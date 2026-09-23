@@ -72,6 +72,41 @@ def _write_relay_stub(path: Path, *, agent_id: int, session_id: int, token: str)
     path.chmod(0o600)
 
 
+def _print_claude_relay_instructions(response: dict[str, Any], *, agent_id: int) -> None:
+    """Name the claude relay start-up path: the resident stub handoff, else the manual flow."""
+    # env-ok: per-session relay stub handoff, not cluster configuration
+    stub_path = os.environ.get("AVA_IMPERSONATION_RELAY_STUB")
+    token = response.get("relay_token")
+    if stub_path and token:
+        _write_relay_stub(
+            Path(stub_path),
+            agent_id=agent_id,
+            session_id=int(response["session_id"]),
+            token=str(token),
+        )
+        print(
+            "The session plugin starts the claude relay automatically: its "
+            f"credential stub was written to {stub_path}; do not arm a Monitor "
+            "watch. If the stub is not consumed and no relay heartbeat starts, "
+            "fall back to the manual flow: start the relay (ava impersonate "
+            "relay) inside the controller session with "
+            "AVA_IMPERSONATION_RELAY_TOKEN set to the relay token printed above, "
+            "arm it as a Monitor watch with timeout_ms 1800000 and re-arm on "
+            "each expiry notice (see the host conventions). Preparation fails "
+            "without its heartbeat.",
+            file=sys.stderr,
+        )
+        return
+    print(
+        "Start the claude relay (ava impersonate relay) inside the controller "
+        "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
+        "relay token printed above; arm it as a Monitor watch with timeout_ms "
+        "1800000 and re-arm on each expiry notice (see the host conventions). "
+        "Preparation fails without its heartbeat.",
+        file=sys.stderr,
+    )
+
+
 async def _wait_inbox(
     lease_id: str, caller: dict[str, Any], limit: int, wait: float
 ) -> list[dict[str, Any]]:
@@ -175,37 +210,7 @@ def _dispatch(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         else:
-            # env-ok: per-session relay stub handoff, not cluster configuration
-            stub_path = os.environ.get("AVA_IMPERSONATION_RELAY_STUB")
-            token = response.get("relay_token")
-            if stub_path and token:
-                _write_relay_stub(
-                    Path(stub_path),
-                    agent_id=args.agent_id,
-                    session_id=int(response["session_id"]),
-                    token=str(token),
-                )
-                print(
-                    "The session plugin starts the claude relay automatically: its "
-                    f"credential stub was written to {stub_path}; do not arm a Monitor "
-                    "watch. If the stub is not consumed and no relay heartbeat starts, "
-                    "fall back to the manual flow: start the relay (ava impersonate "
-                    "relay) inside the controller session with "
-                    "AVA_IMPERSONATION_RELAY_TOKEN set to the relay token printed above, "
-                    "arm it as a Monitor watch with timeout_ms 1800000 and re-arm on "
-                    "each expiry notice (see the host conventions). Preparation fails "
-                    "without its heartbeat.",
-                    file=sys.stderr,
-                )
-            else:
-                print(
-                    "Start the claude relay (ava impersonate relay) inside the controller "
-                    "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
-                    "relay token printed above; arm it as a Monitor watch with timeout_ms "
-                    "1800000 and re-arm on each expiry notice (see the host conventions). "
-                    "Preparation fails without its heartbeat.",
-                    file=sys.stderr,
-                )
+            _print_claude_relay_instructions(response, agent_id=args.agent_id)
         return 0
     if command == "list":
         _emit(sessions.list_sessions(args.agent_id, before=args.before, limit=args.limit))

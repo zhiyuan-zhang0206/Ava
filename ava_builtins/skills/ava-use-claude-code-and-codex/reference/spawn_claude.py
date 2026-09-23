@@ -292,6 +292,18 @@ def _relay_stub_path(workspace: Path) -> Path:
     return workspace / _RELAY_STUB_NAME
 
 
+def _relay_options(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> tuple[bool, Path | None]:
+    """Resolve the resident-relay flags; takeover-only, and the group keeps the two exclusive."""
+    if not args.impersonate_self and (
+        args.no_relay_resident or args.relay_resident_dir is not None
+    ):
+        parser.error("--no-relay-resident/--relay-resident-dir require --impersonate-self")
+    plugin_dir = Path(args.relay_resident_dir) if args.relay_resident_dir else None
+    return not args.no_relay_resident, plugin_dir
+
+
 def _claude_command(
     workspace: Path,
     caller_instance: str | None = None,
@@ -636,13 +648,14 @@ def main() -> int:
         help="Takeover briefing text, inlined verbatim into the launch message. "
         "Required with --impersonate-self; a takeover reads no files.",
     )
-    parser.add_argument(
+    relay_action = parser.add_mutually_exclusive_group()
+    relay_action.add_argument(
         "--no-relay-resident",
         action="store_true",
         help="Launch the takeover without the session relay plugin; the executor "
         "arms the Claude Monitor relay itself, as before.",
     )
-    parser.add_argument(
+    relay_action.add_argument(
         "--relay-resident-dir",
         default=None,
         help="Override the relay plugin directory loaded into the takeover "
@@ -661,15 +674,11 @@ def main() -> int:
             )
         if args.brief is None or not args.brief.strip():
             parser.error("--impersonate-self requires a non-empty --brief")
-        if args.no_relay_resident and args.relay_resident_dir is not None:
-            parser.error("--no-relay-resident and --relay-resident-dir are mutually exclusive")
     else:
         if args.impersonation_name is not None:
             parser.error("--impersonation-name requires --impersonate-self")
         if args.brief is not None:
             parser.error("--brief requires --impersonate-self")
-        if args.no_relay_resident or args.relay_resident_dir is not None:
-            parser.error("--no-relay-resident/--relay-resident-dir require --impersonate-self")
 
     workspace = Path(args.workspace).expanduser().resolve()
     if not args.status and not args.cancel_generation:
@@ -684,6 +693,7 @@ def main() -> int:
     if not args.impersonate_self:
         tasks_file = _resolve_file(workspace, args.tasks_file or "tasks.md")
         work_file = _resolve_file(workspace, args.work_file or "work.md")
+    relay_resident, relay_plugin_dir = _relay_options(parser, args)
     return _launch(
         workspace,
         tasks_file,
@@ -692,8 +702,8 @@ def main() -> int:
         args.caller_instance,
         (args.impersonation_name or workspace.name) if args.impersonate_self else None,
         args.brief,
-        relay_resident=not args.no_relay_resident,
-        relay_plugin_dir=Path(args.relay_resident_dir) if args.relay_resident_dir else None,
+        relay_resident=relay_resident,
+        relay_plugin_dir=relay_plugin_dir,
     )
 
 
