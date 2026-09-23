@@ -5,8 +5,9 @@ The active identity is ``(cluster, canonical workspace, claude)``. A supervised
 worker (the default) keeps the two-file collaboration — a task file, a work
 file, and a session the launcher's owner follows with ``watch_work.py``. A
 takeover (``--impersonate-self``) runs file- and supervisor-less with its
-briefing inlined in the launch message: its Claude Monitor relay is started by
-the executor itself, from the briefing and the guide. A concurrent or
+briefing inlined in the launch message: its relay starts with the session
+via the bundled ava-relay plugin (resident mode; ``--no-relay-resident``
+restores the executor-armed Monitor flow). A concurrent or
 cross-agent caller adopts the live record instead of stacking another Claude
 process.
 
@@ -51,11 +52,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import os
 import shlex
-import stat
 import sys
-import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -63,6 +61,16 @@ from pathlib import Path
 import ava
 from shared import coding_session_owner
 from shared.agents import AgentNotFound, AgentStatus
+
+# The first-run presets live in a sibling module (moved out when this launcher
+# crossed the 800-line budget). Script mode drops the script's own directory
+# from sys.path under PYTHONSAFEPATH=1, and importlib path-loads never had it,
+# so restore it before the sibling import.
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from _claude_first_run import _preset_claude_first_run  # noqa: E402
 
 _DEFAULT_TTL_SECONDS = 24 * 3600
 
@@ -132,114 +140,6 @@ def _pretrust(workspace: Path) -> None:
     proj["hasTrustDialogAccepted"] = True
     config_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"+ trusted: {ws_key}")
-
-
-def _preset_json_file(path: Path, updates: dict[str, object], *, label: str) -> None:
-    """Back up, merge ``updates`` into a JSON file, atomically; see _preset_claude_first_run.
-
-    Existing keys are preserved verbatim; a satisfied update makes the call a
-    no-op; an unparsable file is backed up and raises (fail fast - overlaying
-    it would destroy the owner's config).
-    """
-    try:
-        raw = path.read_text(encoding="utf-8")
-        data = json.loads(raw) if raw.strip() else {}
-    except FileNotFoundError:
-        data = None
-    except json.JSONDecodeError as exc:
-        _backup_before_write(path)
-        raise RuntimeError(
-            f"{label} is not valid JSON ({exc}); left as-is with a backup taken. "
-            "Fix or remove it, then relaunch."
-        ) from exc
-    if data is not None and not isinstance(data, dict):
-        _backup_before_write(path)
-        raise RuntimeError(f"{label} is not a JSON object; left as-is with a backup taken.")
-    if data is not None and all(_preset_satisfied(data.get(k), v) for k, v in updates.items()):
-        print(f"(already preset: {label})")
-        return
-    if data is None:
-        data = {}
-    if path.exists():
-        _backup_before_write(path)
-    data.update(updates)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json_atomic(path, data)
-    print(f"+ preset: {label}")
-
-
-def _preset_satisfied(current: object, desired: object) -> bool:
-    """True when `current` already carries the desired preset value."""
-    if isinstance(desired, bool):
-        return current is desired
-    if isinstance(desired, int):
-        return (
-            isinstance(current, (int, float))
-            and not isinstance(current, bool)
-            and current >= desired
-        )
-    return current == desired
-
-
-def _backup_before_write(path: Path) -> Path:
-    """Copy `path` to a uniquely named sibling backup; same-second callers never collide."""
-    fd, raw_backup = tempfile.mkstemp(
-        dir=path.parent, prefix=f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}-"
-    )
-    os.close(fd)
-    backup = Path(raw_backup)
-    backup.write_bytes(path.read_bytes())
-    return backup
-
-
-def _write_json_atomic(path: Path, data: dict[str, object]) -> None:
-    """Publish `data` at `path` through a mkstemp-unique tmp file + atomic replace.
-
-    A unique tmp name means two concurrent presets in the same second cannot
-    collide; an existing file keeps its permission bits.
-    """
-    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    tmp = Path(raw_tmp)
-    try:
-        if mode is not None and os.name != "nt":
-            os.fchmod(fd, mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-
-
-def _preset_claude_first_run(home: Path | None = None) -> None:
-    """Preset Claude Code's first-run dialogs so an unattended spawn never parks on one.
-
-    Two dialogs break a non-interactive spawn on a fresh HOME: the
-    bypass-permissions confirmation (>=2.1.274 defaults to No/exit, so a blind
-    Enter kills the session) and the fullscreen upsell. Both answers persist in
-    files, so presetting them is enough:
-
-    - ``~/.claude/settings.json``: ``skipDangerousModePermissionPrompt: true``
-      ("whether the user has accepted the bypass permissions mode dialog").
-    - ``~/.claude.json``: ``fullscreenUpsellSeenCount: 3`` - 2.1.278 shows the
-      upsell while this is below its threshold of 3 (bundle: ``<x8e``, x8e=3).
-
-    Each file is backed up before its first change, a second call is a no-op,
-    and an unparsable file is backed up and raises instead of being
-    overwritten. One line per file: ``+ preset`` / ``(already preset``.
-    """
-    home = Path.home() if home is None else home
-    _preset_json_file(
-        home / ".claude" / "settings.json",
-        {"skipDangerousModePermissionPrompt": True},
-        label="~/.claude/settings.json",
-    )
-    _preset_json_file(
-        home / ".claude.json",
-        {"fullscreenUpsellSeenCount": 3},
-        label="~/.claude.json",
-    )
 
 
 def _session_exists(name: str) -> bool:
@@ -383,18 +283,44 @@ def _owner_terminated(agent_id: int) -> bool:
         return False
 
 
-def _claude_command(workspace: Path, caller_instance: str | None = None) -> str:
+_RELAY_STUB_NAME = ".ava-relay.env"
+"""Resident relay credential stub: `impersonate request` writes it 0600; the wrapper consumes it once."""
+
+
+def _relay_stub_path(workspace: Path) -> Path:
+    """The per-session relay credential stub; cleared before each takeover launch."""
+    return workspace / _RELAY_STUB_NAME
+
+
+def _claude_command(
+    workspace: Path,
+    caller_instance: str | None = None,
+    *,
+    relay_plugin_dir: Path | None = None,
+) -> str:
     from shared.external_caller import launch_caller_assignment
 
+    resident = ""
+    plugin_flag = ""
+    if relay_plugin_dir is not None:
+        stub = _relay_stub_path(workspace)
+        resident = (
+            f"export AVA_IMPERSONATION_RELAY_STUB={shlex.quote(stub.as_posix())} "
+            f"AVA_IMPERSONATION_RELAY_PY={shlex.quote(sys.executable)} && "
+        )
+        plugin_flag = f" --plugin-dir {shlex.quote(relay_plugin_dir.as_posix())}"
     return (
         f"cd {shlex.quote(workspace.as_posix())} && "
         "unset ANTHROPIC_API_KEY && "
+        f"{resident}"
         f"{launch_caller_assignment('claude_code', caller_instance)}"
-        "exec claude --dangerously-skip-permissions"
+        f"exec claude --dangerously-skip-permissions{plugin_flag}"
     )
 
 
-def _takeover_bootstrap_message(agent_id: int, name: str, brief: str) -> str:
+def _takeover_bootstrap_message(
+    agent_id: int, name: str, brief: str, *, relay_resident: bool
+) -> str:
     """Inline the briefing; a takeover reads no task or work file."""
     from ava._impersonation_launch import bootstrap_message
 
@@ -405,7 +331,7 @@ def _takeover_bootstrap_message(agent_id: int, name: str, brief: str) -> str:
         / "impersonator-guide"
         / "SKILL.md"
     )
-    return bootstrap_message(agent_id, name, "claude", brief, guide)
+    return bootstrap_message(agent_id, name, "claude", brief, guide, relay_resident=relay_resident)
 
 
 def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: bool) -> None:
@@ -533,7 +459,20 @@ def _run_takeover_launch(
     takeover_brief: str,
     ttl_seconds: float,
     caller_instance: str | None,
+    *,
+    relay_resident: bool = True,
+    relay_plugin_dir: Path | None = None,
 ) -> int:
+    plugin_dir: Path | None = None
+    if relay_resident:
+        candidate = relay_plugin_dir or _HERE / "ava-relay"
+        if not candidate.is_dir():
+            raise RuntimeError(
+                f"the relay plugin directory is missing: {candidate}; "
+                "launch with --no-relay-resident to use the executor-armed flow"
+            )
+        plugin_dir = candidate.resolve()
+        _relay_stub_path(workspace).unlink(missing_ok=True)  # never consume a stale credential
     key = coding_session_owner.canonical_key(workspace, tool="claude")
     claim = _claim_canonical(
         key,
@@ -563,13 +502,20 @@ def _run_takeover_launch(
             session_id=sid,
             session_name=full_name,
         )
-        ava.shell.sessions.send(sid, _claude_command(workspace, caller_instance))
+        ava.shell.sessions.send(
+            sid,
+            _claude_command(workspace, caller_instance, relay_plugin_dir=plugin_dir),
+        )
         _wait_for_ready(sid)
-        message = _takeover_bootstrap_message(owner_agent_id, takeover_name, takeover_brief)
+        message = _takeover_bootstrap_message(
+            owner_agent_id, takeover_name, takeover_brief, relay_resident=plugin_dir is not None
+        )
         _send_bootstrap(sid, message)
         _verify_start_receipt(
             sid,
-            lambda: _takeover_bootstrap_message(owner_agent_id, takeover_name, takeover_brief),
+            lambda: _takeover_bootstrap_message(
+                owner_agent_id, takeover_name, takeover_brief, relay_resident=plugin_dir is not None
+            ),
         )
     except BaseException:
         # A replacement may own the canonical record by now, so its generation
@@ -599,6 +545,9 @@ def _launch(
     caller_instance: str | None = None,
     impersonation_name: str | None = None,
     brief: str | None = None,
+    *,
+    relay_resident: bool = True,
+    relay_plugin_dir: Path | None = None,
 ) -> int:
     from shared.external_caller import launch_caller_assignment
 
@@ -622,7 +571,13 @@ def _launch(
             workspace, tasks_file, work_file, ttl_seconds, caller_instance
         )
     return _run_takeover_launch(
-        workspace, takeover_name, takeover_brief, ttl_seconds, caller_instance
+        workspace,
+        takeover_name,
+        takeover_brief,
+        ttl_seconds,
+        caller_instance,
+        relay_resident=relay_resident,
+        relay_plugin_dir=relay_plugin_dir,
     )
 
 
@@ -681,6 +636,18 @@ def main() -> int:
         help="Takeover briefing text, inlined verbatim into the launch message. "
         "Required with --impersonate-self; a takeover reads no files.",
     )
+    parser.add_argument(
+        "--no-relay-resident",
+        action="store_true",
+        help="Launch the takeover without the session relay plugin; the executor "
+        "arms the Claude Monitor relay itself, as before.",
+    )
+    parser.add_argument(
+        "--relay-resident-dir",
+        default=None,
+        help="Override the relay plugin directory loaded into the takeover "
+        "(default: the ava-relay directory beside this launcher).",
+    )
     args = parser.parse_args()
     if args.impersonate_self:
         from ava._boot import require_agent_id
@@ -694,11 +661,15 @@ def main() -> int:
             )
         if args.brief is None or not args.brief.strip():
             parser.error("--impersonate-self requires a non-empty --brief")
+        if args.no_relay_resident and args.relay_resident_dir is not None:
+            parser.error("--no-relay-resident and --relay-resident-dir are mutually exclusive")
     else:
         if args.impersonation_name is not None:
             parser.error("--impersonation-name requires --impersonate-self")
         if args.brief is not None:
             parser.error("--brief requires --impersonate-self")
+        if args.no_relay_resident or args.relay_resident_dir is not None:
+            parser.error("--no-relay-resident/--relay-resident-dir require --impersonate-self")
 
     workspace = Path(args.workspace).expanduser().resolve()
     if not args.status and not args.cancel_generation:
@@ -721,6 +692,8 @@ def main() -> int:
         args.caller_instance,
         (args.impersonation_name or workspace.name) if args.impersonate_self else None,
         args.brief,
+        relay_resident=not args.no_relay_resident,
+        relay_plugin_dir=Path(args.relay_resident_dir) if args.relay_resident_dir else None,
     )
 
 

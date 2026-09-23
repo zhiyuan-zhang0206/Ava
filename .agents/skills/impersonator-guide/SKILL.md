@@ -20,6 +20,12 @@ briefing, which arrives inline in your launch message.
   is file-based: no task file to read, no work file to write. Activation is an
   interruption, not a hand-merge — the Ava agent pauses at its checkpoint, and
   you and it never run at the same time.
+- **Relay startup.** Your request output defines it. Resident-mode takeovers
+  start their relay automatically with the session — do not arm a Monitor
+  watch; watch for the heartbeat it names, and only if none starts follow the
+  manual fallback (`timeout_ms 1800000`, re-armed at each expiry notice) that
+  the request output describes. Executor-armed launches say so and proceed as
+  before.
 - **End.** You end by releasing control with a summary. The release summary is
   your end message: what you did, what you verified, what remains open and
   where to resume from. Release resumes the Ava agent: one system note wakes it
