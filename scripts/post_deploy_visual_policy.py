@@ -72,7 +72,20 @@ STRUCTURAL_SPECS = {
     "run-timeline": {
         "ready": "[data-testid='run-timeline-geometry']",
         "visible": ("#main-content", "[aria-label='Run timeline chart']"),
-        "controls": ("button[type='submit']",),
+        # Default-visible controls only. The custom-window form lives inside a
+        # collapsed <details> (no ``open``) since the first-screen layout change
+        # (#3183): a closed disclosure's submit button is intentionally hidden,
+        # NOT occluded, so it must not be listed as a control while the
+        # disclosure defaults to closed. TODO (follow-up, not this contract):
+        # covering controls inside disclosures needs an explicit
+        # open-then-check mechanism. The summary is the disclosure's
+        # always-visible entry point (scoped to the session card so a message
+        # panel's own details can never match); the zoom control is the page's
+        # core default-visible interaction.
+        "controls": (
+            "[data-testid='run-timeline-session'] summary",
+            "button[aria-label='Zoom in']",
+        ),
         "nonempty": ("[aria-label='Run timeline chart']",),
     },
 }
