@@ -37,7 +37,7 @@ from shared.cluster_lock import DeployLease as _DeployLease
 from shared.migrations import CodeBehindSchema, MigrationLayoutError, SchemaVersionMismatch
 
 # Captured before the autouse fixture below stubs it, so the predicate's own test can
-# exercise the real implementation (same pattern as tests/cli/test_commands.py).
+# exercise the real implementation (same pattern as tests/cli/_commands_helpers.py).
 _real_pin_is_the_blocker = schema.pin_is_the_blocker
 _real_deploy_already_running = schema._deploy_already_running
 
