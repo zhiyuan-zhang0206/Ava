@@ -44,9 +44,11 @@ export interface Breakpoint {
   isWide: boolean;
 }
 
-/** SSR-safe single breakpoint source. Defaults to the narrow/mobile layout
- *  before mount, then syncs to the real viewport (same contract useMediaQuery
- *  had: a desktop load paints mobile for one frame — accepted everywhere). */
+/** SSR-safe single breakpoint source. A hydrating load starts on the
+ *  narrow/mobile frame (the server snapshot) and corrects after hydration —
+ *  accepted everywhere; a client-side navigation reads the real viewport in
+ *  its first render (useMediaQuery's useSyncExternalStore snapshot), so a
+ *  route change never paints the wrong frame. */
 export function useBreakpoint(): Breakpoint {
   const isNarrow = !useMediaQuery(`(min-width: ${BREAKPOINT_MD_PX}px)`);
   const isLarge = useMediaQuery(`(min-width: ${BREAKPOINT_LG_PX}px)`);
