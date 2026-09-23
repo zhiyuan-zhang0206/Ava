@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -35,6 +36,17 @@ from tests.services.daemon_shutdown_test_support import (
 )
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="backup scheduler is POSIX-only")
+
+
+@pytest.fixture
+def postgres_base(tmp_path: Path) -> Iterator[Path]:
+    # Keep the Unix socket path below macOS's AF_UNIX limit. The parent owns
+    # cleanup because SIGKILL can bypass a child process's context managers.
+    with tempfile.TemporaryDirectory(dir="/tmp", prefix="bkpg-") as base:
+        yield Path(base)
+    pgdata = tmp_path / "pgdata"
+    if pgdata.exists():
+        assert not Path(pgdata.read_text()).exists()
 
 
 def _block(root: Path, mode: str) -> None:
@@ -86,14 +98,10 @@ def _backup(root: Path, mode: str, now: datetime) -> None:
         )
 
 
-def _restore(root: Path, mode: str) -> None:
+def _restore(root: Path, mode: str, postgres_base: Path) -> None:
     from shared.pg_tools import throwaway_postgres
 
-    # Keep the Unix socket path below macOS's AF_UNIX limit.
-    with (
-        tempfile.TemporaryDirectory(dir="/tmp", prefix="bkpg-") as base,
-        throwaway_postgres(base=Path(base), foreground=True) as url,
-    ):
+    with throwaway_postgres(base=postgres_base, foreground=True) as url:
         import psycopg
 
         with psycopg.connect(url) as conn:
@@ -107,11 +115,11 @@ def _restore(root: Path, mode: str) -> None:
         _block(root, mode)
 
 
-def _exercise_daemon(root: Path, mode: str) -> None:
+def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
     state = daemon._BackupState()
     pidfile = root / "daemon.pid"
     restore_mode = mode.startswith("restore")
-    job = partial(_restore, root, "stubborn" if mode == "restore-stubborn" else mode)
+    job = partial(_restore, root, "stubborn" if mode == "restore-stubborn" else mode, postgres_base)
 
     def record_success(_now: datetime) -> None:
         (root / "restore-success").touch()
@@ -170,10 +178,9 @@ def _alive(pid: int) -> bool:
         return False
 
 
-@pytest.mark.parametrize(
-    "mode", ["pg_dump", "backup encryption", "publish", "stubborn", "restore", "restore-stubborn"]
-)
-def test_sigterm_reaps_job_before_scheduler_exits(tmp_path: Path, mode: str) -> None:
+def _assert_sigterm_reaps_job_before_scheduler_exits(
+    tmp_path: Path, mode: str, postgres_base: Path
+) -> None:
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     retained = artifacts / "retained.dump.enc"
@@ -181,7 +188,7 @@ def test_sigterm_reaps_job_before_scheduler_exits(tmp_path: Path, mode: str) -> 
     code = (
         "from pathlib import Path; "
         "from tests.services.test_backup_scheduler_shutdown import _exercise_daemon; "
-        f"_exercise_daemon(Path({str(tmp_path)!r}), {mode!r})"
+        f"_exercise_daemon(Path({str(tmp_path)!r}), {mode!r}, Path({str(postgres_base)!r}))"
     )
     process = subprocess.Popen(  # noqa: S603 -- fixed disposable scheduler harness
         [sys.executable, "-c", code],
@@ -232,18 +239,29 @@ def test_sigterm_reaps_job_before_scheduler_exits(tmp_path: Path, mode: str) -> 
         process.communicate(timeout=5)
 
 
+@pytest.mark.parametrize("mode", ["pg_dump", "backup encryption", "publish", "stubborn", "restore"])
+def test_sigterm_reaps_job_before_scheduler_exits(
+    tmp_path: Path, mode: str, postgres_base: Path
+) -> None:
+    _assert_sigterm_reaps_job_before_scheduler_exits(tmp_path, mode, postgres_base)
+
+
+def test_killed_restore_uses_parent_owned_postgres_base(
+    tmp_path: Path, postgres_base: Path
+) -> None:
+    _assert_sigterm_reaps_job_before_scheduler_exits(tmp_path, "restore-stubborn", postgres_base)
+    assert Path((tmp_path / "pgdata").read_text()).is_relative_to(postgres_base)
+
+
 def _write(path: Path) -> None:
     path.write_text("done")
 
 
-def _postgres_roundtrip(marker: Path) -> None:
+def _postgres_roundtrip(marker: Path, postgres_base: Path) -> None:
     from shared.pg_tools import throwaway_postgres
 
-    with (
-        tempfile.TemporaryDirectory(dir="/tmp", prefix="bkpg-") as base,
-        throwaway_postgres(base=Path(base), foreground=True),
-    ):
-        data = next(Path(base).glob("ava-pg-*/data"))
+    with throwaway_postgres(base=postgres_base, foreground=True):
+        data = next(postgres_base.glob("ava-pg-*/data"))
         marker.write_text(data.joinpath("postmaster.pid").read_text().splitlines()[0])
 
 
@@ -275,9 +293,11 @@ async def test_worker_requires_successful_result_and_exit(tmp_path: Path) -> Non
         await run_job(_fail_after_result)
 
 
-async def test_worker_accepts_clean_native_postgres_exit(tmp_path: Path) -> None:
+async def test_worker_accepts_clean_native_postgres_exit(
+    tmp_path: Path, postgres_base: Path
+) -> None:
     marker = tmp_path / "postgres"
-    await run_job(partial(_postgres_roundtrip, marker))
+    await run_job(partial(_postgres_roundtrip, marker, postgres_base))
     assert not _alive(int(marker.read_text()))
 
 
