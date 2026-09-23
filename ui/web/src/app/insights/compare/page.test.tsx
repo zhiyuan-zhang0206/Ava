@@ -725,3 +725,21 @@ describe("ComparePage", () => {
     expect(screen.getAllByText(/CTO/).length).toBeGreaterThan(0);
   });
 });
+
+
+it("keeps each compare summary folded through the shared summary cap", async () => {
+  getRunTimeline.mockImplementation((agentId) => Promise.resolve({
+    ...timeline({ agentId }),
+    summary: { text: "Long summary text. ".repeat(100), chars: 1900, source: "compact" },
+  }));
+  renderPage("42,43");
+  await waitFor(() => expect(screen.getAllByTestId("raw-summary-toggle")).toHaveLength(2));
+  const toggles = screen.getAllByTestId("raw-summary-toggle");
+  expect(toggles.map((toggle) => toggle.getAttribute("aria-expanded"))).toEqual(["false", "false"]);
+  for (const summary of screen.getAllByTestId("raw-summary")) {
+    expect(summary.lastElementChild?.className).toContain("max-h-12");
+    expect(summary.lastElementChild?.className).toContain("line-clamp-3");
+  }
+  fireEvent.click(toggles[0]);
+  expect(toggles.map((toggle) => toggle.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+});

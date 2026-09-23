@@ -12,6 +12,7 @@ import {
   type TimelineContextView,
 } from "@/components/run-timeline/context-view";
 import { RunTimelineChart } from "@/components/run-timeline/run-timeline-chart";
+import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-workspace";
 import { RunTimelineChartSkeleton } from "@/components/run-timeline/run-timeline-skeleton";
 import type { TimelineCrumbEntry } from "@/components/run-timeline/run-timeline-crumbs";
 import {
@@ -28,19 +29,20 @@ import { compareHref } from "@/lib/compare-links";
 import { formatTokensCompact } from "@/lib/format-number";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
 import {
   RUN_TIMELINE_SUMMARY_VISIBLE_SETTING,
   RUN_TIMELINE_WINDOW_HOURS_SETTING,
-  RUN_TIMELINE_ZOOM_HOURS,
   chartLabels,
   dateTimeInputValue,
   initialTimelineWindow,
   runTimelineWindowHours,
-  zoomPresetLabel,
 } from "../../_run-timeline-shared";
+
+import { RunTimelineControls } from "./_controls";
 
 /** Run-level tracing page. The backend selects the initialized-context session on first load. */
 export default function RunTimelinePage({
@@ -49,6 +51,8 @@ export default function RunTimelinePage({
   params: Promise<{ agentId: string }>;
 }) {
   const t = useTranslations("runTimeline");
+  const wideReader = useMediaQuery("(min-width: 1280px)");
+  const [readerTarget, setReaderTarget] = useState<HTMLElement | null>(null);
   const [agentId, setAgentId] = useState<number | null>(null);
   const [paramsResolved, setParamsResolved] = useState(false);
   const [session, setSession] = useState<"compact" | "current">("compact");
@@ -211,11 +215,6 @@ export default function RunTimelinePage({
     resetWindow();
   };
 
-  /** P4-3 (#4023): the reset control's label is mode-aware — on the context
-   *  axis it returns to the full axis extent (there is no window), matching
-   *  the demo's full-axis wording; on the time axis it stays "Reset window". */
-  const resetLabel = axis === "context" ? t("resetAxis") : t("resetWindow");
-
   /** P4-1 (#4023): double-click focus — pushes a crumb, then moves the window. */
   const focusWindow = (next: TimelineWindowOverride, label: string) => {
     setTrail((previous) => [...previous, { kind: "time", label, from: next.from, to: next.to }]);
@@ -350,168 +349,91 @@ export default function RunTimelinePage({
         ) : null}
       </header>
 
-      <div className="overflow-y-auto">
-        <div className="mx-auto max-w-6xl space-y-5 p-6">
-          <div className={cn(FLEX, "pointer-events-none sticky top-0 z-10 justify-end px-4")}>
-            <div
-              className={cn(FLEX, "pointer-events-auto max-w-full flex-wrap justify-end gap-1 rounded border border-border bg-card p-1 shadow-sm")}
-              aria-label={t("zoom")}
-            >
-              {timeline ? (
-                <span className="max-w-full truncate px-1 font-mono text-[10px] text-muted-foreground">
-                  {t("windowRange", {
-                    from: dateTimeInputValue(timeline.window.from).replace("T", " "),
-                    to: dateTimeInputValue(timeline.window.to).replace("T", " "),
-                  })}
-                </span>
-              ) : null}
-              {RUN_TIMELINE_ZOOM_HOURS.map((hours) => (
-                <button
-                  key={hours}
-                  type="button"
-                  onClick={() => setZoomWindow(hours)}
-                  className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
-                >
-                  {zoomPresetLabel(hours)}
-                </button>
-              ))}
+      <RunTimelineWorkspace readerRef={setReaderTarget} pending={!timeline}>
+        <RunTimelineControls
+          window={timeline?.window}
+          flipLayers={flipLayers}
+          axis={axis}
+          axisDisabled={axisDisabled}
+          onPreset={setZoomWindow}
+          onZoom={zoomBy}
+          onFlip={() => setFlipLayers((value) => !value)}
+          onAxis={selectAxis}
+          onReset={resetToFullAxis}
+        />
+
+        <section
+          className="min-h-[74px] space-y-1 rounded border border-border bg-card p-2"
+          data-testid="run-timeline-session"
+          style={{ marginTop: 0 }}
+        >
+          <div className={cn(FLEX, "flex-wrap items-start justify-between gap-2")}>
+            <div className={cn(FLEX, "flex-wrap items-center gap-1")} role="group" aria-label={t("session")}>
+              <h2 className="mr-2 text-xs font-semibold">{t("session")}</h2>
               <button
                 type="button"
-                aria-label={t("zoomOut")}
-                onClick={() => zoomBy(1.6)}
-                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
-              >
-                −
-              </button>
-              <button
-                type="button"
-                aria-label={t("zoomIn")}
-                onClick={() => zoomBy(0.625)}
-                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
-              >
-                +
-              </button>
-              <button
-                type="button"
-                aria-pressed={flipLayers}
-                aria-label={t("flipLayers")}
-                onClick={() => setFlipLayers((value) => !value)}
+                aria-pressed={session === "compact"}
+                onClick={() => selectSession("compact")}
                 className={cn(
                   "rounded border px-2 py-1 font-mono text-xs",
-                  flipLayers ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                  session === "compact" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
                 )}
               >
-                {t("flipLayers")}
+                {t("compactSession")}
               </button>
-              <span role="group" aria-label={t("axisGroup")} className={cn(FLEX, "items-center gap-0.5")}>
-                <button
-                  type="button"
-                  aria-pressed={axis === "time"}
-                  onClick={() => selectAxis("time")}
-                  className={cn(
-                    "rounded border px-2 py-1 font-mono text-xs",
-                    axis === "time" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
-                  )}
-                >
-                  {t("axisTime")}
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={axis === "context"}
-                  disabled={axisDisabled}
-                  title={axisDisabled ? t("axisDisabled") : t("axisContextTitle")}
-                  onClick={() => selectAxis("context")}
-                  className={cn(
-                    "rounded border px-2 py-1 font-mono text-xs",
-                    axis === "context" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
-                    axisDisabled && "opacity-50",
-                  )}
-                >
-                  {t("axisContext")}
-                </button>
-              </span>
               <button
                 type="button"
-                aria-label={resetLabel}
-                onClick={resetToFullAxis}
-                className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
+                aria-pressed={session === "current"}
+                onClick={() => selectSession("current")}
+                className={cn(
+                  "rounded border px-2 py-1 font-mono text-xs",
+                  session === "current" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
+                )}
               >
-                {resetLabel}
+                {t("currentSession")}
               </button>
             </div>
+            <details>
+              <summary className="cursor-pointer py-1 text-xs text-muted-foreground">
+                {t("customWindow")}
+              </summary>
+              <p className="my-2 text-xs text-muted-foreground">
+                {session === "compact" ? t("compactDescription") : t("currentDescription")}
+              </p>
+              <form
+                className={cn(FLEX, "flex-wrap items-end gap-2")}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  applyWindow();
+                }}
+              >
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  {t("start")}
+                  <input
+                    aria-label={t("start")}
+                    type="datetime-local"
+                    value={selectedFromInput}
+                    onChange={(event) => setFromInput(event.target.value)}
+                    className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-muted-foreground">
+                  {t("end")}
+                  <input
+                    aria-label={t("end")}
+                    type="datetime-local"
+                    value={selectedToInput}
+                    onChange={(event) => setToInput(event.target.value)}
+                    className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+                  />
+                </label>
+                <button type="submit" className={buttonVariants({ size: "sm" })}>
+                  {t("apply")}
+                </button>
+              </form>
+            </details>
           </div>
-
-          <section
-            className="min-h-[74px] space-y-1 rounded border border-border bg-card p-2"
-            data-testid="run-timeline-session"
-            style={{ marginTop: 0 }}
-          >
-            <div className={cn(FLEX, "flex-wrap items-start justify-between gap-2")}>
-              <div className={cn(FLEX, "flex-wrap items-center gap-1")} role="group" aria-label={t("session")}>
-                <h2 className="mr-2 text-xs font-semibold">{t("session")}</h2>
-                <button
-                  type="button"
-                  aria-pressed={session === "compact"}
-                  onClick={() => selectSession("compact")}
-                  className={cn(
-                    "rounded border px-2 py-1 font-mono text-xs",
-                    session === "compact" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
-                  )}
-                >
-                  {t("compactSession")}
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={session === "current"}
-                  onClick={() => selectSession("current")}
-                  className={cn(
-                    "rounded border px-2 py-1 font-mono text-xs",
-                    session === "current" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted",
-                  )}
-                >
-                  {t("currentSession")}
-                </button>
-              </div>
-              <details>
-                <summary className="cursor-pointer py-1 text-xs text-muted-foreground">
-                  {t("customWindow")}
-                </summary>
-                <p className="my-2 text-xs text-muted-foreground">
-                  {session === "compact" ? t("compactDescription") : t("currentDescription")}
-                </p>
-                <form
-                  className={cn(FLEX, "flex-wrap items-end gap-2")}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    applyWindow();
-                  }}
-                >
-                  <label className="grid gap-1 text-xs text-muted-foreground">
-                    {t("start")}
-                    <input
-                      aria-label={t("start")}
-                      type="datetime-local"
-                      value={selectedFromInput}
-                      onChange={(event) => setFromInput(event.target.value)}
-                      className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs text-muted-foreground">
-                    {t("end")}
-                    <input
-                      aria-label={t("end")}
-                      type="datetime-local"
-                      value={selectedToInput}
-                      onChange={(event) => setToInput(event.target.value)}
-                      className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
-                    />
-                  </label>
-                  <button type="submit" className={buttonVariants({ size: "sm" })}>
-                    {t("apply")}
-                  </button>
-                </form>
-              </details>
-            </div>
+          <div data-testid="run-timeline-notices" className="h-[62px] space-y-1 overflow-y-auto sm:h-[42px]">
             {timeline && timeline.meta.unmatched_turns + timeline.meta.fallback_turns > 0 ? (
               <p className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-xs text-amber-800 dark:text-amber-200" role="alert">
                 {t("unmatchedWarning", {
@@ -527,63 +449,64 @@ export default function RunTimelinePage({
                 </button>
               </p>
             ) : null}
-          </section>
+          </div>
+        </section>
 
-          {timeline ? (
-            <>
-              <RunTimelineChart
-                timeline={timeline}
-                labels={chartLabels(t)}
-                onDrillBucket={drillBucket}
-                onZoomWindow={selectWindow}
-                showSummaries={showTimelineSummaries}
-                flipLayers={flipLayers}
-                trail={trail}
-                onCrumbSelect={selectCrumb}
-                onFocusWindow={focusWindow}
-                minHeight="50vh"
-                withReadout
-                axis={axis}
-                contextView={effectiveContextView}
-                contextTotal={contextTotal}
-                onContextView={updateContextView}
-                onContextFocus={focusContextView}
-              />
-              <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-                {[
-                  [t("turns"), String(timeline.meta.n_turns)],
-                  [t("active"), `${timeline.meta.active_s.toFixed(0)}s`],
-                  [t("tokens"), `${formatTokensCompact(timeline.meta.tokens_in)} / ${formatTokensCompact(timeline.meta.tokens_out)}`],
-                  [t("cost"), `$${timeline.meta.cost_usd.toFixed(2)}`],
-                  [t("failures"), String(timeline.meta.n_exec_failed)],
-                  [t("compacts"), String(timeline.meta.n_compact)],
-                  [t("restarts"), String(timeline.meta.n_restart)],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded border border-border bg-card px-3 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-                    <div className="font-mono text-sm tabular-nums">{value}</div>
-                  </div>
-                ))}
-              </section>
-              {/* Agent-scoped context details follow the timeline and window metrics. */}
-              {agentId !== null ? <ContextBreakdownCard agentId={agentId} /> : null}
-            </>
-          ) : timelinePending ? (
-            <RunTimelineChartSkeleton />
-          ) : (
-            <div className="space-y-2 font-mono text-sm text-destructive" role="alert">
-              <p>{t("loadFailed")}</p>
-              <button
-                type="button"
-                className={buttonVariants({ size: "sm" })}
-                onClick={() => void (shouldBucket ? bucketQuery : turnQuery).refetch()}
-              >
-                {t("retry")}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
+        {timeline ? (
+          <>
+            <RunTimelineChart
+              timeline={timeline}
+              detailTarget={wideReader ? readerTarget : null}
+              labels={chartLabels(t)}
+              onDrillBucket={drillBucket}
+              onZoomWindow={selectWindow}
+              showSummaries={showTimelineSummaries}
+              flipLayers={flipLayers}
+              trail={trail}
+              onCrumbSelect={selectCrumb}
+              onFocusWindow={focusWindow}
+              minHeight="50vh"
+              withReadout
+              axis={axis}
+              contextView={effectiveContextView}
+              contextTotal={contextTotal}
+              onContextView={updateContextView}
+              onContextFocus={focusContextView}
+            />
+            <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+              {[
+                [t("turns"), String(timeline.meta.n_turns)],
+                [t("active"), `${timeline.meta.active_s.toFixed(0)}s`],
+                [t("tokens"), `${formatTokensCompact(timeline.meta.tokens_in)} / ${formatTokensCompact(timeline.meta.tokens_out)}`],
+                [t("cost"), `$${timeline.meta.cost_usd.toFixed(2)}`],
+                [t("failures"), String(timeline.meta.n_exec_failed)],
+                [t("compacts"), String(timeline.meta.n_compact)],
+                [t("restarts"), String(timeline.meta.n_restart)],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded border border-border bg-card px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+                  <div className="font-mono text-sm tabular-nums">{value}</div>
+                </div>
+              ))}
+            </section>
+            {/* Agent-scoped context details follow the timeline and window metrics. */}
+            {agentId !== null ? <ContextBreakdownCard agentId={agentId} /> : null}
+          </>
+        ) : timelinePending ? (
+          <RunTimelineChartSkeleton />
+        ) : (
+          <div className="space-y-2 font-mono text-sm text-destructive" role="alert">
+            <p>{t("loadFailed")}</p>
+            <button
+              type="button"
+              className={buttonVariants({ size: "sm" })}
+              onClick={() => void (shouldBucket ? bucketQuery : turnQuery).refetch()}
+            >
+              {t("retry")}
+            </button>
+          </div>
+        )}
+      </RunTimelineWorkspace>
     </main>
   );
 }

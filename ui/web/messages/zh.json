@@ -96,6 +96,8 @@
     "anomalies": "异常",
     "none": "无",
     "noExecutions": "无执行调用",
+    "readerTitle": "Timeline reader",
+    "readerEmpty": "Click any block to read its full text here.",
     "closeDetails": "关闭详情",
     "layerDetails": "层详情",
     "layerSummary": "总结",

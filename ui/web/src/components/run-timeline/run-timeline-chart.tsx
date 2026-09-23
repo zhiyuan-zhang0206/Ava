@@ -9,6 +9,8 @@ import {
   useState,
 } from "react";
 
+import { createPortal } from "react-dom";
+
 import { formatTokensCompact } from "@/lib/format-number";
 import { FLEX, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
@@ -62,6 +64,7 @@ export function RunTimelineChart({
   widthOverride,
   minHeight,
   onDetailOpenChange,
+  detailTarget,
   flipLayers,
   trail,
   onCrumbSelect,
@@ -89,6 +92,9 @@ export function RunTimelineChart({
   widthOverride?: number;
   /** Single-run pages reserve viewport space; compare lanes keep their content height. */
   minHeight?: string;
+  /** Page-owned desktop reader. Null keeps single-run details below the chart;
+   *  omitted preserves the compare lane layout. Selection stays chart-local. */
+  detailTarget?: HTMLElement | null;
   /** Reports detail-panel visibility; the compare view sizes every lane from
    *  whether ANY lane's panel is open. */
   onDetailOpenChange?: (open: boolean) => void;
@@ -147,6 +153,7 @@ export function RunTimelineChart({
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null);
   const [selectedMessageIndex, setSelectedMessageIndex] = useState<number | null>(null);
+  const [expandedMessageKey, setExpandedMessageKey] = useState<string | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [popoverTarget, setPopoverTarget] = useState<TimelinePopoverTarget | null>(null);
   const [hoveredLayerIndex, setHoveredLayerIndex] = useState<number | null>(null);
@@ -413,6 +420,7 @@ export function RunTimelineChart({
     setSummaryOpen(false);
   };
   const selectMessage = (index: number) => {
+    if (index !== selectedMessageIndex) setExpandedMessageKey(null);
     setSelectedMessageIndex(index);
     setSelectedRowIndex(null);
     setSelectedLayerIndex(null);
@@ -423,14 +431,19 @@ export function RunTimelineChart({
     if (widthOverride !== undefined) return;
     const container = scrollRef.current;
     if (!container) return;
-    const minimumWidth = selectedRow ? MIN_DETAIL_CANVAS_WIDTH : MIN_CANVAS_WIDTH;
+    const minimumWidth = selectedRow && !detailTarget ? MIN_DETAIL_CANVAS_WIDTH : MIN_CANVAS_WIDTH;
     const updateWidth = () => {
       setMeasuredWidth(Math.max(minimumWidth, Math.floor(container.getBoundingClientRect().width)));
     };
     updateWidth();
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
-  }, [selectedRow, widthOverride]);
+  }, [detailTarget, selectedRow, widthOverride]);
+
+  useEffect(() => {
+    // A persistent reader must start each new selection at its heading.
+    detailTarget?.scrollTo({ top: 0 });
+  }, [detailTarget, selectedRowIndex, selectedLayerIndex, selectedMessageIndex]);
 
   // Detail-panel visibility is a shared concern in the compare view: it sizes
   // every lane from whether ANY lane's panel is open.
@@ -454,6 +467,31 @@ export function RunTimelineChart({
     setDragging,
   });
 
+  const detailPanel = selectedRow ? (
+    <TurnDetailPanel row={selectedRow} labels={labels} onClose={() => setSelectedRowIndex(null)} />
+  ) : selectedLayer ? (
+    <LayerDetailPanel node={selectedLayer} labels={labels} onClose={() => setSelectedLayerIndex(null)} />
+  ) : selectedMessage ? (
+    <MessageDetailPanel
+      key={selectedMessage.key}
+      agentId={timeline.agent_id}
+      message={selectedMessage}
+      chain={messageChain.flatMap((index) => {
+        const node = timeline.layers?.[index];
+        return node ? [{ index, node }] : [];
+      })}
+      labels={labels}
+      focusTarget={selectedMessageFocus}
+      onFocus={focusMessage}
+      onClose={() => setSelectedMessageIndex(null)}
+      fullText={{
+        expanded: expandedMessageKey === `${timeline.agent_id}:${selectedMessage.key}`,
+        onExpand: () => setExpandedMessageKey(`${timeline.agent_id}:${selectedMessage.key}`),
+      }}
+      onSelectLayer={selectLayer}
+    />
+  ) : null;
+
   if (timeline.rows.length === 0) {
     return (
       <section
@@ -461,6 +499,7 @@ export function RunTimelineChart({
         aria-label={labels.chart}
       >
         <p className="font-mono text-sm text-muted-foreground">{labels.empty}</p>
+        {detailTarget ? createPortal(<p className="text-sm text-muted-foreground">{labels.readerEmpty}</p>, detailTarget) : null}
       </section>
     );
   }
@@ -470,7 +509,7 @@ export function RunTimelineChart({
       <div
         className={cn(
           "grid gap-3",
-          selectedRow || selectedLayer || selectedMessage ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "",
+          detailTarget === undefined && (selectedRow || selectedLayer || selectedMessage) ? "lg:grid-cols-[minmax(0,1fr)_320px]" : "",
         )}
       >
         <div ref={popoverLayerRef} className={cn(MIN_W_0, "relative space-y-2")}>
@@ -852,26 +891,7 @@ export function RunTimelineChart({
             </p>
           ) : null}
         </div>
-        {selectedRow ? (
-          <TurnDetailPanel row={selectedRow} labels={labels} onClose={() => setSelectedRowIndex(null)} />
-        ) : selectedLayer ? (
-          <LayerDetailPanel node={selectedLayer} labels={labels} onClose={() => setSelectedLayerIndex(null)} />
-        ) : selectedMessage ? (
-          <MessageDetailPanel
-            key={selectedMessage.key}
-            agentId={timeline.agent_id}
-            message={selectedMessage}
-            chain={messageChain.flatMap((index) => {
-              const node = timeline.layers?.[index];
-              return node ? [{ index, node }] : [];
-            })}
-            labels={labels}
-            focusTarget={selectedMessageFocus}
-            onFocus={focusMessage}
-            onClose={() => setSelectedMessageIndex(null)}
-            onSelectLayer={selectLayer}
-          />
-        ) : null}
+        {detailTarget ? createPortal(detailPanel ?? <p className="text-sm text-muted-foreground">{labels.readerEmpty}</p>, detailTarget) : detailPanel}
       </div>
     </section>
   );

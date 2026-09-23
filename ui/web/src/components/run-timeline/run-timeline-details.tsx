@@ -20,6 +20,7 @@ export interface RunTimelineChartLabels {
   cost: string;
   model: string;
   empty: string;
+  readerEmpty: string;
   moreEvents: (count: number, summary: string) => string;
   turnDetails: string;
   timeRange: string;
