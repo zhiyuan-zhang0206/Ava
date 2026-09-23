@@ -139,16 +139,34 @@ def validate_quality_entries(kind: str, entries: object, scope: tuple[str, ...])
             )
 
 
+def _renamed_source_key(key: str, sources: dict[str, str]) -> str | None:
+    """The pre-rename key a file rename carries over, when a rename explains the key."""
+    path, separator, qualname = key.partition("::")
+    source = sources.get(path)
+    return f"{source}{separator}{qualname}" if source is not None else None
+
+
 def quality_errors(
-    measurements: dict[str, dict[str, int]], baseline: dict[str, dict[str, int]]
+    measurements: dict[str, dict[str, int]],
+    baseline: dict[str, dict[str, int]],
+    *,
+    renames: dict[str, str] | None = None,
 ) -> list[str]:
     errors: list[str] = []
+    sources = {new: old for old, new in (renames or {}).items()}
     for kind, ceiling in (("complexity", COMPLEXITY_HARD - 1), ("nesting", NESTING_CEILING)):
         for key, value in measurements[kind].items():
             if value <= ceiling:
                 continue
             if key not in baseline[kind]:
-                reason = "new violation, not in the baseline — refactor it"
+                inherited = _renamed_source_key(key, sources)
+                if inherited is not None and inherited in baseline[kind]:
+                    reason = (
+                        f"renamed file — migrate the baseline entry {inherited} "
+                        "to this path (same value)"
+                    )
+                else:
+                    reason = "new violation, not in the baseline — refactor it"
             elif value > baseline[kind][key]:
                 reason = (
                     f"grew above its frozen baseline value ({baseline[kind][key]}) — refactor it"
