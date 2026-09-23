@@ -45,10 +45,16 @@ source's overlay + preset verbatim. See
 scope, label/ID search and a keyset cursor. `GET /api/agents/roster` returns
 live cards and their minimal ancestor closure in one database snapshot;
 unrelated terminated rows receive no per-agent enrichment. Cards carry
-attention counts/priority, never notice bodies. Selected or bookmarked agents
+attention counts/priority and an open impersonation session number, never notice
+bodies. Selected or bookmarked agents
 use the independent ID detail endpoint. SDK, CLI and MCP consume the same
 page contract; no implicit list-all or field-projection compatibility modes
 remain.
+
+`POST /api/agents/{id}/impersonation/force-expire` accepts the session number
+the caller observed. It performs a gateway-local DB transition and wake with
+standard gateway authentication, returns `expired` or `not_open`, and returns
+404 for an unknown agent. It does not forward to the home runner.
 
 ## Per-agent observability
 

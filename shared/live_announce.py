@@ -14,6 +14,7 @@ from shared.config import settings
 from shared.live_events import (
     AgentSpawned,
     AgentUpdated,
+    ImpersonationChanged,
     NoticePosted,
     NoticeResolved,
     PageClosed,
@@ -36,6 +37,14 @@ def publish_agent_updated_sync(agent_id: int) -> None:
     ev = AgentUpdated(agent_id=agent_id)
     publish_best_effort_sync(
         settings.data_plane.events_channel, ev.model_dump_json(), context="agent_updated"
+    )
+
+
+def publish_impersonation_changed_sync(agent_id: int) -> None:
+    """Refresh the selected timeline after a committed lease change."""
+    ev = ImpersonationChanged(agent_id=agent_id)
+    publish_best_effort_sync(
+        settings.data_plane.events_channel, ev.model_dump_json(), context="impersonation_changed"
     )
 
 

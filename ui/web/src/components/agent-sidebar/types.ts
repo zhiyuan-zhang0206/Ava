@@ -5,7 +5,7 @@ export interface Props {
   agents: AgentRow[];
   ancestors?: AgentLineage[];
   /** Per-agent lifecycle pending state (mutation isPending → row spinner). */
-  pendingActions: Record<number, "restarting" | "terminating" | "resurrecting" | "compacting">;
+  pendingActions: Record<number, "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring">;
   /** Number of SpawningRow placeholders to render (in-flight spawns awaiting AgentSpawned). */
   pendingSpawnCount: number;
   /** True while the initial agent list fetch is in flight (cold load — no cached data yet). */
@@ -13,6 +13,7 @@ export interface Props {
   /** imperative lifecycle actions — provided by the caller's useAgents hook */
   onSpawn: (opts: { machine?: string; model?: string; preset?: string; reasoning_effort?: string }) => void;
   onTerminate: (id: number, force?: boolean) => void;
+  onForceExpire: (id: number, sessionId: number) => void;
   onRestart: (id: number) => void;
   onResurrect: (id: number, prompt?: string) => void;
   onFork: (id: number, prompt?: string) => void;
@@ -29,11 +30,12 @@ export interface InnerProps {
   onSelect: (id: number) => void;
   onSpawn: (opts: { machine?: string; model?: string; preset?: string; reasoning_effort?: string }) => void;
   onTerminate: (id: number, force?: boolean) => void;
+  onForceExpire: (id: number, sessionId: number) => void;
   onRestart: (id: number) => void;
   onResurrect: (id: number, prompt?: string) => void;
   onFork: (id: number, prompt?: string) => void;
   onCompact: (id: number) => void;
-  pendingActions: Record<number, "restarting" | "terminating" | "resurrecting" | "compacting">;
+  pendingActions: Record<number, "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring">;
   pendingSpawnCount: number;
   isLoading: boolean;
   onRename: (id: number, label: string) => void;

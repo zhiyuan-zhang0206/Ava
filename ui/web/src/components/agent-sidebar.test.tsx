@@ -286,6 +286,7 @@ function makeAgent(overrides: Partial<AgentRow>): AgentRow {
 const handlerFns = {
   onSpawn: vi.fn(),
   onTerminate: vi.fn(),
+  onForceExpire: vi.fn(),
   onRestart: vi.fn(),
   onResurrect: vi.fn(),
   onFork: vi.fn(),

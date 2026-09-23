@@ -129,6 +129,7 @@ function HomeShell({ showError }: HomeShellProps) {
     spawn,
     fork,
     terminate,
+    forceExpire,
     restart,
     resurrect,
     compact,
@@ -187,6 +188,7 @@ function HomeShell({ showError }: HomeShellProps) {
         pendingSpawnCount={pendingSpawnCount}
         onSpawn={handleSpawn}
         onTerminate={terminate}
+        onForceExpire={forceExpire}
         onRestart={restart}
         onResurrect={resurrect}
         onFork={fork}
