@@ -10,6 +10,8 @@ drill-down source rather than a requirement for this run-level surface.
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context  # noqa: TID251 — propagate request context to the read worker
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
@@ -18,7 +20,7 @@ from typing import Annotated, Literal, cast
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from gateway import loki_events
+from gateway.routers import _run_timeline_events
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.routers.run_timeline_strip import router as strip_router
@@ -48,7 +50,6 @@ router.include_router(strip_router)
 _RETENTION = timedelta(days=7)
 _FALLBACK_WINDOW = timedelta(hours=24)
 _ASSOCIATION_TOLERANCE = timedelta(seconds=2)
-_PAGE_SIZE = 1_000
 _BUCKET_PATTERN = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[smhd])$")
 
 _TURN_EVENTS = (
@@ -507,23 +508,7 @@ def _query_all_events(
     *,
     event_names: tuple[str, ...] = _TURN_EVENTS,
 ) -> list[dict[str, object]]:
-    """Read every relevant event page so turn aggregation is never page-truncated."""
-    events: list[dict[str, object]] = []
-    offset = 0
-    while True:
-        page, has_more = loki_events.query_events(
-            agent_id=agent_id,
-            event_names=list(event_names),
-            from_=from_,
-            to=to,
-            limit=_PAGE_SIZE,
-            offset=offset,
-            direction="forward",
-        )
-        events.extend(page)
-        if not has_more:
-            return events
-        offset += _PAGE_SIZE
+    return _run_timeline_events.query_all_events(agent_id, from_, to, event_names=event_names)
 
 
 def _default_window(
@@ -611,48 +596,58 @@ def get_run_timeline(
     """Return an event-driven session waterfall with turn or bucket rows."""
     now = datetime.now(UTC)
     window_start, window_end = _effective_window(agent_id, from_, to, now, session=session)
-    try:
-        events = _query_all_events(agent_id, window_start, window_end)
-        post_window_events = (
-            _query_all_events(
-                agent_id,
-                window_end,
-                now,
-                event_names=tuple(_SESSION_START_EVENTS | {"turn_end"}),
-            )
-            if session == "compact" and from_ is None and to is None and window_end < now
-            else []
+    # Two independent read branches: the request thread owns events/narrative,
+    # one worker owns checkpoint strip reads. Join before returning or raising;
+    # request context follows the worker, and no executor survives the request.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="run-timeline") as executor:
+        strip_read = executor.submit(
+            copy_context().run,
+            strip_for_window_or_none,
+            agent_id,
+            window_start,
+            window_end,
+            messages_max,
         )
-    except httpx.HTTPError as exc:
-        raise_backend_unavailable(exc)
+        try:
+            events = _query_all_events(agent_id, window_start, window_end)
+            post_window_events = (
+                _query_all_events(
+                    agent_id,
+                    window_end,
+                    now,
+                    event_names=tuple(_SESSION_START_EVENTS | {"turn_end"}),
+                )
+                if session == "compact" and from_ is None and to is None and window_end < now
+                else []
+            )
+        except httpx.HTTPError as exc:
+            raise_backend_unavailable(exc)
 
-    aggregate = aggregate_turn_timeline(
-        events,
-        window_start,
-        window_end,
-        bucket_seconds=_parse_bucket_seconds(bucket) if level == "bucket" else None,
-    )
-    post_window_turns = sum(
-        1
-        for event in post_window_events
-        if _event_name(event) == "turn_end" and _event_ts(event) > window_end
-    )
-    has_activity_after_window = post_window_turns > 0 or any(
-        _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) > window_end
-        for event in post_window_events
-    )
-    layers, summary, pending = _narrative_for_window(
-        agent_id,
-        window_start,
-        window_end,
-        # Wall spans of the window's completed turns: the "activity presence"
-        # the pending-placeholder subtraction reads.
-        activity=[(row.start, row.end) for row in aggregate.rows],
-    )
-    inbounds = _inbounds_for_window(agent_id, window_start, window_end)
-    messages, messages_truncated = strip_for_window_or_none(
-        agent_id, window_start, window_end, messages_max
-    )
+        aggregate = aggregate_turn_timeline(
+            events,
+            window_start,
+            window_end,
+            bucket_seconds=_parse_bucket_seconds(bucket) if level == "bucket" else None,
+        )
+        post_window_turns = sum(
+            1
+            for event in post_window_events
+            if _event_name(event) == "turn_end" and _event_ts(event) > window_end
+        )
+        has_activity_after_window = post_window_turns > 0 or any(
+            _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) > window_end
+            for event in post_window_events
+        )
+        layers, summary, pending = _narrative_for_window(
+            agent_id,
+            window_start,
+            window_end,
+            # Wall spans of the window's completed turns: the "activity presence"
+            # the pending-placeholder subtraction reads.
+            activity=[(row.start, row.end) for row in aggregate.rows],
+        )
+        inbounds = _inbounds_for_window(agent_id, window_start, window_end)
+        messages, messages_truncated = strip_read.result()
     return RunTimelineResponse(
         agent_id=agent_id,
         window=RunTimelineWindow(from_=window_start, to=window_end),
