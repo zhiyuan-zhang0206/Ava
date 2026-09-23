@@ -45,7 +45,9 @@ surface merged-but-still-listed-as-pending mismatches.
 
 ### 3. fail-fast anti-patterns (whole-repo)
 
-`rg` across `ava/ plugins/ agent/ gateway/ cli/ services/ shared/` for:
+`rg` across the tracked source roots — the canonical list is `SCAN_DIRS` in
+`run.sh` (`ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ shared/`;
+the stale `plugins/` path was corrected 2026-09-23 — no such tracked dir exists) — for:
 `get() or {}`, `case _:` defaults, `(rare|shouldn't happen|almost never)`
 comments. False positives in config-defaults and external boundaries are
 expected — flag candidates, the human decides.
@@ -70,9 +72,16 @@ scan produces 70+ false positives reflecting framework conventions):
 - Plugin hook callbacks (`@register_after_exec`, etc.)
 - Pydantic schemas referenced only by wire-format-freezing tests
 - Watchdog event handler methods (`on_created` / `on_modified` etc.)
+- Transport `Protocol` / interface signatures (parameter names with `...`
+  bodies — e.g. the `services/pitr` protocols, `SpanExporter.force_flush`)
 
 The exclude list is itself an artifact — when it drifts (starts hiding real dead
-code, or a new convention appears), say so in the PR body.
+code, or a new convention appears), say so in the PR body. Two observed drift
+cases (2026-09-23): transport `Protocol` signatures read as unused parameters
+(interface, not dead code; bullet added above), and a file that fails vulture's
+`type_comments=True` parse — a `# type:`-prefixed comment does it — is skipped
+whole, so scan the run output for parse-error lines before trusting coverage
+(one instance: `shared/timeline.py`, fixed in the same pass).
 
 ### 6. boundary (anchored on recent PRs — the reasoned class)
 
@@ -97,17 +106,22 @@ hard ceiling (80 units) is enforced mechanically by
 `scripts/lint_skill_descriptions.py` in pre-commit; this class covers the
 **soft zone (50-80 units)**: descriptions that pass the gate but should be
 tightened. Reuse the lint's own scope + helpers (so this audit never drifts from
-what the gate scans — `skills/`, `plugins/*/skills/`, and `.agents/skills/`):
+what the gate scans — `ava_builtins/skills/`, `ava_builtins/plugins/*/skills/`,
+and `.agents/skills/`):
 
 ```
 python - <<'PY'
-from scripts.lint_skill_descriptions import length_units, _skill_md_files, _description
-for f in _skill_md_files():
-    d = _description(f)
+from scripts.lint_skill_descriptions import length_units, _skill_entries
+for entry in _skill_entries():
+    d = entry.description
     if d and 50 < length_units(d) <= 80:
-        print(length_units(d), f.parent.name)
+        print(length_units(d), entry.skill_md)
 PY
 ```
+
+The helper names drifted once (2026-09-23: `_skill_md_files` / `_description`
+no longer exist and the old snippet failed to import) — keep this snippet in
+lockstep with the lint's exports.
 
 Unlike a line count, trimming a description needs judgment — keep what it does
 plus the trigger keywords, push detail into the body. Propose tighter wording;
@@ -133,7 +147,7 @@ of the zero-based budget (`conventions/sdk-docstring-discipline.md`):
 
 Reuse the lint's own scope helpers (so this audit never drifts from what the
 gate scans — `ava/*.py` public modules + plugin namespace modules + wrap
-targets in `plugins/*/plugin.py`):
+targets in `ava_builtins/plugins/*/plugin.py`):
 
 ```
 python - <<'PY'

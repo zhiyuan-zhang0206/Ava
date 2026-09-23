@@ -587,20 +587,15 @@ def _spawn(
 def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str | None = None) -> int:
     """Run `code` as a background watcher, bounded by `timeout`.
 
-    `code` calls `ava.agents.send_message(ava.self.AGENT_ID, content)`
-    whenever it wants to wake you. The watcher runs until it exits, you kill
-    its session, or `timeout` elapses; its selected policy sends a message with
-    its exit code and a pointer to its full output.
+    `code` calls `ava.agents.send_message(ava.self.AGENT_ID, content)` to wake you;
+    the watcher runs until its exit, your kill, or `timeout`, then reports its exit code and output.
 
     Args:
-        timeout: seconds, a `timedelta`, or a `"<n>{s,m,h,d}"` duration
-            string (e.g. `"30m"`).
+        timeout: seconds, a `timedelta`, or `"<n>{s,m,h,d}"` (e.g. `"30m"`).
         name: a lowercase slug like `"ci-monitor"`.
-        notify: omit to use the agent policy; `"always"` or `"failure"` overrides it.
-
+        notify: omit to use the agent policy; `"always"` / `"failure"` override it.
     Returns:
-        The watcher's session id — while it runs, the watcher is one of your
-        shell sessions, managed like any other.
+        The watcher's session id — it is one of your shell sessions while running.
     """
     code = coerce_str(code, "code")
     timeout = coerce_str(timeout, "timeout", allow_types=(int, float, datetime.timedelta))
@@ -627,34 +622,22 @@ def cron(
 ) -> int:
     """Runs until `end_time`, or until you kill its session.
 
-    `end_time` defaults to now + 7 days (user ruling 2026-09-09, task
-    #2617): a standing schedule must be renewed, it cannot live forever
-    silently. Pass an explicit `end_time` for a longer schedule.
-    Re-registering the same schedule (expression + timezone) supersedes the
-    existing watcher with a fresh session carrying the new end — never
-    stacked into a duplicate that double-fires (Task #1825). One live
-    watcher per schedule, whatever end times are in play: a defaulted
-    re-registration renews a standing schedule, and an explicit-end
-    re-registration REPLACES a standing twin (user ruling 2026-09-10,
-    #2061). A schedule already live under the exact same (agent, expression,
-    timezone, end time) is REUSED instead; the returned session id is the
-    existing watcher's when reused. Kill the returned session to stop the
-    schedule.
+    `end_time` defaults to now + 7 days; pass an explicit one for a longer
+    schedule. Re-registering the same expression + timezone supersedes the
+    existing watcher with a fresh session carrying the new end — never a
+    double-firing duplicate: an explicit end replaces a standing twin, a
+    defaulted one renews it, and an exact (agent, expression, timezone, end)
+    match is reused as-is.
 
     Args:
         expr: 5-field cron expression (`minute hour day-of-month month
             day-of-week`).
-        timezone: IANA name (e.g. `"America/Los_Angeles"`); defaults to your
-            configured timezone — the same wall clock your message timestamps
-            are shown in.
-        end_time: same accepted types as `at()`'s `when`; must be in the
-            future (a past end raises ValueError, like `at()`); defaults to
-            now + 7 days.
+        timezone: IANA name; defaults to your configured timezone.
+        end_time: same accepted types as `at()`'s `when`; must be in the future.
         name: a lowercase slug like `"daily-check-in"`.
-        notify: omit to use the agent policy; `"always"` or `"failure"` overrides it.
-
+        notify: omit to use the agent policy; `"always"` / `"failure"` to override.
     Returns:
-        The watcher's session id; kill that session to stop the schedule.
+        The watcher's session id; kill it to stop the schedule.
     """
     from shared.config import cluster_tz_name, host_tz_name
 

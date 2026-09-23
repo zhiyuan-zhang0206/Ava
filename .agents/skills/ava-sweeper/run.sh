@@ -36,7 +36,7 @@ echo "repo: $REPO"
 echo "HEAD: $(git rev-parse --short HEAD)"
 echo ""
 
-SCAN_DIRS="ava/ plugins/ agent/ gateway/ cli/ services/ shared/"
+SCAN_DIRS="ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ shared/"
 
 # ------------------------------------------------------------------
 # Class 1: outdated deps

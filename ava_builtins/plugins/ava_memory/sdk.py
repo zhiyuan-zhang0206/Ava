@@ -1,21 +1,4 @@
-"""
-Long-term notes as markdown files, with semantic search to find them.
-
-Two stores:
-
-- Shared pool (`ava.memory.PATH`): notes visible to every agent. Restrained:
-  reusable rules, repeatedly-referenced facts, and user rulings only; events
-  stay out by default (git history already carries them).
-- Per-agent memory (`<workspace>/memory/`): your own durable state.
-  `MEMORY.md` there is the index — one line per memory, injected into your
-  context at cold start and after each compact; each memory is one file
-  beside it, read on demand. A write lands in the entry file and its index
-  line.
-
-Both stores are written through the same entry point, which resolves an
-absolute store-owned path — immune to `ava.cwd` changes.
-
-"""
+"""Long-term notes as markdown files, with semantic search to find them."""
 
 from __future__ import annotations
 
@@ -594,27 +577,15 @@ def write(
 ) -> Path:
     """Upsert the store's MEMORY.md pointer.
 
-    Personal entries use a flat kebab-case name in the calling agent's
-    workspace; shared entries may use topic directories in the memory pool.
-    Both targets are absolute store paths. A shared subdirectory entry is
-    indexed by its own directory's index.md — created when missing and
-    upserted in place otherwise — so the write leaves the root MEMORY.md
-    untouched. The entry always ends with a newline; content that does not close
-    with one gains a terminal newline.
+    Personal entries use a flat kebab-case name in your workspace; shared entries
+    may use topic directories in the memory pool. A shared subdirectory entry is
+    indexed by its own directory's `index.md` (created when missing), leaving the
+    root `MEMORY.md` untouched. The entry always ends with a newline; a missing one is appended.
 
-    Content may open with its own frontmatter block: that block is kept as
-    the note's only one, gains whichever required fields it is missing, and
-    has each of its bare values quoted on the same terms as a generated one.
-    Otherwise the writer generates the block, followed by the attribution
-    line on the shared store. A missing title defaults to the file name and
-    a missing description falls back to the title, so a written note never
-    carries a blank one. A value YAML would otherwise misread (a leading
-    indicator, a `: ` or trailing colon, a ` #` comment marker, or text it
-    would retype like `null`, `123` or a date) is quoted to survive as
-    written.
-
-    Each index update holds an advisory lock on the store's `MEMORY.md`, so
-    concurrent writers in this and other processes are serialized.
+    Content may open with its own frontmatter block — kept as the note's only
+    one, gaining any missing required fields; otherwise the writer generates the
+    block (plus the attribution line on the shared store). A missing title
+    defaults to the file name, a missing description to the title.
     """
     slug = coerce_str(slug, "slug")
     content = coerce_str(content, "content")

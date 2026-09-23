@@ -1,20 +1,5 @@
-"""Show the user a rich web page your HTTP server serves.
-
-A page is declared with the platform, which can run its server inside one
-of this agent's own persistent shell sessions. Such a session appears under
-the page's name in your session list; an open page normally occupies one entry.
-You can have at most one open page at a time — opening a new one
-auto-closes the old one.
-
-Ports are explicit: serve() and show() require the caller to name the port
-— there is no per-agent reserved or default port to fall back to — and the
-platform refuses a port another live page holds, as well as a port held by a
-process that is not a page server.
-
-The page server binds the machine's own address (loopback on a single
-machine) — it is never exposed on the network, and the page is reached
-through the platform's authenticated link, not by dialing the server
-directly.
+"""Show the user a rich web page your HTTP server serves — one page at a time;
+ports are explicit, and the page is reached only through the platform's authenticated link.
 """
 
 from __future__ import annotations
@@ -294,26 +279,15 @@ def show(
 ) -> Page:
     """Show the user the page your HTTP server serves.
 
-    Declares the page with the platform so the platform routes your
-    server's URL — you started that server yourself; the platform's page
-    supervisor does not manage it. No page-server session is created for you;
-    only the page registration is managed by the platform, and expiry
-    unregisters the page without stopping your server.
-
-    The declaration is taken as given — show() does not probe whether the
-    server answers — but the platform refuses a port another open page
-    already holds.
+    Declares the page with the platform, which routes it to the user; the server
+    stays yours — show() creates no session and does not probe whether the
+    server answers, and expiry unregisters the page without stopping it.
 
     Args:
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
-        port: the port your server listens on (1024-65535). Explicit and
-            required — the platform reserves no port per agent.
+        port: the port your server listens on (1024-65535); required.
         title: defaults to `name`.
-        ttl: optional page lifetime in seconds; when omitted, the platform
-            default applies. Expiry only unregisters the page (the link
-            turns into the expired notice) — the server runs in your own
-            process, so you must stop it yourself to release the port; the
-            expiry notice reminds you.
+        ttl: page lifetime; omitted = the platform default; expiry does not stop the server.
     """
     name = coerce_str(name, "name")
     port = _coerce_page_port(port)
@@ -332,34 +306,23 @@ def serve(
 ) -> Page:
     """Start an HTTP server for `dir` and show it to the user, in one call.
 
-    The platform starts the HTTP server in a persistent shell session for
-    this agent. It appears in `ava.shell.sessions.list()` as `page-<name>`
-    (lowercased, with underscores replaced by hyphens), normally occupying
-    one entry while the page is open. End the page with `close()` or TTL
-    expiry; killing the session only interrupts the server, which the
-    platform restarts, and does not close the page.
+    The server runs inside a persistent shell session of this agent, listed as
+    `page-<name>`; a new call auto-closes any existing page. End the page with
+    `close()` or TTL expiry — killing that session only restarts the server, it
+    does not close the page.
 
-    Calling again auto-closes any existing page.
-    A directory without `index.html` is not browsable: requests show a
-    placeholder because directory listings are disabled. An `index.html` is
-    required; for Markdown, render it to self-contained HTML first with
-    the ava-ui markdown widget, then serve that directory.
-
-    The port is the caller's explicit choice and must be free: one held by
-    another live page is refused by the platform, and one held by a process
-    that is not a page server fails the call before anything is registered —
-    the page-server daemon never displaces a foreign occupant.
+    `dir` must contain an `index.html` (render Markdown to self-contained HTML
+    first); without it, requests show a placeholder — directory listings are
+    disabled.
 
     Args:
-        dir: the directory to serve. A relative path is resolved against
-            your working directory (`ava.cwd`), consistent with the
-            `ava.files` API; `~` is expanded and an absolute path is used
-            as-is.
+        dir: relative paths resolve against your working directory (`ava.cwd`);
+            `~` is expanded, an absolute path is used as-is.
         name: `^[a-zA-Z0-9_-]+$`, 1-64 chars.
-        port: the port the page server listens on (1024-65535). Explicit and
-            required — ava.ui never allocates or reserves a port.
+        port: the page server's port (1024-65535); ava.ui never allocates or
+            reserves one.
         title: defaults to `name`.
-        ttl: optional page lifetime in seconds; when omitted, the platform default applies.
+        ttl: page lifetime in seconds; omitted = the platform default.
     """
     dir = coerce_str(dir, "dir", allow_types=(_os.PathLike,))
     name = coerce_str(name, "name")
