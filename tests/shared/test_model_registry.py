@@ -218,7 +218,9 @@ def test_superseded_chain_validation_rejects_non_spawnable_target(
 
     from shared.lm import registry as reg
 
-    monkeypatch.setitem(reg.MODELS, "gpt-5.6-sol", replace(reg.MODELS["gpt-5.6-sol"], spawnable=False))
+    monkeypatch.setitem(
+        reg.MODELS, "gpt-5.6-sol", replace(reg.MODELS["gpt-5.6-sol"], spawnable=False)
+    )
     monkeypatch.setitem(
         reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="gpt-5.6-sol")
     )
