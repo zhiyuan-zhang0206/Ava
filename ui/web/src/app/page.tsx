@@ -29,6 +29,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -270,6 +271,12 @@ function HomeContent({
   // Single force-scroll signal (timeline-store-owned). Agent switch bumps it
   // inside switchThread; send bumps it here via requestScrollToBottom.
   const requestScrollToBottom = useTimelineStore((s) => s.requestScrollToBottom);
+  // The timeline's scroll position is remembered per history entry, so a
+  // browser back/forward returns to the reader's position instead of
+  // re-pinning to the bottom (lib/scroll-memory.ts; bfcacheId is kept across
+  // back/forward, router.refresh() and search-param-/hash-only navigations,
+  // fresh only on a push/replace into a new segment).
+  const { bfcacheId } = useRouter();
 
   // File upload — one or more files sent as a single batch (one request, one
   // inbound to the agent). progress is the whole batch's byte progress.
@@ -412,6 +419,7 @@ function HomeContent({
           <TimelineView
             items={items}
             threadKey={activeId != null ? String(activeId) : undefined}
+            scrollMemoryKey={bfcacheId}
             streamingCode={streamingCode}
             turnActive={agentBusy}
             onFork={activeId != null ? handleFork : null}
