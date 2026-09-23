@@ -25,7 +25,7 @@ from dataclasses import dataclass
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from shared.checkpoint_cleanup import trim_checkpoints_sync
+from shared.agents.history.checkpoint_cleanup import trim_checkpoints_sync
 from shared.log import logger
 
 _KEEP = 3

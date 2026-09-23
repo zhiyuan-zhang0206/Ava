@@ -38,7 +38,7 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 ### boundary:checkpoint-postgres-historical-walk-patch
 - **class**: boundary
 - **status**: open
-- **evidence**: `shared/checkpoint_postgres_walks.py:install_checkpoint_postgres_walk_patch` wraps private `BasePostgresSaver._try_advance_walks` for checkpoint-postgres 3.1.2. It keeps an unseen historical target out of the cached walk cursor until a later page arrives; `shared/delta_read_compat.py` installs it for gateway and agent-host readers. The dependency version, method identity, and signature are guarded because this is a temporary third-party patch. Once langgraph#8448 / #8556 is released, run `tests/shared/test_checkpoint_postgres_walks.py`, delete the wrapper and its installation, then upgrade the checkpoint-postgres pin (405 tracks the follow-up).
+- **evidence**: `shared/checkpoint_postgres_walks.py:install_checkpoint_postgres_walk_patch` wraps private `BasePostgresSaver._try_advance_walks` for checkpoint-postgres 3.1.2. It keeps an unseen historical target out of the cached walk cursor until a later page arrives; `shared/agents/history/delta_read_compat.py` installs it for gateway and agent-host readers. The dependency version, method identity, and signature are guarded because this is a temporary third-party patch. Once langgraph#8448 / #8556 is released, run `tests/shared/test_checkpoint_postgres_walks.py`, delete the wrapper and its installation, then upgrade the checkpoint-postgres pin (405 tracks the follow-up).
 - **first-seen**: 2026-09-23 (PR for task #4518)
 - **last-verified**: 2026-09-23
 

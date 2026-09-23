@@ -36,12 +36,12 @@ from ops import ops_lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
 from shared import agent_snapshot
-from shared.chat_delivery import ClientMessageConflictError
-from shared.checkpoint import (
+from shared.agents.history.checkpoint import (
     CheckpointReadError,
     load_checkpoint_messages,
     load_checkpoint_messages_by_trace,
 )
+from shared.chat_delivery import ClientMessageConflictError
 from shared.completion_notices import (
     CompletionNotice,
     CompletionNoticePolicy,

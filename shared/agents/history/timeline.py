@@ -28,6 +28,9 @@ from langchain_core.messages import (
     ToolCall,
 )
 
+# Re-export: TimelineItem's home is shared/agents/history/timeline_item.py (file line budget);
+# callers keep importing it from here.
+from shared.agents.history.timeline_item import TimelineItem as TimelineItem
 from shared.config import now_timestamp, settings
 from shared.db import InboundRow
 from shared.impersonation_history import ImpersonationMetadata
@@ -40,10 +43,6 @@ from shared.message_kwargs import (
     read_ava_kwargs,
 )
 from shared.sdk_telemetry import SdkCall, sdk_calls_by_tool_call_id
-
-# Re-export: TimelineItem's home is shared/timeline_item.py (file line budget);
-# callers keep importing it from here.
-from shared.timeline_item import TimelineItem as TimelineItem
 
 # Items after the same inbound anchor are offset by a microsecond increment to
 # preserve relative order without colliding with the next real-ts anchor

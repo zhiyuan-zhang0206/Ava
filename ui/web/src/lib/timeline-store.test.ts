@@ -919,7 +919,7 @@ describe("compact_done hard reset (incremental design)", () => {
 // the merge replaces wholesale instead of keep-all.
 
 describe("compact crossed unseen (SSE-gap heal)", () => {
-  // Production shape (shared/timeline.py `_compact_item`): the envelope's
+  // Production shape (shared/agents/history/timeline.py `_compact_item`): the envelope's
   // inbound_id is hardcoded null and message_timestamps prefixes the payload
   // with a render-time ts — so the identity must be item_id + kind +
   // created_at (the render-stable ava_created_at), never payload/inbound_id.

@@ -24,7 +24,7 @@ local recovery copy. A gap present in the mirror can be replayed with
   and `OtlpJsonHttpSpanExporter` re-strips defensively before anything leaves
   the process (a future instrumentor that ignores the env var cannot leak
   content back in). Turn content is fetched on demand from the checkpoints
-  table by trace id — see `shared/checkpoint.py` / the gateway trace endpoint.
+  table by trace id — see `shared/agents/history/checkpoint.py` / the gateway trace endpoint.
 
 - **Ship** (`cli/commands/trace.py`, `ava trace ship`): replays a time window of
   the sidecar's JSONL mirror to Tempo directly on a gateway, or through the

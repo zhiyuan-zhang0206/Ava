@@ -349,7 +349,7 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
     from langchain_core.messages import HumanMessage
     from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 
-    from shared.checkpoint import (
+    from shared.agents.history.checkpoint import (
         load_checkpoint_messages,
         load_checkpoint_messages_by_trace,
     )

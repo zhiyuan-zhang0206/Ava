@@ -221,7 +221,7 @@ def _finalize_turn_observability(
       "thought for X seconds" from a real elapsed value rather than the
       timeline's own synthetic per-turn microsecond offset. Keyed alongside
       the other ava_* message tags; absent when no thinking streamed.
-      shared/timeline.py reads it back.
+      shared/agents/history/timeline.py reads it back.
     - log standardized token usage (`events.event_name='llm_usage'`).
     - emit the live TokenUsage SSE event. usage_metadata is accurate only after
       the stream completes (chunks carry only output_tokens increments;
@@ -230,13 +230,13 @@ def _finalize_turn_observability(
     """
     # Stamp the turn's real wall-clock onto the message so the timeline renders
     # the agent's reply / reasoning / code at their actual time, not the
-    # synthetic anchor+offset fallback. shared/timeline.py prefers this ts.
+    # synthetic anchor+offset fallback. shared/agents/history/timeline.py prefers this ts.
     kw = read_ava_kwargs(final_msg)
     kw["ava_created_at"] = datetime.now(UTC).isoformat()
     reasoning_ms_by_block = handler.reasoning_ms_by_block
     if reasoning_ms_by_block:
         # str keys: additional_kwargs is checkpoint-serialized, JSON object
-        # keys are strings; shared/timeline.py reads back with str(block_idx).
+        # keys are strings; shared/agents/history/timeline.py reads back with str(block_idx).
         kw["ava_reasoning_ms_by_block"] = {
             str(block_idx): ms for block_idx, ms in reasoning_ms_by_block.items()
         }

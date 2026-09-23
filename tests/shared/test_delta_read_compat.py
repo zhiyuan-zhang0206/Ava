@@ -1,4 +1,4 @@
-"""Tests for shared/delta_read_compat.py — delta read-compat reconstruction.
+"""Tests for shared/agents/history/delta_read_compat.py — delta read-compat reconstruction.
 
 Real delta-written threads against the session's test Postgres: the transition
 layer must let plain (vanilla) readers see the same history the delta runtime
@@ -31,18 +31,18 @@ from psycopg_pool import AsyncConnectionPool
 from agent.messages_guard import guarded_delta_reducer
 from agent.startup import _reconcile_claimed_inbounds_at_startup
 from ops.agent_spawn import _copy_checkpoint_chain
-from shared.checkpoint import (
+from shared.agents.history.checkpoint import (
     _is_delta_snapshot_blob,
     load_checkpoint_message_count,
     load_checkpoint_messages_full,
     load_checkpoint_messages_segment,
 )
-from shared.db import create_agent
-from shared.delta_read_compat import (
+from shared.agents.history.delta_read_compat import (
     _fold_messages,
     areconstruct_delta_messages,
     wrap_saver_reads_with_delta_reconstruction,
 )
+from shared.db import create_agent
 
 
 def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
@@ -307,7 +307,7 @@ def test_fold_fast_path_equals_per_write_add_messages() -> None:
 async def test_gateway_readers_reconstruct_delta_threads(
     aops_pool: AsyncConnectionPool, db_conn: psycopg.Connection
 ) -> None:
-    """`shared/checkpoint.py`'s sync readers (timeline + self-evolution +
+    """`shared/agents/history/checkpoint.py`'s sync readers (timeline + self-evolution +
     restore drill) see reconstructed content: full stitch, boundary segment,
     and the delta fallback for the header count."""
     agent_id = create_agent(db_conn)

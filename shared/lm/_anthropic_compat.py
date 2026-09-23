@@ -29,7 +29,7 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
 
     Overrides the single chunk-conversion seam so downstream consumers
     (`agent.observe.log_llm_usage`, `agent.graph._llm._finalize_turn_observability`,
-    `shared.timeline`, `gateway.routers.agent_inspect`) all see a non-zero
+    `shared.agents.history.timeline`, `gateway.routers.agent_inspect`) all see a non-zero
     `reasoning` count — no other file needs to change.
     """
 

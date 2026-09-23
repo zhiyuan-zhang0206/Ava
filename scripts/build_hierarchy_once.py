@@ -22,10 +22,10 @@ from __future__ import annotations
 import argparse
 from urllib.parse import urlsplit
 
+from shared.agents.history.hierarchy.generate import build_generation_llm
+from shared.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
+from shared.agents.history.hierarchy.store import load_known_texts, write_tree
 from shared.config import settings
-from shared.hierarchy.generate import build_generation_llm
-from shared.hierarchy.pipeline import MaterializedTree, build_agent_tree
-from shared.hierarchy.store import load_known_texts, write_tree
 from shared.lm.factory import close_chat_model
 
 # How many failed-node lines the report shows before folding the rest into a

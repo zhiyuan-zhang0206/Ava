@@ -65,7 +65,7 @@ async def attach_trace_checkpoint_ref(
     # endpoint — is DB-side and unaffected.
     if span.is_recording():
         span.set_attribute("ava.checkpoint_id", checkpoint_id)
-    from shared.checkpoint import attach_trace_to_checkpoint
+    from shared.agents.history.checkpoint import attach_trace_to_checkpoint
 
     await attach_trace_to_checkpoint(
         ctx.ops_pool,

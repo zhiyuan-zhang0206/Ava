@@ -154,7 +154,7 @@ def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
 
 
 def test_sink_agent_id_int_kwarg_overrides_bind(sink_logger, db_conn: psycopg.Connection) -> None:
-    """log call passing agent_id=N overrides the bind default — used by shared/agents.py for cross-process
+    """log call passing agent_id=N overrides the bind default — used by shared/agents/contract.py for cross-process
     lifecycle events (the caller process bind may not be the target)."""
     tid = _insert_agent(db_conn)
     db_conn.commit()
@@ -503,7 +503,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
 
     from langgraph.checkpoint.base import CheckpointTuple
 
-    from shared.delta_read_compat import _log_reconstruction
+    from shared.agents.history.delta_read_compat import _log_reconstruction
 
     tuple_ = cast(
         CheckpointTuple,

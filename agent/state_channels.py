@@ -4,7 +4,7 @@
 Why these five live here and NOT in their own package: they are checkpoint
 channel values. LangGraph's `JsonPlusSerializer` writes a pydantic-v2 channel
 value as an ext object carrying its class's `(module, name)`, and
-`shared/checkpoint_serde.py` allowlists the pairs that may deserialize. Moving
+`shared/agents/history/checkpoint_serde.py` allowlists the pairs that may deserialize. Moving
 a model changes `__module__`, so **old checkpoints** (written when the class
 lived at `agent.state.<Name>`) still resolve because `agent.state` re-exports
 every name from here, and **new checkpoints** validate because

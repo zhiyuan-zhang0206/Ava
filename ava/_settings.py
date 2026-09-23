@@ -116,7 +116,7 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
     #    calls all failing in a chain (especially hard to diagnose when
     #    caller forgets rollback)
     # Multi-statement transactions don't go through this conn — the caller
-    # opens its own `psycopg.connect()` (shared/agents.py's spawn_agent /
+    # opens its own `psycopg.connect()` (shared/agents/contract.py's spawn_agent /
     # resurrect_agent already follow this pattern).
     #
     # PG_STATEMENT_TIMEOUT_KWARGS (not `shared.db.connect()`, which dials the pooled URL

@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool
 
 import services.events_maintenance.checkpoint_reaper as reaper
 from services.events_maintenance.checkpoint_reaper import ReapCounts
-from shared.checkpoint_cleanup import TrimCounts, trim_checkpoints_sync
+from shared.agents.history.checkpoint_cleanup import TrimCounts, trim_checkpoints_sync
 from shared.config import settings
 
 _SCHEMA = """

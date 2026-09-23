@@ -61,8 +61,8 @@ from agent.messages import (
 )
 from agent.nodes import INIT_CONTEXT, LLM
 from agent.state import AgentState, CompactState, ContextReset
+from shared.agents.history.checkpoint_cleanup import mark_compact_boundary
 from shared.audit_events import insert_event_log_async
-from shared.checkpoint_cleanup import mark_compact_boundary
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext, agent_id_from_config
 from shared.live_events import CompactDone

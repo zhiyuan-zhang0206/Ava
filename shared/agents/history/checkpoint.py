@@ -47,10 +47,10 @@ from langchain_core.runnables import RunnableConfig
 from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 
-from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from shared.agents.history.delta_read_compat import reconstruct_delta_messages
 from shared.db import pool
 from shared.db_transaction import async_write_transaction
-from shared.delta_read_compat import reconstruct_delta_messages
 
 _log = logging.getLogger(__name__)
 

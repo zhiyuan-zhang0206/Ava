@@ -25,10 +25,10 @@ from ops.agent_spawn import create_agent_row
 from services.agent_host import db_recovery
 from services.agent_host.host import AgentHost
 from shared import maintenance, maintenance_cohort, pause_owner
+from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
-from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.hosted_force import install_hosted_force
 from shared.incarnation_resources import ResourceBirth
 from shared.machine import machine_name

@@ -1,4 +1,4 @@
-"""Unit tests for the hierarchy generation pass (`shared/hierarchy/generate.py`).
+"""Unit tests for the hierarchy generation pass (`shared/agents/history/hierarchy/generate.py`).
 
 Load-bearing contracts locked here:
 - the budget is the one formula `min(source/10, hard cap)` over the measured
@@ -22,7 +22,7 @@ from typing import Any, cast
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from shared.hierarchy.generate import (
+from shared.agents.history.hierarchy.generate import (
     GenParams,
     GenRequest,
     build_generation_llm,
@@ -31,8 +31,8 @@ from shared.hierarchy.generate import (
     clean_text,
     generate_nodes,
 )
-from shared.hierarchy.seal import NARRATIVE_CAP_TOK, narrative_budget_tok
-from shared.hierarchy.tokens import count_tokens
+from shared.agents.history.hierarchy.seal import NARRATIVE_CAP_TOK, narrative_budget_tok
+from shared.agents.history.hierarchy.tokens import count_tokens
 
 MODEL = "deepseek-v4-flash"
 

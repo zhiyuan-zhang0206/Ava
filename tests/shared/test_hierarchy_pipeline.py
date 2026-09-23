@@ -1,4 +1,4 @@
-"""Unit tests for the hierarchy pipeline (`shared/hierarchy/pipeline.py`).
+"""Unit tests for the hierarchy pipeline (`shared/agents/history/hierarchy/pipeline.py`).
 
 Contracts locked here: trigger batches cut at compact items (tail optional);
 units carry rendered sizes and stable uid/spans; materialize walks levels and
@@ -18,25 +18,25 @@ from typing import Any, cast
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from shared.hierarchy import pipeline as pipeline_module
-from shared.hierarchy.blocks import fold_blocks
-from shared.hierarchy.generate import input_hash, text_hash
-from shared.hierarchy.pipeline import (
+from shared.agents.history.hierarchy import pipeline as pipeline_module
+from shared.agents.history.hierarchy.blocks import fold_blocks
+from shared.agents.history.hierarchy.generate import input_hash, text_hash
+from shared.agents.history.hierarchy.pipeline import (
     MaterializedTree,
     build_agent_tree,
     build_units,
     materialize,
     trigger_batches,
 )
-from shared.hierarchy.seal import (
+from shared.agents.history.hierarchy.seal import (
     NodeSpec,
     SealResult,
     Unit,
     narrative_budget_tok,
     seal_cascade,
 )
-from shared.hierarchy.tokens import count_tokens
-from shared.timeline import build_timeline_items
+from shared.agents.history.hierarchy.tokens import count_tokens
+from shared.agents.history.timeline import build_timeline_items
 
 MODEL = "deepseek-v4-flash"
 T0 = "2026-09-12T12:00:00+08:00"

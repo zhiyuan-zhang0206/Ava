@@ -52,10 +52,10 @@ from ops.agents import get_agent_status
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 from shared import agent_roster, agent_snapshot
 from shared.agents import AvaAgentError
+from shared.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
 from shared.audit_events import insert_event_log
 from shared.caller_identity import CallerIdentity
 from shared.chat_delivery import ClientMessageConflictError
-from shared.checkpoint import CheckpointReadError, load_checkpoint_messages
 from shared.inbound_provenance import InboundProvenance
 from shared.machine import machine_name
 

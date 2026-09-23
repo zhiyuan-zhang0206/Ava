@@ -192,8 +192,8 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
 ) -> None:
     from agent.impersonation_handoff import start_marker
     from gateway.routers.timeline import _window_before
+    from shared.agents.history.timeline import build_timeline_items
     from shared.impersonation_timeline import hydrate
-    from shared.timeline import build_timeline_items
 
     lease = start(owner)
     marker = start_marker(lease)
@@ -303,8 +303,8 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     from psycopg.types.json import Jsonb
 
     from agent.impersonation_handoff import start_marker
+    from shared.agents.history.timeline import build_timeline_items
     from shared.impersonation_timeline import hydrate
-    from shared.timeline import build_timeline_items
     from shared.uploads import upload_url
 
     lease = start(owner)

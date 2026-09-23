@@ -153,7 +153,7 @@ def attach_message(
     interleaved per file — ``[text(notice), text(line1), media1, text(line2),
     media2, ...]`` — so every media block sits directly after its own caption
     line (the timeline reads that pairing structurally via
-    ``shared/timeline._attach_image_captions``).
+    ``shared/agents/history/timeline._attach_image_captions``).
     """
     content_blocks = blocks or [{"type": "text", "text": text}]
     return HumanMessage(

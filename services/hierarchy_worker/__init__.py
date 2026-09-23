@@ -18,7 +18,7 @@ Modules:
   scan-cursor advance for a `compact` job, the tail-seal delta column for a
   `tail` job) and the build itself.
 
-The build is `shared.hierarchy.pipeline.build_agent_tree` plus the storage
+The build is `shared.agents.history.hierarchy.pipeline.build_agent_tree` plus the storage
 layer's `write_tree`; generation is hash-idempotent, so any interrupted run
 resumes with zero redone nodes (the review-pinned invariant), and a job
 budget under the hard deadline lets an oversized history be sliced with the

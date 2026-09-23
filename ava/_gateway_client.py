@@ -3,7 +3,7 @@
 The agent process's `ava.agents.*` no longer directly connects to the DB —
 three gateway ops (spawn / send_message / get_last_message)
 all go through this module calling gateway HTTP routes. See the
-"error-wire protocol" section at the top of `shared/agents.py`.
+"error-wire protocol" section at the top of `shared/agents/contract.py`.
 
 Design trade-offs:
 - **Synchronous httpx.Client**: agent code is sync; introducing async

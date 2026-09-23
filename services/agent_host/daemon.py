@@ -363,8 +363,8 @@ async def _build_checkpointer(
         _wrap_saver_writes_with_nstep_interval,
     )
     from agent.state import build_checkpoint_serde
+    from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
     from shared.config.turn_view import turn_settings
-    from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
     checkpointer = PooledPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())

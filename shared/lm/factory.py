@@ -20,7 +20,7 @@ Current provider matrix:
 
 kimi uses `ChatMoonshot` (`langchain-moonshot`) and captures reasoning in
 `additional_kwargs["reasoning_content"]` (not canonical content blocks) — the
-streaming fan-out (`RedisStreamHandler`) and timeline (`shared/timeline.py`)
+streaming fan-out (`RedisStreamHandler`) and timeline (`shared/agents/history/timeline.py`)
 handle that style. Its binding lives in `ava_builtins/plugins/lm_moonshot`.
 
 glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/_reasoning_compat.py`), a
