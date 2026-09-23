@@ -54,9 +54,7 @@ _FETCH_TIMEOUT_S = 10.0
 # because during a gateway outage no cluster config edit can have happened
 # since the snapshot was written.
 _SNAPSHOT_NAME = "bootstrap-snapshot.json"
-# Admission zero means unlimited only for capable clients. Version the cache
-# across that boundary so legacy readers cannot reuse a zero-slot projection,
-# and upgraded runners negotiate instead of retaining a legacy positive limit.
+# Version 2 snapshots carry unmodified zero turn limits; version 1 is incompatible.
 _SNAPSHOT_VERSION = 2
 # Freshness window: how long a snapshot may stand in for a live fetch. Bounds
 # cluster-edit propagation to a few minutes in steady state (the first child
@@ -227,10 +225,6 @@ def fetch_bootstrap_config(
     ``"runner"`` and ``None`` receive the least-privilege `ava_runner`
     AVA_DB_URL. The main identity is never a bootstrap projection.
 
-    Advertises support for zero as unlimited hosted admission. A gateway that
-    predates this capability ignores the extra query parameter and serves its
-    existing positive limit unchanged.
-
     Presents `Authorization: Bearer <AVA_CLUSTER_SECRET>` when that env var is set
     (enroll writes it on a split agent-runner); the gateway requires it when
     multi-host is on. Read from os.environ, not Settings — this runs during the
@@ -248,7 +242,6 @@ def fetch_bootstrap_config(
     secret = os.environ.get("AVA_CLUSTER_SECRET", "")
     headers = bearer_header(secret) if secret else {}
     params = {"role": role} if role else {}
-    params["host_unlimited_admission"] = "true"
     url = f"{base_url.rstrip('/')}/api/bootstrap?{urlencode(params)}"
     attempt = 0
     while True:

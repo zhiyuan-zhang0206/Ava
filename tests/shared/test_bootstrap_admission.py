@@ -1,4 +1,4 @@
-"""Rolling-version bootstrap preserves usable admission on old runners."""
+"""Bootstrap serves the authoritative hosted turn limit without rewriting zero."""
 
 import json
 import time
@@ -18,7 +18,6 @@ from shared.cluster_auth import bearer_header
 
 _SECRET = "bootstrap-admission-test"  # noqa: S105 — isolated test credential
 _TURN_LIMIT = "AVA_HOST_MAX_CONCURRENT_TURNS"
-_CAPABILITY = "host_unlimited_admission"
 
 
 @pytest.fixture
@@ -42,52 +41,47 @@ def gateway_client() -> Iterator[TestClient]:
         yield client
 
 
-@pytest.mark.parametrize("capable", [False, True], ids=["legacy", "capable"])
-@pytest.mark.parametrize("raw", [None, "0", "00", "+0", " 0 ", "0.0", "7", "+007", "7.0"])
-def test_bootstrap_projects_zero_only_for_legacy_runners(
-    gateway_snapshot: dict[str, str], gateway_client: TestClient, capable: bool, raw: str | None
+@pytest.mark.parametrize("role", [None, "runner"])
+@pytest.mark.parametrize(
+    "raw", [None, "0", "00", "+0", " 0 ", "0.0", "7", "+007", "7.0", "invalid"]
+)
+def test_bootstrap_serves_turn_limit_verbatim(
+    gateway_snapshot: dict[str, str], gateway_client: TestClient, role: str | None, raw: str | None
 ) -> None:
     if raw is not None:
         gateway_snapshot[_TURN_LIMIT] = raw
-    params = {"role": "runner"}
-    if capable:
-        params[_CAPABILITY] = "true"
+    params = {"role": role} if role else {}
     response = gateway_client.get("/api/bootstrap", params=params, headers=bearer_header(_SECRET))
     assert response.status_code == 200
     served = response.json()
-    effective = 0 if raw is None else float(raw)
-    expected = "16" if not capable and effective == 0 else raw if raw is not None else "0"
-    assert served[_TURN_LIMIT] == expected
+    assert served[_TURN_LIMIT] == (raw if raw is not None else "0")
     assert served["AVA_HOST_DB_POOL_MAX_SIZE"] == "64"
     assert served["AVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
 
 
-@pytest.mark.parametrize("capable", [False, True])
 @pytest.mark.parametrize("secret", [None, "wrong-secret"])
-def test_bootstrap_admission_capability_preserves_auth(
-    gateway_snapshot: dict[str, str], gateway_client: TestClient, capable: bool, secret: str | None
+def test_bootstrap_admission_preserves_auth(
+    gateway_snapshot: dict[str, str], gateway_client: TestClient, secret: str | None
 ) -> None:
     headers = bearer_header(secret) if secret else {}
-    response = gateway_client.get(
-        "/api/bootstrap", params={_CAPABILITY: str(capable).lower()}, headers=headers
-    )
+    response = gateway_client.get("/api/bootstrap", headers=headers)
     assert response.status_code == 401
 
 
-@pytest.mark.parametrize("capable", [False, True])
-def test_no_secret_bootstrap_preserves_admission_projection(
+@pytest.mark.parametrize("role", [None, "runner"])
+def test_no_secret_bootstrap_serves_zero_verbatim(
     gateway_snapshot: dict[str, str],
     gateway_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
-    capable: bool,
+    role: str | None,
 ) -> None:
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
-    response = gateway_client.get("/api/bootstrap", params={_CAPABILITY: str(capable).lower()})
+    response = gateway_client.get("/api/bootstrap", params={"role": role} if role else {})
     assert response.status_code == 200
-    assert response.json()[_TURN_LIMIT] == ("0" if capable else "16")
+    assert response.json()[_TURN_LIMIT] == "0"
 
 
-def test_new_runner_advertises_capability_and_replaces_stale_admission(
+def test_runner_fetch_replaces_stale_admission(
     gateway_snapshot: dict[str, str], gateway_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = {
@@ -108,17 +102,14 @@ def test_new_runner_advertises_capability_and_replaces_stale_admission(
     monkeypatch.setattr(bootstrap, "dial_get", dial)
     bootstrap.inject_config_from_gateway()
     assert len(requests) == 1
-    assert parse_qs(urlsplit(requests[0]).query) == {
-        "role": ["runner"],
-        _CAPABILITY: ["true"],
-    }
+    assert parse_qs(urlsplit(requests[0]).query) == {"role": ["runner"]}
     assert env[_TURN_LIMIT] == "0"
     assert env["AVA_HOST_DB_POOL_MAX_SIZE"] == "64"
     assert env["AVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
 
 
 @pytest.mark.parametrize("age_seconds", [1.0, 10_000.0], ids=["fresh", "stale"])
-def test_new_runner_refreshes_a_legacy_admission_snapshot(
+def test_runner_refreshes_an_outdated_admission_snapshot(
     gateway_snapshot: dict[str, str],
     gateway_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -153,65 +144,3 @@ def test_new_runner_refreshes_a_legacy_admission_snapshot(
     assert env[_TURN_LIMIT] == "0"
     written = bootstrap._read_config_snapshot("http://gateway")
     assert written is not None and written[0][_TURN_LIMIT] == "0"
-
-
-def test_unlimited_snapshot_is_not_readable_by_a_legacy_client(
-    gateway_snapshot: dict[str, str],
-    gateway_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    env = {"AVA_HOME": str(tmp_path), "AVA_GATEWAY_URL": "http://gateway"}
-    monkeypatch.setattr(bootstrap, "os", SimpleNamespace(**{**vars(bootstrap.os), "environ": env}))
-    bootstrap._write_config_snapshot("http://gateway", {_TURN_LIMIT: "0"})
-    current = bootstrap._read_config_snapshot("http://gateway")
-    assert current is not None and current[0][_TURN_LIMIT] == "0"
-
-    # The previous client uses the same reader with snapshot version 1. It
-    # must fetch its positive admission projection instead of loading zero.
-    monkeypatch.setattr(bootstrap, "_SNAPSHOT_VERSION", 1)
-    assert bootstrap._read_config_snapshot("http://gateway") is None
-
-    def legacy_fetch(base_url: str, *, role: str | None = None) -> dict[str, str]:
-        response = gateway_client.get(
-            f"{base_url}/api/bootstrap", params={"role": role}, headers=bearer_header(_SECRET)
-        )
-        assert response.status_code == 200
-        return response.json()
-
-    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", legacy_fetch)
-    bootstrap.inject_config_from_gateway()
-    assert env[_TURN_LIMIT] == "16"
-
-
-@pytest.mark.parametrize("role", [None, "runner"])
-def test_new_client_can_fetch_from_gateway_without_capability_parameter(
-    monkeypatch: pytest.MonkeyPatch, role: str | None
-) -> None:
-    legacy_app = FastAPI()
-
-    @legacy_app.get("/api/bootstrap")
-    def legacy_bootstrap(role: str | None = None) -> dict[str, str]:
-        assert role in (None, "runner")
-        return {_TURN_LIMIT: "16"}
-
-    requests: list[str] = []
-    with TestClient(legacy_app) as client:
-
-        def dial(url: str, *, timeout: float, headers: dict[str, str]) -> httpx2.Response:
-            assert timeout > 0
-            requests.append(url)
-            return client.get(url, headers=headers)
-
-        monkeypatch.setattr(bootstrap, "dial_get", dial)
-        values = bootstrap.fetch_bootstrap_config("http://old-gateway", role=role)
-    assert values[_TURN_LIMIT] == "16"
-    assert parse_qs(urlsplit(requests[0]).query)[_CAPABILITY] == ["true"]
-
-
-def test_legacy_projection_refuses_malformed_admission(
-    gateway_snapshot: dict[str, str], gateway_client: TestClient
-) -> None:
-    gateway_snapshot[_TURN_LIMIT] = "invalid"
-    response = gateway_client.get("/api/bootstrap", headers=bearer_header(_SECRET))
-    assert response.status_code == 400
