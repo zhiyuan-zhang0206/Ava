@@ -134,7 +134,7 @@ async def _probe_agent_shells(
 # SQL work is bounded by database timeouts and at most four leaders. Identical
 # in-flight requests share a read; completed values are not kept behind a TTL.
 _INSPECT_RESPONSE_TIMEOUT_S = 15.0
-_InspectKey = tuple[int, int | None, bool]
+_InspectKey = tuple[int, int | None]
 _inspect_query_cache = InspectQueryCache[_InspectKey, _inspect_metrics.MetricsSnapshot](
     max_entries=32,
     max_inflight=32,
@@ -147,16 +147,13 @@ async def _inspect_rows_cached_async(
     agent_id: int,
     hours: StatsWindowHours | None,
     *,
-    since_compact: bool,
     spawned_at: datetime,
 ) -> _inspect_metrics.MetricsSnapshot:
-    key = (agent_id, None if hours is None else int(hours), since_compact)
+    key = (agent_id, None if hours is None else int(hours))
     try:
         return await _inspect_query_cache.get_or_load_async(
             key,
-            lambda: _inspect_metrics.inspect_snapshot(
-                pool, agent_id, hours, since_compact=since_compact, spawned_at=spawned_at
-            ),
+            lambda: _inspect_metrics.inspect_snapshot(pool, agent_id, hours, spawned_at=spawned_at),
             ttl_s=0,
             now=time_mod.monotonic,
         )
@@ -216,7 +213,6 @@ async def get_agent_inspect_statistics(
     agent_id: int,
     request: Request,
     hours: Annotated[StatsWindowHours | None, Query()] = None,
-    since_compact: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> AgentInspectStatistics:
     """Read only the selected agent's window-dependent statistics.
 
@@ -226,7 +222,7 @@ async def get_agent_inspect_statistics(
     window is preserved; unavailable historical coverage is explicit.
     """
     pool = request.app.state.db_pool
-    applied_window_hours = None if since_compact or hours is None else int(hours)
+    applied_window_hours = None if hours is None else int(hours)
     try:
         spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
         aggregates = await asyncio.wait_for(
@@ -234,7 +230,6 @@ async def get_agent_inspect_statistics(
                 pool,
                 agent_id,
                 hours,
-                since_compact=since_compact,
                 spawned_at=spawned_at,
             ),
             timeout=_INSPECT_RESPONSE_TIMEOUT_S,
@@ -253,9 +248,8 @@ async def get_agent_inspect_statistics(
         ) from exc
     return AgentInspectStatistics(
         agent_id=agent_id,
-        window_hours=None if since_compact else hours,
+        window_hours=hours,
         applied_window_hours=applied_window_hours,
-        since_compact=since_compact,
         cost=aggregates.cost,
         stats=aggregates.stats,
         tps=aggregates.tps,

@@ -21,7 +21,6 @@ class MetricEvidence(BaseModel):
     reason: (
         Literal[
             "historical_coverage_unknown",
-            "compact_boundary_unknown",
             "missing_turn_durations",
             "archive_precision_unattributed",
         ]

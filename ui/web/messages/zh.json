@@ -945,7 +945,6 @@
     "window1h": "1 小时",
     "window24h": "24 小时",
     "window7d": "7 天",
-    "windowSinceCompact": "自压缩以来",
     "liveRefreshFailing": "实时刷新失败",
     "loadFailed": "加载失败",
     "retryInspector": "重试检查器",

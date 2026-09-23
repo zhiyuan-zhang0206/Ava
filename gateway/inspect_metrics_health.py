@@ -12,8 +12,7 @@ backend keeps the record instead of the panel:
   chronic limit on every statistics request.
 - limits expected by construction stop at that log line: a window reaching
   back before the observation collection started
-  (``historical_coverage_unknown``), an agent without a compact boundary
-  (``compact_boundary_unknown``), a legacy archive whose per-day precision
+  (``historical_coverage_unknown``), a legacy archive whose per-day precision
   cannot be attributed per turn (``archive_precision_unattributed``, incl.
   retained sources). Alerting them would only move the panel's chronic noise
   into the alerts surface — the same ruling grades expected gaps down.
@@ -67,7 +66,6 @@ _FAMILIES = ("cost", "turns", "activity", "lifecycle")
 _EXPECTED = frozenset(
     {
         "historical_coverage_unknown",
-        "compact_boundary_unknown",
         "archive_precision_unattributed",
     }
 )
@@ -85,8 +83,7 @@ def _cooldown_seconds() -> float:
 def _historical(metadata: InspectMetricsMetadata, *, spawned_at: datetime) -> bool:
     """Mirror of the read model's ``historical`` flag (window reaches before
     the observation collection started). A missing window start reads
-    historical — the quiet side, and the only shape it appears in
-    (``compact_boundary_unknown``) never reaches the unexpected set."""
+    historical — the quiet side."""
     if metadata.window_start is None:
         return True
     return max(metadata.window_start, spawned_at) < metadata.collection_started_at
@@ -104,8 +101,6 @@ def _conditions(
                 condition = "missing_turn_durations"
             elif ev.reason == "archive_precision_unattributed" or ev.retained_unapplied_sources:
                 condition = "archive_precision_unattributed"
-            elif ev.reason == "compact_boundary_unknown":
-                condition = "compact_boundary_unknown"
             else:
                 condition = "historical_coverage_unknown"
             out.append((family, condition, ev.availability))

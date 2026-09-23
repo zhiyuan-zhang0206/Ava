@@ -309,22 +309,6 @@ def test_statistics_read_invokes_the_coverage_note(
     assert seen == [aid]
 
 
-def test_since_compact_without_authoritative_boundary_is_unavailable(
-    db_conn: psycopg.Connection,
-) -> None:
-    aid = _agent(db_conn, datetime.now(UTC))
-    db_conn.commit()
-    with TestClient(app) as client:
-        response = client.get(
-            f"/api/agents/{aid}/inspect/statistics", params={"since_compact": True}
-        )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["cost"] is None
-    assert data["metadata"]["window_start"] is None
-    assert data["metadata"]["cost"]["availability"] == "unavailable"
-
-
 def test_recent_window_for_old_agent_preserves_activity_and_lm_throughput(
     db_conn: psycopg.Connection,
 ) -> None:

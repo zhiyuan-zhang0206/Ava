@@ -150,10 +150,16 @@ def test_pre_schema_fence_does_not_read_new_column(barrier_db: psycopg.Connectio
 
 def test_fence_does_not_read_the_retired_note_column(barrier_db: psycopg.Connection) -> None:
     """Batch-6 drops `deployment_state.note`; the fence must already stand on the
-    canonical `settle_hosts` predicate. Asserted the same way as the pre-schema
-    guard above — drop the column, the lock still passes (red on any `note` reader)."""
+    canonical `settle_hosts` predicate. The baseline lacks the retired column;
+    acquiring the lock would fail on any remaining `note` reader."""
     collection = _collection(barrier_db)
-    barrier_db.execute("ALTER TABLE deployment_state DROP COLUMN note")
+    assert (
+        barrier_db.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_name='deployment_state' "
+            "AND column_name='note'"
+        ).fetchone()
+        is None
+    )
     assert lock_rollout(barrier_db, collection.operation) >= collection.collected_at
 
 
