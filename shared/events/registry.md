@@ -25,7 +25,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
 | telemetry (category=telemetry) | `events` | 212 | event stream |
-| log (category=log) | `events` | 14 | event stream |
+| log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
 
@@ -335,7 +335,6 @@ consumers: see the comments at each emit point.
 | `shell_ttl_expired` | the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
 | `watcher_reaped` | the gateway TTL reaper reclaimed a watcher session — its deadline passed, or its owner agent is terminated for good; attributes carry agent_id, session_id, mode (killed / absent / machine_absent) | observation | — | events |
-| `watcher_ttl_healed` | the gateway TTL reaper re-aligned a legacy watcher session's recorded TTL to the watcher's true deadline (rows spawned before the unified write path, task #3411) instead of reclaiming it; attributes carry count and samples | observation | — | events |
 | `lifecycle_pointer_done_torn` | the gateway TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
 | `lifecycle_fences_settled_absent_machine` | the gateway TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples | observation | — | events |
 

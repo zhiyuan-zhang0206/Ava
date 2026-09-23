@@ -17,7 +17,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
 from gateway.schemas import ShellCaptureResponse
-from gateway.shell_ttls import fallback_expiry
 from ops import cluster_rpc as _cluster_rpc
 from shared.config import settings
 
@@ -96,7 +95,6 @@ async def get_agent_shell(
         request.app.state.db_pool,
         agent_id,
         session_id,
-        created_at,
     )
     return ShellCaptureResponse(
         agent_id=agent_id,
@@ -112,10 +110,7 @@ async def get_agent_shell(
 
 
 def _parse_created_at(value: object) -> datetime | None:
-    """The capture op's launch epoch as a datetime; None when absent/unparsable.
-
-    The response model would parse the raw string itself; parsing here once
-    lets the TTL fallback count from the same instant the page renders."""
+    """The capture op's launch epoch as a datetime; None when absent/unparsable."""
     if not isinstance(value, str):
         return None
     try:
@@ -128,18 +123,14 @@ def _shell_ttl_row_blocking(
     pool: ConnectionPool,
     agent_id: int,
     session_id: int,
-    created_at: datetime | None,
 ) -> tuple[datetime | None, int, datetime | None]:
     """The session's TTL facts from `agent_shell_ttls`: (deadline, renewal
     count, last renewal).
 
-    A session without a row — legacy pre-mandate shell, or one created by a
-    not-yet-updated runner during a rollout — falls back to the 24h cap
-    counted from its launch epoch, so the monitor page always renders a
-    deadline; its renewal facts are then (0, None). The deadline itself is
-    None only when there is no launch epoch to count from. The table lives in
-    the gateway's own Postgres — a split runner cannot answer this, so the
-    merge happens here, mirroring the inspector's shell list enrichment."""
+    A session without a row has no shell TTL or renewals: (None, 0, None).
+    Page and schedule sessions have their own lifecycle and no shell TTL row.
+    The table lives in the gateway's own Postgres, so the merge happens here,
+    mirroring the inspector's shell list enrichment."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT expires_at, renewals, last_renewed_at FROM agent_shell_ttls "
@@ -149,7 +140,7 @@ def _shell_ttl_row_blocking(
         row = cur.fetchone()
     if row is not None:
         return row[0], row[1], row[2]
-    return fallback_expiry(created_at), 0, None
+    return None, 0, None
 
 
 def _agent_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:
