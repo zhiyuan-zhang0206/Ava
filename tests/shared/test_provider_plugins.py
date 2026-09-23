@@ -58,17 +58,10 @@ _REPO_PROVIDER_PLUGINS = {
 _REPO_MODEL_VENDORS = {
     "claude-fable-5": "anthropic",
     "claude-fable-5-1": "anthropic",
-    "claude-haiku-4-5": "anthropic",
     "claude-haiku-4-5-20251001": "anthropic",
-    "claude-opus-4-6": "anthropic",
-    "claude-opus-4-7": "anthropic",
-    "claude-opus-4-8": "anthropic",
     "claude-opus-5": "anthropic",
-    "claude-sonnet-4-6": "anthropic",
     "claude-sonnet-5": "anthropic",
     "deepseek-flash": "deepseek",
-    "gemini-2.5-flash": "google",
-    "gemini-2.5-pro": "google",
     "gemini-3.1-pro-preview": "google",
     "gemini-3.5-flash": "google",
     "gemini-3.7-flash": "google",
@@ -78,8 +71,6 @@ _REPO_MODEL_VENDORS = {
     "glm-5.3": "zhipu",
     "glm-5.3-flash": "zhipu",
     "glm-5.3-flashx": "zhipu",
-    "gpt-5.4-mini": "openai",
-    "gpt-5.5": "openai",
     "gpt-5.6-luna": "openai",
     "gpt-5.6-sol": "openai",
     "gpt-5.6-terra": "openai",
@@ -294,7 +285,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 35
+    assert len(_REPO_MODEL_VENDORS) == 26
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
@@ -306,6 +297,15 @@ def test_repo_model_vendor_vocabulary_is_complete() -> None:
         "deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
         "mimo-v2.5-pro-ultraspeed",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gpt-5.5",
+        "gpt-5.4-mini",
     }
     assert {
         model: pricing.model_vendor(model) for model in pricing._PLUGIN_PRICES
@@ -374,8 +374,6 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
         "gemini-3.5-flash",
         "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
     }
     assert gemini_models <= MODELS.keys()
     assert set(SUPPORTED_MODELS["gemini"]) == {
@@ -416,11 +414,6 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
         "claude-opus-5",
         "claude-fable-5",
         "claude-fable-5-1",
-        "claude-opus-4-8",
-        "claude-sonnet-4-6",
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-haiku-4-5",
     }
     assert claude_models <= MODELS.keys()
     assert set(SUPPORTED_MODELS["claude"]) == {
@@ -459,8 +452,6 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
-        "gpt-5.5",
-        "gpt-5.4-mini",
     }
     assert gpt_models <= MODELS.keys()
     assert set(SUPPORTED_MODELS["gpt"]) == {

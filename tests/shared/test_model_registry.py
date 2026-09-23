@@ -218,8 +218,9 @@ def test_superseded_chain_validation_rejects_non_spawnable_target(
 
     from shared.lm import registry as reg
 
+    monkeypatch.setitem(reg.MODELS, "gpt-5.6-sol", replace(reg.MODELS["gpt-5.6-sol"], spawnable=False))
     monkeypatch.setitem(
-        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="gpt-5.5")
+        reg.MODELS, "glm-5.2", replace(reg.MODELS["glm-5.2"], superseded_by="gpt-5.6-sol")
     )
     with pytest.raises(RuntimeError, match="not spawnable"):
         reg._validate_registry()
@@ -341,24 +342,15 @@ def test_image_media_types_match_the_verified_model_matrix() -> None:
         "claude-opus-5",
         "claude-fable-5",
         "claude-fable-5-1",
-        "claude-opus-4-8",
-        "claude-sonnet-4-6",
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-haiku-4-5",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
         "gemini-flash-lite-latest",
         "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
         "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
-        "gpt-5.5",
-        "gpt-5.4-mini",
         "kimi-k3",
         "glm-5.3-flash",
         "glm-5.3-flashx",
@@ -624,10 +616,10 @@ def test_attach_modalities_default_to_the_declared_media_matrix() -> None:
     text-only model attaches nothing (user ruling 2026-08-28)."""
     from shared.lm.factory import attach_modalities_for_model
 
-    assert attach_modalities_for_model("gemini-2.5-flash") == frozenset(
+    assert attach_modalities_for_model("gemini-3.8-flash") == frozenset(
         {"image", "pdf", "audio", "video"}
     )
-    assert attach_modalities_for_model("claude-sonnet-4-6") == frozenset({"image", "pdf"})
+    assert attach_modalities_for_model("claude-sonnet-5") == frozenset({"image", "pdf"})
     assert attach_modalities_for_model("glm-5.3-flash") == frozenset({"image"})
     assert attach_modalities_for_model("deepseek-flash") == frozenset()
 
@@ -644,8 +636,8 @@ def test_attach_modalities_declaration_must_stay_within_media_types() -> None:
     with pytest.raises(RuntimeError, match="attach_modalities"):
         reg._validate_spec("glm-5.3-flash", bad, anthropic_protocol=False)
     # A strict subset (attach narrower than the endpoint) is legal.
-    narrower = replace(MODELS["gemini-2.5-flash"], attach_modalities=frozenset({"image"}))
-    reg._validate_spec("gemini-2.5-flash", narrower, anthropic_protocol=False)
+    narrower = replace(MODELS["gemini-3.8-flash"], attach_modalities=frozenset({"image"}))
+    reg._validate_spec("gemini-3.8-flash", narrower, anthropic_protocol=False)
 
 
 def test_reasoning_effort_default_must_stay_within_effort_levels() -> None:

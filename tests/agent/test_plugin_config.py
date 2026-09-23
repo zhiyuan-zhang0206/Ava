@@ -306,7 +306,7 @@ def test_validate_config_overlay_unknown_llm_model_raises(isolated_registry, uni
 
 
 def test_validate_config_overlay_registered_llm_model_passes(isolated_registry, unit_home):
-    validate_config_overlay({"llm_model": "claude-opus-4-6"})
+    validate_config_overlay({"llm_model": "claude-opus-5"})
 
 
 def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
@@ -372,7 +372,7 @@ def test_validate_config_overlay_unknown_model_field_raises(
 def test_validate_config_overlay_registered_model_field_passes(
     isolated_registry, unit_home, field: str
 ):
-    validate_config_overlay({field: "claude-opus-4-6"})
+    validate_config_overlay({field: "claude-opus-5"})
 
 
 def test_validate_config_overlay_none_reasoning_effort_passes(isolated_registry, unit_home):
@@ -471,9 +471,9 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
     monkeypatch.setattr(settings.lm, "llm_model", settings.lm.llm_model)  # snapshot for teardown
     assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".git"
 
-    apply_config_overlay({"llm_model": "claude-opus-4-7", "marker": ".hg"}, scope="framework")
+    apply_config_overlay({"llm_model": "claude-opus-5", "marker": ".hg"}, scope="framework")
 
-    assert settings.lm.llm_model == "claude-opus-4-7"
+    assert settings.lm.llm_model == "claude-opus-5"
     assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".git"  # plugin untouched
 
 
@@ -486,7 +486,7 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
     _setup_overlayable_plugin()
     original_model = settings.lm.llm_model
 
-    apply_config_overlay({"llm_model": "claude-opus-4-7", "marker": ".hg"}, scope="plugin")
+    apply_config_overlay({"llm_model": "claude-opus-5", "marker": ".hg"}, scope="plugin")
 
     assert settings.lm.llm_model == original_model  # framework untouched
     assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".hg"

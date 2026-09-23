@@ -342,7 +342,7 @@ def test_media_model_non_gemini_fails_fast(
     format is Gemini-specific, so a gpt image model would otherwise crash at
     invoke time. Real provider routing — no build_chat_model mock — and the
     check runs before any client is built, so no API key is needed here."""
-    monkeypatch.setattr(settings.lm, "understand_media_model", "gpt-5.5")
+    monkeypatch.setattr(settings.lm, "understand_media_model", "gpt-5.6-sol")
     with pytest.raises(understand_mod.UnderstandError, match="Gemini"):
         understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
 

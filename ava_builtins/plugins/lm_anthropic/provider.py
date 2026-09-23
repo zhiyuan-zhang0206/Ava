@@ -33,7 +33,7 @@ from shared.lm.stop import StopSpec
 _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
 
 # Effort vocabulary shared by adaptive-thinking Claude models. The per-model
-# declarations remain authoritative because sonnet-4-6 and haiku-4-5 diverge.
+# declarations remain authoritative because the dated haiku-4-5 diverges.
 _CLAUDE_ADAPTIVE_EFFORT = ("low", "medium", "high", "xhigh", "max")
 
 
@@ -292,61 +292,11 @@ register(
             ),
             media_types=frozenset({"image", "pdf"}),
         ),
-        "claude-opus-4-8": ModelSpec(
-            provider="claude",
-            context_window=200_000,
-            max_output_tokens=128_000,
-            knowledge_cutoff="2026-01",
-            effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
-            tuning=ModelTuning(
-                # User decision (2026-09-03): Claude family defaults this section off.
-                prompt_user_tone_enabled=False,
-            ),
-            media_types=frozenset({"image", "pdf"}),
-        ),
-        "claude-sonnet-4-6": ModelSpec(
-            provider="claude",
-            context_window=200_000,
-            max_output_tokens=128_000,
-            knowledge_cutoff="2025-08",
-            effort_levels=("low", "medium", "high", "max"),  # xhigh arrived with opus-4-7
-            tuning=ModelTuning(
-                # User decision (2026-09-03): Claude family defaults this section off.
-                prompt_user_tone_enabled=False,
-            ),
-            media_types=frozenset({"image", "pdf"}),
-        ),
-        "claude-opus-4-7": ModelSpec(
-            provider="claude",
-            max_output_tokens=128_000,
-            effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
-            tuning=ModelTuning(
-                # User decision (2026-09-03): Claude family defaults this section off.
-                prompt_user_tone_enabled=False,
-            ),
-            media_types=frozenset({"image", "pdf"}),
-        ),
-        "claude-opus-4-6": ModelSpec(
-            provider="claude",
-            tuning=ModelTuning(
-                # User decision (2026-09-03): Claude family defaults this section off.
-                prompt_user_tone_enabled=False,
-            ),
-            media_types=frozenset({"image", "pdf"}),
-        ),
-        # Bare alias of the dated snapshot above, kept for old agent configs.
-        # Carries the same extended-thinking-only flag as the dated entry: without
-        # it the factory's adaptive-thinking default would send `type: "adaptive"`,
-        # which this model 400s on.
-        "claude-haiku-4-5": ModelSpec(
-            provider="claude",
-            extended_thinking_only=True,
-            tuning=ModelTuning(
-                # User decision (2026-09-03): Claude family defaults this section off.
-                prompt_user_tone_enabled=False,
-            ),
-            media_types=frozenset({"image", "pdf"}),
-        ),
+        # Removed 2026-09-23 (task #4508): claude-opus-4-8, claude-opus-4-7,
+        # claude-opus-4-6, claude-sonnet-4-6, and claude-haiku-4-5
+        # were never selectable here (implicit spawnable=False) and have no
+        # live references. Historical prices remain in
+        # shared/lm/pricing_catalog_archive.json.
     },
     pricing={
         "claude-sonnet-5": PriceRates(
@@ -459,121 +409,6 @@ register(
                             cache_miss="10.0",
                             cache_hit="0.25",
                             output="50.0",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "claude-opus-4-8": PriceRates(
-            cache_miss=5.0,
-            cache_hit=0.50,
-            output=25.0,
-            source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
-            vendor="anthropic",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="5.0",
-                            cache_hit="0.50",
-                            output="25.0",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "claude-sonnet-4-6": PriceRates(
-            cache_miss=3.0,
-            cache_hit=0.30,
-            output=15.0,
-            source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
-            vendor="anthropic",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="3.0",
-                            cache_hit="0.30",
-                            output="15.0",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "claude-opus-4-7": PriceRates(
-            cache_miss=5.0,
-            cache_hit=0.50,
-            output=25.0,
-            source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
-            vendor="anthropic",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="5.0",
-                            cache_hit="0.50",
-                            output="25.0",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "claude-opus-4-6": PriceRates(
-            cache_miss=5.0,
-            cache_hit=0.50,
-            output=25.0,
-            source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
-            vendor="anthropic",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="5.0",
-                            cache_hit="0.50",
-                            output="25.0",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "claude-haiku-4-5": PriceRates(
-            cache_miss=1.0,
-            cache_hit=0.10,
-            output=5.0,
-            source_url="https://www.anthropic.com/pricing",
-            source_checked_at="2026-06-27",
-            vendor="anthropic",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="1.0",
-                            cache_hit="0.10",
-                            output="5.0",
                         ),
                     ),
                 ),

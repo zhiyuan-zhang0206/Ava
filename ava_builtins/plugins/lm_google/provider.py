@@ -256,14 +256,10 @@ register(
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
         ),
-        "gemini-2.5-pro": ModelSpec(
-            provider="gemini",
-            media_types=frozenset({"image", "pdf", "audio", "video"}),
-        ),
-        "gemini-2.5-flash": ModelSpec(
-            provider="gemini",
-            media_types=frozenset({"image", "pdf", "audio", "video"}),
-        ),
+        # Removed 2026-09-23 (task #4508): gemini-2.5-pro and gemini-2.5-flash
+        # were never selectable here (implicit spawnable=False) and have no
+        # live references. Historical prices remain in
+        # shared/lm/pricing_catalog_archive.json.
     },
     pricing={
         "gemini-3.8-flash": PriceRates(
@@ -409,52 +405,6 @@ register(
                             cache_miss="4.0",
                             cache_hit="0.4",
                             output="18.0",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "gemini-2.5-pro": PriceRates(
-            cache_miss=1.25,
-            cache_hit=0.125,
-            output=10.0,
-            source_url="https://ai.google.dev/gemini-api/docs/pricing",
-            source_checked_at="2026-06-27",
-            vendor="google",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="1.25",
-                            cache_hit="0.125",
-                            output="10.0",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "gemini-2.5-flash": PriceRates(
-            cache_miss=0.30,
-            cache_hit=0.03,
-            output=2.50,
-            source_url="https://ai.google.dev/gemini-api/docs/pricing",
-            source_checked_at="2026-06-27",
-            vendor="google",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="0.30",
-                            cache_hit="0.03",
-                            output="2.50",
                         ),
                     ),
                 ),
