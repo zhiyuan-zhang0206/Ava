@@ -276,9 +276,11 @@ def test_current_reset_converges_complete_history_and_refuses_cross_floor_rollba
         required_migration_set,
         rollback_to,
     )
-    from tests.ava.migration_support import _set_table_to
+    from tests.ava.migration_support import _schema_sql_stamped_migration_names, _set_table_to
 
-    predecessor = {_BASELINE_NAME, *_PRE_RESET_SET}
+    # Concurrent upstream deltas remain executable and are already represented
+    # in this test DB's schema. Preserve their stamps when modeling the reset.
+    predecessor = _PRE_RESET_SET | (set(_schema_sql_stamped_migration_names()) - {_RESET_ANCHOR})
     _set_table_to(db_conn, "set", predecessor)
     with psycopg.connect(settings.data_plane.db_url) as conn:
         applied = apply_pending_migrations(conn)
