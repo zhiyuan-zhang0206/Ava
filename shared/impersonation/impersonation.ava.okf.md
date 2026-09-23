@@ -97,6 +97,9 @@ explicitly `unknown`, so a zero SDK count is never a zero-call fact. Statistics
 never extrapolate samples.
 See the consumer module for delivery-completion semantics.
 
+Manifest authority, alert surfaces, and the post-completion integrity window
+are specified in [[manifest-certification.ava.okf.md]].
+
 ## CLI parameters: explicit, with four named exceptions
 
 The `ava impersonate` tree spells out every parameter that decides behavior

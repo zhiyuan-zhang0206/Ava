@@ -142,7 +142,7 @@ def _certify_if_complete(
     protocol_v1: bool,
 ) -> None:
     if not cursor and protocol_v1 and _indexed_manifest_matches(lease):
-        certify(str(session["id"]), machine=session["machine"])
+        certify(str(session["id"]))
 
 
 def _indexed_manifest_matches(lease: dict[str, Any]) -> bool:
@@ -154,6 +154,33 @@ def _indexed_manifest_matches(lease: dict[str, Any]) -> bool:
     manifest breach.  The SQL function immediately afterwards independently
     compares the same frozen union with the durable consumed entries.
     """
+    expected, actual, conflicting = _indexed_manifest_items(lease)
+    lease_id = str(lease["id"])
+    if conflicting:
+        set_pending_reason(lease_id, "manifest_mismatch")
+        return False
+    if actual == expected:
+        return True
+    reason = "awaiting_indexed_ids" if expected.keys() - actual.keys() else "manifest_mismatch"
+    set_pending_reason(lease_id, reason)
+    return False
+
+
+def post_completion_integrity_breach(lease: dict[str, Any]) -> bool:
+    """Whether a completed lease has an extra or byte-different tagged row.
+
+    The terminal stamp stays immutable. The caller records one integrity alert
+    rather than replaying or changing the certified handoff state.
+    """
+    expected, actual, conflicting = _indexed_manifest_items(lease)
+    return conflicting or any(
+        key not in expected or expected[key] != item for key, item in actual.items()
+    )
+
+
+def _indexed_manifest_items(
+    lease: dict[str, Any],
+) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]], bool]:
     lease_id = str(lease["id"])
     with write_transaction() as conn:
         expected = frozen_items(conn, lease_id)
@@ -191,15 +218,9 @@ def _indexed_manifest_matches(lease: dict[str, Any]) -> bool:
                 item = (event["line_sha256"], event_kind)
                 previous = actual.setdefault(key, item)
                 if previous != item:
-                    set_pending_reason(lease_id, "manifest_mismatch")
-                    return False
+                    return expected, actual, True
             if not page["meta"]["has_more"]:
                 break
         else:
-            set_pending_reason(lease_id, "manifest_mismatch")
-            return False
-    if actual == expected:
-        return True
-    reason = "awaiting_indexed_ids" if expected.keys() - actual.keys() else "manifest_mismatch"
-    set_pending_reason(lease_id, reason)
-    return False
+            return expected, actual, True
+    return expected, actual, False

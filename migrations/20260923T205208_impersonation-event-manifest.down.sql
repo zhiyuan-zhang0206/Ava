@@ -11,12 +11,16 @@ BEGIN
     END IF;
 END $$;
 
-DROP FUNCTION IF EXISTS certify_impersonation_event_delivery(UUID);
+DROP FUNCTION IF EXISTS certify_impersonation_event_delivery(UUID, TEXT);
+DROP FUNCTION IF EXISTS admit_impersonation_event_certifier(UUID, TEXT);
+DROP FUNCTION IF EXISTS record_impersonation_event_retention_loss(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS record_impersonation_event_integrity_alert(UUID);
 DROP FUNCTION IF EXISTS freeze_impersonation_event_manifest(UUID, TEXT, BIGINT, TIMESTAMPTZ);
 DROP FUNCTION IF EXISTS seal_impersonation_event_participant(UUID, TEXT, TEXT, TEXT, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS close_impersonation_event_manifest_admission(UUID);
 DROP TABLE IF EXISTS agent_impersonation_event_expected_items;
 DROP TABLE IF EXISTS agent_impersonation_event_expected_receipts;
+DROP TABLE IF EXISTS agent_impersonation_event_certifiers;
 DROP TABLE IF EXISTS agent_impersonation_event_participant_items;
 DROP TABLE IF EXISTS agent_impersonation_event_participants;
 ALTER TABLE agent_impersonations

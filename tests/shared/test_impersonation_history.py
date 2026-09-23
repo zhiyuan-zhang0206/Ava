@@ -231,10 +231,15 @@ def test_protocol_v1_empty_frozen_manifest_certifies_only_through_runner_procedu
     from shared.config import settings
 
     monkeypatch.setattr(settings.general, "impersonation_event_manifest_enabled", True)
+    monkeypatch.setattr(
+        settings.general,
+        "impersonation_event_manifest_certification_secret",
+        "test-manifest-certification-secret-000001",
+    )
     lease = start(owner)
     assert lease["event_delivery_protocol_version"] == 1
     leases.release(str(lease["id"]), attested_caller(lease), "No eligible events emitted")
-    assert certify(str(lease["id"]), machine=machine_name())
+    assert certify(str(lease["id"]))
     document = history.build_document(
         history.resolve(owner.agent_id, 0), history.entries(str(lease["id"]), db_conn)
     )
@@ -374,10 +379,10 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
         "api_events": {"coverage": "unknown", "consumed_event_count": 0},
     }
     count = len(reads)
-    reader.consume_recorded_events(lease)  # stale caller snapshot rechecks DB receipt
-    assert len(reads) == count
-    with pytest.raises(ValueError, match="certified delivery"):
-        consume_events(owner.agent_id, 0, [{**event, "id": "unexpected"}])
+    reader.consume_recorded_events(lease)  # legacy rows remain replayable, never certified.
+    assert len(reads) == count + 2
+    assert consume_events(owner.agent_id, 0, [{**event, "id": "unexpected"}]) == 1
+    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is None
 
 
 def test_message_retry_does_not_replace_newer_preview(

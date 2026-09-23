@@ -132,19 +132,19 @@ def fake_helper(monkeypatch: pytest.MonkeyPatch) -> FakeHelper:
 def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     log: list[dict[str, Any]] = []
 
-    def _insert(
-        *,
-        event_type: str,
-        agent_id: int | None,
-        source: str,
-        payload: dict[str, Any],
-        **_: Any,
-    ) -> None:
+    def _stage(event: Any, *, origin_kind: str, origin_id: int) -> None:
         log.append(
-            {"event_type": event_type, "agent_id": agent_id, "source": source, "payload": payload}
+            {
+                "event_type": event.event_name,
+                "agent_id": event.agent_id,
+                "source": event.source,
+                "payload": event.attributes,
+                "origin_kind": origin_kind,
+                "origin_id": origin_id,
+            }
         )
 
-    monkeypatch.setattr(daemon_mod.audit_events, "insert_event_log", _insert)
+    monkeypatch.setattr("shared.agents.impersonation_manifest.emit_staged_central_event", _stage)
     return log
 
 
@@ -879,10 +879,12 @@ async def test_audit_emitted_on_success(
     monkeypatch.setattr(screen_mod, "_snapshot_path", lambda _agent_id: "/tmp/x.png")  # noqa: S108  # pyright: ignore[reportUnknownArgumentType]
     d = _daemon()
     await _call(d, "click", {"x": 100, "y": 200, "task_id": 42})
-    # the computer_action row + the task-session envelope start
-    actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
-    assert len(actions) == 1  # pyright: ignore[reportUnknownArgumentType]
-    ev = actions[0]
+    assert len(audit_log) == 2  # pyright: ignore[reportUnknownArgumentType]
+    start, ev = audit_log
+    assert start["event_type"] == "computer_session_start"
+    assert start["payload"]["task_id"] == 42
+    assert start["origin_id"] == 42
+    assert ev["event_type"] == "computer_action"
     assert ev["agent_id"] == 7
     assert ev["source"] == "agent:7"
     assert ev["payload"]["action"] == "click"
@@ -890,9 +892,7 @@ async def test_audit_emitted_on_success(
     assert ev["payload"]["coords"] == "100,200"
     assert ev["payload"]["task_id"] == 42
     assert ev["payload"]["app"] == "Finder"
-    starts = [ev for ev in audit_log if ev["event_type"] == "computer_session_start"]
-    assert len(starts) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert starts[0]["payload"]["task_id"] == 42
+    assert (ev["origin_kind"], ev["origin_id"]) == ("computer_action", 1)
 
 
 async def test_audit_emitted_on_error(fake_helper: FakeHelper, audit_log: list) -> None:
@@ -1034,22 +1034,21 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     monkeypatch.setattr(daemon_mod.logger, "warning", lambda msg: warnings.append(str(msg)))  # pyright: ignore[reportUnknownArgumentType]
     log: list[dict] = []
 
-    def _insert(
-        *,
-        event_type: str,
-        agent_id: int | None,
-        source: str,
-        payload: dict,
-        **_: object,
-    ) -> None:
-        if event_type.startswith("computer_session_"):
+    def _stage(event: Any, *, origin_kind: str, origin_id: int) -> None:
+        del origin_kind, origin_id
+        if event.event_name.startswith("computer_session_"):
             # the envelope path is broken (unregistered name etc.)
-            raise ValueError(f"unknown event name {event_type!r}")
-        log.append(  # pyright: ignore[reportUnknownMemberType]
-            {"event_type": event_type, "agent_id": agent_id, "source": source, "payload": payload}
-        )
+            raise ValueError(f"unknown event name {event.event_name!r}")
+        log.append(
+            {
+                "event_type": event.event_name,
+                "agent_id": event.agent_id,
+                "source": event.source,
+                "payload": event.attributes,
+            }
+        )  # pyright: ignore[reportUnknownMemberType]
 
-    monkeypatch.setattr(daemon_mod.audit_events, "insert_event_log", _insert)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.agents.impersonation_manifest.emit_staged_central_event", _stage)
     d = _daemon()
     resp = await _call(d, "click", {"x": 1, "y": 2, "task_id": 42})
     assert resp["ok"] is True  # the action itself executed

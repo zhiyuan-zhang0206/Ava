@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import ExitStack, suppress
-from threading import Lock
+from threading import Lock, Timer
 from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
@@ -178,9 +178,26 @@ class Attachment:
         """Seal the durable receipt in every attachment close path."""
         if self._manifest_participant is None:
             return
-        from shared.agents.impersonation_manifest import seal_local_participant
+        from shared.agents.impersonation_manifest import (
+            alert_if_participant_still_open,
+            seal_local_participant,
+        )
+        from shared.config import settings
 
-        seal_local_participant(self._manifest_participant)
+        # This timer is deliberately diagnostic-only. A live SDK finally may
+        # outlast the detach wait and seal later; only a real capture failure
+        # can mark its receipt failed.
+        timer = Timer(
+            settings.general.impersonation_event_manifest_seal_wait_seconds,
+            alert_if_participant_still_open,
+            args=(self._manifest_participant,),
+        )
+        timer.daemon = True
+        timer.start()
+        try:
+            seal_local_participant(self._manifest_participant)
+        finally:
+            timer.cancel()
 
     def _detach(self) -> None:
         """Restore local bindings without reading or writing the lease."""

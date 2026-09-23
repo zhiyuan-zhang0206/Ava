@@ -50,8 +50,10 @@ from gateway.schemas.alerts import (
     AlertsListResponse,
     AlertStatus,
     AlertWebhookPayload,
+    ImpersonationRetentionLossRow,
 )
 from gateway.sse import event_stream
+from shared.agents.impersonation_manifest import retention_loss_panel
 from shared.alerts import (
     AlertKey,
     display_language,
@@ -209,6 +211,21 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
 
 
 # -- list ---------------------------------------------------------------------
+
+
+@router.get("/api/alerts/impersonation-event-retention")
+def list_impersonation_event_retention(
+    machine: str = Query(min_length=1, max_length=255),
+) -> list[ImpersonationRetentionLossRow]:
+    """Operator panel rows for frozen manifests that crossed Loki retention.
+
+    The query is machine-scoped because the runner that owns the manifest
+    detects its retention floor. The normal alerts list already exposes the
+    accompanying alert; this endpoint supplies the lease/floor/missing-count
+    evidence needed to investigate it without permitting a local mirror to
+    clear the condition.
+    """
+    return [ImpersonationRetentionLossRow(**row) for row in retention_loss_panel(machine=machine)]
 
 
 @router.get("/api/alerts")

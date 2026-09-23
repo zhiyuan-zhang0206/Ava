@@ -29,6 +29,19 @@ class GeneralSettings(EnvSettings):
         },
     )
 
+    impersonation_event_manifest_certification_secret: str = Field(
+        default="",
+        alias="AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET",
+        description="Host-local random secret that authorizes this agent-runner to certify the manifests of leases on its machine. It is never returned by the gateway or readable through the runner database role. Enabling manifest leases requires a distinct nonempty value on every participating agent-runner.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     impersonation_event_reconcile_interval_seconds: int = Field(
         default=60,
         alias="AVA_IMPERSONATION_EVENT_RECONCILE_INTERVAL_SECONDS",
