@@ -477,6 +477,12 @@ jobs:
         working-directory: ui/web
         run: npm ci
 
+      - name: Fetch base branch for structure guard
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "${{ github.event.pull_request.base.ref }}"
+          echo "LINT_STRUCTURE_BASELINE_BASE=$(git rev-parse FETCH_HEAD^{commit})" >> "$GITHUB_ENV"
+
       - name: Run pre-commit structural gates (--all-files)
         run: uv run pre-commit run --all-files
 

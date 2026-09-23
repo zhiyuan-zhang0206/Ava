@@ -202,7 +202,7 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 ## Python conventions (quick reference)
 
 - No `if TYPE_CHECKING:` (lint-enforced). Exceptions in `_TYPE_CHECKING_ALLOWED`.
-- Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; packages + tests/scripts, frozen shrink-only baseline.
+- Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline.
 - No `print()` in framework code (use `shared.log.logger`).
 - No decorative emoji in core Python.
 - Import layering: `shared < ava < agent < gateway < cli`.
