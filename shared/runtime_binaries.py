@@ -116,11 +116,13 @@ def ensure_pg_binaries() -> Path:
     return bin_dir
 
 
-# Maven Central rate-limits bursts (HTTP 429); with the jar sha256-pinned, a bounded
-# backoff on transient answers is safe. Any other 4xx is a permanent answer about the
-# pinned artifact and still fails fast.
+# These are idempotent GETs; artifact bytes are checked against pinned sha256s
+# before use, so bounded retries cannot accept the wrong artifact. In CI run
+# 35927189264 on 2026-09-24, Maven returned 404 for the pinned jar in attempt 1
+# and the same URL succeeded in attempt 2. Retry 403 as a possible intermediary
+# response too; other 4xx still fail fast.
 _DOWNLOAD_ATTEMPTS = 4
-_TRANSIENT_HTTP = frozenset({429, 500, 502, 503, 504})
+_TRANSIENT_HTTP = frozenset({403, 404, 429, 500, 502, 503, 504})
 
 
 def _download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
