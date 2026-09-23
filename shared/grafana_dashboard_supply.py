@@ -203,8 +203,8 @@ def render_dashboard_json(*, repo_only: bool = False) -> tuple[str, tuple[str, .
         ``(dashboard_json, failed_plugins)`` — the deterministic serialization
         plus the sorted names of plugins whose metrics module failed to load.
     """
-    from shared import core_metrics
     from shared.grafana_dashboard import render_dashboard, render_to_json
+    from shared.metrics.core import core_metrics
 
     core_specs = core_metrics.collect_core_metrics()
     if repo_only:

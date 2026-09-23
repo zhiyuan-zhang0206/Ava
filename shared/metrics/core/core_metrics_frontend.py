@@ -1,6 +1,6 @@
 """Core frontend-telemetry panels — user-modeling interaction metrics.
 
-Split out of ``shared/core_metrics_observability.py`` (task #3697 S1 line
+Split out of ``shared/metrics/core/core_metrics_observability.py`` (task #3697 S1 line
 budget): interaction volume per minute plus the three top-15 tables
 (elements, page views, settings changes) over frontend_interaction
 telemetry events.
@@ -8,8 +8,8 @@ telemetry events.
 
 from __future__ import annotations
 
-from shared import core_metrics
 from shared.events.contract import FRONTEND_INTERACTION_KEYS
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import MetricSpec
 
 _SEL = '{service_name="unknown_service"}'

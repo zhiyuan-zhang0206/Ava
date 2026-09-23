@@ -15,7 +15,7 @@ hand-written originals, and the per-type gauges keep their as-is sizes
 
 from __future__ import annotations
 
-from shared import core_metrics
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import MetricSpec, ThresholdStep
 
 core_metrics.register_core_metric(

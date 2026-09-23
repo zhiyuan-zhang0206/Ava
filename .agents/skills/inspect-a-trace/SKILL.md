@@ -118,7 +118,7 @@ and the verified query set: [references/spans.md](references/spans.md).
 ## Where this skill does not apply
 
 - Fleet-wide trends and dashboards — those are pre-shaped questions; use the
-  core-metrics dashboards (`shared/core_metrics_observability.py`) and the
+  core-metrics dashboards (`shared/metrics/core/core_metrics_observability.py`) and the
   alert rules, not run-level correlation.
 - Deploying or operating the LGTM stack — `deploy/lgtm/README.md`, `ava lgtm`.
 - Computer-use traces (`/api/computer/traces`) — a different subsystem.

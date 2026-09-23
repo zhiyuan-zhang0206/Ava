@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from shared import core_metrics
+from shared.metrics.core import core_metrics
 from shared.plugin_context import PluginContext
 from shared.plugin_metrics import (
     MetricSpec,

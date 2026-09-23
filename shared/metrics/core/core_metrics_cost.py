@@ -1,7 +1,7 @@
 # ruff: noqa: RUF001 — multiplication signs in the cost formulas
 """Core cost-analysis panels — the LLM spend family of the ops dashboard.
 
-Split out of ``shared/core_metrics_panels.py`` (task #3697 S1 line budget):
+Split out of ``shared/metrics/core/core_metrics_panels.py`` (task #3697 S1 line budget):
 the window-cost stat, the two pace projections, and the three cost
 breakdowns (per-minute barchart, top-20 by model / by agent). Every panel
 reads usage-time attributes_cost_usd snapshots from telemetry llm_usage
@@ -11,8 +11,8 @@ the window spend over the panel range.
 
 from __future__ import annotations
 
-from shared import core_metrics
 from shared.events.contract import LLM_USAGE_KEYS
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import MetricSpec
 
 _SEL_EV = '{service_name="unknown_service", event_name={event_name}}'

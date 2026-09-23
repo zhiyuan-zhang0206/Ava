@@ -138,18 +138,18 @@ resolution gauges, not raw event lines.
 
 ## Core metrics (registered, not hand-written)
 
-Core metric definitions live in `shared/core_metrics_panels.py` (the core
+Core metric definitions live in `shared/metrics/core/core_metrics_panels.py` (the core
 dashboard panels, including the Statistics-coverage tiles),
-`shared/core_metrics_observability.py` (the former `ava_observability`
+`shared/metrics/core/core_metrics_observability.py` (the former `ava_observability`
 plugin pack, promoted to core the same day — the repo's own observability
-is not a plugin, per user ruling), `shared/core_metrics_events.py` (the
+is not a plugin, per user ruling), `shared/metrics/core/core_metrics_events.py` (the
 event-stream panels: the Events trio and the gateway sample count) and
-`shared/core_metrics_host.py` (the `Host & data plane` section), plus the
+`shared/metrics/core/core_metrics_host.py` (the `Host & data plane` section), plus the
 smaller registration modules beside them (`core_metrics_cost` and
 `core_metrics_frontend` — the line budget splits of the first two, task
 #3697 — and `core_metrics_dismissed`, `core_metrics_fleet`,
 `core_metrics_pr_flow`). All register through `register_core_metric()` in
-`shared/core_metrics.py`, which runs the **same
+`shared/metrics/core/core_metrics.py`, which runs the **same
 SQL-template safety validation as plugin metrics** (`validate_spec_sql`) and
 fills `plugin = "core"`.
 

@@ -10,7 +10,7 @@ ava_observability registry count remains locked at 21 metrics by tests.
 
 from __future__ import annotations
 
-from shared import core_metrics
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import MetricSpec
 
 core_metrics.register_core_metric(

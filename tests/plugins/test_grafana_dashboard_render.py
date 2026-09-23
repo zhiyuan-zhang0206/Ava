@@ -56,7 +56,6 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from shared import core_metrics
 from shared.grafana_dashboard import (
     _CORE_SECTIONS_PREFIX,
     _CORE_SECTIONS_SUFFIX,
@@ -69,6 +68,7 @@ from shared.grafana_dashboard_supply import (
     load_installed_plugin_specs,
     load_repo_plugin_specs,
 )
+from shared.metrics.core import core_metrics
 from shared.plugin_context import PluginContext
 from shared.plugin_metrics import MetricSpec, clear_registry, registered_metrics
 
@@ -394,7 +394,7 @@ def test_render_is_deterministic_and_environment_independent(
     script = (
         "import hashlib, sys;"
         f"sys.path.insert(0, {str(_REPO_ROOT)!r});"
-        "from shared import core_metrics;"
+        "from shared.metrics.core import core_metrics;"
         "from shared.grafana_dashboard import render_dashboard, render_to_json;"
         "from shared.grafana_dashboard_supply import collect_plugin_specs;"
         "plugins = collect_plugin_specs();"
