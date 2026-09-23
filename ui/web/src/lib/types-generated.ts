@@ -3806,7 +3806,7 @@ export interface components {
          *     basis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped
          *     at 1.0 (a node that began before the window's leading edge counts in full, so
          *     raw active can momentarily exceed windowed alive); 0.0 when alive is 0. All
-         *     fields follow the request's `?hours=` / `?since_compact=` window.
+         *     fields follow the request's `?hours=` window.
          */
         AgentActivity: {
             /** Active Seconds */
@@ -3999,7 +3999,7 @@ export interface components {
          * AgentInspectStatistics
          * @description Window-dependent statistics, with no current control-plane state.
          *
-         *     ``window_hours`` and ``since_compact`` identify the requested view;
+         *     ``window_hours`` identifies the requested view;
          *     ``applied_window_hours`` echoes the served hour window without a Loki
          *     retention clamp. Metadata distinguishes observed, partial, and unavailable
          *     source coverage. Unknown sections are null, never invented zero totals.
@@ -4011,11 +4011,6 @@ export interface components {
             window_hours?: components["schemas"]["StatsWindowHours"] | null;
             /** Applied Window Hours */
             applied_window_hours?: number | null;
-            /**
-             * Since Compact
-             * @default false
-             */
-            since_compact: boolean;
             cost: components["schemas"]["AgentCost"] | null;
             stats: components["schemas"]["AgentStats"] | null;
             tps: components["schemas"]["AgentTps"] | null;
@@ -6268,7 +6263,7 @@ export interface components {
             /** Retained Unapplied Sources */
             retained_unapplied_sources?: string[];
             /** Reason */
-            reason?: ("historical_coverage_unknown" | "compact_boundary_unknown" | "missing_turn_durations" | "archive_precision_unattributed") | null;
+            reason?: ("historical_coverage_unknown" | "missing_turn_durations" | "archive_precision_unattributed") | null;
             /** Duration Precision */
             duration_precision?: ("exact" | "one_second_buckets" | "mixed") | null;
         };
@@ -9785,7 +9780,6 @@ export interface operations {
         parameters: {
             query?: {
                 hours?: components["schemas"]["StatsWindowHours"] | null;
-                since_compact?: boolean;
             };
             header?: never;
             path: {

@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Any, LiteralString, cast
+from typing import Any
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from psycopg import sql
 
 from gateway import loki_events
 from gateway.app import app
@@ -234,36 +232,6 @@ def test_inspect_config_overlay_roundtrips(db_conn: psycopg.Connection) -> None:
         "auto_compact_fraction": 0.7,
     }
     assert isinstance(body["shells"], list)
-
-
-def test_inspect_config_overlay_clean_of_skill_match_residue(
-    db_conn: psycopg.Connection,
-) -> None:
-    """The cleanup migration strips the deleted matcher's keys so the inspector
-    no longer serves them (user report 2026-08-28: the Configuration Overlay
-    still showed skill_match_enabled: true)."""
-    migration = (
-        Path(__file__).resolve().parents[2]
-        / "migrations"
-        / "20260827T165000_drop-skill-match-config-keys.sql"
-    )
-    aid = _insert_agent(
-        db_conn,
-        config_overlay={
-            "llm_model": "claude-opus-4-8",
-            "skill_match_enabled": True,
-            "skill_match_top_k": 3,
-            "skill_match_min_score": 0.35,
-            "skill_match_budget_ms": 300,
-        },
-    )
-    db_conn.commit()
-    with db_conn.cursor() as cur:
-        cur.execute(sql.SQL(cast(LiteralString, migration.read_text())), prepare=False)
-    db_conn.commit()
-    with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/inspect/live").json()
-    assert body["config_overlay"] == {"llm_model": "claude-opus-4-8"}
 
 
 def test_inspect_null_config_overlay_is_empty_dict(db_conn: psycopg.Connection) -> None:

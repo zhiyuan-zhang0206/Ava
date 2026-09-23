@@ -1,7 +1,5 @@
 import { api } from "./api";
 
-export const COMPACT_INSPECT_WINDOW = -1;
-
 export const inspectLiveQueryKey = (agentId: number) =>
   ["agent-inspect-live", agentId] as const;
 
@@ -16,10 +14,5 @@ export function fetchWindowedInspect(
   hours: number | null,
   signal?: AbortSignal,
 ) {
-  return api.getAgentInspectStatistics(
-    agentId,
-    hours === COMPACT_INSPECT_WINDOW ? null : hours,
-    hours === COMPACT_INSPECT_WINDOW,
-    signal,
-  );
+  return api.getAgentInspectStatistics(agentId, hours, signal);
 }

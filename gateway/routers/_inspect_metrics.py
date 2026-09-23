@@ -202,20 +202,15 @@ def inspect_snapshot(
     agent_id: int,
     hours: StatsWindowHours | None,
     *,
-    since_compact: bool,
     spawned_at: datetime,
-    last_compact_at: datetime | None = None,
 ) -> MetricsSnapshot:
     """Read one consistent DB snapshot; no HTTP/Loki request belongs on this path.
 
-    A missing durable compact boundary makes that window unavailable. Historical
-    evidence remains partial even after a successful backfill, because the old
+    Historical evidence remains partial even after a successful backfill, because the old
     best-effort event producer cannot certify that every observation survived.
     """
     sampled_at = datetime.now(UTC)
     start = spawned_at if hours is None else sampled_at - window_delta(hours)
-    if since_compact and last_compact_at is not None:
-        start = last_compact_at
     with pool.connection(timeout=1.0) as conn, conn.transaction():
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         conn.execute("SET LOCAL statement_timeout = '2s'")
@@ -223,31 +218,7 @@ def inspect_snapshot(
         collection = _rows(conn, "SELECT started_at FROM agent_metric_collection", ())[0][
             "started_at"
         ]
-        if since_compact and last_compact_at is None:
-            absent = MetricEvidence(
-                availability="unavailable",
-                sources=[],
-                reason="compact_boundary_unknown",
-            )
-            snapshot = MetricsSnapshot(
-                None,
-                None,
-                None,
-                None,
-                InspectMetricsMetadata(
-                    window_start=None,
-                    window_end=sampled_at,
-                    sampled_at=sampled_at,
-                    collection_started_at=collection,
-                    last_observed_at=None,
-                    cost=absent,
-                    turns=absent,
-                    activity=absent,
-                    lifecycle=absent,
-                ),
-            )
-        else:
-            snapshot = _read_snapshot(conn, agent_id, start, sampled_at, spawned_at, collection)
+        snapshot = _read_snapshot(conn, agent_id, start, sampled_at, spawned_at, collection)
     # Outside the read transaction: the coverage note is a diagnostic side
     # channel (background log + alert episodes; task #3869) and never joins
     # the snapshot itself.

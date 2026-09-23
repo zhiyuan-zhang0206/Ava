@@ -20,7 +20,6 @@ const prefetchMocks = vi.hoisted(() => ({
       (
         agentId: number,
         hours?: number | null,
-        sinceCompact?: boolean,
         signal?: AbortSignal,
       ) => Promise<unknown>
     >()

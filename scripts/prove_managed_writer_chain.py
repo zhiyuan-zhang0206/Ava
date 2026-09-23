@@ -233,7 +233,7 @@ def provision_schema(conn: psycopg.Connection, namespace: str) -> None:
         # The settle columns are real-schema since the initial release; the
         # activation chain's lease fencing references `settle_hosts` (task #4086 b5).
         "CREATE TABLE deployment_state(id integer PRIMARY KEY, managed_writer_evidence jsonb,"
-        " phase text, kind text, note text, holder text, acquired_at timestamptz,"
+        " phase text, kind text, holder text, acquired_at timestamptz,"
         " expires_at timestamptz, target_sha text, settle_hosts text[],"
         " settle_note text, settle_started_at timestamptz)"
     )
@@ -275,7 +275,7 @@ def run_chain(  # noqa: PLR0915 — one guarded chain lifetime with ordered gate
     row = conn.execute(
         "UPDATE deployment_state SET phase='updating', kind='rollout', holder=%s,"
         " acquired_at=clock_timestamp(), expires_at=clock_timestamp() + interval '600 seconds',"
-        " note=NULL, target_sha=%s WHERE id=1 RETURNING acquired_at",
+        " target_sha=%s WHERE id=1 RETURNING acquired_at",
         (COORDINATOR, TARGET_SHA),
     ).fetchone()
     if row is None:

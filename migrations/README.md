@@ -26,17 +26,26 @@ YYYYMMDDTHHMMSS_<kebab-name>.down.sql   -- reverse (mandatory)
 - The current full schema lives in **`db/schema.sql`** (the squashed baseline a
   fresh DB bootstraps from); a new migration must also reflect its change there.
 
-## v0.1.0 baseline (2026-08-14)
+## Current baseline (2026-09-23)
 
-The pre-release migration history (59 timestamped deltas) was squashed into
-`db/schema.sql` and reset at the v0.1.0 public release. `20260814T235959_v010-baseline.sql`
-is the single migration that history collapses to — an intentionally empty
-anchor (schema is 100% in `db/schema.sql`), so a fresh install's applied set is
-exactly `{baseline, v010-baseline}` and future deltas sort after it.
+The 101 deltas through `20260921T211400_watcher-agent-notify` are folded into
+`db/schema.sql`. Fresh databases stamp the baseline sentinel and
+`20260923T031516_schema-baseline`; the retired history's seed rows are absent.
+Subsequent deltas remain paired and must also be reflected in the current schema.
 
-A cluster upgrading across the reset converges automatically:
-`apply_pending_migrations` drops applied-set rows whose files no longer exist
-(they were folded into the baseline), then applies the v0.1.0 anchor — no
-manual DB surgery, no downtime window. A cluster that later rolls back to
-pre-reset code self-heals: the older code re-applies its idempotent migration
-files against the already-current schema and restores the names.
+`shared/migration_history.py` keeps the exact frozen inventories for this reset
+and the 2026-08-14 reset (59 names). The earlier inventory remains necessary
+because restores before 2026-08-14 have not been ruled out. Before deleting any
+tracking rows, the runner refuses partial generations. A database without the
+current anchor must carry the entire 101-name predecessor inventory; an old
+baseline-only restore cannot masquerade as a fresh database.
+
+Upgrade older restores through the release immediately before the applicable
+reset. Integer-keyed history is unsupported; restore it under its matching
+release before advancing. Current live databases already use the applied set.
+
+The current anchor is a rollback floor. Rolling back across it is refused before
+any down migration executes: the folded history includes strict DDL, so replaying
+an older release cannot safely restore it. Recover across the boundary with a
+matching pre-reset database backup, or fix forward. Merge does not authorize a
+runtime rollout or a restore.
