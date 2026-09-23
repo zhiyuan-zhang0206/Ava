@@ -1,10 +1,25 @@
 """shared.paths — per-agent workspace layout."""
 
+import os
 from pathlib import Path
 
 import pytest
 
-from shared import paths
+from shared import daemon_health, paths
+
+
+def test_daemon_pidfile_uses_run_directory_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    current = paths.pid_path("agent_host")
+    assert current == tmp_path / "run" / "agent_host.pid"
+    (tmp_path / current.name).write_text(str(os.getpid()))
+
+    assert daemon_health._recorded_pid(current) is None
+
+    current.write_text(str(os.getpid()))
+    assert daemon_health._recorded_pid(current) == os.getpid()
 
 
 def test_workspace_dir_creates_per_agent_dir(unit_home: Path) -> None:

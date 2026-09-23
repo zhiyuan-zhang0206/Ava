@@ -38,14 +38,6 @@ def pid_path(service_name: str) -> Path:
     return run_dir() / f"{service_name}.pid"
 
 
-def legacy_pid_path(service_name: str) -> Path:
-    """Old pidfile location ($AVA_HOME/<service>.pid) — kept for backward
-    compat during the transition to run/ subdirectory. Callers check this
-    path first when probing for an already-running instance, then write new
-    pidfiles to the path returned by pid_path()."""
-    return ava_home() / f"{service_name}.pid"
-
-
 def plugins_config_path() -> Path:
     """plugins.json path — returns the path only; load() decides whether to write defaults."""
     return ava_home() / "plugins.json"

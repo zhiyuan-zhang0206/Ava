@@ -35,7 +35,6 @@ from shared.daemon_health import health_port, start_health_server, stop_health_s
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
-from shared.paths import legacy_pid_path
 
 _log = logging.getLogger("services.backup_scheduler.daemon")
 
@@ -80,10 +79,8 @@ def _remove_pidfile() -> None:
 
 
 def _is_running() -> bool:
-    """Whether this daemon already owns its new or legacy pidfile."""
-    return pidfile_holds_daemon(
-        _PIDFILE, "services.backup_scheduler.daemon"
-    ) or pidfile_holds_daemon(legacy_pid_path("pg_backup"), "services.backup_scheduler.daemon")
+    """Whether this daemon already owns its pidfile."""
+    return pidfile_holds_daemon(_PIDFILE, "services.backup_scheduler.daemon")
 
 
 def _backup_components(state: _BackupState) -> list[dict[str, object]]:
