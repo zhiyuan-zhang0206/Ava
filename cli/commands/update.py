@@ -582,6 +582,36 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         return rc
 
     pull_recover: tuple[str, set[str], Path | None] | None = None
+    finalized = False
+
+    def finish(rc: int) -> int:
+        """Run compensation once and let its verified verdict affect the exit code."""
+        nonlocal finalized
+        if finalized:
+            return rc
+        finalized = True
+        final_outcome = _finalize_orchestration(
+            hosts_to_resume=hosts_to_resume,
+            phase_a_started=phase_a_started,
+            fan_out=_ns._fan_out,
+            phase_a_timeout_s=_PHASE_A_TIMEOUT_S,
+            outcome=outcome,
+            deploy_capability=deploy_capability,
+            pin_advanced=pin_advanced,
+            failing_step=failing_step,
+            recovered=recovered,
+            local_launch_failures=local_launch_failures,
+            publication_refused=publication_refused,
+            telemetry=telemetry,
+            refresh_settings=refresh_data_plane_settings,
+            finalize_rollout_runner=finalize_rollout,
+            finalize_commit_telemetry=_finalize_commit_telemetry,
+            spawn_offsite_upload=_spawn_async_offsite_upload,
+            repo=repo,
+            pull_recover=pull_recover,
+        )
+        return rc if final_outcome is RolloutOutcome.CLEAN else max(rc, 1)
+
     try:
         # The managed-writer enable point (task #4121): one mode decision per
         # rollout, after Phase 0 and before any effect below. `off` keeps this
@@ -609,9 +639,9 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
                 f"\n✗ prepare failed before maintenance ({type(exc).__name__}): {exc}",
                 file=sys.stderr,
             )
-            return 1
+            return finish(1)
         if (refusal := _refuse_normal_prepare(gate)) is not None:
-            return refusal
+            return finish(refusal)
         pull_recover = gate.prepared.pull_recover
 
         # The managed-writer P1 begin position (task #4128, E2-b): under an
@@ -631,7 +661,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             begin_rc, phase_input = _begin_managed_writer_publication(target_sha)
             if begin_rc != 0:
                 failing_step = "the managed-writer begin refused; nothing was stopped"
-                return begin_rc
+                return finish(begin_rc)
 
         # The prepare reconciliation is deliberately read-only. Its vetted
         # candidates become mutable only at this commit boundary, immediately
@@ -650,9 +680,9 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
                 deploy_capability=deploy_capability,
             )
         if paused_names is None:
-            return 1
+            return finish(1)
         if not all_quiesced:
-            return 1
+            return finish(1)
         force_reap = mode == "force"
 
         # 2-5) gateway local stop -> pull -> sync -> start (start migrates).
@@ -684,7 +714,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
                 "paused agent-runners.",
                 file=sys.stderr,
             )
-            return rc  # finally resumes every paused host
+            return finish(rc)  # compensation runs after the failed local leg
 
         # What the local leg's child `ava start` could not launch. Read here rather
         # than inferred from its exit code for two reasons: that leg runs with
@@ -718,7 +748,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
 
         if not agent_runners:
             outcome = RolloutOutcome.INCOMPLETE if local_launch_failures else RolloutOutcome.CLEAN
-            return 1 if local_launch_failures else 0
+            return finish(1 if local_launch_failures else 0)
 
         # The rollout's closing section (6.4 through 9) lives in
         # `_update_verdict` (file-size budget). Its five seams are injected from
@@ -746,25 +776,6 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         hosts_to_resume = phase_b.hosts_to_resume
         failing_step = phase_b.failing_step or failing_step
         publication_refused = publication_refused or phase_b.publication_refused
-        return rc
+        return finish(rc)
     finally:
-        _finalize_orchestration(
-            hosts_to_resume=hosts_to_resume,
-            phase_a_started=phase_a_started,
-            fan_out=_ns._fan_out,
-            phase_a_timeout_s=_PHASE_A_TIMEOUT_S,
-            outcome=outcome,
-            deploy_capability=deploy_capability,
-            pin_advanced=pin_advanced,
-            failing_step=failing_step,
-            recovered=recovered,
-            local_launch_failures=local_launch_failures,
-            publication_refused=publication_refused,
-            telemetry=telemetry,
-            refresh_settings=refresh_data_plane_settings,
-            finalize_rollout_runner=finalize_rollout,
-            finalize_commit_telemetry=_finalize_commit_telemetry,
-            spawn_offsite_upload=_spawn_async_offsite_upload,
-            repo=repo,
-            pull_recover=pull_recover,
-        )
+        finish(1)

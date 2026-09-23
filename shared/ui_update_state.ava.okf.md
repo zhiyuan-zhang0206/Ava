@@ -32,6 +32,20 @@ the UI marker.
   fsync, so the lock-free gate reader sees only a complete old/new snapshot.
 - Phase updates and completion are generation-CAS operations inside the lock.
   A late process from generation A cannot overwrite or unlink generation B.
+- `$AVA_HOME/deploy-state.owner.lock` serializes owner publication against
+  recovery proof and its destructive action. Normal publication holds it only
+  briefly. `$AVA_HOME/deploy-state.lifecycle.lock` serializes long local
+  start/stop/pause sections and remains the hold-watchdog's 0.1-second probe.
+  Recovery takes the resource lock before the owner lock. `spawn_update`
+  publishes its durable pending handoff and session record under both, then
+  releases the owner lock before draining and spawning. The handoff prevents
+  destructive recovery through that gap. The updater child stops only after
+  the parent releases the long resource section. New rollout/restart triggers
+  refuse a pending or uncleared updater handoff before their session check can
+  mistake the pause-to-spawn gap for an idle host.
+- Each mutex has an atomically replaced `.holder.json` sidecar with the last
+  holder's PID, purpose, start time and held/released state. It is diagnostic;
+  the OS lock remains the authority. A bounded wait names the last holder.
 - A hard-killed owner leaves the marker as honest interrupted-update state.
   `ava cluster recover`, or stranded-pause automatic recovery after the same
   no-live-owner proof, may unpause only when the exact updater handoff and

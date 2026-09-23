@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import psycopg
+
 import shared.db
 from shared.db_transaction import write_transaction
 
@@ -58,20 +60,30 @@ def set_target_with_pending_known_good(new_target_sha: str, *, set_by: str | Non
             raise RuntimeError(f"cluster_pin singleton row missing (rowcount={cur.rowcount})")
 
 
-def get_cluster_target_sha() -> str | None:
+def _target_sha_from_connection(conn: psycopg.Connection) -> str | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT target_sha FROM cluster_pin WHERE id = 1")
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("cluster_pin singleton row missing (migration 0026 seeds it)")
+        return row[0]
+
+
+def get_cluster_target_sha(*, conn: psycopg.Connection | None = None) -> str | None:
     """The cluster's pinned commit, or None if no rollout has pinned one yet.
+
+    A supplied connection lets a status snapshot read the pin with its existing
+    DB borrow.
 
     None means "the singleton row exists but `target_sha IS NULL`" (no rollout has
     pinned a commit). A *missing* row is an invariant breach (migration 0026 seeds
     it and nothing deletes it), so it raises rather than collapsing to the same
     None — otherwise a vanished row would masquerade as an unset pin and the drift
     net would stay silently blind. Mirrors `set_cluster_target_sha`'s rowcount guard."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("SELECT target_sha FROM cluster_pin WHERE id = 1")
-        row = cur.fetchone()
-        if row is None:
-            raise RuntimeError("cluster_pin singleton row missing (migration 0026 seeds it)")
-        return row[0]
+    if conn is not None:
+        return _target_sha_from_connection(conn)
+    with shared.db.connect(autocommit=True) as borrowed:
+        return _target_sha_from_connection(borrowed)
 
 
 def get_last_known_good_sha() -> str | None:

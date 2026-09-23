@@ -13,6 +13,7 @@ import psycopg
 import pytest
 
 from ops import cluster_status
+from ops.controllers import schema_mismatch
 from ops.rpc_schemas import SessionInfo
 from shared.cluster_lock import DeployLease
 from shared.host_deploy_state import HostDeployState
@@ -166,6 +167,7 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
     connect_calls = 0
     state_connections: list[object | None] = []
     lease_connections: list[object | None] = []
+    schema_connections: list[object] = []
     sample_started = threading.Event()
     db_finished = threading.Event()
     sample_calls = 0
@@ -196,6 +198,17 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
         assert db_finished.wait(timeout=2), "DB reads did not overlap the resource sample"
         return _RESOURCE
 
+    def _applied(schema_conn: object) -> set[str]:
+        schema_connections.append(schema_conn)
+        return {"baseline"}
+
+    def _pin(*, conn: object) -> None:
+        schema_connections.append(conn)
+
+    monkeypatch.setattr(schema_mismatch, "applied_migration_names", _applied)
+    monkeypatch.setattr(schema_mismatch, "get_cluster_target_sha", _pin)
+    monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
+
     monkeypatch.setattr("shared.db.connect", _connect)
     monkeypatch.setattr("shared.host_deploy_state.read", _read_state)
     monkeypatch.setattr("shared.cluster_lock.read_update_lease", _read_lease)
@@ -206,6 +219,7 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
     assert connect_calls == 1
     assert state_connections == [conn]
     assert lease_connections == [conn]
+    assert schema_connections == [conn, conn]
     assert sample_calls == 1
     assert snapshot.paused is True
     assert snapshot.current_orchestration == "rollout"
@@ -407,8 +421,8 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: runner)
     monkeypatch.setattr(cluster_status, "_check_pidfile", check)
 
-    def no_deploy(_pool: object) -> tuple[None, None, int]:
-        return None, None, 0
+    def no_deploy(_pool: object) -> tuple[None, None, int, None]:
+        return None, None, 0, None
 
     monkeypatch.setattr(cluster_status, "_read_deploy_snapshot", no_deploy)
     monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)

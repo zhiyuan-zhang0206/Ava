@@ -26,9 +26,10 @@ import shared.db
 import shared.host_deploy_state
 from ops import cluster_pause, cluster_session
 from ops.cluster_session import OrchestrationKind
+from ops.controllers.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 from ops.updater_outcome import UpdaterOutcome, last_updater_outcome
-from shared.api_contracts.status import PausedReason
+from shared.api_contracts.status import PausedReason, SchemaMismatchStatus
 from shared.config import cluster_tz
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.proc import process_alive
@@ -114,6 +115,7 @@ class ClusterStatus(BaseModel):
     # a different commit is not covered here; its own commit is on its
     # `/healthz`, and `probe_daemon` surfaces it per daemon.
     running_sha: str | None = None
+    schema_mismatch: SchemaMismatchStatus | None = None
     # This host's live agent shell-session count, surfaced per-machine in
     # the status panel. 0 on a host with no agents (e.g. a pure gateway).
     shell_count: int = 0
@@ -381,8 +383,9 @@ def _read_deploy_snapshot(
     shared.host_deploy_state.HostDeployState | None,
     shared.cluster_lock.DeployLease | None,
     int,
+    SchemaMismatchStatus | None,
 ]:
-    """Read deploy state and local agent count through one snapshot-local connection."""
+    """Read deploy state, agents, and schema through one snapshot-local connection."""
     try:
         connection = (
             shared.db.connect(autocommit=True)
@@ -393,13 +396,14 @@ def _read_deploy_snapshot(
             state = shared.host_deploy_state.read(conn=conn)
             lease = shared.cluster_lock.read_update_lease(conn=conn)
             agent_count = _count_local_agents(conn) if is_agent_runner() else 0
-        return state, lease, agent_count
+            schema_status = schema_mismatch_status(conn=conn)
+        return state, lease, agent_count, schema_status
     except Exception:  # fail-fast-ok: status degrades when the central DB is unavailable
         # Deploy state and agent count share one bounded connection. During a
         # data-plane outage the snapshot remains readable with no deploy claim
         # and the existing zero-count default.
         _log.warning("deploy-state snapshot read failed; using degraded status", exc_info=True)
-        return None, None, 0
+        return None, None, 0, None
 
 
 def _read_resource_sample() -> ResourceSample | None:
@@ -472,7 +476,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
         resource_future = executor.submit(_read_resource_sample)
-        state, lease, agent_count = _read_deploy_snapshot(pool)
+        state, lease, agent_count, schema_status = _read_deploy_snapshot(pool)
         resource = resource_future.result()
     # One source of truth for the pair: `paused` is exactly "a clause fired",
     # so the bool can never drift from its reason.
@@ -488,6 +492,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         last_updater_outcome=last_updater_outcome(state),
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
+        schema_mismatch=schema_status,
         shell_count=shell_count,
         agent_host_online=agent_host_alive,
         watchdog_online=watchdog_alive,

@@ -296,7 +296,7 @@ def test_resource_stop_excludes_concurrent_start(
 
     from cli.commands._pause_resume import exclusive_resources
 
-    entered, finish = Event(), Event()
+    entered, finish, start_finished = Event(), Event(), Event()
 
     @exclusive_resources
     def stopping() -> None:
@@ -307,14 +307,24 @@ def test_resource_stop_excludes_concurrent_start(
     thread.start()
     assert entered.wait(5)
     start = MagicMock(return_value=0)
+
+    def waiting_start() -> None:
+        assert resume_after_start(start)() == 0
+        start_finished.set()
+
+    starter = Thread(target=waiting_start)
+    starter.start()
     try:
-        with pytest.raises(RuntimeError, match="lock"):
-            resume_after_start(start)()
+        assert not start_finished.wait(0.2)
         start.assert_not_called()
     finally:
         finish.set()
         thread.join(5)
+        starter.join(5)
     assert not thread.is_alive()
+    assert not starter.is_alive()
+    assert start_finished.is_set()
+    start.assert_called_once()
 
 
 @pytest.mark.parametrize("full_stop", [False, True])

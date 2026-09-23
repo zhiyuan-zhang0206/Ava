@@ -7,6 +7,7 @@ import shlex
 import time
 
 import shared.ui_update_state
+import shared.updater_handoff
 from ops import cluster_session
 from shared.deploy_timing import ORCHESTRATION_OWNER_WAIT_S
 from shared.paths import repo_root
@@ -95,10 +96,11 @@ def wait_for_ui_owner(
 def assert_no_orchestration_in_flight(*, force: bool = False) -> None:
     """Refuse a deploy that this host may not perform.
 
-    Two refusals, in order: this checkout may not act on the production home
-    (`assert_prod_home_has_its_own_checkout` — the deploy-trigger half of the
-    2026-08-27 incident fix), then a second deploy locally and, unless forced,
-    cluster-wide."""
+    Refuse a foreign checkout acting on production, a local session or updater
+    handoff, then a cluster-wide deploy unless explicitly forced. The handoff
+    closes the gap after updater ownership is published but before its detached
+    session exists; releasing the short owner lock during the drain is safe only
+    while every new rollout/restart checks that durable owner."""
     assert_prod_home_has_its_own_checkout()
     session = cluster_session.live_orchestration_session()
     if session is not None:
@@ -107,6 +109,13 @@ def assert_no_orchestration_in_flight(*, force: bool = False) -> None:
             f"/ update is in flight. Wait for it to finish — a hung session is "
             f"force-reaped automatically — or terminate the pid named in "
             f"$AVA_HOME/run/sessions/{session}.json if it is hung."
+        )
+    handoff = shared.updater_handoff.read()
+    if handoff.status != "inactive":
+        raise ClusterUpdateInProgress(
+            f"local updater handoff is {handoff.status}; a pending spawn or unrecovered "
+            "updater owns this host. Wait for it or recover the exact handoff before "
+            "starting another rollout/restart"
         )
     if force:
         _log.warning("[cluster] --force: skipping the cluster-wide deploy-window check")

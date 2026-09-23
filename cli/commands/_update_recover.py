@@ -54,8 +54,9 @@ class RolloutOutcome(StrEnum):
     """
 
     CLEAN = "clean"
-    # The gateway leg succeeded and the pin advanced, but some acked agent-runner
-    # never reported back. Not an abort; the lease is held while they settle.
+    # The gateway leg succeeded and the pin advanced, but some target runner
+    # failed dispatch/convergence or compensation. Not an abort; a settle hold
+    # covers only hosts whose updater began and remains mid-transition.
     INCOMPLETE = "incomplete"
     # The orchestration bailed — before Phase B, or on an exception.
     ABORTED = "aborted"
@@ -291,6 +292,34 @@ def local_update_failure_detail(rc: int, *, restart_only: bool) -> str:
     )
 
 
+def _resume_hosts(
+    hosts: list[tuple[str, str | None]],
+    fan_out: _FanOut,
+    timeout_s: float,
+    deploy_capability: ClusterOpPayload,
+) -> tuple[list[str], list[str], list[str]]:
+    """Attempt every compensation target and retain a reason for each missing proof."""
+    unreached = [name for name, _url in hosts]
+    if not hosts:
+        return [], unreached, []
+    print(f"\n→ compensating unpause: request resume for {len(hosts)} host(s)", file=sys.stderr)
+    try:
+        results = fan_out(hosts, "/api/cluster/resume", timeout_s, deploy_capability)
+        by_name = {name: (status, detail) for name, status, detail in results}
+        reached = [name for name in unreached if name in by_name and by_name[name][0] == "ok"]
+        unreached = [name for name in unreached if name not in reached]
+        failures = [
+            f"{name} resume {by_name[name][0]} ({by_name[name][1]})"
+            if name in by_name
+            else f"{name} resume missing reply"
+            for name in unreached
+        ]
+        return reached, unreached, failures
+    except Exception as exc:
+        print(f"  ✗ compensating resume dial itself failed: {exc!r}", file=sys.stderr)
+        return [], unreached, [f"{name} resume dial failed ({exc!r})" for name in unreached]
+
+
 def finalize_rollout(
     hosts_to_resume: list[tuple[str, str | None]],
     fan_out: _FanOut,
@@ -303,9 +332,9 @@ def finalize_rollout(
     recovered: bool = False,
     local_launch_failures: list[str] | None = None,
     publication_refused: bool = False,
-) -> None:
-    """`finally`-clause tail of the gateway orchestration: record how the rollout
-    ended, best-effort resume every potentially paused host, then — unless the rollout was
+) -> RolloutOutcome:
+    """`finally`-clause tail of the gateway orchestration: best-effort resume
+    every potentially paused host, record the resulting verdict, then — unless it was
     `CLEAN` — print the cluster's residual state and the recovery commands that fit
     what actually happened.
 
@@ -343,34 +372,24 @@ def finalize_rollout(
     exception; a raise here would mask that root cause and skip the report (the
     2026-07-20 incident: the compensating resume's own Postgres read raised, so the
     cluster was left stop-the-world + paused under a second traceback). The record
-    write, the resume dial and the report are each guarded so none escapes — and the
-    record is first, because a rollout whose data plane is down is exactly when the
-    row cannot be written and the reader has to fall back on the orphan reading.
+    write, the resume dial and the report are each guarded so none escapes. The
+    record follows compensation so it cannot claim success before a failed resume.
     """
+    reached, unreached, resume_failures = _resume_hosts(
+        hosts_to_resume, fan_out, resume_timeout_s, deploy_capability
+    )
+
+    if resume_failures:
+        failing_step = "; ".join(filter(None, [failing_step, *resume_failures]))
+        if outcome is RolloutOutcome.CLEAN:
+            outcome = RolloutOutcome.INCOMPLETE
+        recovered = False
     _record_outcome(
         outcome, pin_advanced=pin_advanced, failing_step=failing_step, recovered=recovered
     )
-    reached: list[str] = []
-    unreached: list[str] = [name for name, _url in hosts_to_resume]
-    if hosts_to_resume:
-        print(
-            f"\n→ compensating unpause: request resume for {len(hosts_to_resume)} host(s)",
-            file=sys.stderr,
-        )
-        try:
-            results = fan_out(
-                hosts_to_resume,
-                "/api/cluster/resume",
-                resume_timeout_s,
-                deploy_capability,
-            )
-            reached = [name for name, status, _ in results if status == "ok"]
-            unreached = [name for name, status, _ in results if status != "ok"]
-        except Exception as exc:
-            print(f"  ✗ compensating resume dial itself failed: {exc!r}", file=sys.stderr)
 
     if outcome is RolloutOutcome.CLEAN:
-        return
+        return outcome
     _print_rollout_aftermath(
         reached=reached,
         unreached=unreached,
@@ -379,6 +398,7 @@ def finalize_rollout(
         local_launch_failures=local_launch_failures or [],
         publication_refused=publication_refused,
     )
+    return outcome
 
 
 def _record_outcome(

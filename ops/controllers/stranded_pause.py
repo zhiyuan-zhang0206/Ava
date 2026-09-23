@@ -688,10 +688,11 @@ def recover_stranded_pause() -> bool:
     if paused_for is None or paused_for <= STRANDED_PAUSE_TIMEOUT_S:
         return False
     try:
-        with ui_update_state.lifecycle_lock():
-            # The first age check avoids taking the cross-process mutex on ordinary
-            # ticks. Re-read under it so a fresh owner cannot appear between proof
-            # and the destructive unpause/marker clear.
+        with (
+            ui_update_state.resource_lock(purpose="watchdog stranded pause", timeout_s=0.1),
+            ui_update_state.lifecycle_lock(),
+        ):
+            # Recheck age under both locks before destructive recovery.
             paused_for = _stranded_pause_seconds()
             if paused_for is None or paused_for <= STRANDED_PAUSE_TIMEOUT_S:
                 return False

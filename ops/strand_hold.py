@@ -79,7 +79,10 @@ def maybe_release_abandoned_hold(*, paused_for: float | None) -> None:
     from shared import ui_update_state
 
     try:
-        with ui_update_state.lifecycle_lock():
+        with (
+            ui_update_state.resource_lock(purpose="watchdog abandoned hold release", timeout_s=0.1),
+            ui_update_state.lifecycle_lock(),
+        ):
             current = hold_snapshot()
             if current is None:
                 return
