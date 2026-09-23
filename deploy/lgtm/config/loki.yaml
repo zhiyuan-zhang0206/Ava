@@ -54,16 +54,17 @@ schema_config:
         prefix: index_
         period: 24h
 
-# `default_resource_attributes_as_index_labels` replaces Loki's default list,
-# so retain the 3.7.6 defaults and add only the bounded Ava event dimensions.
-# `agent_id` is dozens of values and `event_name` around twenty; payloads,
-# trace IDs, and spans remain structured metadata rather than streams.
+# `default_resource_attributes_as_index_labels` replaces Loki's default list.
+# Keep the remaining 3.7.6 defaults plus bounded `agent_id` and `event_name`.
+# Task #4591: per-PID UUIDs from short-lived exec children drove ~95% of
+# projected new stream churn, so `service.instance.id` stays queryable as
+# structured metadata via `| service_instance_id="..."` instead of an index label.
+# Payloads, trace IDs, and spans also remain structured metadata.
 distributor:
   otlp_config:
     default_resource_attributes_as_index_labels:
       - service.name
       - service.namespace
-      - service.instance.id
       - deployment.environment
       - deployment.environment.name
       - cloud.region
