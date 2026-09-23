@@ -38,7 +38,13 @@ def test_live_roster_preserves_ancestor_closure_without_history_growth(
     ]
     seed(db_conn, [(i, "user", "terminated") for i in range(100, 10_100)])
     after = select_roster(db_conn)
-    assert after.model_dump_json() == before.model_dump_json()
+    before_payload = before.model_dump(mode="json")
+    after_payload = after.model_dump(mode="json")
+    # Roster content is stable even though each read has a new assessment time.
+    for payload in (before_payload, after_payload):
+        for card in payload["agents"]:
+            card["availability"].pop("observed_at")
+    assert after_payload == before_payload
 
 
 def test_ancestor_closure_follows_fork_source_and_deduplicates_cycles(

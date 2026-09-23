@@ -28,6 +28,33 @@ def _force_local_machine(set_machine_identity) -> str:
 
 
 class TestRouting:
+    @pytest.mark.parametrize("failure", ["exception", "missing"])
+    def test_receipt_read_failure_keeps_accepted_creation(
+        self,
+        _force_local_machine: str,
+        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
+        failure: str,
+    ) -> None:
+        async def _capture_forward(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            return SpawnedAgent(id=body.agent_id)
+
+        def _unreadable(_conn: psycopg.Connection, _agent_id: int) -> None:
+            if failure == "exception":
+                raise RuntimeError("receipt read unavailable")
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(app_module.agent_snapshot, "select_one", _unreadable)
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"machine": "local-test"})
+        assert resp.status_code == 201
+        body = resp.json()
+        assert db_conn.execute("SELECT id FROM agents_meta WHERE id=%s", (body["id"],)).fetchone()
+        assert body["accepted"] is True
+        assert body["execution_observed"] is False
+        assert body["reason"] == "unknown"
+        assert body["observed_at"]
+
     def test_machine_eq_local_forwards_to_local_target(
         self,
         _force_local_machine: str,

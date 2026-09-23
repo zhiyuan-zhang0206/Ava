@@ -15,6 +15,7 @@ live tail + historical REST query) live in routers/agent_events.py.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -38,7 +39,7 @@ from ops.rpc_schemas import (
     SpawnedAgent,
 )
 from shared import agent_roster, agent_snapshot
-from shared.agent_observation import AgentAvailability
+from shared.agent_observation import AgentAvailability, AvailabilityReason
 from shared.agents import (
     AgentNotFound,
     ForkConfigChangeNotAllowed,
@@ -465,10 +466,15 @@ async def create_and_launch_agent(
 
 
 def _creation_availability(pool: ConnectionPool, agent_id: int) -> AgentAvailability:
-    with pool.connection() as conn:
-        snap = agent_snapshot.select_one(conn, agent_id)
+    try:
+        with pool.connection() as conn:
+            snap = agent_snapshot.select_one(conn, agent_id)
+    except Exception as exc:
+        logger.warning("created agent {} receipt read failed: {}", agent_id, exc)
+        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=datetime.now(UTC))
     if snap is None or snap.availability is None:
-        raise RuntimeError(f"created agent {agent_id} disappeared before receipt")
+        logger.warning("created agent {} unavailable for receipt read", agent_id)
+        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=datetime.now(UTC))
     return snap.availability
 
 

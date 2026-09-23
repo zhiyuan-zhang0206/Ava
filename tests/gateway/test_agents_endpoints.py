@@ -907,10 +907,7 @@ class TestRestart:
         assert resp.json() == {"status": "already_terminated"}
         assert _inbound_rows(db_conn, agent_id) == []  # not delivered
 
-    def test_restart_nonexistent_404(
-        self,
-        db_conn: psycopg.Connection,
-    ) -> None:
+    def test_restart_nonexistent_404(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
             resp = client.post("/api/agents/9999/restart")
         assert resp.status_code == 404
@@ -952,6 +949,7 @@ class TestList:
             "heartbeat_paused_until",
             "open_impersonation_session_id",
             "observation",
+            "availability",
         }
         assert rows[0]["open_impersonation_session_id"] is None
         assert rows[0]["observation"]["runtime_owner"] == "unknown"
@@ -985,8 +983,10 @@ class TestList:
             terminated_rows = client.get("/api/agents", params={"scope": "terminated"}).json()[
                 "agents"
             ]
-
         assert {row["agent_id"] for row in all_rows} == {live_id, terminated_id}
+        # Each request assesses availability at its own time.
+        for row in default_rows + live_rows:
+            row["availability"].pop("observed_at")
         assert default_rows == live_rows
         assert [row["agent_id"] for row in live_rows] == [live_id]
         assert [row["agent_id"] for row in terminated_rows] == [terminated_id]
@@ -1025,6 +1025,7 @@ class TestList:
             "heartbeat_paused_until",
             "open_impersonation_session_id",
             "observation",
+            "availability",
         }
         assert row["open_impersonation_session_id"] is None
         assert row["observation"]["runtime_owner"] == "unknown"
@@ -1077,10 +1078,7 @@ class TestList:
             "limit",
         }
 
-    def test_get_agents_joins_thread_label(
-        self,
-        db_conn: psycopg.Connection,
-    ) -> None:
+    def test_get_agents_joins_thread_label(self, db_conn: psycopg.Connection) -> None:
         """label field fetched from agents JOIN — after PATCH write, GET should see it."""
         with TestClient(app) as client:
             a_id = client.post("/api/agents", json={}).json()["id"]

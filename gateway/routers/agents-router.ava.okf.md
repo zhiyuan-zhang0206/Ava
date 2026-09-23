@@ -46,7 +46,10 @@ the launch request and first prompt were accepted; no agent-host turn or first
 message claim is synchronously confirmed. The host-down reason comes from the
 existing machine status probe, and a recent admission refusal comes from the
 agent's durable admission observation. Exact host boot exceptions remain in
-machine diagnostics.
+machine diagnostics. If the post-launch availability read fails or the created
+row is unavailable, the receipt still returns 201 with
+`reason=unknown` and a fresh `observed_at` because row creation and the launch
+reply have already succeeded.
 
 ## List projections
 
