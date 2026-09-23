@@ -251,12 +251,6 @@ def watch(
             last_change = time.monotonic()
 
         status = read_status(path)
-        first_poll, last_actionable_mtime = _baseline_first_actionable_poll(
-            first_poll=first_poll,
-            status=status,
-            mtime=mtime,
-            last_actionable_mtime=last_actionable_mtime,
-        )
         elapsed_total = time.monotonic() - start_time
         elapsed_change = time.monotonic() - last_change
         elapsed_wake = time.monotonic() - last_wake
@@ -313,6 +307,12 @@ def watch(
             time.sleep(POLL_SECONDS)
             continue
 
+        first_poll, last_actionable_mtime = _baseline_first_actionable_poll(
+            first_poll=first_poll,
+            status=status,
+            mtime=mtime,
+            last_actionable_mtime=last_actionable_mtime,
+        )
         if status is None and saw_work_file and mtime is None:
             if not _notify(
                 target_agent,

@@ -14,11 +14,12 @@ imports, a fake ``ava`` that records sends and can refuse the first N of them.
 
 from __future__ import annotations
 
+import datetime as dt
 import importlib.util
 import os
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -272,6 +273,51 @@ def test_watch_work_heartbeats_an_unchanged_baselined_actionable_status(
 
     assert fake.calls == 1
     assert "unchanged since arming" in fake.sent[0][1][1]
+
+
+def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Canonical supervision must not baseline an already-current NEED_INPUT."""
+    work = tmp_path / "work.md"
+    work.write_text("STATUS: NEED_INPUT\n")
+    owner = SimpleNamespace(
+        generation="generation",
+        status="active",
+        created_at=dt.datetime.fromtimestamp(work.stat().st_mtime - 1, dt.UTC),
+        expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
+    )
+    monkeypatch.setattr(watch_work.coding_session_owner, "read", lambda _key: owner)
+    monkeypatch.setattr(watch_work, "_owner_terminated", lambda _agent_id: False)
+    monkeypatch.setattr(watch_work, "_session_crashed", lambda _owner: False)
+    messages: list[str] = []
+
+    class CanonicalWakeError(RuntimeError):
+        pass
+
+    def _notify(_agent_id: int, message: str, *, canonical: bool) -> bool:
+        assert canonical
+        messages.append(message)
+        raise CanonicalWakeError
+
+    def _unexpected_sleep(_seconds: float) -> None:
+        raise AssertionError("canonical NEED_INPUT did not wake on its first eligible poll")
+
+    monkeypatch.setattr(watch_work, "_notify", _notify)
+    monkeypatch.setattr(watch_work.time, "sleep", _unexpected_sleep)
+
+    with pytest.raises(CanonicalWakeError):
+        watch_work.watch(
+            str(work),
+            cluster=tmp_path,
+            workspace=tmp_path,
+            generation="generation",
+            owner_agent_id=41,
+        )
+
+    assert messages == [
+        f"coding agent reported STATUS: NEED_INPUT in {work} -- read the file and reply"
+    ]
 
 
 def test_watch_work_terminal_wake_exits_2_on_exhaustion(
