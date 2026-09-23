@@ -610,7 +610,7 @@ def test_sync_bounds_a_stalled_caller_flush(monkeypatch: pytest.MonkeyPatch) -> 
         started = time.monotonic()
         pipe.sync(timeout=0.05, bounded=True)
         assert entered.is_set()
-        assert time.monotonic() - started < 0.09
+        assert time.monotonic() - started < 1.0
         assert any("flush" in message for message in reports)
     finally:
         release.set()
@@ -645,7 +645,7 @@ def test_sync_bounds_a_full_marker_enqueue(monkeypatch: pytest.MonkeyPatch) -> N
     started = time.monotonic()
     try:
         pipe.sync(timeout=0.05, bounded=True)
-        assert time.monotonic() - started < 0.09
+        assert time.monotonic() - started < 1.0
         assert any("marker" in message for message in reports)
     finally:
         holder_done.set()

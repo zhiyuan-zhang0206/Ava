@@ -537,7 +537,7 @@ class _EventPipeline:
         )
         if outcome is not None:
             _report_no_pipeline(
-                f"[event-emitter] sync() {outcome} timed out after {{t}}s — the mirror may land later",
+                f"[event-emitter] sync() timed out after {{t}}s during {outcome} — the mirror may land later",
                 t=timeout,
             )
 
