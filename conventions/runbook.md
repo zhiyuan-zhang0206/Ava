@@ -177,6 +177,11 @@ env -u VIRTUAL_ENV uv sync
 env -u VIRTUAL_ENV uv pip install -e .
 ```
 
+Every worktree `uv` invocation must carry `env -u VIRTUAL_ENV`, including
+`uv run`, `uv sync`, and `uv pip`. Never run bare `uv pip install`: an inherited
+`VIRTUAL_ENV` can target the shared production environment and remove its
+launcher while another service is using it (incident #4629).
+
 On PowerShell, apply the same rule with `Remove-Item Env:VIRTUAL_ENV
 -ErrorAction SilentlyContinue` before `uv`. Never rely on `cd` alone to select
 the worktree's `.venv`. `scripts/install.sh --worktree` and
@@ -2135,6 +2140,67 @@ structured via OTLP.
 
 The emitter wiring behind that stream, the unified `events` schema (and its
 legacy `agent_events` mirror), and the monthly partitioning are in `shared/log.ava.okf.md`.
+
+## Git hooks: pre-commit / pre-push
+
+Install from the **main clone**, using that clone's stable `.venv`:
+
+```bash
+.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+The configuration also makes plain `pre-commit install` install both stages.
+Never install from an ephemeral worktree: all worktrees of a clone share
+`git rev-parse --git-common-dir`'s `hooks/` directory, and pre-commit writes the
+installing interpreter's absolute path into `INSTALL_PYTHON`. Deleting that
+worktree leaves a dead pointer. `scripts/setup-worktree.sh` checks the shared
+installation without rewriting hooks or `core.hooksPath`. Before deleting a
+worktree, inspect both shared hooks' `INSTALL_PYTHON` values and reinstall from
+the main clone if either points into the worktree.
+
+The fast `check-pre-push-install` commit hook warns when the shared pre-push
+hook is missing, unmanaged, non-executable, redirected by `core.hooksPath`, or
+points at a missing/non-executable interpreter or outside the main clone's
+`.venv/bin`. It prints the exact repair command and passes: v1 is warn-only so
+hook rollout does not block commits; CI independently enforces the checks.
+Review any `core.hooksPath` override before removing it and installing.
+
+Commit hooks keep linting and code-generation checks. The full-repository
+strict pyright check, frontend typecheck (including Next.js route typegen),
+and frontend ESLint run at **pre-push**. Other local hooks default to pre-commit;
+upstream hooks may also declare pre-push hygiene checks. File filters are
+unchanged. Run either stage explicitly with the worktree's own environment:
+
+```bash
+.venv/bin/pre-commit run --all-files
+.venv/bin/pre-commit run --all-files --hook-stage pre-push
+```
+
+For targeted local verification, skip `frontend-vitest` by name and run only
+the relevant vitest files, as described in the
+[local-test skill](../.agents/skills/run-local-tests/SKILL.md).
+
+`scripts/prepush-guard.sh` holds a separate `flock` for each of `pyright`,
+`tsc`, and `eslint` across all worktrees on the host. Locks live in
+`/tmp/ava-prepush-locks`, independent of clone, user, and `TMPDIR`; never delete
+live lock files. `AVA_PREPUSH_LOCK_DIR` may override this for tests or a host
+policy, but every checkout on that host must use the same local directory.
+Missing tools/dependencies, unavailable locks/load probes, excessive load, or
+a lock timeout print **WARNING: PRE-PUSH SKIPPED** with the tool and reason,
+then exit 0. Hook verbosity makes these successful skips visible. Install
+frontend dependencies with `(cd ui/web && npm ci)`; Python dependencies use
+`env -u VIRTUAL_ENV uv sync` after the worktree venv preflight above.
+
+`AVA_PREPUSH_LOCK_WAIT_SECONDS` defaults to `120`: enough for a normal pyright
+run to release its lock, while bounding a contended push. Waiting prints the
+tool name. `AVA_PREPUSH_MAX_LOAD_PER_CORE` defaults to `1.5` for the one-minute
+load average divided by logical CPUs: allow short bursts but avoid adding work
+to a sustained CPU queue. Load is checked before and after acquiring the lock.
+The tool's actual failure status propagates unchanged; a local skip is never
+evidence that the check ran. CI bypasses the wrapper: `backend-static` runs
+`uv run pyright`; `frontend` runs `npx next typegen`, `npx tsc --noEmit`, and
+`npm run lint`. These independent runners retain enforcement; the structural
+CI jobs already skip the three duplicate hooks.
 
 ## CI (Continuous Integration)
 

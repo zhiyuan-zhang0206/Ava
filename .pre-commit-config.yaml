@@ -1,3 +1,6 @@
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.7
@@ -38,6 +41,15 @@ repos:
 
   - repo: local
     hooks:
+      - id: check-pre-push-install
+        name: check pre-push installation (warn-only)
+        entry: python3 scripts/provision/check_git_hooks.py
+        language: system
+        stages: [pre-commit]
+        always_run: true
+        pass_filenames: false
+        verbose: true
+
       - id: lint-python-lock
         name: lint Python lock (canonical PyPI sources)
         entry: .venv/bin/python scripts/lint_python_lock.py
@@ -50,7 +62,9 @@ repos:
         # Use the pyright from the uv venv — deps are complete, no need to
         # reinstall langgraph / psycopg / redis etc. in an isolated hook env.
         # Equivalent to running `.venv/bin/pyright` on a dev machine.
-        entry: .venv/bin/pyright
+        entry: bash scripts/prepush-guard.sh pyright -- .venv/bin/pyright
+        stages: [pre-push]
+        verbose: true  # Successful skips must stay visible.
         language: system
         types: [python]
         pass_filenames: false
@@ -443,7 +457,9 @@ repos:
       # tsc doesn't support incremental single-file checks.
       - id: frontend-tsc
         name: frontend tsc --noEmit
-        entry: bash -c 'cd ui/web && npx --no-install next typegen && npx --no-install tsc --noEmit'
+        entry: bash scripts/prepush-guard.sh tsc -- bash -c 'cd ui/web && npx --no-install next typegen && npx --no-install tsc --noEmit'
+        stages: [pre-push]
+        verbose: true
         language: system
         files: ^ui/web/.*\.(ts|tsx)$
         pass_filenames: false
@@ -451,7 +467,9 @@ repos:
       # ESLint — aligned with frontend CI; errors and unbaselined warnings fail.
       - id: frontend-eslint
         name: frontend eslint
-        entry: bash -c 'cd ui/web && npm run lint'
+        entry: bash scripts/prepush-guard.sh eslint -- bash -c 'cd ui/web && npm run lint'
+        stages: [pre-push]
+        verbose: true
         language: system
         files: ^ui/web/.*\.(ts|tsx|js|mjs)$
         pass_filenames: false

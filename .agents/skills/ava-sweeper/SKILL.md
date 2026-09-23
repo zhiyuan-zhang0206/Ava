@@ -224,5 +224,7 @@ which exists precisely to keep markers out of a commit — cannot fire on the
 commits a rebase produces. A marker-bearing resolution commits silently. Sweep
 with `rg '^(<{7} |={7}$|>{7} )'` — the trailing space and the `$` are what
 separate a real marker from a decorative `=====` banner, of which this repo has
-several. The cheap standing hardening is that same sweep in the pre-push path
-(`scripts/pre-push-check.sh`), where pre-commit does run.
+several. The framework's `check-merge-conflict` hook runs at pre-commit;
+structural CI repeats it over all files, including after a rebase. The
+[pre-push stage](../../../conventions/runbook.md#git-hooks-pre-commit--pre-push)
+carries the heavy static checks.

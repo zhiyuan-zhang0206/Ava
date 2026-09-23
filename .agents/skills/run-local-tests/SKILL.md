@@ -34,6 +34,9 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   `PYTHONPATH=<this-worktree> <other-worktree>/.venv/bin/python -m pytest ...`
   (PYTHONPATH outranks that venv's `.pth`, so the tests run against this
   worktree's code).
+- **Every worktree `uv` command needs `env -u VIRTUAL_ENV`**, including
+  `uv run` and `uv pip`. Never run bare `uv pip install`: it can target an
+  inherited shared production environment and remove its launcher (#4629).
 - **Pick targeted tests by dependency, not only by directory.** Shared changes
   can break consumer-side enum or field-set assertions. Locate those consumers
   and include their specific tests locally, rather than expanding to the full
@@ -56,8 +59,11 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   gate (`scripts/lint_migrations.py` — filename format, up/down pairing,
   baseline seed) *is* a local hook, gated on `migrations/` + `db/schema.sql`.
 - **Full non-e2e + e2e + coverage threshold runs in CI** — it's the merge gate.
-- **Optional pre-push hook**: `ln -s ../../scripts/pre-push-check.sh .git/hooks/pre-push`
-  to auto-run tests for changed areas before every push.
+- **Framework pre-push hooks** run pyright, frontend tsc and eslint. Install
+  both stages from the main clone's stable `.venv`, never a worktree:
+  `.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push`.
+  See [the hook runbook](../../../conventions/runbook.md#git-hooks-pre-commit--pre-push)
+  for shared-machine guards and warn-only installation checks.
 
 ## Two rules for the tests themselves
 
