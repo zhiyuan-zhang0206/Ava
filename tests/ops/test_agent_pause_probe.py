@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,60 @@ def test_host_running_rejects_live_pid_when_root_unit_is_down(
     _stub_root_client(monkeypatch, response=_root_response(state="stopped", pid=pid))
     with pytest.raises(RuntimeError, match="without its owned service session"):
         agent_pause_probe.host_running()
+
+
+def test_host_running_retries_the_scan_once_past_a_leaked_permission_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """macOS psutil can leak a raw PermissionError while building one process's
+    info mid-iteration (sysctl raced with a process diverging under load); the
+    identical read succeeds when re-probed, so the scan retries once and the
+    real answer still lands (the 2026-09-18 flake)."""
+    _stub_backend(monkeypatch, has_session=False)
+    monkeypatch.setattr(settings.services, "agent_host_pidfile", tmp_path / "absent.pid")
+    monkeypatch.setattr(agent_pause_probe, "ava_home", lambda: tmp_path)
+    calls: list[int] = []
+
+    class _UnrecordedHost:
+        def __init__(self) -> None:
+            self.info = {"pid": 4242, "cmdline": ["python", "-m", "services.agent_host.daemon"]}
+
+        def environ(self) -> dict[str, str]:
+            return {"AVA_HOME": str(tmp_path)}
+
+    def process_iter(attrs: list[str]) -> Iterator[object]:
+        del attrs
+        calls.append(1)
+        if len(calls) == 1:
+            raise PermissionError("force permission denied (sysctl(KERN_PROCARGS2) -> errno 0)")
+        return iter([_UnrecordedHost()])
+
+    monkeypatch.setattr("psutil.process_iter", process_iter)
+    with pytest.raises(RuntimeError, match="still running without its service record"):
+        agent_pause_probe.host_running()
+    assert len(calls) == 2
+
+
+def test_host_running_stays_loud_when_the_process_scan_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A persistent scan failure must not silently read as "not running": the
+    probe refuses with a typed error, so the pause path aborts instead of
+    declaring the host absent."""
+    _stub_backend(monkeypatch, has_session=False)
+    monkeypatch.setattr(settings.services, "agent_host_pidfile", tmp_path / "absent.pid")
+    monkeypatch.setattr(agent_pause_probe, "ava_home", lambda: tmp_path)
+    calls: list[int] = []
+
+    def process_iter(attrs: list[str]) -> Iterator[object]:
+        del attrs
+        calls.append(1)
+        raise PermissionError("force permission denied")
+
+    monkeypatch.setattr("psutil.process_iter", process_iter)
+    with pytest.raises(RuntimeError, match="cannot verify whether an unrecorded agent-host"):
+        agent_pause_probe.host_running()
+    assert len(calls) == 2
 
 
 # ─── ops_quiescent: the mode-aware "is ops running" gate (task #3370) ──────────
