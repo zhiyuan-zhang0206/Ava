@@ -1,30 +1,6 @@
-"""Understand almost any input by asking a question about it.
-
-One call handles text, images, video, audio, and PDF — you pass the material
-plus a prompt and get back a text answer. You never see the raw bytes; the
-prompt steers what comes back (summarize, extract, describe, answer).
-
-The call is batch-shaped: you pass `targets` (a list of dicts, each with
-`prompt` + exactly one of `text` / `paths`) and every target runs
-concurrently, answers coming back in input order. A single question is a
-one-element list. Same batch shape as `ava.web.fetch` / `ava.web.search`.
-
-The module is also the importable home of the SDK entry point — the import
-statement resolves without changing the attribute surface.
-
-Provider split by modality: text (literal strings and text files) runs on the
-text model (`settings.lm.understand_text_model`, default `deepseek-flash`); binary
-media (image / video / audio / PDF) runs on the media model
-(`settings.lm.understand_media_model`, default Gemini 3.5 Flash, which natively
-decodes those bytes). The media model's provider is picked by the model prefix
-through the same model factory every LLM path uses, and
-`AVA_UNDERSTAND_MEDIA_BASE_URL` can point the Gemini branch at a self-hosted
-relay or mirror. The media wire format is Gemini-specific, so the path currently
-supports Gemini models only — a non-Gemini media model fails fast with a clear
-error; the abstraction (factory routing, endpoint override, quality knobs) is in
-place so a second media provider can plug in with its own part conversion.
-`effort` (default `max`) controls the answering model's reasoning depth; the
-per-modality mapping is on the entry point below."""
+"""Understand almost any input — text, images, video, audio, PDF — by asking a
+question about it.
+"""
 
 from __future__ import annotations
 
@@ -162,27 +138,12 @@ def understand[TargetValue: str | list[str]](
     """Answer a prompt about each target in parallel.
 
     Each target is a dict with `prompt` plus exactly one of `text` / `paths`.
-    `paths` is a non-empty list of file paths (text, image, video, audio, or
-    PDF). The files are sent together in ONE model call as separate parts;
-    any media file makes the whole call run on the
-    media model, and text files in the list ride along as text parts. `text`
-    is the material itself as a literal string. A failed model call raises
-    `ava.understand.UnderstandError`.
+    `paths` is a non-empty list of file paths (text, image, video, audio, PDF),
+    sent together in one model call; any media file routes the call to the media model.
 
-    `effort` sets the answering model's reasoning depth, one of `none` / `low`
-    / `medium` / `high` / `xhigh` / `max` (also available as
-    `ava.understand.ReasoningEffort`). Default `max` — the deepest reasoning
-    the model supports. The media path maps it onto Gemini's
-    `thinking_level` (no `max` level there): `max` keeps the configured
-    `AVA_UNDERSTAND_MEDIA_THINKING_LEVEL` knob; other levels map to
-    `minimal`/`low`/`medium`/`high` (`none` → `minimal`, `xhigh` → `high`).
-
-    `max_concurrent` caps parallel targets; the default is 12. Pass a positive
-    integer to choose a different ceiling.
-
-    Every result is auto-saved to `.exec_output/` in your workspace; the path
-    is logged at debug level.
-
+    `effort` (`none` … `max`, default `max`) sets the answering model's reasoning
+    depth; `max_concurrent` (default 12) caps parallel targets. Results are
+    auto-saved to `.exec_output/` in your workspace.
     Returns:
         One answer per target, in input order.
     """
