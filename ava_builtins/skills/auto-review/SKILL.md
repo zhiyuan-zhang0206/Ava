@@ -84,8 +84,8 @@ Not the coverage percentage (CI gates that already) — the judgment:
 ### 6. Architecture consistency
 - Is new code in the correct layer (`shared < ava < agent < gateway`)?
 - Any reverse-direction layer dependency that shouldn't exist?
-- Per-file line budget (600 soft / 800 hard) — flag only what the structure lint
-  does not already block.
+- Structure budgets (800 lines/file, 20 entries/directory; shrink-only baseline)
+  — flag only what the structure lint does not already block.
 
 ### 7. Numeric limits
 Per `conventions/numeric-limits.md`: a new or changed limit/cap is either cluster

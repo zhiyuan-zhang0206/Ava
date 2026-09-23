@@ -15,16 +15,38 @@ Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 `_TYPE_CHECKING_ALLOWED` with a reason. This rule is lint-enforced by
 `scripts/lint_code_structure.py`.
 
-## Per-file line budget: 600 soft / 800 hard
+## Per-file line budget: 800 lines
 
-- ≤600 lines: normal.
-- 600–800: transitional zone — tolerated, listed as a non-blocking nudge on a
-  full run.
-- >800: fails lint. No exemption — split into focused modules.
+A `.py` file may contain at most 800 lines (`len(text.splitlines())`). Split
+larger files into focused modules. The budget covers the eight governed
+packages (`agent`, `ava`, `ava_builtins`, `gateway`, `shared`, `services`, `ops`,
+`cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and machine_role()
+allowlist still apply only to the eight packages.
 
-Scope (`_SCAN_DIRS`) tracks `[tool.importlinter] root_packages`, so a package
-declared a layer is gated. Enforced by
-`scripts/lint_code_structure.py`.
+Existing over-limit files are frozen in `scripts/structure/baseline.json`.
+New violations and growth above a frozen value fail the gate. The baseline is
+shrink-only: a guard compares it with git HEAD and rejects added entries or
+raised values. After splitting a file, lower its baseline value by hand to
+its current line count, or remove its entry once it is within budget. If the
+baseline is absent in HEAD (its introduction), the guard emits a short note
+and skips that comparison. Enforced by `scripts/lint_code_structure.py`.
+
+## Directory budget: ≤20 direct entries
+
+Each directory in the same scope may have at most 20 direct entries:
+`.py` and `.pyi` files plus direct subdirectories. A subdirectory counts as
+one regardless of its contents; each level is checked independently.
+`__pycache__`, dot-prefixed entries, and symlinks do not count and are not
+traversed. `migrations` subtrees are entirely exempt. `docs/` and `ui/` are
+outside the scope.
+
+Existing over-limit directories are frozen in the `directories` object of
+`scripts/structure/baseline.json`, with the same containment and shrink-only
+rules as files. After reorganizing a directory, lower its count by hand or
+remove its entry when it reaches the cap. A full gate run checks the whole
+scope; an explicit directory target checks itself and its descendants, and
+an explicit file target checks the file and its containing directory. The
+baseline guard runs in both modes.
 
 ## No `print()` in framework code
 

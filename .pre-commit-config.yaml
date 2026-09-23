@@ -194,15 +194,16 @@ repos:
         pass_filenames: false
 
       # Structural lints for agent legibility — bans `if TYPE_CHECKING:` import
-      # folding and enforces the 800-line per-file ceiling (600-800 = nudge).
+      # folding; budgets are 800 lines/file and 20 direct entries/directory,
+      # over packages + tests/scripts, with a frozen shrink-only baseline.
       # Rules + the _TYPE_CHECKING_ALLOWED list live in
       # scripts/lint_code_structure.py header. (print() bans are enforced by
       # ruff T20, not here.)
       - id: lint-code-structure
-        name: lint code structure (no TYPE_CHECKING, file size ceiling)
+        name: lint code structure (AST rules, file/directory budgets)
         entry: .venv/bin/python scripts/lint_code_structure.py
         language: system
-        types: [python]
+        always_run: true  # Baseline JSON and directories can change without Python edits.
         pass_filenames: false
 
       # AGENTS.md line-count ceiling (constants in the script; hard + a
