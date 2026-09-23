@@ -30,8 +30,9 @@
 # from a runner's rendered config entirely).
 receivers:
   otlp:
-    # OTLP/HTTP only — every Ava producer speaks OTLP/HTTP (shared/
-    # telemetry_otlp.py rejects non-http schemes); no dead gRPC receiver.
+    # OTLP/HTTP only — every Ava producer speaks OTLP/HTTP
+    # (shared/telemetry/otlp/telemetry_otlp.py rejects non-http schemes);
+    # no dead gRPC receiver.
     # The receiver endpoint is baked from AVA_TELEMETRY_OTLP_PORT at converge
     # (default 127.0.0.1:4318 — the standard OTLP port; single source in
     # shared/config/observability.py, task #1945).

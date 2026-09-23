@@ -202,7 +202,7 @@ def _init_logger(agent_id: int | None) -> None:
     With the sink in place, the boot timing line becomes the child's first
     event-pipeline record, so the OTLP side is armed for deferred export here,
     before any record can flow (task #3816 M4b; see
-    `shared.telemetry_otlp_defer`). A failed sink registration skips the arm."""
+    `shared.telemetry.otlp.telemetry_otlp_defer`). A failed sink registration skips the arm."""
     if agent_id is None:
         return
     init_subprocess_logger(agent_id=agent_id)
@@ -217,7 +217,7 @@ def _init_logger(agent_id: int | None) -> None:
             agent_id=agent_id,
         )
         return
-    from shared import telemetry_otlp
+    from shared.telemetry.otlp import telemetry_otlp
 
     telemetry_otlp.defer_until_exit()
 
@@ -226,7 +226,7 @@ def _emit_child_boot_timing() -> None:
     """Record the child-ready boundary before executing agent-authored code."""
     duration_ms = (time.perf_counter() - _CHILD_BOOT_STARTED_AT) * 1000
     extra: dict[str, object] = {}
-    module = sys.modules.get("shared.telemetry_otlp")
+    module = sys.modules.get("shared.telemetry.otlp.telemetry_otlp")
     if module is not None and hasattr(module, "deferred_state"):
         # Diagnostic marker (task #3816 M4b): held for deferred export?
         extra["otlp_deferred"] = module.deferred_state()
@@ -408,8 +408,8 @@ def _finalize_telemetry() -> None:
     from shared import telemetry
 
     telemetry.sync()
-    if "shared.telemetry_otlp" in sys.modules:
-        from shared import telemetry_otlp
+    if "shared.telemetry.otlp.telemetry_otlp" in sys.modules:
+        from shared.telemetry.otlp import telemetry_otlp
 
         telemetry_otlp.finalize()
 
@@ -475,8 +475,8 @@ def _run(request_path: str, result_path: str) -> None:
             bind_child_incarnation(request.incarnation)
         _init_logger(request.agent_id)
         # No eager OTLP warmup: the backend comes up lazily on the first export
-        # (shared.telemetry_otlp._ensure), so a zero-record child never imports
-        # the OTel SDK at all (task #3816 M3).
+        # (`_ensure()` in shared/telemetry/otlp/telemetry_otlp.py), so a zero-record
+        # child never imports the OTel SDK at all (task #3816 M3).
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
     # plugins load (apply_config_overlay needs _PLUGIN_CONFIGS bound first).

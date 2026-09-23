@@ -12,7 +12,7 @@ tags:
 
 # OTLP metrics mapping
 
-`_record_metrics` (in `shared/telemetry_otlp.py`) maps telemetry-category
+`_record_metrics` (in `shared/telemetry/otlp/telemetry_otlp.py`) maps telemetry-category
 events to OTLP instruments; log/audit events are the event stream, not a
 measurement, and produce no metrics.
 
@@ -70,7 +70,7 @@ values are skipped (an absent optional metric is not zero).
 ## Resource
 
 The MeterProvider's Resource carries `service.name=ava-<process>` (the
-bounded process dimension, `shared/telemetry.py:process_name`), a
+bounded process dimension, `shared/telemetry/emitter.py:process_name`), a
 per-instance `service.instance.id` (uuid4) and
 `service.version`, plus the home-derived `cluster` label. Without the service
 identity every series landed as

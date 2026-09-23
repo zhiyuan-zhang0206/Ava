@@ -244,7 +244,7 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
         cur.execute("UPDATE agents_meta SET last_heartbeat_at = now() WHERE id = %s", (agent_id,))
         # The event name 'heartbeat_nudged' is stored row data — renaming it
         # would strand the existing history. Emit through the unified pipeline
-        # (`shared/telemetry.py`).
+        # (`shared/telemetry/emitter.py`).
         #
         # ts time-source note: the emitter stamps datetime.now(UTC) at ENQUEUE
         # time (process clock, one time source for the whole stream) — the old

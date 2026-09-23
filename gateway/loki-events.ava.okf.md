@@ -15,7 +15,7 @@ tags:
 `gateway/loki_events.py` is the historical read path that replaced the PG
 `events` table reads (task #1197 — the LGTM cutover, user decision 2026-08-12:
 all event history reads serve from Loki). The write side
-(`shared/telemetry_otlp.py`, [[shared/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]])
+(`shared/telemetry/otlp/telemetry_otlp.py`, [[shared/telemetry/otlp/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]])
 ships every event as an OTLP log whose line body is the full event JSON and
 whose top-level fields, including the home-derived `cluster`, ride as
 structured metadata.
@@ -125,4 +125,4 @@ structured metadata.
   three functions), `tests/gateway/test_agent_inspect.py` (route tests with
   an in-memory `_FakeLoki`).
 - Parent node: [[gateway.ava.okf.md|Gateway]]; write side:
-  [[shared/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]].
+  [[shared/telemetry/otlp/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]].

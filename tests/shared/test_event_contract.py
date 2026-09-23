@@ -260,7 +260,7 @@ def test_delivery_outbox_payloads_name_the_evidence() -> None:
 def test_gateway_observability_payloads_and_gauge_dispositions() -> None:
     """Gateway absolute state is gauged; interval counts remain counters."""
     from shared.events.contract import payload_keys
-    from shared.telemetry_otlp import _METRIC_DISPOSITION
+    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 
     assert payload_keys("sse") == ("mode", "active_connections", "opened", "closed")
     assert payload_keys("gateway_process") == ("cpu_percent", "rss_bytes", "fd_count")
@@ -286,7 +286,7 @@ def test_checkpoint_table_sizes_payload_and_metric_disposition() -> None:
     physical sizes plus the three live row counts (live growth vs dead-tuple
     bloat are separable in the growth curve)."""
     from shared.events.contract import payload_keys
-    from shared.telemetry_otlp import _METRIC_DISPOSITION
+    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 
     assert payload_keys("checkpoint_table_sizes") == (
         "blobs_bytes",
@@ -338,7 +338,7 @@ def test_pr_flow_payloads_and_metric_dispositions() -> None:
     Counter and accrue across re-emissions, a float to a Histogram — each
     must be dispositioned as a gauge (task #2139)."""
     from shared.events.contract import payload_keys
-    from shared.telemetry_otlp import _METRIC_DISPOSITION
+    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 
     assert payload_keys("pr_flow_daily") == (
         "day",
@@ -368,7 +368,7 @@ def test_agent_registry_payload_and_metric_disposition() -> None:
     gauge (task #2010) — an int would otherwise default to a Counter and
     accrue value on every sample."""
     from shared.events.contract import payload_keys
-    from shared.telemetry_otlp import _METRIC_DISPOSITION
+    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 
     assert payload_keys("agent_registry") == ("max_id",)
     assert _METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
@@ -380,7 +380,7 @@ def test_memory_search_stats_payload_and_metric_disposition() -> None:
     every sample; last_save_seconds a float that would default to a
     Histogram. Both must be declared gauges (task #2088)."""
     from shared.events.contract import payload_keys
-    from shared.telemetry_otlp import _METRIC_DISPOSITION
+    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 
     assert payload_keys("memory_search_stats") == ("rows", "last_save_seconds")
     assert _METRIC_DISPOSITION[("memory_search_stats", "rows")] == "gauge"
@@ -391,7 +391,7 @@ def test_watchdog_tick_payload_and_metric_disposition() -> None:
     """A completed watchdog round publishes its wall-clock timestamp as a
     gauge, so Prometheus exposes freshness rather than a meaningless sum."""
     from shared.events.contract import payload_keys
-    from shared.telemetry_otlp import _METRIC_DISPOSITION
+    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 
     assert payload_keys("watchdog_tick") == ("last_tick_timestamp_seconds",)
     assert _METRIC_DISPOSITION[("watchdog_tick", "last_tick_timestamp_seconds")] == "gauge"
@@ -400,7 +400,7 @@ def test_watchdog_tick_payload_and_metric_disposition() -> None:
 def test_pitr_remote_inventory_payload_and_metric_disposition() -> None:
     """A remote inventory sample is absolute backend-scoped state, never a sum."""
     from shared.events.contract import payload_keys
-    from shared.telemetry_otlp import _METRIC_DISPOSITION
+    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 
     assert payload_keys("pitr_remote_inventory") == ("backend", "object_count", "bytes")
     assert _METRIC_DISPOSITION[("pitr_remote_inventory", "object_count")] == "gauge"

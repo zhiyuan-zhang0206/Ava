@@ -278,14 +278,14 @@ class TelemetryReadRecovered(TypedDict):
 
 
 class OtlpBackendDisabled(TypedDict):
-    """`otlp_backend_disabled` payload — shared/telemetry_otlp.py."""
+    """`otlp_backend_disabled` payload — shared/telemetry/otlp/telemetry_otlp.py."""
 
     reason: str
     endpoint: str | None
 
 
 class OtlpBackendRecovered(TypedDict):
-    """`otlp_backend_recovered` payload — shared/telemetry_otlp.py."""
+    """`otlp_backend_recovered` payload — shared/telemetry/otlp/telemetry_otlp.py."""
 
     endpoint: str | None
     disabled_s: float | None

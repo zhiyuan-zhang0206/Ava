@@ -19,7 +19,7 @@ unaggregated count_over_time hits Loki's per-query series cap.
 
 Data provenance: ``syntax_fix`` events carry a ``fixes`` attribute (comma
 list, e.g. ``"ruff_format"``) and are written with ``category='telemetry'`` —
-``syntax_fix`` is in ``shared/telemetry.py``'s telemetry event set
+``syntax_fix`` is in ``shared/telemetry/emitter.py``'s telemetry event set
 (event_name-category final convention, 2026-08-05, tracker #762), so
 ``category_for_kind`` maps it to ``telemetry`` (90d retention). The category
 predicate keeps the ``|log`` alternative for pre-convention rows (the core

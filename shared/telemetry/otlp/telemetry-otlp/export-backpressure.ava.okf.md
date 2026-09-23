@@ -19,7 +19,7 @@ the collector sidecar owns durable mirroring after acceptance.
 
 ## Signal paths
 
-- `shared/telemetry_otlp.py` places events into a bounded 2048-entry queue with
+- `shared/telemetry/otlp/telemetry_otlp.py` places events into a bounded 2048-entry queue with
   `put_nowait`; a full queue increments the cumulative drop counter and reports
   the loss outside the saturated log lane. In-memory metric recording never waits on the
   exporter queue.

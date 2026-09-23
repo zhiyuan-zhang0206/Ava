@@ -78,7 +78,7 @@ from shared.config import settings
 from shared.log import logger
 from shared.observability import cluster_label
 from shared.paths import traces_dir
-from shared.telemetry_otlp import (
+from shared.telemetry.otlp.telemetry_otlp import (
     COLLECTOR_RETRY_INTERVAL_S,
     _observability_export_allowed,
     endpoint_reachable,

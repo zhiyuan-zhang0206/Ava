@@ -50,7 +50,7 @@ class EventRow(BaseModel):
 
     Every signal shares this shape (event-system design doc §1): audit
     (legacy `event_log`), telemetry and log (formerly `agent_events`) all land
-    in it, written through the unified emitter (`shared/telemetry.py`).
+    in it, written through the unified emitter (`shared/telemetry/emitter.py`).
     `trace_id` is the correlation key — one turn = one trace id, every event
     inside it carries the same value. `agent_id` is None for service-level
     events (gateway / daemons); `machine` is the host dimension. `level` is

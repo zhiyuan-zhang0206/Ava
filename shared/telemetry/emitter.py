@@ -16,7 +16,7 @@ interval) to independent sinks:
    class's second, independent failure domain) — then
 2. project compact typed measurements to Postgres (`shared.observed_metrics`),
    best-effort and idempotent; no event or checkpoint bodies are stored — then
-3. export the batch to the OTLP backend (`shared.telemetry_otlp`) — events ->
+3. export the batch to the OTLP backend (`shared.telemetry.otlp.telemetry_otlp`) — events ->
    OTLP logs (Loki), telemetry numeric payloads -> OTLP metrics (Prometheus) —
    when `AVA_TELEMETRY_OTLP_ENABLED` is on (default). Fully failure-isolated:
    the OTLP side sheds instead of blocking; see telemetry_otlp's docstring
@@ -375,11 +375,11 @@ def _export_otlp(events: list[Event]) -> None:
 
     Runs on the drain thread right after the JSONL mirror write. The OTLP
     side is fully failure-isolated (bounded queue, drop semantics, SDK-owned
-    export threads — see `shared.telemetry_otlp`), and this call is
+    export threads — see `shared.telemetry.otlp.telemetry_otlp`), and this call is
     suppressed end to end, so even a programming error there must not cost
     the batch its mirror copy or raise into the drain thread."""
     with contextlib.suppress(Exception):
-        from shared import telemetry_otlp  # deferred — heavy OTel imports
+        from shared.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
 
         telemetry_otlp.export_batch(events)
 
@@ -792,7 +792,7 @@ def _drain_on_exit() -> None:
 
         close_projection()
     with contextlib.suppress(Exception):
-        from shared import telemetry_otlp  # deferred — heavy OTel imports
+        from shared.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
 
         telemetry_otlp.shutdown()
 

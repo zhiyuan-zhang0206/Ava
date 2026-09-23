@@ -548,7 +548,7 @@ class PrFlowDaily(TypedDict):
     on every run so the whole window stays inside Prometheus's retention.
     Every numeric field is absolute per-day state, never a sum, and the OTLP
     disposition records each as an ObservableGauge
-    (``shared/telemetry_otlp.py``) — a counter or histogram would accrue
+    (``shared/telemetry/otlp/telemetry_otlp.py``) — a counter or histogram would accrue
     across re-emissions. Fields are absent when the day has no such sample
     (no merges -> no percentile/round values; an unreachable flaky source
     omits ``flake_new_quarantines`` rather than claiming zero).
