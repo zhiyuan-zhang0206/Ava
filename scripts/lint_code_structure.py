@@ -1,5 +1,5 @@
 """Structural lints that keep the codebase legible to agents: no `TYPE_CHECKING`
-import-folding, role-call allowlisting, and frozen file/directory budgets.
+import-folding, role-call allowlisting, and frozen structure/function budgets.
 
 Run: `.venv/bin/python scripts/lint_code_structure.py [path ...]` (defaults to the
 whole repo; an explicit path that does not exist is an error (stderr + exit 1)
@@ -50,9 +50,15 @@ AST rules retain their governed-package scope.
 
 scripts/structure/baseline.json freezes existing over-limit counts. New or growing
 violations fail; the baseline itself may only lose entries or lower values versus
-HEAD. After splitting, shrink the relevant baseline values or remove fixed entries
+the configured base (or merge-base with origin/main, falling back to HEAD).
+After splitting, shrink the relevant baseline values or remove fixed entries
 by hand. Explicit targets restrict budget checks to the selected files/directories;
 a file also checks its parent directory. The baseline guard always runs.
+
+Function budgets: Radon 6.0.1 CC >=15 is hard, 10-14 warns; control-flow nesting
+>5 is hard. The complexity/nesting baseline sections use path::qualname keys.
+Same-file one-to-one removals may cover renamed keys with equal or lower values.
+Use --complexity-warnings-full anywhere in argv to unfold all warning file counts.
 """
 
 from __future__ import annotations
@@ -65,6 +71,10 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import quality_budget as quality  # noqa: E402 — standalone script
+
 _HARD_CEILING = 800
 _DIRECTORY_CEILING = 20
 _BASELINE_PATH = "scripts/structure/baseline.json"
@@ -189,15 +199,15 @@ def _type_checking_violations(tree: ast.Module) -> list[int]:
     return hits
 
 
-def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str]]:
+def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> list[tuple[int, str]]:
     """Return AST violations as [(lineno, message), ...]."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return []  # unreadable entry (e.g. a dangling symlink) or binary content
+    if tree is None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return []  # unreadable entry (e.g. a dangling symlink) or binary content
+        tree = ast.parse(text, filename=rel_path)
     out: list[tuple[int, str]] = []
-
-    tree = ast.parse(text, filename=rel_path)
 
     if rel_path not in _TYPE_CHECKING_ALLOWED:
         for lineno in _type_checking_violations(tree):
@@ -306,10 +316,20 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
     return files, directories
 
 
-def _parse_baseline(text: str) -> dict[str, dict[str, int]]:
+def _parse_baseline(text: str, *, allow_legacy: bool = False) -> dict[str, dict[str, int]]:
     baseline = json.loads(text)
-    if not isinstance(baseline, dict) or set(baseline) != {"directories", "files"}:
-        raise ValueError("expected exactly 'directories' and 'files' objects")
+    sections = {"directories", "files", *quality.QUALITY_SECTIONS}
+    allowed = [sections, {"directories", "files"}] if allow_legacy else [sections]
+    if not isinstance(baseline, dict) or set(baseline) not in allowed:
+        raise ValueError("expected directories, files, complexity and nesting objects")
+    for kind in quality.QUALITY_SECTIONS:
+        if kind in baseline:
+            quality.validate_quality_entries(kind, baseline[kind], _STRUCTURE_DIRS)
+    _validate_structure_entries(baseline)
+    return baseline
+
+
+def _validate_structure_entries(baseline: dict[str, dict[str, int]]) -> None:
     for kind, ceiling in (("directories", _DIRECTORY_CEILING), ("files", _HARD_CEILING)):
         entries = baseline[kind]
         if not isinstance(entries, dict):
@@ -330,37 +350,79 @@ def _parse_baseline(text: str) -> dict[str, dict[str, int]]:
                 raise ValueError(
                     f"invalid {kind} entry {name!r}: expected a scoped path and integer > {ceiling}"
                 )
-    return baseline
+
+
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 — local git query, no shell
+        ["git", "-C", str(_REPO_ROOT), *args], capture_output=True, text=True, check=False
+    )
+
+
+def _baseline_base() -> str:
+    if "LINT_STRUCTURE_BASELINE_BASE" in os.environ:
+        ref = os.environ["LINT_STRUCTURE_BASELINE_BASE"]
+        for args in (
+            ("merge-base", "--", "HEAD", ref),
+            ("rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"),
+        ):
+            result = _git(*args)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        raise ValueError(f"LINT_STRUCTURE_BASELINE_BASE={ref!r} cannot resolve to a commit")
+    if _git("rev-parse", "--verify", "origin/main^{commit}").returncode == 0:
+        result = _git("merge-base", "HEAD", "origin/main")
+        if result.returncode == 0:
+            return result.stdout.strip()
+        print("note: origin/main merge-base unavailable; falling back to HEAD", file=sys.stderr)
+    return "HEAD"
+
+
+def _section_guard(kind: str, current: dict[str, int], previous: dict[str, int]) -> list[str]:
+    errors: list[str] = []
+    additions = current.keys() - previous.keys()
+    if kind in quality.QUALITY_SECTIONS:
+        additions = set(quality.unpaired_additions(current, previous))
+    for name in sorted(additions):
+        rule = (
+            "added key without a paired same-file removal of equal or greater value"
+            if kind in quality.QUALITY_SECTIONS
+            else "baseline is shrink-only"
+        )
+        errors.append(f"{_BASELINE_PATH}: added {kind} entry {name} — {rule}")
+    for name in sorted(current.keys() & previous.keys()):
+        if current[name] > previous[name]:
+            errors.append(
+                f"{_BASELINE_PATH}: raised {kind} entry {name} from {previous[name]} "
+                f"to {current[name]} — baseline is shrink-only"
+            )
+    return errors
 
 
 def _baseline_guard(baseline: dict[str, dict[str, int]]) -> list[str]:
-    result = subprocess.run(  # noqa: S603 — fixed local git query, no shell
-        ["git", "-C", str(_REPO_ROOT), "show", f"HEAD:{_BASELINE_PATH}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        base = _baseline_base()
+    except ValueError as exc:
+        return [f"{_BASELINE_PATH}: {exc}"]
+    result = _git("show", f"{base}:{_BASELINE_PATH}")
     if result.returncode:
         print(
-            f"note: baseline guard skipped: git HEAD:{_BASELINE_PATH} unavailable", file=sys.stderr
+            f"note: baseline guard skipped: git {base}:{_BASELINE_PATH} unavailable",
+            file=sys.stderr,
         )
         return []
     try:
-        previous = _parse_baseline(result.stdout)
+        previous = _parse_baseline(result.stdout, allow_legacy=True)
     except ValueError as exc:
-        return [f"{_BASELINE_PATH}: invalid HEAD baseline: {exc}"]
-    errors = []
-    for kind in ("directories", "files"):
-        for name, count in baseline[kind].items():
-            if name not in previous[kind]:
-                errors.append(
-                    f"{_BASELINE_PATH}: added {kind} entry {name} — baseline is shrink-only"
-                )
-            elif count > previous[kind][name]:
-                errors.append(
-                    f"{_BASELINE_PATH}: raised {kind} entry {name} from {previous[kind][name]} "
-                    f"to {count} — baseline is shrink-only"
-                )
+        return [f"{_BASELINE_PATH}: invalid base baseline ({base}): {exc}"]
+    errors: list[str] = []
+    for kind, entries in baseline.items():
+        if kind not in previous:
+            print(
+                f"note: {kind} baseline guard skipped: section absent at base {base}",
+                file=sys.stderr,
+            )
+        else:
+            errors.extend(_section_guard(kind, entries, previous[kind]))
     return errors
 
 
@@ -376,7 +438,7 @@ def _budget_error(value: int, ceiling: int, name: str, baseline: dict[str, int])
 
 def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> list[str]:
     files, directories = _budget_targets(targets)
-    errors = []
+    errors: list[str] = []
     for path in sorted(files):
         try:
             count = len(path.read_text(encoding="utf-8").splitlines())
@@ -402,8 +464,48 @@ def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> 
     return errors
 
 
+def _ast_rule_files(argv: list[str]) -> set[Path]:
+    # Preserve the AST rules' original resolved-target scope, including aliases.
+    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+    return set(_iter_py_files(targets))
+
+
+def _check_ast_and_quality(
+    argv: list[str], targets: list[Path], baseline: dict[str, dict[str, int]], *, full: bool
+) -> list[str]:
+    files, _ = _budget_targets(targets)
+    ast_files = _ast_rule_files(argv)
+    measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality.QUALITY_SECTIONS}
+    errors: list[str] = []
+    for path in sorted(files | ast_files):
+        try:
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+        except ValueError:
+            continue
+        ast_rules = path in ast_files and _in_scan_scope(rel)
+        if path not in files and not ast_rules:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        tree = ast.parse(text, filename=rel)
+        if ast_rules:
+            errors.extend(
+                f"{rel}:{line}: {message}" for line, message in _scan_file(path, rel, tree)
+            )
+        if path in files:
+            for kind, values in quality.measure_quality(tree, rel).items():
+                measurements[kind].update(values)
+    errors.extend(quality.quality_errors(measurements, baseline))
+    quality.render_warnings(measurements["complexity"], full=full)
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    full = "--complexity-warnings-full" in argv
+    argv = [arg for arg in argv if arg != "--complexity-warnings-full"]
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
@@ -422,17 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     errors = _baseline_guard(baseline)
     errors.extend(_check_budgets(targets, baseline))
-    # AST rules retain their original explicit-target resolution and package scope.
-    ast_targets = (
-        [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
-    )
-    for path in sorted(set(_iter_py_files(ast_targets))):
-        try:
-            rel = path.relative_to(_REPO_ROOT).as_posix()
-        except ValueError:
-            continue
-        if _in_scan_scope(rel):
-            errors.extend(f"{rel}:{lineno}: {message}" for lineno, message in _scan_file(path, rel))
+    errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full))
     for error in errors:
         print(error)
     if errors:
