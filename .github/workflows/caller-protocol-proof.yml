@@ -2,6 +2,36 @@ name: Caller protocol integration proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'agent/db.py'
+      - 'agent/hosted_ownership.py'
+      - 'agent/graph/_chat_inbound.py'
+      - 'services/agent_host/**'
+      - 'gateway/mcp_endpoint.py'
+      - 'gateway/routers/_delivery.py'
+      - 'gateway/routers/agents*.py'
+      - 'cli/commands/agents.py'
+      - 'ops/rpc_schemas.py'
+      - 'shared/audit_events.py'
+      - 'shared/caller*.py'
+      - 'shared/chat_delivery.py'
+      - 'shared/db.py'
+      - 'shared/envelope.py'
+      - 'shared/runtime_incarnation.py'
+      - 'shared/turn_identity.py'
+      - 'tests/gateway/test_*caller*.py'
+      - 'tests/gateway/test_mcp_endpoint.py'
+      - 'tests/shared/test_caller_persistence.py'
+      - 'tests/agent/test_hosted_ownership.py'
+      - 'tests/conftest.py'
+      - 'tests/_*.py'
+      - 'db/schema.sql'
+      - 'migrations/**'
+      - '.github/actions/install-pg-redis/**'
+      - '.github/actions/uv-sync/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/caller-protocol-proof.yml'
 permissions:
   contents: read
 jobs:

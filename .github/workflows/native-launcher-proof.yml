@@ -2,6 +2,23 @@ name: Native launcher observation proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'shared/native_job_observation.py'
+      - 'shared/managed_writer_observation.py'
+      - 'shared/managed_writer_barrier.py'
+      - 'shared/daemon_http.py'
+      - 'shared/transport_encryption.py'
+      - 'services/agent_ops/bootstrap.py'
+      - 'scripts/prove_native_launcher_reads.py'
+      - 'tests/shared/test_native_job_observation.py'
+      - 'tests/shared/test_managed_writer_observation.py'
+      - 'tests/conftest.py'
+      - 'tests/_*.py'
+      - '.github/actions/install-pg-redis/**'
+      - '.github/actions/uv-sync/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/native-launcher-proof.yml'
 permissions:
   contents: read
 jobs:

@@ -52,7 +52,7 @@ middle integration layer is a documented vacuum — 9 integration tests for
 # in the worktree
 bash scripts/setup-worktree.sh   # first use only
 .venv/bin/pytest <touched-test-files> -q
-.venv/bin/pyright                  # pre-commit will gate anyway
+.venv/bin/pyright                  # guarded pre-push locally; CI enforces independently
 ```
 
 See `.agents/skills/run-local-tests/SKILL.md` for the full matrix. Rules:
