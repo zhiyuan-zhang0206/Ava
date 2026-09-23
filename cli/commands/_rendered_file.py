@@ -6,7 +6,7 @@ hash was hand-edited by the user, so converge warns and preserves it instead of
 overwriting. Used by the LGTM provisioning renderer and the otel-collector
 config renderer (task #1791, A3). A preserve hit additionally reports one
 `converge_file_preserved` telemetry event through
-shared/converge_preserve_report.py (task #3871).
+shared/host/converge/converge_preserve_report.py (task #3871).
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from shared.converge_preserve_report import report_converge_preserve
+from shared.host.converge.converge_preserve_report import report_converge_preserve
 
 
 def write_rendered_guarded(
@@ -45,7 +45,7 @@ def write_rendered_guarded(
 
     ``surface`` names the renderer (e.g. ``lgtm-dashboard``,
     ``otel-collector``); a preserve hit reports it through
-    shared/converge_preserve_report.py as one ``converge_file_preserved``
+    shared/host/converge/converge_preserve_report.py as one ``converge_file_preserved``
     telemetry event.
 
     Returns the warning string when the file was preserved, else None.
