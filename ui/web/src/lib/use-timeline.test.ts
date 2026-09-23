@@ -928,6 +928,84 @@ describe("useTimeline agentId switch", () => {
     expect(showError).not.toHaveBeenCalled();
   });
 
+  it("All walks through a long segment and more than three previous pages, then stops at has_more=false", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({ settings: [
+      { key: "display.compact_history_sessions", value: -1, updated_at: "2026-09-24T00:00:00Z" },
+    ] });
+    const pages: Record<string, TimelineResponse> = {
+      "2.0": tlResp([snapshotItem({ item_id: "1.5", payload: "same long segment" })], true),
+      "1.5": tlResp([snapshotItem({ item_id: "s1.a.0.0", kind: "inbound_compact_summary", payload: "first" })], true),
+      "s1.a.0.0": tlResp([snapshotItem({ item_id: "s2.b.0.0", kind: "inbound_compact_summary", payload: "second" })], true),
+      "s2.b.0.0": tlResp([snapshotItem({ item_id: "s3.c.0.0", kind: "inbound_compact_summary", payload: "third" })], true),
+      "s3.c.0.0": tlResp([snapshotItem({ item_id: "s4.d.0.0", kind: "inbound_compact_summary", payload: "fourth" })], false),
+    };
+    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => Promise.resolve(opts?.before ? pages[opts.before] ?? tlResp([], false) : tlResp(postWindow(), true)));
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(3));
+    await waitFor(() => expect(queryClient.getQueryData(SETTINGS_QUERY_KEY)).toBeTruthy());
+
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: postWindow() });
+    await waitFor(() => expect(result.current.items.some((item) => item.item_id === "s4.d.0.0")).toBe(true));
+    const beforeCalls = () => vi.mocked(api.getTimeline).mock.calls.map(([, opts]) => opts?.before).filter((before) => before !== undefined);
+    expect(beforeCalls()).toEqual(["2.0", "1.5", "s1.a.0.0", "s2.b.0.0", "s3.c.0.0"]);
+    act(() => useTimelineStore.setState((state) => ({ items: [...state.items, snapshotItem({ item_id: "3.0" })] })));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(beforeCalls()).toHaveLength(5);
+  });
+
+  it("All waits for the post-compact tail read before deciding whether older history exists", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({ settings: [
+      { key: "display.compact_history_sessions", value: -1, updated_at: "2026-09-24T00:00:00Z" },
+    ] });
+    let postTailResolve: ((value: TimelineResponse) => void) | null = null;
+    let postCompact = false;
+    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
+      if (opts?.before) return Promise.resolve(tlResp([
+        snapshotItem({ item_id: "s1.a.1.0", payload: "retained" }),
+      ], false));
+      if (!postCompact) return Promise.resolve(tlResp([
+        snapshotItem({ item_id: "90.0", payload: "before compact" }),
+      ], false));
+      return new Promise<TimelineResponse>((resolve) => { postTailResolve = resolve; });
+    });
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items[0]?.payload).toBe("before compact"));
+    await waitFor(() => expect(queryClient.getQueryData(SETTINGS_QUERY_KEY)).toBeTruthy());
+    postCompact = true;
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: postWindow() });
+    await waitFor(() => expect(postTailResolve).not.toBeNull());
+    expect(vi.mocked(api.getTimeline).mock.calls.filter(([, opts]) => opts?.before)).toHaveLength(0);
+    act(() => { postTailResolve!(tlResp(postWindow(), true)); });
+    await waitFor(() => expect(result.current.items.some((item) => item.payload === "retained")).toBe(true));
+    expect(vi.mocked(api.getTimeline).mock.calls.filter(([, opts]) => opts?.before)).toHaveLength(1);
+  });
+
+  it("All retries a failed history page and stops after the successful terminal page", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({ settings: [
+      { key: "display.compact_history_sessions", value: -1, updated_at: "2026-09-24T00:00:00Z" },
+    ] });
+    let olderAttempts = 0;
+    vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
+      if (!opts?.before) return Promise.resolve(tlResp(postWindow(), true));
+      olderAttempts += 1;
+      if (olderAttempts === 1) return Promise.reject(new Error("transient"));
+      return Promise.resolve(tlResp([snapshotItem({ item_id: "s1.a.1.0", payload: "recovered" })], false));
+    });
+    const showError = vi.fn();
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(3));
+    await waitFor(() => expect(queryClient.getQueryData(SETTINGS_QUERY_KEY)).toBeTruthy());
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: postWindow() });
+    await waitFor(() => expect(olderAttempts).toBe(1));
+    act(() => useTimelineStore.setState((state) => ({ items: [...state.items, snapshotItem({ item_id: "3.0" })] })));
+    await waitFor(() => expect(result.current.items.some((item) => item.payload === "recovered")).toBe(true));
+    expect(olderAttempts).toBe(2);
+    expect(showError).toHaveBeenCalledWith("Failed to load older messages: transient");
+  });
+
   it("display.compact_history_sessions = 0 keeps the legacy clear-on-compact behavior (no retention fetch)", async () => {
     const showError = vi.fn();
     vi.mocked(api.getSettings).mockResolvedValue({
@@ -2035,11 +2113,11 @@ describe("compact retention request ownership", () => {
     expect(vi.mocked(api.getTimeline).mock.calls.filter((call) => call[1]?.before)).toHaveLength(1);
   });
 
-  it.each(["switch", "hidden", "unmount", "clear"])("%s cancels automatic history and rejects its late completion", async (cause) => {
+  it.each(["switch", "hidden", "unmount", "clear"].flatMap((cause) => [2, -1].map((retention) => ({ cause, retention }))))("$cause cancels retention $retention and rejects its late completion", async ({ cause, retention }) => {
     const pages: { signal: AbortSignal; resolve: (page: TimelineResponse) => void }[] = [];
     const showError = vi.fn();
     vi.mocked(api.getSettings).mockResolvedValue({ settings: [
-      { key: "display.compact_history_sessions", value: 2, updated_at: "2026-09-17T00:00:00Z" },
+      { key: "display.compact_history_sessions", value: retention, updated_at: "2026-09-17T00:00:00Z" },
     ] });
     vi.mocked(api.getTimeline).mockImplementation((_id, opts) => {
       if (!opts?.before) return Promise.resolve(tlResp(postWindow(), true));
