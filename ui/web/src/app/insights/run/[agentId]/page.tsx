@@ -12,6 +12,7 @@ import {
   type TimelineContextView,
 } from "@/components/run-timeline/context-view";
 import { RunTimelineChart } from "@/components/run-timeline/run-timeline-chart";
+import { RunTimelineChartSkeleton } from "@/components/run-timeline/run-timeline-skeleton";
 import type { TimelineCrumbEntry } from "@/components/run-timeline/run-timeline-crumbs";
 import {
   bucketLabel,
@@ -441,15 +442,13 @@ export default function RunTimelinePage({
           </div>
 
           <section
-            className="space-y-3 rounded border border-border bg-card p-4"
+            className="min-h-[74px] space-y-1 rounded border border-border bg-card p-2"
+            data-testid="run-timeline-session"
             style={{ marginTop: 0 }}
           >
-            <div>
-              <h2 className="text-sm font-semibold">{t("session")}</h2>
-              <p className="text-xs text-muted-foreground">
-                {session === "compact" ? t("compactDescription") : t("currentDescription")}
-              </p>
-              <div className={cn(FLEX, "mt-2 gap-1")} role="group" aria-label={t("session")}>
+            <div className={cn(FLEX, "flex-wrap items-start justify-between gap-2")}>
+              <div className={cn(FLEX, "flex-wrap items-center gap-1")} role="group" aria-label={t("session")}>
+                <h2 className="mr-2 text-xs font-semibold">{t("session")}</h2>
                 <button
                   type="button"
                   aria-pressed={session === "compact"}
@@ -473,40 +472,48 @@ export default function RunTimelinePage({
                   {t("currentSession")}
                 </button>
               </div>
+              <details>
+                <summary className="cursor-pointer py-1 text-xs text-muted-foreground">
+                  {t("customWindow")}
+                </summary>
+                <p className="my-2 text-xs text-muted-foreground">
+                  {session === "compact" ? t("compactDescription") : t("currentDescription")}
+                </p>
+                <form
+                  className={cn(FLEX, "flex-wrap items-end gap-2")}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    applyWindow();
+                  }}
+                >
+                  <label className="grid gap-1 text-xs text-muted-foreground">
+                    {t("start")}
+                    <input
+                      aria-label={t("start")}
+                      type="datetime-local"
+                      value={selectedFromInput}
+                      onChange={(event) => setFromInput(event.target.value)}
+                      className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-muted-foreground">
+                    {t("end")}
+                    <input
+                      aria-label={t("end")}
+                      type="datetime-local"
+                      value={selectedToInput}
+                      onChange={(event) => setToInput(event.target.value)}
+                      className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+                    />
+                  </label>
+                  <button type="submit" className={buttonVariants({ size: "sm" })}>
+                    {t("apply")}
+                  </button>
+                </form>
+              </details>
             </div>
-            <form
-              className={cn(FLEX, "flex-wrap items-end gap-2")}
-              onSubmit={(event) => {
-                event.preventDefault();
-                applyWindow();
-              }}
-            >
-              <label className="grid gap-1 text-xs text-muted-foreground">
-                {t("start")}
-                <input
-                  aria-label={t("start")}
-                  type="datetime-local"
-                  value={selectedFromInput}
-                  onChange={(event) => setFromInput(event.target.value)}
-                  className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
-                />
-              </label>
-              <label className="grid gap-1 text-xs text-muted-foreground">
-                {t("end")}
-                <input
-                  aria-label={t("end")}
-                  type="datetime-local"
-                  value={selectedToInput}
-                  onChange={(event) => setToInput(event.target.value)}
-                  className="rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
-                />
-              </label>
-              <button type="submit" className={buttonVariants({ size: "sm" })}>
-                {t("apply")}
-              </button>
-            </form>
             {timeline && timeline.meta.unmatched_turns + timeline.meta.fallback_turns > 0 ? (
-              <p className="rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200" role="alert">
+              <p className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-xs text-amber-800 dark:text-amber-200" role="alert">
                 {t("unmatchedWarning", {
                   count: timeline.meta.unmatched_turns + timeline.meta.fallback_turns,
                 })}
@@ -524,6 +531,24 @@ export default function RunTimelinePage({
 
           {timeline ? (
             <>
+              <RunTimelineChart
+                timeline={timeline}
+                labels={chartLabels(t)}
+                onDrillBucket={drillBucket}
+                onZoomWindow={selectWindow}
+                showSummaries={showTimelineSummaries}
+                flipLayers={flipLayers}
+                trail={trail}
+                onCrumbSelect={selectCrumb}
+                onFocusWindow={focusWindow}
+                minHeight="50vh"
+                withReadout
+                axis={axis}
+                contextView={effectiveContextView}
+                contextTotal={contextTotal}
+                onContextView={updateContextView}
+                onContextFocus={focusContextView}
+              />
               <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
                 {[
                   [t("turns"), String(timeline.meta.n_turns)],
@@ -540,29 +565,11 @@ export default function RunTimelinePage({
                   </div>
                 ))}
               </section>
-              {/* P4-3 (#4023): the context breakdown card — the composer
-                  panel's body rendered inline above the chart (demo order). */}
+              {/* Agent-scoped context details follow the timeline and window metrics. */}
               {agentId !== null ? <ContextBreakdownCard agentId={agentId} /> : null}
-              <RunTimelineChart
-                timeline={timeline}
-                labels={chartLabels(t)}
-                onDrillBucket={drillBucket}
-                onZoomWindow={selectWindow}
-                showSummaries={showTimelineSummaries}
-                flipLayers={flipLayers}
-                trail={trail}
-                onCrumbSelect={selectCrumb}
-                onFocusWindow={focusWindow}
-                withReadout
-                axis={axis}
-                contextView={effectiveContextView}
-                contextTotal={contextTotal}
-                onContextView={updateContextView}
-                onContextFocus={focusContextView}
-              />
             </>
           ) : timelinePending ? (
-            <p className="font-mono text-sm text-muted-foreground">{t("loading")}</p>
+            <RunTimelineChartSkeleton />
           ) : (
             <div className="space-y-2 font-mono text-sm text-destructive" role="alert">
               <p>{t("loadFailed")}</p>

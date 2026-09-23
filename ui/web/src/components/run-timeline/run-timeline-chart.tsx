@@ -60,6 +60,7 @@ export function RunTimelineChart({
   onZoomWindow,
   showSummaries = true,
   widthOverride,
+  minHeight,
   onDetailOpenChange,
   flipLayers,
   trail,
@@ -86,6 +87,8 @@ export function RunTimelineChart({
    *  #3802), so the stacked time axes stay locked together. When set, the
    *  chart stops self-measuring and drops its own min-width floor. */
   widthOverride?: number;
+  /** Single-run pages reserve viewport space; compare lanes keep their content height. */
+  minHeight?: string;
   /** Reports detail-panel visibility; the compare view sizes every lane from
    *  whether ANY lane's panel is open. */
   onDetailOpenChange?: (open: boolean) => void;
@@ -506,7 +509,7 @@ export function RunTimelineChart({
                 widthOverride === undefined &&
                   (selectedRow ? "min-w-[320px]" : "min-w-[1000px]"),
               )}
-              style={{ width: `${layout.width}px`, height: `${layout.height}px` }}
+              style={{ width: `${layout.width}px`, height: `${layout.height}px`, minHeight }}
             >
               <svg
                 data-testid="run-timeline-geometry"
