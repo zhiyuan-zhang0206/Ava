@@ -918,7 +918,7 @@ def _restore_ava_home_override() -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the test session hermetic: the OTLP dual-write (shared.telemetry ->
-    shared.telemetry_otlp, default ON since the 2026-08-11 stack decision) would
+    shared.telemetry.otlp.telemetry_otlp, default ON since the 2026-08-11 stack decision) would
     otherwise fire real OTLP/HTTP requests at 127.0.0.1:4318 from every
     event-emitting test. tests/shared/test_telemetry_otlp.py re-enables the
     flag and installs in-memory providers where the OTLP path is under test.

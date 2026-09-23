@@ -11,8 +11,8 @@ from typing import Any
 import httpx
 import pytest
 
-from shared import telemetry_otlp
 from shared import trace as trace_mod
+from shared.telemetry.otlp import telemetry_otlp
 from shared.trace import (
     OtlpJsonHttpSpanExporter,
     claim_idle_wait_span,

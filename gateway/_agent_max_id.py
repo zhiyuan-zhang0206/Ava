@@ -9,7 +9,7 @@ The gateway samples it once per `FLUSH_INTERVAL_S` and emits ONE
 ``agent_registry`` telemetry event carrying ``max_id``. The OTLP exporter maps
 an int payload field to a Counter by default, but this value is absolute
 state, never a sum — the ``_METRIC_DISPOSITION`` override in
-``shared/telemetry_otlp.py`` records it as an ObservableGauge, exported to
+``shared/telemetry/otlp/telemetry_otlp.py`` records it as an ObservableGauge, exported to
 Prometheus as ``ava_agent_registry_max_id_ratio`` (the unit-"1" gauge suffix,
 the same naming as ``resolution_status`` / ``checkpoint_table_sizes``).
 

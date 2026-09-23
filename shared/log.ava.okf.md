@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Logging
-description: '`shared/log.py` is the single structural logging module spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields and assemble three sink types: stderr / JSONL file / the unified event pipeline (`shared/telemetry.py`).'
+description: '`shared/log.py` is the single structural logging module spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields and assemble three sink types: stderr / JSONL file / the unified event pipeline (`shared/telemetry/emitter.py`).'
 tags:
 - shared
 - library
@@ -14,7 +14,7 @@ tags:
 
 `shared/log.py` is the single structural logging **module** (not a package) spanning kernel / gateway / SDK subprocesses / all daemons. A global loguru logger singleton, with per-process entry `init_*` called once to bind process-level fields (`agent_id`) and assemble sinks. All `from shared.log import logger` get the same logger that automatically carries these fields.
 
-`agent_id` is the one field bound **deferred** rather than frozen: `init_agent_process` binds `shared/turn_identity.py:TURN_SCOPED_AGENT_ID`, which resolves per record — turn contextvar, else this process's agent, else the `-` sentinel (an explicit `logger.bind(agent_id=N)` still wins outright). Identical to a fixed binding with one agent per process; it is what lets a process hosting several agents' turns attribute each record to the turn that wrote it. `shared/telemetry.py:emit` applies the same order.
+`agent_id` is the one field bound **deferred** rather than frozen: `init_agent_process` binds `shared/turn_identity.py:TURN_SCOPED_AGENT_ID`, which resolves per record — turn contextvar, else this process's agent, else the `-` sentinel (an explicit `logger.bind(agent_id=N)` still wins outright). Identical to a fixed binding with one agent per process; it is what lets a multi-agent process attribute each record to the turn that wrote it. `shared/telemetry/emitter.py:emit` applies the same order.
 
 Every log line is also an **event** in the unified event stream (event-system design §1): the loguru side derives `(ts, agent_id, level, event, payload, source)` and enqueues into `shared/telemetry` — the unified emitter — which writes the JSONL mirror and OTLP export (the legacy `agent_events` mirror was removed with the migration window). Business (audit) events flow through the same emitter via `shared/audit_events.py`.
 
@@ -34,7 +34,7 @@ Every log line is also an **event** in the unified event stream (event-system de
 
 ### Two key mechanisms
 - The seven-day full, 90-day rollup-source and 365-day lineage JSONL mirrors preserve Loki-stable IDs; [[services/gateway_side/events_maintenance/events_maintenance.ava.okf.md|events maintenance]] replays the rollup tier.
-- The emitter's bounded queue + daemon drain thread (`shared/telemetry._EventPipeline`) replaces loguru's `enqueue=True`, which uses `multiprocessing.SimpleQueue` allocating POSIX named semaphores; when an agent is SIGKILLed (routine operation) they leak permanently, eventually hitting `kern.posix.sem.max`, after which new agent startups fail with errno 28. The thread queue uses no kernel resources. A sink failure is contained on the drain thread (`catch=True`); the JSONL file sinks and the emitter's own day-stamped JSONL mirror (`$AVA_HOME/logs/events-YYYYMMDD.jsonl`) serve as durable fallback. Queue loss is an error: local diagnostics and structured loss summaries bypass the saturated queue, and an independent metric drives the cluster alert. See [[telemetry-otlp/export-backpressure.ava.okf.md|Queue loss]].
+- The emitter's bounded queue + daemon drain thread (`shared/telemetry._EventPipeline`) replaces loguru's `enqueue=True`, which uses `multiprocessing.SimpleQueue` allocating POSIX named semaphores; when an agent is SIGKILLed (routine operation) they leak permanently, eventually hitting `kern.posix.sem.max`, after which new agent startups fail with errno 28. The thread queue uses no kernel resources. A sink failure is contained on the drain thread (`catch=True`); the JSONL file sinks and the emitter's own day-stamped JSONL mirror (`$AVA_HOME/logs/events-YYYYMMDD.jsonl`) serve as durable fallback. Queue loss is an error: local diagnostics and loss summaries bypass the saturated queue, and an independent metric drives the cluster alert. See [[telemetry/otlp/telemetry-otlp/export-backpressure.ava.okf.md|Queue loss]].
 - `_StdlibInterceptHandler`: routes records from stdlib `logging.getLogger(...)` into loguru sinks (many services historically used stdlib logging), otherwise their lines would only appear on stderr and not enter the event stream. Installed on the root logger; `psycopg.pool` recycling noise is gated to ERROR.
 
 ## Two surfaces, and where they diverge
@@ -76,4 +76,4 @@ aggregates alive across the retirement.
 
 - [[db.ava.okf.md]] — Postgres connection pool (the `events` archive is dropped)
 - [[metrics.ava.okf.md]] — computes system-level metrics on top of the event stream
-- `shared/telemetry.py` — the unified emitter (queue + drain + batch writer)
+- `shared/telemetry/emitter.py` — the unified emitter (queue + drain + batch writer)

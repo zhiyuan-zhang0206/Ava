@@ -50,7 +50,7 @@ stderr (human-readable, aligned with terminal scrollback habits), a JSONL
 file sink under `logs_dir()` (rotated — see `_add_file_sink`), and the
 unified event pipeline: every INFO+ record is derived to an event and
 enqueued into `shared.telemetry` — the unified emitter — which batches
-it into the unified event stream (see `shared/telemetry.py`); the legacy
+it into the unified event stream (see `shared/telemetry/emitter.py`); the legacy
 `agent_events` mirror was removed with the migration window.
 
 Subprocesses call `init_subprocess_logger` — file sink **only**, no
@@ -375,7 +375,7 @@ def _postgres_sink(message: loguru.Message) -> None:
     This is the loguru-side adapter: field derivation lives in
     `_message_to_params`, and the event itself is enqueued to
     `shared.telemetry` — the emitter batches it into the unified event stream
-    (see `shared/telemetry.py`). The enqueue is non-blocking (bounded queue; shed
+    (see `shared/telemetry/emitter.py`). The enqueue is non-blocking (bounded queue; shed
     records are counted and reported as `event_log_drop`), so even the
     synchronous `enqueue=False` registration costs the producer nothing.
 
@@ -409,7 +409,7 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
     JSONL file sinks, but never or rarely become `events` rows):
 
       - the emitter's own failure reports (records carrying the `_no_emitter`
-        marker, see `shared/telemetry.py`): a mirror-down process would
+        marker, see `shared/telemetry/emitter.py`): a mirror-down process would
         otherwise loop failure → warning → emit → failure forever;
       - `node_enter` (agent/graph/_node_log.py): a pure write-amplification
         event — zero consumers in the event stream (agent_inspect reads

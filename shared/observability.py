@@ -116,7 +116,7 @@ def collector_allowed_for_home(home: Path | None) -> bool:
     capability) always runs the sidecar. A non-station gateway runs it only when
     the operator explicitly overrode ``AVA_TELEMETRY_OTLP_ENDPOINT`` — the same
     escape hatch the exporter side honors
-    (``shared.telemetry_otlp._observability_export_allowed``) — so an explicit
+    (``shared.telemetry.otlp.telemetry_otlp._observability_export_allowed``) — so an explicit
     collector export is not silently starved of its local sidecar. ``None`` (no
     gateway home: pure runner, unconfigured unit, bootstrap) keeps historical
     behavior — relay collectors are not gated.

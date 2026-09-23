@@ -472,7 +472,7 @@ loaded semantics = the body was actually read.
 
 The `EVENTS` registry in `shared/events/contract.py` (R2-C) is the final caliber for
 event_name and category; `_TELEMETRY_KINDS` in
-`shared/telemetry.py` is a derived projection, no longer hand-maintained:
+`shared/telemetry/emitter.py` is a derived projection, no longer hand-maintained:
 
 - **`text`, `syntax_fix` → telemetry**: the whitelist previously missed these two
   label-fallback event_names, so live data landed in log (30d). Now whitelisted +

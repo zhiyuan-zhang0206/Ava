@@ -1,19 +1,16 @@
 """OTLP export backend — the write side of the OTel + Tempo/Loki/Prometheus stack.
 
-Exports the unified event stream: every batch the emitter's drain thread
-flushes (``shared.telemetry._write_batch``) is exported here, when
-``AVA_TELEMETRY_OTLP_ENABLED=true`` (default since the 2026-08-11 stack
-decision). The Postgres `events` copy was retired with the LGTM cutover
-(task #1197) — OTLP is now the only live sink besides the JSONL mirror.
+Exports the unified event stream: every batch the emitter's drain thread flushes
+(``shared.telemetry._write_batch``) is exported here, when ``AVA_TELEMETRY_OTLP_ENABLED=true``
+(default since the 2026-08-11 stack decision). The Postgres `events` copy was retired with the
+LGTM cutover (task #1197) — OTLP is now the only live sink besides the JSONL mirror.
 
-The endpoint (``AVA_TELEMETRY_OTLP_ENDPOINT``, default 127.0.0.1:4318) is the
-LOCAL OTel Collector sidecar on every machine (task #1266, 2026-08-14):
-agents never dial a backend directly. A gateway collector fans out logs ->
-loopback Loki and metrics -> loopback Prometheus; a pure runner collector
-relays them to the gateway collector's authenticated private-address OTLP
-receiver. A remote agent keeps the localhost producer endpoint — its first hop
-is still its own sidecar.
-Three signals:
+The endpoint (``AVA_TELEMETRY_OTLP_ENDPOINT``, default 127.0.0.1:4318) is the LOCAL OTel
+Collector sidecar on every machine (task #1266, 2026-08-14): agents never dial a backend
+directly. A gateway collector fans out logs -> loopback Loki and metrics -> loopback
+Prometheus; a pure runner collector relays them to the gateway collector's authenticated
+private-address OTLP receiver. A remote agent keeps the localhost producer endpoint — its
+first hop is still its own sidecar. Three signals:
 
 - **logs** — every ``Event`` becomes one OTLP LogRecord (Loki). The body is the
   full event as JSON (the same shape the JSONL mirror stores, so the mirror and
@@ -37,9 +34,8 @@ Three signals:
   ``ava trace ship`` is the separate recovery replay: gateway units dial Tempo
   directly; pure runners use the authenticated gateway collector ingress.
 
-Failure isolation — the contract this module exists to keep: **the OTLP side
-must never block, break, or slow the event drain after its JSONL mirror write.**
-Three layers:
+Failure isolation — the contract this module exists to keep: **the OTLP side must never block,
+break, or slow the event drain after its JSONL mirror write.** Three layers:
 
 1. The emitter drain thread only does bounded ``put_nowait`` into this
    module's queue (shed, counted, reported) plus in-memory metric recordings —
@@ -52,26 +48,25 @@ Three layers:
    call again (``_export_otlp``) — even a programming error here cannot cost a
    batch its JSONL copy.
 
-Flag semantics: the implicit collector is available only to a registered
-machine running against the production ``~/.ava`` cluster. Other processes,
-including disposable exec children in test or ad-hoc homes, stay off unless an
-operator explicitly sets ``AVA_TELEMETRY_OTLP_ENDPOINT``. Every allowed process
-reads ``AVA_TELEMETRY_OTLP_ENABLED`` from the startup-frozen settings singleton
-(``restart_required`` on the config fields). Exec children never first-construct
-the OTel SDK during interpreter shutdown: the child deferral completes its
-bring-up during life (``shared.telemetry_otlp_defer``), and ``_ensure()`` refuses
-to construct while ``sys.is_finalizing()`` is true — the invariant the old eager
-``warmup()`` call served. This is **startup-applied**, matching every other config
-field in the system — there is no live-reload mechanism in ``shared/config``,
-and the isolation above makes the flag a rare emergency kill switch, not the
-primary defense. Off means JSONL mirror only: Loki and Prometheus stop advancing.
-Flipping it + restarting is the documented apply path.
+Flag semantics: the implicit collector is available only to a registered machine running
+against the production ``~/.ava`` cluster. Other processes, including disposable exec children
+in test or ad-hoc homes, stay off unless an operator explicitly sets
+``AVA_TELEMETRY_OTLP_ENDPOINT``. Every allowed process reads ``AVA_TELEMETRY_OTLP_ENABLED``
+from the startup-frozen settings singleton (``restart_required`` on the config fields). Exec
+children never first-construct the OTel SDK during interpreter shutdown: the child deferral
+completes its bring-up during life (``shared.telemetry.otlp.telemetry_otlp_defer``), and
+``_ensure()`` refuses to construct while ``sys.is_finalizing()`` is true — the invariant the
+old eager ``warmup()`` call served. This is **startup-applied**, matching every other config
+field in the system — there is no live-reload mechanism in ``shared/config``, and the
+isolation above makes the flag a rare emergency kill switch, not the primary defense. Off
+means JSONL mirror only: Loki and Prometheus stop advancing. Flipping it + restarting is the
+documented apply path.
 
 Child deferral (task #3816 M4b): an exec child arms `defer_until_exit()` before
 its first record; batches are held in the bounded queue — OTel stack, settings
 chain, and metric plumbing unimported — and complete at `finalize()` (clean
 exit), on hold saturation, or at the max-age bound. The policy and its
-semantics live in `shared.telemetry_otlp_defer`.
+semantics live in `shared.telemetry.otlp.telemetry_otlp_defer`.
 
 Backend initialization is retried every five minutes after a failed collector
 probe or SDK setup. Each disabled/recovered attempt is emitted as a real event,
@@ -89,7 +84,7 @@ import time
 from functools import cache
 from typing import Any
 
-from shared import ci_runs_metrics, telemetry_otlp_metrics
+from shared import ci_runs_metrics
 from shared.observability import (
     cluster_label,
     endpoint_override_is_explicit,
@@ -97,24 +92,29 @@ from shared.observability import (
     production_identity,
 )
 from shared.telemetry import Event
-from shared.telemetry_otlp_defer import ChildDeferral
-from shared.telemetry_otlp_gauges import GaugeValues, observable_gauge_callback, record_gauge
-from shared.telemetry_otlp_logs import _emit_log_record
-from shared.telemetry_otlp_metrics import (
+from shared.telemetry.otlp import telemetry_otlp_metrics
+from shared.telemetry.otlp.telemetry_otlp_defer import ChildDeferral
+from shared.telemetry.otlp.telemetry_otlp_gauges import (
+    GaugeValues,
+    observable_gauge_callback,
+    record_gauge,
+)
+from shared.telemetry.otlp.telemetry_otlp_logs import _emit_log_record
+from shared.telemetry.otlp.telemetry_otlp_metrics import (
     _EVENT_LOOP_LAG_BUCKETS_MS as _EVENT_LOOP_LAG_BUCKETS_MS,
 )
-from shared.telemetry_otlp_metrics import (
+from shared.telemetry.otlp.telemetry_otlp_metrics import (
     _LLM_LATENCY_BUCKETS_MS as _LLM_LATENCY_BUCKETS_MS,
 )
-from shared.telemetry_otlp_metrics import (
+from shared.telemetry.otlp.telemetry_otlp_metrics import (
     _build_providers,
     _strip_unit_suffix,
     _unit_for,
 )
-from shared.telemetry_otlp_metrics import (
+from shared.telemetry.otlp.telemetry_otlp_metrics import (
     _EventDimensionResourceExporter as _EventDimensionResourceExporter,
 )
-from shared.telemetry_otlp_metrics import (
+from shared.telemetry.otlp.telemetry_otlp_metrics import (
     _metric_views as _metric_views,
 )
 
@@ -349,7 +349,7 @@ class _OtlpBackend:
         self._init_failed_at: float | None = None
         self._init_lock = threading.Lock()
         self._thread: threading.Thread | None = None
-        # Child deferral (task #3816 M4b) — policy in shared.telemetry_otlp_defer;
+        # Child deferral (task #3816 M4b) — policy in shared.telemetry.otlp.telemetry_otlp_defer;
         # the lambdas look the backend methods up per call so test seams stay live.
         self._deferral = ChildDeferral(
             queue=self._queue,
@@ -423,7 +423,7 @@ class _OtlpBackend:
         worker: draining it here would drop every held event (`_emit_log`
         cannot emit without providers), so flushing a deferred backend is a
         no-op — the hold is completed by finalize() (see
-        `shared.telemetry_otlp_defer`) (task #3816 M4b)."""
+        `shared.telemetry.otlp.telemetry_otlp_defer`) (task #3816 M4b)."""
         if self._deferral.is_active():
             return
         del timeout  # signature kept for callers; the drain is best-effort
@@ -608,7 +608,7 @@ class _OtlpBackend:
     def _emit_log(self, event: Event) -> None:
         """Map one Event to an OTLP LogRecord and emit it.
 
-        The mapping body lives in `shared.telemetry_otlp_logs` (split for the
+        The mapping body lives in `shared.telemetry.otlp.telemetry_otlp_logs` (split for the
         800-line ceiling); runs on the worker thread (or flush()).
         """
         _emit_log_record(self._logs, event)

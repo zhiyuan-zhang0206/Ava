@@ -88,7 +88,7 @@ _ROUTE_TIMEOUT_S = 10.0
 # closed constant, never a request-derived path; reasons live in the contract.
 _STALE_ROUTE = "fleet_graph"
 
-# The OTLP-mapped llm_usage counters (shared/telemetry_otlp._record_metrics:
+# The OTLP-mapped llm_usage counters (shared/telemetry/otlp/telemetry_otlp._record_metrics:
 # int payload field -> Counter named ava_<event>_<field>, Prometheus appends
 # `_total`). The token totals are the sum of the two counters.
 _IN_METRIC = "ava_llm_usage_in_total"

@@ -31,6 +31,7 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext
 from shared import observability, telemetry
 from shared.config import settings
 from shared.events.contract import lineage_event_names
+from shared.telemetry import emitter
 
 _AGENT = 8901
 
@@ -214,7 +215,7 @@ def test_jsonl_mirror_holds_every_event() -> None:
 def test_jsonl_rollup_mirror_holds_only_rollup_source_events(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(telemetry, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
     now = datetime.now(UTC)
     event_names = ["llm_usage", "turn_end", "exec", "exec_failed", "exec(timeout)", "fork"]
     events = [
@@ -259,7 +260,7 @@ def test_jsonl_lineage_mirror_holds_only_the_permanent_lineage_class(
     a second hand-kept list — a name added to the registry lands in both
     permanent copies with no further wiring.
     """
-    monkeypatch.setattr(telemetry, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
     now = datetime.now(UTC)
     day = now.strftime("%Y%m%d")
     lineage_path = tmp_path / f"events-{day}.lineage.jsonl"
@@ -312,10 +313,10 @@ def test_jsonl_mirror_prunes_full_rollup_and_lineage_retention_independently(
     glob that swept a `.rollup`/`.lineage` file into the full tier's cutoff
     would silently collapse all three into the shortest one.
     """
-    monkeypatch.setattr(telemetry, "logs_dir", lambda: tmp_path)
-    monkeypatch.setattr(telemetry, "_JSONL_RETENTION_DAYS", 2)
+    monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(emitter, "_JSONL_RETENTION_DAYS", 2)
     monkeypatch.setattr(settings.daemon, "events_jsonl_rollup_retention_days", 4)
-    monkeypatch.setattr(telemetry, "_JSONL_LINEAGE_RETENTION_DAYS", 6)
+    monkeypatch.setattr(emitter, "_JSONL_LINEAGE_RETENTION_DAYS", 6)
     today = datetime.now(UTC)
     full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
     full_kept = tmp_path / f"events-{today - timedelta(days=2):%Y%m%d}.jsonl"

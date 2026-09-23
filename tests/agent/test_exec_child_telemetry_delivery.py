@@ -142,7 +142,7 @@ def _sent_keys() -> set[tuple[str, object, object]]:
 
     `(event_name, envelope, op)`: the OTLP attribute list carries the indexed
     dimensions (`event_name` here); the event payload rides the record body as
-    the mirror-shape JSON (`shared/telemetry_otlp_logs`), so `envelope`/`op`
+    the mirror-shape JSON (`shared/telemetry/otlp/telemetry_otlp_logs`), so `envelope`/`op`
     come from `body["attributes"]`.
     """
     from opentelemetry.proto.collector.logs.v1 import logs_service_pb2

@@ -58,7 +58,7 @@ dependencies = [
     "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
     "traceloop-sdk>=0.61",
     # Imported directly: shared/trace.py (span exporter, OTLP protobuf encode)
-    # and shared/telemetry_otlp.py (OTLP/HTTP logs + metrics exporters).
+    # and shared/telemetry/otlp/telemetry_otlp.py (OTLP/HTTP logs + metrics exporters).
     # Transitively pulled by traceloop-sdk already; declared here because we
     # import them by name.
     "opentelemetry-sdk>=1.30",

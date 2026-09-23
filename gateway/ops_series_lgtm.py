@@ -64,7 +64,7 @@ WINDOWS: dict[str, tuple[int, int]] = {
 _GRID_ORIGIN = OPS_GRID_ORIGIN
 _LLM_ERROR_EVENTS = family_events(LLM_ERROR_FAMILY)
 
-# OTLP instrument names on the Prometheus side (see shared/telemetry_otlp):
+# OTLP instrument names on the Prometheus side (see shared/telemetry/otlp/telemetry_otlp):
 # int payload fields -> counters named `ava_<event>_<field>` (Prometheus
 # appends `_total`), float fields -> histograms (`_bucket`/`_sum`/`_count`).
 _LLM_CALLS = "ava_llm_usage_latency_milliseconds_count"

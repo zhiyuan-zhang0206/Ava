@@ -3,7 +3,7 @@
 These events are a **live projection**: they are published to the Redis
 `ava:events` channel and consumed by the frontend, and are never persisted.
 They are distinct from the unified event-stream facts
-(`shared/telemetry.py` — `Event` LogRecord facts; the JSONL mirror is the
+(`shared/telemetry/emitter.py` — `Event` LogRecord facts; the JSONL mirror is the
 durable copy and Loki the live read side). A live projection is a render hint for
 the UI; a telemetry event is a fact. The two never cross: nothing here is
 written to the DB, and the telemetry emitter does not publish to this
