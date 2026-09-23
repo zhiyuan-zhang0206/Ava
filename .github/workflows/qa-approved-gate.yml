@@ -6,6 +6,9 @@
 # receipt evaluator reacts to pull_request_target / workflow_run /
 # issue_comment from the default-branch copy — never executing PR code.
 # Concurrency is job-scoped so the two event paths never cancel each other.
+# The issue_comment face is filtered at job level: only comment deletion or a
+# body carrying the receipt literal (ava_qa_version) evaluates; other comment
+# traffic skips the job with no runner spend (approval evaluation #4628).
 # Trunk test PRs are exempt by head-ref prefix.
 name: QA Approved Gate
 
@@ -68,7 +71,11 @@ jobs:
 
   # Receipt evaluator — steady-state authority, base-file runs only.
   evaluate-qa-evidence:
-    if: github.event_name != 'pull_request'
+    if: |
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'issue_comment' ||
+       github.event.action == 'deleted' ||
+       contains(github.event.comment.body, 'ava_qa_version'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     concurrency:
