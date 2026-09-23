@@ -21,7 +21,7 @@ Ava's skill format **is** the [Agent Skills](https://agentskills.io) open standa
 | `license` / `compatibility` / `metadata` / `allowed-tools` | **preserved, not acted on** — parsed, kept on disk, and rendered in the SKILL.md body the agent reads. Ava enforces no tool allowlist: its single tool is `execute_code`, so `allowed-tools` gates nothing here |
 | any other key | **preserved, not acted on** — a client's own extension key is not an error |
 
-Only genuinely malformed input fails: no `---` fence, invalid YAML, or a missing `name` / `description`. Encoding is normalized rather than rejected (`shared/frontmatter.py`: leading UTF-8 BOM dropped, CRLF/CR folded to LF, closing fence may end the file) — a skill authored on Windows is still a valid standard skill, so the encoding must not be what refuses it.
+Only genuinely malformed input fails: no `---` fence, invalid YAML, or a missing `name` / `description`. Encoding is normalized rather than rejected (`shared/docs/frontmatter.py`: leading UTF-8 BOM dropped, CRLF/CR folded to LF, closing fence may end the file) — a skill authored on Windows is still a valid standard skill, so the encoding must not be what refuses it.
 
 Two Ava-side notes for authors:
 - The standard's bundled directories carry no SKILL.md, so they stay plain files the agent reads. A **nested** SKILL.md is how Ava gets sub-skills — a superset of the standard, which other readers simply see as a folder.
@@ -41,7 +41,7 @@ Every install runs **two gates over all discovered packages** (`cli/commands/_sk
 
 ## Key Dependencies
 - [[okf/skills/skills.ava.okf.md|Skill System]] — the skill system this compatibility claim is about
-- `shared/frontmatter.py` — the `---` parser both the runtime loader and the merge-time lint use
+- `shared/docs/frontmatter.py` — the `---` parser both the runtime loader and the merge-time lint use
 - `shared/install_registry.py` — the per-machine origin/enabled registry each installed package lands in
 
 ## Entry Points

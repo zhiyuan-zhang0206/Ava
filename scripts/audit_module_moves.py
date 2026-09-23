@@ -17,7 +17,10 @@ imports cannot enumerate their references and fail the completeness check.
 
 The invariant is that committed repository content carries no reference to the
 old path. Scan working-tree text for `git ls-files` entries, excluding the frozen
-decisions/, postmortems/, and docs/history/ axes and this script itself. Untracked
+decisions/, postmortems/, and docs/history/ axes, the hash-pinned legacy
+compatibility patch (`scripts/legacy_lkg/compatibility.patch`, bound by
+`manifest.json` patch_sha256 to the 612326d base — its context lines must keep
+that base's paths), and this script itself. Untracked
 environments, caches, and operator scaffolding are outside that universe. Stage
 new files before auditing. Binary files are skipped. Any failed check exits 1.
 """
@@ -33,13 +36,22 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _FROZEN = ("decisions/", "postmortems/", "docs/history/")
+# Hash-pinned frozen single files outside the frozen axes: the legacy
+# compatibility patch is bound by manifest.json `patch_sha256` to the 612326d
+# base, so its context lines must keep that base's paths verbatim.
+_FROZEN_FILES = frozenset({"scripts/legacy_lkg/compatibility.patch"})
+
+
+def _is_excluded(name: str) -> bool:
+    """Whether a tracked path is outside the audit's live-content universe."""
+    return not name or name.startswith(_FROZEN) or name in _FROZEN_FILES
 
 
 def _tracked_text() -> list[tuple[str, str]]:
     paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=_REPO).decode().split("\0")
     texts: list[tuple[str, str]] = []
     for name in paths:
-        if not name or name.startswith(_FROZEN):
+        if _is_excluded(name):
             continue
         path = _REPO / name
         if path.resolve() == Path(__file__).resolve():

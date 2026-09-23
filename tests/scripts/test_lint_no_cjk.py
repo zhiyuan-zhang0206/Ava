@@ -23,7 +23,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         gate,
         "_LOCALE_PY_FILES",
-        frozenset({"shared/alerts_copy.py", "shared/pages_copy.py"}),
+        frozenset({"shared/alerts_copy.py", "shared/docs/pages_copy.py"}),
     )
     return tmp_path
 
@@ -93,14 +93,14 @@ def test_alerts_copy_locale_module_exempt(repo: Path) -> None:
 
 
 def test_pages_copy_locale_module_exempt(repo: Path) -> None:
-    """shared/pages_copy.py is the page-expired copy locale module (zh/en by
+    """shared/docs/pages_copy.py is the page-expired copy locale module (zh/en by
     display.language) - same exemption class as alerts_copy."""
     _write(
         repo,
-        "shared/pages_copy.py",
+        "shared/docs/pages_copy.py",
         'PAGE_EXPIRED_BODY = {"zh": "\u9875\u9762\u5df2\u8fc7\u671f"}\n',
     )
-    assert gate._scan_file("shared/pages_copy.py") == []
+    assert gate._scan_file("shared/docs/pages_copy.py") == []
 
 
 def test_skill_body_with_cjk_fails(repo: Path) -> None:

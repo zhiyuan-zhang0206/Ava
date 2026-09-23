@@ -47,15 +47,15 @@ from shared.agents import AgentStatus
 from shared.alerts import display_language
 from shared.config import settings
 from shared.db import agent_exists
-from shared.live_events import PageClosed, PageOpened
-from shared.log import logger
-from shared.pages_copy import (
+from shared.docs.pages_copy import (
     PAGE_EXPIRED_BODY,
     PAGE_EXPIRED_TITLE,
     PAGE_LANGUAGE_DEFAULT,
     PAGE_SERVER_DOWN_BODY,
     PAGE_SERVER_TIMEOUT_BODY,
 )
+from shared.live_events import PageClosed, PageOpened
+from shared.log import logger
 from shared.redis_client import publish_best_effort
 
 router = APIRouter()
@@ -93,7 +93,7 @@ def _page_language(pool: ConnectionPool) -> str:
 def _EXPIRED_PAGE_HTML(agent_id: int, name: str, lang: str) -> str:  # noqa: N802 — fixed contract name
     """Small self-contained response for links whose page TTL elapsed.
 
-    Copy follows the user's display language (``shared/pages_copy.py``, the
+    Copy follows the user's display language (``shared/docs/pages_copy.py``, the
     locale module); the page name and agent id pass through untranslated.
     """
     escaped_name = _html.escape(name)

@@ -1,7 +1,7 @@
 """Shared markdown-note model + walkers — one parser for the whole repo.
 
 The memory pool graph (`gateway/routers/memory.py`) and the OKF bundle graph
-(`shared/okf_graph.py`) both build graphs out of `---`-frontmatter markdown
+(`shared/docs/okf_graph.py`) both build graphs out of `---`-frontmatter markdown
 notes; this module is the single place that reads a note off disk, decides it
 is a note, and maps frontmatter to the fields both consumers need. It stays
 schema-free: `Note` is plain data, and graph-specific semantics (primary_tag,
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from shared.frontmatter import parse_frontmatter_typed
+from shared.docs.frontmatter import parse_frontmatter_typed
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 

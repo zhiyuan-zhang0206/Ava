@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Markdown Note Model"
-description: '`shared/notes.py` — one parser for the whole repo: reads a `---`-frontmatter markdown note off disk, decides it is a note, and lifts the fields both graph consumers need. Note/walk_notes/extract_md_links/normalize_tags, plus the lenient type-preserving `parse_frontmatter_typed` in `shared/frontmatter.py`.'
+description: '`shared/docs/notes.py` — one parser for the whole repo: reads a `---`-frontmatter markdown note off disk, decides it is a note, and lifts the fields both graph consumers need. Note/walk_notes/extract_md_links/normalize_tags, plus the lenient type-preserving `parse_frontmatter_typed` in `shared/docs/frontmatter.py`.'
 tags:
 - shared
 - library
@@ -12,13 +12,13 @@ tags:
 
 ## What it is
 
-`shared/notes.py` is the single place that turns a `---`-frontmatter markdown
+`shared/docs/notes.py` is the single place that turns a `---`-frontmatter markdown
 file into a typed `Note` — the model behind the memory pool concept graph
 (`gateway/routers/memory.py`) and the OKF bundle graph
-(`shared/okf_graph.py`). Before it existed, frontmatter parsing was inlined
+(`shared/docs/okf_graph.py`). Before it existed, frontmatter parsing was inlined
 three times (memory graph, memory search metadata, okf bundle) with two
 different tags-normalization rules; now the delimiter scan lives once in
-`shared/frontmatter.py:_split_frontmatter`, shared by the strict parser
+`shared/docs/frontmatter.py:_split_frontmatter`, shared by the strict parser
 (`parse_frontmatter`, skills/commands) and the lenient typed variant
 (`parse_frontmatter_typed`, note pools).
 

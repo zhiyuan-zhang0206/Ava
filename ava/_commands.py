@@ -73,7 +73,7 @@ from typing import NamedTuple, TypedDict
 
 from ava import skills
 from shared.config import settings
-from shared.frontmatter import FrontmatterError, parse_frontmatter
+from shared.docs.frontmatter import FrontmatterError, parse_frontmatter
 from shared.log import logger
 from shared.paths import ava_home, repo_plugins_dir, repo_root
 from shared.runtime_interpreter import external_plugin_read_root

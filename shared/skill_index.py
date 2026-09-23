@@ -38,7 +38,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.frontmatter import FrontmatterError, parse_frontmatter
+from shared.docs.frontmatter import FrontmatterError, parse_frontmatter
 from shared.skill_names import match_key
 
 _REQUIRED_FIELDS = ("name", "description")
