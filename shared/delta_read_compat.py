@@ -46,7 +46,10 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.errors import EmptyChannelError
 from langgraph.graph.message import add_messages
 
+from shared.checkpoint_postgres_walks import install_checkpoint_postgres_walk_patch
 from shared.log import logger
+
+install_checkpoint_postgres_walk_patch()
 
 DELTA_COUNTERS_KEY = "counters_since_delta_snapshot"
 """Checkpoint-metadata key carrying per-channel delta replay counters.
