@@ -788,6 +788,66 @@ describe("RunTimelineChart", () => {
     messages_truncated: false,
   };
 
+  it("routes selections, chain chips and budgeted message reads through one external reader", async () => {
+    getRunTimelineMessage.mockReset();
+    getRunTimelineMessage.mockImplementation((_agent: number, key: string, options: { full: boolean }) => Promise.resolve({
+      key, kind: "ai", ts: "2026-09-19T00:10:00Z", source: null, chars: 300,
+      parts: [{ kind: "text", chars: 300, text: options.full ? "complete text" : "clipped text", text_truncated: !options.full }],
+      content_truncated: !options.full,
+    }));
+    const target = render(<aside data-testid="external-reader" />).getByTestId("external-reader");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (detailTarget: HTMLElement | null, data = stripTimeline) => (
+      <QueryClientProvider client={client}>
+        <RunTimelineChart timeline={data} labels={labels} detailTarget={detailTarget} {...chartActions} />
+      </QueryClientProvider>
+    );
+    const { container, rerender } = render(view(target));
+    expect(within(target).getByText(labels.readerEmpty)).toBeTruthy();
+    expect(getRunTimelineMessage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Turn 1" }));
+    expect(within(target).getByRole("region", { name: "Turn details" })).toBeTruthy();
+    expect(container.querySelector('[aria-label="Turn details"]')).toBeNull();
+    fireEvent.click(within(target).getByRole("button", { name: "Close details" }));
+    expect(within(target).getByText(labels.readerEmpty)).toBeTruthy();
+
+    fireEvent.click(screen.getAllByTestId("strip-message-button")[1]);
+    expect(await within(target).findByText("clipped text")).toBeTruthy();
+    expect(getRunTimelineMessage).toHaveBeenCalledTimes(1);
+    expect(getRunTimelineMessage).toHaveBeenLastCalledWith(42, "c.1", { full: false });
+    fireEvent.click(within(target).getByRole("button", { name: "Show full text" }));
+    expect(await within(target).findByText("complete text")).toBeTruthy();
+    expect(getRunTimelineMessage).toHaveBeenLastCalledWith(42, "c.1", { full: true });
+    rerender(view(null));
+    expect(await within(container).findByText("complete text")).toBeTruthy();
+    expect(within(container).queryByRole("button", { name: "Show full text" })).toBeNull();
+    rerender(view(target));
+    expect(await within(target).findByText("complete text")).toBeTruthy();
+    // An expanded message never authorizes a full read for another agent.
+    rerender(view(target, { ...stripTimeline, agent_id: 99 }));
+    expect(await within(target).findByText("clipped text")).toBeTruthy();
+    expect(getRunTimelineMessage).toHaveBeenLastCalledWith(99, "c.1", { full: false });
+    rerender(view(target));
+    fireEvent.click(within(target).getByRole("button", { name: "L1#blk" }));
+    expect(within(target).getByRole("region", { name: "Layer details" })).toBeTruthy();
+    expect(within(target).queryByRole("region", { name: "Message details" })).toBeNull();
+
+    rerender(view(null));
+    expect(target.childElementCount).toBe(0);
+    expect(within(container).getByRole("region", { name: "Layer details" })).toBeTruthy();
+    rerender(view(target));
+    expect(within(target).getByRole("region", { name: "Layer details" })).toBeTruthy();
+    fireEvent.click(within(target).getByRole("button", { name: "Close details" }));
+    expect(within(target).getByText(labels.readerEmpty)).toBeTruthy();
+    target.scrollTop = 1000;
+    fireEvent.click(screen.getAllByTestId("layer-block-button")[0]);
+    expect(target.scrollTop).toBe(0);
+    expect(within(target).getByRole("region", { name: "Layer details" })).toBeTruthy();
+    target.scrollTop = 1000;
+    fireEvent.click(screen.getAllByTestId("layer-block-button")[1]);
+    expect(target.scrollTop).toBe(0);
+  });
+
   it("renders the raw-context strip and legend, and opens the message panel on click (P4-2)", async () => {
     getRunTimelineMessage.mockResolvedValue({
       key: "c.2",

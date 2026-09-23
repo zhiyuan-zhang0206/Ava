@@ -96,6 +96,8 @@
     "anomalies": "Anomalies",
     "none": "None",
     "noExecutions": "No executions",
+    "readerTitle": "Timeline reader",
+    "readerEmpty": "Click any block to read its full text here.",
     "closeDetails": "Close details",
     "layerDetails": "Layer details",
     "layerSummary": "Summary",

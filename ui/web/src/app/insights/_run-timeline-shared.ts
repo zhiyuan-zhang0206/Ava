@@ -72,6 +72,7 @@ export function chartLabels(
     cost: t("cost"),
     model: t("model"),
     empty: t("empty"),
+    readerEmpty: t("readerEmpty"),
     moreEvents: (count, summary) => t("moreEvents", { count, summary }),
     turnDetails: t("turnDetails"),
     timeRange: t("timeRange"),

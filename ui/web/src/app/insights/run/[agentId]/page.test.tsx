@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -8,7 +8,7 @@ import type {
   UserSettingListResponse,
 } from "@/lib/types";
 
-const { getRunTimeline, getSettings, getContextBreakdown } = vi.hoisted(() => ({
+const { getRunTimeline, getSettings, getContextBreakdown, useMediaQuery } = vi.hoisted(() => ({
   getRunTimeline: vi.fn<
     (
       agentId: number,
@@ -21,9 +21,12 @@ const { getRunTimeline, getSettings, getContextBreakdown } = vi.hoisted(() => ({
       },
     ) => Promise<RunTimelineResponse>
   >(),
+  useMediaQuery: vi.fn(() => false),
   getSettings: vi.fn<() => Promise<UserSettingListResponse>>(),
   getContextBreakdown: vi.fn<(agentId: number) => Promise<ContextBreakdownResponse>>(),
 }));
+
+vi.mock("@/lib/use-media-query", () => ({ useMediaQuery }));
 
 vi.mock("@/lib/api", () => ({
   api: { getRunTimeline, getSettings, getContextBreakdown },
@@ -146,6 +149,7 @@ function render() {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  useMediaQuery.mockReturnValue(false);
   getRunTimeline.mockReset();
   getRunTimeline.mockReturnValue(new Promise(() => undefined));
   getSettings.mockReset();
@@ -581,5 +585,35 @@ describe("timeline landing layout", () => {
     rtlRender(<Loading />);
     expect(screen.getByRole("main").id).toBe("main-content");
     expect(screen.getByRole("status", { name: "Loading run timeline…" })).toBeTruthy();
+  });
+});
+
+
+describe("persistent timeline reader", () => {
+  it("shows the reader hint while data is pending and after an empty result", async () => {
+    useMediaQuery.mockReturnValue(true);
+    let finish!: (value: RunTimelineResponse) => void;
+    getRunTimeline.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    render();
+    const reader = screen.getByRole("complementary", { name: "Timeline reader" });
+    expect(within(reader).getByText("Click any block to read its full text here.")).toBeTruthy();
+    await waitFor(() => expect(getRunTimeline).toHaveBeenCalled());
+    finish({ ...pendingResponse, rows: [] });
+    await screen.findByText("No activity in this window.");
+    expect(within(reader).getByText("Click any block to read its full text here.")).toBeTruthy();
+  });
+
+  it.each([true, false])("places turn details in the correct reader when wide=%s", async (wide) => {
+    useMediaQuery.mockReturnValue(wide);
+    getRunTimeline.mockResolvedValue(pendingResponse);
+    render();
+    fireEvent.click(await screen.findByRole("button", { name: "Turn 1" }));
+    const panel = screen.getByRole("region", { name: "Turn details" });
+    const reader = screen.getByTestId("run-timeline-reader");
+    expect(reader.contains(panel)).toBe(wide);
+    expect(screen.getByTestId("run-timeline-main").contains(panel)).toBe(!wide);
+    fireEvent.click(within(panel).getByRole("button", { name: "Close details" }));
+    expect(screen.queryByRole("region", { name: "Turn details" })).toBeNull();
+    if (wide) expect(within(reader).getByText("Click any block to read its full text here.")).toBeTruthy();
   });
 });
