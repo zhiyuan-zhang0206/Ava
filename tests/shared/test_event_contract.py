@@ -215,9 +215,9 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # restart_config_normalized) raises it to 208; the daily debt-sweep dispatch
     # (task #4015: debt_sweep_daily) raises it to 209; the CI-run observability
     # trio (task #4014: ci_runs_daily / ci_workflow_window / ci_runs_run) raises
-    # it to 212.
+    # it to 212; persistent Loki write-path throttling raises it to 213.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 212
+    assert len(_TELEMETRY_KINDS) == 213
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

@@ -23,8 +23,9 @@ per unavailable episode (#2096).
 Once all listeners answer, sends a unique Loki OTLP log and queries it back.
 Three consecutive generic write/read failures re-run start.sh. A stuck ingester
 is force-restarted immediately once its storage disk drops below the configured
-WAL throttle. The counter lives under AVA_HOME because the watchdog launches a
-fresh process for every 60-second round.
+WAL throttle. HTTP 429 is retried, then tracked as persistent throttling without
+restarting the stack. The counters live under AVA_HOME because the watchdog
+launches a fresh process for every 60-second round.
 
 The stack is the cluster's observability backend: while it is down the
 gateway's /ops + inspect reads (Loki/Prometheus), the Grafana-evaluated ops
@@ -63,6 +64,11 @@ _NANOSECONDS_PER_SECOND = 1_000_000_000
 _WRITE_PROBE_LOOKBACK_SECONDS = 120
 _WRITE_PROBE_END_LAG_SECONDS = 1
 _WRITE_PROBE_RESTART_THRESHOLD = 3
+# Two bounded retries for Loki admission throttling; one probe makes at most three pushes.
+_WRITE_PROBE_RETRY_BACKOFF_SECONDS = (1, 2)
+_WRITE_PROBE_THROTTLE_THRESHOLD = 3
+# Re-signal persistent saturation every ~30 minutes at the watchdog's 60s cadence.
+_WRITE_PROBE_THROTTLE_EVENT_INTERVAL = 30
 
 
 def readiness_probes() -> tuple[tuple[str, str], ...]:
@@ -167,7 +173,7 @@ def write_path_probe() -> tuple[bool, str]:
                 {
                     "resource": {
                         "attributes": [
-                            {"key": "agent_id", "value": {"stringValue": marker}},
+                            {"key": "agent_id", "value": {"stringValue": "watchdog"}},
                             {
                                 "key": "event_name",
                                 "value": {"stringValue": "watchdog-write-probe"},
@@ -194,16 +200,9 @@ def write_path_probe() -> tuple[bool, str]:
         headers={"Content-Type": "application/json", "X-Scope-OrgID": "fake"},
         method="POST",
     )
-    try:
-        with _local_http.open(push_request, timeout=2.0) as response:
-            if not 200 <= response.status < 300:
-                response_body = response.read() if response.status >= 500 else b""
-                return False, _push_failure_reason(response.status, response_body)
-    except urllib.error.HTTPError as exc:
-        response_body = exc.read() if exc.code >= 500 else b""
-        return False, _push_failure_reason(exc.code, response_body)
-    except Exception:
-        return False, "push_error"
+    push_failure = _push_probe(push_request)
+    if push_failure is not None:
+        return False, push_failure
 
     # The range end is exclusive, so it must sit strictly past the pushed
     # line's timestamp. Capture a fresh now after the push (never the
@@ -211,7 +210,7 @@ def write_path_probe() -> tuple[bool, str]:
     query_end_ns = time.time_ns()
     query = urllib.parse.urlencode(
         {
-            "query": f'{{agent_id="{marker}"}}',
+            "query": f'{{agent_id="watchdog", event_name="watchdog-write-probe"}} |= "{marker}"',
             "start": str(marker_ns - (_WRITE_PROBE_LOOKBACK_SECONDS * _NANOSECONDS_PER_SECOND)),
             "end": str(query_end_ns),
         }
@@ -235,6 +234,27 @@ def write_path_probe() -> tuple[bool, str]:
     return (True, "ok") if visible else (False, "probe_not_visible")
 
 
+def _push_probe(request: urllib.request.Request) -> str | None:
+    """Push once, retrying only HTTP 429 with bounded backoff."""
+    for attempt in range(len(_WRITE_PROBE_RETRY_BACKOFF_SECONDS) + 1):
+        try:
+            with _local_http.open(request, timeout=2.0) as response:
+                status = response.status
+                response_body = response.read() if status >= 500 else b""
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            response_body = exc.read() if status >= 500 else b""
+        except Exception:
+            return "push_error"
+        if 200 <= status < 300:
+            return None
+        if status == 429 and attempt < len(_WRITE_PROBE_RETRY_BACKOFF_SECONDS):
+            time.sleep(_WRITE_PROBE_RETRY_BACKOFF_SECONDS[attempt])
+            continue
+        return _push_failure_reason(status, response_body)
+    raise AssertionError("unreachable write-probe retry state")
+
+
 def _push_failure_reason(status: int, response_body: bytes) -> str:
     if status >= 500 and b"ingester is shutting down" in response_body.lower():
         return "ingester_shutting_down"
@@ -243,6 +263,10 @@ def _push_failure_reason(status: int, response_body: bytes) -> str:
 
 def _write_probe_counter_path() -> Path:
     return ava_home() / "lgtm-write-probe-consecutive-failures"
+
+
+def _write_probe_throttle_counter_path() -> Path:
+    return ava_home() / "lgtm-write-probe-consecutive-throttles"
 
 
 def _read_counter() -> int:
@@ -260,6 +284,38 @@ def _write_counter(consecutive_failures: int) -> None:
         _write_probe_counter_path().write_text(str(consecutive_failures), encoding="utf-8")
     except OSError as exc:
         sys.stderr.write(f"lgtm write-probe counter write failed: {exc}\n")
+
+
+def _read_throttle_counter() -> int:
+    try:
+        return int(_write_probe_throttle_counter_path().read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return 0
+
+
+def _write_throttle_counter(consecutive_throttles: int) -> None:
+    """Advisory state; a counter write failure must not fail the probe round."""
+    try:
+        _write_probe_throttle_counter_path().write_text(
+            str(consecutive_throttles), encoding="utf-8"
+        )
+    except OSError as exc:
+        sys.stderr.write(f"lgtm write-probe throttle counter write failed: {exc}\n")
+
+
+def _record_throttled_round(reason: str) -> None:
+    consecutive_throttles = _read_throttle_counter() + 1
+    _write_throttle_counter(consecutive_throttles)
+    if consecutive_throttles == _WRITE_PROBE_THROTTLE_THRESHOLD or (
+        consecutive_throttles % _WRITE_PROBE_THROTTLE_EVENT_INTERVAL == 0
+    ):
+        telemetry.emit(
+            "telemetry",
+            "loki_write_path_probe_throttled",
+            level="warning",
+            source="system",
+            attributes={"consecutive_throttles": consecutive_throttles, "reason": reason},
+        )
 
 
 def _loki_storage_dir(home: Path) -> Path:
@@ -343,6 +399,7 @@ def main() -> None:
         sys.stderr.write(f"lgtm backends down ({', '.join(down)}) — re-running start.sh\n")
         restarted = _restart_stack()
         _write_counter(0)
+        _write_throttle_counter(0)
         if not restarted:
             sys.exit(1)
         return
@@ -350,8 +407,13 @@ def main() -> None:
     healthy, reason = write_path_probe()
     if healthy:
         _write_counter(0)
+        _write_throttle_counter(0)
+        return
+    if reason == "push_http_429":
+        _record_throttled_round(reason)
         return
 
+    _write_throttle_counter(0)
     consecutive_failures = _read_counter() + 1
     _write_counter(consecutive_failures)
     telemetry.emit(

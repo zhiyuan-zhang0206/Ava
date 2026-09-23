@@ -36,6 +36,7 @@ from shared.events.payloads import (
     LlmProviderError,
     LlmUsage,
     LokiWritePathProbeFailed,
+    LokiWritePathProbeThrottled,
     NodeExit,
     PluginActivation,
     PrFlowDaily,
@@ -117,12 +118,9 @@ def _telemetry(
 
 
 _EVENTS_RUNTIME: dict[str, EventSpec] = {
-    # ── audit (category=audit, 27) — registry.md §2, append-only operations ──
-    # The lineage class (retention_class="lineage"): spawn/fork/resurrect plus
-    # the ops-mirror names of the same two facts (agent_spawned /
-    # agent_resurrected, emitted telemetry-side). The mirrors are bundled
-    # deliberately — a reader that only kept one spelling would lose half the
-    # rows for the same event.
+    # ── audit (category=audit, 29) — registry.md §2, append-only operations ──
+    # Lineage includes spawn/fork/resurrect and agent_spawned/agent_resurrected
+    # telemetry mirrors; retaining only one spelling loses some rows.
     "spawn": _audit("spawn", "new agent born", payload=Spawn, retention_class="lineage"),
     "fork": _audit("fork", "agent forked from another", retention_class="lineage"),
     "send_message": _audit("send_message", "message sent to an agent"),
@@ -495,8 +493,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "durable terminated flip already committed",
         tier="noise",
     ),
-    # crash-recovery wake family (task #4039) — the reap commits the death's
-    # near-field recovery wake; the service layer consumes it right after
+    # Crash-recovery wake (task #4039): reap commits it; service consumes it.
     "crash_recovery_wake_queued": _telemetry(
         "crash_recovery_wake_queued",
         "the corpse reaper committed a crash death's recovery wake — one "
@@ -536,9 +533,8 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "the checkpoint",
         tier="anomaly",
     ),
-    # settled-abort inbound reconcile (task #3615) — at a fatal abort whose
-    # checkpoint settlement already ran, the claimed inbounds are disposed at
-    # the settlement point instead of waiting for a cold admission/boot
+    # Settled-abort reconcile (task #3615): dispose claims at settlement
+    # rather than waiting for cold admission.
     "host_abort_reconcile_skipped": _telemetry(
         "host_abort_reconcile_skipped",
         "the settled hosted turn abort skipped the immediate inbound reconcile "
@@ -556,9 +552,8 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "retries the disposal of the claimed rows",
         tier="anomaly",
     ),
-    # finished-turn inbound reconcile (task #3999) — a finished (non-crashed)
-    # turn disposes its own claimed inbounds at its settlement, behind the
-    # turn-end checkpoint flush; same fail-closed gates as the abort pass
+    # Finished-turn reconcile (task #3999): dispose claims after the
+    # checkpoint flush with the same fail-closed gates as abort.
     "host_turn_reconcile_skipped": _telemetry(
         "host_turn_reconcile_skipped",
         "the finished hosted turn skipped the immediate inbound reconcile "
@@ -704,6 +699,12 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "loki_write_path_probe_failed",
         "Loki write-path probe failed",
         payload=LokiWritePathProbeFailed,
+        tier="anomaly",
+    ),
+    "loki_write_path_probe_throttled": _telemetry(
+        "loki_write_path_probe_throttled",
+        "Loki write-path probe persistently throttled",
+        payload=LokiWritePathProbeThrottled,
         tier="anomaly",
     ),
     "delivery_poisoned": _telemetry(
