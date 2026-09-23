@@ -14,37 +14,33 @@ below).
 
 ## Install radon
 
-radon is **not** a dev dependency (pyproject.toml does not list it). Three ways:
-
-- **One-off (recommended, zero repo change)** — the repo is uv-based:
-  `uvx radon ...` (uv downloads radon into its cache on first use).
-- **Repeated local use** — install into the repo venv:
-  `.venv/bin/pip install radon` (a later `uv sync` removes it — reinstall when
-  needed).
-- **Lock it in as a dev dependency** — `uv add --dev radon` if the team wants
-  it in CI/dev; that is a separate decision, not required for this skill.
+Use the repository's pinned dev dependency, `radon==6.0.1`, after `uv sync`.
+Run `.venv/bin/radon` so reports use the same metric version as the structure
+budget gate. Complexity reports help rank refactoring work; the enforced
+CC/nesting thresholds and frozen-baseline protocol live in
+[`python-conventions.md`](../../../conventions/python-conventions.md#function-quality-budgets-complexity-and-nesting).
 
 ## Run it
 
 ### Single file
 ```
-uvx radon cc -a -s path/to/file.py
+.venv/bin/radon cc -a -s path/to/file.py
 ```
 
 ### One directory
 ```
-uvx radon cc -a -s path/to/package/
+.venv/bin/radon cc -a -s path/to/package/
 ```
 
 ### Whole repo
 ```
-uvx radon cc -a -s -j .
+.venv/bin/radon cc -a -s -j .
 ```
 Hidden directories (`.git`, `.venv`, `.claude`, …) are auto-ignored, so
 running from the repo root is safe. To scope to the Python source tree only
 (mirrors the sweeper's scope, skips `tests/` noise):
 ```
-uvx radon cc -a -s ava/ agent/ gateway/ cli/ services/ shared/ plugins/
+.venv/bin/radon cc -a -s ava/ agent/ gateway/ cli/ services/ shared/ plugins/
 ```
 
 - `-s` shows the numeric complexity next to the A–F rank.
@@ -54,11 +50,11 @@ uvx radon cc -a -s ava/ agent/ gateway/ cli/ services/ shared/ plugins/
 
 ### Flag cc > threshold (default 10) and rank
 
-`radon cc` has no threshold flag, but `-n <n>` sets the **minimum complexity
-to display** (inclusive), so a threshold of 10 means `-n 11`:
+`radon cc -n` takes a minimum letter rank, not a numeric score. Use `-n C`
+to show CC >10 (ranks C through F):
 
 ```
-uvx radon cc -s -n 11 -o SCORE .
+.venv/bin/radon cc -s -n C -o SCORE .
 ```
 `-o SCORE` sorts by complexity descending — this is the ranked report.
 
@@ -70,7 +66,7 @@ JSON:
 import json, subprocess, sys
 targets = sys.argv[1:] or ["."]
 data = json.loads(subprocess.check_output(
-    ["uvx", "radon", "cc", "-a", "-s", "-j", *targets]))
+    [".venv/bin/radon", "cc", "-a", "-s", "-j", *targets]))
 rows = []
 for path, funcs in data.items():
     for f in funcs:
@@ -86,7 +82,7 @@ The text mode line `F 53:0 find - A (5)` reads: type `F`(unction)/`M`(ethod),
 ### Maintainability index
 
 ```
-uvx radon mi -s .
+.venv/bin/radon mi -s .
 ```
 Per-module MI (0–100, computed from Halstead volume, cc, LLOC, and comment
 ratio). Ranks: **A** > 19, **B** 9–19, **C** ≤ 9. Low MI modules are
@@ -107,9 +103,9 @@ One plus the number of decision points (roughly: each `if`/`elif`, `for`,
 | 21+ | very complex (radon D–F) | priority debt; bugs concentrate here |
 
 Threshold is a judgment dial: the skill defaults to flagging cc > 10
-(`-n 11`), but a domain rule that is inherently a decision table (a parser,
-a state machine) can legitimately sit higher — the report is a locator, not a
-gate.
+(`-n C`). This advisory ranking is separate from the structure gate's
+CC 10-14 warning band and frozen CC >=15 hard violations; high complexity
+still requires baseline containment even when it models a decision table.
 
 ## Using the report to prioritize refactoring (Layer 2 — agent judgment)
 
@@ -133,6 +129,6 @@ deciding:
 5. **Prove the drop.** Re-run the scan after the refactor and show the
    before/after cc for the touched functions in the PR description.
 
-This is advisory — nothing here is CI-enforced, and radon is not a dev
-dependency; if the team later wants a gate, `-n` thresholds or the JSON recipe
-above are the building blocks.
+Use this report to choose refactoring work. Run the enforced structure gate
+with `.venv/bin/python scripts/lint_code_structure.py` to verify the resulting
+CC, nesting, file and directory budgets against the frozen baseline.
