@@ -30,6 +30,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import RunTimelinePage from "./page";
+import Loading from "./loading";
 
 const NOW = new Date("2026-09-05T14:26:00.000Z");
 
@@ -528,5 +529,57 @@ describe("context breakdown card (P4-3)", () => {
     fireEvent.click(getByRole("button", { name: "Characters" }));
     expect(getByRole("button", { name: "Reset axis" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Reset window" })).toBeNull();
+  });
+});
+
+
+describe("timeline landing layout", () => {
+  it("puts the chart before metrics and context details while keeping warnings visible", async () => {
+    getRunTimeline.mockResolvedValue({
+      ...pendingResponse,
+      meta: { ...pendingResponse.meta, unmatched_turns: 2 },
+      boundaries: { ...pendingResponse.boundaries, has_activity_after_window: true, post_window_turns: 3 },
+    });
+    render();
+    const visualization = await screen.findByTestId("run-timeline-visualization");
+    const metrics = screen.getByText("Turns").closest("section")!;
+    const context = screen.getByTestId("context-breakdown-card");
+    expect(visualization.compareDocumentPosition(metrics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(metrics.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(visualization.style.minHeight).toBe("50vh");
+    const session = screen.getByTestId("run-timeline-session");
+    expect(session.querySelector('[role="alert"]')?.closest("details")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("2 turns");
+    expect(screen.getByRole("button", { name: "View current session" }).closest("details")).toBeNull();
+    expect(session.querySelector("details")?.open).toBe(false);
+    expect(screen.getByLabelText("Start").closest("details")).toBe(session.querySelector("details"));
+  });
+
+  it("applies custom dates after opening the disclosure", async () => {
+    getRunTimeline.mockResolvedValue(pendingResponse);
+    render();
+    await screen.findByTestId("run-timeline-visualization");
+    const disclosure = screen.getByText("Custom window").closest("details")!;
+    disclosure.open = true;
+    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "2026-09-05T12:00" } });
+    fireEvent.change(screen.getByLabelText("End"), { target: { value: "2026-09-05T13:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(getRunTimeline).toHaveBeenLastCalledWith(42, {
+      from: new Date("2026-09-05T12:00").toISOString(),
+      to: new Date("2026-09-05T13:00").toISOString(),
+      session: "compact",
+    }));
+  });
+
+  it("shows a timeline skeleton while the client data is pending", async () => {
+    render();
+    expect(screen.getByRole("status", { name: "Loading run timeline…" })).toBeTruthy();
+    await screen.findByRole("heading", { name: "Run timeline — agent 42" });
+  });
+
+  it("gives the route loading boundary the same timeline skeleton", () => {
+    rtlRender(<Loading />);
+    expect(screen.getByRole("main").id).toBe("main-content");
+    expect(screen.getByRole("status", { name: "Loading run timeline…" })).toBeTruthy();
   });
 });
