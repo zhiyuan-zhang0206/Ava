@@ -21,7 +21,7 @@ row carries the read-site evidence for the next reader.
 
 JSON, not a generated ``.py`` module: the all-field faces alone (391 fields x
 several columns) blow past the repo's 800-line hard ceiling
-(``scripts/lint_code_structure.py``, no exemption), and that rule's remedy —
+(``scripts/lint_code_structure.py``, no new baseline entries), and that rule's remedy —
 split into focused modules — does not fit one machine-generated table whose
 columns are never read as separate units. A data file carries no line budget
 (precedent: ``shared/lm/pricing_catalog_archive.json``);
