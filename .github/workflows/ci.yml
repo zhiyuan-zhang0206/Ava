@@ -477,10 +477,15 @@ jobs:
         working-directory: ui/web
         run: npm ci
 
-      - name: Fetch base branch for structure guard
+      - name: Fetch base revision for structure guard
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --depth=1 origin "${{ github.event.pull_request.base.ref }}"
+          # Pin the comparison to the base revision THIS event was built
+          # against (the same revision as the checked-out merge ref) — not the
+          # branch's current tip: a base branch that shrinks while the run waits
+          # in the queue would otherwise report a phantom "raised" for every
+          # in-between shrink (task #4597, run 35859679689 on #3238).
+          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
           echo "LINT_STRUCTURE_BASELINE_BASE=$(git rev-parse FETCH_HEAD^{commit})" >> "$GITHUB_ENV"
 
       - name: Run pre-commit structural gates (--all-files)
