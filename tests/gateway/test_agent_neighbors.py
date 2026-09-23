@@ -612,6 +612,67 @@ def test_archive_refresh_failure_degrades_to_live_only_and_heals(
     assert frozen_cache.writes[-1][2] == neighbors._FROZEN_CACHE_TTL_SECONDS
 
 
+def test_live_tail_refusal_degrades_to_birth_chain_not_503(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A no-observability cluster's read gate refuses the live tail — a
+    configuration state retrying cannot clear (reproduced on the preview
+    venue, 2026-09-24) — so the route must degrade like the archive side:
+    the DB birth chain with empty ties and the degraded flag, not a 503
+    that locks out the chain half. Only the live read refuses here, so
+    `degraded=True` is attributable to the refusal alone; the archive
+    side's own degradation is covered by the archive tests."""
+    a = _seed_agent(db_conn)
+    b = _seed_agent(db_conn, born_spawner=f"agent:{a}")
+    c = _seed_agent(db_conn, born_spawner=f"agent:{b}")
+
+    original = fake_loki.query_events
+
+    def refusing_live_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        if kwargs.get("archive"):
+            return original(**kwargs)
+        raise loki_events.ObservabilityReadUnavailable(
+            "observability reads unavailable for this cluster"
+        )
+
+    monkeypatch.setattr(loki_events, "query_events", refusing_live_query)
+
+    with TestClient(app) as client:
+        resp = client.get(f"/api/agents/{c}/neighbors")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["degraded"] is True
+    assert body["neighbors"] == []
+    # the chain half needs no Loki: served in full, nearest first
+    assert [r["agent_id"] for r in body["ancestors"]] == [b, a]
+
+
+def test_live_tail_transport_failure_maps_to_503(
+    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stalled Loki fails the live read fast (the 8s bound); the transport
+    failure keeps the retriable 503 contract the other Loki-reading routes
+    share, not a 500 internal_error."""
+    a = _seed_agent(db_conn)
+    original = fake_loki.query_events
+
+    def timing_out_live_query(**kwargs: object) -> tuple[list[dict[str, Any]], bool]:
+        if kwargs.get("archive"):
+            return original(**kwargs)
+        raise httpx.ReadTimeout("timed out")
+
+    monkeypatch.setattr(loki_events, "query_events", timing_out_live_query)
+
+    with TestClient(app) as client:
+        resp = client.get(f"/api/agents/{a}/neighbors")
+
+    assert resp.status_code == 503, resp.text
+    body = resp.json()
+    assert body["code"] == "http_503"
+    assert body["retryable"] is True
+
+
 def test_archive_fetch_single_flight_concurrent_misses_run_one_scan(
     fake_loki: FakeLoki, frozen_cache: _FakeRedis, monkeypatch: pytest.MonkeyPatch
 ) -> None:
