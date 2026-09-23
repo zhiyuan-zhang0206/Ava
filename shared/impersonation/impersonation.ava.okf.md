@@ -86,8 +86,14 @@ one due local session and consumes at most four pages per pass; a saved cursor
 continues large sweeps, and completed sweeps restart to recover late indexing.
 `complete_delivery` accepts an upstream manifest of exact event IDs, validates
 the durable set and certifies completion. Until then, accounting remains pending
-even after the native receipt. Statistics count recorded events without
-extrapolating samples. See the consumer module for delivery-completion semantics.
+even after the native receipt. Version-2 handoff statistics expose
+`event_delivery.state`, its manifest-only `completion_basis`, and separate
+SDK/API `coverage` plus `consumed_event_count`. Pending coverage is `unknown`:
+a zero consumed count is not evidence of zero calls. `complete_emitted_events`
+means the manifest covers emitted events only; the SDK sampling policy is
+explicitly `unknown`, so a zero SDK count is never a zero-call fact. Statistics
+never extrapolate samples.
+See the consumer module for delivery-completion semantics.
 
 ## CLI parameters: explicit, with four named exceptions
 

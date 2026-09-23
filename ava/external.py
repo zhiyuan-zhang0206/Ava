@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
+import sys
+from contextlib import ExitStack, suppress
 from threading import Lock
 from types import TracebackType
 from typing import Any, Self
@@ -25,6 +26,27 @@ __all_for_ava__ = ["attach", "Attachment"]
 
 _attachment_lock = Lock()
 _active_attachment: Attachment | None = None
+
+
+def _deliver_telemetry_before_detach() -> None:
+    """Ship an external attachment's tail records while its interpreter lives.
+
+    An SDK call can be the final operation in `ava impersonate exec`. The normal
+    atexit drain has already proved insufficient for first-time OTLP setup in
+    that shape, while an attachment close still runs in the live interpreter.
+    Mirror the exec-child delivery order without importing telemetry for an
+    attachment that emitted no records.
+    """
+    if "shared.telemetry" not in sys.modules:
+        return
+    with suppress(Exception):
+        from shared import telemetry
+
+        telemetry.sync(bounded=True)
+        if "shared.telemetry.otlp.telemetry_otlp" in sys.modules:
+            from shared.telemetry.otlp import telemetry_otlp
+
+            telemetry_otlp.finalize()
 
 
 class Attachment:
@@ -119,7 +141,10 @@ class Attachment:
         try:
             self.flush()
         finally:
-            self._detach()
+            try:
+                _deliver_telemetry_before_detach()
+            finally:
+                self._detach()
 
     def _detach(self) -> None:
         """Restore local bindings without reading or writing the lease."""

@@ -280,10 +280,32 @@ def _sdk_statistics(sdk: list[dict[str, Any]]) -> dict[str, Any]:
     calls = Counter(item["fn"] for item in attributes)
     return {
         "sdk_calls": dict(sorted(calls.items())),
-        "sdk_event_count": len(sdk),
         "sdk_statistics_basis": "consumed_events",
-        "sdk_sampled": any(item.get("sample_rate", 1) != 1 for item in attributes),
+        "sdk_sampling_policy": "unknown",
         "sdk_duration_seconds": sum(item["duration"] for item in attributes),
+    }
+
+
+def _event_delivery_statistics(
+    lease: dict[str, Any], sdk: list[dict[str, Any]], api: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Describe whether observed handoff events have a complete emitted-event manifest.
+
+    Only `complete_delivery()` accepts the upstream manifest that can certify
+    coverage of emitted events. SDK sampling policy is not certified per
+    session, so zero consumed SDK events is never evidence of zero SDK calls.
+    """
+    complete = lease["events_completed_at"] is not None
+    coverage = "complete_emitted_events" if complete else "unknown"
+    return {
+        "state": "complete" if complete else "pending",
+        "completion_basis": "upstream_manifest" if complete else None,
+        "sdk_calls": {
+            "coverage": coverage,
+            "sampling_policy": "unknown",
+            "consumed_event_count": len(sdk),
+        },
+        "api_events": {"coverage": coverage, "consumed_event_count": len(api)},
     }
 
 
@@ -295,7 +317,7 @@ def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[st
     directions = Counter(row["payload"]["direction"] for row in messages)
     started, ended = lease["activated_at"] or lease["created_at"], lease["ended_at"]
     return {
-        "version": 1,
+        "version": 2,
         "session": public_session(lease),
         "messages": messages,
         "lifecycle": [row for row in rows if row["kind"] == "lifecycle"],
@@ -305,7 +327,7 @@ def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[st
             **_sdk_statistics(sdk),
             **_api_statistics(api, lease["agent_id"]),
             "duration_seconds": (ended - started).total_seconds() if ended is not None else None,
-            "event_delivery": "complete" if lease["events_completed_at"] is not None else "pending",
+            "event_delivery": _event_delivery_statistics(lease, sdk, api),
             "incoming_messages": directions["in"],
             "outgoing_messages": directions["out"],
         },
@@ -314,7 +336,9 @@ def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[st
 
 def export_handoff(lease: dict[str, Any], conn: psycopg.Connection) -> tuple[dict[str, Any], str]:
     """Write one JSON file atomically in the agent workspace, before native resumption."""
-    document = lease["handoff_document"] or build_document(lease, entries(str(lease["id"]), conn))
+    document = lease["handoff_document"]
+    if document is None or document["version"] != 2:
+        document = build_document(lease, entries(str(lease["id"]), conn))
     target = workspace_dir(lease["agent_id"]) / "impersonation" / f"{lease['session_id']}.json"
     document["session"]["handoff_path"] = str(target)
     encoded = json.dumps(document, ensure_ascii=False, indent=2, default=_json_default) + "\n"
