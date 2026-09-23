@@ -25,11 +25,11 @@ import {
 } from "@/components/run-timeline/request-level";
 import { buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { useBreakpoint } from "@/lib/breakpoint";
 import { compareHref } from "@/lib/compare-links";
 import { formatTokensCompact } from "@/lib/format-number";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
-import { useMediaQuery } from "@/lib/use-media-query";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +51,7 @@ export default function RunTimelinePage({
   params: Promise<{ agentId: string }>;
 }) {
   const t = useTranslations("runTimeline");
-  const wideReader = useMediaQuery("(min-width: 1280px)");
+  const { isWide: wideReader } = useBreakpoint();
   const [readerTarget, setReaderTarget] = useState<HTMLElement | null>(null);
   const [agentId, setAgentId] = useState<number | null>(null);
   const [paramsResolved, setParamsResolved] = useState(false);

@@ -2,8 +2,8 @@
 //
 // The pure tier math (tierForWidth) is tested exhaustively at every boundary.
 // The hook itself is composed from useMediaQuery (mocked here): isNarrow = the
-// md query NOT matching, isLarge = the lg query matching, and the initial
-// (pre-mount / SSR) state is the narrow/mobile layout.
+// md query NOT matching, isLarge = the lg query matching, isWide = the 1280px
+// query matching, and the initial (pre-mount / SSR) state is the narrow/mobile layout.
 
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -12,19 +12,25 @@ import {
   BREAKPOINT_LG_PX,
   BREAKPOINT_MD_PX,
   BREAKPOINT_SM_PX,
+  BREAKPOINT_WIDE_PX,
   BREAKPOINT_XS_PX,
   tierForWidth,
   useBreakpoint,
 } from "./breakpoint";
 
-const { mdMatches, lgMatches } = vi.hoisted(() => ({
+const { mdMatches, lgMatches, wideMatches } = vi.hoisted(() => ({
   mdMatches: vi.fn<() => boolean>(() => false),
   lgMatches: vi.fn<() => boolean>(() => false),
+  wideMatches: vi.fn<() => boolean>(() => false),
 }));
 
 vi.mock("./use-media-query", () => ({
-  useMediaQuery: (query: string) =>
-    query === `(min-width: ${BREAKPOINT_MD_PX}px)` ? mdMatches() : lgMatches(),
+  useMediaQuery: (query: string) => {
+    if (query === `(min-width: ${BREAKPOINT_MD_PX}px)`) return mdMatches();
+    if (query === `(min-width: ${BREAKPOINT_LG_PX}px)`) return lgMatches();
+    if (query === `(min-width: ${BREAKPOINT_WIDE_PX}px)`) return wideMatches();
+    throw new Error(`Unexpected media query: ${query}`);
+  },
 }));
 
 describe("tierForWidth — 320/390/768/lg boundaries", () => {
@@ -46,6 +52,7 @@ describe("useBreakpoint", () => {
     const { result } = renderHook(() => useBreakpoint());
     expect(result.current.isNarrow).toBe(true);
     expect(result.current.isLarge).toBe(false);
+    expect(result.current.isWide).toBe(false);
   });
 
   it("isNarrow = NOT matching the md query; isLarge = matching the lg query", () => {
@@ -66,6 +73,25 @@ describe("useBreakpoint", () => {
     rerender();
     expect(result.current.isNarrow).toBe(true);
     expect(result.current.isLarge).toBe(false);
+  });
+
+  it("isWide follows the 1280px query without changing the xl tier", () => {
+    mdMatches.mockReturnValue(true);
+    lgMatches.mockReturnValue(true);
+    wideMatches.mockReturnValue(false);
+    const { result, rerender } = renderHook(() => useBreakpoint());
+    expect(result.current.isLarge).toBe(true);
+    expect(result.current.isWide).toBe(false);
+
+    wideMatches.mockReturnValue(true);
+    rerender();
+    expect(result.current.isWide).toBe(true);
+    expect(tierForWidth(BREAKPOINT_WIDE_PX - 1)).toBe("xl");
+    expect(tierForWidth(BREAKPOINT_WIDE_PX)).toBe("xl");
+
+    mdMatches.mockReturnValue(false);
+    lgMatches.mockReturnValue(false);
+    wideMatches.mockReturnValue(false);
   });
 
   it("tier follows the real viewport width after mount", () => {
