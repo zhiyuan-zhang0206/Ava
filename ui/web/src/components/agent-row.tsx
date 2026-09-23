@@ -58,7 +58,7 @@ const LazyPromptDialog = dynamic(() =>
   { loading: () => null },
 );
 
-export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting";
+export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring";
 
 // Public status semantics: sky = actively running, emerald = idling/waiting,
 // red = terminated. Internal launch/restart states are projected to idling
@@ -97,6 +97,7 @@ export interface AgentRowProps {
   ancestorsIsLast: readonly boolean[];
   onSelect: () => void;
   onTerminate: () => void;
+  onForceExpire: (sessionId: number) => void;
   /** Force kill — SIGKILLs the process immediately, for an agent stuck in a
    *  loop / hung call that the graceful terminate can't reach. Right-click
    *  menu only (guarded by a confirm), never a one-click button. */
@@ -160,6 +161,7 @@ export function AgentRow({
   ancestorsIsLast,
   onSelect,
   onTerminate,
+  onForceExpire,
   onForceKill,
   onRestart,
   onResurrect,
@@ -248,6 +250,15 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
       )
     ) {
       onTerminate();
+    }
+  };
+
+  const confirmForceExpire = () => {
+    const sessionId = agent.open_impersonation_session_id;
+    if (sessionId == null) return;
+    const confirmSetting = userSettings["behavior.confirm_terminate"] !== false;
+    if (!confirmSetting || safeConfirm(t("forceExpireConfirm"))) {
+      onForceExpire(sessionId);
     }
   };
 
@@ -418,6 +429,11 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
             >
               <PowerOff className="text-destructive" /> {t("terminate")}
             </ContextMenuItem>
+            {agent.open_impersonation_session_id != null ? (
+              <ContextMenuItem onSelect={confirmForceExpire} disabled={pending !== undefined}>
+                <PowerOff className="text-destructive" /> {t("forceExpire")}
+              </ContextMenuItem>
+            ) : null}
             <ContextMenuItem onSelect={onCompact} disabled={pending !== undefined}>
               <Shrink className="text-amber-500" /> {t("compact")}
             </ContextMenuItem>
@@ -511,7 +527,7 @@ function RowActions({
       </div>
     );
   }
-  if (pending === "terminating") {
+  if (pending === "terminating" || pending === "expiring") {
     return (
       <div className={wrapperCls}>
         <Spinner color="text-destructive" />

@@ -15,3 +15,8 @@ no separate client message store. Each card carries optional `impersonation`
 metadata (agent/session id, name, executor and observed process); user direction
 and the Ava agent identity stay intact. The card header does not render
 this metadata — no executor/takeover badge (user ruling 2026-09-16, task #3660).
+The roster card also carries only an optional open session number. Its presence
+gates the sidebar context menu action to end the external session; confirmation
+sends that exact number, and the response refetches the roster. Agent-updated
+events also refetch the roster when another client opens or ends a session, so
+the menu changes promptly. No timeline or message marker is added for the control.

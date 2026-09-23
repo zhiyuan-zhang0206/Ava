@@ -88,6 +88,7 @@ export function AgentSidebar(props: Props) {
         onSelect={handleSelect}
         onSpawn={props.onSpawn}
         onTerminate={props.onTerminate}
+        onForceExpire={props.onForceExpire}
         onRestart={props.onRestart}
         onResurrect={props.onResurrect}
         onFork={props.onFork}
@@ -113,6 +114,7 @@ export function AgentSidebar(props: Props) {
         onSelect={handleSelect}
         onSpawn={props.onSpawn}
         onTerminate={props.onTerminate}
+        onForceExpire={props.onForceExpire}
         onRestart={props.onRestart}
         onResurrect={props.onResurrect}
         onFork={props.onFork}
