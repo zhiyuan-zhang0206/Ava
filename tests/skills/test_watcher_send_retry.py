@@ -15,6 +15,7 @@ imports, a fake ``ava`` that records sends and can refuse the first N of them.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -98,6 +99,25 @@ def _wire(monkeypatch: pytest.MonkeyPatch, module: ModuleType, send_failures: in
     monkeypatch.setattr(module, "ava", fake)
     monkeypatch.setattr(module, "WAKE_BACKOFF_S", 0.0)
     return fake
+
+
+def _rewrite_as_done_after_first_sleep(
+    monkeypatch: pytest.MonkeyPatch, work: Path, fake: _FakeAva
+) -> None:
+    """Advance one generic poll, then make an actionable update observable."""
+    slept = False
+
+    def _sleep(_seconds: float) -> None:
+        nonlocal slept
+        if slept:
+            return
+        slept = True
+        assert fake.calls == 0
+        work.write_text("STATUS: DONE\n")
+        mtime = work.stat().st_mtime + 1
+        os.utime(work, (mtime, mtime))
+
+    monkeypatch.setattr(watch_work.time, "sleep", _sleep)
 
 
 @pytest.mark.parametrize("module", watch_idle_modules, ids=list(_WATCH_IDLE_PATHS))
@@ -208,11 +228,11 @@ def test_watch_work_exhausted_delivery_reports_false(
 def test_watch_work_terminal_wake_delivers_through_the_window(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An actionable STATUS wakes the launching agent even when the first
-    sends are refused."""
+    """A new actionable status wakes through a refused delivery window."""
     fake = _wire(monkeypatch, watch_work, send_failures=2)
     work = tmp_path / "work.md"
-    work.write_text("STATUS: DONE\n")
+    work.write_text("STATUS: WORKING\n")
+    _rewrite_as_done_after_first_sleep(monkeypatch, work, fake)
 
     watch_work.watch(str(work))
 
@@ -222,14 +242,30 @@ def test_watch_work_terminal_wake_delivers_through_the_window(
     assert "STATUS: DONE" in args[1]
 
 
+def test_watch_work_baselines_actionable_status_until_its_mtime_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A re-armed stale DONE waits for a subsequent file rewrite to wake."""
+    fake = _wire(monkeypatch, watch_work)
+    work = tmp_path / "work.md"
+    work.write_text("STATUS: DONE\n")
+    _rewrite_as_done_after_first_sleep(monkeypatch, work, fake)
+
+    watch_work.watch(str(work))
+
+    assert fake.calls == 1
+    assert "STATUS: DONE" in fake.sent[0][1][1]
+
+
 def test_watch_work_terminal_wake_exits_2_on_exhaustion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The generic one-shot path: a wake that never lands exits 2 instead of
     ending as if it had been delivered."""
-    _wire(monkeypatch, watch_work, send_failures=100)
+    fake = _wire(monkeypatch, watch_work, send_failures=100)
     work = tmp_path / "work.md"
-    work.write_text("STATUS: DONE\n")
+    work.write_text("STATUS: WORKING\n")
+    _rewrite_as_done_after_first_sleep(monkeypatch, work, fake)
 
     with pytest.raises(SystemExit) as excinfo:
         watch_work.watch(str(work))
