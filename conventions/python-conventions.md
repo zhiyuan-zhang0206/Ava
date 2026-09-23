@@ -25,11 +25,10 @@ allowlist still apply only to the eight packages.
 
 Existing over-limit files are frozen in `scripts/structure/baseline.json`.
 New violations and growth above a frozen value fail the gate. The baseline is
-shrink-only: a guard compares it with git HEAD and rejects added entries or
-raised values. After splitting a file, lower its baseline value by hand to
-its current line count, or remove its entry once it is within budget. If the
-baseline is absent in HEAD (its introduction), the guard emits a short note
-and skips that comparison. Enforced by `scripts/lint_code_structure.py`.
+shrink-only: a guard compares it with the base revision described below and
+rejects added file entries or raised values. After splitting a file, lower
+its baseline value by hand to its current line count, or remove its entry
+once it is within budget. Enforced by `scripts/lint_code_structure.py`.
 
 ## Directory budget: ≤20 direct entries
 
@@ -47,6 +46,72 @@ remove its entry when it reaches the cap. A full gate run checks the whole
 scope; an explicit directory target checks itself and its descendants, and
 an explicit file target checks the file and its containing directory. The
 baseline guard runs in both modes.
+
+## Function quality budgets: complexity and nesting
+
+Every function and method in the same recursive `.py` scope has two budgets:
+
+- **McCabe cyclomatic complexity (CC)** uses pinned `radon==6.0.1`.
+  CC ≥15 is a hard violation; CC 10–14 is a non-blocking warning; CC ≤9
+  is silent. Each file is parsed once. Methods in function-local classes
+  omitted by Radon's whole-file collection are scored from their existing
+  AST nodes with the same Radon calculation, so all functions remain covered.
+- **Control-flow nesting** may be at most 5; depth >5 is a hard violation.
+  Count `if`, `for`, `async for`, `while`, `try`, `with`, `async with`, and
+  `match` along the deepest function-body path. An `elif` stays at its
+  parent's depth (a sole `If` in `orelse` with the same column offset).
+  A `try` adds one level to its body, handlers, `else`, and `finally`;
+  handlers do not add a second level. Comprehensions, lambdas, decorators,
+  and `with` items add nothing. Nested functions are measured separately;
+  nested function and class bodies do not deepen the outer function.
+
+Lambda expressions and class bodies themselves are not measured functions.
+Keys use `<repo-relative .py path>::<qualname>` with Python qualification:
+`name`, `Class.name`, `Outer.Inner.name`, or `parent.<locals>.child`.
+Repeated qualified names in one file are ordered by source appearance:
+the first keeps its key, then `#2`, `#3`, and so on are appended.
+
+The `complexity` and `nesting` objects in `scripts/structure/baseline.json`
+freeze hard violations, alongside `directories` and `files`. Function keys
+must name scoped `.py` paths and non-empty qualified names. Values must be
+integers at or above 15 for complexity, or above 5 for nesting; an entry
+below its threshold is invalid. An unlisted hard violation or growth above
+its frozen value fails. Existing violations at or below their frozen values
+pass. Stale entries are allowed; delete them when the violation disappears.
+Hand-edit entries only to lower a still-over-budget value or delete an entry.
+
+Function renames have one allowance: an added function key must pair with a
+distinct removed key in the **same section and file**, with a new value no
+greater than the removed value. One removal cannot cover two additions.
+Directory and file sections never permit added keys. All sections reject
+raised values. New files belong in existing subdirectories with room, or
+arrive with a real directory split that lowers counts, without raising the
+baseline.
+
+The guard chooses its comparison base in this order:
+
+1. If `LINT_STRUCTURE_BASELINE_BASE` is set, use its merge base with `HEAD`,
+   or resolve the value directly to a commit if no merge base exists.
+   An unresolvable explicit value is a hard error.
+2. Otherwise use the merge base of `HEAD` and `origin/main` when available;
+   a failed merge-base computation emits a note and falls through.
+3. Otherwise use `HEAD`.
+
+The guard reads the baseline at that revision. An absent baseline emits a
+note and skips comparison; a legacy two-section baseline compares its file
+and directory sections and notes that the new sections are introductions.
+Malformed baselines fail. This catches raises after committing them too:
+CI fetches the pull request's base branch and sets the explicit base before
+running the structural hooks. The guard runs for full and explicit-target
+scans alike, while quality checks only inspect the selected scope.
+
+Run `.venv/bin/python scripts/lint_code_structure.py` for the full gate.
+Complexity warnings go to stderr as a total function/file count and up to
+30 per-file counts, sorted by count descending then path ascending; remaining
+files and functions are summarized in a `rest:` line. Add
+`--complexity-warnings-full` anywhere in the arguments to print every file
+count. Explicit targets restrict warnings too; no warned functions means
+no warning output. Warnings alone never fail the gate.
 
 ## No `print()` in framework code
 
