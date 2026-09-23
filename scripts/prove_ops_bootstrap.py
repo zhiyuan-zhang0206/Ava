@@ -60,12 +60,12 @@ def main() -> None:  # noqa: PLR0915 — one bounded CI process/DB lifetime with
         # The settle columns are real-schema since the initial release; the lease
         # fence this bootstrap drives references `settle_hosts` (task #4086 b5).
         conn.execute(
-            "CREATE TABLE deployment_state(id int,phase text,kind text,note text,holder text,"
+            "CREATE TABLE deployment_state(id int,phase text,kind text,holder text,"
             "acquired_at timestamptz,expires_at timestamptz,target_sha text,"
             "settle_hosts text[],settle_note text,settle_started_at timestamptz)"
         )
         row = conn.execute(
-            "INSERT INTO deployment_state VALUES (1,'updating','rollout',NULL,'proof',"
+            "INSERT INTO deployment_state VALUES (1,'updating','rollout','proof',"
             "clock_timestamp(),clock_timestamp()+interval '10 minutes',%s,NULL,NULL,NULL)"
             " RETURNING acquired_at",
             ("c" * 40,),

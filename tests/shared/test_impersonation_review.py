@@ -2,16 +2,14 @@
 
 import asyncio
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, LiteralString, cast
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import httpx
 import psycopg
 import pytest
-from psycopg import sql
 
 from ava import _impersonation_events as recorded
 from shared import impersonation as leases
@@ -22,39 +20,6 @@ from shared.db import create_agent
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
-
-
-def test_upgrade_captures_unread_backlog_of_already_active_legacy_session(
-    db_conn: psycopg.Connection,
-) -> None:
-    root = Path(__file__).parents[2]
-    migration = root / "migrations/20260913T180056_named-impersonation-history.sql"
-    rollback = migration.with_suffix(".down.sql")
-    agent_id = create_agent(db_conn)
-    legacy_id = uuid4()
-    db_conn.commit()
-    with db_conn.transaction(force_rollback=True):
-        db_conn.execute(sql.SQL(cast(LiteralString, rollback.read_text())))
-        db_conn.execute(
-            "INSERT INTO agent_impersonations(id,agent_id,source,machine,token_hash,status,"
-            "ttl_seconds,expires_at,activated_at) VALUES(%s,%s,'external_agent:codex',%s,"
-            "'existing-credential-hash','active',3600,now()+interval '1 hour',now())",
-            (legacy_id, agent_id, machine_name()),
-        )
-        row = db_conn.execute(
-            "INSERT INTO inbound_messages(agent_id,content,kind,source) "
-            "VALUES(%s,'Unread at upgrade','chat','user') RETURNING id",
-            (agent_id,),
-        ).fetchone()
-        assert row is not None
-        # The existing relay has not read this message yet, so no delivery receipt exists.
-        db_conn.execute(sql.SQL(cast(LiteralString, migration.read_text())))
-        messages = [
-            entry
-            for entry in history.entries(str(legacy_id), db_conn)
-            if entry["kind"] == "message"
-        ]
-        assert [entry["payload"]["inbound_id"] for entry in messages] == [row[0]]
 
 
 @pytest.fixture

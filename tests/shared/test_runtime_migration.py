@@ -14,7 +14,6 @@ from shared.config import settings
 from shared.migrations import (
     MigrationAuthorityMismatch,
     _assert_migration_authority,
-    _ensure_cutover,
 )
 from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
@@ -123,26 +122,6 @@ def test_release_cannot_use_fresh_birth_empty_roster_exception() -> None:
         pytest.raises(MigrationAuthorityMismatch),
     ):
         _assert_migration_authority(MagicMock(), context)
-
-
-def test_legacy_cutover_refuses_wrong_gateway_before_transaction() -> None:
-    connection = MagicMock()
-    connection.cursor.return_value.__enter__.return_value.fetchall.return_value = [
-        (version,) for version in range(1, 82)
-    ]
-    with (
-        patch("shared.migrations._schema_migrations_shape", return_value="legacy"),
-        patch(
-            "shared.migrations._assert_migration_authority",
-            side_effect=MigrationAuthorityMismatch("wrong gateway"),
-        ),
-        pytest.raises(MigrationAuthorityMismatch, match="wrong gateway"),
-    ):
-        _ensure_cutover(connection)
-    connection.transaction.assert_not_called()
-    executed = connection.cursor.return_value.__enter__.return_value.execute.call_args_list
-    assert len(executed) == 1
-    assert executed[0].args[0] == "SELECT version FROM schema_migrations"
 
 
 def test_verified_inventory_applies_without_git_and_rolls_back(

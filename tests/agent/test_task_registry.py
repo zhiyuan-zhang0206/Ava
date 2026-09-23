@@ -14,7 +14,6 @@ import re
 import threading
 import time
 from collections.abc import Iterator
-from pathlib import Path
 from unittest.mock import patch
 
 import psycopg
@@ -2095,15 +2094,6 @@ def test_create_rejects_parent_1_when_not_root(db_conn: psycopg.Connection) -> N
         assert task.parent_id == 2
     finally:
         ava._boot._agent_id = original
-
-
-def _migration_sql(name_suffix: str) -> tuple[str, str]:
-    """Return (up_sql, down_sql) for the post-baseline migration whose kebab name
-    ends with `name_suffix`, located by its timestamp-prefixed filename."""
-    mig_dir = Path(__file__).resolve().parents[2] / "migrations"
-    up = next(mig_dir.glob(f"*_{name_suffix}.sql"))
-    down = next(mig_dir.glob(f"*_{name_suffix}.down.sql"))
-    return up.read_text(encoding="utf-8"), down.read_text(encoding="utf-8")
 
 
 def _persisted_parent(db: psycopg.Connection, task_id: int) -> int | None:

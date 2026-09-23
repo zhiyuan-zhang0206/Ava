@@ -4,7 +4,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, LiteralString, cast
+from typing import Any
 from uuid import uuid4
 
 import psycopg
@@ -294,67 +294,6 @@ def test_message_retry_does_not_replace_newer_preview(
     assert db_conn.execute(
         "SELECT last_message_text FROM agents_meta WHERE id=%s", (owner.agent_id,)
     ).fetchone() == ("Second",)
-
-
-def test_upgrade_preserves_legacy_credential_and_message_backfill(
-    db_conn: psycopg.Connection[Any],
-) -> None:
-    from psycopg import sql
-
-    root = Path(__file__).parents[2]
-    up = root / "migrations/20260913T180056_named-impersonation-history.sql"
-    down = root / "migrations/20260913T180056_named-impersonation-history.down.sql"
-    agent_id = create_agent(db_conn)
-    legacy_id = uuid4()
-    db_conn.commit()
-    with db_conn.transaction(force_rollback=True):
-        db_conn.execute(sql.SQL(cast(LiteralString, down.read_text())))
-        inserted = db_conn.execute(
-            "INSERT INTO inbound_messages(agent_id,content,kind,source) "
-            "VALUES(%s,'Legacy message','chat','user') RETURNING id",
-            (agent_id,),
-        ).fetchone()
-        assert inserted is not None
-        inbound = inserted[0]
-        db_conn.execute(
-            "INSERT INTO agent_impersonations(id,agent_id,source,machine,token_hash,status,"
-            "ttl_seconds,expires_at,ended_at) VALUES(%s,%s,'external_agent:codex',%s,"
-            "'existing-credential-hash','released',3600,now(),now())",
-            (legacy_id, agent_id, machine_name()),
-        )
-        db_conn.execute(
-            "INSERT INTO agent_impersonation_messages(lease_id,inbound_id,acknowledged_at) "
-            "VALUES(%s,%s,now())",
-            (legacy_id, inbound),
-        )
-        handoff = db_conn.execute(
-            "INSERT INTO inbound_messages(agent_id,content,kind,source) "
-            "VALUES(%s,'Legacy completion summary','chat','external_agent:codex') RETURNING id",
-            (agent_id,),
-        ).fetchone()
-        assert handoff is not None
-        db_conn.execute(
-            "UPDATE agent_impersonations SET summary_inbound_id=%s WHERE id=%s",
-            (handoff[0], legacy_id),
-        )
-        db_conn.execute(sql.SQL(cast(LiteralString, up.read_text())))
-        row = db_conn.execute(
-            "SELECT session_id,token_hash,id FROM agent_impersonations WHERE agent_id=%s",
-            (agent_id,),
-        ).fetchone()
-        assert row == (0, "existing-credential-hash", legacy_id)
-        records = history.entries(str(legacy_id), db_conn)
-        assert records[1]["payload"]["content"] == "Legacy message"
-        assert records[1]["payload"]["acknowledged_at"] is not None
-        assert records[2]["payload"]["content"] == "Legacy completion summary"
-        assert db_conn.execute(
-            "SELECT summary FROM agent_impersonations WHERE id=%s", (legacy_id,)
-        ).fetchone() == ("Legacy completion summary",)
-        assert db_conn.execute(
-            "SELECT impersonation_index FROM agents WHERE id=%s", (agent_id,)
-        ).fetchone() == (1,)
-        with pytest.raises(psycopg.errors.RaiseException, match="permanent"), db_conn.transaction():
-            db_conn.execute(sql.SQL(cast(LiteralString, down.read_text())))
 
 
 @pytest.mark.parametrize("automatic", [True, False])

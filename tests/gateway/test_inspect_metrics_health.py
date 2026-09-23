@@ -171,7 +171,6 @@ def test_cooldown_elapsed_logs_again(
     ("evidence", "condition"),
     [
         (_ev("partial", "historical_coverage_unknown"), "historical_coverage_unknown"),
-        (_ev("unavailable", "compact_boundary_unknown"), "compact_boundary_unknown"),
         (_ev("partial", "missing_turn_durations"), "missing_turn_durations"),
         (_ev("partial", "archive_precision_unattributed"), "archive_precision_unattributed"),
         (

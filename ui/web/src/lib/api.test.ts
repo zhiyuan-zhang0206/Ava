@@ -412,7 +412,7 @@ describe("stats / config / timeline / system status", () => {
       calls.push({ url, init });
       return new Promise<Response>(() => undefined);
     }));
-    void api.getAgentInspectStatistics(7, 24, false, controller.signal);
+    void api.getAgentInspectStatistics(7, 24, controller.signal);
     expect(calls[0].url).toMatch(/\/api\/agents\/7\/inspect\/statistics\?hours=24$/);
     expect(calls[0].init?.signal).not.toBe(controller.signal);
     expect(calls[0].init?.signal?.aborted).toBe(false);

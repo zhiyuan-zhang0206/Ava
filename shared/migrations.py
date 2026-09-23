@@ -32,14 +32,6 @@ Identity model (2026-07-19 timestamp-id + re-baseline cutover):
   is the down-migration floor; a rollback that would remove it is refused
   (`RollbackBelowFloor`).
 
-Cutover from the pre-2026-07-19 sequential-integer scheme (`schema_migrations`
-was `version INT`, seeded `generate_series(1, 81)`) is one-way and automatic:
-`_ensure_cutover` (run inside `apply_pending_migrations`, under the mutation
-lock) converts a DB whose legacy applied set is exactly `{1..81}` into the
-baseline. Any other legacy state (behind 81, or gaps) is refused with a
-"step through the immediately-preceding release first" error — that release
-brings the DB to the full 1..81 baseline this squash assumes.
-
 Design points:
 - Startup check **compares but does not apply** — apply is an explicit step of
   the update flow; startup auto-apply races at multi-process start and breaks
@@ -88,8 +80,6 @@ from shared.dotenv_boot import checkout_anchored_home
 from shared.log import logger
 from shared.machine import MachineNameMissing, machine_name
 from shared.migration_errors import CodeBehindSchema as CodeBehindSchema
-from shared.migration_errors import CutoverRefused as CutoverRefused
-from shared.migration_errors import CutoverRequired as CutoverRequired
 from shared.migration_errors import MigrationAuthorityMismatch as MigrationAuthorityMismatch
 from shared.migration_errors import MigrationError as MigrationError
 from shared.migration_errors import MigrationFailed as MigrationFailed
@@ -97,6 +87,8 @@ from shared.migration_errors import MigrationHistoryGap as MigrationHistoryGap
 from shared.migration_errors import MigrationLayoutError as MigrationLayoutError
 from shared.migration_errors import RollbackBelowFloor as RollbackBelowFloor
 from shared.migration_errors import SchemaVersionMismatch as SchemaVersionMismatch
+from shared.migration_history import _RESET_ANCHOR, assert_reset_history
+from shared.migration_history import _V010_PRE_RESET_SET as _V010_PRE_RESET_SET
 from shared.migration_layout import _BASELINE_NAME as _BASELINE_NAME
 from shared.migration_layout import _DOWN_FILENAME_RE as _DOWN_FILENAME_RE
 from shared.migration_layout import _FILENAME_RE as _FILENAME_RE
@@ -124,86 +116,10 @@ MIGRATIONS_DIR: Path = Path(__file__).resolve().parent.parent / "migrations"
 # (see `_schema_mutation_lock`). Arbitrary but stable cluster-wide; ASCII "AVMI".
 _MIGRATION_LOCK_KEY = 0x41564D49
 
-# The legacy sequential-integer schema version that db/schema.sql squashes. A
-# pre-cutover DB is convertible only if its applied set is exactly {1.._LEGACY_
-# BASELINE_MAX}; see `_ensure_cutover`. Frozen at cutover time — do not bump.
-_LEGACY_BASELINE_MAX = 81
-_LEGACY_BASELINE_SET = frozenset(range(1, _LEGACY_BASELINE_MAX + 1))
-
-# The 59 timestamped migrations squashed into db/schema.sql at the v0.1.0
-# release (2026-08-14 schema reset). Frozen at reset time — do not bump. A DB
-# whose applied set contains ANY of these must contain ALL of them before the
-# convergence path may delete their tracking rows (see apply_pending_migrations
-# and MigrationHistoryGap); a partial set means schema effects that never ran.
-_V010_PRE_RESET_SET = frozenset(
-    {
-        "20260719T223436_root-task-default-parent",
-        "20260720T050943_agents-meta-last-active-at",
-        "20260720T191255_agents-meta-hibernating-status",
-        "20260721T042152_drop-inbound-notify-trigger",
-        "20260721T082401_agent-notices-task-id",
-        "20260721T082402_agent-tasks-priority",
-        "20260721T090000_agents-meta-termination-source",
-        "20260722T051500_agent-events-rollup-tables",
-        "20260722T072626_agent-events-monthly-partitioning",
-        "20260723T023228_add-explorer-preset",
-        "20260725T025418_task-reminder-column-rename",
-        "20260725T054607_rename-skills-ava-prefix",
-        "20260725T060802_pin-haiku-dated-model-id",
-        "20260725T074822_rename-skills-ava-prefix-round2",
-        "20260728T055350_add-last-wedged-check-at",
-        "20260729T041500_cluster-update-lock-note",
-        "20260729T093000_termination-source-integrity",
-        "20260731T042431_skill-names-dash-canonical",
-        "20260731T071400_agent-birth-config",
-        "20260731T071500_cluster-defaults",
-        "20260731T071600_default-model-deepseek-v4-flash",
-        "20260731T084500_seed-presets-drop-skill-index-list",
-        "20260731T151000_cluster-last-update",
-        "20260801T041104_up-since-at-expand",
-        "20260802T202812_inbound-claimed-at",
-        "20260803T180647_ops-alert-rules",
-        "20260803T181500_ops-metrics-table",
-        "20260804T190513_retire-ops-alert-rules",
-        "20260804T190839_unified-events-table",
-        "20260804T203036_events-readers-neighbors",
-        "20260804T214534_ops-alerts",
-        "20260805T001003_ops-alerts-source",
-        "20260805T083741_kind-category-final",
-        "20260807T010148_events-kind-to-event-name",
-        "20260807T040600_delivery-alerted-dedup",
-        "20260807T054700_pages-serve-dir-reopen",
-        "20260807T083219_cluster-ops-idempotency",
-        "20260807T183600_skill-names-canonical-three-store",
-        "20260807T213500_api-idempotency",
-        "20260808T043000_r1-deploy-state-tables",
-        "20260808T073335_r1-host-paused-at",
-        "20260808T075000_skill-identity-config-refs",
-        "20260808T104500_agent-watchers",
-        "20260808T184958_select-all-lateral-indexes",
-        "20260808T200000_unify-ops-idempotency",
-        "20260808T203000_agent-tasks-constraints",
-        "20260809T030358_fyi-answerable",
-        "20260810T140000_blob-autovacuum-tuning",
-        "20260810T224124_events-level-index-includes-critical",
-        "20260810T224356_schedule-runs-agent-fk",
-        "20260811T050000_contract-sweep-dead-tables",
-        "20260811T051000_agent-watchers-composite-pk",
-        "20260812T000000_machines-is-staging",
-        "20260812T040636_agent-liveness-state",
-        "20260812T230738_drop-ops-metrics",
-        "20260813T042527_alerts",
-        "20260813T231327_events-target-agent-id-index",
-        "20260814T092155_llm-usage-cost-snapshot",
-        "20260814T182039_machines-pause",
-    }
-)
-
 
 def _schema_migrations_shape(conn: psycopg.Connection) -> str:
     """Classify the DB's schema_migrations table: 'absent' (no table), 'set'
-    (new applied-set format, keyed by `name`), or 'legacy' (pre-cutover
-    sequential-integer format, keyed by `version`)."""
+    (applied-set format, keyed by `name`). Unsupported shapes fail before writes."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT column_name FROM information_schema.columns "
@@ -214,11 +130,10 @@ def _schema_migrations_shape(conn: psycopg.Connection) -> str:
         return "absent"
     if "name" in cols:
         return "set"
-    if "version" in cols:
-        return "legacy"
     raise MigrationLayoutError(
         f"schema_migrations has an unrecognized shape (columns: {sorted(cols)}); "
-        "expected a `name` (applied-set) or `version` (legacy) column"
+        "expected a `name` (applied-set) column. Restore older databases with "
+        "their matching release and upgrade through the pre-reset release first."
     )
 
 
@@ -227,21 +142,10 @@ def _applied_migration_set(conn: psycopg.Connection) -> set[str]:
 
     Table absent (a DB that has never been provisioned) -> empty set; the caller
     decides whether that is behind-code (check) or nothing-to-do (apply). A
-    legacy (pre-cutover) table raises `CutoverRequired`: the apply path converts
-    it before reading (via `_ensure_cutover`), so only a read path reaches here
-    on legacy — and a read must never silently mutate.
+    table keyed by integer versions is unsupported and raises MigrationLayoutError.
     """
-    shape = _schema_migrations_shape(conn)
-    if shape == "absent":
+    if _schema_migrations_shape(conn) == "absent":
         return set()
-    if shape == "legacy":
-        raise CutoverRequired(
-            "schema_migrations is still in the pre-cutover integer format. On the "
-            "shared prod DB the gateway's `ava cluster update` runs the conversion; if this "
-            "is an agent-runner, wait for the gateway to update. If the gateway "
-            "already updated, the conversion did not run — investigate before "
-            "starting services against it."
-        )
     with conn.cursor() as cur:
         cur.execute("SELECT name FROM schema_migrations")
         return {r[0] for r in cur.fetchall()}
@@ -278,7 +182,6 @@ def check_schema_version(conn: psycopg.Connection) -> None:
     Exceptions:
         SchemaVersionMismatch: DB behind code.
         CodeBehindSchema: DB ahead of code (or divergent).
-        CutoverRequired: DB still in the pre-cutover integer format.
         MigrationLayoutError: migrations/ layout itself is broken.
     """
     required = required_migration_set()
@@ -307,7 +210,7 @@ def assert_schema_current(db_url: str) -> None:
     entries: open a short-lived connection and run
     check_schema_version.
 
-    Exceptions SchemaVersionMismatch / CodeBehindSchema / CutoverRequired /
+    Exceptions SchemaVersionMismatch / CodeBehindSchema /
     MigrationLayoutError pass through; the process entry receives the traceback
     and exits directly; the human/Claude reads the stack and takes over.
 
@@ -335,8 +238,8 @@ def assert_schema_current(db_url: str) -> None:
 
 @contextlib.contextmanager
 def _schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
-    """Hold a Postgres advisory lock for a whole schema-mutation loop (cutover,
-    forward apply, or rollback).
+    """Hold a Postgres advisory lock for a whole schema-mutation loop (forward
+    apply or rollback).
 
     Serializes *every* path that mutates the schema — a rollout's
     `_run_gateway_local_update`, a manual / watchdog `ava start`, a recovery
@@ -362,59 +265,6 @@ def _schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
     finally:
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_unlock(%s)", (_MIGRATION_LOCK_KEY,))
-
-
-def _ensure_cutover(
-    conn: psycopg.Connection, release: ReleaseMigrationContext | None = None
-) -> None:
-    """One-way convert a legacy (sequential-integer) schema_migrations into the
-    applied-set baseline. Idempotent: a new-format or absent table is a no-op.
-    Must run under `_schema_mutation_lock` on a non-autocommit conn (the caller,
-    `apply_pending_migrations`, holds it).
-
-    A legacy DB is convertible only if its applied set is exactly the `{1..81}`
-    baseline that db/schema.sql squashes. Any other legacy state (behind 81, or
-    gaps) raises `CutoverRefused` — the operator must step through the
-    immediately-preceding release, which advances the DB to the full 1..81
-    baseline, before this one.
-
-    Exceptions:
-        CutoverRefused: legacy applied set is not the exact {1..81} baseline.
-    """
-    if _schema_migrations_shape(conn) != "legacy":
-        return
-    with conn.cursor() as cur:
-        cur.execute("SELECT version FROM schema_migrations")
-        applied: frozenset[int] = frozenset(r[0] for r in cur.fetchall())
-    if applied != _LEGACY_BASELINE_SET:
-        missing = sorted(_LEGACY_BASELINE_SET - applied)
-        extra = sorted(applied - _LEGACY_BASELINE_SET)
-        raise CutoverRefused(
-            "cannot convert legacy schema_migrations to the applied-set baseline: "
-            f"applied versions are not exactly 1..{_LEGACY_BASELINE_MAX} "
-            f"(missing={missing}, extra={extra}). Upgrade to the release "
-            "immediately preceding this one (the last with sequential-integer "
-            f"migrations, schema version {_LEGACY_BASELINE_MAX}) so the DB reaches "
-            "the full baseline, then upgrade to this release."
-        )
-    if release is None:
-        _assert_migration_authority(conn)
-    else:
-        _assert_migration_authority(conn, release)
-    logger.info(
-        "[migration] converting legacy schema_migrations (1..{max}) -> baseline",
-        max=_LEGACY_BASELINE_MAX,
-    )
-    with conn.transaction(), conn.cursor() as cur:
-        cur.execute("DROP TABLE schema_migrations")
-        cur.execute(
-            "CREATE TABLE schema_migrations ("
-            "  name TEXT PRIMARY KEY,"
-            "  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-            ")"
-        )
-        cur.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_BASELINE_NAME,))
-    logger.info("[migration] cutover complete; baseline stamped")
 
 
 def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
@@ -470,6 +320,17 @@ def _assert_migration_authority(
     )
 
 
+def _squash_history(conn: psycopg.Connection, names: set[str]) -> None:
+    """Delete folded tracking rows inside the caller's mutation transaction."""
+    logger.info(
+        "[migration] squashing {n} applied name(s) into the baseline: {names}",
+        n=len(names),
+        names=", ".join(sorted(names)),
+    )
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM schema_migrations WHERE name = ANY(%s)", (sorted(names),))
+
+
 def apply_pending_migrations(
     conn: psycopg.Connection, *, release: ReleaseMigrationContext | None = None
 ) -> list[str]:
@@ -478,8 +339,7 @@ def apply_pending_migrations(
     actually applied. Untracked files in migrations/ are warned about and
     skipped (see `_list_migration_files`).
 
-    First converts a legacy DB via `_ensure_cutover` (no-op on a new-format /
-    absent table). Each migration runs in one transaction (`conn.transaction()`);
+    Each migration runs in one transaction (`conn.transaction()`);
     body SQL and the INSERT are in the same transaction; failure rolls back
     together -> schema state does not advance.
 
@@ -498,7 +358,7 @@ def apply_pending_migrations(
 
     Exceptions:
         MigrationFailed: SQL failed; `__cause__` is the original psycopg exception.
-        CutoverRefused: legacy DB not at the exact baseline (from `_ensure_cutover`).
+        MigrationHistoryGap: a pre-reset generation is incomplete.
         MigrationLayoutError: layout broken.
         MigrationAuthorityMismatch: this checkout does not own the cluster.
     """
@@ -507,44 +367,15 @@ def apply_pending_migrations(
             release.assert_operation(conn)
             release.validate(MIGRATIONS_DIR)
             _assert_migration_authority(conn, release)
-        if release is None:
-            _ensure_cutover(conn)
-            files = _list_migration_files()
-        else:
-            _ensure_cutover(conn, release)
-            files = _list_migration_files(release)
+        files = _list_migration_files() if release is None else _list_migration_files(release)
         applied = _applied_migration_set(conn)
         required = {_BASELINE_NAME} | {name for name, _ in files}
 
-        # Re-baseline convergence: applied names whose migration file no longer
-        # exists (and which are not the baseline) have been squashed into
-        # db/schema.sql by a re-baseline — drop their tracking rows so the
-        # applied set matches what this code expects. The convergence gate
-        # (scripts/test_migrations_apply.sh) proves db/schema.sql is the net
-        # effect of every migration file, so a missing file means "folded into
-        # the baseline", never "lost". A rolled-back cluster self-heals: the
-        # older code's apply re-runs its (idempotent) migration files against
-        # the already-current schema and restores the names.
+        # Frozen inventories certify that every folded schema effect ran before
+        # deleting its tracking rows. The current anchor distinguishes a fresh
+        # baseline from an older restore with none of this generation applied.
+        assert_reset_history(applied, required)
         squash = applied - required
-
-        # P1 guard (adversarial review 2026-08-11): never converge a DB that
-        # applied only PART of the pre-reset history. A partial set means the
-        # missing migrations' schema effects never ran; deleting the present
-        # names' tracking rows would make the applied set EQUAL the required
-        # set (check passes) while the schema is not the baseline — a silent
-        # divergence that only explodes at runtime. The full set is safe (the
-        # baseline carries its net effect, proven by the convergence gate); an
-        # empty set is a fresh or already-converged DB.
-        pre_reset_applied = applied & _V010_PRE_RESET_SET
-        pre_reset_missing = _V010_PRE_RESET_SET - applied
-        if pre_reset_applied and pre_reset_missing:
-            raise MigrationHistoryGap(
-                "cannot converge: DB applied only "
-                f"{len(pre_reset_applied)}/{len(_V010_PRE_RESET_SET)} pre-v0.1.0 "
-                f"migrations (missing={sorted(pre_reset_missing)[:5]}{'...' if len(pre_reset_missing) > 5 else ''}). "
-                "Upgrade through a pre-reset release first so the full history "
-                "is applied, then upgrade across the reset."
-            )
 
         # Authority is checked only when there is something to mutate, so an
         # agent-runner's `ava start` — which legitimately calls this on the
@@ -558,19 +389,10 @@ def apply_pending_migrations(
             else:
                 _assert_migration_authority(conn, release)
 
-        if squash:
-            logger.info(
-                "[migration] squashing {n} applied name(s) into the baseline "
-                "(files no longer exist; schema folded into db/schema.sql): {names}",
-                n=len(squash),
-                names=", ".join(sorted(squash)),
-            )
-            with conn.transaction(), conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM schema_migrations WHERE name = ANY(%s)",
-                    (sorted(squash),),
-                )
-            applied -= squash
+        resetting = _RESET_ANCHOR in required - applied
+        if squash and not resetting:
+            with conn.transaction():
+                _squash_history(conn, squash)
 
         applied_now: list[str] = []
         for name, path in pending:
@@ -596,6 +418,11 @@ def apply_pending_migrations(
                         "INSERT INTO schema_migrations (name) VALUES (%s)",
                         (name,),
                     )
+                    if name == _RESET_ANCHOR and squash:
+                        # The anchor and deletion must commit together. A crash
+                        # cannot leave baseline-only tracking that the new guard
+                        # would correctly refuse as an incomplete old restore.
+                        _squash_history(conn, squash)
             except psycopg.Error as exc:
                 raise MigrationFailed(f"apply migration {name} failed: {exc}") from exc
             logger.info("[migration] {name} applied", name=name)
@@ -612,7 +439,10 @@ def apply_down(conn: psycopg.Connection, name: str) -> None:
     Exceptions:
         MigrationFailed: the down SQL failed; `__cause__` is the psycopg error.
         MigrationLayoutError: no `.down.sql` for this name.
+        RollbackBelowFloor: the requested name is a baseline anchor.
     """
+    if name in {_BASELINE_NAME, _RESET_ANCHOR}:
+        raise RollbackBelowFloor("the squashed baseline has no reversible migration history")
     path = _down_path(name)
     body = path.read_text()
     logger.info("[migration] {name} rolling back...", name=name)
@@ -636,8 +466,8 @@ def rollback_to(conn: psycopg.Connection, keep: set[str]) -> list[str]:
     `keep` is the applied set the DB should have after the rollback — typically
     the snapshot from `applied_migration_names` (recovery) or the target commit's
     migration set (`ava cluster rollback`). Rolling back the baseline sentinel is
-    refused: the baseline has no down, and crossing it would strand a set-tracked
-    DB under pre-cutover code.
+    refused: the baseline has no down, and folded strict deltas cannot be
+    replayed safely by an older release.
 
     The whole rollback runs in one transaction. If any down fails, the batch
     aborts atomically and leaves the schema and applied set unchanged, so the
@@ -645,7 +475,7 @@ def rollback_to(conn: psycopg.Connection, keep: set[str]) -> list[str]:
 
     Exceptions:
         RollbackBelowFloor: the rollback set includes the baseline (target
-            predates the cutover).
+            predates the reset).
         MigrationFailed / MigrationLayoutError: from `apply_down`.
     """
     with _schema_mutation_lock(conn):
@@ -653,7 +483,7 @@ def rollback_to(conn: psycopg.Connection, keep: set[str]) -> list[str]:
         with conn.transaction():
             applied = _applied_migration_set(conn)
             to_roll = applied - keep
-            if _BASELINE_NAME in to_roll:
+            if {_BASELINE_NAME, _RESET_ANCHOR} & to_roll:
                 raise RollbackBelowFloor(
                     "rollback target is below the squashed baseline (the baseline has "
                     "no down migration). Choose a target at or after the re-baseline "

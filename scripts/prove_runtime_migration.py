@@ -73,7 +73,7 @@ def main() -> None:
             "CREATE TABLE machine_units(machine_name text, home text, serve_gateway boolean)"
         )
         conn.execute(
-            "CREATE TABLE deployment_state(id integer PRIMARY KEY, holder text, acquired_at timestamptz, expires_at timestamptz, note text, kind text, phase text, target_sha text, settle_started_at timestamptz, settle_hosts text[], settle_note text)"  # the lease read selects the settle trio (task #4086 b5)
+            "CREATE TABLE deployment_state(id integer PRIMARY KEY, holder text, acquired_at timestamptz, expires_at timestamptz, kind text, phase text, target_sha text, settle_started_at timestamptz, settle_hosts text[], settle_note text)"  # the lease read selects the settle trio (task #4086 b5)
         )
         for name in required:
             conn.execute("INSERT INTO schema_migrations(name) VALUES (%s)", (name,))

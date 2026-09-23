@@ -29,7 +29,6 @@ import { useBreakpoint } from "@/lib/breakpoint";
 import { useAgentPages } from "@/lib/use-agent-pages";
 import { useInspectorHours, useInspectorOpen } from "@/lib/inspector-panel-store";
 import {
-  COMPACT_INSPECT_WINDOW,
   fetchWindowedInspect,
   inspectLiveQueryKey,
   inspectWidgetsQueryKey,
@@ -53,16 +52,13 @@ import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, M
 
 // Window options for the cost + activity sections. `null` = cumulative since
 // spawn (available as All); 0 = the last 5m and the positive values are a subset
-// of the backend whitelist (StatsWindowHours: 1/6/24/72/168 = hours). -1 is
-// a local sentinel for the since-last-compact window — it never reaches the
-// backend as `hours`, instead selecting the `since_compact` query param.
+// of the backend whitelist (StatsWindowHours: 1/6/24/72/168 = hours).
 const WINDOWS: { labelKey: string; value: number | null }[] = [
   { labelKey: "windowAll", value: null },
   { labelKey: "window5m", value: 0 },
   { labelKey: "window1h", value: 1 },
   { labelKey: "window24h", value: 24 },
   { labelKey: "window7d", value: 168 },
-  { labelKey: "windowSinceCompact", value: COMPACT_INSPECT_WINDOW },
 ];
 
 /**
@@ -112,8 +108,7 @@ function matchesInspectWindow(
   hours: number | null,
 ): data is AgentInspectStatistics {
   if (data?.agent_id !== agentId) return false;
-  if (hours === COMPACT_INSPECT_WINDOW) return data.since_compact;
-  return !data.since_compact && (data.window_hours ?? null) === hours;
+  return (data.window_hours ?? null) === hours;
 }
 
 export function InspectorPanel({ agentId }: { agentId: number }) {
