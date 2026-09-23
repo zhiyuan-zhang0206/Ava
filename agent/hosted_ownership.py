@@ -12,6 +12,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from shared import maintenance
+from shared.agent_observation import AdmissionOutcome
 from shared.audit_events import insert_event_log_async
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import (
@@ -44,9 +45,40 @@ from shared.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
 class _HostedAdmissionRefusedError(Exception):
     """Roll back speculative resource transfer before returning a refusal."""
 
+    def __init__(self, outcome: AdmissionOutcome) -> None:
+        self.outcome = outcome
 
-def _refuse_hosted_admission() -> Never:
-    raise _HostedAdmissionRefusedError
+
+def _refuse_hosted_admission(
+    outcome: AdmissionOutcome = AdmissionOutcome.ADMISSION_GUARD_REFUSED,
+) -> Never:
+    raise _HostedAdmissionRefusedError(outcome)
+
+
+async def _record_admission_refusal(
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    machine: str,
+    expected_from: str,
+    attempt_at: datetime,
+    outcome: AdmissionOutcome,
+) -> None:
+    """Keep an older, delayed refusal from replacing a later successful claim."""
+    async with async_write_transaction(pool) as conn:
+        await conn.execute(
+            "UPDATE agents_meta SET last_admission_outcome=%s, "
+            "last_admission_at=clock_timestamp() "
+            "WHERE id=%s AND machine=%s AND status=%s "
+            "AND (last_admission_at IS NULL OR last_admission_at <= %s)",
+            (outcome.value, agent_id, machine, expected_from, attempt_at),
+        )
+
+
+async def _admission_attempt_at(pool: AsyncConnectionPool) -> datetime:
+    async with pool.connection() as conn:
+        row = await (await conn.execute("SELECT clock_timestamp()")).fetchone()
+    assert row is not None  # noqa: S101 — scalar SELECT always returns one row
+    return row[0]
 
 
 async def apply_hosted_lifecycle(
@@ -368,7 +400,11 @@ async def admit_hosted_runtime(
     """
     from shared.exec_owner_recovery import recover_local_resources
 
+    attempt_at = await _admission_attempt_at(pool)
     if maintenance.held() and not await _held_owner_matches(pool, agent_id, owner):
+        await _record_admission_refusal(
+            pool, agent_id, machine, expected_from, attempt_at, AdmissionOutcome.MAINTENANCE_HOLD
+        )
         return None
 
     await asyncio.to_thread(recover_local_resources, agent_id, machine)
@@ -396,7 +432,7 @@ async def admit_hosted_runtime(
                 # (issue #2159). The alternative fence below (a successor
                 # boot) stays in force.
                 if maintenance.pending_command(agent_id) is None:
-                    return None
+                    _refuse_hosted_admission(AdmissionOutcome.PUBLICATION_DEFERRED)
                 publication_decision = None
             previous = await (
                 await conn.execute(
@@ -419,7 +455,7 @@ async def admit_hosted_runtime(
                 try:
                     require_current_for_managed(publication_decision, previous[4])
                 except ResourceEvidenceError:
-                    return None
+                    _refuse_hosted_admission(AdmissionOutcome.RESOURCE_FENCE)
             generation = (
                 previous[0]
                 if previous[1:3] == (owner, "hosted") and previous[0] is not None
@@ -460,6 +496,8 @@ async def admit_hosted_runtime(
                     "AND runtime_generation IS NOT NULL "
                     "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
                     "runtime_protocol_version = %s, "
+                    "last_admission_outcome = 'admitted', "
+                    "last_admission_at = clock_timestamp(), "
                     "lease_expires_at = now() + make_interval(secs => %s) "
                     "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
                     "AND status IN ('running','idling') "
@@ -524,7 +562,10 @@ async def admit_hosted_runtime(
                 source="system",
                 payload={"from": expected_from, "to": "running"},
             )
-    except _HostedAdmissionRefusedError:
+    except _HostedAdmissionRefusedError as exc:
+        await _record_admission_refusal(
+            pool, agent_id, machine, expected_from, attempt_at, exc.outcome
+        )
         return None
     logger.info(
         "hosted runtime admitted", agent_id=agent_id, generation=str(row[0]), owner=str(owner)

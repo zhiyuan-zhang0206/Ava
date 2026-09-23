@@ -21,6 +21,19 @@ progress and `last_active_at` are not heartbeats. UI renders observation age
 and absolute deadlines using its existing clock, without extra network probes.
 The existing per-row minute timers remain; no additional list timer is added.
 
+`AgentAvailability` is a separate creation/start observation on `AgentCard`
+and `AgentSnapshot`. The heartbeat status probe retains its existing
+`agent_host_online` verdict in `machine_probe` without changing what that probe
+means. A host verdict is fresh for two 60-second liveness intervals; a durable
+per-agent admission result is fresh for five minutes. Both clocks must be fresh
+before reporting `admitted` or `admission_refused`. A fresh host-down verdict
+takes precedence over older admission history. A fresh host-up verdict with no
+admission result means `awaiting_admission`; missing or stale evidence is
+`unknown`. `observed_at` is when this projection was evaluated and `evidence_at`
+is the source observation time. `admitted` means the ownership row was claimed,
+not that a message was claimed or a turn completed. Lifecycle `status` is
+unchanged.
+
 Inspector `shells_available=false` means the runner observation failed;
 `true` with an empty list means a successful empty result. Missing availability
 from older servers is unknown. Known RPC failures emit a bounded-reason metric

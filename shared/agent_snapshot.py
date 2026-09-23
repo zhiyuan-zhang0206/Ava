@@ -12,7 +12,7 @@ from typing import Any, Literal
 import psycopg
 from pydantic import BaseModel, Field
 
-from shared.agent_observation import AgentObservation, observation
+from shared.agent_observation import AgentAvailability, AgentObservation, availability, observation
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.tasks.priority import Priority
@@ -59,7 +59,8 @@ _FULL_COLS = (
     # no-interpolation preference); keep the '30' in sync with
     # shared.db.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
-    ", a.config_overlay, mp.last_probe_at, a.lease_expires_at"
+    ", a.config_overlay, mp.last_probe_at, a.lease_expires_at, "
+    "mp.agent_host_online, a.last_admission_outcome, a.last_admission_at"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -158,6 +159,7 @@ class AgentSnapshot(BaseModel):
     # intent. `last_probe_at` preserves the actual machine observation time.
     liveness_state: Literal["online", "offline", "unknown"]
     last_probe_at: datetime | None
+    availability: AgentAvailability | None = None
     observation: AgentObservation | None = None
     notices_awaiting_response: list[OpenNotice]
     unread_notice_count: int
@@ -200,6 +202,13 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
             "unread_notice_count": row[16],
             "supports_vision": model_supports_vision(effective_model),
             "observation": observation(row[18], row[19]),
+            "availability": availability(
+                status=row[4],
+                host_online=row[20],
+                probe_at=row[18],
+                admission_outcome=row[21],
+                admission_at=row[22],
+            ),
         }
     )
 

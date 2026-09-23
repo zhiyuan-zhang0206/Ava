@@ -165,6 +165,12 @@ CREATE TABLE agents_meta (
     runtime_generation UUID,
     runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
     runtime_owner UUID,
+    last_admission_outcome TEXT CHECK (last_admission_outcome IN
+        ('admitted', 'maintenance_hold', 'publication_deferred',
+         'resource_fence', 'admission_guard_refused')),
+    last_admission_at TIMESTAMPTZ,
+    CONSTRAINT agents_meta_admission_observation_pair_check
+        CHECK ((last_admission_outcome IS NULL) = (last_admission_at IS NULL)),
     runtime_protocol_version INTEGER NOT NULL DEFAULT 0 CHECK (runtime_protocol_version >= 0),
     incarnation_resources JSONB, -- server-owned versioned resource evidence; NULL is unknown, never an empty-set proof
     -- fork fields exist in pairs or not at all (constraint explicitly named to align with the ALTER in 0002 migration)
@@ -1175,6 +1181,7 @@ CREATE TABLE machines (
 CREATE TABLE machine_probe (
     machine_name         TEXT PRIMARY KEY,
     online               BOOLEAN NOT NULL,
+    agent_host_online    BOOLEAN, -- status_probe's existing host-alive verdict; NULL if the probe failed or lacked it
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
     last_probe_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     transition_since     TIMESTAMPTZ
@@ -2071,3 +2078,4 @@ INSERT INTO schema_migrations (name) VALUES ('20260922T075826_impersonation-deli
 
 -- Current reset anchor: the previous 101 migration names are folded above.
 INSERT INTO schema_migrations (name) VALUES ('20260923T031516_schema-baseline');
+INSERT INTO schema_migrations (name) VALUES ('20260923T175411_agent-creation-availability');

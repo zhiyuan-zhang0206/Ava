@@ -42,6 +42,7 @@ from ops.rpc_terminate import OpenTaskRow as OpenTaskRow
 from ops.rpc_terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_terminate import TerminateAgentResponse as TerminateAgentResponse
+from shared.agent_observation import AvailabilityReason
 from shared.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 from shared.envelope import reject_unnegotiated_caller, validate_writable_source
 
@@ -163,10 +164,18 @@ class ConfigNormalization(BaseModel):
 
 
 class SpawnedAgent(BaseModel):
-    """POST /api/agents response — new agent_id (== agent_id)."""
+    """Creation receipt; execution_observed never asserts a completed turn.
+
+    Runner RPCs carry only `id`. The gateway adds the optional observation
+    fields after the launch request is accepted, preserving older ID consumers.
+    """
 
     id: int
     config_normalized: ConfigNormalization | None = None
+    accepted: bool | None = None
+    execution_observed: bool | None = None
+    reason: AvailabilityReason | None = None
+    observed_at: datetime | None = None
 
 
 class ResurrectAgentRequest(BaseModel):

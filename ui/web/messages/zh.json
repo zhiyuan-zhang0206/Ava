@@ -252,7 +252,22 @@
     "model": "模型",
     "reasoningEffort": "推理强度",
     "preset": "预设",
-    "spawnAgent": "创建 agent"
+    "spawnAgent": "创建 agent",
+    "hostUnavailable": "Agent host 不可用",
+    "hostUnknown": "Agent host 状态未知",
+    "noReadyRunner": "没有 host 可用的 agent runner"
+  },
+  "agentAvailability": {
+    "unknown": "启动可用性未知",
+    "host_unavailable": "Agent host 不可用；创建可被接受，但执行需要等待",
+    "awaiting_admission": "创建已接受；等待 host 接纳",
+    "admission_refused": "Host 已尝试启动，但接纳被拒绝",
+    "admitted": "已观察到 host 接纳；尚未确认首轮执行完成",
+    "maintenance_hold": "维护期间暂缓 host 接纳",
+    "publication_deferred": "运行时发布期间暂缓 host 接纳",
+    "resource_fence": "资源证据不足，host 接纳受阻",
+    "admission_guard_refused": "Host 接纳检查拒绝了此次尝试",
+    "machineDiagnostics": "机器诊断"
   },
   "login": {
     "username": "用户名",
@@ -335,7 +350,7 @@
     "delete": "删除",
     "whatThisDoes": "这个计划做什么",
     "failed": "{verb} 失败：{error}",
-    "writerStarted": "计划编写 agent #{id} 已启动——在对话中完成它",
+    "writerCreated": "计划编写 agent #{id} 已创建——在对话中查看进度",
     "deleteConfirm": "删除计划“{name}”？",
     "updateFailed": "更新失败：{error}",
     "restarted": "计划已重启",
@@ -387,7 +402,7 @@
     "delete": "删除",
     "deleteFailed": "删除失败：{error}",
     "followSkill": "参照 ava.skills.ava_guide.presets 将其转为配置预设：{text}",
-    "writerStarted": "预设编写 agent #{id} 已启动——在对话中完成它",
+    "writerCreated": "预设编写 agent #{id} 已创建——在对话中查看进度",
     "draftFailed": "草稿失败：{error}",
     "deleteConfirm": "删除预设“{label}”？",
     "updateFailed": "更新失败：{error}",
@@ -397,7 +412,7 @@
   },
   "guide": {
     "describeTask": "描述一个运维任务——例如“在 gateway 机器上安装 linear MCP 服务器”",
-    "started": "Ava Guide #{id} 已启动——在对话中继续",
+    "created": "Ava Guide #{id} 已创建——在对话中查看进度",
     "failed": "Guide 失败：{error}",
     "intro": "让 Ava 来运维集群——运行或更新、切换频道、管理 MCP 服务器、安装技能或插件、调整本页未列出的任何配置。",
     "ask": "询问 Ava"
