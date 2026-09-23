@@ -15,7 +15,7 @@ Spawn a planner agent with a top-tier model. It must produce a concrete plan: fi
 ```python
 planner_id = ava.agents.spawn(
     prompt="Design a plan for: <your task>. Output: file tree, key decisions, implementation checklist.",
-    config_overlay={"llm_model": "claude-opus-4-8"},
+    config_overlay={"llm_model": "claude-opus-5"},
     label="planner"
 )
 ```
@@ -45,7 +45,7 @@ Phase 3 — Check (mixed models):
 ```python
 reviewer_id = ava.agents.spawn(
     prompt=f"Review this code for correctness, edge cases, and code quality:\n{combined_output}",
-    config_overlay={"llm_model": "claude-sonnet-4-6"},
+    config_overlay={"llm_model": "claude-sonnet-5"},
     label="reviewer"
 )
 
@@ -62,7 +62,7 @@ Spawn a reflector with a top-tier model. Give it the full output — plan, imple
 ```python
 reflector_id = ava.agents.spawn(
     prompt=f"Reflect on this project: what worked, what didn't, what patterns to reuse.\n\nPlan:\n{plan}\n\nCode:\n{combined_output}\n\nReview:\n{review}\n\nCheck:\n{check}",
-    config_overlay={"llm_model": "claude-opus-4-8"},
+    config_overlay={"llm_model": "claude-opus-5"},
     label="reflector"
 )
 ```
@@ -84,10 +84,10 @@ Requirements:
 ## Expected flow
 
 1. Orchestrator picks a small but realistic coding task
-2. **Phase 1**: Spawns a claude-opus-4-8 planner → gets a concrete plan
+2. **Phase 1**: Spawns a claude-opus-5 planner → gets a concrete plan
 3. **Phase 2**: Spawns 2-3 deepseek-flash workers in parallel → each implements one file
-4. **Phase 3**: Spawns claude-sonnet-4-6 reviewer + deepseek-flash checker in parallel
-5. **Phase 4**: Spawns claude-opus-4-8 reflector → architecture-level reflection
+4. **Phase 3**: Spawns claude-sonnet-5 reviewer + deepseek-flash checker in parallel
+5. **Phase 4**: Spawns claude-opus-5 reflector → architecture-level reflection
 6. Renders the full pipeline output to HTML and serves it with `ava.ui.serve`
 
 ## Expected output
@@ -96,11 +96,11 @@ A Markdown report showing:
 
 | Phase | Model | Cost tier | Why |
 |-------|-------|-----------|-----|
-| Plan | claude-opus-4-8 | $$$ | Strategic thinking needs strongest reasoning |
+| Plan | claude-opus-5 | $$$ | Strategic thinking needs strongest reasoning |
 | Execute | deepseek-flash | $ | Straightforward implementation from clear spec |
-| Review | claude-sonnet-4-6 | $$ | Quality gate needs strong model, not the strongest |
+| Review | claude-sonnet-5 | $$ | Quality gate needs strong model, not the strongest |
 | Check | deepseek-flash | $ | Binary pass/fail verification |
-| Reflect | claude-opus-4-8 | $$$ | Architectural insight needs deep reasoning |
+| Reflect | claude-opus-5 | $$$ | Architectural insight needs deep reasoning |
 
 Plus: the plan, the code, the review, and the reflection.
 
