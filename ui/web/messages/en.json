@@ -34,6 +34,7 @@
   "runTimeline": {
     "title": "Run timeline — agent {agentId}",
     "session": "Session route",
+    "customWindow": "Custom window",
     "compactSession": "Compact session",
     "currentSession": "Current session",
     "compactDescription": "The initialized-context-to-compact session from tracing events.",
