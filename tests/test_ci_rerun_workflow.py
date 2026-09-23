@@ -434,3 +434,21 @@ def test_family_expression_matches_only_the_known_shape() -> None:
             check=True,
         )
         assert result.stdout.strip() == expected, f"{label}: {payload}"
+
+
+def test_dispatcher_prefilter_mirrors_the_first_guard_clauses() -> None:
+    """The first guard clauses now gate the job itself: a run whose conclusion /
+    attempt / event already disqualifies it — or a merge-queue car — never
+    schedules a runner (evaluation #4627 R1). The step's guard chain stays as
+    defense in depth; the behavioral tests above pin its outcomes."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci-rerun.yml").read_text())
+    condition = " ".join(str(workflow["jobs"]["rerun-failed-jobs"]["if"]).split())
+    expected = """\
+        contains(fromJSON('["failure","timed_out","action_required","startup_failure","cancelled"]'),
+                  github.event.workflow_run.conclusion)
+        && github.event.workflow_run.run_attempt == 1
+        && (github.event.workflow_run.event == 'pull_request'
+            || github.event.workflow_run.event == 'push')
+        && !startsWith(github.event.workflow_run.head_branch, 'trunk-merge/')"""
+    assert condition == " ".join(expected.split())
+    assert "does not need a rerun" in retry_script()
