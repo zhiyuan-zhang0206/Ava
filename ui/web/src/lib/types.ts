@@ -786,11 +786,10 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   // 2026-08-23, superseding the 2026-08-05 floating desktop panel); the
   // composer's toggle opens it.
   "display.inspector_open": false,
-  // How many previous compact sessions stay visible in the timeline when a
-  // compact rewrites the active history (task #3698, user ruling 2026-09-17):
-  // the just-compacted session's messages stay above the new summary instead
-  // of the list clearing. 0 = legacy clear-on-compact, 1 = keep the most
-  // recent session (default; the Display settings row offers 0-3).
+  // How many older pages to restore automatically when a compact rewrites the
+  // active timeline (task #3698, user ruling 2026-09-17). 0 skips automatic
+  // history reads, 1 restores one page (default), and -1 restores all pages
+  // available under the gateway's separate compact-history depth setting.
   "display.compact_history_sessions": 1,
   // Sidebar layout. The homepage split ratio is device-local state owned by
   // react-resizable-panels.

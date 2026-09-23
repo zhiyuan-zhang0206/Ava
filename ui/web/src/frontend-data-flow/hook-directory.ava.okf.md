@@ -17,7 +17,7 @@ tags:
 | `useTasks` | [[ui/web/src/frontend-data-flow/task-list.ava.okf.md|Task list data flow]] |
 | `useTimeline` | selected timeline tail + live SSE fold, with abortable older-history paging; the retained window (30min) seeds a switch back and the shared composed reconcile refreshes it; see [[ui/web/src/frontend-state/frontend-state.ava.okf.md|State management]] |
 | `useTokenUsage` | selected context occupancy (abortable cold read + SSE token_usage; a retained snapshot seeds a switch back and the shared composed reconcile refreshes it) |
-| `useCompactHistoryRetention` | consumes the store's compact-replace edge (`compactReplaceSeq`): re-attaches the newest `display.compact_history_sessions` previous segments above the new compact summary through the scroll-up fetch path (task #3698) |
+| `useCompactHistoryRetention` | consumes the store's compact-replace edge (`compactReplaceSeq`): automatically fetches the configured count of older pages above the new compact summary, or every available page for `display.compact_history_sessions = -1`, through the scroll-up fetch path (task #3698) |
 | `useAgentPages` | single agent opened pages (InspectorPanel, SSE folds page_opened/closed into cache, replaces deleted PageDock/use-fleet-pages) |
 | `useAllPages` (#655) | fleet-wide opened pages fetched once + SSE incremental fold (Inbox attaches associated page links to notices, avoids N+1 per-agent requests) |
 | `usePendingMessages` | selected pending inbound queue with abortable reads and bounded queue-event hint repair (the open gap belongs to the shared composed reconcile); the page hides items already visible in the timeline (takeover capture, #3683) |

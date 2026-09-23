@@ -19,7 +19,7 @@ import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
 import { CONVERSATION_RETENTION_MS } from "./switch-budget";
 import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "./timeline";
-import { useCompactHistoryRetention } from "./use-compact-history-retention";
+import { useCompactHistoryRetention, type OlderSegmentLoadResult } from "./use-compact-history-retention";
 
 /** Baked fallback for the base number of items fetched per scroll-up — the
  * live value is display.timeline_history_page_base, read at runtime from
@@ -318,12 +318,13 @@ export function useTimeline(
   // the callback stays stable and never fires on stale closures. The cursor
   // is the oldest item with a stable backend id (ephemeral `_marker.*` items
   // the backend doesn't know are skipped).
-  // Resolves true when a fetch actually ran — the compact-history retention
-  // hook (use-compact-history-retention.ts) walks N segments off this.
-  const loadOlderSegment = useCallback(async (): Promise<boolean> => {
-    if (agentId == null || !isVisible) return false;
+  // A completed page with has_more=false is terminal. A false store flag
+  // before the post-compact GET settles is only unready, never exhaustion.
+  const loadOlderSegment = useCallback(async (): Promise<OlderSegmentLoadResult> => {
+    if (agentId == null || !isVisible) return "aborted";
     const st = useTimelineStore.getState();
-    if (st.activeThreadId !== agentId || !st.hasMoreOlder || st.loadingOlder) return false;
+    if (st.activeThreadId !== agentId) return "aborted";
+    if (!st.hasMoreOlder || st.loadingOlder) return "unready";
     // Current standing context is never a cursor: the re-attached prompt, the
     // standing head notes (exec timeout / timezone / cluster memory / agent id
     // / agent memory — re-attached by the gateway beside the prompt), and
@@ -358,7 +359,7 @@ export function useTimeline(
         .slice(0, idx)
         .every((prev) => isReattachedTimelineContext(prev) || headNoteIds.has(prev.item_id));
     });
-    if (oldest === undefined) return false;
+    if (oldest === undefined) return "unready";
     // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000
     // (the endpoint's protective le — a constant, not config).
     const limit = Math.min(olderBaseLimit * Math.pow(2, st.olderFetchCount), 1000);
@@ -369,16 +370,16 @@ export function useTimeline(
       const page = await api.getTimeline(agentId, { before: oldest.item_id, limit, signal: controller.signal });
       // Agent switch mid-flight: drop the result so it can't contaminate
       // the now-active thread (switchThread already cleared loadingOlder).
-      if (controller.signal.aborted || useTimelineStore.getState().activeThreadId !== agentId) return false;
+      if (controller.signal.aborted || useTimelineStore.getState().activeThreadId !== agentId) return "aborted";
       prependOlder(page.items, page.has_more);
       // Bump the counter so the next scroll-up doubles the window.
       useTimelineStore.getState().incrementOlderFetchCount();
-      return true;
+      return useTimelineStore.getState().hasMoreOlder ? "loaded" : "exhausted";
     } catch (e: unknown) {
-      if (controller.signal.aborted) return false;
+      if (controller.signal.aborted) return "aborted";
       useTimelineStore.setState({ loadingOlder: false });
       showError(`Failed to load older messages: ${errMsg(e)}`);
-      return false;
+      return "failed";
     }
   }, [agentId, isVisible, beginLoadOlder, prependOlder, showError, olderBaseLimit]);
   const loadOlder = useCallback(() => {

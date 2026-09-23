@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
+import { SETTINGS_QUERY_KEY } from "@/lib/use-user-settings";
 import DisplaySettingsPage from "./page";
 
 vi.mock("@/lib/api", () => ({
@@ -36,11 +37,12 @@ function renderPage() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={qc}>
       <DisplaySettingsPage />
     </QueryClientProvider>,
   );
+  return { ...view, queryClient: qc };
 }
 
 // Explicit cleanup: globals are off (vitest.config.mts), so RTL's auto-cleanup
@@ -57,6 +59,25 @@ beforeEach(() => {
 });
 
 describe("DisplaySettingsPage", () => {
+  it("offers All compact history and persists -1 in the settings cache", async () => {
+    vi.mocked(api.putSetting).mockResolvedValue({
+      key: "display.compact_history_sessions", value: -1, updated_at: "2026-09-24T00:00:00Z",
+    });
+    vi.mocked(api.getSettings).mockResolvedValueOnce({ settings: [] }).mockResolvedValue({
+      settings: [{ key: "display.compact_history_sessions", value: -1, updated_at: "2026-09-24T00:00:00Z" }],
+    });
+    const { queryClient } = renderPage();
+    const all = await screen.findByLabelText<HTMLInputElement>("All");
+    expect(all.checked).toBe(false);
+
+    fireEvent.click(all);
+    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.compact_history_sessions", -1));
+    await waitFor(() => {
+      expect(queryClient.getQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY)?.["display.compact_history_sessions"]).toBe(-1);
+      expect(all.checked).toBe(true);
+    });
+  });
+
   it("renders all setting labels", async () => {
     renderPage();
 
