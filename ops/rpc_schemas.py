@@ -42,8 +42,8 @@ from ops.rpc_terminate import OpenTaskRow as OpenTaskRow
 from ops.rpc_terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_terminate import TerminateAgentResponse as TerminateAgentResponse
+from shared.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 from shared.envelope import reject_unnegotiated_caller, validate_writable_source
-from shared.op_envelope import OpEnvelope as OpEnvelope
 
 
 class CancelRequested(BaseModel):
@@ -387,7 +387,7 @@ OpKind = Literal[
 ]
 
 
-# `OpEnvelope` moved to shared/op_envelope.py (re-exported in the import block
+# `OpEnvelope` moved to shared/api_contracts/op_envelope.py (re-exported in the import block
 # above) so the restricted bootstrap observer can validate the same envelope
 # without importing this module -- which pulls shared.config transitively. The
 # name stays importable from here for every existing importer.

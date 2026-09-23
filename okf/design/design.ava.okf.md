@@ -45,7 +45,7 @@ The consolidated lexicon (single source of truth / registry / lease / doorplate 
 | R1 Q1 | State storage shape: two tables vs single table + JSONB hosts column | Two tables |
 | R1 Q2 | Deployment phase enumeration: three states vs five | Three states (`stable`/`updating`/`settling`) |
 | R2 Q1 | Idempotency/delivery semantics (SDK non-idempotent no-retry vs IM bridge retry-all-5xx) | User decides now, or defer to R3 |
-| R3 Q1 | Physical location of contract declarations: shared contract module vs route decorators | Shared module (`shared/contracts.py`) |
+| R3 Q1 | Physical location of contract declarations: shared contract module vs route decorators | Shared module (`shared/api_contracts/contracts.py`) |
 | R3 Q2 | IM bridge pause decoupling: direct DB read vs gateway exempt route | Direct DB read |
 | R4 Q1 | Notice data contract shape: merged `GET /api/notices` vs frontend single-hook convergence | Merged endpoint |
 | R4 Q2 | e2e defense strength: Playwright in CI mandatory vs manual | In CI |

@@ -1,6 +1,6 @@
 """Doorplate lint (R3 doors ① + ②): the contract wall is machine-supervised.
 
-Every gateway route must declare a contract (`shared/contracts.py` — the
+Every gateway route must declare a contract (`shared/api_contracts/contracts.py` — the
 single fact source), every declaration must be used, the pause-exempt
 surface must be exactly the audited CONTROL_PLANE set (a new exemption is
 a deliberate, reviewed change, not an incident patch), and the middleware
@@ -20,8 +20,8 @@ import pytest
 
 from gateway import _pause_policy
 from gateway.app import app
-from shared import contracts
-from shared.contracts import Idempotency, PauseSemantics
+from shared.api_contracts import contracts
+from shared.api_contracts.contracts import Idempotency, PauseSemantics
 
 # The audited exempt surface: exactly the surfaces that must stay reachable
 # mid-migration. Adding a route here is a deliberate control-plane decision
@@ -88,7 +88,7 @@ def test_every_route_declares_a_contract() -> None:
     missing = _app_route_keys() - set(contracts.ROUTE_CONTRACTS)
     assert not missing, (
         "routes without a contract declaration — add them to "
-        "shared/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(missing))
+        "shared/api_contracts/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(missing))
     )
 
 
@@ -97,7 +97,7 @@ def test_no_orphan_contracts() -> None:
     orphan = set(contracts.ROUTE_CONTRACTS) - _app_route_keys()
     assert not orphan, (
         "contract declarations with no matching route — remove them from "
-        "shared/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(orphan))
+        "shared/api_contracts/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(orphan))
     )
 
 

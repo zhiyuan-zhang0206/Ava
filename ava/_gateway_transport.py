@@ -7,11 +7,11 @@ import time as _time
 import uuid as _uuid
 
 import ava
-from shared import contracts
 from shared.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
+from shared.api_contracts import contracts
+from shared.api_contracts.contracts import Idempotency
 from shared.cluster_auth import bearer_header
 from shared.config import settings
-from shared.contracts import Idempotency
 from shared.delivery_outbox import TRANSIENT_HTTP_STATUSES as _TRANSIENT_HTTP_STATUSES
 
 # Singleton: process-wide shared connection pool. Connect/read timeout is a
@@ -233,7 +233,7 @@ def _post(
     loud failure carries the full status + body).
 
     `idempotent=None` (default) inherits the route's semantics from its
-    doorplate (`shared.contracts`): IDEMPOTENT retries the transient family,
+    doorplate (`shared.api_contracts.contracts`): IDEMPOTENT retries the transient family,
     NON_IDEMPOTENT surfaces immediately (a ReadTimeout means the request
     left this process and the server may well have acted on it — re-sending
     can duplicate the effect, e.g. spawn's phantom-twin agent), and
@@ -268,7 +268,7 @@ def _post(
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
 
     # Inherit retry semantics from the route's doorplate unless the caller
-    # overrides: server promises (shared/contracts.py), clients inherit.
+    # overrides: server promises (shared/api_contracts/contracts.py), clients inherit.
     semantics = (
         Idempotency.IDEMPOTENT
         if idempotent

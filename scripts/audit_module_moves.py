@@ -79,6 +79,10 @@ def _old_references(module: str, text: str) -> list[int]:
     parent, _, leaf = module.rpartition(".")
     if parent:
         offsets.extend(offset for offset, names in _from_imports(parent, text) if leaf in names)
+    slash = module.replace(".", "/")
+    if slash in text:
+        slash_pattern = re.compile(rf"(?<![\w.]){re.escape(slash)}\.py(?!\w)")
+        offsets.extend(match.start() for match in slash_pattern.finditer(text))
     return sorted(text.count("\n", 0, offset) + 1 for offset in offsets)
 
 
