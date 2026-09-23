@@ -55,7 +55,6 @@ from cli.commands._converge_steps import (
     _ensure_prod_editable_exec_gate,
     _ensure_prod_editable_pth,
     _ensure_redis_url_identity_step,
-    _migrate_host_config_to_env,
 )
 from cli.commands._converge_steps import (
     _shell_rc_path as _shell_rc_path,
@@ -301,20 +300,6 @@ def _reap_legacy_sessions_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     _reap_legacy_sessions()
 
 
-def _migrate_legacy_disabled_marker(ctx: ConvergeCtx) -> None:
-    """Carry a pre-rename `$AVA_HOME/skipped_services` over to the name the
-    current code reads (`disabled_services`), so an operator's durable
-    `--disable-service` intent recorded before the rename is honored instead of
-    silently ignored. One-shot: after it runs there is no legacy file left, so
-    every later converge is a no-op. See shared.disabled_services.migrate_legacy_marker
-    for the both-files-exist rule."""
-    from shared.disabled_services import migrate_legacy_marker
-
-    summary = migrate_legacy_marker(ctx.ava_home)
-    if summary is not None:
-        print(f"  · {summary}")
-
-
 def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Preflight OS-level screen capture on agent-runner hosts.
 
@@ -482,15 +467,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         ensure_no_frontend_env_overrides,
         roles=frozenset({"gateway"}),
     ),
-    # Retire this machine's per-machine host override file into its .env (file-only,
-    # no DB — safe to run here before Postgres is up). The cluster DB-row migration
-    # needs Postgres + schema, so it runs later in `ava start` (after migrations
-    # apply, before the gateway session starts), not here. Idempotent.
-    ConvergeStep(
-        "migrate legacy env keys -> .env",
-        _migrate_host_config_to_env,
-        requires_unit_config=True,
-    ),
     # A block-style unit whose .env predates a health daemon's slot gets the
     # missing keys derived from its own block, so no daemon falls back to the
     # shared legacy segment on a co-located namespace. File-only, idempotent;
@@ -574,13 +550,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # may share the same macOS host; drift is detected, never repaired here.
     ConvergeStep("Homebrew formula pins", ensure_brew_pin),
     ConvergeStep("reap legacy-named sessions", _reap_legacy_sessions_step),
-    # Pure file work under this cluster's home, so it needs no unit config and no
-    # capability: both roles read the marker (the watchdog runs on either), and a
-    # standalone `ava converge` on a not-yet-configured host must still repair it.
-    # Position is only required to be inside converge — `cmd_start` runs converge
-    # (step 1) well before it resolves the launch skip set (step 4), so a
-    # migration lands in time for the very start that performs it.
-    ConvergeStep("legacy disabled-services marker", _migrate_legacy_disabled_marker),
     ConvergeStep(
         "screen capture availability",
         _ensure_screen_capture,

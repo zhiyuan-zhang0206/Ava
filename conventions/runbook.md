@@ -503,19 +503,11 @@ Drive locations: macOS
 mount surfaced under `/mnt/<letter>/My Drive` (identified by the `My Drive` subfolder, so
 a plain `/mnt/c` never matches), and native Linux an rclone / `~/GoogleDrive` mount.
 
-Converge also carries a one-shot file-name migration: the durable
-`--disable-service` marker used to be `$AVA_HOME/skipped_services` and is now
-`disabled_services`, so a set recorded before that rename was silently unread and the
-services it named came back on. Every converge promotes a leftover `skipped_services`
-to today's name and logs what it moved plus the resulting disabled set; once promoted
-there is no legacy file left, so later runs are no-ops. If BOTH names exist, the
-current name stays authoritative — it is the name the code writes, so it is the
-operator's later word, an empty file included ("nothing disabled" is a real value) —
-and the legacy file is kept as `skipped_services.superseded` with both sets named in
-the log, so two disagreeing files are visible instead of one being erased. Note that a
-bare operator `ava start` (no `--disable-service`) rewrites the marker to empty by
-design, so it re-enables the migrated set on that same start; internal restarts
-(`ava cluster update` / recovery / `ava restart`) and the watchdog's 60 s round honor it.
+The durable `--disable-service` set lives in `$AVA_HOME/disabled_services`.
+A bare operator `ava start` (no `--disable-service`) rewrites the marker to
+empty and re-enables the disabled services. Internal restarts (`ava cluster
+update` / recovery / `ava restart`) and the watchdog's 60 s round honor the
+persisted set without rewriting it.
 
 **The cluster pin is behind the DB schema.** `[ops.schema] ... this checkout IS the
 cluster pin ...` at ERROR, every round, with `ava cluster status` showing the whole

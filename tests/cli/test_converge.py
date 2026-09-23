@@ -636,60 +636,6 @@ def test_converge_host_skips_host_global_in_worktree_even_if_cluster_default(
     assert calls == ["percluster"]  # host-global skipped despite cluster == default
 
 
-def test_legacy_disabled_marker_step_acts_on_ctx_home(home, tmp_path: Path, capsys):
-    """The step migrates the pre-rename marker in the home converge was given (not
-    the settings-resolved one) and reports what it moved on stdout."""
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    (ava_home / "skipped_services").write_text("browser\nfrontend\n")
-
-    _converge._migrate_legacy_disabled_marker(_ctx(tmp_path, ava_home))
-
-    assert (ava_home / "disabled_services").read_text() == "browser\nfrontend\n"
-    assert "browser, frontend" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_legacy_disabled_marker_step_is_registered_and_unconditional(home, tmp_path: Path):
-    """It must be in the real step list, and must not be role-scoped or deferred:
-    both capabilities read the marker, and a converge on a host that is not
-    configured yet still has to repair it."""
-    step = next(
-        s for s in _converge.CONVERGE_STEPS if s.apply is _converge._migrate_legacy_disabled_marker
-    )
-    assert step.roles == _converge.ALL_ROLES
-    assert not step.requires_unit_config
-    assert not step.host_global
-
-
-def test_host_config_step_is_registered(home, tmp_path: Path):
-    """The one-time .env hygiene step stays in the real step list: it repairs
-    the retired host override file on any configured host. (Task #1173 deleted
-    the alerts-key rename this step used to carry; the step itself stays.)"""
-    step = next(
-        s for s in _converge.CONVERGE_STEPS if s.apply is _converge._migrate_host_config_to_env
-    )
-    assert step.roles == _converge.ALL_ROLES
-    assert step.requires_unit_config
-    assert not step.host_global
-
-
-def test_host_config_step_migrates_the_host_override_file(
-    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Step-level: the retired host override file lands in .env and is archived."""
-    from shared import runtime_config as rt
-
-    ava_home = tmp_path / "avahome"
-    ava_home.mkdir()
-    monkeypatch.setattr(rt, "_ava_home", lambda: ava_home)
-    (ava_home / "runtime_config.json").write_text(json.dumps({"ops_concurrency": 4}))
-
-    _converge._migrate_host_config_to_env(_ctx(tmp_path, ava_home))
-
-    assert rt.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
-    assert (ava_home / "runtime_config.json.migrated").exists()
-
-
 def _capable_helper_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A host the capability probe clears, with an empty .env."""
     from shared.config import settings
