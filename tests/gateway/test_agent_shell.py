@@ -212,13 +212,12 @@ def test_shell_capture_carries_created_at_and_ttl_deadline(
     assert body["last_renewed_at"] is None
 
 
-def test_shell_capture_falls_back_to_launch_epoch_plus_24h_without_row(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("name", ["page-preview", "schedule-check"])
+def test_shell_capture_without_row_has_no_deadline(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    """Task #2614: a session without an agent_shell_ttls row (legacy
-    pre-mandate shell, or one created by a not-yet-updated runner during a
-    rollout) still gets a deadline — the 24h cap counted from the runner's
-    launch epoch — so the monitor page never renders No TTL for it."""
+    """Page and schedule sessions have no shell TTL; their launch epoch must
+    not manufacture a deadline (task #4086, DP1)."""
     from datetime import UTC, datetime, timedelta
 
     aid = _insert_agent(db_conn, machine="wsl")
@@ -229,7 +228,7 @@ def test_shell_capture_falls_back_to_launch_epoch_plus_24h_without_row(
         target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
-            "session_name": f"ava-agent-{aid}-shell-7-watcher",
+            "session_name": f"ava-agent-{aid}-shell-7-{name}",
             "lines": ["hello"],
             "created_at": launched.isoformat(),
             "uptime_seconds": 10800,
@@ -239,18 +238,16 @@ def test_shell_capture_falls_back_to_launch_epoch_plus_24h_without_row(
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/shell/7").json()
-    assert body["expires_at"] == (launched + timedelta(hours=24)).astimezone(
-        UTC
-    ).isoformat().replace("+00:00", "Z")
+    assert datetime.fromisoformat(body["created_at"]) == launched
+    assert body["expires_at"] is None
+    assert body["renewals"] == 0
+    assert body["last_renewed_at"] is None
 
 
 def test_shell_capture_without_row_and_epoch_keeps_no_deadline(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No TTL row AND no launch epoch from the runner — nothing to count
-    from, so expires_at stays None and the page's defensive No TTL branch
-    renders. Only reachable with a very old runner that reports no
-    created_at."""
+    """Missing launch metadata does not affect the absent TTL facts."""
     aid = _insert_agent(db_conn, machine="wsl")
     db_conn.commit()
 
@@ -271,19 +268,19 @@ def test_shell_capture_without_row_and_epoch_keeps_no_deadline(
     assert body["expires_at"] is None
 
 
-def test_shell_capture_prefers_row_over_fallback(
+def test_shell_capture_returns_recorded_deadline(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A recorded row wins over the launch-epoch fallback (a watcher's
-    timeout row is shorter than 24h)."""
+    """The capture returns the exact recorded deadline, independent of uptime."""
     from datetime import UTC, datetime, timedelta
 
     aid = _insert_agent(db_conn, machine="wsl")
     launched = datetime.now(tz=UTC) - timedelta(minutes=5)
+    deadline = datetime.now(tz=UTC) + timedelta(minutes=30)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES (%s, %s, %s)",
-            (aid, 9, datetime.now(tz=UTC) + timedelta(minutes=30)),
+            (aid, 9, deadline),
         )
     db_conn.commit()
 
@@ -301,10 +298,7 @@ def test_shell_capture_prefers_row_over_fallback(
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/shell/9").json()
-    # ~30m from now, not created_at+24h.
-    assert body["expires_at"] < (launched + timedelta(hours=24)).astimezone(
-        UTC
-    ).isoformat().replace("+00:00", "Z")
+    assert datetime.fromisoformat(body["expires_at"]) == deadline
 
 
 def test_shell_machine_unreachable_503(
@@ -351,33 +345,3 @@ def test_shell_capture_carries_renewal_facts(
         body = client.get(f"/api/agents/{aid}/shell/4").json()
     assert body["renewals"] == 3
     assert body["last_renewed_at"] == renewed.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def test_shell_capture_fallback_keeps_zero_renewal_facts(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A session without a TTL row (legacy) answers the fallback deadline with
-    zero renewal facts — the monitor page renders no badge."""
-    from datetime import UTC, datetime, timedelta
-
-    aid = _insert_agent(db_conn, machine="wsl")
-    launched = datetime.now(tz=UTC) - timedelta(hours=1)
-    db_conn.commit()
-
-    async def _dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        return {
-            "session_name": f"ava-agent-{aid}-shell-5-legacy",
-            "lines": [],
-            "created_at": launched.isoformat(),
-            "uptime_seconds": 3600,
-        }
-
-    monkeypatch.setattr(shell_router._cluster_rpc, "dispatch_to_machine", _dispatch)
-
-    with TestClient(app) as client:
-        body = client.get(f"/api/agents/{aid}/shell/5").json()
-    assert body["expires_at"] is not None
-    assert body["renewals"] == 0
-    assert body["last_renewed_at"] is None

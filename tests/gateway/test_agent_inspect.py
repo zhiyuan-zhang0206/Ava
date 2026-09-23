@@ -293,21 +293,21 @@ def test_inspect_shells_probed_on_agents_machine(
     ]
 
 
+@pytest.mark.parametrize("name", ["page-preview", "schedule-check"])
 def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    """TTL deadlines come from the gateway's own `agent_shell_ttls` rows,
-    merged onto the probed shells — the runner probe answers identity +
-    uptime only, and a split runner has no DB access. A session without a row
-    (watcher / legacy pre-TTL) keeps `expires_at=None`."""
-    from gateway.routers import agent_inspect as inspect_mod
+    """Only recorded TTLs enrich the probe. Row-less page/schedule sessions
+    render no TTL even with a launch epoch (task #4086, DP1)."""
+    launched = datetime.now(UTC) - timedelta(minutes=30)
+    deadline = datetime.now(UTC) + timedelta(hours=2)
 
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET machine = 'wsl' WHERE id = %s", (aid,))
         cur.execute(
             "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES (%s, %s, %s)",
-            (aid, 5, datetime.now(tz=UTC) + timedelta(hours=2)),
+            (aid, 5, deadline),
         )
     db_conn.commit()
 
@@ -317,16 +317,16 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
         return {
             "shells": [
                 {"id": 5, "name": "dev-server", "created_at": None, "uptime_seconds": 42},
-                {"id": 6, "name": "watcher", "created_at": None, "uptime_seconds": 7},
+                {"id": 6, "name": name, "created_at": launched.isoformat(), "uptime_seconds": 1800},
             ]
         }
 
-    monkeypatch.setattr(inspect_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+    monkeypatch.setattr(agent_inspect._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
     by_id = {s["id"]: s for s in body["shells"]}
-    assert by_id[5]["expires_at"] is not None  # row present -> deadline set
+    assert datetime.fromisoformat(by_id[5]["expires_at"]) == deadline
     assert by_id[6]["expires_at"] is None  # no row -> no TTL
 
 

@@ -258,8 +258,7 @@ def session_deadline(
     deadline, one system — never the registry and the TTL disagreeing). The
     spawn write path (`ava.watcher._spawn`, which folds the remaining TTL on
     every (re)mount), the boot reconcile (rebuild vs reaped), and the
-    gateway reaper (reclaim vs heal) all derive through THIS function, so
-    they cannot drift apart:
+    gateway reaper (deadline-data validation) all derive through THIS function:
 
     - ``launch`` — ``created_at + timeout_secs`` (the watchdog horizon; the
       session is created with its watchdog, so created_at is the launch);
