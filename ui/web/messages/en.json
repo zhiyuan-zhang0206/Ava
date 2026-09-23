@@ -252,7 +252,22 @@
     "model": "Model",
     "reasoningEffort": "Thinking effort",
     "preset": "Preset",
-    "spawnAgent": "Spawn agent"
+    "spawnAgent": "Spawn agent",
+    "hostUnavailable": "Agent host unavailable",
+    "hostUnknown": "Agent host status unknown",
+    "noReadyRunner": "No agent runner with an available host"
+  },
+  "agentAvailability": {
+    "unknown": "Start availability unknown",
+    "host_unavailable": "Agent host unavailable; creation may be accepted while execution waits",
+    "awaiting_admission": "Creation accepted; waiting for host admission",
+    "admission_refused": "Host tried to start this agent but admission was refused",
+    "admitted": "Host admission observed; first turn completion is not confirmed",
+    "maintenance_hold": "Host admission held by maintenance",
+    "publication_deferred": "Host admission deferred by runtime publication",
+    "resource_fence": "Host admission blocked by resource evidence",
+    "admission_guard_refused": "Host admission guard refused this attempt",
+    "machineDiagnostics": "Machine diagnostics"
   },
   "login": {
     "username": "Username",
@@ -335,7 +350,7 @@
     "delete": "Delete",
     "whatThisDoes": "What this schedule does",
     "failed": "{verb} failed: {error}",
-    "writerStarted": "Schedule writer #{id} started — finish it in the conversation",
+    "writerCreated": "Schedule writer #{id} created — check its conversation for progress",
     "deleteConfirm": "Delete schedule \"{name}\"?",
     "updateFailed": "Update failed: {error}",
     "restarted": "Schedule restarted",
@@ -387,7 +402,7 @@
     "delete": "Delete",
     "deleteFailed": "Delete failed: {error}",
     "followSkill": "Follow ava.skills.ava_guide.presets to turn this into a config preset: {text}",
-    "writerStarted": "Preset writer #{id} started — finish it in the conversation",
+    "writerCreated": "Preset writer #{id} created — check its conversation for progress",
     "draftFailed": "Draft failed: {error}",
     "deleteConfirm": "Delete preset \"{label}\"?",
     "updateFailed": "Update failed: {error}",
@@ -397,7 +412,7 @@
   },
   "guide": {
     "describeTask": "Describe an operations task — e.g. install the linear MCP server",
-    "started": "Ava Guide #{id} started — continue in the conversation",
+    "created": "Ava Guide #{id} created — check its conversation for progress",
     "failed": "Guide failed: {error}",
     "intro": "Ask Ava to operate the cluster — run or update it, switch tracks, manage MCP servers, install skills or plugins, tune anything not on this page.",
     "ask": "Ask Ava"

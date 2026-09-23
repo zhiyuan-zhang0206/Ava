@@ -14,7 +14,7 @@ import psycopg
 from psycopg import sql
 from pydantic import BaseModel
 
-from shared.agent_observation import AgentObservation, observation
+from shared.agent_observation import AgentAvailability, AgentObservation, availability, observation
 from shared.agents import AgentStatus
 from shared.config import settings
 from shared.lm.factory import model_supports_vision
@@ -45,6 +45,7 @@ class AgentCard(AgentLineage):
     machine: str
     supports_vision: bool
     liveness_state: Literal["online", "offline", "unknown"]
+    availability: AgentAvailability | None = None
     observation: AgentObservation
     awaiting_response_count: int
     highest_notice_priority: Priority | None
@@ -74,7 +75,8 @@ _CARD_COLUMNS = """
     COALESCE(im.last_inbound_at, a.started_at, a.spawned_at) AS last_inbound_at,
     t.label, a.machine, a.heartbeat_paused_until, a.liveness_state,
     a.config_overlay ->> 'llm_model' AS effective_model,
-    mp.last_probe_at AS machine_probe_at, a.lease_expires_at,
+    mp.last_probe_at AS machine_probe_at, mp.agent_host_online, a.lease_expires_at,
+    a.last_admission_outcome, a.last_admission_at,
     attention.awaiting_response_count, attention.highest_notice_priority,
     fyi.unread_notice_count,
     open_impersonation.session_id AS open_impersonation_session_id
@@ -137,10 +139,21 @@ def _card(data: dict[str, Any]) -> AgentCard:
     model = resolve_available_model(data.pop("effective_model") or settings.lm.llm_model)
     data["supports_vision"] = model_supports_vision(model)
     probe = data.pop("machine_probe_at")
+    host_online = data.pop("agent_host_online")
     lease = data.pop("lease_expires_at")
+    admission_outcome = data.pop("last_admission_outcome")
+    admission_at = data.pop("last_admission_at")
+    probe_at = datetime.fromisoformat(probe) if probe else None
     data["observation"] = observation(
-        datetime.fromisoformat(probe) if probe else None,
+        probe_at,
         datetime.fromisoformat(lease) if lease else None,
+    )
+    data["availability"] = availability(
+        status=data["status"],
+        host_online=host_online,
+        probe_at=probe_at,
+        admission_outcome=admission_outcome,
+        admission_at=datetime.fromisoformat(admission_at) if admission_at else None,
     )
     return AgentCard.model_validate(data)
 

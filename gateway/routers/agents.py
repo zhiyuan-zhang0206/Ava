@@ -38,6 +38,7 @@ from ops.rpc_schemas import (
     SpawnedAgent,
 )
 from shared import agent_roster, agent_snapshot
+from shared.agent_observation import AgentAvailability
 from shared.agents import (
     AgentNotFound,
     ForkConfigChangeNotAllowed,
@@ -450,7 +451,25 @@ async def create_and_launch_agent(
                 )
             }
         )
-    return spawned
+    observed = await asyncio.to_thread(_creation_availability, pool, new_id)
+    return spawned.model_copy(
+        update={
+            "accepted": True,
+            # Admission can race this read; neither it nor a 201 proves that
+            # the first inbound was claimed or the turn completed.
+            "execution_observed": False,
+            "reason": observed.reason,
+            "observed_at": observed.observed_at,
+        }
+    )
+
+
+def _creation_availability(pool: ConnectionPool, agent_id: int) -> AgentAvailability:
+    with pool.connection() as conn:
+        snap = agent_snapshot.select_one(conn, agent_id)
+    if snap is None or snap.availability is None:
+        raise RuntimeError(f"created agent {agent_id} disappeared before receipt")
+    return snap.availability
 
 
 @router.post("/api/agents", status_code=201, response_model_exclude_none=True)

@@ -248,14 +248,28 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
                 ),
             )
             db_conn.commit()
-            before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
+            before = db_conn.execute(
+                "SELECT status,runtime_generation,runtime_owner,incarnation_resources,"
+                "lease_expires_at FROM agents_meta WHERE id=%s",
+                (agent,),
+            ).fetchone()
             assert [w.agent_id for w in await host.pending_inbound_wakes(60)] == [agent]
             await host.run_turn(agent)
             assert host.stats.cache_misses == 0
             assert (
-                db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
+                db_conn.execute(
+                    "SELECT status,runtime_generation,runtime_owner,incarnation_resources,"
+                    "lease_expires_at FROM agents_meta WHERE id=%s",
+                    (agent,),
+                ).fetchone()
                 == before
             )
+            observation = db_conn.execute(
+                "SELECT last_admission_outcome,last_admission_at FROM agents_meta WHERE id=%s",
+                (agent,),
+            ).fetchone()
+            assert observation is not None and observation[0] == "admission_guard_refused"
+            assert observation[1] is not None
             assert predecessor.poll() is None
         finally:
             predecessor.stdin.close()

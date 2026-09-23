@@ -60,6 +60,7 @@ from typing import Any, cast
 from psycopg_pool import ConnectionPool
 
 from ops import cluster_rpc
+from ops.cluster_status import ClusterStatus
 from shared import cluster_lock, host_deploy_state
 from shared.agent_observation import LIVENESS_PASS_INTERVAL_S, MACHINE_OFFLINE_AFTER_FAILURES
 from shared.config import settings
@@ -90,14 +91,14 @@ _PASS_INTERVAL_S = LIVENESS_PASS_INTERVAL_S
 async def _probe_machine(
     name: str,
     probe: Callable[..., Awaitable[object]] = cluster_rpc.dispatch_to_machine,
-) -> bool:
-    """One status_probe round-trip to an agent-runner; True = reachable.
+) -> tuple[bool, bool | None]:
+    """One status_probe round-trip; return ops reachability and host verdict.
 
     Any failure (unreachable, op failure, timeout, transport error) is a probe
     failure — the caller counts consecutive failures.
     """
     try:
-        await probe(
+        result = await probe(
             target_machine=name,
             kind="status_probe",
             payload={},
@@ -107,9 +108,14 @@ async def _probe_machine(
             # the fan-out (same reasoning as the roster probe).
             retries=0,
         )
-        return True
+        try:
+            status = ClusterStatus.model_validate(result)
+        except ValueError:
+            # A reachable old/malformed ops server is not evidence of a host.
+            return True, None
+        return True, status.agent_host_online if status.machine_name == name else None
     except Exception:
-        return False
+        return False, None
 
 
 def _machine_alert_edges(
@@ -221,7 +227,7 @@ def _machine_alert_edges(
 
 
 async def _record_probe(
-    pool: ConnectionPool, name: str, *, ok: bool, deploy_explains: bool
+    pool: ConnectionPool, name: str, *, ok: bool, host_online: bool | None, deploy_explains: bool
 ) -> None:
     """UPSERT one probe outcome into machine_probe, bumping the consecutive
     failure count on failure and resetting it on success — and record the
@@ -238,16 +244,17 @@ async def _record_probe(
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO machine_probe "
-                "(machine_name, online, consecutive_failures, last_probe_at, transition_since) "
-                "VALUES (%s, %s, %s, now(), CASE WHEN %s THEN NULL ELSE now() END) "
+                "(machine_name, online, agent_host_online, consecutive_failures, last_probe_at, transition_since) "
+                "VALUES (%s, %s, %s, %s, now(), CASE WHEN %s THEN NULL ELSE now() END) "
                 "ON CONFLICT (machine_name) DO UPDATE SET "
                 "  online = EXCLUDED.online, "
+                "  agent_host_online = EXCLUDED.agent_host_online, "
                 "  consecutive_failures = EXCLUDED.consecutive_failures, "
                 "  last_probe_at = now(), "
                 "  transition_since = CASE WHEN EXCLUDED.online THEN NULL "
                 "    ELSE COALESCE(machine_probe.transition_since, EXCLUDED.transition_since) END "
                 "RETURNING transition_since, last_probe_at",
-                (name, ok, new_cf, ok),
+                (name, ok, host_online, new_cf, ok),
             )
             probe_row = cast("tuple[datetime | None, datetime] | None", cur.fetchone())
             assert probe_row is not None  # noqa: S101 — UPSERT RETURNING always yields one row
@@ -345,8 +352,10 @@ async def run_liveness_pass(
         return
     deploy_explanations = _deploy_explanations([name for name, _url in runners])
     results = await asyncio.gather(*(_probe_machine(name, probe=probe) for name, _url in runners))
-    for (name, _url), ok in zip(runners, results, strict=True):
-        await _record_probe(pool, name, ok=ok, deploy_explains=deploy_explanations[name])
+    for (name, _url), (ok, host_online) in zip(runners, results, strict=True):
+        await _record_probe(
+            pool, name, ok=ok, host_online=host_online, deploy_explains=deploy_explanations[name]
+        )
     changed_agent_ids = _merge_liveness(pool)
     # `_merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:
@@ -354,5 +363,5 @@ async def run_liveness_pass(
     _log.info(
         "[heartbeat] liveness pass: %d machines probed (%d reachable), agents_meta merged",
         len(runners),
-        sum(results),
+        sum(ok for ok, _host_online in results),
     )

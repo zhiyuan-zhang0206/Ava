@@ -39,6 +39,15 @@ payload and load at the context tail. A fork without config inherits the
 source's overlay + preset verbatim. See
 [decision](../../decisions/2026-09-10-preset-in-config-overlay-fork-cache.md).
 
+The POST receipt adds `accepted=true`, `execution_observed=false`, an observed
+availability reason, and `observed_at` while retaining `id` for older clients.
+The gateway reads the created row after the runner ops launch reply. A 201 says
+the launch request and first prompt were accepted; no agent-host turn or first
+message claim is synchronously confirmed. The host-down reason comes from the
+existing machine status probe, and a recent admission refusal comes from the
+agent's durable admission observation. Exact host boot exceptions remain in
+machine diagnostics.
+
 ## List projections
 
 `GET /api/agents` is a bounded, newest-first directory page with explicit
@@ -50,6 +59,9 @@ bodies. Selected or bookmarked agents
 use the independent ID detail endpoint. SDK, CLI and MCP consume the same
 page contract; no implicit list-all or field-projection compatibility modes
 remain.
+
+Cards and detail expose the same typed `availability` projection independently
+of lifecycle `status` and `liveness_state`.
 
 `POST /api/agents/{id}/impersonation/force-expire` accepts the session number
 the caller observed. It performs a gateway-local DB transition and wake with
