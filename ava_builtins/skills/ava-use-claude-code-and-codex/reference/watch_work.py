@@ -170,6 +170,52 @@ def _terminalize(
     return stopped
 
 
+def _baseline_first_actionable_poll(
+    *,
+    first_poll: bool,
+    status: str | None,
+    mtime: float | None,
+    last_actionable_mtime: float | None,
+) -> tuple[bool, float | None]:
+    """Record a pre-existing actionable status as the arming baseline."""
+    if not first_poll:
+        return False, last_actionable_mtime
+    first_poll = False
+    # A pre-existing actionable status at arming time is the baseline, not a
+    # new report: suppress the immediate wake and wait for a change.
+    if status in ACTIONABLE:
+        return first_poll, mtime
+    return first_poll, last_actionable_mtime
+
+
+def _generic_actionable_woke(
+    target_agent: int,
+    status: str,
+    path: str,
+    mtime: float | None,
+    last_actionable_mtime: float | None,
+    elapsed_wake: float,
+) -> bool:
+    """Notify for a new actionable state or its unchanged-status heartbeat."""
+    if mtime != last_actionable_mtime:
+        if not _notify(
+            target_agent,
+            f"coding agent reported STATUS: {status} in {path} -- read that file",
+            canonical=False,
+        ):
+            raise SystemExit(2)
+        return True
+    if elapsed_wake > HEARTBEAT_SECONDS:
+        if not _notify(
+            target_agent,
+            f"coding agent heartbeat: STATUS is {status!r} in {path} (unchanged since arming)",
+            canonical=False,
+        ):
+            raise SystemExit(2)
+        return True
+    return False
+
+
 def watch(
     path: str,
     *,
@@ -191,6 +237,7 @@ def watch(
     last_wake = time.monotonic()
     last_mtime: float | None = None
     last_actionable_mtime: float | None = None
+    first_poll = True
     saw_work_file = Path(path).exists()
 
     while True:
@@ -260,6 +307,12 @@ def watch(
             time.sleep(POLL_SECONDS)
             continue
 
+        first_poll, last_actionable_mtime = _baseline_first_actionable_poll(
+            first_poll=first_poll,
+            status=status,
+            mtime=mtime,
+            last_actionable_mtime=last_actionable_mtime,
+        )
         if status is None and saw_work_file and mtime is None:
             if not _notify(
                 target_agent,
@@ -277,13 +330,17 @@ def watch(
                 raise SystemExit(2)
             return
         if status in ACTIONABLE:
-            if not _notify(
+            if _generic_actionable_woke(
                 target_agent,
-                f"coding agent reported STATUS: {status} in {path} -- read that file",
-                canonical=False,
+                status,
+                path,
+                mtime,
+                last_actionable_mtime,
+                elapsed_wake,
             ):
-                raise SystemExit(2)
-            return
+                return
+            time.sleep(POLL_SECONDS)
+            continue
         if status in (None, "WORKING"):
             if elapsed_change > STALL_SECONDS:
                 if not _notify(
