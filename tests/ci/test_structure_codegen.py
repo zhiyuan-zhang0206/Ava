@@ -281,11 +281,11 @@ def test_node_npm_and_codegen_share_one_condition() -> None:
 
 def test_every_codegen_input_family_selects_freshness() -> None:
     paths = (
-        "gateway/schemas/agent.py",
+        "gateway/schemas/agents.py",
         "gateway/app.py",
         "gateway/routers/agents.py",
         "shared/agents/contract.py",
-        "shared/api_contracts/agent.py",
+        "shared/api_contracts/contracts.py",
         "shared/tasks/priority.py",
         "shared/tasks/task_status.py",
         "shared/agents/history/timeline.py",
@@ -320,11 +320,12 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "scripts/gen_event_registry.py",
         "shared/events/registry.md",
         "shared/config_registry.py",
-        "shared/config/fields/core.py",
+        "shared/config/agent.py",
         "scripts/gen_config_lite_table.py",
         "shared/config_lite_table.json",
     )
     for path in paths:
+        assert (ROOT / path).is_file(), f"Freshness matrix path no longer exists: {path}"
         assert any(re.search(HOOKS[hook_id]["files"], path) for hook_id in CODEGEN), path
         # Reuse the real parsed config across the path matrix; parser failures
         # are covered separately without repeating YAML parsing for every path.
