@@ -178,6 +178,46 @@ def _alive(pid: int) -> bool:
         return False
 
 
+def _terminate_and_assert_reaped(tmp_path: Path, process: subprocess.Popen[str]) -> None:
+    _wait_file(tmp_path / "child", process)
+    pids = [
+        int(path.read_text())
+        for name in ("worker", "child", "postgres")
+        if (path := tmp_path / name).exists()
+    ]
+    assert (tmp_path / "daemon.pid").exists()
+    started = time.monotonic()
+    process.send_signal(signal.SIGTERM)
+    stdout, stderr = process.communicate(timeout=9)
+    assert process.returncode == 0, stdout + stderr
+    assert time.monotonic() - started < 9
+    assert all(not _alive(pid) for pid in pids)
+
+
+def _assert_backup_artifacts(tmp_path: Path, artifacts: Path, mode: str) -> None:
+    if mode not in {"stubborn", "restore-stubborn"}:
+        assert not list(artifacts.glob("*.partial"))
+        assert not (artifacts / "test.key").exists()
+        assert not list(tmp_path.glob("ava-pg-*"))
+        if (tmp_path / "pgdata").exists():
+            assert not Path((tmp_path / "pgdata").read_text()).exists()
+    if mode == "publish":
+        assert len(list(artifacts.glob("*.dump.enc"))) == 2
+
+
+def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> None:
+    # Clean only PIDs written by this disposable harness, including on the
+    # negative control where the old scheduler leaves its executor blocked.
+    for name in ("child", "worker", "postgres"):
+        path = tmp_path / name
+        if path.exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(path.read_text()), signal.SIGKILL)
+    if process.poll() is None:
+        process.kill()
+    process.communicate(timeout=5)
+
+
 def _assert_sigterm_reaps_job_before_scheduler_exits(
     tmp_path: Path, mode: str, postgres_base: Path
 ) -> None:
@@ -198,19 +238,7 @@ def _assert_sigterm_reaps_job_before_scheduler_exits(
         start_new_session=True,
     )
     try:
-        _wait_file(tmp_path / "child", process)
-        pids = [
-            int(path.read_text())
-            for name in ("worker", "child", "postgres")
-            if (path := tmp_path / name).exists()
-        ]
-        assert (tmp_path / "daemon.pid").exists()
-        started = time.monotonic()
-        process.send_signal(signal.SIGTERM)
-        stdout, stderr = process.communicate(timeout=9)
-        assert process.returncode == 0, stdout + stderr
-        assert time.monotonic() - started < 9
-        assert all(not _alive(pid) for pid in pids)
+        _terminate_and_assert_reaped(tmp_path, process)
         assert not (tmp_path / "daemon.pid").exists()
         assert json.loads((tmp_path / "state.json").read_text()) == {
             "running": False,
@@ -218,25 +246,9 @@ def _assert_sigterm_reaps_job_before_scheduler_exits(
         }
         assert not (tmp_path / "restore-success").exists()
         assert retained.read_bytes() == b"previous complete backup"
-        if mode not in {"stubborn", "restore-stubborn"}:
-            assert not list(artifacts.glob("*.partial"))
-            assert not (artifacts / "test.key").exists()
-            assert not list(tmp_path.glob("ava-pg-*"))
-            if (tmp_path / "pgdata").exists():
-                assert not Path((tmp_path / "pgdata").read_text()).exists()
-        if mode == "publish":
-            assert len(list(artifacts.glob("*.dump.enc"))) == 2
+        _assert_backup_artifacts(tmp_path, artifacts, mode)
     finally:
-        # Clean only PIDs written by this disposable harness, including on the
-        # negative control where the old scheduler leaves its executor blocked.
-        for name in ("child", "worker", "postgres"):
-            path = tmp_path / name
-            if path.exists():
-                with contextlib.suppress(ProcessLookupError):
-                    os.kill(int(path.read_text()), signal.SIGKILL)
-        if process.poll() is None:
-            process.kill()
-        process.communicate(timeout=5)
+        _kill_harness_processes(tmp_path, process)
 
 
 @pytest.mark.parametrize("mode", ["pg_dump", "backup encryption", "publish", "stubborn", "restore"])

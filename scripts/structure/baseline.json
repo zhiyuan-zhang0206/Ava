@@ -555,7 +555,6 @@
     "tests/services/test_ava_root_daemon.py::test_upgrade_exec_replaces_in_place_and_adopts_the_tree": 18,
     "tests/services/test_ava_root_selfcheck.py::test_missing_process_opens_one_event_per_episode": 15,
     "tests/services/test_backup.py::test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv": 17,
-    "tests/services/test_backup_scheduler_shutdown.py::test_sigterm_reaps_job_before_scheduler_exits": 22,
     "tests/services/test_computer_mcp_daemon.py::test_audit_emitted_on_success": 15,
     "tests/services/test_delivery_watchdog.py::TestDispatchBackoffAndPoison.test_dispatch_cap_poisons_once_and_emits_event": 15,
     "tests/services/test_embeddings.py::_embedding_server.<locals>.Handler.do_POST": 19,
