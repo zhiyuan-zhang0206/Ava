@@ -99,20 +99,33 @@ def test_download_retries_transient_answers_then_succeeds(
     assert sleeps == [2, 4, 8]
 
 
+@pytest.mark.parametrize("status", [403, 404])
+def test_download_retries_403_or_404_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(status), _FakeResponse(b"jar")])
+    assert rb._download("https://repo1.invalid/x.jar") == b"jar"
+    assert len(calls) == 2
+    assert sleeps == [2]
+
+
 def test_download_fails_fast_on_a_permanent_http_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A non-transient 4xx (bad pin/artifact) is a permanent answer — no retry."""
-    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(404)])
-    with pytest.raises(RuntimeError, match="404"):
+    """A non-transient 4xx (bad request) fails without retry."""
+    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(400)])
+    with pytest.raises(RuntimeError, match="400"):
         rb._download("https://repo1.invalid/x.jar")
     assert len(calls) == 1
     assert sleeps == []
 
 
-def test_download_gives_up_after_bounded_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(429)] * rb._DOWNLOAD_ATTEMPTS)
-    with pytest.raises(RuntimeError, match="429"):
+@pytest.mark.parametrize("status", [403, 404, 429])
+def test_download_gives_up_after_bounded_retries(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(status)] * rb._DOWNLOAD_ATTEMPTS)
+    with pytest.raises(RuntimeError, match=str(status)):
         rb._download("https://repo1.invalid/x.jar")
     assert len(calls) == rb._DOWNLOAD_ATTEMPTS
     assert sleeps == [2, 4, 8]
