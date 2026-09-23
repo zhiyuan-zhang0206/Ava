@@ -187,14 +187,16 @@ describe("ScrollArea", () => {
     expect(scrollbar.className).toContain("focus-within:opacity-100");
   });
 
-  it("does not show the scrollbar when the root or scrollbar is hovered", () => {
+  it("reveals the scrollbar on track hover without revealing it on content hover", () => {
     const root = renderScrollArea();
     const scrollbar = getScrollbar();
 
     fireEvent.pointerEnter(root);
     expect(scrollbar.getAttribute("data-visible")).toBe("false");
-    fireEvent.pointerEnter(scrollbar);
-    expect(scrollbar.getAttribute("data-visible")).toBe("false");
+    expect(root.className).not.toContain("hover:opacity-100");
+    expect(scrollbar.className).toContain("hover:opacity-100");
+    expect(scrollbar.className).not.toContain("pointer-events-none");
+    expect(scrollbar.className).toContain("transition-opacity duration-300");
   });
 
   it("repositions the thumb on EVERY viewport scroll event, mid-gesture", () => {
