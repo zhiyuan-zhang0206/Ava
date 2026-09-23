@@ -65,29 +65,21 @@ policy bug, not a preference, so the frontier is actively maintained:
 - When a new model lands, place it on the frontier **only if** it is not itself
   dominated; register it, then update this skill's policy.
 - When a new model dominates a current one, replace it in this skill's policy and
-  note the dominance; the old model stays registered (older configs keep
-  working, and `superseded_by` hides it from the picker) but is no longer a
-  choice this policy names.
+  note the dominance. A still-serviceable old model stays registered so older
+  configs work, with `superseded_by` hiding it from the picker. Remove an id
+  entirely when the provider can no longer serve it.
 - A dominance pair is worth stating explicitly, so a later reader does not
   resurrect the dominated name out of habit.
 
 Current frontier state (user ruling 2026-09-10; id updated 2026-09-17; the V4
 names retired 2026-09-20):
 
-- `deepseek-flash` **dominates** `deepseek-v4-flash-vision-exp` — same
-  price (the catalog carries the same rates), same 1M context, and its
-  backend is DeepSeek V4.1 Flash. Wherever a doc, script or spawn choice
-  named the vision experimental sibling, use the plain `deepseek-flash`
-  id: the policy is flash everywhere, vision work included.
-- `deepseek-v4-flash` is **retired from selection** (user order 2026-09-17,
-  task #3750; the V4 Flash model is retired at the provider — user report
-  2026-09-20, task #4140): the old name stays registered with `spawnable=False`
-  and resolves to `deepseek-flash` before provider construction, so a
-  pre-rename config keeps working — with a logged fallback warning, the sign
-  of a config to fix — but no new choice may name `deepseek-v4-flash`.
-- `deepseek-v4-pro` is **withdrawn from selection** (2026-09-10 ruling). It
-  stays registered with `spawnable=False` so old configs keep working — it
-  resolves to `deepseek-flash` — but no new choice may name it.
+- `deepseek-flash` is the current DeepSeek id. `deepseek-v4-pro`,
+  `deepseek-v4-flash`, and `deepseek-v4-flash-vision-exp` were removed from
+  the registry after retirement. `mimo-v2.5-pro-ultraspeed` was also removed
+  after Xiaomi stopped serving it. A config naming any of these ids fails
+  spawn validation as an unknown model; repair it by naming a current id from
+  the roster. Use `deepseek-flash` for the DeepSeek tier, including vision work.
 
 ## Current cost policy
 
@@ -99,9 +91,9 @@ transforms, scanning — run the same id on its V4.1 Flash backend.
 
 - Complexity is absorbed by **decomposition and verification waves**, not by
   upgrading the model (next section).
-- `deepseek-v4-pro`, `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp`
-  are retired or withdrawn by policy and are never named as a selection;
-  vision work uses plain `deepseek-flash`.
+- Never name the removed `deepseek-v4-pro`, `deepseek-v4-flash`,
+  `deepseek-v4-flash-vision-exp`, or `mimo-v2.5-pro-ultraspeed` ids in a new
+  configuration; vision work uses plain `deepseek-flash`.
 - Other registered models (`gemini-*`, Claude, GLM, Qwen, …) sit outside the
   default policy: select one only when the user explicitly asks for that
   model, and confirm it is on the roster first (section above).
@@ -139,11 +131,11 @@ deepseek-flash orchestrator
 ## Don't
 
 - Don't select anything outside `deepseek-flash` for Ava-line agents
-  (workers, orchestrators, reviewers, synthesizers alike) — `deepseek-v4-pro`,
-  `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp` and `gemini-*` are all
-  retired or withdrawn from the policy (user rulings 2026-09-10 14:16 and
-  2026-09-17), vision work included. An exception happens only when the user
-  explicitly asks for a specific model (and it must be on the roster).
+  (workers, orchestrators, reviewers, synthesizers alike). The retired
+  `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, and
+  `mimo-v2.5-pro-ultraspeed` ids are absent from the registry and cannot be
+  requested, even as exceptions. Select another roster model only when the
+  user explicitly asks for it; vision work uses `deepseek-flash`.
 - Don't hand flash an open-ended judgment task and trust the output
   unverified — pair flash breadth with a flash cross-checking wave.
 - Don't scatter hardcoded model names where the cluster default would do —

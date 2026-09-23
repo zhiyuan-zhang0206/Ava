@@ -189,25 +189,41 @@ def test_missing_key_still_fails(env_file: Path, monkeypatch: pytest.MonkeyPatch
         validate_model_config(model="deepseek-flash", config={})
 
 
-def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(env_file: Path) -> None:
-    """A spawn that still names a withdrawn or retired deepseek model (v4-pro,
-    v4-flash, vision-exp) degrades to the registered flash fallback instead of
-    failing — both as the cluster default and via a per-agent overlay (user
-    orders 2026-09-10 / 2026-09-17)."""
+def test_withdrawn_model_resolves_to_its_fallback_at_the_spawn_boundary(
+    env_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A synthetic withdrawal preserves fallback coverage at both spawn inputs."""
+    from dataclasses import replace
+
+    from shared.lm.registry import MODELS
+
     env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
-    assert validate_model_config(model="deepseek-v4-pro", config={}) == "deepseek-flash"
-    assert (
-        validate_model_config(model=None, config={"llm_model": "deepseek-v4-pro"})
-        == "deepseek-flash"
+    ensure_provider_plugins_loaded()
+    model = "deepseek-retired-fixture"
+    monkeypatch.setitem(
+        MODELS,
+        model,
+        replace(MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"),
     )
-    assert validate_model_config(model="deepseek-v4-flash", config={}) == "deepseek-flash"
-    assert (
-        validate_model_config(model=None, config={"llm_model": "deepseek-v4-flash"})
-        == "deepseek-flash"
-    )
-    assert (
-        validate_model_config(model="deepseek-v4-flash-vision-exp", config={}) == "deepseek-flash"
-    )
+    assert validate_model_config(model=model, config={}) == "deepseek-flash"
+    assert validate_model_config(model=None, config={"llm_model": model}) == "deepseek-flash"
+
+
+@pytest.mark.parametrize(
+    "model",
+    (
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "mimo-v2.5-pro-ultraspeed",
+    ),
+)
+def test_removed_model_fails_spawn_validation(env_file: Path, model: str) -> None:
+    env_file.write_text("DEEPSEEK_API_KEY=sk-file-value\n")
+    with pytest.raises(ValueError, match=f"unknown model '{model}'"):
+        validate_model_config(model=model, config={})
+    with pytest.raises(ValueError, match=f"unknown model '{model}'"):
+        validate_model_config(model=None, config={"llm_model": model})
 
 
 def test_unknown_model_still_fails(env_file: Path) -> None:
@@ -222,19 +238,14 @@ def test_unknown_model_still_fails(env_file: Path) -> None:
 
 
 class TestModelSupportsVision:
-    """The gate answers per-model from the registry, with the prefix table as
-    fallback for unregistered ids. The deepseek family is the live case that
-    forced the per-model media matrix: one multimodal member under a text-only
-    prefix."""
+    """The gate answers from registry media types or plugin prefix fallback."""
 
     def test_registered_vision_model_passes(self) -> None:
-        assert model_supports_vision("deepseek-v4-flash-vision-exp") is True
+        assert model_supports_vision("glm-5.3-flash") is True
 
     def test_registered_text_only_deepseek_fails(self) -> None:
-        # Same prefix as the vision model — the per-model media types, not the prefix,
-        # decides: an image to a flash agent must still 422 up front.
+        # An image to a text-only flash agent must still 422 up front.
         assert model_supports_vision("deepseek-flash") is False
-        assert model_supports_vision("deepseek-v4-pro") is False
 
     def test_unregistered_id_falls_back_to_prefix(self) -> None:
         # config_overlay experiments and retired aliases keep the old prefix

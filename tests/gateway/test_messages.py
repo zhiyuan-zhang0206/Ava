@@ -370,13 +370,27 @@ class TestMultimodalMessage:
     def test_image_to_withdrawn_vision_model_resolves_text_only_422(
         self, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The gate answers for the model that will actually run: a
-        deepseek-v4-flash-vision-exp pin resolves to the text-only
-        deepseek-flash, so an image message is gated 422 up front."""
+        """The image gate resolves a withdrawn vision pin to its text-only fallback."""
+        from dataclasses import replace
         from pathlib import Path
 
+        from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+        from shared.lm.registry import MODELS
+
+        ensure_provider_plugins_loaded()
+        model = "deepseek-vision-fixture"
+        monkeypatch.setitem(
+            MODELS,
+            model,
+            replace(
+                MODELS["deepseek-flash"],
+                spawnable=False,
+                unavailable_fallback="deepseek-flash",
+                media_types=frozenset({"image"}),
+            ),
+        )
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        tid = _seed_vision_agent(db_conn, model="deepseek-v4-flash-vision-exp")
+        tid = _seed_vision_agent(db_conn, model=model)
         with TestClient(app) as client:
             up = client.post(
                 f"/api/agents/{tid}/uploads?deliver=false",

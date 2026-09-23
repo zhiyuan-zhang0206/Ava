@@ -26,33 +26,13 @@ def _load_provider_plugins() -> None:
 
 
 class TestDeepseekMaxTokens:
-    """Per-model output cap dispatch. v4-pro and v4-flash both 384K today (same
-    1M context / 384K output), but the value is looked up per model name so a
-    future deepseek model with a different cap changes only its plugin ModelSpec,
-    while an unregistered one fails fast rather than borrowing a wrong cap and
-    400-ing the server."""
-
-    def test_pro_max_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        llm = build_chat_model("deepseek-v4-pro")
-        assert isinstance(llm, ChatAnthropic)
-        assert llm.max_tokens == 384_000
+    """Output cap comes from the registered model spec; unknown ids fail fast."""
 
     def test_flash_max_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         llm = build_chat_model("deepseek-flash")
         assert isinstance(llm, ChatAnthropic)
         assert llm.max_tokens == 384_000
-
-    def test_vision_exp_max_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The vision variant rides the same deepseek branch — ChatAnthropic on the
-        anthropic-compatible endpoint (which speaks image blocks for this model per
-        api-docs.deepseek.com/guides/vision) — with the same 384K output cap."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        llm = build_chat_model("deepseek-v4-flash-vision-exp")
-        assert isinstance(llm, ChatAnthropic)
-        assert llm.max_tokens == 384_000
-        assert "deepseek.com" in str(llm.anthropic_api_url)
 
     def test_unknown_deepseek_model_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A deepseek-prefixed model without a registered ModelSpec raises rather
@@ -64,24 +44,15 @@ class TestDeepseekMaxTokens:
 
         message = str(exc_info.value)
         assert "Known deepseek models:" in message
-        assert "deepseek-v4-flash" in message
-        assert "deepseek-v4-flash-vision-exp" in message
-        assert "deepseek-v4-pro" in message
+        assert "deepseek-flash" in message
+        assert "deepseek-v4-pro" not in message
 
 
 class TestModelContextWindow:
-    """Input-token ceilings reported by the token-usage endpoint. deepseek-v4-pro
-    and deepseek-flash are both 1M context — a frontend gauge computing
-    occupancy% off a stale 128K would over-report usage by ~8x."""
-
-    def test_deepseek_pro_is_one_million(self) -> None:
-        assert MODEL_CONTEXT_WINDOW["deepseek-v4-pro"] == 1_000_000
+    """Input-token ceilings reported by the token-usage endpoint."""
 
     def test_deepseek_flash_is_one_million(self) -> None:
         assert MODEL_CONTEXT_WINDOW["deepseek-flash"] == 1_000_000
-
-    def test_deepseek_vision_exp_is_one_million(self) -> None:
-        assert MODEL_CONTEXT_WINDOW["deepseek-v4-flash-vision-exp"] == 1_000_000
 
     def test_kimi_k3_is_1m(self) -> None:
         assert MODEL_CONTEXT_WINDOW["kimi-k3"] == 1_048_576
