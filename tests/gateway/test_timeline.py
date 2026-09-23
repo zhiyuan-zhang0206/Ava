@@ -675,7 +675,7 @@ class TestAttachItems:
 
         Image.new("RGB", (1, 1)).save(image)
         pack = pack_attachments(
-            "deepseek-v4-flash-vision-exp",
+            "glm-5.3-flash",
             [AttachEntry(path=str(image.resolve()), label="after fix")],
         )
         assert pack is not None
@@ -1131,7 +1131,7 @@ def test_item_sort_key_is_numeric_not_lexical() -> None:
         image = tmp_path / "render.png"
         Image.new("RGB", (2, 2)).save(image)
         pack = pack_attachments(
-            "deepseek-v4-flash-vision-exp",
+            "glm-5.3-flash",
             [AttachEntry(path=str(image.resolve()), label="brand")],
         )
         assert pack is not None

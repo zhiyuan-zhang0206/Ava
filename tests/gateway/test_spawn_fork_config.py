@@ -69,7 +69,7 @@ class TestForkConfigStability:
                 "/api/agents",
                 json={
                     "spawner": "user",
-                    "config": {"preset": "coder", "llm_model": "deepseek-v4-pro"},
+                    "config": {"preset": "coder", "llm_model": "deepseek-flash"},
                 },
             ).json()["id"]
             _checkpoint(db_conn, src)
@@ -78,10 +78,7 @@ class TestForkConfigStability:
             ]
         overlay, preset_name = _row(db_conn, fork)
         assert preset_name == "coder"
-        # The source's withdrawn `deepseek-v4-pro` was settled to its registered
-        # fallback when the SOURCE was created (task #4306), so the fork's
-        # verbatim copy carries the settled value — still exactly what the
-        # source ran.
+        # The fork copies the source's live model pin verbatim.
         assert overlay == {"llm_model": "deepseek-flash"}
         assert _fork_inbound(db_conn, fork) is None
 

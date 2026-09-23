@@ -133,13 +133,27 @@ def test_rejects_text_only_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 def test_rejects_model_withdrawn_to_its_text_only_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A configured withdrawn model is gated as the model that will run: a
-    deepseek-v4-flash-vision-exp pin resolves to the text-only
-    deepseek-flash, so attach is rejected (task #3212)."""
+    """A withdrawn vision pin is gated as its text-only fallback (task #3212)."""
+    from dataclasses import replace
+
     from shared.config import settings
+    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.registry import MODELS
 
     _exec_child(monkeypatch, tmp_path)
-    monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-flash-vision-exp")
+    ensure_provider_plugins_loaded()
+    model = "deepseek-vision-fixture"
+    monkeypatch.setitem(
+        MODELS,
+        model,
+        replace(
+            MODELS["deepseek-flash"],
+            spawnable=False,
+            unavailable_fallback="deepseek-flash",
+            media_types=frozenset({"image"}),
+        ),
+    )
+    monkeypatch.setattr(settings.lm, "llm_model", model)
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
 
