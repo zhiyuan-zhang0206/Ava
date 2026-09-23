@@ -7,10 +7,14 @@
 // tail. Each surface saves its position under the history entry it belongs
 // to, and a remount at the same entry restores it before the first paint.
 //
-// The key is Next's `router.bfcacheId`: stable across back/forward and
-// `router.refresh()`, fresh on push/replace -- the client router restores it
-// from its BFCache entry on a traverse regardless of `cacheComponents`
-// (next/dist client router source). So a restore happens exactly when the
+// The key is Next's `router.bfcacheId`: kept across back/forward,
+// `router.refresh()`, and search-param-/hash-only navigations; a push/replace
+// into a new segment gets a fresh id (vendored Next 16.3.4 use-router docs).
+// The client router restores it from its BFCache entry on a traverse
+// regardless of `cacheComponents` (next/dist client router source). A
+// search-param-only switch (e.g. `?agent_id=`) keeps the id, so successive
+// home visits share one slot (the content key guards such a restore). So a
+// restore happens exactly when the
 // browser returns to an entry it kept, never on a fresh navigation: a first
 // visit keeps its own default (timeline pinned to the newest message,
 // terminal pinned to the tail).

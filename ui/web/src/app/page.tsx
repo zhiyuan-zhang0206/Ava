@@ -273,8 +273,9 @@ function HomeContent({
   const requestScrollToBottom = useTimelineStore((s) => s.requestScrollToBottom);
   // The timeline's scroll position is remembered per history entry, so a
   // browser back/forward returns to the reader's position instead of
-  // re-pinning to the bottom (lib/scroll-memory.ts; bfcacheId is stable
-  // across traversals and fresh on push/replace).
+  // re-pinning to the bottom (lib/scroll-memory.ts; bfcacheId is kept across
+  // back/forward, router.refresh() and search-param-/hash-only navigations,
+  // fresh only on a push/replace into a new segment).
   const { bfcacheId } = useRouter();
 
   // File upload — one or more files sent as a single batch (one request, one
