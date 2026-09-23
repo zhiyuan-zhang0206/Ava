@@ -34,10 +34,9 @@ OTHER_CI = {
     "ruff-format",
     "lint-migrations",
     "lint-clock-lattice",
-    "frontend-vitest",
     "lint-core-content-manifests",
 }
-PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint"}
+PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"}
 LOCAL_ONLY = {"check-git-hooks-install"}
 # These identities come from fastapi._compat.v2 / fastapi.openapi.utils, not
 # repository class definitions. Keep exact names: new unknowns require review.
@@ -281,11 +280,11 @@ def test_node_npm_and_codegen_share_one_condition() -> None:
 
 def test_every_codegen_input_family_selects_freshness() -> None:
     paths = (
-        "gateway/schemas/agent.py",
+        "gateway/schemas/agents.py",
         "gateway/app.py",
         "gateway/routers/agents.py",
         "shared/agents/contract.py",
-        "shared/api_contracts/agent.py",
+        "shared/api_contracts/contracts.py",
         "shared/tasks/priority.py",
         "shared/tasks/task_status.py",
         "shared/agents/history/timeline.py",
@@ -320,11 +319,12 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "scripts/gen_event_registry.py",
         "shared/events/registry.md",
         "shared/config_registry.py",
-        "shared/config/fields/core.py",
+        "shared/config/agent.py",
         "scripts/gen_config_lite_table.py",
         "shared/config_lite_table.json",
     )
     for path in paths:
+        assert (ROOT / path).is_file(), f"Freshness matrix path no longer exists: {path}"
         assert any(re.search(HOOKS[hook_id]["files"], path) for hook_id in CODEGEN), path
         # Reuse the real parsed config across the path matrix; parser failures
         # are covered separately without repeating YAML parsing for every path.
@@ -445,3 +445,4 @@ def test_prepush_migration_keeps_direct_ci_owners() -> None:
     assert any(step.get("run") == "uv run pyright" for step in backend)
     assert any(step.get("run") == "npx tsc --noEmit" for step in frontend)
     assert any(step.get("run") == "npm run lint" for step in frontend)
+    assert any(step.get("run") == "npx vitest run --coverage" for step in frontend)

@@ -84,11 +84,17 @@ def test_stage_contract() -> None:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
     assert config["default_install_hook_types"] == ["pre-commit", "pre-push"]
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
-    for name in ("pyright", "frontend-tsc", "frontend-eslint"):
+    for name in ("pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"):
         hook = hooks[name]
         assert hook["stages"] == ["pre-push"]
         assert hook["verbose"] is True  # pre-commit hides output on PASS otherwise.
         assert "bash scripts/prepush-guard.sh " in hook["entry"]
+    vitest = hooks["frontend-vitest"]
+    assert vitest["entry"] == (
+        "bash scripts/prepush-guard.sh vitest -- bash -c 'cd ui/web && npx --no-install vitest run'"
+    )
+    assert vitest["files"] == r"^ui/web/.*\.(ts|tsx)$"
+    assert vitest["pass_filenames"] is False
     check = hooks["check-git-hooks-install"]
     assert check["stages"] == ["pre-commit"]
     assert check["always_run"] is True
@@ -173,7 +179,7 @@ def test_lock_timeout(checkout: Path, tmp_path: Path, monkeypatch: pytest.Monkey
     assert "executed" not in result.stdout
 
 
-@pytest.mark.parametrize("tool", ["tsc", "eslint"])
+@pytest.mark.parametrize("tool", ["tsc", "eslint", "vitest"])
 @requires_flock
 def test_missing_frontend_env(checkout: Path, tool: str) -> None:
     result = run_guard(checkout, tool)
@@ -181,6 +187,28 @@ def test_missing_frontend_env(checkout: Path, tool: str) -> None:
     assert f"PRE-PUSH SKIPPED [{tool}]: missing ui/web/node_modules" in result.stderr
     assert "npm ci" in result.stderr
     assert "executed" not in result.stdout
+
+
+@pytest.mark.parametrize("status", [0, 1, 7])
+@requires_flock
+def test_vitest_binary_and_command_status(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    bins = checkout / "ui/web/node_modules/.bin"
+    bins.mkdir(parents=True)
+    for name in ("node", "npm"):
+        (bins / name).symlink_to(sys.executable)
+    monkeypatch.setenv("PATH", str(bins) + os.pathsep + os.environ["PATH"])
+    missing = run_guard(checkout, "vitest")
+    assert missing.returncode == 0
+    assert "missing frontend executable vitest" in missing.stderr
+    assert "executed" not in missing.stdout
+
+    (bins / "vitest").symlink_to(sys.executable)
+    result = run_guard(checkout, "vitest", code=f"print('executed'); raise SystemExit({status})")
+    assert result.returncode == status
+    assert "executed" in result.stdout
+    assert "SKIPPED" not in result.stderr
 
 
 @requires_flock

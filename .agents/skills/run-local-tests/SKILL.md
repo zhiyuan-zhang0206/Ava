@@ -11,9 +11,9 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   a local repository-wide or full-backend run, including after a `shared/`
   change. Run bounded tests selected from the changed behavior and its direct
   consumers locally; leave broad verification to CI.
-- **Commit hooks** run static checks and custom lints. If a frontend test hook
-  invokes a full suite, skip that hook by name and record the targeted tests
-  run instead; do not bypass the other hooks.
+- **Commit hooks** run lints and codegen checks. For targeted local verification,
+  skip the full-suite `frontend-vitest` pre-push hook by name and record the
+  targeted tests run instead; do not bypass the other hooks.
 - **Local tests before push** — mandatory. After commit and before `git push`,
   run tests for the areas you touched:
   - Python: `.venv/bin/pytest <selected-test-files-or-node-ids>`
@@ -45,9 +45,10 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   suite before merge; an unrun or skipped CI suite is not a pass.
   ([postmortem](../../../postmortems/0003-touched-areas-is-not-the-blast-radius.md))
 
-- **Every pre-commit lint hook also runs in CI**, so a locally skipped hook is
-  still caught before merge: the backend job runs `pre-commit run --all-files`,
-  and a markdown-only PR (which skips backend under the change classifier) still gets
+- **CI independently enforces local checks** except the warn-only hook-installation
+  check: `backend-structure` runs structural lints and conditional explicit
+  codegen hooks; `backend-static` and `frontend` own the heavy checks directly.
+  A markdown-only PR (which skips backend under the change classifier) still gets
   the doc-lint family from the classify-independent `doc-lints` job. That
   redundancy is what makes `SKIP=` safe and `--no-verify` merely invisible
   rather than actually permissive.
@@ -59,7 +60,7 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   gate (`scripts/lint_migrations.py` — filename format, up/down pairing,
   baseline seed) *is* a local hook, gated on `migrations/` + `db/schema.sql`.
 - **Full non-e2e + e2e + coverage threshold runs in CI** — it's the merge gate.
-- **Framework pre-push hooks** run pyright, frontend tsc and eslint. Install
+- **Framework pre-push hooks** run pyright, frontend tsc, eslint and vitest. Install
   both stages from the main clone's stable `.venv`, never a worktree:
   `.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push`.
   See [the hook runbook](../../../conventions/runbook.md#git-hooks-pre-commit--pre-push)
