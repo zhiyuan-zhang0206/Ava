@@ -19,10 +19,12 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any
 
 import pytest
+
+from shared.coding_session_owner import CodingSessionKey, CodingSessionOwner
 
 _REPO = Path(__file__).parents[2]
 
@@ -281,15 +283,28 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
     """Canonical supervision must not baseline an already-current NEED_INPUT."""
     work = tmp_path / "work.md"
     work.write_text("STATUS: NEED_INPUT\n")
-    owner = SimpleNamespace(
+    key = watch_work.coding_session_owner.canonical_key(tmp_path, tool="codex", cluster=tmp_path)
+    owner = CodingSessionOwner(
+        key=key,
         generation="generation",
         status="active",
         created_at=dt.datetime.fromtimestamp(work.stat().st_mtime - 1, dt.UTC),
         expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
     )
-    monkeypatch.setattr(watch_work.coding_session_owner, "read", lambda _key: owner)
-    monkeypatch.setattr(watch_work, "_owner_terminated", lambda _agent_id: False)
-    monkeypatch.setattr(watch_work, "_session_crashed", lambda _owner: False)
+
+    def _read(_key: CodingSessionKey) -> CodingSessionOwner:
+        assert _key == key
+        return owner
+
+    def _owner_terminated(_agent_id: int) -> bool:
+        return False
+
+    def _session_crashed(_owner: CodingSessionOwner) -> bool:
+        return False
+
+    monkeypatch.setattr(watch_work.coding_session_owner, "read", _read)
+    monkeypatch.setattr(watch_work, "_owner_terminated", _owner_terminated)
+    monkeypatch.setattr(watch_work, "_session_crashed", _session_crashed)
     messages: list[str] = []
 
     class CanonicalWakeError(RuntimeError):
