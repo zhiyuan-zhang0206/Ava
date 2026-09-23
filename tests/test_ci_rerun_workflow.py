@@ -1,4 +1,9 @@
-"""Execute the real retry shell with a mock GitHub API; never call the network."""
+"""Execute the real retry shell with a mock GitHub API; never call the network.
+
+The checked-in ci-rerun script needs bash >= 4 (`${VAR,,}`); macOS ships bash
+3.2 as /bin/bash, so the runner resolves a modern bash explicitly and this
+file skips with a clear reason when only an older one exists on macOS (see
+`_resolve_bash`)."""
 
 import json
 import os
@@ -52,6 +57,52 @@ DOUBLE_FAULT_JOBS = {
         },
     ]
 }
+
+
+def _resolve_bash(candidates: tuple[str | None, ...] | None = None) -> str | None:
+    """Resolve a bash >= 4 for the checked-in retry script, or None.
+
+    The script uses bash-4 lowercase expansion (`${VAR,,}`), which bash 3.2
+    cannot parse; candidates are probed for their BASH_VERSINFO major — the
+    expansion itself cannot be probed (it is the feature under test). The
+    default search: PATH's bash, then the common Homebrew/local prefixes, then
+    /bin/bash. Tests pass fake candidates."""
+    if candidates is None:
+        candidates = (
+            shutil.which("bash"),
+            "/opt/homebrew/bin/bash",
+            "/usr/local/bin/bash",
+            "/bin/bash",
+        )
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate is None or candidate in seen or not os.access(candidate, os.X_OK):
+            continue
+        seen.add(candidate)
+        probe = subprocess.run(  # noqa: S603 — resolved local bash, not untrusted input
+            [candidate, "-c", 'echo "${BASH_VERSINFO[0]}"'],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        major = probe.stdout.strip()
+        if probe.returncode == 0 and major.isdigit() and int(major) >= 4:
+            return candidate
+    return None
+
+
+BASH = _resolve_bash()
+
+# Skip only on macOS: an unusable bash here is the expected 3.2-as-/bin/bash
+# case (a clear reason beats 23 phantom failures), while on any other platform
+# a missing modern bash is an environment defect that must fail loudly instead
+# of silently dropping this file's coverage.
+pytestmark = pytest.mark.skipif(
+    BASH is None and sys.platform == "darwin",
+    reason="the ci-rerun script needs bash >= 4 (`${VAR,,}`) and macOS ships 3.2 "
+    "as /bin/bash — install a modern bash to run this file locally",
+)
 
 
 def retry_script() -> str:
@@ -109,8 +160,9 @@ def run_retry(
         "API_FAIL": "0",
         **overrides,
     }
+    assert BASH is not None, "no bash >= 4 resolved for the ci-rerun script"
     result = subprocess.run(  # noqa: S603 — checked-in shell; gh is an isolated mock
-        ["/bin/bash", "-c", script],
+        [BASH, "-c", script],
         env=env,
         capture_output=True,
         text=True,
@@ -123,6 +175,27 @@ def run_retry(
         else []
     )
     return result, calls
+
+
+def test_resolve_bash_requires_version_four_and_takes_the_first_match(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Selection logic of the skip's resolver: older candidates are rejected,
+    the first >= 4 wins, and an all-old set resolves to None (the skip case)."""
+    old = tmp_path / "bash-old"
+    old.write_text("")
+    old.chmod(0o700)
+    new = tmp_path / "bash-new"
+    new.write_text("")
+    new.chmod(0o700)
+
+    def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        major = "3" if argv[0] == str(old) else "5"
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{major}\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert _resolve_bash((str(old), str(new))) == str(new)
+    assert _resolve_bash((str(old),)) is None
 
 
 @pytest.mark.parametrize("event", ["pull_request", "push"])
