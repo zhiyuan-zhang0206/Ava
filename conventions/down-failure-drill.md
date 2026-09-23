@@ -127,7 +127,7 @@ After the intentional start failure reaches recovery, verify all of these:
 
 ## References
 
-- [`shared/migrations.ava.okf.md`](../shared/migrations.ava.okf.md) —
+- [`shared/migrations/migrations.ava.okf.md`](../shared/migrations/migrations.ava.okf.md) —
   expand-contract requirements for lossy operations.
 - [`cli/commands/_update_recover.py`](../cli/commands/_update_recover.py) —
   failed-rollout recovery and manual-intervention diagnostics.

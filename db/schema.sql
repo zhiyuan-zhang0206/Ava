@@ -172,6 +172,9 @@ CREATE TABLE agents_meta (
         CHECK ((fork_source_agent_id IS NULL) = (fork_source_checkpoint_id IS NULL))
 );
 
+-- Live roster scans exclude the retained terminated-agent history.
+CREATE INDEX agents_meta_live_roster_idx ON agents_meta (id) WHERE status <> 'terminated';
+
 COMMENT ON COLUMN agents_meta.born_spawner IS
     'Birth-time original spawner. Immutable and never rewritten by folding; '
     'forks use agent:<fork_source>, plain spawns use the birth trigger, and '
@@ -1004,13 +1007,10 @@ CREATE TRIGGER agents_meta_born_spawner_append_only
 
 -- ─────────────── events archive (DROPPED — Loki archive stream) ───────────────
 -- The frozen PG `events` archive was dropped with the task #1281/#1823 cleanup
--- (migration 20260829T030000_drop-events-archive): every pre-cutover event row
+-- Every pre-cutover event row
 -- lives in the Loki archive stream (parity-verified import, 365d retention),
 -- and the cold pg_dump archive is the long-term copy. The baseline omits the
--- table so `db/schema.sql` stays the net effect of all migrations (the
--- migration smoke's convergence check); post-baseline migrations that read
--- `events` guard their reads with `to_regclass('events')` so fresh-DB replay
--- skips them.
+-- table so fresh databases contain only the current read models.
 --
 -- agent_archive_stats survives the drop: it materializes whole-life inspector
 -- values from the pre-cutover archive and is read directly, independent of the
@@ -1121,7 +1121,7 @@ CREATE TABLE user_settings (
 -- Recency-weighted "who is this agent connected to" used by ava.agents.get_neighbors.
 -- Agent tie weights (spawn/fork/resurrect + send_message) and the neighbor walk moved to
 -- the event stream in Python (gateway/neighbors.py) when the unified `events` table froze
--- at the LGTM cutover — task #180, migrations/20260821T023527_drop-agent-neighbors.sql.
+-- at the LGTM cutover (task #180).
 -- ─────────────── machines ───────────────
 -- Machine → inbound base URL registry for multi-machine deployment. At the tail of `ava start` on
 -- each machine, UPSERT its own (name, role, url) here. gateway_url is the machine's inbound base URL
@@ -1212,8 +1212,7 @@ CREATE TABLE machine_units (
 -- are the deploy lease, and `outcome` is the most recent orchestration result —
 -- a RECORD, never a phase (a failure is a fact in here). shared/cluster_lock.py
 -- acquires/renews/releases the lease; shared/last_update.py mirrors the last
--- outcome from cluster_last_update. Created by
--- migrations/20260808T043000_r1-deploy-state-tables.sql.
+-- outcome from cluster_last_update.
 CREATE TABLE deployment_state (
     id           INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     phase        TEXT NOT NULL DEFAULT 'stable'
@@ -1287,8 +1286,7 @@ COMMENT ON FUNCTION public.lock_runtime_publication_admission() IS
 -- cluster_paused file, updating.flag, session probing and updater-log-mtime
 -- liveness; R1 wave, Task #1021). `posture` is idle/paused/converging;
 -- `updater_lease_expires_at` is the updater process's lease. Owned by
--- shared/host_deploy_state.py. Created by
--- migrations/20260808T043000_r1-deploy-state-tables.sql.
+-- shared/host_deploy_state.py.
 CREATE TABLE host_deploy_state (
     machine                  TEXT PRIMARY KEY,
     posture                  TEXT NOT NULL DEFAULT 'idle'
@@ -1302,8 +1300,7 @@ CREATE TABLE host_deploy_state (
     -- The stranded-hold record (task #3132): set while this host's pause is a
     -- maintenance hold that has lost its owner (a failed updater leg left it).
     -- Read by the gateway-side alarm + every roster surface, because the held
-    -- host's own probe is usually down with it. See
-    -- migrations/20260911T180406_host-deploy-stranded-hold.sql.
+    -- host's own probe is usually down with it.
     stranded_hold_since      TIMESTAMPTZ,
     stranded_hold_reason     TEXT,
     -- The bounded automatic recovery of that hold (task #3142): per-episode
@@ -1419,8 +1416,7 @@ CREATE TABLE cluster_defaults (
     updated_at TIMESTAMPTZ,
     updated_by TEXT
 );
--- Seed matches migrations/20260917T045040_default-model-deepseek-flash.sql:
--- a fresh baseline must resolve the same default as a migrated prod DB.
+-- A fresh baseline resolves the same default as an upgraded database.
 INSERT INTO cluster_defaults (id, llm_model) VALUES (1, 'deepseek-flash');
 
 -- ─────────────── schedules ───────────────
@@ -1487,8 +1483,7 @@ CREATE TABLE schedule_fire_log (
 -- (stop / rollout reap / SIGKILL) leaves the row, and the agent's boot
 -- reconcile rebuilds cron watchers from the stored expression or marks
 -- one-shots 'missed'. Liveness is the session itself, so there is no lease
--- column. Created by
--- migrations/20260808T104500_agent-watchers.sql.
+-- column.
 CREATE TABLE agent_watchers (
     session_id     INTEGER NOT NULL,      -- the watcher's shell-session id (per-agent counter)
     agent_id       BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,  -- the spawning agent
@@ -2070,177 +2065,9 @@ CREATE TABLE schema_migrations (
 -- post-baseline files in migrations/ that are not folded below.
 INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');
 
--- This strict ADD COLUMN is already represented above. Fresh DBs must not replay
--- it, while existing DBs without this applied marker still run the migration and
--- fail loudly if the column was added outside migration tracking.
-INSERT INTO schema_migrations (name) VALUES ('20260901T065353_add-last-claim-loop-at');
-
--- This strict ADD COLUMN is already represented above. Fresh DBs must not replay
--- it, while existing DBs without this applied marker still run the migration and
--- fail loudly if the column was added outside migration tracking.
-INSERT INTO schema_migrations (name) VALUES ('20260903T080634_add-last-heartbeat-at');
-
--- This strict ADD COLUMN is already represented above. Fresh DBs must not replay
--- it, while existing DBs without this applied marker still run the migration and
--- fail loudly if the column was added outside migration tracking.
-INSERT INTO schema_migrations (name) VALUES ('20260903T175722_add-born-spawner');
-
--- Failure feedback is already represented above. Fresh DBs stamp it instead
--- of replaying the strict ALTER/CREATE delta against the baseline schema.
-INSERT INTO schema_migrations (name) VALUES ('20260905T121043_failure-feedback');
-
--- Failure-feedback bounds and retry accounting are represented above. Fresh
--- DBs must not replay the strict ADD COLUMN against the baseline schema.
-INSERT INTO schema_migrations (name) VALUES ('20260905T140829_bound-failure-feedback');
-
--- Dispatch-cap/backoff/poison columns are already represented above. Fresh
--- DBs must not replay the strict ADD COLUMN against the baseline schema,
--- while existing DBs without this applied marker still run the migration and
--- fail loudly if the columns were added outside migration tracking.
-INSERT INTO schema_migrations (name) VALUES ('20260905T162656_watchdog-dispatch-poison');
-
-
--- Wake suppression is already represented above. Fresh DBs must not replay
--- the strict ADD COLUMN against the baseline schema, while existing DBs
--- without this applied marker still run the migration and fail loudly if
--- the columns were added outside migration tracking.
-INSERT INTO schema_migrations (name) VALUES ('20260906T050000_wake-suppress');
-
--- Schedule fire claims are already represented above. Fresh DBs stamp the
--- migration instead of replaying the strict table-creation delta.
-INSERT INTO schema_migrations (name) VALUES ('20260906T081715_schedule-fire-log');
-
--- Heartbeat nudge backoff is already represented above. Fresh DBs stamp the
--- migration instead of replaying the strict ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260906T125200_heartbeat-nudge-backoff');
-
--- Notice expire_at is already represented above. Fresh DBs stamp the
--- migration instead of replaying the strict ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260907T190000_notice-expire-at');
-
--- Corpse fatal marker is already represented above. Fresh DBs stamp the
--- migration instead of replaying the strict ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260907T152552_corpse-fatal-marker');
-
--- Relay binding columns are already represented above. Fresh DBs stamp the
--- migration instead of replaying the strict ALTER ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260908T042458_impersonation-relay-binding');
-INSERT INTO schema_migrations (name) VALUES ('20260908T063636_impersonation-relay-batch-window');
-
--- Shell TTL renewal columns and the audit trail are already represented
--- above. Fresh DBs stamp the migration instead of replaying the strict
--- ALTER ADD COLUMN / CREATE TABLE delta.
-INSERT INTO schema_migrations (name) VALUES ('20260908T230000_shell-ttl-renewal');
-
--- system_note is already represented in the baseline kind CHECK. Fresh DBs
--- stamp the migration instead of replaying its CHECK rebuild, which carries
--- the pre-2026-09-08 kind list and would drop later kinds folded into the
--- baseline (e.g. 'reminder' from the impersonation-push-ack fold below).
-INSERT INTO schema_migrations (name) VALUES ('20260827T073641_task-notify-system-note-inbound');
-
--- start_message and the reminder kind are already represented above. Fresh
--- DBs stamp the migration instead of replaying the strict ALTER deltas.
-INSERT INTO schema_migrations (name) VALUES ('20260908T225900_impersonation-push-ack');
-
--- Native ownership restoration is already represented above.
-INSERT INTO schema_migrations (name) VALUES ('20260909T232714_impersonation-restore-native-owner');
-
--- The runtime-admission runner lock function is already represented above.
--- Fresh DBs stamp the migration instead of replaying its delta.
-INSERT INTO schema_migrations (name) VALUES ('20260904T155441_runtime-admission-runner-lock');
-INSERT INTO schema_migrations (name) VALUES ('20260909T171240_agents-meta-preset-name');
-
--- The resurrection epoch fence is already represented above. Fresh DBs stamp
--- the migration instead of replaying the strict ALTER ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260911T005419_add-resurrect-inbound-fence');
-
--- plugin_stats is already represented above. Fresh DBs stamp the migration
--- instead of replaying the CREATE TABLE delta.
-INSERT INTO schema_migrations (name) VALUES ('20260910T165723_plugin-stats');
-
--- The stranded-hold columns are already represented above. Fresh DBs must not
--- replay the strict ADD COLUMN against the baseline schema, while existing DBs
--- without this applied marker still run the migration and fail loudly if the
--- columns were added outside migration tracking.
-INSERT INTO schema_migrations (name) VALUES ('20260911T180406_host-deploy-stranded-hold');
-
--- The stranded-hold recovery columns are already represented above. Fresh DBs
--- must not replay the strict ADD COLUMN against the baseline schema.
-INSERT INTO schema_migrations (name) VALUES ('20260911T192500_stranded-hold-recovery');
-
--- Named impersonation sessions and permanent history are represented above.
-INSERT INTO schema_migrations (name) VALUES ('20260913T180056_named-impersonation-history');
-
--- The root-ongoing pin is superseded: the baseline now pins the root to
--- 'in_progress' (agent_tasks_root_status_in_progress), so replaying the old
--- migration's root-to-ongoing backfill would violate that pin. Fresh DBs
--- stamp it; existing DBs already applied it.
-INSERT INTO schema_migrations (name) VALUES ('20260827T021440_root-task-ongoing');
-
--- allow-non-root-ongoing is superseded by the 2026-09-15 removal of the
--- 'ongoing' status (drop-task-ongoing-status migration): replaying it would
--- re-pin the root to 'ongoing' against the baseline's in_progress pin.
-INSERT INTO schema_migrations (name) VALUES ('20260901T181810_allow-non-root-ongoing');
-
--- The permanent-reject streak column is already represented above. Fresh DBs
--- stamp the migration instead of replaying the strict ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260916T054934_permanent-reject-streak');
-
--- The lifecycle pointer->done guard (function + constraint trigger) is already
--- represented above, and a fresh DB has no torn rows to repair. Fresh DBs stamp
--- the migration instead of replaying the strict CREATE CONSTRAINT TRIGGER delta,
--- while existing DBs without this applied marker still run the migration and fail
--- loudly if the guard was installed outside migration tracking.
-INSERT INTO schema_migrations (name) VALUES ('20260916T164150_lifecycle-pointer-done-guard');
-
--- understanding_nodes is represented above. Fresh DBs stamp the migration
--- instead of replaying the CREATE TABLE / grant delta.
-INSERT INTO schema_migrations (name) VALUES ('20260916T204617_hierarchy-understanding-nodes');
-
--- hierarchy_jobs + hierarchy_worker_state are represented above. Fresh DBs
--- stamp the migration instead of replaying the CREATE TABLE delta.
-INSERT INTO schema_migrations (name) VALUES ('20260916T225140_hierarchy-worker');
-
--- Compact observed metrics and transactional lifecycle intervals are represented above.
-INSERT INTO schema_migrations (name) VALUES ('20260916T172008_observed-agent-metrics');
-
--- Earlier pause-table comments are superseded by the current read contract.
-INSERT INTO schema_migrations (name) VALUES ('20260828T191814_heartbeat-pause-log');
-INSERT INTO schema_migrations (name) VALUES ('20260831T185300_heartbeat-pause-comment-update');
-
-CREATE INDEX agents_meta_live_roster_idx ON agents_meta (id) WHERE status <> 'terminated';
-INSERT INTO schema_migrations (name) VALUES ('20260916T171506_index-live-agent-roster');
-
--- agents_meta.closed_at is represented above. Fresh DBs stamp the migration
--- instead of replaying the strict ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260917T195200_add-agents-meta-closed-at');
-
--- agents_meta.last_permanent_reject_reason is represented above. Fresh DBs
--- stamp the migration instead of replaying the ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260918T031422_last-permanent-reject-reason');
-
--- The tail kind + the worker-state delta column are represented above. Fresh
--- DBs stamp the migration instead of replaying the ALTER delta.
-INSERT INTO schema_migrations (name) VALUES ('20260918T113600_hierarchy-tail-seal');
-
--- The relay mint mark columns are represented above. Fresh DBs stamp the
--- migration instead of replaying the strict ADD COLUMN delta.
-INSERT INTO schema_migrations (name) VALUES ('20260919T020500_impersonation-relay-minted');
-
--- Watcher completion policy is represented above. Fresh DBs stamp the strict
--- ADD COLUMN delta instead of replaying it against the baseline schema.
-INSERT INTO schema_migrations (name) VALUES ('20260921T195118_watcher-notify');
-
--- completion_notice_events is represented above. Fresh databases stamp this
--- strict CREATE TABLE migration instead of replaying it against the baseline.
-INSERT INTO schema_migrations (name) VALUES ('20260921T211300_completion-notice-digest');
-
--- Omitted watcher notify settings are represented above as `agent`; stamp the
--- strict CHECK rebuild rather than replaying it against the folded baseline.
-INSERT INTO schema_migrations (name) VALUES ('20260921T211400_watcher-agent-notify');
-
--- Durable per-message relay attempt budget.
+-- Strict post-baseline deltas retained from concurrent upstream work.
 INSERT INTO schema_migrations (name) VALUES ('20260922T053200_impersonation-delivery-budget');
-
--- Lease-scoped delivery policy and configurable attempt limits.
 INSERT INTO schema_migrations (name) VALUES ('20260922T075826_impersonation-delivery-config');
+
+-- Current reset anchor: the previous 101 migration names are folded above.
+INSERT INTO schema_migrations (name) VALUES ('20260923T031516_schema-baseline');
