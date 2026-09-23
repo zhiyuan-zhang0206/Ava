@@ -87,7 +87,9 @@ multi-chunk.
 | `test_message_flow.py` | `message_flow` | **Panoramic Case 1 (#1018)** — one user message → reasoning + code tool call + real exec + reply; REST timeline fan-out (reasoning/code/output/chat), reply rendered in browser via SSE, zero unrecognized-marker alarms + zero `[timeline] unrecognized` console warnings |
 | `test_compact_flow.py` | `compact_flow` | **Panoramic Case 2 (#1018)** — UI-triggered force compact (POST /api/agents/{id}/compact) → Compaction LLM (script turn) → clean wipe → `inbound_compact_request` envelope renders, NO unrecognized-marker alarm (#1017 regression), agent replies post-compact |
 | `test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |
-| `test_shell_history_state.py` | `shell_history` | **task #4585** — browser back/forward between `/?agent_id=N` and `/shell/N/S` restores each container's scroll position (per history entry) with no blank / invalid-params frame on either return, and the shell poll + manual refresh stay alive |
+| `state/test_shell_history_state.py` | `shell_history` | **task #4585** — browser back/forward between `/?agent_id=N` and `/shell/N/S` restores each container's scroll position (per history entry) with no blank / invalid-params frame on either return, and the shell poll + manual refresh stay alive |
+
+`tests/e2e/state/` groups the browser scroll/navigation-state scenarios — `test_load_older_anchor.py`, `test_parked_compact_switch_back.py`, `test_shell_history_state.py` — split out of the top level to stay under the `tests/e2e` direct-entry budget in `scripts/structure/baseline.json`.
 
 **Differences between fork scenario and lifecycle**: fork creates a **new agent_id** (not reused).
 `build()` distinguishes source / forked process by whether there is a `kind='fork'` inbound for
