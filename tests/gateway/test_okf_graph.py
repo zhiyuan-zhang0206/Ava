@@ -1,7 +1,7 @@
 """GET /api/okf/graph integration tests.
 
 No DB involved — the route parses the repo's on-disk `.ava.okf.md` tree
-(`shared/okf_graph.py`) and renders it into the D3 template on every request.
+(`shared/docs/okf_graph.py`) and renders it into the D3 template on every request.
 Covers: the route returns a self-contained HTML page with the data injected
 (not the raw placeholder), and that it is gated by the normal cluster auth
 middleware like every other route (it is not in `_AUTH_BYPASS_PATHS`).
@@ -53,7 +53,7 @@ def test_okf_graph_accepts_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # ── parse_frontmatter equivalence (audit #2448 Phase 2) ──
 #
-# The okf adapter now delegates to shared.frontmatter.parse_frontmatter_typed.
+# The okf adapter now delegates to shared.docs.frontmatter.parse_frontmatter_typed.
 # These tests lock the merge: on every bundle in the repo the adapter must be
 # field-for-field identical to the pre-refactor parser, so the shared-parser
 # consolidation cannot silently change the OKF graph.
@@ -78,7 +78,7 @@ def _legacy_parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 def test_parse_frontmatter_equivalent_to_legacy_on_repo_bundles() -> None:
     """Every `.ava.okf.md` bundle in the repo parses identically through the
     adapter and the legacy parser — frontmatter and body, field for field."""
-    from shared.okf_graph import find_files, parse_frontmatter
+    from shared.docs.okf_graph import find_files, parse_frontmatter
 
     repo_root = Path(__file__).resolve().parents[2]
     bundles = find_files(repo_root)
@@ -95,7 +95,7 @@ def test_parse_frontmatter_equivalent_to_legacy_on_repo_bundles() -> None:
 def test_parse_frontmatter_keeps_legacy_tolerance_for_spaced_fences() -> None:
     """`"--- "` opener/closer lines predate the shared parser; the adapter
     still accepts them (the strict shared parser rejects them)."""
-    from shared.okf_graph import parse_frontmatter
+    from shared.docs.okf_graph import parse_frontmatter
 
     fm, body = parse_frontmatter("--- \ntitle: X\n--- \n\nBody\n")
     assert fm == {"title": "X"}

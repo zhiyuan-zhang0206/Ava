@@ -16,7 +16,7 @@ TEMPLATE = REPO / "scripts" / "okf-d3-template.html"
 
 sys.path.insert(0, str(REPO))
 
-from shared.okf_graph import build_graph_data, render_html  # noqa: E402
+from shared.docs.okf_graph import build_graph_data, render_html  # noqa: E402
 
 
 def build() -> dict[str, Any]:

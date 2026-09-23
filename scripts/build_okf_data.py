@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build graph_data.json from an Ava OKF bundle (.ava.okf.md files).
 
-CLI wrapper over `shared/okf_graph.py`'s `build_graph_data()` — writes the
+CLI wrapper over `shared/docs/okf_graph.py`'s `build_graph_data()` — writes the
 result to disk and prints build stats + unresolved-wikilink diagnostics.
 `gateway/routers/okf_graph.py` calls `build_graph_data()` directly instead
 (no file write, always rebuilt fresh for the live `GET /api/okf/graph` route).
@@ -20,8 +20,8 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Re-exported: scripts/lint_ava_okf.py does `from build_okf_data import resolve_wikilink`.
-from shared.okf_graph import build_graph_data
-from shared.okf_graph import resolve_wikilink as resolve_wikilink
+from shared.docs.okf_graph import build_graph_data
+from shared.docs.okf_graph import resolve_wikilink as resolve_wikilink
 
 
 def _print_stats(

@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 
 from services.memory_indexer.backends.base import KIND_BODY, KIND_DESC
-from shared.notes import parse_note
+from shared.docs.notes import parse_note
 
 _CHUNK_MAX_CHARS = 1800
 _CHUNK_OVERLAP_CHARS = 200

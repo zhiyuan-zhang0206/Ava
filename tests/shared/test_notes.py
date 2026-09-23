@@ -1,4 +1,4 @@
-"""shared.notes — the note model + walkers (audit #2448 Phase 1/2 pure-function
+"""shared.docs.notes — the note model + walkers (audit #2448 Phase 1/2 pure-function
 unit tests: no filesystem for parse/extract, tmp_path for walk)."""
 
 from __future__ import annotations
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from shared.frontmatter import parse_frontmatter_typed
-from shared.notes import (
+from shared.docs.frontmatter import parse_frontmatter_typed
+from shared.docs.notes import (
     extract_md_links,
     normalize_tags,
     parse_note,
