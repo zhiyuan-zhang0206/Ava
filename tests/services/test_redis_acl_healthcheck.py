@@ -8,7 +8,6 @@ Runs against a throwaway redis-server (tests._containers.redis_server) — no pr
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -171,30 +170,18 @@ def test_failing_repair_raises() -> None:
             _check(cluster_url, bad_admin)
 
 
-def test_main_skips_when_url_carries_no_username(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
-    """The legacy .env shape (`redis://:<secret>@host/0`): the runtime dials as the
-    redis `default` user (requirepass persists across restarts), so no ACL identity
-    can be dropped and the check must SKIP with a warning — not raise a traceback
-    every watchdog round (the 4.5k-ERROR flood this regression test pins)."""
-    from services.healthchecks import redis_acl
-
+def test_main_rejects_url_without_username(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing runtime identity is misconfiguration and fails loudly."""
     monkeypatch.setattr(redis_acl, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(redis_acl.settings.data_plane, "redis_url", "redis://:sek@127.0.0.1:6380/0")
-    # the legacy .env shape implies a cluster with a secret — the no-secret
-    # skip must not pre-empt the legacy-URL skip
     monkeypatch.setattr(redis_acl.settings.data_plane, "cluster_secret", "sek")
     monkeypatch.setattr(redis_acl, "get_record", _registry_record)
     monkeypatch.setattr(redis_acl, "record_redis_port", _registry_redis_port)
     calls = []
     monkeypatch.setattr(redis_acl, "check", lambda *a, **k: calls.append((a, k)))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    with caplog.at_level(logging.WARNING, logger="services.healthchecks.redis_acl"):  # pyright: ignore[reportUnknownMemberType]
+    with pytest.raises(ValueError, match="data-plane URL carries no username"):
         redis_acl.main()
     assert calls == []
-    assert "no ACL username" in caplog.text  # pyright: ignore[reportUnknownMemberType]
-    assert "127.0.0.1:6380" in caplog.text  # pyright: ignore[reportUnknownMemberType]
-    assert (
-        "sek" not in caplog.text  # pyright: ignore[reportUnknownMemberType]
-    )  # the credential never reaches a log line
 
 
 def test_main_runs_check_with_the_url_identity(monkeypatch: pytest.MonkeyPatch) -> None:
