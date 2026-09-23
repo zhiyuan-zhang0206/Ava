@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -26,6 +28,17 @@ _RESOURCE = ResourceSample(
     disk_total_gb=7.0,
     disk_pct=8.0,
 )
+
+
+def test_check_pidfile_ignores_root_level_pidfile(tmp_path: Path) -> None:
+    current = tmp_path / "run" / "agent_host.pid"
+    current.parent.mkdir()
+    (tmp_path / current.name).write_text(str(os.getpid()))
+
+    assert cluster_status._check_pidfile(str(current)) == (False, None)
+
+    current.write_text(str(os.getpid()))
+    assert cluster_status._check_pidfile(str(current)) == (True, os.getpid())
 
 
 class _Pool:
