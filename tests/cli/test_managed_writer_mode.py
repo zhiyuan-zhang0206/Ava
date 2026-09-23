@@ -248,9 +248,8 @@ def _stub_orchestration(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda _sha, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
-    monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
-    monkeypatch.setattr(_up, "finalize_rollout", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._update_finalize._unpause_local_via_tree", lambda _repo: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "finalize_rollout", lambda *_a, **kwargs: kwargs["outcome"])  # pyright: ignore[reportUnknownArgumentType]
     return stopped
 
 
@@ -522,7 +521,7 @@ def test_active_rollout_runs_the_hop_phase_instead_of_the_legacy_poll(
     monkeypatch.setattr(
         _up,
         "_phase_b_outcome",
-        lambda *_a, **_k: legacy.append(None) or (0, _up.RolloutOutcome.CLEAN, []),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_k: legacy.append(None) or (0, _up.RolloutOutcome.CLEAN, [], None),  # pyright: ignore[reportUnknownArgumentType]
     )
     collected: list[object] = []
     monkeypatch.setattr(
@@ -638,7 +637,7 @@ def test_collect_never_runs_on_a_non_clean_outcome(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         _up,
         "_phase_b_outcome",
-        lambda *_a, **_k: (1, _up.RolloutOutcome.INCOMPLETE, []),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_k: (1, _up.RolloutOutcome.INCOMPLETE, [], None),  # pyright: ignore[reportUnknownArgumentType]
     )
     calls: list[None] = []
     monkeypatch.setattr(
@@ -799,7 +798,7 @@ def _stub_orchestration_to_phase_b(
     monkeypatch.setattr(
         _up,
         "_phase_b_outcome",
-        lambda *_a, **_k: (0, _up.RolloutOutcome.CLEAN, []),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_k: (0, _up.RolloutOutcome.CLEAN, [], None),  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
@@ -859,7 +858,7 @@ def test_commit_step_never_runs_on_a_non_clean_outcome(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         _up,
         "_phase_b_outcome",
-        lambda *_a, **_k: (1, _up.RolloutOutcome.INCOMPLETE, []),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_k: (1, _up.RolloutOutcome.INCOMPLETE, [], None),  # pyright: ignore[reportUnknownArgumentType]
     )
     calls: list[None] = []
     monkeypatch.setattr(_up, "_commit_managed_writer_publication", lambda: calls.append(None) or 0)  # pyright: ignore[reportUnknownArgumentType]
