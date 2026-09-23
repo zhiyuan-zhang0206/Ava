@@ -43,8 +43,8 @@ from psycopg_pool import ConnectionPool
 
 from gateway.error_envelope import error_response
 from gateway.request_principal import PrincipalScopeError, request_key
-from shared import contracts
-from shared.contracts import Idempotency
+from shared.api_contracts import contracts
+from shared.api_contracts.contracts import Idempotency
 from shared.db_transaction import write_transaction
 
 _MAX_WAIT_SECONDS = 15.0

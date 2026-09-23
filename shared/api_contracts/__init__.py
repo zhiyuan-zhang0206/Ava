@@ -11,26 +11,9 @@ directly instead of hand-unpacking dicts.
 
 Only the subset the CLI actually decodes lives here — gateway-only response
 models (ClusterPanel, SystemStatus, ServiceItem, ...) stay in `gateway.schemas`.
+
+Import `config`, `contracts`, `op_envelope`, and `status` submodules directly.
+Nothing is re-exported here: every submodule import executes this initializer.
+Settings-free consumers must not inherit unrelated chains such as
+`config.py -> shared.config_registry` or `status.py -> DB`.
 """
-
-from shared.api_contracts.config import (
-    ConfigAuditView,
-    ConfigFieldView,
-    ConfigFieldWriteResult,
-    ConfigView,
-    ConfigWriteResult,
-    ResolvedConfigView,
-    ResolvedFieldView,
-)
-from shared.api_contracts.status import MachineStatus
-
-__all__ = [
-    "ConfigAuditView",
-    "ConfigFieldView",
-    "ConfigFieldWriteResult",
-    "ConfigView",
-    "ConfigWriteResult",
-    "MachineStatus",
-    "ResolvedConfigView",
-    "ResolvedFieldView",
-]

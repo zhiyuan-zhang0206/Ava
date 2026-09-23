@@ -24,7 +24,7 @@ import pytest
 from pydantic import ValidationError
 
 from services.agent_ops import bootstrap, daemon, dispatch_child
-from shared.op_envelope import OpEnvelope
+from shared.api_contracts.op_envelope import OpEnvelope
 
 _REPO = Path(__file__).resolve().parents[3]
 

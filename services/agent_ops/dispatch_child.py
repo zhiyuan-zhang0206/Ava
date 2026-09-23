@@ -21,7 +21,7 @@ import sys
 from pydantic import ValidationError
 
 from services.agent_ops import daemon
-from shared.op_envelope import OpEnvelope
+from shared.api_contracts.op_envelope import OpEnvelope
 
 
 def main() -> int:

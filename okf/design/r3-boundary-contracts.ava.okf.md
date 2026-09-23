@@ -37,7 +37,7 @@ One metaphor, one new concept (the rest are existing ideas re-declared at bounda
 
 | Declaration / entity | Writer | Reader | Supervisor |
 |---|---|---|---|
-| Contract constants (`shared/contracts.py`) | route author | middleware, SDK, lint | tests |
+| Contract constants (`shared/api_contracts/contracts.py`) | route author | middleware, SDK, lint | tests |
 | `agent_pages` table | `serve()` declares, daemon updates state | daemon (spawn/kill), gateway | page daemon |
 | `agent_notices` table | unified notice API | frontend aggregate endpoint, IM bridge | TTL maintenance |
 | `SkillIndex` | `build()` | skill read paths | mtime invalidation |
@@ -62,7 +62,7 @@ No deployment-state model (R1) · no event contracts / skill identity / env-key 
 
 ## Open decision points
 
-- **Q1 — physical location of contract declarations**: shared contract module (`shared/contracts.py`, recommended — precondition of invariant 2, one fact source) vs pure route decorators (declaration gateway-side only, SDK relies on doc discipline — today's comment-contract).
+- **Q1 — physical location of contract declarations**: shared contract module (`shared/api_contracts/contracts.py`, recommended — precondition of invariant 2, one fact source) vs pure route decorators (declaration gateway-side only, SDK relies on doc discipline — today's comment-contract).
 - **Q2 — IM bridge pause decoupling**: direct DB read (recommended — existing daemon pattern: watchdog/heartbeat read the DB; the gateway-uniform-RPC principle governs gateway↔runner RPC, not daemon↔DB) vs gateway exempt route (everything through the gateway, but one more exempt surface + notice consumption lives and dies with gateway availability).
 
 ## Related as-is nodes
