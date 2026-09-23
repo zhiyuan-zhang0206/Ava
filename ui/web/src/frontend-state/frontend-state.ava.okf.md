@@ -57,3 +57,20 @@ The selected conversation store and its abortable reads have their own node:
 ## Sticky Bottom Controller (`lib/sticky.ts`)
 
 `createStickyController` is the **sole owner** of the sticky flag — replacing 6 paths that each wrote `stickyRef`. Two core ideas: when pinning, move the baseline together (`notifyPinnedToBottom` makes the pin's own echo read as zero movement, eliminating direction heuristics/grace timers); `lastBottomScrollHeight` witnesses "content growing taller under my feet". At-bottom zone width splits into two thresholds by pointer type (touch/mouse). Callers only issue `requestStick()`/`handleScroll()`/`handleLayoutChange()`, never modify the flag. `scrollToBottomRequest` is the sole forced-scroll signal, bumped on agent switch (`switchThread`) + on send — those two force pins also hand the controller a fresh upward run (`notifyPinnedToBottom(view, freshRun)`; a stale run would otherwise release following again on the first post-pin twitch, before the reply could be followed). Automatic (streaming-growth) pins keep the run.
+
+## History-Entry Scroll Memory (`lib/scroll-memory.ts`)
+
+The document never scrolls (h-full chain; every page scrolls inside its own
+element), so the browser's history scroll restoration has nothing to restore:
+a back/forward remount would reset each container (timeline re-pinned to the
+newest message, terminal to its tail). Every scrolling surface saves its
+position under the history entry it belongs to — keyed by
+`router.bfcacheId`, which the client router keeps stable across back/forward
+and regenerates on push/replace, independent of `cacheComponents` — so a
+restore happens only on a return to a kept entry; a first visit keeps its own
+default. The record carries a content key (agent / agent+session): a mismatch
+drops the position instead of restoring it onto other content, and the sticky
+flag rides along so a follower returns following. Restores land in a layout
+effect on the first commit that can hold them (before paint), report through
+`notifyRestored` (following resumes exactly at an at-bottom restore), and the
+mount force-pin defers to a pending restore.

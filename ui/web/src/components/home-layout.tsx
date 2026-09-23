@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { type CSSProperties, type ReactNode } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/resizable";
 import { BAR_HEIGHT_PX, FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { panelLayoutStorage } from "@/lib/panel-layout-storage";
+import { useClientReady } from "@/lib/use-client-ready";
 import { cn } from "@/lib/utils";
 
 // Panel sizes are written as explicit percent strings: v4 reads a bare number
@@ -133,16 +134,18 @@ export function HomeLayout({
   main,
   inspector,
 }: Props) {
-  // useBreakpoint intentionally starts in its SSR-safe mobile frame. Delay
-  // PanelGroup registration until its effects have installed the real frame;
-  // otherwise the transient frame registers a group that immediately remounts
-  // onto the breakpoint's keyed group. The full-size placeholder reserves the
-  // page box, so the gate itself does not move surrounding layout.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the first registered panel frame must use post-mount breakpoint state
-    setMounted(true);
-  }, []);
+  // A hydrating load starts in the SSR-safe mobile frame; Delay PanelGroup
+  // registration until the breakpoint values are the client's own — otherwise
+  // the transient frame registers a group that immediately remounts onto the
+  // breakpoint's keyed group. The full-size placeholder reserves the page box,
+  // so the gate itself does not move surrounding layout.
+  //
+  // The gate keys on the snapshot's ORIGIN (useClientReady), not on a
+  // post-mount flag: a client-side navigation already has the real breakpoint
+  // values in its first render, so it renders the real frame directly — a
+  // back/forward into the home page must not paint a blank placeholder frame
+  // first. Hydration keeps the old two-phase order (server snapshot → real).
+  const clientReady = useClientReady();
 
   const frame = isLarge ? DESKTOP_COLUMNS : MOBILE_COLUMNS;
   // Only user-driven commits persist (see DesktopMain) — the breakpoint's
@@ -153,7 +156,7 @@ export function HomeLayout({
     onlySaveAfterUserInteractions: true,
   });
 
-  if (!mounted) {
+  if (!clientReady) {
     return (
       <div
         data-testid="home-layout-placeholder"
