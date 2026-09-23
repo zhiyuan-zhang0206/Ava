@@ -42,6 +42,7 @@ from gateway.schemas import (
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster import ClusterStatus, _check_pidfile, current_orchestration
 from ops.cluster import is_paused as cluster_is_paused
+from ops.controllers.schema_mismatch import status as schema_mismatch_status
 from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease
 from shared.config import settings
@@ -422,6 +423,7 @@ async def _probe_agent_runner(
         is_staging=is_staging,
         head_sha=status.head_sha,
         running_sha=status.running_sha,
+        schema_mismatch=status.schema_mismatch,
         shell_count=status.shell_count,
         agent_host_online=status.agent_host_online,
         watchdog_online=status.watchdog_online,
@@ -577,6 +579,7 @@ def _local_machine_status_blocking(
         is_staging=is_staging,
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
+        schema_mismatch=schema_mismatch_status(),
         resource=_local_resource_sample(),
     )
 

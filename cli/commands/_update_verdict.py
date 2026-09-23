@@ -68,7 +68,9 @@ def _phase_b_and_commit(
     hosts_to_resume: list[tuple[str, str | None]],
     targets: Callable[[list[tuple[str, str | None]]], list[tuple[str, str | None]]],
     readiness: Callable[[list[tuple[str, str | None]], set[str], list[str] | None], bool],
-    poll_outcome: Callable[..., tuple[int, RolloutOutcome, list[tuple[str, str | None]]]],
+    poll_outcome: Callable[
+        ..., tuple[int, RolloutOutcome, list[tuple[str, str | None]], str | None]
+    ],
     collect: Callable[[ManagedWriterPhaseInput | None], int],
     commit: Callable[[], int],
     phase_input: ManagedWriterPhaseInput | None = None,
@@ -158,7 +160,7 @@ def _phase_b_and_commit(
         # An override only; None keeps the caller's own failing_step.
         failing_step: str | None = None
         with _stage_telemetry("phase_b"):
-            rc, outcome, hosts_to_resume = poll_outcome(
+            rc, outcome, hosts_to_resume, phase_b_failure = poll_outcome(
                 fanout_targets,
                 target_sha=target_sha,
                 restart_only=restart_only,
@@ -170,7 +172,7 @@ def _phase_b_and_commit(
         for _host, _stages in host_outcomes.items():
             _record_host_telemetry(_host, _stages)
         if outcome is not RolloutOutcome.CLEAN:
-            failing_step = "the Phase-B poll: acked agent-runners never reported back"
+            failing_step = phase_b_failure
         elif local_launch_failures:
             # Every agent-runner converged, so Phase B has nothing to report — but
             # this host is short a service and the rollout is not clean. `failing_step`

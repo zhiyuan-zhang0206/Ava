@@ -96,7 +96,7 @@ from shared.daemon_health import Liveness, health_port, start_health_server, sto
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.disabled_services import is_skipped, read_skipped
 from shared.log import init_gateway_process
-from shared.machine import MachineRole
+from shared.machine import MachineRole, machine_name
 
 _log = logging.getLogger("services.watchdog.daemon")
 
@@ -529,7 +529,34 @@ async def _tick(role: MachineRole) -> None:
     controller reports is resolved against the roster by `_checks_for_round`.
     """
     blocks = await _manager.reconcile(role)
-    for check in _checks_for_round(role, blocks, _manager.blocking_dimension()):
+    checks = _checks_for_round(role, blocks, _manager.blocking_dimension())
+    if blocks is BlockScope.DB_DEPENDENT and _manager.blocking_dimension() == "schema":
+        from ops.controllers import schema_mismatch
+
+        mismatch = await asyncio.to_thread(schema_mismatch.detect)
+        if mismatch is not None:
+            held = [c.name for c in _checks_for_capability(role) if c.requires_db]
+            rounds = schema_mismatch.observe(role, mismatch, held)
+            if rounds in (1, 10) or rounds % 60 == 0:
+                telemetry.emit(
+                    "telemetry",
+                    "schema_mismatch_blocked",
+                    level="error",
+                    attributes={
+                        "kind": mismatch.kind,
+                        "machine": machine_name(),
+                        "consecutive_blocked_rounds": rounds,
+                        "held_back_services": held,
+                        "detail": mismatch.detail,
+                    },
+                )
+        else:
+            schema_mismatch.clear(role)
+    elif blocks is BlockScope.NONE:
+        from ops.controllers import schema_mismatch
+
+        schema_mismatch.clear(role)
+    for check in checks:
         await _run_check(check.name, check.run)
 
 

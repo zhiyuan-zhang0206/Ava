@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 213 | event stream |
+| telemetry (category=telemetry) | `events` | 214 | event stream |
 | log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 213)
+## 3. Telemetry events (category=telemetry, 214)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -246,6 +246,7 @@ consumers: see the comments at each emit point.
 | `host_held_wake_truncated` | a held-controls wake stopped quietly because the update straggler reap had marked its row 'restarting' — the successor boundary owns the row and its un-applied restart, so the wake had nothing left to do; not a failure | observation | — | — | events |
 | `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events |
 | `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events |
+| `schema_mismatch_blocked` | watchdog held back DB-dependent services for a code/schema/pin mismatch | anomaly | — | — | events |
 | `db_outage_wait` | db outage wait | anomaly | — | — | events |
 | `db_outage_pause` | db outage pause | anomaly | — | — | events |
 | `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | events |

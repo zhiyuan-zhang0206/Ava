@@ -437,43 +437,47 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
     # lines per update and answers that question outright; the syscall underneath is
     # still unidentified, so the next occurrence has to be readable off the box.
     _log.info("[cluster] spawning updater session %s (log=%s)", updater_sess, log_path)
-    with shared.ui_update_state.lifecycle_lock():
-        # Validation/fetch above is intentionally outside this short mutex.
-        # Recheck now, then make pause + session visibility indivisible from a
-        # recovery actor's no-owner proof.
-        live_session = cluster_session.live_orchestration_session()
-        if live_session is not None:
-            raise ClusterUpdateInProgress(
-                f"orchestration session {live_session!r} already exists; an update is in flight"
-            )
-        try:
-            shared.updater_handoff.begin(
-                expected_session=updater_sess,
-                generation=handoff_generation,
-            )
-        except shared.updater_handoff.UpdaterHandoffActive as exc:
-            raise ClusterUpdateInProgress(
-                "an updater spawn handoff still has a live/fresh owner or is "
-                "unreadable; wait for it or recover the host"
-            ) from exc
-        # P2 #2102: persist the updater's SESSION RECORD before the pause lands,
-        # so a death anywhere in the pause->spawn gap (the 2026-09-10 outage
-        # class) still leaves a record of the chain that began — the day is
-        # never zero-record for an update that started. pid=0 with the -1.0
-        # dead-child create_time sentinel can never match a real process, so
-        # liveness probes treat it as absent and recovery reaps it; the
-        # backend's new_session atomically replaces it with the real record at
-        # spawn. Definitive aborts below remove it.
-        from shared.platform_backend import get_backend as _get_platform_backend
-        from shared.session_record import SessionRecord, record_path
+    with shared.ui_update_state.resource_lock(purpose="ops.spawn_update pause and spawn"):
+        with shared.ui_update_state.lifecycle_lock():
+            # Validation/fetch above is intentionally outside this short mutex.
+            # Recheck now, then make pause + session visibility indivisible from a
+            # recovery actor's no-owner proof.
+            live_session = cluster_session.live_orchestration_session()
+            if live_session is not None:
+                raise ClusterUpdateInProgress(
+                    f"orchestration session {live_session!r} already exists; an update is in flight"
+                )
+            try:
+                shared.updater_handoff.begin(
+                    expected_session=updater_sess,
+                    generation=handoff_generation,
+                )
+            except shared.updater_handoff.UpdaterHandoffActive as exc:
+                raise ClusterUpdateInProgress(
+                    "an updater spawn handoff still has a live/fresh owner or is "
+                    "unreadable; wait for it or recover the host"
+                ) from exc
+            # P2 #2102: persist the updater's SESSION RECORD before the pause lands,
+            # so a death anywhere in the pause->spawn gap (the 2026-09-10 outage
+            # class) still leaves a record of the chain that began — the day is
+            # never zero-record for an update that started. pid=0 with the -1.0
+            # dead-child create_time sentinel can never match a real process, so
+            # liveness probes treat it as absent and recovery reaps it; the
+            # backend's new_session atomically replaces it with the real record at
+            # spawn. Definitive aborts below remove it.
+            from shared.platform_backend import get_backend as _get_platform_backend
+            from shared.session_record import SessionRecord, record_path
 
-        SessionRecord(
-            pid=0,
-            create_time=-1.0,
-            cmd=inner_cmd if _get_platform_backend().is_posix() else native_cmd,
-            cwd=str(repo),
-            started_at=time.time(),
-        ).write(record_path(updater_sess))
+            SessionRecord(
+                pid=0,
+                create_time=-1.0,
+                cmd=inner_cmd if _get_platform_backend().is_posix() else native_cmd,
+                cwd=str(repo),
+                started_at=time.time(),
+            ).write(record_path(updater_sess))
+        # The durable pending handoff above makes a recovery actor refuse throughout
+        # pause -> spawn. Release the short owner mutex before a drain can take minutes.
+        # The long resource lock is the one local start/stop and the hold probe use.
         try:
             cluster_pause.pause_local_cluster()
         except BaseException:

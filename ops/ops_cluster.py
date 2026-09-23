@@ -86,20 +86,18 @@ def cluster_stop_op(
     deploy_acquired_at: datetime,
 ) -> dict[str, object]:
     """Drain hosted continuations under the exact executing deploy generation."""
-    with ui_update_state.lifecycle_lock():
-        # Phase A is valid only while an executing rollout/restart owns the
-        # cluster lease. Recheck under the same local mutex recovery uses: if a
-        # cross-host recover CAS-claimed the lease first, this delayed stop must
-        # not re-pause the just-recovered host.
-        _require_executing_deploy(deploy_holder, deploy_acquired_at)
-        pause_owner.mark_paused(deploy_holder, deploy_acquired_at)
-        try:
-            # Close the cross-host lease-change window between the first DB
-            # proof and publishing the local capability.
+    with ui_update_state.resource_lock(purpose="ops.cluster_stop drain"):
+        with ui_update_state.lifecycle_lock():
+            # Recovery takes these locks in the same order. Keep the lease proof
+            # and local owner publication indivisible, then release the short
+            # mutex before the potentially long drain.
             _require_executing_deploy(deploy_holder, deploy_acquired_at)
-        except BaseException:
-            pause_owner.clear(deploy_holder, deploy_acquired_at)
-            raise
+            pause_owner.mark_paused(deploy_holder, deploy_acquired_at)
+            try:
+                _require_executing_deploy(deploy_holder, deploy_acquired_at)
+            except BaseException:
+                pause_owner.clear(deploy_holder, deploy_acquired_at)
+                raise
         try:
             pause_local_cluster()
         except BaseException:
@@ -137,7 +135,10 @@ def cluster_resume_op(
     deploy_acquired_at: datetime,
 ) -> dict[str, object]:
     """Generation-scoped unpause — never resume a later rollout's pause."""
-    with ui_update_state.lifecycle_lock():
+    with (
+        ui_update_state.resource_lock(purpose="ops.cluster_resume"),
+        ui_update_state.lifecycle_lock(),
+    ):
         owner = pause_owner.read()
         if not owner.matches(deploy_holder, deploy_acquired_at):
             raise ClusterUpdateInProgress(
@@ -204,7 +205,10 @@ def cluster_recover_op() -> dict[str, object]:
 
     Returns {"unlocked_holder": <prior lock holder or None>}.
     """
-    with ui_update_state.lifecycle_lock():
+    with (
+        ui_update_state.resource_lock(purpose="ops.cluster_recover"),
+        ui_update_state.lifecycle_lock(),
+    ):
         handoff = updater_handoff.read()
         if handoff.status == "invalid":
             raise ClusterUpdateInProgress(

@@ -322,6 +322,12 @@ def _classify_rollout(repo: Path, *, restart_only: bool, origin: str) -> tuple[i
             "replaying the full rollout"
         )
         return None, True
+    from ops.controllers.schema_mismatch import detect as detect_schema_mismatch
+
+    mismatch = detect_schema_mismatch()
+    if mismatch is not None and mismatch.kind == "pin-behind-schema":
+        print("\n→ cluster pin trails the applied schema; replaying the full pin-aware rollout")
+        return None, True
     # Classify before touching anything. On a git error, fall back to a full
     # restart (restart_frontend=True) — never under-restart on a fetch hiccup.
     try:

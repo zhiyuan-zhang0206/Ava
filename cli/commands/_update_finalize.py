@@ -36,7 +36,7 @@ def _stderr_reason(stderr: str) -> str:
     return lines[-1] if lines else "(no stderr)"
 
 
-def _unpause_local_via_tree(repo: Path) -> None:
+def _unpause_local_via_tree(repo: Path) -> bool:
     """Run compensating local unpause through the current tree's interpreter.
 
     `repo/.venv/bin/python` executes the code the rollout just deployed — the
@@ -54,7 +54,7 @@ def _unpause_local_via_tree(repo: Path) -> None:
     """
     if (refusal := _local_resume_refusal()) is not None:
         print(f"  local compensating unpause skipped: {refusal}", file=sys.stderr)
-        return
+        return False
 
     python = repo / ".venv" / "bin" / "python"
     if python.exists():
@@ -77,7 +77,7 @@ def _unpause_local_via_tree(repo: Path) -> None:
                 check=False,
             )
             if result.returncode == 0:
-                return
+                return True
             print(
                 "  warning: deployed-tree compensating local unpause failed "
                 f"(rc={result.returncode}): {_stderr_reason(result.stderr)}; "
@@ -97,11 +97,13 @@ def _unpause_local_via_tree(repo: Path) -> None:
 
         unpause_local_cluster()
         finalize_pause_owner_journal()
+        return True
     except Exception as exc:
         print(
             f"  warning: in-process compensating local unpause raised {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
+        return False
 
 
 def finalize_orchestration(
@@ -122,12 +124,12 @@ def finalize_orchestration(
     publication_refused: bool = False,
     telemetry: RolloutTelemetry,
     refresh_settings: Callable[[], None],
-    finalize_rollout_runner: Callable[..., None],
+    finalize_rollout_runner: Callable[..., RolloutOutcome],
     finalize_commit_telemetry: Callable[[RolloutTelemetry], None],
     spawn_offsite_upload: Callable[[Path, Path | None], None],
     repo: Path,
     pull_recover: tuple[str, set[str], Path | None] | None,
-) -> None:
+) -> RolloutOutcome:
     """Resume hosts, close the record, and emit only clean commit telemetry.
 
     The local update can rotate data-plane credentials, so the settings refresh
@@ -137,10 +139,18 @@ def finalize_orchestration(
     """
     refresh_settings()
     if phase_a_started:
-        _unpause_local_via_tree(repo)
+        local_resumed = _unpause_local_via_tree(repo)
     else:
         print("no Phase A pause occurred; skipping compensating local unpause", file=sys.stderr)
-    finalize_rollout_runner(
+        local_resumed = True
+    if not local_resumed:
+        failing_step = "; ".join(
+            filter(None, [failing_step, "gateway local compensating unpause failed"])
+        )
+        if outcome is RolloutOutcome.CLEAN:
+            outcome = RolloutOutcome.INCOMPLETE
+        recovered = False
+    final_outcome = finalize_rollout_runner(
         hosts_to_resume,
         fan_out,
         phase_a_timeout_s,
@@ -152,7 +162,8 @@ def finalize_orchestration(
         local_launch_failures=local_launch_failures,
         publication_refused=publication_refused,
     )
-    if outcome is RolloutOutcome.CLEAN:
+    if final_outcome is RolloutOutcome.CLEAN:
         finalize_commit_telemetry(telemetry)
     spawn_offsite_upload(repo, pull_recover[2] if pull_recover is not None else None)
     telemetry.print_summary()
+    return final_outcome

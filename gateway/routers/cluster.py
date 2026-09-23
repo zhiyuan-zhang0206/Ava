@@ -39,6 +39,7 @@ from ops.cluster import (
     current_orchestration,
 )
 from ops.cluster import is_paused as cluster_is_paused
+from ops.controllers.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import ClusterSpawnSession, ClusterTransitionPayload
 from shared import machines
 from shared.cluster_drift import prod_source_head_sha
@@ -87,6 +88,7 @@ def _local_snapshot_blocking() -> ClusterStatus:
         # gateway that outlived a checkout advance reports the old commit and the
         # roster shows the drift.
         running_sha=_process_sha.get(),
+        schema_mismatch=schema_mismatch_status(),
     )
 
 

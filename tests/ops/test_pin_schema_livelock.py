@@ -14,22 +14,27 @@ The unit tests beside this one pin each half. This file asserts the property tha
 only holds when both are in place: **in the incident's state, a controller round
 moves nothing.**
 
-Real convergence still needs a human — advance the pin, or roll the schema back — and
-that is the decision, not a gap: auto-advancing the pin would let any DB drift move
-the cluster onto unreviewed code. What changes is that the cluster now waits loudly
-in one place instead of flapping its checkout between two commits.
+Convergence is a pin-aware gateway rollout: it advances the pin and verifies the
+fleet. Host-local heals still refuse while this split exists, and the watchdog
+exposes the hold through cluster status and events.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 import shared.db
-from ops.controllers import pin, schema, update_trigger
+from ops.cluster_status import ClusterStatus
+from ops.controllers import pin, schema, schema_mismatch, update_trigger
 from ops.controllers.base import BlockScope
+from services.watchdog import daemon as watchdog
+from shared.api_contracts.status import MachineStatus
+from shared.machine import MachineRole
 from shared.migrations import CodeBehindSchema
 
 _PIN = "1a90f95d33a145d1df24d17fec0a604f14084b5f"
@@ -144,3 +149,135 @@ def test_an_off_pin_host_with_nothing_running_still_self_heals(
 
     assert pin.check_pin_drift() is True
     assert db_ahead_of_the_pin["pin"] == [_PIN]
+
+
+def test_pin_behind_schema_is_visible_on_status_even_when_local_code_matches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mismatch = schema_mismatch.classify(
+        {"baseline", "new"}, {"baseline", "new"}, {"baseline"}, "a" * 40
+    )
+    assert mismatch is not None and mismatch.kind == "pin-behind-schema"
+    monkeypatch.setattr(schema_mismatch, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(schema_mismatch, "detect", lambda: mismatch)
+    monkeypatch.setattr(schema_mismatch, "machine_name", lambda: "company-mini")
+
+    assert schema_mismatch.observe("agent-runner", mismatch, ["ava-agent-host"]) == 1
+    assert schema_mismatch.observe("agent-runner", mismatch, ["ava-agent-host"]) == 2
+    state = schema_mismatch.status()
+    assert state is not None
+    assert (state.kind, state.machine, state.consecutive_blocked_rounds) == (
+        "pin-behind-schema",
+        "company-mini",
+        2,
+    )
+    assert state.held_back_services == ["ava-agent-host"]
+    assert "ava cluster update" in state.detail
+
+    local = ClusterStatus(
+        machine_name="company-mini",
+        serve_gateway=False,
+        serve_agent_runner=True,
+        paused=False,
+        schema_mismatch=state,
+    )
+    assert local.model_dump(mode="json")["schema_mismatch"]["kind"] == "pin-behind-schema"
+    roster = MachineStatus(
+        name="company-mini",
+        serve_gateway=False,
+        serve_agent_runner=True,
+        gateway_url="http://cm",
+        up_since_at=datetime(2026, 9, 24, tzinfo=UTC),
+        online=True,
+        paused=False,
+        schema_mismatch=state,
+    )
+    assert roster.model_dump(mode="json")["schema_mismatch"]["held_back_services"] == [
+        "ava-agent-host"
+    ]
+    from cli.commands.cluster import _schema_mismatch_banner
+
+    banner = _schema_mismatch_banner([roster])
+    assert "company-mini" in banner[0]
+    assert "2 consecutive blocked" in banner[0]
+    assert "ava-agent-host" in banner[0]
+
+
+def test_schema_block_streak_resets_only_after_a_healthy_round(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(schema_mismatch, "ava_home", lambda: tmp_path)
+    mismatch = schema_mismatch.classify(
+        {"baseline", "new"}, {"baseline", "new"}, {"baseline"}, "a" * 40
+    )
+    assert mismatch is not None
+    assert schema_mismatch.observe("agent-runner", mismatch, ["ava-agent-host"]) == 1
+    assert schema_mismatch.observe("agent-runner", mismatch, ["ava-agent-host"]) == 2
+    changed = schema_mismatch.classify(
+        {"baseline", "new", "newer"}, {"baseline", "new", "newer"}, {"baseline"}, "a" * 40
+    )
+    assert changed is not None
+    assert schema_mismatch.observe("agent-runner", changed, ["ava-agent-host"]) == 3
+    monkeypatch.setattr(schema_mismatch, "detect", lambda: changed)
+    changed_state = schema_mismatch.status()
+    assert changed_state is not None and changed_state.consecutive_blocked_rounds == 3
+    schema_mismatch.clear("agent-runner")
+    assert schema_mismatch.observe("agent-runner", mismatch, ["ava-agent-host"]) == 1
+
+
+def test_mismatch_classification_preserves_local_drift_categories() -> None:
+    cases: tuple[tuple[set[str], set[str], str], ...] = (
+        ({"old"}, {"new"}, "divergent"),
+        ({"old"}, set(), "schema-ahead-of-code"),
+        (set(), {"new"}, "schema-behind-code"),
+    )
+    for applied, required, expected in cases:
+        mismatch = schema_mismatch.classify(applied, required, None, None)
+        assert mismatch is not None and mismatch.kind == expected
+
+
+async def test_db_scoped_watchdog_block_emits_error_event_with_held_services(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mismatch = schema_mismatch.classify({"baseline", "new"}, {"baseline"}, {"baseline"}, "a" * 40)
+    assert mismatch is not None
+    monkeypatch.setattr(schema_mismatch, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(schema_mismatch, "detect", lambda: mismatch)
+    monkeypatch.setattr(watchdog, "machine_name", lambda: "company-mini")
+
+    class Manager:
+        async def reconcile(self, _role: MachineRole) -> BlockScope:
+            return BlockScope.DB_DEPENDENT
+
+        def blocking_dimension(self) -> str:
+            return "schema"
+
+    def no_checks(
+        _role: MachineRole, _blocks: BlockScope, _dimension: str | None = None
+    ) -> list[watchdog._Check]:
+        return []
+
+    def capability_checks(_role: MachineRole) -> list[watchdog._Check]:
+        return [watchdog._Check("ava-agent-host", lambda: None, True)]
+
+    monkeypatch.setattr(watchdog, "_manager", Manager())
+    monkeypatch.setattr(watchdog, "_checks_for_round", no_checks)
+    monkeypatch.setattr(watchdog, "_checks_for_capability", capability_checks)
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    def emit(category: str, name: str, **kw: object) -> None:
+        events.append((category, name, kw))
+
+    monkeypatch.setattr(
+        watchdog.telemetry,
+        "emit",
+        emit,
+    )
+    await watchdog._tick("agent-runner")
+    assert len(events) == 1
+    assert events[0][1] == "schema_mismatch_blocked"
+    assert events[0][2]["level"] == "error"
+    attributes = cast(dict[str, object], events[0][2]["attributes"])
+    assert attributes["held_back_services"] == ["ava-agent-host"]
+    state = schema_mismatch.status()
+    assert state is not None and state.consecutive_blocked_rounds == 1

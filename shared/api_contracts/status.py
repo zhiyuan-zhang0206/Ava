@@ -29,6 +29,18 @@ from shared.resource_sample import ResourceSample
 PausedReason = Literal["no_state", "business_pause", "maintenance", "startup"]
 
 
+class SchemaMismatchStatus(BaseModel):
+    """One machine's code/schema/pin mismatch and watchdog hold-back."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["pin-behind-schema", "schema-ahead-of-code", "schema-behind-code", "divergent"]
+    machine: str
+    consecutive_blocked_rounds: int
+    held_back_services: list[str]
+    detail: str
+
+
 class MachineStatus(BaseModel):
     """A machines-table row state — augmented with live probe results.
 
@@ -94,6 +106,7 @@ class MachineStatus(BaseModel):
     # advanced but the process was not restarted — a node shown "on pin ✓" can
     # still be running stale code, which only running_sha reveals.
     running_sha: str | None = None
+    schema_mismatch: SchemaMismatchStatus | None = None
     # The live deploy lease (`shared.cluster_lock.read_update_lease().describe()`):
     # holder, how long it has been held, when it lapses, plus the settle note when
     # it is a hold rather than an executing rollout. None = no live lease. The lease

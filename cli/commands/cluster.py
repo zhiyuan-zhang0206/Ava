@@ -233,7 +233,12 @@ def _render_roster(
         *(len(f"{m.name} (staging)") if m.is_staging else len(m.name) for m in roster),
         len("name"),
     )
-    lines = _stranded_hold_banner(roster) + _last_update_banner(roster) + _hold_banner(roster)
+    lines = (
+        _schema_mismatch_banner(roster)
+        + _stranded_hold_banner(roster)
+        + _last_update_banner(roster)
+        + _hold_banner(roster)
+    )
     if managed_writer is not None:
         lines += _managed_writer_banner(managed_writer)
     lines += [
@@ -257,6 +262,22 @@ def _render_roster(
         lines.append(
             f"{display_name.ljust(name_w)}  {role:<{_ROLE_COL_W}} {paused_str:<7} {status:<10} "
             f"{pin_str:<10} {code_str:<10} {hold_str:<{_HOLD_COL_W}} {up_since}"
+        )
+    return lines
+
+
+def _schema_mismatch_banner(roster: list[MachineStatus]) -> list[str]:
+    """Keep a DB-scoped hold visible even while the ops roster is online."""
+    lines: list[str] = []
+    for machine in roster:
+        mismatch = machine.schema_mismatch
+        if mismatch is None:
+            continue
+        services = ", ".join(mismatch.held_back_services) or "(watchdog has not reported yet)"
+        lines.append(
+            f"⚠ schema mismatch on {mismatch.machine}: {mismatch.kind}; "
+            f"{mismatch.consecutive_blocked_rounds} consecutive blocked round(s); "
+            f"held back: {services}. {mismatch.detail}"
         )
     return lines
 

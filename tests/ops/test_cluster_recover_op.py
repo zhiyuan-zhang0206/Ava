@@ -16,10 +16,33 @@ from typing import Literal
 import pytest
 
 import ops.ops_cluster as _ops
+from ops import deploy_spawn
 from ops.cluster import ClusterUpdateInProgress
 from shared.cluster_lock import DeployLease, RecoveryClaim
+from shared.updater_handoff import UpdaterHandoffSnapshot
 
 _Kind = Literal["rollout", "restart", "update"]
+
+
+@pytest.mark.parametrize("status", ["pending", "running", "invalid"])
+def test_new_rollout_refuses_an_updater_handoff_before_session_visibility(
+    status: Literal["pending", "running", "invalid"], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The persisted handoff closes the owner-lock release to session-spawn gap."""
+    monkeypatch.setattr(deploy_spawn, "assert_prod_home_has_its_own_checkout", lambda: None)
+    monkeypatch.setattr(deploy_spawn.cluster_session, "live_orchestration_session", lambda: None)
+    monkeypatch.setattr(
+        deploy_spawn.shared.updater_handoff,
+        "read",
+        lambda: UpdaterHandoffSnapshot(status=status),
+    )
+
+    def no_fleet_probe() -> None:
+        pytest.fail("the local handoff must refuse before the fleet probe")
+
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", no_fleet_probe)
+    with pytest.raises(ClusterUpdateInProgress, match=f"handoff is {status}"):
+        deploy_spawn.assert_no_orchestration_in_flight()
 
 
 def _lease(

@@ -340,9 +340,8 @@ def test_excessive_estimate_does_not_block_phase_a(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda sha, **_kw: pins.append(sha))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
-    monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
-    monkeypatch.setattr(_up, "finalize_rollout", lambda *_args, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_finalize, "_unpause_local_via_tree", lambda _repo: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up, "finalize_rollout", lambda *_args, **kw: kw["outcome"])  # pyright: ignore[reportUnknownArgumentType]
 
     assert _run_inner() == 0
     assert stopped == ["stop"]
@@ -605,9 +604,15 @@ def test_normal_prepare_snapshots_before_maintenance_and_threads_recovery(
     )
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda *_args, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
-    monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
-    monkeypatch.setattr(_up, "finalize_rollout", lambda *_args, **_kw: order.append("finalize"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_finalize, "_unpause_local_via_tree", lambda _repo: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    def _record_finalize(*_args: object, **kwargs: object) -> _up.RolloutOutcome:
+        order.append("finalize")
+        outcome = kwargs["outcome"]
+        assert isinstance(outcome, _up.RolloutOutcome)
+        return outcome
+
+    monkeypatch.setattr(_up, "finalize_rollout", _record_finalize)
     monkeypatch.setattr(
         _up,
         "_finalize_commit_telemetry",

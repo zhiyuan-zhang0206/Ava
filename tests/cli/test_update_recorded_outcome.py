@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from cli import commands as _cli
+from cli.commands import _update_phase_b as phase_b
 from cli.commands import _update_recover as _rec
 from cli.commands import update as _up
 from cli.commands._update_fanout import ClusterOpPayload
@@ -46,8 +47,9 @@ def _orchestration_seams(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_iden
 def _capture_finalize(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
-    def _finalize(*_a: Any, **kw: Any) -> None:
+    def _finalize(*_a: Any, **kw: Any) -> _rec.RolloutOutcome:
         captured.update(kw)
+        return kw["outcome"]
 
     monkeypatch.setattr(_up, "finalize_rollout", _finalize)
     return captured
@@ -241,3 +243,103 @@ def test_a_foreground_local_update_records_no_log(monkeypatch: pytest.MonkeyPatc
     _up._begin_update_record("PINNEDSHA1234567", origin="cli:mini")
 
     assert seen["log_path"] is None
+
+
+def test_phase_b_fatal_dispatch_names_machine_and_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fatal_poll(*_args: object, **_kwargs: object) -> dict[str, phase_b.PollVerdict]:
+        return {"company-mini": phase_b.PollVerdict("fatal", detail="spawn_update lock timeout")}
+
+    monkeypatch.setattr(
+        "cli.commands.update._phase_b_and_poll",
+        fatal_poll,
+    )
+    rc, outcome, hosts, failure = phase_b._phase_b_outcome(
+        [("company-mini", "http://cm:8106")],
+        target_sha="a" * 40,
+        restart_only=False,
+        runner_urls={"company-mini": "http://cm:8106"},
+        unconverged=[],
+    )
+    assert (rc, outcome) == (1, _rec.RolloutOutcome.INCOMPLETE)
+    assert hosts == [("company-mini", "http://cm:8106")]
+    assert failure is not None
+    assert "company-mini" in failure and "dispatch" in failure
+    assert "spawn_update lock timeout" in failure
+
+
+def test_failed_compensating_resume_downgrades_record_before_finish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: list[tuple[object, str | None]] = []
+
+    def record(outcome: object, **kw: object) -> None:
+        step = kw["failing_step"]
+        assert isinstance(step, str) or step is None
+        recorded.append((outcome, step))
+
+    monkeypatch.setattr(
+        "shared.last_update.finish_update",
+        record,
+    )
+
+    def resume(
+        _hosts: list[tuple[str, str | None]],
+        _path: str,
+        _timeout: float,
+        _payload: object,
+    ) -> list[tuple[str, str, str]]:
+        assert recorded == [], "the result must be folded before finish_update"
+        return [("company-mini", "fatal", "resume refused")]
+
+    final_outcome = _rec.finalize_rollout(
+        [("company-mini", "http://cm:8106")],
+        resume,
+        1.0,
+        deploy_capability={"deploy_holder": "g", "deploy_acquired_at": "2026-09-24T00:00:00Z"},
+        outcome=_rec.RolloutOutcome.CLEAN,
+        pin_advanced=True,
+    )
+    assert len(recorded) == 1
+    assert final_outcome is _rec.RolloutOutcome.INCOMPLETE
+    assert str(recorded[0][0]) == "incomplete"
+    assert "company-mini" in (recorded[0][1] or "")
+
+
+def test_pin_behind_schema_forces_full_rollout_even_with_no_new_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cli.commands import _update_orchestration as orchestration
+    from ops import update_check
+    from ops.controllers import schema_mismatch
+
+    mismatch = schema_mismatch.classify(
+        {"baseline", "new"}, {"baseline", "new"}, {"baseline"}, "a" * 40
+    )
+    assert mismatch is not None
+
+    def no_replay(*_args: object, **_kwargs: object) -> bool:
+        return False
+
+    def git_result(*args: str) -> str:
+        return "0" if args[0] == "rev-list" else ""
+
+    monkeypatch.setattr(schema_mismatch, "detect", lambda: mismatch)
+    monkeypatch.setattr(update_check, "_get_installed_sha", lambda: "a" * 40)
+    monkeypatch.setattr(update_check, "_get_running_sha", lambda: "a" * 40)
+    monkeypatch.setattr(update_check, "_installed_sha_needs_replay", no_replay)
+    monkeypatch.setattr(update_check, "_git_ro", git_result)
+    assert update_check.update_check().needs_replay is True
+
+    monkeypatch.setattr("shared.running_sha.get", lambda: "a" * 40)
+    monkeypatch.setattr("shared.source_integrity.get", lambda: "a" * 40)
+    monkeypatch.setattr("shared.source_integrity.installed_sha_needs_replay", no_replay)
+    monkeypatch.setattr(
+        "cli.commands._changed_paths_vs_origin",
+        lambda: (_ for _ in ()).throw(AssertionError("docs-only fast path must not run")),
+    )
+    assert orchestration._classify_rollout(Path("/unused"), restart_only=False, origin="test") == (
+        None,
+        True,
+    )

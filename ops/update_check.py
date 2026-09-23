@@ -30,11 +30,10 @@ class UpdateCheck(BaseModel):
     checkout is behind its track target, and which side a pull would restart.
 
     `behind` is the commit count from the last fully installed commit to the
-    track target. `needs_replay` names the exceptional state where the fully
-    installed commit is ahead of the running-commit bookmark: a rollout was
-    interrupted between them, so zero commits behind is not an up-to-date
-    verdict. A running commit ahead of installation is the normal fast-path
-    state and does not need replay.
+    track target. `needs_replay` covers an interrupted installed-versus-running
+    transition and a cluster pin that lacks migrations already applied in the
+    DB. Either case needs a full rollout even with zero new commits. A running
+    commit ahead of installation alone is the normal fast-path state.
 
     `frontend_changed` / `backend_changed` mirror `ava cluster update`'s own
     classification so the UI can tell the user what a rollout would actually
@@ -85,7 +84,12 @@ def update_check() -> UpdateCheck:
     """
     installed_sha = _get_installed_sha()
     running_sha = _get_running_sha()
-    needs_replay = _installed_sha_needs_replay(installed_sha, running_sha, repo=_REPO_ROOT)
+    from ops.controllers.schema_mismatch import detect as detect_schema_mismatch
+
+    mismatch = detect_schema_mismatch()
+    needs_replay = _installed_sha_needs_replay(installed_sha, running_sha, repo=_REPO_ROOT) or (
+        mismatch is not None and mismatch.kind == "pin-behind-schema"
+    )
 
     _git_ro("fetch", "origin", settings.general.track_branch)
     if settings.general.track_mode == "releases":

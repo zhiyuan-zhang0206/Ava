@@ -68,6 +68,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
         "task_escalation",  # task_maintenance/daemon.py:_run_escalate
         "watchdog_tick",  # services/watchdog/daemon.py:_TickProgress.record_completed (positional emit)
+        "schema_mismatch_blocked",  # services/watchdog/daemon.py:_tick (positional emit)
         "heartbeat_paused",  # ava/self.py:258 telemetry.emit("telemetry", ...)
         "shell_ttl_renewed",  # ava/shell/sessions.py:_record_renewal telemetry.emit("telemetry", ...)
         "chrome_page_ttl_expired",  # services/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)

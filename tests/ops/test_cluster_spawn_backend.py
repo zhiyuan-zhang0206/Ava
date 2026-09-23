@@ -894,12 +894,21 @@ class TestPrerecordedUpdaterSession:
         tmp_path: Path,
     ) -> None:
         from ops import cluster_pause as _cluster_pause
+        from shared import ui_update_state
+        from shared.platform import LockTimeoutError
 
         seen_at_pause: list[SessionRecord | None] = []
         real_pause = _cluster_pause.pause_local_cluster
 
         def _probe_pause() -> None:
             seen_at_pause.append(SessionRecord.read(record_path("ava-test-updater")))
+            with (
+                pytest.raises(LockTimeoutError),
+                ui_update_state.resource_lock(purpose="competing stop", timeout_s=0),
+            ):
+                pytest.fail("a second resource transition entered the drain")
+            with ui_update_state.lifecycle_lock():
+                pass  # owner publication is free during the long pause
             real_pause()
 
         monkeypatch.setattr(_cluster_pause, "pause_local_cluster", _probe_pause)
@@ -951,21 +960,10 @@ class TestNativeArg:
 
 
 def test_the_facade_imports_every_submodule_eagerly() -> None:
-    """`ops/cluster.py` must import all four submodules at module level.
+    """Eager re-exports let the test spawn guard find every definition site.
 
-    `tests/conftest.py`'s `_guard_cluster_spawn` stubs the spawn entry points via
-    `_stub_everywhere`, which finds aliases by object identity but only across
-    modules the run has already imported ("Nothing is imported to find them"). The
-    facade's eager re-exports are what make that scan reach the definition sites.
-    Converted to lazy / `__getattr__` imports it would reach only whichever
-    submodules an earlier test happened to load, so the guard would cover some of
-    them and a test could spawn a real `ava cluster update` with nothing failing to say so.
-
-    Checked statically, on the source: asserting it by re-importing at runtime would
-    have to evict the modules from `sys.modules` first, and every already-imported
-    consumer (`gateway/routers/*`, `ops/ops_cluster.py`) holds references to the
-    function objects those modules defined — swapping them mid-session is how a
-    guard test becomes the thing that breaks unrelated tests.
+    Inspect source: re-importing would replace modules still referenced by
+    other consumers and make this guard test corrupt the test process.
     """
     import ast
     from pathlib import Path

@@ -8978,6 +8978,16 @@
             ],
             "title": "Running Sha"
           },
+          "schema_mismatch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SchemaMismatchStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "shell_count": {
             "type": "integer",
             "title": "Shell Count",
@@ -11483,6 +11493,16 @@
               }
             ],
             "title": "Running Sha"
+          },
+          "schema_mismatch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SchemaMismatchStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "deploy_hold": {
             "anyOf": [
@@ -14989,6 +15009,49 @@
         ],
         "title": "ScheduleView"
       },
+      "SchemaMismatchStatus": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pin-behind-schema",
+              "schema-ahead-of-code",
+              "schema-behind-code",
+              "divergent"
+            ],
+            "title": "Kind"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "consecutive_blocked_rounds": {
+            "type": "integer",
+            "title": "Consecutive Blocked Rounds"
+          },
+          "held_back_services": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Held Back Services"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "machine",
+          "consecutive_blocked_rounds",
+          "held_back_services",
+          "detail"
+        ],
+        "title": "SchemaMismatchStatus",
+        "description": "One machine's code/schema/pin mismatch and watchdog hold-back."
+      },
       "SdkCall": {
         "properties": {
           "method": {
@@ -16774,7 +16837,7 @@
           "needs_replay"
         ],
         "title": "UpdateCheck",
-        "description": "`GET /api/cluster/update-check` response — how far the gateway's\ncheckout is behind its track target, and which side a pull would restart.\n\n`behind` is the commit count from the last fully installed commit to the\ntrack target. `needs_replay` names the exceptional state where the fully\ninstalled commit is ahead of the running-commit bookmark: a rollout was\ninterrupted between them, so zero commits behind is not an up-to-date\nverdict. A running commit ahead of installation is the normal fast-path\nstate and does not need replay.\n\n`frontend_changed` / `backend_changed` mirror `ava cluster update`'s own\nclassification so the UI can tell the user what a rollout would actually\nrestart (docs-only diffs count as neither — a pull with nothing to restart)."
+        "description": "`GET /api/cluster/update-check` response — how far the gateway's\ncheckout is behind its track target, and which side a pull would restart.\n\n`behind` is the commit count from the last fully installed commit to the\ntrack target. `needs_replay` covers an interrupted installed-versus-running\ntransition and a cluster pin that lacks migrations already applied in the\nDB. Either case needs a full rollout even with zero new commits. A running\ncommit ahead of installation alone is the normal fast-path state.\n\n`frontend_changed` / `backend_changed` mirror `ava cluster update`'s own\nclassification so the UI can tell the user what a rollout would actually\nrestart (docs-only diffs count as neither — a pull with nothing to restart)."
       },
       "UpdateOutcome": {
         "type": "string",

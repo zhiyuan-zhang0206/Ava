@@ -103,7 +103,12 @@ def reclaim_dead_deploy_lease() -> str | None:
         return None
     recovery_holder = f"recovery:{machine_name()}:pid{os.getpid()}"
     try:
-        with ui_update_state.lifecycle_lock():
+        with (
+            ui_update_state.resource_lock(
+                purpose="watchdog stranded lease recovery", timeout_s=0.1
+            ),
+            ui_update_state.lifecycle_lock(),
+        ):
             claim = claim_recovery_lock(recovery_holder, lease)
             if not claim.acquired:
                 _log.warning(

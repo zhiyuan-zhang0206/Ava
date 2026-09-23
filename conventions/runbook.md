@@ -514,19 +514,20 @@ empty and re-enables the disabled services. Internal restarts (`ava cluster
 update` / recovery / `ava restart`) and the watchdog's 60 s round honor the
 persisted set without rewriting it.
 
-**The cluster pin is behind the DB schema.** `[ops.schema] ... this checkout IS the
-cluster pin ...` at ERROR, every round, with `ava cluster status` showing the whole
-roster's DB-dependent services down, means the pinned commit does not carry migrations
-the DB has applied. The watchdog deliberately stops here rather than self-healing: its
-`ava cluster update` would move HEAD forward and the pin controller would force it straight
-back, and nothing advances the pin because advancing it is a step of a *successful*
-update. Preserve the target, applied migration set, lease/holder, and failure
-evidence before choosing an authorized forward recovery or schema-compatible
-rollback through the installed `ava cluster` CLI. Check that version's help and
-recovery-point requirements first. Do not reset the production checkout, call
-internal pin setters, or mutate migration state to make these facts appear aligned.
-If the installed CLI cannot recover the mismatch, stop and report that exact
-blocker; a manual source/pin change is not a substitute for a verified rollout.
+**The cluster pin is behind the DB schema.** `ava cluster status` names the
+`pin-behind-schema` machine, consecutive blocked rounds and DB-dependent
+services held back, even while its ops daemon is online. The first blocked
+round and bounded follow-ups emit `schema_mismatch_blocked` error events. A
+host-local watchdog heal does not spawn when HEAD equals the stale pin: the pin
+controller would undo its checkout. Preserve the target, applied migration
+set, lease/holder, and failure evidence. Run the pin-aware `ava cluster update`
+from the gateway after confirming no rollout is already executing; a
+pin-behind-schema mismatch forces the full fleet path even when the gateway
+already runs the newest commit. Verify each target's checkout, running SHA,
+unpaused state and the resulting pin/schema status. Do not reset the production
+checkout, call internal pin setters, or roll back applied migrations to make
+these facts appear aligned. If the installed CLI cannot converge the mismatch,
+stop and report the exact blocker.
 Only recover a stranded pause after proving no live orchestrator owns it.
 ([decision](../decisions/2026-07-31-two-healers-must-not-own-the-same-checkout.md))
 

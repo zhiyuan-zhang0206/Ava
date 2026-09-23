@@ -19,10 +19,9 @@ def exclusive_resources[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
 
     @wraps(operation)
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
-        from shared.platform import file_lock
-        from shared.ui_update_state import lifecycle_lock_path
+        from shared.ui_update_state import resource_lock
 
-        with file_lock(lifecycle_lock_path(), timeout_s=0.1):
+        with resource_lock(purpose=f"cli.{operation.__name__}"):
             return operation(*args, **kwargs)
 
     return wrapped
