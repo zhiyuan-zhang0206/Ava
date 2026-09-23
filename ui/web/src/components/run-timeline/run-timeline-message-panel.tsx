@@ -72,6 +72,7 @@ export function MessageDetailPanel({
   onFocus,
   onClose,
   onSelectLayer,
+  fullText,
 }: {
   agentId: number;
   message: RunTimelineMessage;
@@ -82,8 +83,11 @@ export function MessageDetailPanel({
   onFocus: (target: MessageFocusTarget, label: string) => void;
   onClose: () => void;
   onSelectLayer: (index: number) => void;
+  /** Chart-owned read choice survives moving between inline and desktop reader. */
+  fullText?: { expanded: boolean; onExpand: () => void };
 }) {
-  const [full, setFull] = useState(false);
+  const [localFull, setLocalFull] = useState(false);
+  const full = fullText?.expanded ?? localFull;
   const details = useQuery({
     queryKey: ["run-timeline-message", agentId, message.key, full],
     queryFn: () => api.getRunTimelineMessage(agentId, message.key, { full }),
@@ -233,7 +237,7 @@ export function MessageDetailPanel({
             {details.data.content_truncated && !full ? (
               <button
                 type="button"
-                onClick={() => setFull(true)}
+                onClick={() => fullText ? fullText.onExpand() : setLocalFull(true)}
                 className="rounded border border-border px-2 py-1 font-mono text-xs hover:bg-muted"
               >
                 {labels.messageExpandFull}

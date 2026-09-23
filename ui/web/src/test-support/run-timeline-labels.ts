@@ -20,6 +20,7 @@ export function runTimelineLabels(): RunTimelineChartLabels {
     cost: "Cost",
     model: "Model",
     empty: "No activity in this window.",
+    readerEmpty: "Click any block to read its full text here.",
     moreEvents: (count, summary) => `+${count} more (${summary})`,
     turnDetails: "Turn details",
     timeRange: "Time range",
