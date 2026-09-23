@@ -53,6 +53,18 @@ def test_set_then_get_roundtrips() -> None:
     assert get_cluster_target_sha() == "abc1234"
 
 
+def test_get_reuses_supplied_connection(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_cluster_target_sha("abc1234")
+
+    def _unexpected_connect(**_kwargs: object) -> None:
+        raise AssertionError("pin read opened a second connection")
+
+    monkeypatch.setattr("shared.db.connect", _unexpected_connect)
+    assert get_cluster_target_sha(conn=db_conn) == "abc1234"
+
+
 def test_set_overwrites_previous_pin() -> None:
     set_cluster_target_sha("aaaaaaa")
     set_cluster_target_sha("bbbbbbb")

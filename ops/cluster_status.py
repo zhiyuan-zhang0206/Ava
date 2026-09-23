@@ -383,8 +383,9 @@ def _read_deploy_snapshot(
     shared.host_deploy_state.HostDeployState | None,
     shared.cluster_lock.DeployLease | None,
     int,
+    SchemaMismatchStatus | None,
 ]:
-    """Read deploy state and local agent count through one snapshot-local connection."""
+    """Read deploy state, agents, and schema through one snapshot-local connection."""
     try:
         connection = (
             shared.db.connect(autocommit=True)
@@ -395,13 +396,14 @@ def _read_deploy_snapshot(
             state = shared.host_deploy_state.read(conn=conn)
             lease = shared.cluster_lock.read_update_lease(conn=conn)
             agent_count = _count_local_agents(conn) if is_agent_runner() else 0
-        return state, lease, agent_count
+            schema_status = schema_mismatch_status(conn=conn)
+        return state, lease, agent_count, schema_status
     except Exception:  # fail-fast-ok: status degrades when the central DB is unavailable
         # Deploy state and agent count share one bounded connection. During a
         # data-plane outage the snapshot remains readable with no deploy claim
         # and the existing zero-count default.
         _log.warning("deploy-state snapshot read failed; using degraded status", exc_info=True)
-        return None, None, 0
+        return None, None, 0, None
 
 
 def _read_resource_sample() -> ResourceSample | None:
@@ -474,7 +476,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
         resource_future = executor.submit(_read_resource_sample)
-        state, lease, agent_count = _read_deploy_snapshot(pool)
+        state, lease, agent_count, schema_status = _read_deploy_snapshot(pool)
         resource = resource_future.result()
     # One source of truth for the pair: `paused` is exactly "a clause fired",
     # so the bool can never drift from its reason.
@@ -490,7 +492,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         last_updater_outcome=last_updater_outcome(state),
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
-        schema_mismatch=schema_mismatch_status(),
+        schema_mismatch=schema_status,
         shell_count=shell_count,
         agent_host_online=agent_host_alive,
         watchdog_online=watchdog_alive,

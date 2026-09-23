@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
+import psycopg
+
 import shared.db
 from shared.api_contracts.status import SchemaMismatchStatus
 from shared.cluster_pin import get_cluster_target_sha
@@ -71,12 +73,16 @@ def classify(
     return Mismatch(kind, detail, hashlib.sha256(facts.encode()).hexdigest())
 
 
-def detect() -> Mismatch | None:
-    """Compare the live applied set with local code and the cluster pin tree."""
+def detect(*, conn: psycopg.Connection | None = None) -> Mismatch | None:
+    """Compare applied migrations with local code and the pin using one DB borrow."""
     try:
-        with shared.db.connect(autocommit=True) as conn:
+        if conn is None:
+            with shared.db.connect(autocommit=True) as borrowed:
+                applied = applied_migration_names(borrowed)
+                pin = get_cluster_target_sha(conn=borrowed)
+        else:
             applied = applied_migration_names(conn)
-        pin = get_cluster_target_sha()
+            pin = get_cluster_target_sha(conn=conn)
     except Exception as exc:
         # This is an observational second read after the schema controller's
         # authoritative gate. A sick DB must not prevent DB-free healthchecks.
@@ -158,9 +164,9 @@ def clear(role: MachineRole) -> None:
         _write(role, {"state": "clear"})
 
 
-def status() -> SchemaMismatchStatus | None:
+def status(*, conn: psycopg.Connection | None = None) -> SchemaMismatchStatus | None:
     """Fresh mismatch facts plus the last watchdog count and held-back roster."""
-    mismatch = detect()
+    mismatch = detect() if conn is None else detect(conn=conn)
     if mismatch is None:
         return None
     matching = [
