@@ -269,8 +269,8 @@ def _never_poll(
 
 def _clean_poll(
     *_args: object, **_kwargs: object
-) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]]]:
-    return 0, RolloutOutcome.CLEAN, []
+) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]], str | None]:
+    return 0, RolloutOutcome.CLEAN, [], None
 
 
 def _managed_phase_input() -> ManagedWriterPhaseInput:

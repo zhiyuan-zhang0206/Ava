@@ -43,6 +43,16 @@ Why it is logged every round and not once on change: a skipped round and an all-
 
 The per-round line is an alarm, never a rate limit. Bounding the *action* a block retries — the ~85 failed `ava update` triggers of that window — is a separate mechanism, and a backed-off round still reports its block: [[services/watchdog/block-scope/heal-backoff.ava.okf.md]].
 
+For a schema mismatch, `ops/controllers/schema_mismatch.py` also compares the applied DB
+migrations with local code and the cluster pin tree. Each capability watchdog
+atomically records its own consecutive schema-blocked rounds and exact
+DB-dependent checks held back. The first round, tenth round, and every 60th
+round emit `schema_mismatch_blocked` at error level. Host status and the
+cluster roster expose the mismatch kind, machine, count, held services, and
+recovery detail even when the ops daemon remains online. A gateway whose pin
+lacks applied migrations replays the full pin-aware rollout on `ava cluster
+update`, including when its own checkout has no newer commit to pull.
+
 ## DB-free services today
 `browser`, `browser-mcp`, `milvus`, `memory-indexer`, `frontend`, plus the `redis-acl`, `pgbouncer`, `lgtm`, and `brew-pin` pseudo-checks. Everything else on the roster calls `assert_schema_current` at boot and then reads or writes the DB.
 

@@ -39,14 +39,11 @@ and still escalates the consecutive-round streak to ERROR. Fewer attempts, the s
 
 **One code-behind-DB state is not backed off but refused outright: when the cluster
 pin is what lacks the migrations** (``pin_is_the_blocker`` — this checkout is behind
-the DB *and* this checkout is the pin). The heal moves HEAD forward, the pin
-controller moves it back, and nothing advances the pin because advancing it is a step
-of a *successful* update: a livelock by construction, and slowing it to one lap per
-backoff window only makes it quieter. So the arm logs ERROR with both remedies and
-spawns nothing, and the reason rides out on ``ReconcileResult.detail`` so the
-manager's escalating blocked-round line names it. That the loop produced no signal a
-human would see — the outage was noticed by the frontend being down — is half of what
-made it a two-hour outage (issue #1074).
+the DB *and* this checkout is the pin). The host-local heal moves HEAD forward,
+then the pin controller moves it back: a livelock. This arm refuses the local
+spawn and points to the gateway's pin-aware full rollout. The mismatch also
+rides the status projection and error event, so an online ops daemon cannot
+hide a DB-scoped service hold (issue #1074).
 """
 
 from __future__ import annotations
@@ -281,12 +278,12 @@ def schema_reconcile() -> tuple[BlockScope, str | None]:
         if (pin := pin_is_the_blocker()) is not None:
             _log.error(
                 "[ops.schema] %s; and this checkout IS the cluster pin %s, so the PIN is "
-                "what lacks these migrations. `ava cluster update` would move HEAD forward and the "
+                "what lacks these migrations. A host-local update would move HEAD forward and the "
                 "pin controller would force it straight back — nothing advances the pin, "
-                "because advancing it is a step of a SUCCESSFUL update. NOT spawning: this "
-                "needs a human. Either advance the pin to a commit that carries them "
-                "(shared.cluster_pin.advance_pin) or roll the schema back to what the pin "
-                "carries (shared.migrations.rollback_to).",
+                "because advancing it is a step of a SUCCESSFUL update. NOT spawning a "
+                "host-local heal: run pin-aware `ava cluster update` on the gateway "
+                "to advance the pin and all runners together; do not roll back "
+                "applied migrations automatically.",
                 exc,
                 pin,
             )

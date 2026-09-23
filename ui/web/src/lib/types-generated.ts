@@ -4786,6 +4786,7 @@ export interface components {
             head_sha?: string | null;
             /** Running Sha */
             running_sha?: string | null;
+            schema_mismatch?: components["schemas"]["SchemaMismatchStatus"] | null;
             /**
              * Shell Count
              * @default 0
@@ -6054,6 +6055,7 @@ export interface components {
             on_pin?: boolean | null;
             /** Running Sha */
             running_sha?: string | null;
+            schema_mismatch?: components["schemas"]["SchemaMismatchStatus"] | null;
             /** Deploy Hold */
             deploy_hold?: string | null;
             last_update?: components["schemas"]["LastUpdate"] | null;
@@ -7652,6 +7654,25 @@ export interface components {
             script: string;
         };
         /**
+         * SchemaMismatchStatus
+         * @description One machine's code/schema/pin mismatch and watchdog hold-back.
+         */
+        SchemaMismatchStatus: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "pin-behind-schema" | "schema-ahead-of-code" | "schema-behind-code" | "divergent";
+            /** Machine */
+            machine: string;
+            /** Consecutive Blocked Rounds */
+            consecutive_blocked_rounds: number;
+            /** Held Back Services */
+            held_back_services: string[];
+            /** Detail */
+            detail: string;
+        };
+        /**
          * SdkCall
          * @description One SDK method's call count in an agent_code block, e.g.
          *     ``SdkCall(method="files.read", count=3)`` for ``ava.files.read(...)`` x3.
@@ -8568,11 +8589,10 @@ export interface components {
          *     checkout is behind its track target, and which side a pull would restart.
          *
          *     `behind` is the commit count from the last fully installed commit to the
-         *     track target. `needs_replay` names the exceptional state where the fully
-         *     installed commit is ahead of the running-commit bookmark: a rollout was
-         *     interrupted between them, so zero commits behind is not an up-to-date
-         *     verdict. A running commit ahead of installation is the normal fast-path
-         *     state and does not need replay.
+         *     track target. `needs_replay` covers an interrupted installed-versus-running
+         *     transition and a cluster pin that lacks migrations already applied in the
+         *     DB. Either case needs a full rollout even with zero new commits. A running
+         *     commit ahead of installation alone is the normal fast-path state.
          *
          *     `frontend_changed` / `backend_changed` mirror `ava cluster update`'s own
          *     classification so the UI can tell the user what a rollout would actually

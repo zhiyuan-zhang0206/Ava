@@ -121,6 +121,11 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow",
     ),
     # db resilience
+    "schema_mismatch_blocked": _telemetry(
+        "schema_mismatch_blocked",
+        "watchdog held back DB-dependent services for a code/schema/pin mismatch",
+        tier="anomaly",
+    ),
     "db_outage_wait": _telemetry("db_outage_wait", "db outage wait", tier="anomaly"),
     "db_outage_pause": _telemetry("db_outage_pause", "db outage pause", tier="anomaly"),
     "db_outage_reconcile_retry": _telemetry(

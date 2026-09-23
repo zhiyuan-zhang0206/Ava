@@ -249,9 +249,10 @@ def test_gateway_local_finally_swallows_a_finalize_failure(
         lambda _hosts, **_unused: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    # must not raise out of the finally despite the journal write failing
+    # Must not raise out of finalization, and the unconfirmed local resume
+    # cannot leave the rollout with a clean exit code.
     rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
-    assert rc == 0
+    assert rc == 1
 
 
 def test_success_path_does_not_resume(monkeypatch: pytest.MonkeyPatch) -> None:

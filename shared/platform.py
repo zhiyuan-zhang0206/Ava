@@ -275,7 +275,7 @@ def _bounded_file_lock(path: Path, timeout_s: float) -> Generator[None]:
         while not _take_nonblocking(fd):
             if time.monotonic() >= deadline:
                 raise LockTimeoutError(
-                    f"could not take {path} within {timeout_s:.0f}s — another "
+                    f"could not take {path} within {timeout_s:g}s — another "
                     f"process holds it; it is released when that process exits"
                 )
             time.sleep(_LOCK_POLL_S)

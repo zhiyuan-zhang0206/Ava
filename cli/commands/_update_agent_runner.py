@@ -277,7 +277,10 @@ def _self_release_pre_stop_hold(reason: str) -> None:
     from shared import ui_update_state
 
     try:
-        with ui_update_state.lifecycle_lock():
+        with (
+            ui_update_state.resource_lock(purpose="updater pre-stop hold release"),
+            ui_update_state.lifecycle_lock(),
+        ):
             release_pre_stop_hold(reason=reason)
     except Exception as exc:
         print(

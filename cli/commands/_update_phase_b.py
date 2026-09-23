@@ -129,6 +129,7 @@ class PollVerdict(NamedTuple):
 
     status: str
     updater: dict[str, Any] | None = None
+    detail: str | None = None
 
 
 def _probe_verdict(
@@ -677,9 +678,9 @@ def _phase_b_and_poll(
         f"moment a host provably stops)"
     )
     polls = _ns._poll_until_unpaused(to_poll, host_outcomes=host_outcomes, target_sha=target_sha)
-    for name, status, _ in results:
+    for name, status, detail in results:
         if status != "ok":
-            polls.setdefault(name, PollVerdict(status))
+            polls.setdefault(name, PollVerdict(status, detail=detail))
     _print_poll_verdicts(polls)
     return polls
 
@@ -718,17 +719,15 @@ def _phase_b_outcome(
     unconverged: list[str] | None,
     force_reap: bool = False,
     host_outcomes: dict[str, dict[str, object]] | None = None,
-) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]]]:
+) -> tuple[int, RolloutOutcome, list[tuple[str, str | None]], str | None]:
     """Phase B + poll, then the verdict.
 
-    Returns (rc, outcome, hosts_to_resume) — outcome and hosts_to_resume feed
+    Returns (rc, outcome, hosts_to_resume, failing_step) — outcome and hosts_to_resume feed
     the caller's compensating `finally`, which must run on every path. A poll
     that gave up on an acked host is not a clean finish, and the rollout must
-    not report one. Only the hosts that *took* the op count: a host that was
-    unreachable for the Phase-B fan-out never began transitioning (its forward
-    path is the watchdog re-trigger on return), and letting a powered-off
-    laptop fail every rollout would destroy the signal this distinction
-    creates.
+    not report one. A target that never took the op is also incomplete: it
+    cannot satisfy this rollout's target-code and unpaused verification. It
+    does not enter the settle hold because no updater began on that host.
 
     This host is not in `fanout_targets` (`_phase_b_targets`) and so appears in
     neither the polls nor `hosts_to_resume`. It does not need to: the caller's
@@ -756,22 +755,26 @@ def _phase_b_outcome(
         for name, verdict in polls.items()
         if verdict.status != POLL_OK
     ]
-    if mid_transition:
-        outcome = RolloutOutcome.INCOMPLETE
+    failures = [(name, verdict) for name, verdict in polls.items() if verdict.status != POLL_OK]
+    if failures:
+        failing_step = "the Phase-B update: " + "; ".join(
+            f"{name} {'dispatch' if verdict.status in ('fatal', 'unreachable') else 'poll'} "
+            f"{verdict.status}{f' ({verdict.detail})' if verdict.detail else ''}"
+            for name, verdict in sorted(failures)
+        )
         # "did not come back within the poll window", never "never came back": a
         # CONVERGING host handed to the settle hold is still working (C3), and
         # reporting it as gone would misread the poll's early exit as a failure
         # of the host. The per-verdict detail lines below say which is which.
         print(
-            f"\n✗ rollout incomplete: {len(mid_transition)} of {len(polls)} agent-runner(s) "
-            f"acked the self-update and did not come back within the poll window "
-            f"({', '.join(sorted(mid_transition))}). "
-            f"The gateway migrated and the pin advanced; those hosts have not — the "
-            f"deploy lease stays held over them while they settle.",
+            f"\n✗ rollout incomplete: {len(failures)} of {len(polls)} target agent-runner(s) "
+            f"did not verify on the target code and unpaused ({failing_step}). "
+            f"The gateway migrated and the pin advanced; the settle hold covers "
+            f"only hosts whose updater began and is still converging.",
             file=sys.stderr,
         )
-        return 1, outcome, hosts_to_resume
-    return 0, RolloutOutcome.CLEAN, hosts_to_resume
+        return 1, RolloutOutcome.INCOMPLETE, hosts_to_resume, failing_step
+    return 0, RolloutOutcome.CLEAN, hosts_to_resume, None
 
 
 def _print_poll_verdicts(polls: dict[str, PollVerdict]) -> None:

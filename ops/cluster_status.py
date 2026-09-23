@@ -26,9 +26,10 @@ import shared.db
 import shared.host_deploy_state
 from ops import cluster_pause, cluster_session
 from ops.cluster_session import OrchestrationKind
+from ops.controllers.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 from ops.updater_outcome import UpdaterOutcome, last_updater_outcome
-from shared.api_contracts.status import PausedReason
+from shared.api_contracts.status import PausedReason, SchemaMismatchStatus
 from shared.config import cluster_tz
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.proc import process_alive
@@ -114,6 +115,7 @@ class ClusterStatus(BaseModel):
     # a different commit is not covered here; its own commit is on its
     # `/healthz`, and `probe_daemon` surfaces it per daemon.
     running_sha: str | None = None
+    schema_mismatch: SchemaMismatchStatus | None = None
     # This host's live agent shell-session count, surfaced per-machine in
     # the status panel. 0 on a host with no agents (e.g. a pure gateway).
     shell_count: int = 0
@@ -488,6 +490,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         last_updater_outcome=last_updater_outcome(state),
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
+        schema_mismatch=schema_mismatch_status(),
         shell_count=shell_count,
         agent_host_online=agent_host_alive,
         watchdog_online=watchdog_alive,

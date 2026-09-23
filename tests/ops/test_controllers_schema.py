@@ -590,7 +590,7 @@ def test_escalates_instead_of_spawning_when_the_pin_is_behind_the_schema(
     assert detail is not None and "1a90f95" in detail
     errors = [r.message for r in caplog.records if r.levelno >= logging.ERROR]
     assert errors, "a livelock a human must break has to reach ERROR"
-    assert "advance_pin" in errors[0] and "rollback_to" in errors[0]
+    assert "ava cluster update" in errors[0] and "gateway" in errors[0]
 
 
 def test_the_escalation_is_not_merely_a_backoff(monkeypatch: pytest.MonkeyPatch) -> None:

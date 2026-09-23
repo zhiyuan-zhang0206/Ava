@@ -288,7 +288,10 @@ def pending_publication_recovery_op() -> dict[str, object]:
     state = read_pending_recovery_state()
     if not state.pending:
         return {"recovered": False, "detail": "no pending publication is journaled"}
-    with ui_update_state.lifecycle_lock():
+    with (
+        ui_update_state.resource_lock(purpose="ops.pending_publication_recovery"),
+        ui_update_state.lifecycle_lock(),
+    ):
         _require_no_live_deploy()
         _prove_abandoned_holder_gone(state)
         raise ClusterUpdateInProgress(_CLOSURE_PRODUCER_NOT_CONNECTED)
@@ -308,7 +311,10 @@ def run_pending_publication_recovery(
     state = read_pending_recovery_state()
     if not state.pending:
         return {"recovered": False, "detail": "no pending publication is journaled"}
-    with ui_update_state.lifecycle_lock():
+    with (
+        ui_update_state.resource_lock(purpose="ops.publication_recovery"),
+        ui_update_state.lifecycle_lock(),
+    ):
         _require_no_live_deploy()
         observed = _prove_abandoned_holder_gone(state)
         claim = claim_abandoned_pending_lease(state, observed=observed)
@@ -495,7 +501,10 @@ def pre_stop_abort_pending_publication_op() -> dict[str, object]:
         raise ClusterUpdateInProgress(
             "the pending publication has no readable operation -- abort refused"
         )
-    with ui_update_state.lifecycle_lock():
+    with (
+        ui_update_state.resource_lock(purpose="ops.publication_abort"),
+        ui_update_state.lifecycle_lock(),
+    ):
         _require_no_live_deploy()
         observed = _prove_abandoned_holder_gone(state)
         _prove_no_unit_started_a_hop(state.abandoned_units)
