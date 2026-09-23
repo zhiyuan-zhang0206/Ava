@@ -85,9 +85,7 @@ async def test_exec_drains_attachment_right_after_output(
     monkeypatch.setattr("agent.graph._exec._run_agent_code", _fake_run_agent_code)
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
-    result = await _exec_node_impl(
-        state, _make_runtime(model_name="deepseek-v4-flash-vision-exp"), _CONFIG
-    )
+    result = await _exec_node_impl(state, _make_runtime(model_name="glm-5.3-flash"), _CONFIG)
 
     update = result.update
     assert update is not None
@@ -126,9 +124,7 @@ async def test_exec_without_attachments_appends_no_attach_message(
     monkeypatch.setattr("agent.graph._exec._run_agent_code", _fake_run_agent_code)
 
     state = AgentState(messages=[HumanMessage(content="hi"), _TOOL_CALL_AIMESSAGE], halted=False)
-    result = await _exec_node_impl(
-        state, _make_runtime(model_name="deepseek-v4-flash-vision-exp"), _CONFIG
-    )
+    result = await _exec_node_impl(state, _make_runtime(model_name="glm-5.3-flash"), _CONFIG)
 
     update = result.update
     assert update is not None

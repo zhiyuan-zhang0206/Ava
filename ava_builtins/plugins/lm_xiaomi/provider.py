@@ -128,33 +128,9 @@ register(
                 reasoning_effort="high",
             ),
         ),
-        "mimo-v2.5-pro-ultraspeed": ModelSpec(
-            provider="mimo",
-            # Retired from new selections 2026-09-22: Xiaomi's pricing page
-            # (https://mimo.mi.com/docs/price/pay-as-you-go) no longer lists
-            # this id; the live /v1/models list omitted it and chat completions
-            # returned "Unsupported model" (checked 2026-09-22). The entry
-            # stays registered so its facts, tuning, and price history remain;
-            # existing configurations resolve to the served V2.6 UltraSpeed id
-            # before provider construction.
-            spawnable=False,
-            unavailable_fallback="mimo-v2.6-pro-ultraspeed",
-            # Same 1T/42B weights as Pro, served on the TileRT stack — same window
-            # and output cap; only throughput and price differ.
-            context_window=1_000_000,
-            max_output_tokens=128_000,
-            knowledge_cutoff="2024-12",
-            effort_levels=("none", "high"),
-            tuning=ModelTuning(
-                # Pinned 2026-08-01 (task #568): "high" = provider default (see
-                # mimo-v2.5-pro).
-                reasoning_effort="high",
-                # Xiaomi omits this variant from the published RPM/TPM table
-                # entirely and gates it behind an application ("limited slots"),
-                # i.e. its serving capacity is self-declared scarce.
-                llm_retry_max_attempts=10,
-            ),
-        ),
+        # Removed 2026-09-23: mimo-v2.5-pro-ultraspeed returns "Unsupported
+        # model" (checked 2026-09-22). Historical prices remain in
+        # shared/lm/pricing_catalog_archive.json; stale configs fail validation.
         "mimo-v2.6-pro": ModelSpec(
             provider="mimo",
             spawnable=True,
@@ -215,29 +191,6 @@ register(
                             cache_miss="0.435",
                             cache_hit="0.0036",
                             output="0.87",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "mimo-v2.5-pro-ultraspeed": PriceRates(
-            cache_miss=1.305,
-            cache_hit=0.0108,
-            output=2.61,
-            source_url="https://platform.xiaomimimo.com",
-            source_checked_at="2026-06-27",
-            vendor="xiaomi",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="1.305",
-                            cache_hit="0.0108",
-                            output="2.61",
                         ),
                     ),
                 ),
