@@ -15,6 +15,16 @@ jobs:
   rerun-failed-jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Payload-level prefilter (evaluation #4627 R1): a run whose conclusion /
+    # attempt / event already disqualifies it — or a merge-queue car — never
+    # schedules a runner. The guard chain in the step stays as defense in depth.
+    if: >-
+      contains(fromJSON('["failure","timed_out","action_required","startup_failure","cancelled"]'),
+               github.event.workflow_run.conclusion)
+      && github.event.workflow_run.run_attempt == 1
+      && (github.event.workflow_run.event == 'pull_request'
+          || github.event.workflow_run.event == 'push')
+      && !startsWith(github.event.workflow_run.head_branch, 'trunk-merge/')
     env:
       GH_TOKEN: ${{ github.token }}
       RUN_ID: ${{ github.event.workflow_run.id }}
