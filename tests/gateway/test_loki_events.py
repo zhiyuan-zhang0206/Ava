@@ -498,14 +498,14 @@ class TestGlobalQueryBudget:
         }
         validate_loki_deploy_config(config([reversed_rule]))
 
-    def test_loki_preserves_default_resource_labels_and_indexes_event_dimensions(self) -> None:
-        config_path = Path(__file__).parents[2] / "deploy/lgtm/config/loki.yaml"
+    @pytest.mark.parametrize("variant", ("config", "native/config"))
+    def test_loki_demotes_instance_id_and_indexes_event_dimensions(self, variant: str) -> None:
+        config_path = Path(__file__).parents[2] / f"deploy/lgtm/{variant}/loki.yaml"
         config = yaml.safe_load(config_path.read_text())
         labels = config["distributor"]["otlp_config"]["default_resource_attributes_as_index_labels"]
         assert labels == [
             "service.name",
             "service.namespace",
-            "service.instance.id",
             "deployment.environment",
             "deployment.environment.name",
             "cloud.region",
