@@ -580,3 +580,155 @@ def test_same_phase_update_may_set_error_message(tmp_path: Path) -> None:
         error_message="pg_basebackup exited 1: FATAL no pg_hba.conf entry",
     )
     assert advanced.error_message == "pg_basebackup exited 1: FATAL no pg_hba.conf entry"
+
+
+@pytest.mark.parametrize(
+    ("changes", "error_type", "message"),
+    [
+        (
+            {"phase": "unknown", "schema_version": False},
+            ValueError,
+            "unknown PITR activation phase",
+        ),
+        (
+            {"schema_version": False, "operation_id": None},
+            TypeError,
+            "PITR activation schema_version must be an integer",
+        ),
+        (
+            {"schema_version": 99, "operation_id": None},
+            TypeError,
+            "PITR activation operation_id must be a string",
+        ),
+        (
+            {"schema_version": 99, "started_at": "invalid"},
+            ValueError,
+            "unsupported PITR activation record schema",
+        ),
+        (
+            {"pre_activation_snapshot": 1, "pre_activation_pg_settings": []},
+            ValueError,
+            "PITR activation pre_activation_snapshot must be a string or null",
+        ),
+        (
+            {"pre_activation_pg_settings": [], "error_code": "unknown"},
+            TypeError,
+            "PITR activation pre_activation_pg_settings must be an object or null",
+        ),
+        (
+            {"pre_activation_credential_evidence": {"extra": 1}},
+            ValueError,
+            "PITR activation pre_activation_credential_evidence must contain string pairs",
+        ),
+        (
+            {"started_at": "2026-08-29T00:00:00", "error_code": "unknown"},
+            ValueError,
+            "PITR activation timestamps must carry timezone",
+        ),
+        (
+            {"wal_verification_deadline": "2026-08-29T00:00:00", "config_apply_intent": {}},
+            ValueError,
+            "PITR activation wal_verification_deadline must be a UTC timestamp",
+        ),
+        (
+            {"config_apply_intent": {}, "config_apply_applied": {}},
+            ValueError,
+            "PITR config apply intent kind is unknown",
+        ),
+        (
+            {"config_apply_applied": {}, "rollback_setting_intent": {}},
+            ValueError,
+            "PITR config apply applied kind is unknown",
+        ),
+        (
+            {"rollback_setting_intent": {}, "rollback_settings_applied": {"unknown": "{}"}},
+            ValueError,
+            "PITR rollback setting intent fields differ",
+        ),
+        (
+            {"rollback_settings_applied": {"archive_mode": "[]"}, "error_code": "unknown"},
+            TypeError,
+            "PITR rollback applied evidence fields differ",
+        ),
+        (
+            {"error_code": "unknown", "phase": "protected"},
+            ValueError,
+            "PITR activation error code is unknown",
+        ),
+        (
+            {"error_code": "wal_deadline", "phase": "protected"},
+            ValueError,
+            "PITR activation diagnostics are incomplete",
+        ),
+        (
+            {"phase": "protected", "restart_handoff_consumed_at": "bound"},
+            ValueError,
+            "PITR activation phase is missing logical recovery evidence",
+        ),
+    ],
+)
+def test_activation_parser_preserves_first_error(
+    changes: dict[str, object], error_type: type[Exception], message: str
+) -> None:
+    raw = ActivationRecord.start(operation_id="op-1", origin="cli").__dict__ | changes
+    with pytest.raises(error_type) as error:
+        ActivationRecord.from_json(json.dumps(raw))
+    assert type(error.value) is error_type
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    "phase", ["wal_config_applying", "rollback_pending", "rollback_restart_pending", "rolled_back"]
+)
+@pytest.mark.parametrize(
+    "snapshot_field", ["pre_activation_env_b64", "pre_activation_auto_conf_b64"]
+)
+def test_activation_parser_preserves_empty_snapshot_and_rollback_ownership(
+    phase: str, snapshot_field: str
+) -> None:
+    baseline = dict.fromkeys(
+        ("archive_mode", "archive_command", "archive_timeout", "wal_compression"), "original"
+    )
+    raw = ActivationRecord.start(operation_id="op-1", origin="cli").__dict__ | {
+        "phase": phase,
+        "pre_activation_snapshot": "/verified.dump.enc",
+        "pre_activation_pg_settings": {"archive_mode": "off"},
+        "pre_activation_credential_evidence": _credentials(),
+        "wal_config_before_digest": "before",
+        "wal_config_desired_digest": "desired",
+        "pre_activation_pitr_env": {"pitr_enabled": "__ABSENT__"},
+        "pre_activation_pg_auto_conf": baseline,
+        "pre_activation_env_b64": "",
+        "pre_activation_env_digest": "env-digest",
+        "pre_activation_auto_conf_b64": "",
+        "pre_activation_auto_conf_digest": "auto-digest",
+        "restart_handoff": "handoff",
+        "restart_orchestration": "orchestration",
+        "restart_handoff_consumed_at": "bound",
+        "restart_dispatch_session": "session",
+        "rollback_postmaster_started_at": "postmaster",
+        "rollback_expected_env_digest": "expected-env",
+        "rollback_expected_auto_conf_digest": "expected-auto",
+        "rollback_settings_applied": {
+            name: json.dumps({"desired_value": value, "post_digest": "0" * 64})
+            for name, value in baseline.items()
+        },
+    }
+    assert ActivationRecord.from_json(json.dumps(raw)).__dict__ == raw
+    missing_snapshot = {
+        "wal_config_applying": "PITR activation phase is missing WAL config digests",
+        "rollback_pending": "PITR rollback phase is missing restart evidence",
+        "rollback_restart_pending": "PITR rollback phase is missing restart evidence",
+        "rolled_back": "mutated PITR rollback is missing full ownership evidence",
+    }
+    with pytest.raises(ValueError) as error:
+        ActivationRecord.from_json(json.dumps(raw | {snapshot_field: None}))
+    assert str(error.value) == missing_snapshot[phase]
+
+    unbound = raw | {"restart_handoff_consumed_at": None, "restart_dispatch_session": None}
+    if phase == "rolled_back":
+        with pytest.raises(ValueError) as error:
+            ActivationRecord.from_json(json.dumps(unbound))
+        assert str(error.value) == "mutated PITR rollback is missing full ownership evidence"
+    else:
+        assert ActivationRecord.from_json(json.dumps(unbound)).__dict__ == unbound
