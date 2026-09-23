@@ -88,7 +88,6 @@ from shared.daemon_health import (
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
-from shared.paths import legacy_pid_path
 
 _log = logging.getLogger("services.events_maintenance.daemon")
 
@@ -202,15 +201,11 @@ def _remove_pidfile() -> None:
 
 
 def _is_running() -> bool:
-    """Whether a daemon is already running (via pidfile, new + legacy paths).
+    """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(
-        _PIDFILE, "services.events_maintenance.daemon"
-    ) or pidfile_holds_daemon(
-        legacy_pid_path("events_maintenance"), "services.events_maintenance.daemon"
-    )
+    return pidfile_holds_daemon(_PIDFILE, "services.events_maintenance.daemon")
 
 
 def _loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
