@@ -22,7 +22,8 @@ Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` 
   inline `# tailnet-ip-ok:` boundary-test opt-out) — pre-commit `lint-no-tailnet`
   + the always-on `repo-language` CI job (rules: 2026-08-03/04 Gateway-URL +
   2026-08-20 public-repo contribution ruling)
-- `lint_fail_fast.py`, `lint_no_emoji.py`, `lint_no_os_environ.py`, `lint_code_structure.py`, `lint_no_script_sibling_imports.py` — Python conventions (the last: script-mode files must restore their own directory before a same-dir sibling import — PYTHONSAFEPATH=1 keeps it off sys.path; the 2026-08-23 `daily_scan.py` crash)
+- `lint_fail_fast.py`, `lint_no_emoji.py`, `lint_no_os_environ.py`, `lint_no_script_sibling_imports.py` — Python conventions (the last: script-mode files must restore their own directory before a same-dir sibling import — PYTHONSAFEPATH=1 keeps it off sys.path; the 2026-08-23 `daily_scan.py` crash)
+- `lint_code_structure.py` — 800-line/20-entry caps (packages, tests, scripts); shrink-only `structure/baseline.json` vs HEAD.
 - `lint_termination_source.py` — every `UPDATE agents_meta SET status='terminated'` must stamp `termination_source` in the same statement (AST-based, so it catches the bind-parameter form a grep misses); a NULL source is permanently unresurrectable, so a forgotten stamp silently strands the agent's queued work
 - `lint_clock_lattice.py` — lattice-vocabulary timing constants (STALL / GRACE / REAP / BUDGET / WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SETTLE_TTL / LAUNCH_CONFIRM / LEASE_TTL / LEASE_RENEW / SCAN_INTERVAL) may only be defined in the clock-lattice family modules (`shared/timing.py` / `boot_timing.py` / `deploy_timing.py` / `stop_timing.py` / `schedule_timing.py` / `cluster_lock.py` / `host_deploy_state.py`), as aliases of a registered clock, or with an explicit stated exemption — a bare `_SOME_REAP_GRACE_S` outside the lattice is the 2026-07-30 spawn incident's seedling; the lattice topology itself lives in `shared/timing.py`
 - `lint_time_bomb.py` — tests may not exactly assert a value derived from a repo fixed-instant constant (`datetime(2026, …)`) when the derivation can reach the real clock (unpinned `now=`/`at=`, or an opaque `client.get(...)`); pin the clock, use a tolerance, or opt out with `# time-bomb-ok:` — the 2026-08-30 pair of deterministic-red long-window tests (agent-inspect, events-rollup). Source half: a function accepting a clock parameter must thread it into fixed-instant window boundaries (the 2026-08-30 rollup bomb: `compute_rollup(now_utc=...)` reaching `split_index_label_window` without `now=`; that seam has since been removed). Fixture half: a fixed calendar literal (`"2026-09-06"`, `date(2026, 6, 9)`, `datetime(2026, 7, 22, 18, tzinfo=UTC)`) bound to a window-shaped name (`day`, `date`, `since`, `until`, `window_start`, `window_end`) as a dict value, keyword argument, or plain assignment must derive from the clock or carry the marker — the 2026-09-13 queue-level red
@@ -50,8 +51,7 @@ must scan rather than crash:
   (`lint_time_bomb`), or against the caller's cwd (the other scripts; pre-commit
   passes absolute paths).
 - **Out-of-repo targets are scanned.** An existing target outside the repository
-  is scanned under its absolute path — its members are never dropped by the
-  repo-relative prefix computation. Scope-anchored scripts
+  is scanned under its absolute path. Scope-anchored scripts
   (`lint_code_structure` / `lint_fixture_scope` / `lint_no_plugin_wrap`) keep
   their own scope filter: a target or member outside it is skipped silently
   (rc 0). Directory targets enumerate their members

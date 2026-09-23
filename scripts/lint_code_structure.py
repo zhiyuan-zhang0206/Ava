@@ -1,5 +1,5 @@
 """Structural lints that keep the codebase legible to agents: no `TYPE_CHECKING`
-import-folding, and a per-file line ceiling.
+import-folding, role-call allowlisting, and frozen file/directory budgets.
 
 Run: `.venv/bin/python scripts/lint_code_structure.py [path ...]` (defaults to the
 whole repo; an explicit path that does not exist is an error (stderr + exit 1)
@@ -9,7 +9,7 @@ commit.
 ## Why
 
 A fully agent-generated codebase is optimized first for the agent's ability to
-reason over it directly. Two structural rules protect that:
+reason over it directly. These structural rules protect that:
 
 ### Rule 1: no `if TYPE_CHECKING:` import folding
 
@@ -41,45 +41,35 @@ else fails the run; an allowlisted module that stops calling it also fails
 (stale-entry alert, the `unmatched_ignore_imports_alerting` shape from #176)
 so the list cannot rot into a permission wall.
 
-### Rule 2: per-file line budget (600 soft / 800 hard)
+### Structure budgets: 800 lines per file, 20 direct entries per directory
 
-600-800 lines is a transitional zone: tolerated, but surfaced on every full run
-as a nudge to split. Past 800 it is a hard error — a file that large is hard for
-an agent to hold in context and reason about as a unit. There is no exemption:
-split into focused modules.
+Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.
+Direct entries are .py/.pyi files and subdirectories; hidden entries, symlinks,
+__pycache__, and migrations subtrees are excluded. Each directory is independent.
+AST rules retain their governed-package scope.
 
-Scope (`_SCAN_DIRS`) tracks `[tool.importlinter] root_packages` in pyproject.toml,
-so a new governed package is gated the moment it is declared a layer.
-
-Hard violations (TYPE_CHECKING, over-800) print `file:line: <remediation>` and
-fail the run; transitional-zone files print a note to stderr and do not fail.
+scripts/structure/baseline.json freezes existing over-limit counts. New or growing
+violations fail; the baseline itself may only lose entries or lower values versus
+HEAD. After splitting, shrink the relevant baseline values or remove fixed entries
+by hand. Explicit targets restrict budget checks to the selected files/directories;
+a file also checks its parent directory. The baseline guard always runs.
 """
 
 from __future__ import annotations
 
 import ast
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-
-_TRANSITIONAL_FLOOR = 600
 _HARD_CEILING = 800
+_DIRECTORY_CEILING = 20
+_BASELINE_PATH = "scripts/structure/baseline.json"
 
-# Core source held to the line budget — scripts/migrations/db/tests
-# are not scanned.
-#
-# Kept in step with `[tool.importlinter] root_packages` in pyproject.toml, which
-# is the repo's standing list of governed source packages. A package that is a
-# layer there but absent here is silently ungated, and that is an easy hole to
-# fall into: this tuple was written once (2026-05-28) and never revisited, so
-# `ops/` — extracted out of the scanned `gateway/` a month later — carried its
-# files out of the budget with it. `ava_builtins` (mcps + skills + plugins)
-# entered 2026-08-07 (Task #1011) after its oversized files were split to the
-# budget. Its `skills/*/reference/*.py` are agent-facing reference scripts and
-# `skills/*/vendor/` holds vendored third-party payloads, but only `*.py` is
-# collected by `_iter_py_files` anyway — the vendored highlight.js under
-# skills/ava-ui/widgets/markdown/vendor/ is outside the scan by construction.
+# AST rules track [tool.importlinter] root_packages; budgets also cover tooling/tests.
 _SCAN_DIRS = (
     "agent",
     "ava",
@@ -90,6 +80,7 @@ _SCAN_DIRS = (
     "ops",
     "cli",
 )
+_STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
 
 # Rule 3 allowlist — modules that may call machine_role(), each with the
 # question the call answers ("what do I serve" vs "where does this run").
@@ -198,13 +189,13 @@ def _type_checking_violations(tree: ast.Module) -> list[int]:
     return hits
 
 
-def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
-    """Return [(lineno, message, severity), ...]; severity is "error" | "note"."""
+def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str]]:
+    """Return AST violations as [(lineno, message), ...]."""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []  # unreadable entry (e.g. a dangling symlink) or binary content
-    out: list[tuple[int, str, str]] = []
+    out: list[tuple[int, str]] = []
 
     tree = ast.parse(text, filename=rel_path)
 
@@ -218,7 +209,6 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
                     "introspect type hints at runtime (deferred imports NameError). "
                     "Real circular-import / heavy-dep cases: refactor, or add this file "
                     "to _TYPE_CHECKING_ALLOWED in scripts/lint_code_structure.py with a reason.",
-                    "error",
                 )
             )
 
@@ -232,7 +222,6 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
                     "machine_role(); remove it from _MACHINE_ROLE_ALLOWED in "
                     "scripts/lint_code_structure.py (the list must match reality, "
                     "issue #216).",
-                    "error",
                 )
             )
     elif role_calls:
@@ -246,29 +235,9 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
                     "on role (user ruling 2026-08-21, issue #216). Add the module "
                     "deliberately with the question the call answers, or route the "
                     "operation to the gateway instead.",
-                    "error",
                 )
             )
 
-    n_lines = len(text.splitlines())
-    if n_lines > _HARD_CEILING:
-        out.append(
-            (
-                n_lines,
-                f"file is {n_lines} lines, over the {_HARD_CEILING}-line hard ceiling — "
-                "split into focused modules.",
-                "error",
-            )
-        )
-    elif n_lines > _TRANSITIONAL_FLOOR:
-        out.append(
-            (
-                n_lines,
-                f"file is {n_lines} lines, in the {_TRANSITIONAL_FLOOR}-{_HARD_CEILING} "
-                "transitional zone — consider splitting before it hits the hard ceiling.",
-                "note",
-            )
-        )
     return out
 
 
@@ -286,6 +255,153 @@ def _iter_py_files(roots: list[Path]) -> list[Path]:
     return files
 
 
+def _budget_entries(directory: Path) -> list[Path]:
+    return [
+        entry
+        for entry in directory.iterdir()
+        if not entry.is_symlink()
+        and not entry.name.startswith(".")
+        and entry.name != "__pycache__"
+        and not (entry.name == "migrations" and entry.is_dir())
+    ]
+
+
+def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
+    """Collect files and independently checked directories without following links."""
+    files: set[Path] = set()
+    directories: set[Path] = set()
+    visited: set[Path] = set()
+
+    def visit(directory: Path) -> None:
+        if directory in visited:
+            return
+        visited.add(directory)
+        directories.add(directory)
+        for entry in _budget_entries(directory):
+            if entry.is_dir():
+                visit(entry)
+            elif entry.is_file() and entry.suffix == ".py":
+                files.add(entry)
+
+    for target in targets:
+        for scope in (_REPO_ROOT / name for name in _STRUCTURE_DIRS):
+            if target == scope or scope in target.parents:
+                selected = target
+            elif target in scope.parents:
+                selected = scope
+            else:
+                continue
+            relative = selected.relative_to(_REPO_ROOT)
+            if any(
+                part.startswith(".") or part in {"__pycache__", "migrations"}
+                for part in relative.parts
+            ) or any(path.is_symlink() for path in (selected, *selected.parents)):
+                continue
+            if selected.is_dir():
+                visit(selected)
+            elif selected.is_file():
+                directories.add(selected.parent)
+                if selected.suffix == ".py":
+                    files.add(selected)
+    return files, directories
+
+
+def _parse_baseline(text: str) -> dict[str, dict[str, int]]:
+    baseline = json.loads(text)
+    if not isinstance(baseline, dict) or set(baseline) != {"directories", "files"}:
+        raise ValueError("expected exactly 'directories' and 'files' objects")
+    for kind, ceiling in (("directories", _DIRECTORY_CEILING), ("files", _HARD_CEILING)):
+        entries = baseline[kind]
+        if not isinstance(entries, dict):
+            raise ValueError(f"'{kind}' must be an object")  # noqa: TRY004 — invalid JSON schema
+        for name, count in entries.items():
+            path = Path(name)
+            if (
+                not name
+                or not path.parts
+                or path.is_absolute()
+                or path.as_posix() != name
+                or ".." in path.parts
+                or path.parts[0] not in _STRUCTURE_DIRS
+                or (kind == "files" and path.suffix != ".py")
+                or type(count) is not int
+                or count <= ceiling
+            ):
+                raise ValueError(
+                    f"invalid {kind} entry {name!r}: expected a scoped path and integer > {ceiling}"
+                )
+    return baseline
+
+
+def _baseline_guard(baseline: dict[str, dict[str, int]]) -> list[str]:
+    result = subprocess.run(  # noqa: S603 — fixed local git query, no shell
+        ["git", "-C", str(_REPO_ROOT), "show", f"HEAD:{_BASELINE_PATH}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        print(
+            f"note: baseline guard skipped: git HEAD:{_BASELINE_PATH} unavailable", file=sys.stderr
+        )
+        return []
+    try:
+        previous = _parse_baseline(result.stdout)
+    except ValueError as exc:
+        return [f"{_BASELINE_PATH}: invalid HEAD baseline: {exc}"]
+    errors = []
+    for kind in ("directories", "files"):
+        for name, count in baseline[kind].items():
+            if name not in previous[kind]:
+                errors.append(
+                    f"{_BASELINE_PATH}: added {kind} entry {name} — baseline is shrink-only"
+                )
+            elif count > previous[kind][name]:
+                errors.append(
+                    f"{_BASELINE_PATH}: raised {kind} entry {name} from {previous[kind][name]} "
+                    f"to {count} — baseline is shrink-only"
+                )
+    return errors
+
+
+def _budget_error(value: int, ceiling: int, name: str, baseline: dict[str, int]) -> str | None:
+    if value <= ceiling:
+        return None
+    if name not in baseline:
+        return "new violation, not in the baseline — split it"
+    if value > baseline[name]:
+        return f"grew above its frozen baseline value ({baseline[name]}) — split it"
+    return None
+
+
+def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> list[str]:
+    files, directories = _budget_targets(targets)
+    errors = []
+    for path in sorted(files):
+        try:
+            count = len(path.read_text(encoding="utf-8").splitlines())
+        except (OSError, UnicodeDecodeError):
+            continue  # Preserve the shared lint contract for unreadable members.
+        name = path.relative_to(_REPO_ROOT).as_posix()
+        error = _budget_error(count, _HARD_CEILING, name, baseline["files"])
+        if error:
+            errors.append(
+                f"{name}:{count}: file is {count} lines, over the {_HARD_CEILING}-line hard ceiling: {error}"
+            )
+    for path in sorted(directories):
+        count = sum(
+            entry.is_dir() or (entry.is_file() and entry.suffix in {".py", ".pyi"})
+            for entry in _budget_entries(path)
+        )
+        name = path.relative_to(_REPO_ROOT).as_posix()
+        error = _budget_error(count, _DIRECTORY_CEILING, name, baseline["directories"])
+        if error:
+            errors.append(
+                f"{name}: directory has {count} direct entries, over the {_DIRECTORY_CEILING}-entry cap: {error}"
+            )
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if argv:
@@ -293,34 +409,35 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    # argv non-empty = pre-commit passed changed files; empty = full scan of _SCAN_DIRS.
-    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
-
-    errors = 0
-    notes: list[str] = []
-    for path in sorted(_iter_py_files(targets)):
+    # Keep symlinks visible to the budget collector so it can exclude them.
+    targets = (
+        [Path(os.path.abspath(a)) for a in argv]  # noqa: PTH100 — normalize without following symlinks
+        if argv
+        else [_REPO_ROOT / d for d in _STRUCTURE_DIRS]
+    )
+    try:
+        baseline = _parse_baseline((_REPO_ROOT / _BASELINE_PATH).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        print(f"{_BASELINE_PATH}: invalid baseline: {exc}", file=sys.stderr)
+        return 1
+    errors = _baseline_guard(baseline)
+    errors.extend(_check_budgets(targets, baseline))
+    # AST rules retain their original explicit-target resolution and package scope.
+    ast_targets = (
+        [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+    )
+    for path in sorted(set(_iter_py_files(ast_targets))):
         try:
             rel = path.relative_to(_REPO_ROOT).as_posix()
         except ValueError:
-            rel = path.as_posix()
-        if not _in_scan_scope(rel):
             continue
-        for lineno, message, severity in _scan_file(path, rel):
-            if severity == "error":
-                errors += 1
-                print(f"{rel}:{lineno}: {message}")
-            else:
-                notes.append(f"{rel}:{lineno}: {message}")
-
-    if notes:
-        print(f"\n{len(notes)} file(s) in the transitional zone (not blocking):", file=sys.stderr)
-        for note in notes:
-            print(f"  {note}", file=sys.stderr)
-
+        if _in_scan_scope(rel):
+            errors.extend(f"{rel}:{lineno}: {message}" for lineno, message in _scan_file(path, rel))
+    for error in errors:
+        print(error)
     if errors:
         print(
-            f"\n{errors} hard violations. See the docstring at the top of "
-            "scripts/lint_code_structure.py for the rules and exemption procedure.",
+            f"\n{len(errors)} hard violations. See scripts/lint_code_structure.py for the rules.",
             file=sys.stderr,
         )
         return 1

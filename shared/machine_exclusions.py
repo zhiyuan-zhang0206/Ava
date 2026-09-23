@@ -10,8 +10,8 @@ deliberately left alone — so a stale `host_deploy_state` row on one of these i
 history, not a competing deployment.
 
 Its own module rather than a function in `shared/machines.py` because that file
-sits in the structural 600-800 line transitional zone and this addition would
-push it past the hard ceiling (a split, not an exemption).
+sits close to the structural 800-line hard ceiling and this addition would push
+it past the ceiling (a split, not an exemption).
 """
 
 from __future__ import annotations
