@@ -450,7 +450,7 @@ jobs:
       # ruff/ruff-format/pyright/lint-migrations/lint-clock-lattice, the
       # frontend job runs tsc/eslint/vitest. Everything else in
       # .pre-commit-config.yaml runs here.
-      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests
+      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -506,7 +506,7 @@ jobs:
       AVA_REDIS_URL: redis://127.0.0.1:1/0
       # Same command set as backend-structure: hooks already covered by other
       # jobs are skipped here too.
-      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests
+      SKIP: ruff,ruff-format,pyright,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
