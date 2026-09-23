@@ -29,9 +29,8 @@ This loop is the enforcer, scanning
   timeout, cron = end, at = moment + grace). An expired watcher session is
   reclaimed, and its still-``running`` registry row is marked ``reaped`` —
   past the deadline a watcher is never rebuilt (the boot reconcile shares
-  the rule). The one exception is a legacy row whose recorded TTL predates
-  the unified write path while its true deadline is still ahead: it is
-  healed to that deadline, never reclaimed.
+  the rule). A running watcher with incomplete deadline data is left with
+  a warning: its intended lifetime cannot be verified safely.
 - **Browser sessions** — expired rows are deleted in the gateway's periodic
   pass, so cleanup does not depend on the next login.
 - **Work failures** — a gateway crash after recording an event but before
@@ -90,7 +89,6 @@ from gateway.lifecycle_fences import (
 )
 from gateway.routers import work_failed as work_failed_router
 from gateway.watcher_ttl import (
-    heal_legacy_ttl,
     mark_reaped_owner_appropriate,
     reap_terminated_owner_watchers,
     watcher_deadline_of,
@@ -484,10 +482,9 @@ async def _reap_expired_shells(
     deadline, so an expired one is reclaimed like any other, and its
     still-``running`` registry row is marked ``reaped`` on the definitive
     verdict — past the deadline a watcher is never rebuilt, and the boot
-    reconcile's deadline check shares that rule. The one exception is a
-    legacy row whose recorded TTL predates the unified write path while its
-    true deadline is still ahead: the row is healed to the true deadline and
-    never reclaimed (``gateway.watcher_ttl.heal_legacy_ttl``).
+    reconcile's deadline check shares that rule. Running watchers with
+    incomplete deadline data are left with a warning, without rewriting
+    their TTL or killing a session whose intended lifetime is unknown.
 
     The row is deleted only on a definitive verdict (killed / absent /
     machine_absent); an unreachable machine or a version-skewed runner leaves
@@ -501,9 +498,6 @@ async def _reap_expired_shells(
     """
     rows = await asyncio.to_thread(_expired_shell_rows_blocking, pool)
     reaped: list[tuple[int, int]] = []
-    healed = 0
-    heal_samples: list[str] = []
-    now = datetime.now(UTC)
     for row in rows:
         if stop is not None and stop.is_set():
             break
@@ -511,26 +505,14 @@ async def _reap_expired_shells(
         session_id = row["session_id"]
         deadline = watcher_deadline_of(row)
         if row["watcher_status"] == "running" and deadline is None:
-            # A running watcher whose payload cannot answer has no deadline
-            # to enforce — the recorded TTL is exactly the pre-unification
-            # placeholder this pass must not act on. Unreachable for rows
-            # written after task #2617 (every kind carries its payload);
-            # leave it loudly rather than mis-kill what cannot be judged.
+            # Incomplete watcher data violates the unified write contract.
+            # Keep this integrity guard: do not kill a running watcher whose
+            # intended lifetime cannot be verified, or mutate its TTL row.
             _log.warning(
                 "[ttl-reaper] watcher %s of agent %s has no derivation deadline — leaving its session",
                 session_id,
                 agent_id,
             )
-            continue
-        if row["watcher_status"] == "running" and deadline is not None and deadline > now:
-            # Legacy placeholder TTL on a watcher still living its real
-            # window: re-align the recorded deadline instead of reclaiming
-            # (idempotent CAS; the fleet-wide migration count is the
-            # `watcher_ttl_healed` telemetry event below).
-            if await asyncio.to_thread(heal_legacy_ttl, pool, agent_id, session_id, deadline):
-                healed += 1
-                if len(heal_samples) < 3:
-                    heal_samples.append(f"{agent_id}:{session_id}->{deadline.isoformat()}")
             continue
         if not await asyncio.to_thread(_claim_shell_row_still_expired, pool, agent_id, session_id):
             # Renewed between the select and this pass — the deadline moved
@@ -601,18 +583,6 @@ async def _reap_expired_shells(
             },
         )
         reaped.append((agent_id, session_id))
-    if healed:
-        _log.info(
-            "[ttl-reaper] healed %d legacy watcher TTL row(s) to their true deadline: %s",
-            healed,
-            ", ".join(heal_samples),
-        )
-        telemetry.emit(
-            "log",
-            "watcher_ttl_healed",
-            level="info",
-            attributes={"count": healed, "samples": ", ".join(heal_samples)},
-        )
     return reaped
 
 

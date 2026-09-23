@@ -26,6 +26,10 @@ result TTL is part of the statistics path. Since-compact is unavailable without
 an authoritative completed compact boundary. The `/inspect/live` half remains
 window-independent — see [[gateway/routers/ops-surfaces.ava.okf.md]].
 
+Shell deadlines in `/inspect/live` and the shell monitor come only from
+`agent_shell_ttls`. Row-less page and schedule sessions render no shell TTL;
+their lifecycle is managed separately. Launch time never synthesizes a deadline.
+
 ## Plugin metric surface (`/inspect/metrics`, W13b)
 
 Builds the metric registry in process — shipped plugin `metrics.py` modules +
