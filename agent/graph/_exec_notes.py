@@ -5,9 +5,10 @@ delivered inside the exec's own messages delta, not through a side-channel
 file read by a later hook. Two in-memory sources feed the delta:
 
 1. Security findings: ava.security buffers them during the exec turn
-   (scan_content runs inside the agent's SDK calls) and the exec node drains
-   the parent buffer after the run plus the child-drained findings from the
-   result envelope.
+   (scan_content runs inside the agent's SDK calls), or claim explicitly
+   attributes an inbound finding with scan_inbound_content(). The exec node
+   drains parent findings before call resolution plus child-drained findings
+   from the result envelope.
 2. Plugin-contributed messages: ava_code (AGENTS.md/CLAUDE.md context notes)
    writes them to the base `messages` channel via PluginStateHandle during
    the turn; the exec node pops them out of the plugin state update (a dict

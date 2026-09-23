@@ -460,9 +460,17 @@ async def _exec_node_impl(
         ExecStart(agent_id=agent_id, item_id=f"{exec_msg_idx}.0").model_dump_json()
     )
 
+    # Claim-side inbound scans run in this parent process before the exec child
+    # exists. Drain their explicitly attributed findings before every exit path
+    # below, so an unknown-tool response cannot leak them into a later turn.
+    parent_findings = take_findings()
     resolved = _resolve_exec_call(state, agent_id)
     if isinstance(resolved, Command):
         # Unknown-tool path: the error ToolMessage is already in the update list.
+        assert resolved.update is not None  # noqa: S101 — _resolve_exec_call builds this update
+        resolved.update["messages"] = merge_exec_notes(
+            resolved.update["messages"], None, parent_findings
+        )
         return resolved
     state_messages_update = resolved.state_messages_update
 
@@ -493,10 +501,9 @@ async def _exec_node_impl(
     # clobber the ToolMessage). Popped + drained unconditionally so a compact
     # turn (REMOVE_ALL'd by claim) leaks nothing to later turns.
     plugin_messages = plugin_state_update.pop("messages", None)
-    # Findings drained from this process's own buffer (scans outside the exec
-    # turn — inbound injection checks — run in the parent) first, then the
-    # child-drained ones from the result envelope.
-    findings = take_findings() + envelope_findings
+    # Parent findings were drained before exec-call resolution; add the
+    # child-drained findings from the result envelope in execution order.
+    findings = parent_findings + envelope_findings
 
     # Compact path (_SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
