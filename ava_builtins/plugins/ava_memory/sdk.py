@@ -599,7 +599,8 @@ def write(
     Both targets are absolute store paths. A shared subdirectory entry is
     indexed by its own directory's index.md — created when missing and
     upserted in place otherwise — so the write leaves the root MEMORY.md
-    untouched.
+    untouched. The entry always ends with a newline; content that does not close
+    with one gains a terminal newline.
 
     Content may open with its own frontmatter block: that block is kept as
     the note's only one, gains whichever required fields it is missing, and
@@ -666,6 +667,10 @@ def write(
     else:
         merged = _merge_frontmatter(block, existing, generated)
         written = f"---\n{merged}---\n{rest}"
+    if not written.endswith("\n"):
+        # The pool treats a terminal newline as canonical; normalize at the single
+        # write entry point so callers cannot publish entries a sweep must repair.
+        written += "\n"
     _write_atomically(entry, written)
     root = (
         shared.paths.memory_dir() if is_shared else shared.paths.workspace_dir(agent_id) / "memory"

@@ -1128,3 +1128,54 @@ def test_write_leaves_caller_multiline_quoted_scalars_alone(
     frontmatter = _frontmatter(written)
     assert frontmatter["title"] == "single line"
     assert frontmatter["description"] == "double line"
+
+
+def test_write_terminates_entry_with_newline(memory_plugin: Any, tmp_path: Path) -> None:
+    """`write` publishes each entry with a trailing newline: a body handed in
+    without one gains a terminal newline, a body that already closes with one
+    stays untouched (idempotent), and the caller-frontmatter and shared paths
+    land the same way."""
+    entry = ava.memory.write(
+        "terminal-newline",
+        "Body without a trailing newline.",
+        title="Terminal newline",
+        description="Entries end with a newline",
+        tags=["type/feedback"],
+    )
+    assert entry.read_text(encoding="utf-8").endswith("Body without a trailing newline.\n")
+
+    ava.memory.write(
+        "terminal-newline",
+        "Body that already ends with a newline.\n",
+        title="Terminal newline",
+        description="Entries end with a newline",
+        tags=["type/feedback"],
+    )
+    text = entry.read_text(encoding="utf-8")
+    assert text.endswith("Body that already ends with a newline.\n")
+    assert not text.endswith("\n\n")
+
+    entry = ava.memory.write(
+        "terminal-newline-caller-block",
+        "---\n"
+        "name: terminal-newline-caller-block\n"
+        "description: caller block without a terminal newline\n"
+        "tags: [type/feedback]\n"
+        "---\n"
+        "Body after a caller block, no newline.",
+        tags=["type/feedback"],
+    )
+    text = entry.read_text(encoding="utf-8")
+    assert text.endswith("Body after a caller block, no newline.\n")
+
+    _pool_with_pointers(tmp_path)
+    entry = ava.memory.write(
+        "projects/demo/terminal-newline",
+        "Shared body without a trailing newline.",
+        title="Terminal newline shared",
+        description="Shared entries end with a newline",
+        tags=["type/project"],
+        store="shared",
+    )
+    text = entry.read_text(encoding="utf-8")
+    assert text.endswith("Shared body without a trailing newline.\n")
