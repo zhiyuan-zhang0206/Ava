@@ -157,8 +157,8 @@ def main() -> None:
         identity = db_identity()
     except ValueError:
         # A db_url with no username: the pooled front door's scram identity is
-        # unknowable, so the probe cannot authenticate. Same shape as the
-        # redis-acl check's username-less skip — `ava converge` backfills it.
+        # unknowable, so the probe cannot authenticate. `ava converge`
+        # backfills the missing identity.
         _log.warning(
             "[pgbouncer healthcheck] db_url carries no identity — cannot authenticate "
             "against the pooler; skipping. Run `ava converge` to backfill it."

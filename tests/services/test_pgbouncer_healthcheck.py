@@ -269,8 +269,7 @@ def test_missing_registry_record_is_skipped_not_guessed(monkeypatch: pytest.Monk
 
 def test_identity_less_db_url_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     """No scram identity in the db_url means the probe cannot authenticate against
-    the pooled front door — the same shape as the redis-acl check's username-less
-    skip, and `ava converge` is what backfills it."""
+    the pooled front door. `ava converge` backfills the missing identity."""
     calls = _Calls(listener=[False], public=[True])
     _wire(monkeypatch, calls)
     monkeypatch.setattr(hc.settings.data_plane, "pgbouncer_enabled", True)
