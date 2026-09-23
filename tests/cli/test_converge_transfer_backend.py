@@ -12,7 +12,7 @@ def _ctx(home: Path) -> cv.ConvergeCtx:
 
 
 def test_passes_when_writable_drive_found(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import shared.google_drive as gd
+    import shared.host.converge.google_drive as gd
 
     monkeypatch.setattr(gd, "find_writable_google_drive", lambda: tmp_path / "My Drive")
     cv._ensure_cross_machine_transfer(_ctx(tmp_path))  # no raise
@@ -23,7 +23,7 @@ def test_warns_but_continues_when_drive_missing(
 ) -> None:
     """A missing Drive backend must NOT block start: the probe warns on stderr and
     the runner keeps going (cross-machine transfer now degrades instead of failing)."""
-    import shared.google_drive as gd
+    import shared.host.converge.google_drive as gd
 
     monkeypatch.setattr(gd, "find_writable_google_drive", lambda: None)
     monkeypatch.setattr(gd, "candidate_drive_dirs", lambda: [Path("/some/My Drive")])
@@ -39,7 +39,7 @@ def test_skips_on_single_box(
     """A single box (also carries gateway) has no peer to transfer to — the probe
     must not even run (pinned: a probing implementation would touch the drive
     detection, and a blocking one would fail the start)."""
-    import shared.google_drive as gd
+    import shared.host.converge.google_drive as gd
 
     def _must_not_probe() -> Path:
         raise AssertionError("drive probe ran on a single box")
@@ -57,7 +57,7 @@ def test_skips_when_backend_none(
 ) -> None:
     """AVA_CROSS_MACHINE_TRANSFER_BACKEND=none skips the probe on a split runner
     (pinned: no probe call, no warning)."""
-    import shared.google_drive as gd
+    import shared.host.converge.google_drive as gd
     from shared.config import settings
 
     def _must_not_probe() -> Path:

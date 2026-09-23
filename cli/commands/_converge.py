@@ -67,19 +67,19 @@ from cli.commands._ownership_preflight import (
 )
 from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
-from shared.accessibility import (
-    clear_status as clear_accessibility_status,
-)
-from shared.accessibility import (
-    write_status as write_accessibility_status,
-)
-from shared.browser_deps import browser_deps_notice, browser_deps_warning
 from shared.cluster import is_default_home
 from shared.config import settings
+from shared.host.converge.accessibility import (
+    clear_status as clear_accessibility_status,
+)
+from shared.host.converge.accessibility import (
+    write_status as write_accessibility_status,
+)
+from shared.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
+from shared.host.converge.screen_capture import clear_status, write_status
 from shared.machine import MachineRoles
 from shared.platform_backend import get_backend
 from shared.platform_probes import browser_incapability
-from shared.screen_capture import clear_status, write_status
 
 __all__ = [
     "ALL_ROLES",
@@ -200,7 +200,7 @@ def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
     backend = settings.general.cross_machine_transfer_backend
     if backend == "none":
         return
-    from shared.google_drive import candidate_drive_dirs, find_writable_google_drive
+    from shared.host.converge.google_drive import candidate_drive_dirs, find_writable_google_drive
 
     if find_writable_google_drive() is None:
         looked = ", ".join(str(p) for p in candidate_drive_dirs()) or "(no candidate paths)"

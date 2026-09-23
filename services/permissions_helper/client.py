@@ -26,9 +26,9 @@ import time
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from shared.accessibility import AccessibilityState, AccessibilityStatus
+from shared.host.converge.accessibility import AccessibilityState, AccessibilityStatus
+from shared.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
 from shared.paths import permissions_helper_socket
-from shared.screen_capture import ScreenCaptureState, ScreenCaptureStatus
 
 # Transport selection: named pipe on Windows, Unix socket elsewhere. A module
 # constant (not a live os.name check) so tests can flip the transport without

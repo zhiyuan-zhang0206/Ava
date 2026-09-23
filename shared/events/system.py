@@ -478,7 +478,7 @@ class PluginLoadFailed(TypedDict):
 
 
 class ConvergeFilePreserved(TypedDict):
-    """`converge_file_preserved` payload — shared/converge_preserve_report.py.
+    """`converge_file_preserved` payload — shared/host/converge/converge_preserve_report.py.
 
     One row per converge-managed destination preserved because its current
     content no longer matches the recorded render — someone hand-edited it

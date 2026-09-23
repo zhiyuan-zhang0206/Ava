@@ -1,4 +1,4 @@
-"""Tests for shared.accessibility -- the status type and its status file.
+"""Tests for shared.host.converge.accessibility -- the status type and its status file.
 
 The probe that produces a status lives with the permissions helper client; this
 module owns the three-state result and the file that carries it from converge to
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.accessibility import (
+from shared.host.converge.accessibility import (
     AccessibilityState,
     AccessibilityStatus,
     clear_status,
@@ -67,7 +67,7 @@ class TestAccessibilityStatus:
 
 class TestStatusFile:
     def test_write_read_clear_cycle(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        monkeypatch.setattr("shared.accessibility.ava_home", lambda: tmp_path)
+        monkeypatch.setattr("shared.host.converge.accessibility.ava_home", lambda: tmp_path)
         write_status(AccessibilityStatus(state=AccessibilityState.NOT_GRANTED, diagnostic="test"))
 
         assert status_file_path().exists()
