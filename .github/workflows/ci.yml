@@ -430,7 +430,7 @@ jobs:
     # Same required check, two segments: A always runs structure lint via
     # pre-commit --all-files; B installs Node/npm and explicitly runs the four
     # freshness hooks only when the PR diff matches their configured files:
-    # regexes. Pushes and unreadable diffs run B; a no-match PR logs STEP SKIPPED.
+    # regexes. Pushes and selector errors run B; a no-match PR logs STEP SKIPPED.
     # Other CI jobs own ruff/pyright/migrations/clock, frontend gates and core
     # manifests. Pre-push-only pyright/tsc/eslint remain redundant SKIP entries.
     # Runs when EITHER side changed: frontend-only edits can break generated
@@ -475,33 +475,36 @@ jobs:
 
       - name: Select codegen freshness from changed files
         id: codegen
+        # Selector failures run B; only the freshness hooks gate the result.
+        continue-on-error: true
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           env -u VIRTUAL_ENV uv run python - <<'PY'
-          import os
-          import re
-          import subprocess
-          from pathlib import Path
+          try:
+              import os
+              import re
+              import subprocess
+              from pathlib import Path
 
-          import yaml
+              # Publish RUN first; only a successful no-match may override it.
+              with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+                  output.write("run=true\n")
 
-          codegen_ids = (
-              "types-codegen-fresh",
-              "constants-codegen-fresh",
-              "events-registry-fresh",
-              "config-lite-table-fresh",
-          )
-          run_codegen = True
-          if os.environ["EVENT_NAME"] == "pull_request":
-              try:
+              import yaml
+
+              codegen_ids = (
+                  "types-codegen-fresh",
+                  "constants-codegen-fresh",
+                  "events-registry-fresh",
+                  "config-lite-table-fresh",
+              )
+              run_codegen = True
+              if os.environ["EVENT_NAME"] == "pull_request":
                   changed = subprocess.check_output([
                       "git", "diff", "--name-only", "--no-renames", "-z",
                       os.environ["LINT_STRUCTURE_BASELINE_BASE"], "HEAD",
                   ])
-              except (OSError, subprocess.CalledProcessError, KeyError):
-                  print("::warning::Cannot compute codegen input diff; running all freshness hooks")
-              else:
                   # The hook regexes own the union (including shared/events/,
                   # ui/web/openapi.json and shared/config/; not db/schema.sql).
                   config = yaml.safe_load(Path(".pre-commit-config.yaml").read_text())
@@ -512,17 +515,22 @@ jobs:
                       for path in changed.split(b"\0") if path
                       for pattern in patterns
                   )
-          if not run_codegen:
-              print("STEP SKIPPED: codegen freshness — no codegen inputs changed in this PR; "
-                    "main pushes always run it; the merge queue re-runs the combined tree.")
-          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
-              output.write(f"run={str(run_codegen).lower()}\n")
+              if not run_codegen:
+                  with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+                      output.write("run=false\n")
+                  print("STEP SKIPPED: codegen freshness — no codegen inputs changed in this PR; "
+                        "main pushes always run it; the merge queue re-runs the combined tree.")
+          except Exception as error:
+              # A failed outcome overrides even a partially published skip.
+              print(f"::warning::Codegen selector failed ({type(error).__name__}); "
+                    "running all freshness hooks")
+              raise SystemExit(1)
           PY
 
       # Segment B: only types-codegen-fresh needs npx, but the four hooks share
       # one condition. Explicit invocations keep new lint hooks in segment A.
       - name: Install Node
-        if: steps.codegen.outputs.run == 'true'
+        if: steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -530,12 +538,12 @@ jobs:
           cache-dependency-path: ui/web/package-lock.json
 
       - name: Install frontend deps (codegen freshness)
-        if: steps.codegen.outputs.run == 'true'
+        if: steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'
         working-directory: ui/web
         run: npm ci
 
       - name: Run codegen freshness hooks (--all-files)
-        if: steps.codegen.outputs.run == 'true'
+        if: steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'
         run: |
           env -u VIRTUAL_ENV uv run pre-commit run types-codegen-fresh --all-files
           env -u VIRTUAL_ENV uv run pre-commit run constants-codegen-fresh --all-files

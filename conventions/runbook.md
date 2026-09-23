@@ -2240,8 +2240,15 @@ keeps one job with two segments when the frontend/backend classifier selects it:
   event-pinned base revision with HEAD and matches the changed paths against
   these hooks' `files:` regexes in `.pre-commit-config.yaml`. Rename detection
   is disabled so moving an input out of the union still checks its deletion.
-  An unreadable diff runs B. A no-match diff skips B and prints
+  Any selector exception (including config/YAML/regex failures) warns and runs
+  B. A failed selector outcome or missing output also runs B; only a successful
+  no-match skips it and prints
   `STEP SKIPPED: codegen freshness` with the reason and safety nets in the log.
+
+CI closure tests follow route annotations and imports to the OpenAPI components'
+defining modules, and recursively follow the event contract's source imports.
+A model or event definition moved into an uncovered file fails these tests;
+update the hook's `files:` regex alongside the move.
 
 Main pushes always select B within this job. The Trunk merge queue re-evaluates
 the selector on the combined tree before landing; required check names and
