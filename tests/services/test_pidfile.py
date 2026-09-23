@@ -7,10 +7,45 @@ the write race (two daemons both pass the guard, both write, both run).
 
 from __future__ import annotations
 
+import importlib
 import os
+from pathlib import Path
 from typing import Any
 
+import pytest
+
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "services.labeler.daemon",
+        "services.heartbeat.daemon",
+        "services.backup_scheduler.daemon",
+        "services.page_server.daemon",
+        "services.im_bridge.daemon",
+        "services.memory_indexer.daemon",
+        "services.delivery_watchdog.daemon",
+        "services.events_maintenance.daemon",
+        "services.agent_ops.daemon",
+        "ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
+    ],
+)
+def test_daemon_guard_checks_only_current_pidfile(
+    module_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each singleton guard reads the path its daemon writes, exactly once."""
+    daemon = importlib.import_module(module_name)
+    calls: list[tuple[Path, str]] = []
+
+    def holds_daemon(path: Path, module: str) -> bool:
+        calls.append((path, module))
+        return False
+
+    monkeypatch.setattr(daemon, "pidfile_holds_daemon", holds_daemon)
+    assert daemon._is_running() is False
+    assert calls == [(daemon._PIDFILE, module_name)]
 
 
 def test_acquire_writes_own_pid(tmp_path: Any) -> None:
