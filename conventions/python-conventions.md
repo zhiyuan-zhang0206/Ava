@@ -101,9 +101,13 @@ The guard reads the baseline at that revision. An absent baseline emits a
 note and skips comparison; a legacy two-section baseline compares its file
 and directory sections and notes that the new sections are introductions.
 Malformed baselines fail. This catches raises after committing them too:
-CI fetches the pull request's base branch and sets the explicit base before
-running the structural hooks. The guard runs for full and explicit-target
-scans alike, while quality checks only inspect the selected scope.
+before the structural hooks run, CI sets the explicit base to the base
+revision of the triggering event — the same revision the checked-out merge
+ref was built from. Pinning both sides to one event matters: a base branch
+that shrinks while a run waits in the queue would otherwise read every
+in-between shrink as a phantom raise (task #4597). The guard runs for full
+and explicit-target scans alike, while quality checks only inspect the
+selected scope.
 
 Run `.venv/bin/python scripts/lint_code_structure.py` for the full gate.
 Complexity warnings go to stderr as a total function/file count and up to
