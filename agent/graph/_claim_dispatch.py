@@ -30,7 +30,7 @@ from agent.hooks.compact_events import emit_compact_finished, emit_compact_start
 from agent.messages import NoteTag, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
-from ava.security import scan_content
+from ava.security import scan_inbound_content
 from shared.config import now_timestamp, settings
 from shared.context import AvaContext
 from shared.inbound import InboundKind
@@ -187,7 +187,7 @@ async def _handle_system_note(
     """
     content = item.content
     if settings.agent.security_scan_enabled:
-        content = scan_content(content, source=f"inbound.system_note:{item.source}")
+        content = scan_inbound_content(content, source=f"inbound.system_note:{item.source}")
     task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
     st.active_task_id = task_id
     if task_id is not None:

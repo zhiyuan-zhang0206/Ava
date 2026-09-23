@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage
 from agent.db import ClaimedInbound
 from agent.messages import inbound_message
 from ava._commands import expand_command
-from ava.security import scan_content
+from ava.security import scan_inbound_content
 from shared.config import settings
 from shared.envelope import wrap_inbound
 from shared.log import logger
@@ -49,7 +49,7 @@ def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:
     if not isinstance(raw_blocks, list):
         raw = expand_command(item.content)
         if settings.agent.security_scan_enabled:
-            raw = scan_content(raw, source=scan_src)
+            raw = scan_inbound_content(raw, source=scan_src)
         wrapped = wrap_inbound(raw, item.source, created_at=item.created_at)
         return inbound_message(
             content=wrapped,
@@ -62,7 +62,7 @@ def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:
     text = "\n".join(b["text"] for b in blocks if b.get("type") == "text")
     raw_text = expand_command(text)
     if settings.agent.security_scan_enabled:
-        raw_text = scan_content(raw_text, source=scan_src)
+        raw_text = scan_inbound_content(raw_text, source=scan_src)
     wrapped_text = wrap_inbound(raw_text, item.source, created_at=item.created_at)
     content: list[dict[str, Any]] = [{"type": "text", "text": wrapped_text}]
     image_urls: list[str] = []

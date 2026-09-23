@@ -63,6 +63,7 @@ from agent.impersonation_handoff import resume_note_pending
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.messages import has_conversation
 from agent.nodes import BEFORE_LLM, CLAIM, END
+from ava.security import discard_inbound_findings
 from shared.context import AvaContext, agent_id_from_config
 
 # Names moved to co-located submodules during the Task #1006 split, re-exported
@@ -205,6 +206,10 @@ async def claim_node(
     This is the node registered in the LangGraph state graph.  Its signature
     and return type are part of the public graph contract and MUST NOT change.
     """
+    # A failed/cancelled prior claim must not leave an attributed finding for
+    # this unrelated invocation. This call normally clears nothing; the
+    # current claim's findings stay buffered only when it routes to BEFORE_LLM.
+    discard_inbound_findings()
     agent_id = agent_id_from_config(config)
     flush_node_exit_aggregate(agent_id)
     event_publisher = runtime.context.event_publisher
@@ -221,12 +226,20 @@ async def claim_node(
     # claim right after, the snapshot is still a legal view of the committed
     # state — the next node's incremental snapshot covers the new messages.
     will_idle = claim_will_idle(state)
-    async with node_lifecycle(
-        CLAIM,
-        messages=state.messages,
-        ops_pool=runtime.context.ops_pool,
-        event_publisher=event_publisher,
-        agent_id=agent_id,
-        full_window=will_idle,
-    ):
-        return await _claim_node_impl(state, runtime, config)
+    command: Command[ClaimGoto] | None = None
+    try:
+        async with node_lifecycle(
+            CLAIM,
+            messages=state.messages,
+            ops_pool=runtime.context.ops_pool,
+            event_publisher=event_publisher,
+            agent_id=agent_id,
+            full_window=will_idle,
+        ):
+            command = await _claim_node_impl(state, runtime, config)
+            return command
+    finally:
+        if command is None or command.goto != BEFORE_LLM:
+            # END / CLAIM / INIT_CONTEXT and exceptions never reach the exec
+            # node, so retaining a claim finding would misattribute it later.
+            discard_inbound_findings()
