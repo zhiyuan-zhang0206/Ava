@@ -11,6 +11,7 @@ from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from shared.agents import ForkSourceEmpty
 from shared.config import settings
 from shared.db import insert_inbound_message, publish_inbound_wake
+from shared.labels import spawn_prompt_with_label
 from shared.machine import machine_name
 
 
@@ -34,9 +35,7 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     elif body.prompt is not None:
         # Old gateway compatibility only. New requests never send a prompt.
         assert body.prompt_source is not None  # narrowed by the caller  # noqa: S101
-        prompt = body.prompt
-        if body.label:
-            prompt = f"{prompt}\n\nYour label has been set to {body.label}."
+        prompt = spawn_prompt_with_label(body.prompt, body.label)
         iid = await asyncio.to_thread(
             _insert_prompt_blocking, db_pool, body.agent_id, prompt, body.prompt_source
         )

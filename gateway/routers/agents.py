@@ -50,7 +50,7 @@ from shared.agents import (
 )
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.labels import publish_label_updated
+from shared.labels import publish_label_updated, spawn_prompt_with_label
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.machine import machine_name
@@ -432,11 +432,7 @@ async def create_and_launch_agent(
     if prompt_inbound_id is not None and body.prompt_source is not None and body.prompt is not None:
         from ops.ops_events import publish_inbound_arrived
 
-        prompt_content = (
-            f"{body.prompt}\n\nYour label has been set to {body.label}."
-            if body.label
-            else body.prompt
-        )
+        prompt_content = spawn_prompt_with_label(body.prompt, body.label)
         try:
             await publish_inbound_arrived(
                 new_id, prompt_inbound_id, "chat", body.prompt_source, prompt_content
@@ -446,7 +442,6 @@ async def create_and_launch_agent(
     launch = LaunchAgentRequest(
         agent_id=new_id,
         launch_attempt_id=launch_attempt_id,
-        prompt_inbound_id=prompt_inbound_id,
         config=body.config,
         birth_config=birth_config,
     )

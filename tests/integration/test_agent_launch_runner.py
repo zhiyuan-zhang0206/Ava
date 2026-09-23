@@ -32,7 +32,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
     monkeypatch.setattr(ops_launch, "_validate_launch_row", _validate)
     monkeypatch.setattr(ops_launch, "_insert_prompt_blocking", _insert)
     monkeypatch.setattr(ops_launch, "publish_inbound_wake", _wake)
-    body = LaunchAgentRequest(agent_id=7, launch_attempt_id=uuid4(), prompt_inbound_id=11)
+    body = LaunchAgentRequest(agent_id=7, launch_attempt_id=uuid4())
     await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert validated == [7, 7]

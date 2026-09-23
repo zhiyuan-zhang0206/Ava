@@ -136,14 +136,14 @@ class LaunchAgentRequest(BaseModel):
     forwards only the launch to the target runner — the runner's ops server
     runs as the least-privilege `ava_runner` role, which by design cannot
     INSERT agents. `config` / `birth_config` are the per-agent overlay the
-    child replays (carried in the child env, never argv); `prompt` /
-    `launch_attempt_id` fences delayed responses and gives an explicit retry a
-    new RPC dedupe key. The gateway has already committed the first prompt.
+    child replays (carried in the child env, never argv). `launch_attempt_id`
+    fences delayed responses and gives an explicit retry a new RPC dedupe key.
+    The gateway has already committed the first prompt; `prompt` and `label`
+    remain for old gateway compatibility.
     """
 
     agent_id: int
     launch_attempt_id: UUID | None = None
-    prompt_inbound_id: int | None = None
     config: dict[str, object] | None = None
     birth_config: dict[str, object] | None = None
     prompt: str | None = None

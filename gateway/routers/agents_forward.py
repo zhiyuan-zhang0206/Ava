@@ -143,15 +143,15 @@ async def _forward_spawn_to_remote(target: str, body: LaunchAgentRequest) -> Spa
     """POST a versioned launch op to the target machine's ops server.
 
     The target machine's ava-ops server dispatches in-process to
-    `ops.ops_lifecycle.launch_agent_op` (Task #1236 follow-up: the gateway
-    already created the agent row as the main identity — the runner's op only
-    launches the process) and returns the SpawnedAgent dict.
+    `ops.ops_lifecycle.launch_agent_op`. The gateway already committed the
+    agent row and first prompt; the runner validates the attempt, wakes the
+    hosted agent, and returns the SpawnedAgent dict.
 
     Raises:
-        CrossMachineGatewayUnavailable: the target machine's ops server was
-            unreachable (offline / not yet registered / timed out).
-        Other AvaAgentError subclasses: business errors raised by the
-            target machine's op are passed through.
+        LaunchForwardError: launch_unreachable when the ops server cannot be
+            reached or returns a malformed result; launch_rejected when the
+            target op rejects the launch. The target's business reason is
+            included in the error detail.
     """
     forward_body = body.model_dump(mode="json", exclude_none=True)
     try:

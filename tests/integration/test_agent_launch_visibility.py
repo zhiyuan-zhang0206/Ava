@@ -61,12 +61,50 @@ def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
         assert repaired.json()["id"] == agent_id
         assert attempts[0].launch_attempt_id != attempts[1].launch_attempt_id
         assert attempts[1].prompt is None
-        assert attempts[1].prompt_inbound_id is None
         assert _inbound_rows(db_conn, agent_id) == [("Do the task", "chat", "user")]
         assert (
             client.get(f"/api/agents/{agent_id}").json()["availability"]["reason"]
             != "launch_unreachable"
         )
+
+
+def test_retry_launch_rejects_non_idling_agent_without_rotating_attempt(
+    db_conn: psycopg.Connection,
+) -> None:
+    with TestClient(app) as client:
+        created = client.post("/api/agents", json={})
+        assert created.status_code == 201
+        agent_id = created.json()["id"]
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,))
+            original_attempt_row = cur.fetchone()
+            assert original_attempt_row is not None
+            original_attempt = original_attempt_row[0]
+            cur.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (agent_id,))
+        db_conn.commit()
+
+        response = client.post(f"/api/agents/{agent_id}/retry-launch")
+        assert response.status_code == 409
+        assert response.json()["detail"] == (
+            f"agent {agent_id} cannot retry launch in status running"
+        )
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,))
+            retry_attempt_row = cur.fetchone()
+            assert retry_attempt_row is not None
+            assert retry_attempt_row[0] == original_attempt
+
+
+def test_retry_launch_returns_404_for_missing_agent(db_conn: psycopg.Connection) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM agents_meta")
+        missing_id_row = cur.fetchone()
+        assert missing_id_row is not None
+        missing_id = missing_id_row[0]
+    with TestClient(app) as client:
+        response = client.post(f"/api/agents/{missing_id}/retry-launch")
+    assert response.status_code == 404
+    assert response.json()["reason"] == "agent_not_found"
 
 
 def test_failed_launch_state_write_outage_keeps_committed_id_retriable(

@@ -34,6 +34,7 @@ from shared.agents import ForkCheckpointNotFound
 from shared.audit_events import insert_event_log
 from shared.birth_config import resolve_birth_config
 from shared.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
+from shared.labels import spawn_prompt_with_label
 from shared.live_announce import publish_agent_spawned_sync
 from shared.lm.registry import normalize_overlay_llm_model
 from shared.log import logger
@@ -491,7 +492,7 @@ def create_agent_row(
             )
         if prompt is not None:
             assert prompt_source is not None, "prompt requires prompt_source (validated above)"  # noqa: S101
-            prompt_content = f"{prompt}\n\nYour label has been set to {label}." if label else prompt
+            prompt_content = spawn_prompt_with_label(prompt, label)
             prompt_inbound_id = insert_spawn_prompt_in_transaction(
                 cur, new_id, prompt_content, prompt_source
             )
