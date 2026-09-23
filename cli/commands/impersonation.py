@@ -62,14 +62,23 @@ def _write_relay_stub(path: Path, *, agent_id: int, session_id: int, token: str)
 
     The takeover launcher scopes the path per session through
     ``AVA_IMPERSONATION_RELAY_STUB``; the plugin wrapper deletes the file
-    immediately after loading it into the relay's environment.
+    immediately after loading it into the relay's environment. The file is
+    created 0600 (``fchmod`` defeats the umask): the credential is never
+    briefly world-readable between create and write.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f"SID={session_id}\nAGENT={agent_id}\nAVA_IMPERSONATION_RELAY_TOKEN={token}\n",
-        encoding="utf-8",
-    )
-    path.chmod(0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)  # apply the exact mode even under a permissive umask
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            fd = -1
+            stream.write(
+                f"SID={session_id}\nAGENT={agent_id}\nAVA_IMPERSONATION_RELAY_TOKEN={token}\n"
+            )
+    finally:
+        if fd != -1:
+            os.close(fd)
 
 
 def _print_claude_relay_instructions(response: dict[str, Any], *, agent_id: int) -> None:

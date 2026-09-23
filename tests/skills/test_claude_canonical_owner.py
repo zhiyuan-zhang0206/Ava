@@ -90,6 +90,34 @@ def test_launch_command_can_explicitly_declare_external_caller(tmp_path: Path) -
     assert '"instance":"run-42"' in command
 
 
+def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) -> None:
+    """Resident wiring: the plugin command carries the stub export; the opt-out stays silent."""
+    record = _owner(tmp_path)
+    workspace = Path(record.key.workspace)
+    plugin = spawn_claude._HERE / "ava-relay"
+    stub = spawn_claude._relay_stub_path(workspace)
+
+    resident = spawn_claude._claude_command(workspace, relay_plugin_dir=plugin)
+    manual = spawn_claude._claude_command(workspace)
+
+    assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in resident
+    assert "AVA_IMPERSONATION_RELAY_PY=" in resident
+    assert resident.endswith(
+        f"exec claude --dangerously-skip-permissions --plugin-dir {plugin.as_posix()}"
+    )
+    assert "AVA_IMPERSONATION_RELAY_STUB" not in manual
+    assert "--plugin-dir" not in manual
+
+    fallback = spawn_claude._takeover_bootstrap_message(
+        1, "Fix login", "brief", relay_resident=False
+    )
+    resident_message = spawn_claude._takeover_bootstrap_message(
+        1, "Fix login", "brief", relay_resident=True
+    )
+    assert "Immediately start the Claude Monitor relay" in fallback
+    assert "do not arm a Monitor watch" in resident_message
+
+
 def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -178,6 +206,61 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     assert brief in message
     assert "tasks.md" not in message and "work.md" not in message
     assert rebuilt == [message]
+
+
+def test_resident_launch_clears_a_stale_credential_stub(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new takeover never consumes an earlier session's stub: cleared before the session starts."""
+    active = _owner(tmp_path)
+    launching = replace(active, status="launching", session_id=None, session_name=None)
+    sent: list[str] = []
+
+    def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionClaim:
+        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+
+    def _pretrust(_workspace: Path) -> None:
+        return None
+
+    def _new(**_kwargs: object) -> int:
+        return 7
+
+    def _send(_sid: int, content: str) -> None:
+        sent.append(content)
+
+    def _ready(_sid: int) -> None:
+        return None
+
+    def _receipt(_sid: int, _rebuild: Callable[[], str]) -> None:
+        return None
+
+    def _publish(
+        _key: coding_session_owner.CodingSessionKey,
+        _generation: str,
+        *,
+        session_id: int,
+        session_name: str,
+    ) -> coding_session_owner.CodingSessionOwner:
+        return replace(launching, status="active", session_id=session_id, session_name=session_name)
+
+    monkeypatch.setattr(spawn_claude, "_claim_canonical", _claim)
+    monkeypatch.setattr(spawn_claude, "_pretrust", _pretrust)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "new", _new)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(spawn_claude, "_wait_for_ready", _ready)
+    monkeypatch.setattr(spawn_claude, "_verify_start_receipt", _receipt)
+    monkeypatch.setattr(spawn_claude.coding_session_owner, "publish_active", _publish)
+
+    workspace = Path(launching.key.workspace)
+    stub = spawn_claude._relay_stub_path(workspace)
+    stub.write_text("SID=9\nAGENT=41\nAVA_IMPERSONATION_RELAY_TOKEN=stale\n", encoding="utf-8")
+
+    assert spawn_claude._launch(workspace, None, None, 3600, None, "Fix login", "brief") == 0
+
+    assert not stub.exists()
+    assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in sent[0]
+    assert "--plugin-dir" in sent[0]
 
 
 def test_start_receipt_survives_a_dead_session_at_the_enter_retry(
