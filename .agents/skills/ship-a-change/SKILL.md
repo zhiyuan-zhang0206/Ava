@@ -180,16 +180,16 @@ file-tree diff with ★ critical paths + prose data flow.
 
 ## When a pre-commit hook cannot run: `SKIP=`, never `--no-verify`
 
-Four hooks shell out to `npx` against `ui/web/node_modules`:
-`frontend-tsc`, `frontend-eslint`, `frontend-vitest`, `types-codegen-fresh`.
-A fresh agent worktree has no `ui/web/node_modules` and often cannot fetch
-packages, so all four fail there — identically on a clean `main`, with no change
-of yours involved.
+The commit-stage `types-codegen-fresh` hook needs `ui/web/node_modules`.
+A fresh worktree without these dependencies can fail this hook even on clean
+`main`. The frontend tsc, eslint and vitest hooks run at pre-push; their shared
+guard reports a visible skip when tooling is unavailable.
 
-Skip **those four by name**, so every other hook still runs:
+If dependencies cannot be installed, skip **only that hook by name**, so every
+other commit hook still runs:
 
 ```bash
-SKIP=frontend-tsc,frontend-eslint,frontend-vitest,types-codegen-fresh git commit -m "..."
+SKIP=types-codegen-fresh git commit -m "..."
 ```
 
 **Never reach for `--no-verify`.** It is not "skip the broken hook" — it disables

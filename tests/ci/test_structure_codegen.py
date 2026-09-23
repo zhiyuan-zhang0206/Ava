@@ -34,10 +34,9 @@ OTHER_CI = {
     "ruff-format",
     "lint-migrations",
     "lint-clock-lattice",
-    "frontend-vitest",
     "lint-core-content-manifests",
 }
-PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint"}
+PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"}
 LOCAL_ONLY = {"check-git-hooks-install"}
 # These identities come from fastapi._compat.v2 / fastapi.openapi.utils, not
 # repository class definitions. Keep exact names: new unknowns require review.
@@ -446,3 +445,4 @@ def test_prepush_migration_keeps_direct_ci_owners() -> None:
     assert any(step.get("run") == "uv run pyright" for step in backend)
     assert any(step.get("run") == "npx tsc --noEmit" for step in frontend)
     assert any(step.get("run") == "npm run lint" for step in frontend)
+    assert any(step.get("run") == "npx vitest run --coverage" for step in frontend)

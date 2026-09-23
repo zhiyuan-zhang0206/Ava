@@ -2179,8 +2179,8 @@ Review any `core.hooksPath` override before removing it and installing.
 
 Commit hooks keep linting and code-generation checks. The full-repository
 strict pyright check, frontend typecheck (including Next.js route typegen),
-and frontend ESLint run at **pre-push**. Other local hooks default to pre-commit;
-upstream hooks may also declare pre-push hygiene checks. File filters are
+ESLint and the full Vitest suite run at **pre-push**. Other local hooks default
+to pre-commit; upstream hooks may also declare pre-push hygiene checks. File filters are
 unchanged. Run either stage explicitly with the worktree's own environment:
 
 ```bash
@@ -2188,12 +2188,14 @@ unchanged. Run either stage explicitly with the worktree's own environment:
 .venv/bin/pre-commit run --all-files --hook-stage pre-push
 ```
 
-For targeted local verification, skip `frontend-vitest` by name and run only
-the relevant vitest files, as described in the
+For targeted local verification, skip `frontend-vitest` by name at pre-push
+and run only the relevant vitest files, as described in the
 [local-test skill](../.agents/skills/run-local-tests/SKILL.md).
+The [Vitest placement decision](../decisions/2026-09-24-vitest-prepush-selection.md)
+records the measurements, push-cost projection and affected-test-selection limits.
 
 `scripts/prepush-guard.sh` holds a separate `flock` for each of `pyright`,
-`tsc`, and `eslint` across all worktrees on the host. Locks live in
+`tsc`, `eslint`, and `vitest` across all worktrees on the host. Locks live in
 `/tmp/ava-prepush-locks`, independent of clone, user, and `TMPDIR`; never delete
 live lock files. `AVA_PREPUSH_LOCK_DIR` may override this for tests or a host
 policy, but every checkout on that host must use the same local directory.
@@ -2210,17 +2212,17 @@ load average divided by logical CPUs: allow short bursts but avoid adding work
 to a sustained CPU queue. Load is checked before and after acquiring the lock.
 The tool's actual failure status propagates unchanged; a local skip is never
 evidence that the check ran. CI bypasses the wrapper: `backend-static` runs
-`uv run pyright`; `frontend` runs `npx next typegen`, `npx tsc --noEmit`, and
-`npm run lint`. These independent runners retain enforcement; the structural
-CI jobs already skip the three duplicate hooks.
+`uv run pyright`; `frontend` runs `npx next typegen`, `npx tsc --noEmit`,
+`npm run lint` and `npx vitest run --coverage`. These independent runners retain
+enforcement; the structural CI job already skips the four duplicate hooks.
 
 ## CI (Continuous Integration)
 
-CI runs on **GitHub-hosted `ubuntu-latest` runners** via the workflows in
+CI runs on **GitHub-hosted `ubuntu-24.04` runners** via the workflows in
 [`.github/workflows/`](../.github/workflows/): `ci.yml` (backend pytest +
 pyright, frontend eslint + tsc + vitest, e2e Playwright happy path) and the
-image/retention workflows. A fork gets CI for free — GitHub Actions provisions
-the runners, no self-hosted infrastructure required. The test suite, migration
+release and repository-automation workflows. A fork gets CI for free — GitHub
+Actions provisions the runners, no self-hosted infrastructure required. The test suite, migration
 smoke, and e2e self-provision **throwaway native** pg/redis clusters per xdist
 worker (`tests/_containers.py`: `initdb` + `redis-server` on ephemeral
 127.0.0.1 ports, data dir on a tmpfs, torn down after), so a runner only needs
@@ -2232,8 +2234,8 @@ keeps one job with two segments when the frontend/backend classifier selects it:
 
 - **Structure lint (A)** always runs `pre-commit run --all-files`, skipping the
   hooks owned by other CI jobs, the local installation warning, and the four
-  codegen freshness hooks. The existing pyright, frontend-tsc and frontend-eslint
-  SKIP entries are redundant since those hooks run only at pre-push; CI still
+  codegen freshness hooks. The pyright, frontend-tsc, frontend-eslint and
+  frontend-vitest SKIP entries are redundant since those hooks run only at pre-push; CI still
   runs their underlying checks directly in `backend-static` and `frontend`.
 - **Codegen freshness (B)** installs Node/frontend dependencies and explicitly
   runs `types-codegen-fresh`, `constants-codegen-fresh`, `events-registry-fresh`
@@ -2255,12 +2257,6 @@ Main pushes always select B within this job. The Trunk merge queue re-evaluates
 the selector on the combined tree before landing; required check names and
 failure reporting are unchanged. CI remains the merge gate, including when
 local pre-push checks visibly skip for load or missing tooling.
-
-> The maintainer's deployment runs CI on a dedicated self-hosted runner fleet
-> (per-job runner isolation for timing determinism) instead of the GitHub-hosted
-> runners. That setup — host roster, provisioning scripts, the eval Docker
-> image — is operator-specific and lives in their private deployment notes, not
-> in this repo.
 
 ## ava-root dev dry run (W1.2e / S2 / W1.2c)
 

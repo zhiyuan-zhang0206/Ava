@@ -2,9 +2,9 @@
 # Serialize one heavy tool across host worktrees. CI independently enforces it.
 set -euo pipefail
 
-tool="${1:?usage: prepush-guard.sh pyright|tsc|eslint -- command...}"
+tool="${1:?usage: prepush-guard.sh pyright|tsc|eslint|vitest -- command...}"
 shift
-case "$tool" in pyright|tsc|eslint) ;; *) echo "Unknown heavy tool: $tool" >&2; exit 2 ;; esac
+case "$tool" in pyright|tsc|eslint|vitest) ;; *) echo "Unknown heavy tool: $tool" >&2; exit 2 ;; esac
 [[ "${1:-}" == -- && $# -ge 2 ]] || { echo "Expected -- command..." >&2; exit 2; }
 shift
 
@@ -19,14 +19,16 @@ case "$tool" in
     pyright)
         [[ -x .venv/bin/pyright ]] || skip "missing .venv/bin/pyright; run env -u VIRTUAL_ENV uv sync"
         ;;
-    tsc|eslint)
+    tsc|eslint|vitest)
         [[ -d ui/web/node_modules ]] || skip "missing ui/web/node_modules; run (cd ui/web && npm ci)"
         command -v node >/dev/null || skip "node is not installed"
         command -v npm >/dev/null || skip "npm is not installed"
         if [[ "$tool" == tsc ]]; then
             required_bins=(next tsc)
-        else
+        elif [[ "$tool" == eslint ]]; then
             required_bins=(eslint)
+        else
+            required_bins=(vitest)
         fi
         for bin in "${required_bins[@]}"; do
             [[ -x "ui/web/node_modules/.bin/$bin" ]] || skip "missing frontend executable $bin; run (cd ui/web && npm ci)"
