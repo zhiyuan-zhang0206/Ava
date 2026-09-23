@@ -60,7 +60,8 @@ _FULL_COLS = (
     # shared.db.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay, mp.last_probe_at, a.lease_expires_at, "
-    "mp.agent_host_online, a.last_admission_outcome, a.last_admission_at"
+    "mp.agent_host_online, a.last_admission_outcome, a.last_admission_at, "
+    "a.last_launch_failure_reason, a.last_launch_failure_at"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -208,6 +209,8 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
                 probe_at=row[18],
                 admission_outcome=row[21],
                 admission_at=row[22],
+                launch_failure_reason=row[23],
+                launch_failure_at=row[24],
             ),
         }
     )

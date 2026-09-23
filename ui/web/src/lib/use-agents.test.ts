@@ -7,10 +7,13 @@ import { useStore } from "./store";
 import type { AgentRow, AgentRoster } from "./types";
 import { AGENTS_QUERY_KEY, useAgents } from "./use-agents";
 import { AGENT_DETAIL_QUERY_KEY } from "./fold/agents";
-vi.mock("./api", () => ({ api: {
-  getAgentRoster: vi.fn(), getAgent: vi.fn(), listAgents: vi.fn(), spawnAgent: vi.fn(),
-  terminateAgent: vi.fn(), restartAgent: vi.fn(), resurrectAgent: vi.fn(), compact: vi.fn(),
-} }));
+vi.mock("./api", async (importOriginal) => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  api: {
+    getAgentRoster: vi.fn(), getAgent: vi.fn(), listAgents: vi.fn(), spawnAgent: vi.fn(),
+    terminateAgent: vi.fn(), restartAgent: vi.fn(), resurrectAgent: vi.fn(), compact: vi.fn(),
+  },
+}));
 function row(agent_id: number, status: AgentRow["status"] = "idling"): AgentRow {
   return { agent_id, status, label: `Test #${agent_id}`, spawner: "user", fork_source_agent_id: null,
     pid: agent_id + 100, spawned_at: "2026-05-10T00:00:00Z", started_at: "2026-05-10T00:00:01Z",

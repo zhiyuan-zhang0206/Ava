@@ -263,6 +263,12 @@
     "awaiting_admission": "创建已接受；等待 host 接纳",
     "admission_refused": "Host 已尝试启动，但接纳被拒绝",
     "admitted": "已观察到 host 接纳；尚未确认首轮执行完成",
+    "launch_unreachable": "启动失败：无法连接 runner",
+    "launch_rejected": "启动失败：runner 拒绝了请求",
+    "launch_unknown": "启动失败：派发结果未知",
+    "retryLaunch": "重试启动",
+    "retryLaunchFailed": "重试失败",
+    "failureObservedAt": "{time} 在 {machine} 观察到失败",
     "maintenance_hold": "维护期间暂缓 host 接纳",
     "publication_deferred": "运行时发布期间暂缓 host 接纳",
     "resource_fence": "资源证据不足，host 接纳受阻",
@@ -572,7 +578,9 @@
     "statusIdling": "空闲中",
     "statusRestarting": "重启中",
     "statusTerminated": "已终止",
-    "statusOffline": "离线 — 机器不可达或进程失联"
+    "statusOffline": "离线 — 机器不可达或进程失联",
+    "launchFailed": "启动失败",
+    "launchFailedCreated": "Agent #{id} 已创建，但启动失败。请选择它并重试。"
   },
   "contentToggle": {
     "details": "详情",

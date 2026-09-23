@@ -57,10 +57,13 @@ class AvailabilityReason(StrEnum):
     AWAITING_ADMISSION = "awaiting_admission"
     ADMISSION_REFUSED = "admission_refused"
     ADMITTED = "admitted"
+    LAUNCH_UNREACHABLE = "launch_unreachable"
+    LAUNCH_REJECTED = "launch_rejected"
+    LAUNCH_UNKNOWN = "launch_unknown"
 
 
 class AgentAvailability(BaseModel):
-    """A time-bounded observation, never proof of first-message completion."""
+    """Dispatch/admission evidence, never proof of first-message completion."""
 
     reason: AvailabilityReason
     observed_at: datetime
@@ -72,6 +75,37 @@ def _fresh(stamp: datetime | None, at: datetime, max_age: timedelta) -> bool:
     return stamp is not None and timedelta(0) <= at - stamp <= max_age
 
 
+def _launch_failure_availability(
+    reason: str, at: datetime, evidence_at: datetime
+) -> AgentAvailability:
+    parsed = AvailabilityReason(reason)
+    if parsed not in {
+        AvailabilityReason.LAUNCH_UNREACHABLE,
+        AvailabilityReason.LAUNCH_REJECTED,
+        AvailabilityReason.LAUNCH_UNKNOWN,
+    }:
+        raise ValueError(f"invalid launch failure reason: {parsed}")
+    return AgentAvailability(reason=parsed, observed_at=at, evidence_at=evidence_at)
+
+
+def _validate_evidence_pairs(
+    admission_outcome: str | None,
+    admission_at: datetime | None,
+    launch_failure_reason: str | None,
+    launch_failure_at: datetime | None,
+) -> None:
+    if (admission_outcome is None) != (admission_at is None):
+        raise ValueError("admission outcome and timestamp must be paired")
+    if (launch_failure_reason is None) != (launch_failure_at is None):
+        raise ValueError("launch failure reason and timestamp must be paired")
+
+
+def _latest_evidence_at(
+    probe_at: datetime | None, admission_at: datetime | None
+) -> datetime | None:
+    return max((stamp for stamp in (probe_at, admission_at) if stamp is not None), default=None)
+
+
 def availability(
     *,
     status: str,
@@ -79,21 +113,25 @@ def availability(
     probe_at: datetime | None,
     admission_outcome: str | None,
     admission_at: datetime | None,
+    launch_failure_reason: str | None = None,
+    launch_failure_at: datetime | None = None,
     now: datetime | None = None,
 ) -> AgentAvailability:
-    """Host health wins over older agent history; stale evidence becomes unknown.
+    """Launch failure is durable; host/admission evidence expires by age.
 
     `host_online` is the existing pidfile verdict carried by status_probe, not
     proof that a turn can pass publication/resource admission. An admission
     observation is useful only while both it and the host probe are fresh.
     """
     at = now or datetime.now(UTC)
-    if (admission_outcome is None) != (admission_at is None):
-        raise ValueError("admission outcome and timestamp must be paired")
-    outcome = AdmissionOutcome(admission_outcome) if admission_outcome is not None else None
-    latest_at = max(
-        (stamp for stamp in (probe_at, admission_at) if stamp is not None), default=None
+    _validate_evidence_pairs(
+        admission_outcome, admission_at, launch_failure_reason, launch_failure_at
     )
+    if status != "terminated" and launch_failure_reason is not None:
+        assert launch_failure_at is not None  # noqa: S101 — paired above
+        return _launch_failure_availability(launch_failure_reason, at, launch_failure_at)
+    outcome = AdmissionOutcome(admission_outcome) if admission_outcome is not None else None
+    latest_at = _latest_evidence_at(probe_at, admission_at)
     if status == "terminated" or host_online is None or not _fresh(probe_at, at, PROBE_FRESH_FOR):
         return AgentAvailability(
             reason=AvailabilityReason.UNKNOWN, observed_at=at, evidence_at=latest_at

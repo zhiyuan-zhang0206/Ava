@@ -260,14 +260,9 @@ export interface paths {
          *     is done asynchronously by the services/labeler daemon — does not block
          *     the spawn response.
          *
-         *     Fork prompt delivery: for a fork, the prompt is inserted pre-launch by
-         *     create_agent_row (the forked agent inherits a full history and would
-         *     otherwise start a turn on the inherited task before a post-launch prompt
-         *     landed), with no InboundArrived (the agent's claim emits InboundCommitted
-         *     once it picks the prompt up — same as resurrect); for a plain spawn, the
-         *     launch op delivers the first prompt post-launch and publishes
-         *     InboundArrived so all UIs see the new agent received its first task in
-         *     real time.
+         *     Plain and fork first prompts commit with the row. The fork marker precedes
+         *     its chat in that transaction. InboundArrived is a best-effort live hint;
+         *     the pending scan recovers a missed wake.
          *
          *     body.machine = None targets the local machine (which must be a registered
          *     agent-runner).
@@ -297,6 +292,26 @@ export interface paths {
         get: operations["get_agent_roster_api_agents_roster_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{agent_id}/retry-launch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Agent Launch
+         * @description Retry dispatch for one committed identity without adding an inbound.
+         */
+        post: operations["retry_agent_launch_api_agents__agent_id__retry_launch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3844,7 +3859,7 @@ export interface components {
         };
         /**
          * AgentAvailability
-         * @description A time-bounded observation, never proof of first-message completion.
+         * @description Dispatch/admission evidence, never proof of first-message completion.
          */
         AgentAvailability: {
             reason: components["schemas"]["AvailabilityReason"];
@@ -4524,7 +4539,7 @@ export interface components {
          * AvailabilityReason
          * @enum {string}
          */
-        AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admission_refused" | "admitted";
+        AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admission_refused" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
         /**
          * BillingBalanceReport
          * @description Provider balance probe result carried on every billing-recovery response.
@@ -9131,6 +9146,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRoster"];
+                };
+            };
+        };
+    };
+    retry_agent_launch_api_agents__agent_id__retry_launch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpawnedAgent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

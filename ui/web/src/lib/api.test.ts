@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, MessageDeliveryUnknownError } from "./api";
+import { ApiError, api, MessageDeliveryUnknownError } from "./api";
 import { track } from "./telemetry";
 
 vi.mock("./telemetry", () => ({ track: vi.fn() }));
@@ -206,6 +206,32 @@ describe("lifecycle endpoints", () => {
   it("spawnAgent with no args POSTs empty body", async () => {
     await api.spawnAgent();
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({});
+  });
+
+  it("preserves a committed id and state from a launch-failure response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      reason: "agent_launch_failed",
+      detail: "created but launch failed",
+      agent_id: 123,
+      state: { status: "idling", availability: { reason: "launch_unreachable" } },
+      retry_launch_path: "/api/agents/123/retry-launch",
+    }), { status: 502, headers: { "content-type": "application/problem+json" } })));
+    try {
+      await api.spawnAgent();
+      throw new Error("expected launch failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const failure = error as ApiError;
+      expect(failure.agentId).toBe(123);
+      expect(failure.launchState?.availability?.reason).toBe("launch_unreachable");
+      expect(failure.retryLaunchPath).toBe("/api/agents/123/retry-launch");
+    }
+  });
+
+  it("retryAgentLaunch POSTs to the existing id", async () => {
+    await api.retryAgentLaunch(123);
+    expect(calls[0].url).toMatch(/\/api\/agents\/123\/retry-launch$/);
+    expect(calls[0].init?.method).toBe("POST");
   });
 
   it("terminateAgent POSTs /api/agents/{id}/terminate", async () => {

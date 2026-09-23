@@ -171,6 +171,12 @@ CREATE TABLE agents_meta (
     last_admission_at TIMESTAMPTZ,
     CONSTRAINT agents_meta_admission_observation_pair_check
         CHECK ((last_admission_outcome IS NULL) = (last_admission_at IS NULL)),
+    last_launch_attempt_id UUID, -- rotated on explicit retry; fences delayed dispatch results
+    last_launch_failure_reason TEXT CHECK (last_launch_failure_reason IN
+        ('launch_unreachable', 'launch_rejected', 'launch_unknown')),
+    last_launch_failure_at TIMESTAMPTZ,
+    CONSTRAINT agents_meta_launch_failure_pair_check
+        CHECK ((last_launch_failure_reason IS NULL) = (last_launch_failure_at IS NULL)),
     runtime_protocol_version INTEGER NOT NULL DEFAULT 0 CHECK (runtime_protocol_version >= 0),
     incarnation_resources JSONB, -- server-owned versioned resource evidence; NULL is unknown, never an empty-set proof
     -- fork fields exist in pairs or not at all (constraint explicitly named to align with the ALTER in 0002 migration)
@@ -2079,3 +2085,4 @@ INSERT INTO schema_migrations (name) VALUES ('20260922T075826_impersonation-deli
 -- Current reset anchor: the previous 101 migration names are folded above.
 INSERT INTO schema_migrations (name) VALUES ('20260923T031516_schema-baseline');
 INSERT INTO schema_migrations (name) VALUES ('20260923T175411_agent-creation-availability');
+INSERT INTO schema_migrations (name) VALUES ('20260923T195300_agent-launch-failure');

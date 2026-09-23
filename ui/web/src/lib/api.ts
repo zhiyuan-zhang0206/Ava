@@ -92,17 +92,38 @@ export { API_BASE } from "./api-base";
 // `login()` for the canonical consumer of this distinction.
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  agentId?: number;
+  launchState?: { status: string; availability?: { reason: string; evidence_at?: string | null } | null };
+  retryLaunchPath?: string;
+  constructor(status: number, message: string, body?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    if (body?.reason === "agent_launch_failed" && typeof body.agent_id === "number") {
+      this.agentId = body.agent_id;
+      if (typeof body.retry_launch_path === "string") this.retryLaunchPath = body.retry_launch_path;
+      if (body.state && typeof body.state === "object") {
+        this.launchState = body.state as ApiError["launchState"];
+      }
+    }
   }
 }
 
 async function ok<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new ApiError(res.status, `HTTP ${res.status}: ${text || res.statusText}`);
+    let body: Record<string, unknown> | undefined;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* A non-JSON error keeps its HTTP status and raw text. */ }
+    throw new ApiError(
+      res.status,
+      typeof body?.detail === "string" ? body.detail : `HTTP ${res.status}: ${text || res.statusText}`,
+      body,
+    );
   }
   return res.json() as Promise<T>;
 }
@@ -444,6 +465,8 @@ export const api = {
   spawnAgent: (req: SpawnAgentRequest = {}): Promise<SpawnedAgent> => {
     return f("/api/agents", POST_JSON(req)).then(ok<SpawnedAgent>);
   },
+  retryAgentLaunch: (agentId: number): Promise<SpawnedAgent> =>
+    f(`/api/agents/${agentId}/retry-launch`, { method: "POST" }).then(ok<SpawnedAgent>),
 
   // force=false (default) → graceful path: backend inserts a terminate
   // inbound and the agent exits after its current turn. force=true → backend

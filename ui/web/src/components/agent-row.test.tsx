@@ -135,6 +135,14 @@ function guides(container: HTMLElement) {
 }
 
 describe("AgentRow tree-guide rendering", () => {
+  it("shows a launch failure on the roster row even with status dots disabled", () => {
+    render(<AgentRow {...baseProps} agent={ag(1, {
+      status: "idling",
+      availability: { reason: "launch_rejected", observed_at: new Date().toISOString() },
+    })} depth={0} ancestorsIsLast={[]} />);
+    expect(screen.getByText("Launch failed")).toBeTruthy();
+  });
+
   it("does not show an ownership fallback when observation is missing", () => {
     render(<AgentRow {...baseProps} agent={ag(1)} depth={0} ancestorsIsLast={[]} />);
     expect(screen.queryByText("owner unknown")).toBeNull();

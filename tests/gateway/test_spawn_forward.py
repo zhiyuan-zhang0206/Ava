@@ -15,8 +15,9 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.routers import agents as app_module
+from gateway.routers import agents_forward
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-from shared.agents import CrossMachineGatewayUnavailable
+from shared.agent_observation import AvailabilityReason
 
 
 @pytest.fixture
@@ -68,7 +69,7 @@ class TestRouting:
         async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
             captured["target"] = target
             captured["body"] = body
-            return SpawnedAgent(id=777)
+            return SpawnedAgent(id=body.agent_id)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
         db_conn.execute(
@@ -79,7 +80,7 @@ class TestRouting:
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "local-test"})
         assert resp.status_code == 201
-        assert resp.json()["id"] == 777
+        assert resp.json()["id"] == captured["body"].agent_id
         assert resp.json()["accepted"] is True
         assert resp.json()["execution_observed"] is False
         assert resp.json()["reason"] == "host_unavailable"
@@ -95,7 +96,7 @@ class TestRouting:
         async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
             captured["target"] = target
             captured["body"] = body
-            return SpawnedAgent(id=778)
+            return SpawnedAgent(id=body.agent_id)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
         with TestClient(app) as client:
@@ -169,7 +170,7 @@ class TestRouting:
         async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
             captured["target"] = target
             captured["body"] = body
-            return SpawnedAgent(id=999)
+            return SpawnedAgent(id=body.agent_id)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
         # The pre-dispatch capability check resolves the target's role; stub it as
@@ -183,7 +184,7 @@ class TestRouting:
                 json={"machine": "remote-mac", "spawner": "user"},
             )
         assert resp.status_code == 201
-        assert resp.json()["id"] == 999
+        assert resp.json()["id"] == captured["body"].agent_id
         assert resp.json()["accepted"] is True
         assert resp.json()["execution_observed"] is False
         assert resp.json()["reason"] == "unknown"
@@ -194,7 +195,8 @@ class TestRouting:
         launch_body = captured["body"]
         assert launch_body.agent_id > 0
         assert launch_body.config is None
-        assert launch_body.prompt is None  # plain spawn: prompt goes post-launch
+        assert launch_body.prompt is None  # first prompt, if any, was committed with the row
+        assert launch_body.launch_attempt_id is not None
 
     def test_registered_remote_runner_is_forwarded(
         self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
@@ -206,7 +208,7 @@ class TestRouting:
 
         async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
             captured["target"] = target
-            return SpawnedAgent(id=999)
+            return SpawnedAgent(id=body.agent_id)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
         monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
@@ -233,13 +235,15 @@ class TestRouting:
         assert body["reason"] == "machine_not_registered"
         assert "ghost-mac" in body["detail"]
 
-    def test_cross_machine_gateway_unavailable_propagates_502(
+    def test_cross_machine_gateway_unavailable_names_committed_agent(
         self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Target gateway transport error → CrossMachineGatewayUnavailable → 502 + reason."""
+        """A post-commit forward error returns 502 with the committed identity."""
 
         async def _forward_raises(*args: Any, **kw: Any) -> None:
-            raise CrossMachineGatewayUnavailable("target unreachable after 3 retries")
+            raise agents_forward.LaunchForwardError(
+                AvailabilityReason.LAUNCH_UNREACHABLE, "target unreachable after 3 retries"
+            )
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _forward_raises)
         monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
@@ -247,4 +251,68 @@ class TestRouting:
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "remote-mac"})
         assert resp.status_code == 502
-        assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
+        assert resp.json()["reason"] == "agent_launch_failed"
+        assert resp.json()["agent_id"] > 0
+        assert resp.json()["state"]["availability"]["reason"] == "launch_unreachable"
+
+    def test_mismatched_runner_receipt_cannot_replace_committed_id(
+        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def _wrong_id(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            return SpawnedAgent(id=body.agent_id + 1)
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _wrong_id)
+        with TestClient(app) as client:
+            response = client.post("/api/agents", json={})
+        assert response.status_code == 502
+        body = response.json()
+        assert body["state"]["availability"]["reason"] == "launch_unreachable"
+        assert body["agent_id"] > 0
+
+
+@pytest.mark.asyncio
+async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import uuid4
+
+    from ops.cluster_rpc import ClusterOpUnreachable
+
+    seen: list[tuple[str, dict[str, object]]] = []
+    attempt_id = uuid4()
+
+    async def _fail(
+        *, target_machine: str, kind: str, payload: dict[str, object]
+    ) -> dict[str, object]:
+        seen.append((kind, payload))
+        raise ClusterOpUnreachable("offline")
+
+    monkeypatch.setattr(agents_forward._cluster_rpc, "dispatch_to_machine", _fail)
+    with pytest.raises(agents_forward.LaunchForwardError) as raised:
+        await agents_forward._forward_spawn_to_remote(
+            "runner", LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id)
+        )
+    assert seen == [("spawn-launch-v2", {"agent_id": 4, "launch_attempt_id": str(attempt_id)})]
+    assert raised.value.reason == AvailabilityReason.LAUNCH_UNREACHABLE
+
+
+@pytest.mark.asyncio
+async def test_spawn_forward_preserves_runner_rejection_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ops.cluster_rpc import ClusterOpFailed
+
+    async def _fail(**_kwargs: object) -> dict[str, object]:
+        raise ClusterOpFailed(
+            {
+                "error": "InvalidModelConfig: key missing",
+                "reason": "invalid_model_config",
+                "detail": "key missing",
+            }
+        )
+
+    monkeypatch.setattr(agents_forward._cluster_rpc, "dispatch_to_machine", _fail)
+    with pytest.raises(agents_forward.LaunchForwardError) as raised:
+        await agents_forward._forward_spawn_to_remote("runner", LaunchAgentRequest(agent_id=4))
+    assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED
+    assert "invalid_model_config: key missing" in str(raised.value)

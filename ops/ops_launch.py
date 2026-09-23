@@ -1,4 +1,4 @@
-"""Runner-side spawn validation, first-prompt delivery and dispatcher wake."""
+"""Runner-side spawn validation and repeatable dispatcher wake."""
 
 from __future__ import annotations
 
@@ -11,44 +11,49 @@ from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 from shared.agents import ForkSourceEmpty
 from shared.config import settings
 from shared.db import insert_inbound_message, publish_inbound_wake
+from shared.labels import spawn_prompt_with_label
+from shared.machine import machine_name
 
 
 async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> SpawnedAgent:
-    """Validate the gateway-created row, insert its prompt and wake the local host. A validation or delivery failure terminates the otherwise orphaned row."""
+    """Validate a gateway-created row and wake its host without changing identity.
+
+    The legacy prompt branch supports an old gateway during a rolling update.
+    New gateways send an attempt ID and an already-committed inbound instead.
+    No failure here terminates the row: the gateway records launch failure and
+    the pending scan can still deliver the committed first prompt.
+    """
     # Lazy imports: both homes (ops_lifecycle, moving to ops_events with the
     # Task #1999 split) re-export THIS cluster, so a module-level import would
     # be circular in either merge order.
     from ops.ops_lifecycle import publish_inbound_arrived
     from shared.lm.factory import validate_model_config
 
-    try:
-        await asyncio.to_thread(
-            validate_model_config, model=settings.lm.llm_model, config=body.config
+    await asyncio.to_thread(validate_model_config, model=settings.lm.llm_model, config=body.config)
+    if body.launch_attempt_id is not None:
+        await asyncio.to_thread(_validate_launch_row, db_pool, body)
+    elif body.prompt is not None:
+        # Old gateway compatibility only. New requests never send a prompt.
+        assert body.prompt_source is not None  # narrowed by the caller  # noqa: S101
+        prompt = spawn_prompt_with_label(body.prompt, body.label)
+        iid = await asyncio.to_thread(
+            _insert_prompt_blocking, db_pool, body.agent_id, prompt, body.prompt_source
         )
-        if body.prompt is not None:
-            assert body.prompt_source is not None  # narrowed by the caller  # noqa: S101
-            prompt = body.prompt
-            if body.label:
-                prompt = f"{prompt}\n\nYour label has been set to {body.label}."
-            iid = await asyncio.to_thread(
-                _insert_prompt_blocking, db_pool, body.agent_id, prompt, body.prompt_source
-            )
-            await publish_inbound_arrived(body.agent_id, iid, "chat", body.prompt_source, prompt)
-        publish_inbound_wake(body.agent_id, "0")
-        return SpawnedAgent(id=body.agent_id)
-    except Exception:
-        # Lazy import: _force_mark_terminated lives in ops_lifecycle (moving
-        # to ops_exit with the Task #1999 split), and a module-level import
-        # would be circular (ops_lifecycle re-exports this cluster).
-        from ops.ops_lifecycle import _force_mark_terminated
+        await publish_inbound_arrived(body.agent_id, iid, "chat", body.prompt_source, prompt)
+    publish_inbound_wake(body.agent_id, "0")
+    return SpawnedAgent(id=body.agent_id)
 
-        await asyncio.to_thread(
-            _force_mark_terminated,
-            body.agent_id,
-            db_pool,
-            source="launch-confirm",
+
+def _validate_launch_row(db_pool: ConnectionPool, body: LaunchAgentRequest) -> None:
+    """A stale attempt cannot wake an identity now placed somewhere else."""
+    with db_pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT machine, last_launch_attempt_id, status FROM agents_meta WHERE id=%s",
+            (body.agent_id,),
         )
-        raise
+        row = cur.fetchone()
+    if row is None or row != (machine_name(), body.launch_attempt_id, "idling"):
+        raise ValueError(f"agent {body.agent_id} launch attempt is stale or misplaced")
 
 
 def _spawn_prechecks_blocking(body: SpawnAgentRequest, db_pool: ConnectionPool) -> str | None:
@@ -77,7 +82,7 @@ def _spawn_prechecks_blocking(body: SpawnAgentRequest, db_pool: ConnectionPool) 
 def _insert_prompt_blocking(
     db_pool: ConnectionPool, agent_id: int, prompt: str, source: str
 ) -> int:
-    """Sync first-prompt inbound INSERT for a plain spawn — via to_thread."""
+    """Sync first-prompt insert for an old gateway during a rolling update."""
     with db_pool.connection() as conn:
         return insert_inbound_message(conn, agent_id, prompt, source=source)
 

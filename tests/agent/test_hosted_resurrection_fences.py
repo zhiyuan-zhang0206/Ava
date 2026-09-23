@@ -28,7 +28,7 @@ from shared.turn_identity import bind_turn_identity
 async def _resurrected(
     db: psycopg.Connection, pool: AsyncConnectionPool
 ) -> tuple[int, int, UUID, IncarnationResources]:
-    aid, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
     db.execute(
         "UPDATE agents_meta SET status='idling',incarnation_resources=%s WHERE id=%s",
         (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), aid),

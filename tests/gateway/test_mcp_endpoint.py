@@ -279,6 +279,28 @@ def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
     ]
 
 
+def test_spawn_launch_failure_tool_error_names_committed_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gateway.routers import agents as route
+    from gateway.routers.agents_forward import LaunchForwardError
+    from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+    from shared.agent_observation import AvailabilityReason
+
+    async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
+        raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
+
+    monkeypatch.setattr(route, "_forward_spawn_to_remote", _fail)
+    with TestClient(app) as client:
+        token = _create_token(client)
+        response = _tool_call(client, token, "spawn_agent", {"prompt": "Keep this task"})
+    assert response["result"]["isError"] is True
+    message = _tool_result(response)
+    assert "agent_id=" in message
+    assert "retry_launch_path=/api/agents/" in message
+    assert "launch_unreachable" in message
+
+
 def test_get_agent_not_found_is_an_error() -> None:
     with TestClient(app) as client:
         token = _create_token(client)

@@ -263,6 +263,12 @@
     "awaiting_admission": "Creation accepted; waiting for host admission",
     "admission_refused": "Host tried to start this agent but admission was refused",
     "admitted": "Host admission observed; first turn completion is not confirmed",
+    "launch_unreachable": "Launch failed: runner could not be reached",
+    "launch_rejected": "Launch failed: runner rejected the request",
+    "launch_unknown": "Launch failed: dispatch outcome is unknown",
+    "retryLaunch": "Retry launch",
+    "retryLaunchFailed": "Retry failed",
+    "failureObservedAt": "Failure observed {time} on {machine}",
     "maintenance_hold": "Host admission held by maintenance",
     "publication_deferred": "Host admission deferred by runtime publication",
     "resource_fence": "Host admission blocked by resource evidence",
@@ -572,7 +578,9 @@
     "statusIdling": "Idling",
     "statusRestarting": "Restarting",
     "statusTerminated": "Terminated",
-    "statusOffline": "Offline — machine unreachable or process lost"
+    "statusOffline": "Offline — machine unreachable or process lost",
+    "launchFailed": "Launch failed",
+    "launchFailedCreated": "Agent #{id} was created, but launch failed. Select it to retry."
   },
   "contentToggle": {
     "details": "Details",

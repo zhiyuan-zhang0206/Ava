@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, OpFailure, SpawnedAgent
+from shared.agent_observation import AvailabilityReason
 from shared.agents import (
     EXCEPTION_BY_REASON,
     AgentNotFound,
@@ -38,6 +39,14 @@ from shared.agents import (
 _LIFECYCLE_DISPATCH_DEADLINE_S = 12.0
 _LIFECYCLE_DISPATCH_TIMEOUT_S = 5.0
 _LIFECYCLE_DISPATCH_RETRIES = 1
+
+
+class LaunchForwardError(Exception):
+    """Typed outcome of forwarding an already-committed agent launch."""
+
+    def __init__(self, reason: AvailabilityReason, detail: str) -> None:
+        super().__init__(detail)
+        self.reason = reason
 
 
 def _raise_proxied_wire_error_from_payload(payload: dict[str, object]) -> None:
@@ -131,34 +140,51 @@ async def _enqueue_lifecycle(target: str, path: str, json_body: dict) -> dict:
 
 
 async def _forward_spawn_to_remote(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
-    """POST a 'spawn-launch' op to the target machine's ops server, return the result.
+    """POST a versioned launch op to the target machine's ops server.
 
     The target machine's ava-ops server dispatches in-process to
-    `ops.ops_lifecycle.launch_agent_op` (Task #1236 follow-up: the gateway
-    already created the agent row as the main identity — the runner's op only
-    launches the process) and returns the SpawnedAgent dict.
+    `ops.ops_lifecycle.launch_agent_op`. The gateway already committed the
+    agent row and first prompt; the runner validates the attempt, wakes the
+    hosted agent, and returns the SpawnedAgent dict.
 
     Raises:
-        CrossMachineGatewayUnavailable: the target machine's ops server was
-            unreachable (offline / not yet registered / timed out).
-        Other AvaAgentError subclasses: business errors raised by the
-            target machine's op are passed through.
+        LaunchForwardError: launch_unreachable when the ops server cannot be
+            reached or returns a malformed result; launch_rejected when the
+            target op rejects the launch. The target's business reason is
+            included in the error detail.
     """
-    forward_body = body.model_dump(exclude_none=True)
+    forward_body = body.model_dump(mode="json", exclude_none=True)
     try:
         result = await _cluster_rpc.dispatch_to_machine(
             target_machine=target,
-            kind="spawn-launch",
+            kind="spawn-launch-v2",
             payload=forward_body,
         )
     except _cluster_rpc.ClusterOpUnreachable as exc:
-        raise CrossMachineGatewayUnavailable(
-            f"target machine={target!r} ops server unreachable for spawn op: {exc!s}"
+        raise LaunchForwardError(
+            AvailabilityReason.LAUNCH_UNREACHABLE,
+            f"target machine={target!r} ops server unreachable for spawn op: {exc!s}",
         ) from exc
     except _cluster_rpc.ClusterOpFailed as exc:
-        _raise_proxied_wire_error_from_payload(exc.result)
-        raise  # unreachable
-    return SpawnedAgent.model_validate(result)
+        try:
+            failure = OpFailure.model_validate(exc.result)
+        except ValidationError:
+            raise LaunchForwardError(
+                AvailabilityReason.LAUNCH_UNREACHABLE,
+                f"target machine={target!r} returned a malformed launch failure",
+            ) from exc
+        raise LaunchForwardError(
+            AvailabilityReason.LAUNCH_REJECTED,
+            f"target machine={target!r} rejected launch: "
+            f"{failure.reason or failure.error}: {failure.detail or failure.error}",
+        ) from exc
+    try:
+        return SpawnedAgent.model_validate(result)
+    except ValidationError as exc:
+        raise LaunchForwardError(
+            AvailabilityReason.LAUNCH_UNREACHABLE,
+            f"target machine={target!r} returned a malformed launch receipt",
+        ) from exc
 
 
 def _home_machine_blocking(app: Any, agent_id: int) -> str:

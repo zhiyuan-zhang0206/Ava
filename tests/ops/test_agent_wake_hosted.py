@@ -40,7 +40,7 @@ def _park(
 ) -> int:
     """Seed a row WITHOUT any launch — hosted spawn is row-only, and the
     guard above turns a stray process launch into a loud failure."""
-    aid, _birth = create_agent_row(spawner="user", machine=machine_name())
+    aid, _birth, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status=%s, pid=%s WHERE id=%s", (status, pid, aid))
     db.commit()

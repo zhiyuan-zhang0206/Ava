@@ -47,7 +47,7 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _admit(pool: AsyncConnectionPool) -> RuntimeIncarnation:
-    agent, _ = create_agent_row(spawner="user", machine=machine_name())
+    agent, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
     async with pool.connection() as conn:
         await conn.execute(
             "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
