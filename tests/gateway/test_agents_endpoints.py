@@ -928,8 +928,10 @@ class TestList:
             "highest_notice_priority",
             "unread_notice_count",
             "heartbeat_paused_until",
+            "open_impersonation_session_id",
             "observation",
         }
+        assert rows[0]["open_impersonation_session_id"] is None
         assert rows[0]["observation"]["runtime_owner"] == "unknown"
         by_id = {r["agent_id"]: r for r in rows}
         assert by_id[a_id]["status"] == "idling"
@@ -999,8 +1001,10 @@ class TestList:
             "highest_notice_priority",
             "unread_notice_count",
             "heartbeat_paused_until",
+            "open_impersonation_session_id",
             "observation",
         }
+        assert row["open_impersonation_session_id"] is None
         assert row["observation"]["runtime_owner"] == "unknown"
         assert row["observation"]["machine_probe_at"] is None
         assert row["observation"]["machine_probe_valid_until"] is None
