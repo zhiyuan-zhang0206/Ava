@@ -367,10 +367,10 @@ to redis.conf) and by the `redis-acl` gateway-watchdog healthcheck, so a redis r
 that drops the in-memory ACL is repaired before agents reconnect. Provisioning uses that
 instance's own `default` user (the independent Redis admin password). A legacy `.env`
 whose redis_url carries no username (`redis://:<runtime-password>@host/0`, born before the
-names-as-data ACL model) dials as that `default` user — no ACL identity exists to
-drop, so the healthcheck warns and skips rather than raising every round, and `ava
-start` converge backfills the username into the URL (from the db_url identity) so the
-cluster adopts the scoped ACL user. The same startup process adopts the repaired
+names-as-data ACL model) dials as that `default` user. If the healthcheck encounters
+that URL, `redis_identity()` raises `ValueError` and the watchdog reports a failure.
+`ava start` converge backfills the username into the URL (from the db_url identity)
+so the cluster adopts the scoped ACL user. The same startup process adopts the repaired
 URL before provisioning Redis; no-auth homes receive a named `nopass` identity.
 **Postgres and PgBouncer bind loopback + this
 host's reachable address (`AVA_MACHINE_HOST`, default `localhost`), de-duplicated**
