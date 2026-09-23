@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from threading import Barrier
-from typing import Any, LiteralString, cast
+from typing import Any
 from unittest.mock import Mock
 
 import psycopg
@@ -272,53 +272,3 @@ def test_lifecycle_intervals_follow_transactional_status_not_telemetry(
         "SELECT count(*), count(*) FILTER (WHERE ended_at IS NULL) "
         "FROM agent_lifecycle_intervals WHERE agent_id=71"
     ).fetchone() == (2, 1)
-
-
-def test_upgrade_seeds_only_known_time_and_down_up_are_reversible(
-    db_conn: psycopg.Connection,
-) -> None:
-    """Exercise delta SQL separately from the already-current test baseline."""
-    db_conn.execute("CREATE SCHEMA metric_migration_fixture")
-    db_conn.execute("SET LOCAL search_path TO metric_migration_fixture, public")
-    db_conn.execute("CREATE TABLE agents (id BIGINT PRIMARY KEY)")
-    db_conn.execute("CREATE TABLE heartbeat_pause_log (id BIGINT PRIMARY KEY)")
-    db_conn.execute(
-        "CREATE TABLE agents_meta (id BIGINT PRIMARY KEY REFERENCES agents(id), "
-        "status TEXT, started_at TIMESTAMPTZ)"
-    )
-    db_conn.execute("INSERT INTO agents VALUES (71), (72)")
-    db_conn.execute(
-        "INSERT INTO agents_meta VALUES (71,'running','2020-01-01'), (72,'terminated','2020-01-01')"
-    )
-    migration = (
-        Path(__file__).resolve().parents[2]
-        / "migrations/20260916T172008_observed-agent-metrics.sql"
-    )
-    up = migration.read_text()
-    down = migration.with_suffix(".down.sql").read_text()
-    for attempt in range(2):
-        db_conn.execute(cast(LiteralString, up))
-        assert db_conn.execute(
-            "SELECT agent_id, i.started_at = c.started_at, ended_at "
-            "FROM agent_lifecycle_intervals i CROSS JOIN agent_metric_collection c"
-        ).fetchall() == [(71, True, None)]
-        db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=71")
-        assert db_conn.execute(
-            "SELECT ended_at IS NOT NULL FROM agent_lifecycle_intervals"
-        ).fetchone() == (True,)
-        with (
-            pytest.raises(psycopg.errors.RaiseException, match="destructive downgrade refused"),
-            db_conn.transaction(),
-        ):
-            db_conn.execute(cast(LiteralString, down))
-        assert db_conn.execute("SELECT count(*) FROM agent_lifecycle_intervals").fetchone() == (1,)
-        assert db_conn.execute(
-            "SELECT count(*) FROM pg_trigger WHERE tgname='agents_meta_lifecycle_interval' AND tgrelid='agents_meta'::regclass"
-        ).fetchone() == (1,)
-        # This isolated synthetic fixture explicitly discards its rows to test
-        # the empty-only DDL reversal; production rollback never deletes them.
-        db_conn.execute("DELETE FROM agent_lifecycle_intervals")
-        db_conn.execute(cast(LiteralString, down))
-        if attempt == 0:
-            db_conn.execute("UPDATE agents_meta SET status='running' WHERE id=71")
-    db_conn.rollback()

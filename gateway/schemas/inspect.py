@@ -102,7 +102,7 @@ class AgentActivity(BaseModel):
     basis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped
     at 1.0 (a node that began before the window's leading edge counts in full, so
     raw active can momentarily exceed windowed alive); 0.0 when alive is 0. All
-    fields follow the request's `?hours=` / `?since_compact=` window."""
+    fields follow the request's `?hours=` window."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -197,7 +197,7 @@ class AgentInspectLive(BaseModel):
 class AgentInspectStatistics(BaseModel):
     """Window-dependent statistics, with no current control-plane state.
 
-    ``window_hours`` and ``since_compact`` identify the requested view;
+    ``window_hours`` identifies the requested view;
     ``applied_window_hours`` echoes the served hour window without a Loki
     retention clamp. Metadata distinguishes observed, partial, and unavailable
     source coverage. Unknown sections are null, never invented zero totals.
@@ -209,7 +209,6 @@ class AgentInspectStatistics(BaseModel):
     agent_id: int
     window_hours: StatsWindowHours | None = None
     applied_window_hours: int | None = None
-    since_compact: bool = False
     cost: AgentCost | None
     stats: AgentStats | None
     tps: AgentTps | None

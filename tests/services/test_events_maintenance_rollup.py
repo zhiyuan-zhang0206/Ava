@@ -6,8 +6,8 @@ I/O seam (`_day_aggregates`), so these tests pin the watermark / retention
 clamp / upsert logic against a real throwaway Postgres: idempotency (the
 full-day overwrite never double-counts), the late-write lookback, the
 retention-floor clamp (archive-backfilled days are never overwritten with
-zeros), and the cost ledger columns. The one-time archive backfill is the
-llm-cost-rollup-columns migration — its SQL is exercised directly here.
+zeros), and the cost ledger columns. The baseline supplies the writable watermark
+table used by every pass.
 
 `now_utc` is passed in, so "today" is deterministic regardless of the wall
 clock; the retention floor derives from it the same way.
@@ -18,8 +18,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
-from typing import LiteralString, cast
 
 import psycopg
 import pytest
@@ -566,21 +564,11 @@ def test_probe_failure_rerolls_but_keeps_previous_watermark(
     assert any("source-count probe failed" in warning for warning in warnings)
 
 
-# ── the archive backfill migration ───────────────────────────────────────────
+# ── baseline watermark defaults ──────────────────────────────────────────────
 
 
-def test_rollup_day_state_migration_creates_writable_watermark(
-    db: psycopg.Connection,
-) -> None:
-    migrations = sorted(
-        (Path(__file__).resolve().parents[2] / "migrations").glob("*_rollup-day-state.sql")
-    )
-    assert len(migrations) == 1
-    migration_sql = cast(LiteralString, migrations[0].read_text())
+def test_baseline_rollup_day_state_has_writable_watermark(db: psycopg.Connection) -> None:
     with db.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS rollup_day_state")
-        cur.execute(migration_sql)
-        cur.execute(migration_sql)  # baseline convergence and repeated apply are safe
         cur.execute(
             "INSERT INTO rollup_day_state (day, source_count) VALUES (%s, %s)",
             (date(2026, 6, 9), 7),

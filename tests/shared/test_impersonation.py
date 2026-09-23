@@ -3,13 +3,11 @@
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Any, LiteralString, cast
+from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
-from psycopg import sql
 
 from shared import impersonation as leases
 from shared.caller_identity import CallerIdentity
@@ -421,37 +419,6 @@ def test_renew_replaces_ttl_and_reject_records_reason(db_conn: psycopg.Connectio
     renewed = leases.renew(lease["id"], attested_caller(lease), ttl_seconds=600)
     assert renewed["ttl_seconds"] == 600
     assert renewed["expires_at"] > lease["expires_at"]
-
-
-def test_rollback_refuses_active_lease_or_pending_handoff(db_conn: psycopg.Connection) -> None:
-    owner = _agent(db_conn)
-    lease = _active(owner)
-    migration = (
-        Path(__file__).resolve().parents[2]
-        / "migrations/20260905T073254_agent-impersonation.down.sql"
-    )
-    migration_sql = sql.SQL(cast(LiteralString, migration.read_text()))
-    with (
-        pytest.raises(psycopg.errors.RaiseException, match="Finish impersonations"),
-        db_conn.transaction(force_rollback=True),
-    ):
-        db_conn.execute(migration_sql)
-    leases.release(lease["id"], attested_caller(lease), "Complete")
-    with (
-        pytest.raises(psycopg.errors.RaiseException, match="Finish impersonations"),
-        db_conn.transaction(force_rollback=True),
-    ):
-        db_conn.execute(migration_sql)
-    db_conn.execute(
-        "UPDATE inbound_messages SET status='done' WHERE agent_id=%s", (owner.agent_id,)
-    )
-    db_conn.commit()
-    # New permanent records intentionally fence old destructive rollbacks.
-    with (
-        db_conn.transaction(force_rollback=True),
-        pytest.raises(psycopg.errors.DependentObjectsStillExist),
-    ):
-        db_conn.execute(migration_sql)
 
 
 def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(

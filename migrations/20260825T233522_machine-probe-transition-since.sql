@@ -1,1 +1,0 @@
-ALTER TABLE machine_probe ADD COLUMN IF NOT EXISTS transition_since TIMESTAMPTZ;

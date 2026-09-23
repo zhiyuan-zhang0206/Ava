@@ -35,27 +35,13 @@ class MigrationLayoutError(MigrationError):
 
 class RollbackBelowFloor(MigrationError):  # noqa: N818 — state-description naming
     """Rollback target is below the baseline; the baseline has no down by
-    design (it is a squashed snapshot). Rolling back across it would strand a
-    set-tracked DB under pre-cutover integer-tracked code."""
-
-
-class CutoverRequired(MigrationError):  # noqa: N818
-    """A read path saw a legacy (sequential-integer) `schema_migrations` that
-    has not been converted to the applied-set format yet. On the shared prod
-    DB the gateway's `ava cluster update` runs the conversion; an agent-runner that
-    sees this must wait for the gateway, not self-update."""
-
-
-class CutoverRefused(MigrationError):  # noqa: N818
-    """The apply path found a legacy `schema_migrations` whose applied set is
-    NOT the exact `{1..81}` baseline (behind, or gaps), so it cannot be safely
-    folded into the squashed baseline. Step through the immediately-preceding
-    release first."""
+    design (it is a squashed snapshot). Folded strict deltas cannot be
+    replayed safely by an older release."""
 
 
 class MigrationHistoryGap(MigrationError):  # noqa: N818
-    """The apply path found a DB that applied only PART of the pre-v0.1.0
-    migration history (some of `_V010_PRE_RESET_SET` present, some missing).
+    """The apply path found a DB that applied only PART of a frozen pre-reset
+    migration generation, or has not reached the current reset at all.
     Convergence deletes applied-set rows whose files no longer exist — for a
     partial history that would certify a schema that never ran the missing
     migrations. Step the DB through a pre-reset release first so it reaches
