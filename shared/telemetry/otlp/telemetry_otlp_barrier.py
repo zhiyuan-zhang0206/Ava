@@ -39,7 +39,7 @@ def stop_worker(
     """Request a bounded worker stop before the shutdown provider flush."""
     try:
         event_queue.put(None, timeout=2.0)
-    except queue.Full:
+    except (AttributeError, queue.Full):
         report("shutdown marker timed out before the OTLP worker could receive it")
     else:
         worker.join(timeout=2.0)
