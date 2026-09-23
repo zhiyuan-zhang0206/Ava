@@ -302,7 +302,7 @@ os.environ["AVA_TELEMETRY_OTLP_PORT"] = "4318"
 # stayed green (test_exec_subprocess.py, test_otel_bootstrap_relay.py,
 # 2026-09-14). Popped, never set: absent is the state CI runs in — the
 # endpoint derives from the pinned port, and a test that needs an explicit
-# endpoint monkeypatches it.
+# endpoint monkeypatches it. Host AVA_LGTM_* are popped in tests/_test_env_file.
 os.environ.pop("AVA_TELEMETRY_OTLP_ENDPOINT", None)
 os.environ["AVA_MACHINE_HOST"] = "localhost"
 
