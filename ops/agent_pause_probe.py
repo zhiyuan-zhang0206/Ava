@@ -45,7 +45,29 @@ def host_running() -> bool:
     # A missing record is not evidence that a daemon which lost that record
     # exited. Check the stable launch module and its private home identity too.
     home = ava_home().resolve()
-    for process in psutil.process_iter(["pid", "cmdline"]):
+    if _find_unrecorded_agent_host(home):
+        raise RuntimeError("agent-host is still running without its service record")
+    return False
+
+
+def _find_unrecorded_agent_host(home: Path) -> bool:
+    """Whether the process table holds an agent-host for `home` with no record.
+
+    macOS psutil can leak a raw PermissionError while building one process's
+    info mid-iteration (a sysctl race with a process diverging under load —
+    the 2026-09-18 flake); the identical read succeeds when re-probed, so the
+    scan retries once. A persistent failure raises — an unreadable scan must
+    never silently read as "not running"."""
+    import psutil
+
+    try:
+        processes = list(psutil.process_iter(["pid", "cmdline"]))
+    except PermissionError:
+        try:
+            processes = list(psutil.process_iter(["pid", "cmdline"]))
+        except PermissionError as exc:
+            raise RuntimeError("cannot verify whether an unrecorded agent-host is running") from exc
+    for process in processes:
         argv = cast(list[str], process.info["cmdline"] or [])
         if not any(
             argv[i : i + 2] == ["-m", "services.agent_host.daemon"] for i in range(len(argv) - 1)
@@ -58,7 +80,7 @@ def host_running() -> bool:
         except psutil.AccessDenied as exc:
             raise RuntimeError("cannot identify an unrecorded agent-host home") from exc
         if raw_home is None or Path(raw_home).resolve() == home:
-            raise RuntimeError("agent-host is still running without its service record")
+            return True
     return False
 
 
