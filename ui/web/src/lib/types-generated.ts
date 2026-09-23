@@ -5334,6 +5334,8 @@ export interface components {
         EventRow: {
             /** Id */
             id: number;
+            /** Line Sha256 */
+            line_sha256: string;
             /**
              * Ts
              * Format: date-time

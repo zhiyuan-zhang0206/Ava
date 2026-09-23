@@ -1032,7 +1032,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     fail the action nor stay silent — it warns (task #1136)."""
     warnings: list[str] = []
     monkeypatch.setattr(daemon_mod.logger, "warning", lambda msg: warnings.append(str(msg)))  # pyright: ignore[reportUnknownArgumentType]
-    log: list[dict] = []
+    log: list[dict[str, Any]] = []
 
     def _stage(event: Any, *, origin_kind: str, origin_id: int) -> None:
         del origin_kind, origin_id
