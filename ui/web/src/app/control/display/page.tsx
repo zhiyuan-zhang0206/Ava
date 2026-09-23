@@ -90,12 +90,14 @@ export default function DisplaySettingsPage() {
   // is how the feature reads to the user.
   const expandRunsDefault = settings["display.expand_runs_mode"] === "all";
 
-  // Compact-history retention (task #3698): number of previous compact sessions
-  // kept visible after a compact rewrites the history. Numbers only — anything
-  // else (missing / foreign type) reads as the default 1.
+  // Compact-history retention (task #3698): number of older pages fetched
+  // after a compact rewrites the history. -1 means All;
+  // missing/invalid values read as the default 1.
+  const compactHistorySetting = settings["display.compact_history_sessions"];
   const compactHistorySessions =
-    typeof settings["display.compact_history_sessions"] === "number"
-      ? settings["display.compact_history_sessions"]
+    typeof compactHistorySetting === "number" &&
+    Number.isInteger(compactHistorySetting) && compactHistorySetting >= -1
+      ? compactHistorySetting
       : 1;
 
   const hiddenModels: string[] = (settings["models.hidden"] as string[] | undefined) ?? [];
@@ -224,17 +226,16 @@ export default function DisplaySettingsPage() {
           value={settings["display.render_reasoning_markdown"] as boolean}
           onChange={(v) => setSetting("display.render_reasoning_markdown", v)}
         />
-        {/* The 0..3 range is clamped again in use-compact-history-retention
-            (MAX_RETAINED_SESSIONS) — widen both together. */}
         <RadioRow
           icon={History}
           label="Compact history"
-          description="How many previous compact sessions stay visible in the timeline when a compact rewrites the history: the just-compacted messages stay above the new summary instead of the list clearing. 0 = clear immediately (legacy), 1 = keep the most recent session."
+          description="How much previous compact history to restore automatically after a compact. 0 clears the view; 1–3 fetch that many older pages. All fetches every available page in sequence, which can take time and use substantial memory on long histories."
           options={[
             { value: "0", label: "Off" },
             { value: "1", label: "1" },
             { value: "2", label: "2" },
             { value: "3", label: "3" },
+            { value: "-1", label: "All" },
           ]}
           value={String(compactHistorySessions)}
           onChange={(v) => setSetting("display.compact_history_sessions", Number(v))}

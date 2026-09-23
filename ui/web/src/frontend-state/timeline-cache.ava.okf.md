@@ -28,8 +28,11 @@ a late response after A-to-B-to-A cannot append to the new A view, and cancellat
 does not produce an error toast or clear the new view's loading state.
 
 A compact replacement preserves the upstream retention edge: `compactReplaceSeq`
-and `compactReplaceAgent` trigger reattachment of the configured previous compact
-sessions through the same cancellable history-page read.
+and `compactReplaceAgent` trigger reattachment through the same cancellable
+history-page read. `display.compact_history_sessions` defaults to one automatic
+page, accepts 0 to skip automatic reads, and accepts -1 to restore every
+available page serially. A completed page with `has_more=false` ends an All
+walk; an unready window before the post-compact tail read settles does not.
 
 History remains fully accessible through explicit paging. Switching releases
 the inactive store view (scroll-loaded history is not retained); only the tail
