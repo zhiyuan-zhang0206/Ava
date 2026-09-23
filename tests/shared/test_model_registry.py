@@ -61,10 +61,10 @@ def test_stream_total_timeout_resolves_shared_floor_and_explicit_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings.lm, "llm_stream_total_timeout_seconds", None)
-    assert resolve_setting("llm_stream_total_timeout_seconds", model="deepseek-v4-pro") == 3600.0
+    assert resolve_setting("llm_stream_total_timeout_seconds", model="deepseek-flash") == 3600.0
 
     monkeypatch.setattr(settings.lm, "llm_stream_total_timeout_seconds", 7200.0)
-    assert resolve_setting("llm_stream_total_timeout_seconds", model="deepseek-v4-pro") == 7200.0
+    assert resolve_setting("llm_stream_total_timeout_seconds", model="deepseek-flash") == 7200.0
 
 
 def test_deepseek_stall_wave_ttft_default_is_150(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,8 +73,7 @@ def test_deepseek_stall_wave_ttft_default_is_150(monkeypatch: pytest.MonkeyPatch
     09-14/15 waves turned into 600s stream + 600s fallback burns per turn). The
     sentinel + per-model layer must agree, and an explicit override still wins."""
     monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", None)
-    for model in ("deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"):
-        assert resolve_setting("llm_stream_ttft_timeout_seconds", model=model) == 150.0
+    assert resolve_setting("llm_stream_ttft_timeout_seconds", model="deepseek-flash") == 150.0
 
     monkeypatch.setattr(settings.lm, "llm_stream_ttft_timeout_seconds", 90.0)
     assert resolve_setting("llm_stream_ttft_timeout_seconds", model="deepseek-flash") == 90.0
@@ -131,16 +130,20 @@ def test_gemini_3_8_flash_is_spawnable_again() -> None:
     assert resolve_available_model("gemini-3.8-flash") == "gemini-3.8-flash"
 
 
-def test_deepseek_v4_pro_is_withdrawn_to_the_flash_fallback() -> None:
-    """User order 2026-09-10: DeepSeek serves only the flash tier, so V4 Pro
-    leaves the spawn picker; a config that still names it resolves to
-    deepseek-flash before provider construction — the withdrawal shape of
-    PR #1582 (gemini-3.8-flash), not a removal."""
-    spec = MODELS["deepseek-v4-pro"]
-    assert not spec.spawnable
-    assert spec.unavailable_fallback == "deepseek-flash"
-    assert "deepseek-v4-pro" not in SUPPORTED_MODELS["deepseek"]
-    assert resolve_available_model("deepseek-v4-pro") == "deepseek-flash"
+@pytest.mark.parametrize(
+    "model",
+    (
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "mimo-v2.5-pro-ultraspeed",
+    ),
+)
+def test_retired_model_is_absent_from_registry(model: str) -> None:
+    """Unusable ids leave the runtime roster; only the archive prices history."""
+    assert model not in MODELS
+    assert all(model not in models for models in SUPPORTED_MODELS.values())
+    assert resolve_available_model(model) == model
 
 
 def test_deepseek_flash_registry_facts() -> None:
@@ -159,20 +162,6 @@ def test_deepseek_flash_registry_facts() -> None:
     assert resolve_setting("reasoning_effort", model="deepseek-flash") == "max"
     assert resolve_setting("auto_compact_fraction", model="deepseek-flash") == 0.512
     assert resolve_setting("compact_reminder_fraction", model="deepseek-flash") == 0.374
-
-
-def test_deepseek_v4_flash_is_withdrawn_to_the_deepseek_flash_fallback() -> None:
-    """User order 2026-09-17 (task #3750): the provider renamed the flash
-    tier, so the old `deepseek-v4-flash` id leaves the spawn picker; a config
-    that still names it resolves to `deepseek-flash` before provider
-    construction — the withdrawal shape of #1582/#2140, not a removal."""
-    spec = MODELS["deepseek-v4-flash"]
-    assert not spec.spawnable
-    assert spec.unavailable_fallback == "deepseek-flash"
-    assert "deepseek-v4-flash" not in SUPPORTED_MODELS["deepseek"]
-    assert resolve_available_model("deepseek-v4-flash") == "deepseek-flash"
-    assert spec.context_window == 1_000_000
-    assert spec.max_output_tokens == 384_000
 
 
 def test_gemini_flash_lite_latest_registry_facts() -> None:
@@ -267,33 +256,6 @@ def test_superseded_chain_validation_accepts_valid_link(
     reg._validate_registry()
 
 
-def test_deepseek_vision_exp_registry_facts() -> None:
-    """The multimodal deepseek entry carries the v4-flash facts (window,
-    output cap, cutoff, effort vocabulary, compact thresholds) plus image
-    media support — it is the same text model with still-image input added,
-    not a new family. Withdrawn from new selections 2026-09-10 (user order):
-    the vision experiment is stopped, so it leaves the picker and resolves to
-    deepseek-flash before provider construction — the facts stay for
-    registry answers (the PR #1582/#2140 withdrawal shape)."""
-    spec = MODELS["deepseek-v4-flash-vision-exp"]
-    assert spec.provider == "deepseek"
-    assert not spec.spawnable
-    assert spec.unavailable_fallback == "deepseek-flash"
-    assert "deepseek-v4-flash-vision-exp" not in SUPPORTED_MODELS["deepseek"]
-    assert resolve_available_model("deepseek-v4-flash-vision-exp") == "deepseek-flash"
-    assert spec.context_window == 1_000_000
-    assert spec.max_output_tokens == 384_000
-    assert spec.knowledge_cutoff == "2026-04"
-    assert spec.effort_levels == ("high", "max")
-    assert spec.media_types == frozenset({"image"})
-    # Same compact decision as every deepseek entry (2026-08-29): soft 374k /
-    # hard 512k on the 1M window.
-    assert resolve_setting("auto_compact_fraction", model="deepseek-v4-flash-vision-exp") == 0.512
-    assert (
-        resolve_setting("compact_reminder_fraction", model="deepseek-v4-flash-vision-exp") == 0.374
-    )
-
-
 def test_glm_5_3_registry_facts() -> None:
     spec = MODELS["glm-5.3"]
     assert spec.provider == "glm"
@@ -372,10 +334,8 @@ def test_glm_5_3_series_thinking_cannot_be_disabled() -> None:
 
 
 def test_image_media_types_match_the_verified_model_matrix() -> None:
-    """Image-capable ids are fixed by their provider bindings, not a broad
-    prefix: the DeepSeek vision experiment is the only multimodal deepseek."""
+    """Image-capable ids match their registered media declarations."""
     expected = {
-        "deepseek-v4-flash-vision-exp",
         "claude-sonnet-5",
         "claude-haiku-4-5-20251001",
         "claude-opus-5",
@@ -457,16 +417,10 @@ def test_shared_floor_applies_when_nothing_set() -> None:
 
 
 def test_deepseek_carries_per_model_compact_thresholds() -> None:
-    """User decision (2026-08-29): the deepseek entries compact at soft
-    374k / hard 512k on their 1M window — 0.374 / 0.512 of the window."""
-    for model in (
-        "deepseek-flash",
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "deepseek-v4-flash-vision-exp",
-    ):
-        assert resolve_setting("auto_compact_fraction", model=model) == 0.512, model
-        assert resolve_setting("compact_reminder_fraction", model=model) == 0.374, model
+    """User decision (2026-08-29): the deepseek entry compacts at soft
+    374k / hard 512k on its 1M window — 0.374 / 0.512 of the window."""
+    assert resolve_setting("auto_compact_fraction", model="deepseek-flash") == 0.512
+    assert resolve_setting("compact_reminder_fraction", model="deepseek-flash") == 0.374
 
 
 def test_unregistered_model_falls_back_to_shared_floor() -> None:
@@ -476,7 +430,7 @@ def test_unregistered_model_falls_back_to_shared_floor() -> None:
 
 
 def test_per_model_default_wins_over_shared_floor(monkeypatch: pytest.MonkeyPatch) -> None:
-    spec = MODELS["deepseek-v4-pro"]
+    spec = MODELS["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
         spawnable=spec.spawnable,
@@ -486,17 +440,17 @@ def test_per_model_default_wins_over_shared_floor(monkeypatch: pytest.MonkeyPatc
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(auto_compact_fraction=0.9, agent_communication_style="silent"),
     )
-    monkeypatch.setitem(MODELS, "deepseek-v4-pro", tuned)
-    assert resolve_setting("auto_compact_fraction", model="deepseek-v4-pro") == 0.9
-    assert resolve_setting("agent_communication_style", model="deepseek-v4-pro") == "silent"
+    monkeypatch.setitem(MODELS, "deepseek-flash", tuned)
+    assert resolve_setting("auto_compact_fraction", model="deepseek-flash") == 0.9
+    assert resolve_setting("agent_communication_style", model="deepseek-flash") == "silent"
     # A field the entry has no opinion on still falls to the shared floor.
-    assert resolve_setting("compact_reminder_fraction", model="deepseek-v4-pro") == 0.3
+    assert resolve_setting("compact_reminder_fraction", model="deepseek-flash") == 0.3
 
 
 def test_explicit_setting_wins_over_per_model_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-None settings value (env/.env/per-agent overlay all write one) is
     the explicit layer — it beats the per-model default."""
-    spec = MODELS["deepseek-v4-pro"]
+    spec = MODELS["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
         spawnable=spec.spawnable,
@@ -506,16 +460,16 @@ def test_explicit_setting_wins_over_per_model_default(monkeypatch: pytest.Monkey
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(auto_compact_fraction=0.9, reasoning_effort="high"),
     )
-    monkeypatch.setitem(MODELS, "deepseek-v4-pro", tuned)
+    monkeypatch.setitem(MODELS, "deepseek-flash", tuned)
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.5)
-    assert resolve_setting("auto_compact_fraction", model="deepseek-v4-pro") == 0.5
+    assert resolve_setting("auto_compact_fraction", model="deepseek-flash") == 0.5
 
 
 def test_explicit_empty_string_beats_per_model_effort(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicitly empty AVA_REASONING_EFFORT is a real choice ("use the
     provider default"), distinct from unset — it must mask a per-model effort
     default rather than fall through it."""
-    spec = MODELS["deepseek-v4-pro"]
+    spec = MODELS["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
         spawnable=spec.spawnable,
@@ -525,10 +479,10 @@ def test_explicit_empty_string_beats_per_model_effort(monkeypatch: pytest.Monkey
         effort_levels=spec.effort_levels,
         tuning=ModelTuning(reasoning_effort="max"),
     )
-    monkeypatch.setitem(MODELS, "deepseek-v4-pro", tuned)
-    assert resolve_setting("reasoning_effort", model="deepseek-v4-pro") == "max"
+    monkeypatch.setitem(MODELS, "deepseek-flash", tuned)
+    assert resolve_setting("reasoning_effort", model="deepseek-flash") == "max"
     monkeypatch.setattr(settings.lm, "reasoning_effort", "")
-    assert resolve_setting("reasoning_effort", model="deepseek-v4-pro") == ""
+    assert resolve_setting("reasoning_effort", model="deepseek-flash") == ""
 
 
 def test_unknown_setting_fails_fast() -> None:
@@ -536,9 +490,9 @@ def test_unknown_setting_fails_fast() -> None:
     resolving to something — both a typo and a real-but-non-per-model config
     field (the membership check runs before the explicit-value shortcut)."""
     with pytest.raises(AttributeError):
-        resolve_setting("no_such_setting", model="deepseek-v4-pro")
+        resolve_setting("no_such_setting", model="deepseek-flash")
     with pytest.raises(AttributeError):
-        resolve_setting("labeler_model", model="deepseek-v4-pro")
+        resolve_setting("labeler_model", model="deepseek-flash")
 
 
 # ---------------------------------------------------------------------------
@@ -570,10 +524,10 @@ def test_explain_setting_names_the_winning_layer(
 ) -> None:
     """Every layer combination reports the value AND which layer produced it,
     while the losing candidates stay visible (the whole point of the view)."""
-    spec = MODELS["deepseek-v4-pro"]
+    spec = MODELS["deepseek-flash"]
     monkeypatch.setitem(
         MODELS,
-        "deepseek-v4-pro",
+        "deepseek-flash",
         ModelSpec(
             provider=spec.provider,
             spawnable=spec.spawnable,
@@ -584,7 +538,7 @@ def test_explain_setting_names_the_winning_layer(
             tuning=ModelTuning(auto_compact_fraction=tuned),
         ),
     )
-    resolved = explain_setting("auto_compact_fraction", model="deepseek-v4-pro", explicit=explicit)
+    resolved = explain_setting("auto_compact_fraction", model="deepseek-flash", explicit=explicit)
     assert (resolved.source, resolved.value) == (expected_source, expected_value)
     assert resolved.shared_default == 0.4
     assert resolved.model_default == tuned
@@ -605,7 +559,7 @@ def test_explain_setting_rejects_a_non_tuning_field() -> None:
     """Same fail-fast membership gate as resolve_setting — a real-but-not-per-model
     config field must not resolve through the per-model path."""
     with pytest.raises(AttributeError):
-        explain_setting("labeler_model", model="deepseek-v4-pro", explicit=None)
+        explain_setting("labeler_model", model="deepseek-flash", explicit=None)
 
 
 def test_compact_fractions_are_per_agent_overridable() -> None:
@@ -641,12 +595,10 @@ def test_resolve_setting_degrades_when_owning_domain_not_in_profile(
         )
 
     monkeypatch.setattr(shared.config, "get_field", _boom)
-    value = resolve_setting("auto_compact_fraction", model="deepseek-v4-flash")
+    value = resolve_setting("auto_compact_fraction", model="deepseek-flash")
     # the no-explicit resolution (model layer over the shared floor), never the
     # sentinel and never a crash
-    expected = explain_setting(
-        "auto_compact_fraction", model="deepseek-v4-flash", explicit=None
-    ).value
+    expected = explain_setting("auto_compact_fraction", model="deepseek-flash", explicit=None).value
     assert value == expected
 
 
@@ -654,9 +606,9 @@ def test_resolve_setting_still_reads_explicit_value_in_full_profile() -> None:
     """In a full (profile-less) process — the agent's own — the explicit value
     still wins: the degradation must not leak into the owner process."""
     explicit = get_field("auto_compact_fraction")
-    value = resolve_setting("auto_compact_fraction", model="deepseek-v4-flash")
+    value = resolve_setting("auto_compact_fraction", model="deepseek-flash")
     expected = explain_setting(
-        "auto_compact_fraction", model="deepseek-v4-flash", explicit=explicit
+        "auto_compact_fraction", model="deepseek-flash", explicit=explicit
     ).value
     assert value == expected
 
@@ -676,8 +628,8 @@ def test_attach_modalities_default_to_the_declared_media_matrix() -> None:
         {"image", "pdf", "audio", "video"}
     )
     assert attach_modalities_for_model("claude-sonnet-4-6") == frozenset({"image", "pdf"})
-    assert attach_modalities_for_model("deepseek-v4-flash-vision-exp") == frozenset({"image"})
-    assert attach_modalities_for_model("deepseek-v4-pro") == frozenset()
+    assert attach_modalities_for_model("glm-5.3-flash") == frozenset({"image"})
+    assert attach_modalities_for_model("deepseek-flash") == frozenset()
 
 
 def test_attach_modalities_declaration_must_stay_within_media_types() -> None:
@@ -712,19 +664,19 @@ def test_reasoning_effort_default_must_stay_within_effort_levels() -> None:
 
 
 def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
-    """File-level isolation (task #3212): a process whose FIRST registry use is
-    the resolve must see plugin-declared withdrawals — the provider loader is
-    triggered by this call, not assumed from an earlier model load. This test
-    process already loaded the providers via the module fixture, which would
-    mask the failure, so the scenario runs in a fresh interpreter (pre-fix it
-    returned the withdrawn id unresolved)."""
+    """First registry use loads provider plugins before resolving a withdrawal."""
     code = textwrap.dedent(
         """
+        from dataclasses import replace
         from shared.lm.registry import MODELS, resolve_available_model
 
         assert not MODELS, "fresh process must start with an empty registry"
-        resolved = resolve_available_model("deepseek-v4-flash-vision-exp")
-        assert resolved == "deepseek-flash", resolved
+        assert resolve_available_model("deepseek-flash") == "deepseek-flash"
+        MODELS["deepseek-retired-fixture"] = replace(
+            MODELS["deepseek-flash"], spawnable=False,
+            unavailable_fallback="deepseek-flash",
+        )
+        assert resolve_available_model("deepseek-retired-fixture") == "deepseek-flash"
         print("OK")
         """
     )
@@ -740,13 +692,20 @@ def test_resolve_is_self_sufficient_in_a_fresh_process() -> None:
     assert result.stdout.strip() == "OK"
 
 
-def test_normalize_overlay_settles_withdrawn_model_and_returns_receipt() -> None:
-    """Write-side settlement (task #4306): a registered-but-withdrawn id in a
-    config overlay is rewritten in place to its registered fallback and the
-    (requested, resolved) pair comes back for the spawner-visible receipt —
-    the stored name must never be the withdrawn id."""
-    config: dict[str, object] = {"llm_model": "deepseek-v4-flash", "reasoning_effort": "low"}
-    assert normalize_overlay_llm_model(config) == ("deepseek-v4-flash", "deepseek-flash")
+def test_normalize_overlay_settles_withdrawn_model_and_returns_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A synthetic withdrawal keeps the write-side settlement contract covered."""
+    from dataclasses import replace
+
+    model = "deepseek-retired-fixture"
+    monkeypatch.setitem(
+        MODELS,
+        model,
+        replace(MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"),
+    )
+    config: dict[str, object] = {"llm_model": model, "reasoning_effort": "low"}
+    assert normalize_overlay_llm_model(config) == (model, "deepseek-flash")
     assert config == {"llm_model": "deepseek-flash", "reasoning_effort": "low"}
 
 

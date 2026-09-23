@@ -61,7 +61,7 @@ class TestBuildChatModel:
         """deepseek-* also returns ChatAnthropic, but base_url points to DeepSeek
         anthropic-compatible endpoint, and its plugin reads DEEPSEEK_API_KEY."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        llm = build_chat_model("deepseek-v4-pro")
+        llm = build_chat_model("deepseek-flash")
         assert isinstance(llm, ChatAnthropic)
         # base_url uses DeepSeek instead of the official Anthropic
         assert "deepseek.com" in str(llm.anthropic_api_url)
@@ -72,11 +72,11 @@ class TestBuildChatModel:
         """deepseek-* must explicitly set max_tokens — langchain-anthropic's model profile
         only covers claude-*, giving deepseek-* a fallback legacy default of 4096, and extended
         thinking can easily exceed 4096 in a single turn and be truncated (agent 169 incident).
-        Set to DeepSeek V4 Pro documented cap of 384K so the client is no longer the bottleneck;
+        Set to DeepSeek Flash documented cap of 384K so the client is no longer the bottleneck;
         setting a high max_tokens has no side effect — max_tokens is the server-side output cap,
         not a budget, and the model only generates the tokens it needs."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
-        llm = build_chat_model("deepseek-v4-pro")
+        llm = build_chat_model("deepseek-flash")
         # isinstance narrow enables pyright to see ChatAnthropic.max_tokens
         # (build_chat_model returns BaseChatModel, the parent doesn't have this field)
         assert isinstance(llm, ChatAnthropic)
@@ -117,7 +117,7 @@ class TestBuildChatModel:
         overrides the per-model "max" from the registry — opt out to a cheaper tier."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "")
-        llm = build_chat_model("deepseek-v4-pro")
+        llm = build_chat_model("deepseek-flash")
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
 
@@ -126,7 +126,6 @@ class TestBuildChatModel:
         upgrades to max for recognized harnesses (docs note Claude Code / OpenCode), Ava is not
         on that list, so we must explicitly request it. Changing this default will break this
         test, signaling the need to sync docs / runbook."""
-        assert resolve_setting("reasoning_effort", model="deepseek-v4-pro") == "max"
         assert resolve_setting("reasoning_effort", model="deepseek-flash") == "max"
 
     def test_deepseek_max_effort_injects_output_config(
@@ -136,7 +135,7 @@ class TestBuildChatModel:
         by langchain-anthropic to the Anthropic SDK into the POST body."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
-        llm = build_chat_model("deepseek-v4-pro")
+        llm = build_chat_model("deepseek-flash")
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
 
@@ -147,7 +146,7 @@ class TestBuildChatModel:
         explicit value overrides the per-model 'max' from the registry."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
-        llm = build_chat_model("deepseek-v4-pro")
+        llm = build_chat_model("deepseek-flash")
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "high"}}
 
@@ -190,7 +189,7 @@ class TestBuildChatModel:
         provider 400 after the agent is already running."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-        llm = build_chat_model("deepseek-v4-pro")
+        llm = build_chat_model("deepseek-flash")
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "high"}}
 
@@ -213,7 +212,7 @@ class TestBuildChatModel:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "nonw")
         with pytest.raises(ValueError, match="unknown reasoning effort"):
-            build_chat_model("deepseek-v4-pro")
+            build_chat_model("deepseek-flash")
 
     def test_deepseek_thinking_disabled_skips_extra_body(
         self, monkeypatch: pytest.MonkeyPatch
@@ -224,7 +223,7 @@ class TestBuildChatModel:
         short-text path explicitly disables thinking; the global env effort must not sneak back in."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
-        llm = build_chat_model("deepseek-v4-pro", thinking={"type": "disabled"})
+        llm = build_chat_model("deepseek-flash", thinking={"type": "disabled"})
         assert isinstance(llm, ChatAnthropic)
         assert "extra_body" not in llm.model_kwargs
 
@@ -236,7 +235,7 @@ class TestBuildChatModel:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
         llm = build_chat_model(
-            "deepseek-v4-pro", thinking={"type": "enabled", "budget_tokens": 8000}
+            "deepseek-flash", thinking={"type": "enabled", "budget_tokens": 8000}
         )
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
@@ -247,7 +246,7 @@ class TestBuildChatModel:
         by a global config set to a lower effort by some agent."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
-        llm = build_chat_model("deepseek-v4-pro", reasoning_effort="max")
+        llm = build_chat_model("deepseek-flash", reasoning_effort="max")
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
 
@@ -258,7 +257,7 @@ class TestBuildChatModel:
         independent source, not dependent on the global being non-empty."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "")
-        llm = build_chat_model("deepseek-v4-pro", reasoning_effort="max")
+        llm = build_chat_model("deepseek-flash", reasoning_effort="max")
         assert isinstance(llm, ChatAnthropic)
         assert llm.model_kwargs["extra_body"] == {"output_config": {"effort": "max"}}
 
@@ -267,7 +266,7 @@ class TestBuildChatModel:
         back to ANTHROPIC_API_KEY and only discovering the issue through a 401."""
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
-            build_chat_model("deepseek-v4-pro")
+            build_chat_model("deepseek-flash")
 
     def test_claude_missing_api_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing ANTHROPIC_API_KEY raises RuntimeError fail-fast — consistent with all other
@@ -702,7 +701,7 @@ class TestBuildChatModel:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         from langchain_anthropic import ChatAnthropic
 
-        m = build_chat_model("deepseek-v4-pro")
+        m = build_chat_model("deepseek-flash")
         assert isinstance(m, ChatAnthropic)
         assert m.disable_streaming is False
 
@@ -1505,7 +1504,7 @@ class TestValidateModelConfig:
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-            validate_model_config(model="deepseek-v4-pro")
+            validate_model_config(model="deepseek-flash")
 
     def test_missing_gemini_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GEMINI_API_KEY not set → ValueError."""
@@ -1574,7 +1573,7 @@ class TestValidateModelConfig:
         # The cluster default has its plugin key, but config picks claude → fail.
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
             validate_model_config(
-                model="deepseek-v4-pro",  # cluster default
+                model="deepseek-flash",  # cluster default
                 config={"llm_model": "claude-sonnet-5"},  # per-agent override
             )
 
@@ -1586,7 +1585,7 @@ class TestValidateModelConfig:
             lambda: {"ANTHROPIC_API_KEY": "sk-ant-123"},
         )
         result = validate_model_config(
-            model="deepseek-v4-pro",  # cluster default (has no deepseek key)
+            model="deepseek-flash",  # cluster default (has no deepseek key)
             config={"llm_model": "claude-sonnet-5"},  # per-agent (has key)
         )
         assert result == "claude-sonnet-5"

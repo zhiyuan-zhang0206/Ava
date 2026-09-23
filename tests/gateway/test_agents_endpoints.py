@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import replace
 from typing import cast
 
 import psycopg
@@ -20,6 +21,20 @@ from psycopg_pool import ConnectionPool
 
 from gateway._cors import cors_allowed_origins
 from gateway.app import app
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.registry import MODELS
+
+
+@pytest.fixture
+def withdrawn_model(monkeypatch: pytest.MonkeyPatch) -> str:
+    ensure_provider_plugins_loaded()
+    model = "deepseek-retired-fixture"
+    monkeypatch.setitem(
+        MODELS,
+        model,
+        replace(MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"),
+    )
+    return model
 
 
 def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:
@@ -55,11 +70,18 @@ def test_get_models_returns_grouped_supported_models() -> None:
     body = resp.json()
     flat = [m for group in body["providers"].values() for m in group]
     assert "deepseek-flash" in flat
-    # V4 Pro, the renamed-away V4 Flash id and the vision experiment are
-    # withdrawn from the picker (user orders 2026-09-10 / 2026-09-17).
+    # Retired ids are absent from the entire registry, including the picker.
     assert "deepseek-v4-pro" not in flat
     assert "deepseek-v4-flash" not in flat
     assert "deepseek-v4-flash-vision-exp" not in flat
+    assert "mimo-v2.5-pro-ultraspeed" not in flat
+    for model in (
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "mimo-v2.5-pro-ultraspeed",
+    ):
+        assert model not in body["models"]
     assert "gpt-5.6-sol" in flat
     # additional verified-live models
     assert "claude-sonnet-5" in flat
@@ -254,18 +276,18 @@ class TestSpawn:
         assert row is not None and row[1] == "claude-code"
 
     def test_spawn_settles_withdrawn_model_and_returns_receipt(
-        self, db_conn: psycopg.Connection
+        self, db_conn: psycopg.Connection, withdrawn_model: str
     ) -> None:
         """A registered-but-withdrawn llm_model is rewritten to its registered
         fallback before the row is created, and the spawner gets the receipt in
         the response (task #4306) — instead of the withdrawal surfacing only as
         a wake-time normalization log."""
         with TestClient(app) as client:
-            resp = client.post("/api/agents", json={"config": {"llm_model": "deepseek-v4-flash"}})
+            resp = client.post("/api/agents", json={"config": {"llm_model": withdrawn_model}})
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["config_normalized"] == {
-            "requested": "deepseek-v4-flash",
+            "requested": withdrawn_model,
             "resolved": "deepseek-flash",
         }
         with db_conn.cursor() as cur:
@@ -810,7 +832,7 @@ class TestRestart:
             assert cur.fetchone() == ({"config_overlay": {"llm_model": "gpt-5.6-sol"}},)
 
     def test_restart_settles_withdrawn_model_before_storing(
-        self, db_conn: psycopg.Connection
+        self, db_conn: psycopg.Connection, withdrawn_model: str
     ) -> None:
         """The ops restart channel (the provider-outage model switch) settles a
         withdrawn llm_model to its registered fallback in both the persisted
@@ -819,7 +841,7 @@ class TestRestart:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
-                json={"config_overlay": {"llm_model": "deepseek-v4-flash"}},
+                json={"config_overlay": {"llm_model": withdrawn_model}},
             )
         assert resp.status_code == 200
         with db_conn.cursor() as cur:

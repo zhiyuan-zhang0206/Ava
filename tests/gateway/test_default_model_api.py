@@ -11,11 +11,27 @@ fixture restores NULL.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.registry import MODELS
+
+
+@pytest.fixture
+def withdrawn_model(monkeypatch: pytest.MonkeyPatch) -> str:
+    ensure_provider_plugins_loaded()
+    model = "deepseek-retired-fixture"
+    monkeypatch.setitem(
+        MODELS,
+        model,
+        replace(MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"),
+    )
+    return model
 
 
 def _spawn_agent(spawner: str = "test") -> int:
@@ -49,23 +65,27 @@ class TestGet:
             resp = client.get("/api/config/default-model")
         assert resp.json() == {"model": "claude-sonnet-5", "source": "cluster"}
 
-    def test_unset_resolves_a_withdrawn_config_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_unset_resolves_a_withdrawn_config_model(
+        self, monkeypatch: pytest.MonkeyPatch, withdrawn_model: str
+    ) -> None:
         """A config chain naming a withdrawn id reports what actually runs: the
         spawn boundary resolves it the same way (`factory.validate_model_config`)."""
         from shared.config import settings
 
-        monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
+        monkeypatch.setattr(settings.lm, "llm_model", withdrawn_model)
         with TestClient(app) as client:
             resp = client.get("/api/config/default-model")
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"model": "deepseek-flash", "source": "config"}
 
-    def test_resolves_a_withdrawn_cluster_row(self, db_conn: psycopg.Connection) -> None:
+    def test_resolves_a_withdrawn_cluster_row(
+        self, db_conn: psycopg.Connection, withdrawn_model: str
+    ) -> None:
         """A row written while its model was still spawnable keeps the id; the
         endpoint still answers with the model a new agent actually runs."""
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE cluster_defaults SET llm_model = %s WHERE id = 1", ("deepseek-v4-pro",)
+                "UPDATE cluster_defaults SET llm_model = %s WHERE id = 1", (withdrawn_model,)
             )
         db_conn.commit()
         with TestClient(app) as client:

@@ -48,7 +48,7 @@ def test_drain_builds_one_native_image_message(tmp_path: Path) -> None:
         attach=AttachState(pending=[AttachEntry(path=str(image.resolve()), label="after fix")])
     )
 
-    drain = build_attach_drain(state, _context("deepseek-v4-flash-vision-exp"))
+    drain = build_attach_drain(state, _context("glm-5.3-flash"))
 
     assert drain is not None
     assert drain["attach"] == AttachState()
@@ -69,7 +69,7 @@ def test_drain_keeps_text_only_models_informed(tmp_path: Path) -> None:
     _write_png(image)
     state = BaseAgentState(attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]))
 
-    drain = build_attach_drain(state, _context("deepseek-v4-pro"))
+    drain = build_attach_drain(state, _context("deepseek-flash"))
 
     assert drain is not None
     message = drain["messages"][0]
@@ -81,7 +81,7 @@ def test_drain_keeps_text_only_models_informed(tmp_path: Path) -> None:
 
 
 def test_drain_is_noop_without_pending_attachments() -> None:
-    assert build_attach_drain(BaseAgentState(), _context("deepseek-v4-pro")) is None
+    assert build_attach_drain(BaseAgentState(), _context("deepseek-flash")) is None
 
 
 async def test_claim_drains_before_turn_boundary_wait(
@@ -93,7 +93,7 @@ async def test_claim_drains_before_turn_boundary_wait(
         halted=True,
         attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]),
     )
-    runtime = Runtime(context=_context("deepseek-v4-flash-vision-exp"))
+    runtime = Runtime(context=_context("glm-5.3-flash"))
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
 
     monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", AsyncMock(return_value=[]))
@@ -114,7 +114,7 @@ async def test_claim_does_not_drain_mid_turn(
         messages=[HumanMessage(content="continue working")],
         attach=AttachState(pending=[AttachEntry(path=str(image), label=None)]),
     )
-    runtime = Runtime(context=_context("deepseek-v4-flash-vision-exp"))
+    runtime = Runtime(context=_context("glm-5.3-flash"))
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
 
     monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", AsyncMock(return_value=[]))

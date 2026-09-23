@@ -39,19 +39,13 @@ def test_budget_is_thirty_forty_percent_of_a_1m_window() -> None:
 
 
 def test_deepseek_budget_is_374k_soft_512k_hard() -> None:
-    """User decision (2026-08-29): the deepseek entries opt out of the flat
-    rule with per-model fractions — soft 374k / hard 512k on their 1M
+    """User decision (2026-08-29): the deepseek entry opts out of the flat
+    rule with per-model fractions — soft 374k / hard 512k on its 1M
     window."""
-    for model in (
-        "deepseek-flash",
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "deepseek-v4-flash-vision-exp",
-    ):
-        budget = resolve_context_budget(model)
-        assert budget.max_context_tokens == 1_000_000
-        assert budget.soft_compact_tokens == 374_000, model
-        assert budget.hard_compact_tokens == 512_000, model
+    budget = resolve_context_budget("deepseek-flash")
+    assert budget.max_context_tokens == 1_000_000
+    assert budget.soft_compact_tokens == 374_000
+    assert budget.hard_compact_tokens == 512_000
 
 
 def test_budget_scales_to_a_smaller_window() -> None:
@@ -71,12 +65,7 @@ def test_every_non_deepseek_spawnable_model_runs_the_flat_thirty_forty_rule() ->
     test_deepseek_budget_is_374k_soft_512k_hard)."""
     for models in SUPPORTED_MODELS.values():
         for model in models:
-            if model in (
-                "deepseek-flash",
-                "deepseek-v4-pro",
-                "deepseek-v4-flash",
-                "deepseek-v4-flash-vision-exp",
-            ):
+            if model == "deepseek-flash":
                 continue
             budget = resolve_context_budget(model)
             window = budget.max_context_tokens
@@ -88,7 +77,7 @@ def test_fractions_are_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     """The thresholds track the configured fractions (per-agent overridable)."""
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.5)
     monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.25)
-    budget = resolve_context_budget("deepseek-v4-pro")
+    budget = resolve_context_budget("deepseek-flash")
     assert budget.hard_compact_tokens == 500_000
     assert budget.soft_compact_tokens == 250_000
 
@@ -100,7 +89,7 @@ def test_ceiling_caps_the_hard_threshold(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.8)
     monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.6)
     monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 150_000)
-    budget = resolve_context_budget("deepseek-v4-pro")
+    budget = resolve_context_budget("deepseek-flash")
     assert budget.hard_compact_tokens == 150_000
     # The reminder is compressed by the same 150K/800K factor, so it keeps its
     # 0.75 lead instead of sitting above the forced ceiling at 600K.
@@ -114,9 +103,9 @@ def test_ceiling_above_the_fraction_is_inert(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(settings.agent, "auto_compact_fraction", 0.8)
     monkeypatch.setattr(settings.agent, "compact_reminder_fraction", 0.6)
     monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 900_000)
-    capped = resolve_context_budget("deepseek-v4-pro")
+    capped = resolve_context_budget("deepseek-flash")
     monkeypatch.setattr(settings.agent, "auto_compact_ceiling_tokens", 0)
-    uncapped = resolve_context_budget("deepseek-v4-pro")
+    uncapped = resolve_context_budget("deepseek-flash")
     assert capped == uncapped
     assert uncapped.hard_compact_tokens == 800_000
     assert uncapped.soft_compact_tokens == 600_000
