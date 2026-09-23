@@ -148,6 +148,23 @@ function clickDirect(group: HTMLElement, testId: string): void {
 }
 
 describe("HomeLayout frame contract", () => {
+  it("client mount renders the real frame directly — no placeholder frame", () => {
+    // The placeholder exists for the hydrating load's SSR-safe frame only; a
+    // client-side navigation must paint the real frame in its first commit
+    // (a back/forward into the home page must not flash a blank frame).
+    render(
+      <HomeLayout
+        {...panes()}
+        isNarrow={false}
+        isLarge
+        sidebarCollapsed={false}
+      />,
+    );
+
+    expect(screen.queryByTestId("home-layout-placeholder")).toBeNull();
+    expect(screen.getAllByTestId("resizable-panel-group")).toHaveLength(2);
+  });
+
   it("server render reserves the layout without mounting a panel group", () => {
     const html = renderToString(
       <HomeLayout

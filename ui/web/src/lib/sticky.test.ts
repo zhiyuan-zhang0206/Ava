@@ -783,3 +783,29 @@ describe("slow drag run (user report 2026-09-12: streaming output + a slow drag 
     expect(ctl.isSticky()).toBe(false);
   });
 });
+
+describe("notifyRestored (back/forward re-entry)", () => {
+  it("a restored mid position stops following and is not pinned by later growth", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    ctl.notifyRestored(view(300, 4000)); // dist 3100, far outside the zone
+    expect(ctl.isSticky()).toBe(false);
+    // Content grows under the reader; no pin is requested.
+    expect(ctl.handleLayoutChange(view(300, 4400))).toBe(false);
+  });
+
+  it("a restored at-bottom position keeps following", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    ctl.notifyRestored(view(3400, 4100)); // dist 100 < zone(600)=120
+    expect(ctl.isSticky()).toBe(true);
+    expect(ctl.handleLayoutChange(view(3400, 4200))).toBe(true);
+  });
+
+  it("resets the accumulated run so a restored position survives jitter", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    ctl.notifyRestored(view(1000, 5000)); // dist 3400
+    // A sub-noise echo at the new position decides nothing, and the restore
+    // baseline means no phantom upward run.
+    ctl.handleScroll(view(1000, 5000));
+    expect(ctl.isSticky()).toBe(false);
+  });
+});

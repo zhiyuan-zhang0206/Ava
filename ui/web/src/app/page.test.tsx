@@ -177,6 +177,11 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+// The timeline's scroll memory is keyed by the history entry (router.bfcacheId).
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ bfcacheId: "_b_test_" }),
+}));
+
 
 
 // Child-component stubs — render a recognizable testid + expose key props for assertions
