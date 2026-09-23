@@ -26,7 +26,7 @@ import json
 import os
 
 import pytest
-from playwright.sync_api import Browser, BrowserContext, Page, Route, expect
+from playwright.sync_api import Browser, BrowserContext, Locator, Page, Route, expect
 
 from tests.e2e._layout_assertions import (
     all_elements_within_parents,
@@ -378,6 +378,40 @@ def test_timeline_layout_invariants(
         ctx.close()
 
 
+def _assert_scrollbar_state(page: Page, track: Locator, opacity: str, state: str) -> None:
+    expect(track).to_have_css("opacity", opacity, timeout=3000)
+    assert _no_page_scroll(page), f"{state} scrollbar widened the document"
+
+
+def _invisible_track_point(track: Locator) -> tuple[float, float]:
+    box = track.bounding_box()
+    assert box is not None
+    x = box["x"] + box["width"] / 2
+    y = box["y"] + box["height"] / 2
+    assert track.evaluate(
+        "(el, point) => { const hit = document.elementFromPoint(point.x, point.y); return hit === el || el.contains(hit); }",
+        {"x": x, "y": y},
+    ), "invisible track is not hit-testable"
+    return x, y
+
+
+def _assert_scrollbar_layout(viewport: Locator, content: Locator, before: dict) -> None:
+    assert viewport.evaluate("el => el.clientWidth") == before["width"]
+    assert content.evaluate("el => el.getBoundingClientRect().toJSON()") == before["rect"]
+
+
+def _content_hover_point(viewport: Locator) -> tuple[float, float]:
+    box = viewport.bounding_box()
+    assert box is not None
+    x = box["x"] + min(80, box["width"] / 2)
+    y = box["y"] + box["height"] / 2
+    assert viewport.evaluate(
+        "(el, point) => el.contains(document.elementFromPoint(point.x, point.y))",
+        {"x": x, "y": y},
+    ), "content hover point is outside the viewport"
+    return x, y
+
+
 def test_timeline_scrollbar_hover_reveal(
     playwright_browser: Browser, _frontend_target: str
 ) -> None:
@@ -399,43 +433,23 @@ def test_timeline_scrollbar_hover_reveal(
         assert viewport.evaluate("el => el.scrollHeight > el.clientHeight")
 
         page.mouse.move(1, 1)
-        expect(track).to_have_css("opacity", "0", timeout=3000)
-        assert _no_page_scroll(page), "scrollbar at rest widened the document"
+        _assert_scrollbar_state(page, track, "0", "at rest")
         before = viewport.evaluate(
             "el => ({width: el.clientWidth, rect: el.querySelector('[role=log]').getBoundingClientRect().toJSON()})"
         )
 
-        box = track.bounding_box()
-        assert box is not None
-        track_x = box["x"] + box["width"] / 2
-        track_y = box["y"] + box["height"] / 2
-        assert track.evaluate(
-            "(el, point) => { const hit = document.elementFromPoint(point.x, point.y); return hit === el || el.contains(hit); }",
-            {"x": track_x, "y": track_y},
-        ), "invisible track is not hit-testable"
-
+        track_x, track_y = _invisible_track_point(track)
         page.mouse.move(track_x, track_y)
-        expect(track).to_have_css("opacity", "1", timeout=3000)
-        assert viewport.evaluate("el => el.clientWidth") == before["width"]
-        assert content.evaluate("el => el.getBoundingClientRect().toJSON()") == before["rect"]
-        assert _no_page_scroll(page), "hovered scrollbar widened the document"
+        _assert_scrollbar_state(page, track, "1", "hovered")
+        _assert_scrollbar_layout(viewport, content, before)
 
         page.mouse.move(1, 1)
-        expect(track).to_have_css("opacity", "0", timeout=3000)
-        assert _no_page_scroll(page), "hidden scrollbar widened the document"
+        _assert_scrollbar_state(page, track, "0", "hidden")
 
-        viewport_box = viewport.bounding_box()
-        assert viewport_box is not None
-        content_x = viewport_box["x"] + min(80, viewport_box["width"] / 2)
-        content_y = viewport_box["y"] + viewport_box["height"] / 2
-        assert viewport.evaluate(
-            "(el, point) => el.contains(document.elementFromPoint(point.x, point.y))",
-            {"x": content_x, "y": content_y},
-        ), "content hover point is outside the viewport"
+        content_x, content_y = _content_hover_point(viewport)
         page.mouse.move(content_x, content_y)
         page.wait_for_timeout(350)  # Let an accidental 300 ms hover fade become observable.
-        expect(track).to_have_css("opacity", "0")
-        assert _no_page_scroll(page), "content hover widened the document"
+        _assert_scrollbar_state(page, track, "0", "content hover")
 
         scroll_top = viewport.evaluate("el => el.scrollTop")
         max_scroll = viewport.evaluate("el => el.scrollHeight - el.clientHeight")
@@ -450,8 +464,7 @@ def test_timeline_scrollbar_hover_reveal(
             timeout=2000,
         )
         assert _no_page_scroll(page), "scroll reveal widened the document"
-        expect(track).to_have_css("opacity", "0", timeout=3000)
-        assert _no_page_scroll(page), "idle hide widened the document"
+        _assert_scrollbar_state(page, track, "0", "idle hide")
     finally:
         ctx.close()
 
