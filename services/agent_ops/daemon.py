@@ -97,7 +97,6 @@ from shared.daemon_shutdown import install_graceful_shutdown
 from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.machine import machine_name
-from shared.paths import legacy_pid_path
 from shared.transport_encryption import verify_transport_encryption
 
 _log = logging.getLogger("services.agent_ops.daemon")
@@ -148,13 +147,11 @@ def _remove_pidfile() -> None:
 
 
 def _is_running() -> bool:
-    """Whether a daemon is already running (via pidfile, new + legacy paths).
+    """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.agent_ops.daemon") or pidfile_holds_daemon(
-        legacy_pid_path("agent_ops"), "services.agent_ops.daemon"
-    )
+    return pidfile_holds_daemon(_PIDFILE, "services.agent_ops.daemon")
 
 
 # The one cluster op that spawns an orchestration session, serialized against

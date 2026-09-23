@@ -138,29 +138,14 @@ class ClusterStatus(BaseModel):
 def _check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
     """Read a pidfile + `process_alive(pid)` to test liveness. Returns (alive, pid).
 
-    Checks the given path first, then falls back to the legacy
-    $AVA_HOME/<name>.pid location (the parent directory of a `run/...` path)
-    for backward compat during the transition to the run/ subdirectory.
-
     Missing/empty/non-int file -> (False, None). Pidfile present but the process
     is gone -> (False, pid)."""
     pf = Path(pidfile_path)
-    # Build a list of paths to check: the canonical path, plus a legacy
-    # fallback if the canonical path lives under a "run" directory.
-    paths = [pf]
-    if pf.parent.name == "run":
-        legacy = pf.parent.parent / pf.name
-        if legacy != pf:
-            paths.append(legacy)
-    for path in paths:
-        try:
-            pid = int(path.read_text().strip())
-        except (FileNotFoundError, ValueError):
-            continue
-        if process_alive(pid):
-            return True, pid
-        return False, pid
-    return False, None
+    try:
+        pid = int(pf.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return False, None
+    return process_alive(pid), pid
 
 
 def _count_agent_shells(sessions: list[SessionInfo]) -> int:

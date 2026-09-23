@@ -393,6 +393,22 @@ def test_pidfile_for_role_picks_per_capability_file(
         wd._pidfile_for_role("bogus")  # type: ignore[arg-type]
 
 
+def test_watchdog_guard_checks_only_configured_pidfile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pidfile = tmp_path / "run" / "gateway-watchdog.pid"
+    monkeypatch.setattr(wd.settings.services, "gateway_watchdog_pidfile", pidfile)
+    calls: list[tuple[Path, str]] = []
+
+    def holds_daemon(path: Path, module: str) -> bool:
+        calls.append((path, module))
+        return False
+
+    monkeypatch.setattr(wd, "pidfile_holds_daemon", holds_daemon)
+    assert wd._is_running(pidfile) is False
+    assert calls == [(pidfile, "services.watchdog.daemon")]
+
+
 # ─── per-capability healthcheck selection (build_services-derived roster) ─────
 
 

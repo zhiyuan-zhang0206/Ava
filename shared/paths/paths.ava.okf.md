@@ -78,5 +78,6 @@ crosses one admission boundary for the shared kernel PTY pool.
 - `$AVA_HOME/disabled_services` records the operator's durable disabled set.
   An empty file means no services are disabled; an absent file reads the same.
   Operator starts rewrite it, while internal restarts and the watchdog read it.
+- Daemon pidfiles live only under `$AVA_HOME/run/`.
 - Operational procedures that act on these paths (backup/restore, log reading,
   recovery) are in `.agents/skills/operating-ava-cluster/`.
