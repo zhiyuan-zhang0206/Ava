@@ -32,9 +32,8 @@ from shared.boot_policy import BOOT_RETRY_INTERVAL_S
 def _stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(os_autostart.settings.general, "ava_home", str(tmp_path))
     monkeypatch.setattr(os_autostart, "ava_binary_path", lambda: "/Users/x/.local/bin/ava")
-    # Pin the home-path slug (label token) + this home's legacy-cleanup tokens.
+    # Pin the home-path slug (label token).
     monkeypatch.setattr(os_autostart, "_home_slug", lambda: "ava-t-cafe0123")
-    monkeypatch.setattr(os_autostart, "_legacy_tokens", lambda: ["t"])
     # `relaunch_via_gui_domain` gates on IS_MACOS and CI runs this suite on
     # Linux; pin it here so the relaunch tests describe the macOS behaviour on
     # any host. The off-macOS refusal test overrides it back to False.
@@ -122,15 +121,15 @@ def test_register_linux_adds_reboot_entry(monkeypatch: pytest.MonkeyPatch) -> No
     assert "--cluster" not in captured["input"]
 
 
-def test_register_linux_replaces_legacy_cluster_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pre-path-only crontab entry (marker token = the old cluster name this
-    home mapped to) is removed when the slug-marked entry is written."""
+def test_register_linux_replaces_only_this_clusters_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace this home's slug-marked entry and preserve a co-located cluster."""
     captured: dict = {}
-    legacy_line = "@reboot /old/ava start --cluster t  # ava-autostart.t"
+    current_line = "@reboot /old/ava boot  # ava-autostart.ava-t-cafe0123"
+    other_line = "@reboot /other/ava boot  # ava-autostart.ava-other-deadbeef"
 
     def fake_run(cmd, **kw):
         if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=0, stdout=legacy_line + "\n")
+            return types.SimpleNamespace(returncode=0, stdout=f"{current_line}\n{other_line}\n")
         if cmd == ["crontab", "-"]:
             captured["input"] = kw.get("input")  # pyright: ignore[reportUnknownMemberType]
             return types.SimpleNamespace(returncode=0, stderr="")
@@ -140,7 +139,9 @@ def test_register_linux_replaces_legacy_cluster_entry(monkeypatch: pytest.Monkey
     monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     assert os_autostart._register_linux() == 0
     assert "ava-autostart.ava-t-cafe0123" in captured["input"]
-    assert legacy_line not in captured["input"]
+    assert current_line not in captured["input"]
+    assert other_line in captured["input"]
+    assert captured["input"].count("# ava-autostart.ava-t-cafe0123") == 1
 
 
 def test_register_linux_skips_when_no_crontab(monkeypatch: pytest.MonkeyPatch) -> None:

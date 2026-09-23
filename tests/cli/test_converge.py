@@ -1615,34 +1615,6 @@ def test_hold_watchdog_step_runs_on_both_roles():
     assert step.requires_unit_config is True
 
 
-# --- stale schtasks reap ---------------------------------------------------
-# A home-slug change leaves ghost tasks firing under the old \Ava\ folder,
-# racing the current slug's /Create on every converge (win 2026-08-11, task
-# #1196). The reap runs ahead of the register steps, on any serving role.
-
-
-def test_reap_stale_schtasks_calls_reap(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    from cli.commands import _converge_os_jobs
-
-    seen: list[str] = []
-    monkeypatch.setattr("shared.os_schtasks.reap_stale_tasks", lambda: seen.append("reaped") or 1)
-    _converge_os_jobs.reap_stale_schtasks(_ctx(tmp_path, home))  # pyright: ignore[reportUnknownArgumentType]
-    assert seen == ["reaped"]
-
-
-def test_reap_stale_schtasks_step_runs_on_both_roles():
-    """Not role-gated: any serving unit may carry a stale-slug ghost, and the
-    reap is a no-op on POSIX hosts."""
-    from cli.commands import _converge_os_jobs
-
-    step = next(s for s in _converge.CONVERGE_STEPS if s.name == "reap stale Windows tasks")
-    assert step.roles == _converge.ALL_ROLES
-    assert step.requires_unit_config is True
-    assert step.apply is _converge_os_jobs.reap_stale_schtasks
-
-
 def _screen_capture_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, enabled=True, incapability=None
 ):

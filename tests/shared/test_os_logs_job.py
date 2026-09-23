@@ -64,12 +64,14 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootstrap"]
 
 
-def test_legacy_log_retention_job_is_booted_out_and_removed(
+def test_macos_unregister_removes_only_the_requested_clusters_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    legacy = job._legacy_launchd_plist_path("ava-deadbeef")
-    legacy.parent.mkdir(parents=True)
-    legacy.write_text("<plist/>", encoding="utf-8")
+    target = job._launchd_plist_path("ava-deadbeef")
+    target.parent.mkdir(parents=True)
+    target.write_text("<target-plist/>", encoding="utf-8")
+    other = job._launchd_plist_path("ava-other-cafefeed")
+    other.write_text("<other-plist/>", encoding="utf-8")
     calls: list[list[str]] = []
 
     def run(argv: list[str], **_kwargs: object) -> types.SimpleNamespace:
@@ -78,32 +80,17 @@ def test_legacy_log_retention_job_is_booted_out_and_removed(
 
     monkeypatch.setattr(job.subprocess, "run", run)
 
-    job.reap_legacy_macos_job()
+    assert job._unregister_macos("ava-deadbeef") == 0
 
-    assert not legacy.exists()
+    assert not target.exists()
+    assert other.read_bytes() == b"<other-plist/>"
     assert calls == [
         [
             "launchctl",
             "bootout",
-            f"gui/{job.os.getuid()}/com.ava.ava-deadbeef.log-retention",
+            f"gui/{job.os.getuid()}/com.ava.ava-deadbeef.logs-maintenance",
         ]
     ]
-
-
-def test_legacy_reaper_does_not_touch_os_jobs_when_test_gate_is_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from shared import os_cron, platform
-
-    monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: False)
-    monkeypatch.setattr(platform, "IS_MACOS", True)
-    monkeypatch.setattr(
-        job,
-        "reap_legacy_macos_job",
-        lambda: pytest.fail("legacy reaper reached launchd with the test gate off"),
-    )
-
-    job.reap_legacy_logs_job()
 
 
 def test_linux_registration_replaces_only_this_clusters_line(
@@ -134,15 +121,14 @@ def test_linux_registration_replaces_only_this_clusters_line(
     assert "logs rotate" in written["body"] and "logs retention" in written["body"]
 
 
-def test_converge_registers_then_reaps_legacy_job(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_converge_registers_logs_maintenance(monkeypatch: pytest.MonkeyPatch) -> None:
     from cli.commands._converge_os_jobs import ensure_logs_maintenance
 
     calls: list[str] = []
     monkeypatch.setattr(job, "register_logs_job", lambda: calls.append("register"))
-    monkeypatch.setattr(job, "reap_legacy_logs_job", lambda: calls.append("reap"))
 
     ensure_logs_maintenance(None)  # type: ignore[arg-type]
-    assert calls == ["register", "reap"]
+    assert calls == ["register"]
 
 
 def test_windows_registration_uses_two_daily_tasks_one_minute_apart(

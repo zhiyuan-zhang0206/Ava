@@ -29,7 +29,6 @@ from cli.commands._converge_os_jobs import (
     ensure_packages_refresh_job,
     ensure_pr_flow_job,
     ensure_watchdog_probe,
-    reap_stale_schtasks,
 )
 from cli.commands._converge_pitr import converge_pitr_foundation
 from cli.commands._converge_redis_bridge import ensure_redis_bridge
@@ -562,8 +561,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
-    # Windows-only: reclaim \Ava\* tasks under a retired home slug (task #1196).
-    ConvergeStep("reap stale Windows tasks", reap_stale_schtasks, requires_unit_config=True),
     ConvergeStep(
         "daily logs maintenance",
         ensure_logs_maintenance,

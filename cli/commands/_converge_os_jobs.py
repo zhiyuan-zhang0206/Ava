@@ -17,29 +17,11 @@ rather than leaving the cluster silently unsupervised — EXCEPT on Windows, whe
 a registration failure degrades to a loud warning instead (see
 ``WindowsPlatformBackend``): the failure class is transient (task #1196), and a
 cluster that is down is worse than one that is up and loudly unsupervised.
-
-Plus the Windows-only **reap** step: stale-slug tasks under ``\\Ava\\`` (the
-ghost-task class behind task #1196) are deleted before the register steps run.
 """
 
 from __future__ import annotations
 
 from cli.commands._converge_spec import CAPABILITY_ORDER, ConvergeCtx
-
-
-def reap_stale_schtasks(_ctx: ConvergeCtx) -> None:
-    """Delete Task Scheduler jobs under ``\\Ava\\`` left behind by a home-slug
-    change (the win 2026-08-11 ghost-task class: old-slug tasks keep firing and
-    race the current slug's `/Create` on every converge). Runs before the
-    register steps below, so a host that once carried an older slug converges
-    clean. A no-op on POSIX (no Task Scheduler).
-
-    Never fails converge: reap is best-effort cleanup, and the register steps
-    that follow (re-)arm the current tasks regardless.
-    """
-    from shared.os_schtasks import reap_stale_tasks
-
-    reap_stale_tasks()
 
 
 def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
@@ -59,14 +41,10 @@ def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
 
 
 def ensure_logs_maintenance(_ctx: ConvergeCtx) -> None:
-    """Register daily rotation + retention and reap the old manual macOS job."""
-    from shared.os_logs_job import (
-        reap_legacy_logs_job,
-        register_logs_job,
-    )
+    """Register daily rotation followed by retention."""
+    from shared.os_logs_job import register_logs_job
 
     register_logs_job()
-    reap_legacy_logs_job()
 
 
 def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:

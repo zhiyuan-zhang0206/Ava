@@ -208,63 +208,6 @@ def launchd_path_env() -> str:
     return ":".join(d for d in dirs if not (d in seen or seen.add(d)))
 
 
-def _legacy_label_tokens() -> list[str]:
-    """Transitional (path-only cutover): the pre-path-only label tokens for THIS
-    home — the cluster name the retired `~/.ava[-<name>]` convention derived
-    (`~/.ava` -> main, `~/.ava-<x>` -> x), PLUS whatever the retired
-    `$AVA_HOME/cluster` identity file says if it is still on disk (an
-    explicitly-named / off-convention pre-cutover home labeled its jobs by that
-    name, not the convention). Used ONLY to clean up this home's own old launchd
-    job; scoping to this home's tokens means a co-located cluster's job is never
-    touched."""
-    from shared.cluster import is_default_home
-    from shared.paths import ava_home
-
-    home = ava_home()
-    tokens: list[str] = []
-    if is_default_home(home):
-        tokens.append("main")
-    prefix = ".ava-"
-    if home.name.startswith(prefix):
-        tokens.append(home.name[len(prefix) :])
-    legacy_file = home / "cluster"
-    if legacy_file.exists():
-        v = legacy_file.read_text().strip()
-        if v and v not in tokens:
-            tokens.append(v)
-    return tokens
-
-
-def cleanup_legacy_macos_job(kind: str) -> None:
-    """Boot out + delete this home's pre-path-only launchd job
-    (`com.ava.<old-cluster-name>.<kind>`), if present. Idempotent; called by the
-    register paths (health-probe / autostart) after the slug-labeled job is in
-    place, so a relabel never leaves a stale duplicate running."""
-    for token in _legacy_label_tokens():
-        label = f"{LAUNCHD_LABEL_PREFIX}.{token}.{kind}"
-        plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
-        if not plist.exists():
-            continue
-        res = subprocess.run(  # noqa: S603
-            ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        plist.unlink(missing_ok=True)
-        if res.returncode == 0:
-            print(f"  . removed legacy launchd job '{label}'")  # noqa: T201
-            logger.info("Removed legacy launchd job '{}'", label)
-        else:
-            # The plist is gone either way (that is the durable part); do not
-            # claim the bootout succeeded when it did not.
-            print(  # noqa: T201
-                f"  ! removed legacy plist for '{label}' (bootout rc={res.returncode}: "
-                f"{res.stderr.strip() or 'job not loaded'})",
-                file=sys.stderr,
-            )
-
-
 def _health_probe_label(slug: str) -> str:
     """The launchd label for one cluster's health probe."""
     return f"{LAUNCHD_LABEL_PREFIX}.{slug}.health-probe"
@@ -351,8 +294,7 @@ def _register_macos(interval_s: int, threshold: int) -> int:
     # fast path that only the job's direct child matches, while descendants —
     # where converges actually run — read "0", so the live process tree check
     # is the proof (postmortems/0008).
-    own_labels = {label, *(_health_probe_label(token) for token in _legacy_label_tokens())}
-    own_job = _own_probe_job_of(own_labels)
+    own_job = _own_probe_job_of({label})
     if own_job is not None:
         logger.info("Health probe '{}' is registering itself — deferring reload", own_job)
         return 0
@@ -382,7 +324,6 @@ def _register_macos(interval_s: int, threshold: int) -> int:
         logger.error("launchctl bootstrap failed: {}", result.stderr)
         return 1
     logger.info("launchd job '{}' loaded (every {}s)", label, interval_s)
-    cleanup_legacy_macos_job("health-probe")
     return 0
 
 

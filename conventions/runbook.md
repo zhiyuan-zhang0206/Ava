@@ -2115,8 +2115,7 @@ Linux cron run rotation followed by retention at 04:40 local time; the second
 command runs only when rotation succeeds. Windows registers two windowless
 Task Scheduler jobs at 04:40 and 04:41 because one task action carries one Ava
 argv. Re-converge replaces the job definitions idempotently, and cluster destroy
-removes them. On macOS, converge also removes the old hand-made
-`com.ava.<home-slug>.log-retention` LaunchAgent after the managed job is loaded.
+removes them.
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
 (Loki datasource), `logcli`, or the HTTP API:
