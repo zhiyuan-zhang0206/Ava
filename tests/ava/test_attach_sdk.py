@@ -198,13 +198,13 @@ def test_attach_modality_matrix_follows_registry(
     image = tmp_path / "shot.png"
     image.write_bytes(b"png")
 
-    monkeypatch.setattr(settings.lm, "llm_model", "gemini-2.5-flash")
+    monkeypatch.setattr(settings.lm, "llm_model", "gemini-3.8-flash")
     attach(video)
     assert take_attachments() == [{"path": str(video.resolve()), "label": None}]
     attach(image)
     assert take_attachments() == [{"path": str(image.resolve()), "label": None}]
 
-    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-4-6")
+    monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
     with pytest.raises(ValueError, match=r"modality 'video'.*supported modalities: image, pdf"):
         attach(video)
     attach(image)
