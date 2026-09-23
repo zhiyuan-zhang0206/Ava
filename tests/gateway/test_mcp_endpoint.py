@@ -203,6 +203,7 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
             "highest_notice_priority": None,
             "unread_notice_count": 0,
             "heartbeat_paused_until": None,
+            "open_impersonation_session_id": None,
         }
     )
     page = AgentDirectoryPage(agents=[card], next_cursor=1)

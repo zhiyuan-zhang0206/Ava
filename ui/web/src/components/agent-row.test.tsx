@@ -109,6 +109,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     awaiting_response_count: 0, highest_notice_priority: null,
     unread_notice_count: 0,
     heartbeat_paused_until: null,
+    open_impersonation_session_id: null,
     ...overrides,
   };
 }
@@ -121,6 +122,7 @@ const baseProps = {
   wide: false,
   onSelect: noop,
   onTerminate: noop,
+  onForceExpire: noop,
   onForceKill: noop,
   onRestart: noop,
   onResurrect: noop,
@@ -467,6 +469,33 @@ describe("AgentRow right-click context menu", () => {
     expect(screen.getByText("Kill")).toBeTruthy();
     // Resurrect items are terminated-only
     expect(screen.queryByText("Resurrect")).toBeNull();
+    expect(screen.queryByText("End external takeover session")).toBeNull();
+  });
+
+  it("shows the end-session item only for an open session and sends its rendered ID after confirmation", () => {
+    const onForceExpire = vi.fn();
+    const confirmMock = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirmMock);
+    const { container } = render(
+      <AgentRow {...baseProps} onForceExpire={onForceExpire}
+        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
+    );
+    openMenu(container.querySelector("li")!);
+    fireEvent.click(screen.getByText("End external takeover session"));
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("agent resumes its own work"));
+    expect(onForceExpire).toHaveBeenCalledExactlyOnceWith(7);
+  });
+
+  it("does not end the session when confirmation is dismissed", () => {
+    const onForceExpire = vi.fn();
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(false));
+    const { container } = render(
+      <AgentRow {...baseProps} onForceExpire={onForceExpire}
+        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
+    );
+    openMenu(container.querySelector("li")!);
+    fireEvent.click(screen.getByText("End external takeover session"));
+    expect(onForceExpire).not.toHaveBeenCalled();
   });
 
   it("terminated agent: menu shows Resurrect + Resurrect with prompt, no Fork / Kill", () => {

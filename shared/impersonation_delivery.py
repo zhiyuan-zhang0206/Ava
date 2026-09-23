@@ -7,12 +7,15 @@ therefore consumes an attempt; its body stays pending for native handoff.
 """
 
 from shared._impersonation_store import (
+    OPEN,
     authenticate_relay,
     expire,
     lock_lease,
     require_relay_active_locked,
 )
+from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
 
 
 def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) -> frozenset[int]:
@@ -27,24 +30,30 @@ def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) ->
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate_relay(lease, relay_token)
+        was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
         if lease["status"] != "active":
-            return frozenset()
-        require_relay_active_locked(conn, lease, relay_token)
-        rows = conn.execute(
-            "UPDATE agent_impersonation_messages m "
-            "SET delivery_attempts=m.delivery_attempts+1,last_delivery_at=clock_timestamp() "
-            "FROM inbound_messages i WHERE m.lease_id=%s AND m.inbound_id=ANY(%s) "
-            "AND i.id=m.inbound_id AND i.agent_id=%s AND i.status='pending' "
-            "AND m.acknowledged_at IS NULL AND m.delivery_attempts < %s "
-            "AND (m.last_delivery_at IS NULL OR m.last_delivery_at <= "
-            "clock_timestamp() - %s*interval '1 second') RETURNING m.inbound_id",
-            (
-                lease_id,
-                message_ids,
-                lease["agent_id"],
-                lease["max_delivery_attempts"],
-                lease["ack_window_seconds"],
-            ),
-        ).fetchall()
+            rows = []
+        else:
+            require_relay_active_locked(conn, lease, relay_token)
+            rows = conn.execute(
+                "UPDATE agent_impersonation_messages m "
+                "SET delivery_attempts=m.delivery_attempts+1,last_delivery_at=clock_timestamp() "
+                "FROM inbound_messages i WHERE m.lease_id=%s AND m.inbound_id=ANY(%s) "
+                "AND i.id=m.inbound_id AND i.agent_id=%s AND i.status='pending' "
+                "AND m.acknowledged_at IS NULL AND m.delivery_attempts < %s "
+                "AND (m.last_delivery_at IS NULL OR m.last_delivery_at <= "
+                "clock_timestamp() - %s*interval '1 second') RETURNING m.inbound_id",
+                (
+                    lease_id,
+                    message_ids,
+                    lease["agent_id"],
+                    lease["max_delivery_attempts"],
+                    lease["ack_window_seconds"],
+                ),
+            ).fetchall()
+    if was_open and lease["status"] == "expired":
+        publish_inbound_wake(lease["agent_id"], "impersonation-expired")
+        publish_impersonation_changed_sync(lease["agent_id"])
+        publish_agent_updated_sync(lease["agent_id"])
     return frozenset(row[0] for row in rows)

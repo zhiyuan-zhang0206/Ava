@@ -33,6 +33,11 @@ then activates. Only one executor owns decisions. A new native incarnation
 reconciles preparation; active control survives native restarts. Administrative
 restart/terminate still reach the native dispatcher; termination revokes control.
 Legacy live requests retain their original consent flow during an upgrade.
+The gateway force-expire endpoint closes only the open session number supplied
+by its caller. It records an operator cause and actor, dismisses reminders,
+queues a resumed-turn note for a live non-automatic session, and publishes a
+native wake. A stale session number returns `not_open` without touching a newer
+session. The external executor remains outside this DB action.
 
 Explicit renewal replaces the database deadline; attaching and relay heartbeats
 never renew. The existing TTL reaper expires abandoned sessions even when the

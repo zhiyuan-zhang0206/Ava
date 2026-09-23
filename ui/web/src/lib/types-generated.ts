@@ -336,6 +336,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/impersonation/force-expire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Force Expire Impersonation
+         * @description End the caller's observed takeover without terminating the native agent.
+         */
+        post: operations["post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/compact": {
         parameters: {
             query?: never;
@@ -3870,6 +3890,8 @@ export interface components {
             unread_notice_count: number;
             /** Heartbeat Paused Until */
             heartbeat_paused_until: string | null;
+            /** Open Impersonation Session Id */
+            open_impersonation_session_id: number | null;
         };
         /**
          * AgentCost
@@ -5398,6 +5420,21 @@ export interface components {
             telemetry_stale: boolean;
             /** Snapshot At */
             snapshot_at?: string | null;
+        };
+        /** ForceExpireImpersonationRequest */
+        ForceExpireImpersonationRequest: {
+            /** Session Id */
+            session_id: number;
+        };
+        /** ForceExpireImpersonationResponse */
+        ForceExpireImpersonationResponse: {
+            /** Session Id */
+            session_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "expired" | "not_open";
         };
         /** GuideDraftRequest */
         GuideDraftRequest: {
@@ -9068,6 +9105,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BornChainResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForceExpireImpersonationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForceExpireImpersonationResponse"];
                 };
             };
             /** @description Validation Error */

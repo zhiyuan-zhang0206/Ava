@@ -2,6 +2,7 @@
 
 import shlex
 import sys
+from typing import Literal
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -9,6 +10,7 @@ from psycopg_pool import ConnectionPool
 from shared._impersonation_store import expire, lock_lease
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
 
 # One reaper pass handles at most this many leases per list — expired-lease
 # reconciliation and the approaching-expiry reminder scan each take one page.
@@ -36,7 +38,64 @@ def reap_impersonations(pool: ConnectionPool, *, limit: int = _PASS_BATCH) -> in
                 expired_agents.append(lease["agent_id"])
     for agent_id in expired_agents:
         publish_inbound_wake(agent_id, "impersonation-expired")
+        publish_impersonation_changed_sync(agent_id)
+        publish_agent_updated_sync(agent_id)
     return len(expired_agents)
+
+
+def force_expire_impersonation(
+    pool: ConnectionPool, agent_id: int, session_id: int, actor: str
+) -> Literal["expired", "not_open"]:
+    """Close only the open session the caller saw; return expired or not_open.
+
+    The lease lock serializes this write with renewal, TTL expiry and the
+    termination trigger. Terminating the agent remains the stronger fallback
+    for a wedged native runtime; its trigger also revokes the lease.
+    """
+    from psycopg.rows import dict_row
+
+    from shared._impersonation_store import dismiss_reminders, insert_handoff, lock_agent
+    from shared.impersonation_history import set_actor
+    from shared.log import logger
+
+    with write_transaction(pool) as conn:
+        lock_agent(conn, agent_id)
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT * FROM agent_impersonations WHERE agent_id=%s "
+                "AND status IN ('requested','accepted','active') FOR UPDATE",
+                (agent_id,),
+            )
+            lease = cur.fetchone()
+        if lease is None or lease["session_id"] != session_id:
+            return "not_open"
+        set_actor(conn, actor)
+        inbound_id = None
+        if lease["status"] == "active" and not lease["automatic"]:
+            inbound_id = insert_handoff(
+                conn,
+                lease,
+                f"The external session {session_id} for this agent was ended by an operator. "
+                "Control has returned to the agent. Unacknowledged messages remain pending; "
+                "no external completion summary was supplied.",
+                expired=True,
+            )
+        conn.execute(
+            "UPDATE agent_impersonations SET status='expired',ended_at=clock_timestamp(), "
+            "rejection_reason=%s,summary_inbound_id=%s WHERE id=%s",
+            ("force-expired: ended by an operator", inbound_id, lease["id"]),
+        )
+        dismiss_reminders(conn, lease)
+    logger.info(
+        "impersonation force-expired",
+        agent_id=agent_id,
+        session_id=session_id,
+        actor=actor,
+    )
+    publish_inbound_wake(agent_id, "impersonation-expired")
+    publish_impersonation_changed_sync(agent_id)
+    publish_agent_updated_sync(agent_id)
+    return "expired"
 
 
 # How long before expiry a lease first gets its renewal reminder: 300s (5
