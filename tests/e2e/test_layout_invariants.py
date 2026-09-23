@@ -26,7 +26,7 @@ import json
 import os
 
 import pytest
-from playwright.sync_api import Browser, BrowserContext, Page, Route
+from playwright.sync_api import Browser, BrowserContext, Page, Route, expect
 
 from tests.e2e._layout_assertions import (
     all_elements_within_parents,
@@ -230,6 +230,7 @@ def _timeline_items() -> list[dict]:
 _FAKE_SSE_JS = """
 (() => {
   const SNAPSHOT = __SNAPSHOT_JSON__;
+  const RECONNECT = __RECONNECT__;
   const DELTA = {"role": "chat_delta", "agent_id": 1, "item_id": "1.33",
     "content": "streaming tail"};
   const HB = {"role": "heartbeat"};
@@ -252,13 +253,15 @@ _FAKE_SSE_JS = """
         if (all) {
           push(self, SNAPSHOT, 80);
           push(self, DELTA, 250);
-          // reconnect cycle: close the stream, then a fresh instance re-runs
+          // When enabled, close the stream so a fresh instance re-runs
           // the whole script (the frontend's backoff reopen does `new
           // EventSource(...)` again).
-          this._timers.push(setTimeout(() => {
-            self.readyState = FakeEventSource.CLOSED;
-            if (self.onerror) self.onerror({});
-          }, 900));
+          if (RECONNECT) {
+            this._timers.push(setTimeout(() => {
+              self.readyState = FakeEventSource.CLOSED;
+              if (self.onerror) self.onerror({});
+            }, 900));
+          }
         } else {
           push(self, HB, 5000);
         }
@@ -299,11 +302,13 @@ def _context(browser: Browser, width: int) -> BrowserContext:
     return ctx
 
 
-def _open(ctx: BrowserContext, base_url: str, path: str, *, stub_api: bool) -> Page:
+def _open(
+    ctx: BrowserContext, base_url: str, path: str, *, stub_api: bool, reconnect_sse: bool = True
+) -> Page:
     page = ctx.new_page()
     # The fake EventSource is ALWAYS injected (timeline invariants need the
     # stream even against a deployed bundle; the fleet page ignores it).
-    page.add_init_script(_FAKE_SSE_JS)
+    page.add_init_script(_FAKE_SSE_JS.replace("__RECONNECT__", json.dumps(reconnect_sse)))
     if stub_api:
 
         def _stub(route: Route) -> None:
@@ -369,6 +374,84 @@ def test_timeline_layout_invariants(
         assert _surface_within_parent(page), "I2: timeline-surface wider than parent (#979)"
         assert _composer_within_viewport(page), "I3: composer overflows viewport"
         assert _no_page_vertical_scroll(page), "I6: page scrolls as a whole"
+    finally:
+        ctx.close()
+
+
+def test_timeline_scrollbar_hover_reveal(
+    playwright_browser: Browser, _frontend_target: str
+) -> None:
+    """The shared ScrollArea track stays hit-testable without taking layout space."""
+    ctx = _context(playwright_browser, 1280)
+    try:
+        # Repeated snapshots cause scroll events that keep resetting the idle timer.
+        page = _open(
+            ctx, _frontend_target, "/", stub_api=not _OVERRIDE_BASE_URL, reconnect_sse=False
+        )
+        _wait_layout_settled(page)
+        assert page.evaluate("matchMedia('(hover: hover)').matches")
+
+        surface = page.locator('[data-testid="timeline-surface"]')
+        viewport = surface.locator('[data-slot="scroll-area-viewport"]')
+        track = surface.locator('[data-slot="scroll-area-scrollbar"]')
+        content = viewport.locator('[role="log"]')
+        expect(track).to_be_attached()
+        assert viewport.evaluate("el => el.scrollHeight > el.clientHeight")
+
+        page.mouse.move(1, 1)
+        expect(track).to_have_css("opacity", "0", timeout=3000)
+        assert _no_page_scroll(page), "scrollbar at rest widened the document"
+        before = viewport.evaluate(
+            "el => ({width: el.clientWidth, rect: el.querySelector('[role=log]').getBoundingClientRect().toJSON()})"
+        )
+
+        box = track.bounding_box()
+        assert box is not None
+        track_x = box["x"] + box["width"] / 2
+        track_y = box["y"] + box["height"] / 2
+        assert track.evaluate(
+            "(el, point) => { const hit = document.elementFromPoint(point.x, point.y); return hit === el || el.contains(hit); }",
+            {"x": track_x, "y": track_y},
+        ), "invisible track is not hit-testable"
+
+        page.mouse.move(track_x, track_y)
+        expect(track).to_have_css("opacity", "1", timeout=3000)
+        assert viewport.evaluate("el => el.clientWidth") == before["width"]
+        assert content.evaluate("el => el.getBoundingClientRect().toJSON()") == before["rect"]
+        assert _no_page_scroll(page), "hovered scrollbar widened the document"
+
+        page.mouse.move(1, 1)
+        expect(track).to_have_css("opacity", "0", timeout=3000)
+        assert _no_page_scroll(page), "hidden scrollbar widened the document"
+
+        viewport_box = viewport.bounding_box()
+        assert viewport_box is not None
+        content_x = viewport_box["x"] + min(80, viewport_box["width"] / 2)
+        content_y = viewport_box["y"] + viewport_box["height"] / 2
+        assert viewport.evaluate(
+            "(el, point) => el.contains(document.elementFromPoint(point.x, point.y))",
+            {"x": content_x, "y": content_y},
+        ), "content hover point is outside the viewport"
+        page.mouse.move(content_x, content_y)
+        page.wait_for_timeout(350)  # Let an accidental 300 ms hover fade become observable.
+        expect(track).to_have_css("opacity", "0")
+        assert _no_page_scroll(page), "content hover widened the document"
+
+        scroll_top = viewport.evaluate("el => el.scrollTop")
+        max_scroll = viewport.evaluate("el => el.scrollHeight - el.clientHeight")
+        page.mouse.wheel(0, 400 if scroll_top < max_scroll / 2 else -400)
+        page.wait_for_function(
+            "([el, before]) => el.scrollTop !== before",
+            arg=[viewport.element_handle(), scroll_top],
+        )
+        page.wait_for_function(
+            "el => Number(getComputedStyle(el).opacity) > 0.95",
+            arg=track.element_handle(),
+            timeout=2000,
+        )
+        assert _no_page_scroll(page), "scroll reveal widened the document"
+        expect(track).to_have_css("opacity", "0", timeout=3000)
+        assert _no_page_scroll(page), "idle hide widened the document"
     finally:
         ctx.close()
 
