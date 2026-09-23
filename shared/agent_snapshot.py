@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from shared.agent_observation import AgentObservation, observation
 from shared.agents import AgentStatus
 from shared.config import settings
-from shared.priority import Priority
+from shared.tasks.priority import Priority
 
 # Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
 # (agents_meta.last_active_at, written by the agent process on every completed

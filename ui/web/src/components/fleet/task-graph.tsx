@@ -45,7 +45,7 @@ import {
 import { TaskKanban } from "./task-kanban";
 
 // Task status → color class for the node's fill (and the Kanban left strip).
-// The status set is the backend's (shared/task_status.py::TaskStatus, mirrored
+// The status set is the backend's (shared/tasks/task_status.py::TaskStatus, mirrored
 // in lib/types.ts): in_progress / done / cancelled.
 export const STATUS_FILL: Record<TaskStatus, string> = {
   // The old 'open' color — 'open' was dropped (tasks are born in_progress)

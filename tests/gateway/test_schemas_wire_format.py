@@ -22,7 +22,7 @@ from gateway.schemas import (
     ResolveNoticeIn,
     UserMessageIn,
 )
-from shared.priority import Priority
+from shared.tasks.priority import Priority
 
 
 def test_agent_row_wire_shape() -> None:
@@ -179,12 +179,12 @@ def test_user_message_in_accepts_long_content_and_rejects_abuse_cap() -> None:
 
 
 def test_task_status_enum_is_single_sourced_across_wire_and_frontend() -> None:
-    """The task status set has one source (shared/task_status.TaskStatus): the
+    """The task status set has one source (shared/tasks/task_status.TaskStatus): the
     gateway schemas serialize it, the generated OpenAPI spec / TS types must
     carry exactly its values, and the hand-written TS mirror aliases the
     generated schema instead of restating a union ('ongoing' was removed by
     user ruling 2026-09-15)."""
-    from shared.task_status import TaskStatus
+    from shared.tasks.task_status import TaskStatus
 
     root = Path(__file__).resolve().parents[2]
     openapi = json.loads((root / "ui" / "web" / "openapi.json").read_text(encoding="utf-8"))
