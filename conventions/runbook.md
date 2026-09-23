@@ -2143,10 +2143,19 @@ legacy `agent_events` mirror), and the monthly partitioning are in `shared/log.a
 
 ## Git hooks: pre-commit / pre-push
 
-Install from the **main clone**, using that clone's stable `.venv`:
+On development clones, prefer installing from the **main clone**, using its
+stable `.venv`:
 
 ```bash
 .venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+When the main clone uses a protected runtime venv without pre-commit, use a
+stable user-level runner instead; run the install command from the main clone:
+
+```bash
+env -u VIRTUAL_ENV uv tool install pre-commit
+~/.local/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 The configuration also makes plain `pre-commit install` install both stages.
@@ -2158,10 +2167,12 @@ installation without rewriting hooks or `core.hooksPath`. Before deleting a
 worktree, inspect both shared hooks' `INSTALL_PYTHON` values and reinstall from
 the main clone if either points into the worktree.
 
-The fast `check-pre-push-install` commit hook warns when the shared pre-push
-hook is missing, unmanaged, non-executable, redirected by `core.hooksPath`, or
-points at a missing/non-executable interpreter or outside the main clone's
-`.venv/bin`. It prints the exact repair command and passes: v1 is warn-only so
+The fast `check-git-hooks-install` commit hook checks both shared pre-commit and
+pre-push hooks and reports every problem: a hook is missing, unmanaged,
+non-executable, dispatches the wrong stage, is redirected by `core.hooksPath`, or
+points at a missing/non-executable interpreter or a disposable `worktrees/` or
+`.worktrees/` path. Executable Python paths in stable user-level uv tool
+installations pass. It prints the repair commands and passes: v1 is warn-only so
 hook rollout does not block commits; CI independently enforces the checks.
 Review any `core.hooksPath` override before removing it and installing.
 

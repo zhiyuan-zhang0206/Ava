@@ -2,6 +2,41 @@ name: Agent observation proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'shared/agent_observation.py'
+      - 'shared/agent_snapshot.py'
+      - 'shared/agent_roster.py'
+      - 'shared/live_announce.py'
+      - 'services/heartbeat/**'
+      - 'gateway/routers/_inspect*.py'
+      - 'gateway/routers/agent_inspect.py'
+      - 'gateway/routers/agents*.py'
+      - 'gateway/schemas/**'
+      - 'gateway/app.py'
+      - 'scripts/codegen-types.sh'
+      - 'scripts/dump_openapi.py'
+      - 'tests/shared/test_agent_observation.py'
+      - 'tests/shared/test_live_announce.py'
+      - 'tests/shared/test_agent_snapshot_scope.py'
+      - 'tests/services/test_heartbeat_liveness.py'
+      - 'tests/gateway/test_agent_inspect.py'
+      - 'tests/gateway/test_agents_endpoints.py'
+      - 'ui/web/src/lib/agent-observation*'
+      - 'ui/web/src/components/agent-row*'
+      - 'ui/web/src/components/inspector-panel*'
+      - 'ui/web/src/lib/types*.ts'
+      - 'ui/web/openapi.json'
+      - 'ui/web/package*.json'
+      - 'ui/web/vitest*'
+      - 'tests/conftest.py'
+      - 'tests/_*.py'
+      - 'db/schema.sql'
+      - 'migrations/**'
+      - '.github/actions/install-pg-redis/**'
+      - '.github/actions/uv-sync/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/observation-proof.yml'
 permissions:
   contents: read
 jobs:

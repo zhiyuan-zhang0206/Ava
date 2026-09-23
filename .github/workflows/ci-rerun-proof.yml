@@ -2,6 +2,15 @@ name: CI retry safety proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '.github/workflows/ci-rerun.yml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/runtime-prepare.yml'
+      - 'tests/test_ci_rerun_workflow.py'
+      - '.github/actions/uv-sync/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ci-rerun-proof.yml'
 permissions:
   contents: read
 jobs:
