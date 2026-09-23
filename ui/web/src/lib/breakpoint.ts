@@ -19,6 +19,8 @@ export const BREAKPOINT_XS_PX = 320;
 export const BREAKPOINT_SM_PX = 390;
 export const BREAKPOINT_MD_PX = 768;
 export const BREAKPOINT_LG_PX = 1024;
+// Tailwind xl; the wide split threshold. The "xl" tier already starts at 1024px.
+export const BREAKPOINT_WIDE_PX = 1280;
 
 export type BreakpointTier = "xs" | "sm" | "md" | "lg" | "xl";
 
@@ -38,6 +40,8 @@ export interface Breakpoint {
   isNarrow: boolean;
   /** Viewport at or above lg (1024px): side-by-side fleet split, floating inspector overlay. */
   isLarge: boolean;
+  /** Viewport at or above 1280px: wide run-timeline reader split. */
+  isWide: boolean;
 }
 
 /** SSR-safe single breakpoint source. Defaults to the narrow/mobile layout
@@ -46,6 +50,7 @@ export interface Breakpoint {
 export function useBreakpoint(): Breakpoint {
   const isNarrow = !useMediaQuery(`(min-width: ${BREAKPOINT_MD_PX}px)`);
   const isLarge = useMediaQuery(`(min-width: ${BREAKPOINT_LG_PX}px)`);
+  const isWide = useMediaQuery(`(min-width: ${BREAKPOINT_WIDE_PX}px)`);
   const [width, setWidth] = useState(0);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe sync: read the real viewport once after mount
@@ -54,5 +59,5 @@ export function useBreakpoint(): Breakpoint {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  return { tier: tierForWidth(width), isNarrow, isLarge };
+  return { tier: tierForWidth(width), isNarrow, isLarge, isWide };
 }
