@@ -75,6 +75,12 @@ async def test_deferred_admission_is_recorded_then_success_supersedes_it(
     aops_pool: AsyncConnectionPool,
 ) -> None:
     agent_id, owner = _admission_agent(db_conn), uuid4()
+    db_conn.execute(
+        "UPDATE agents_meta SET last_launch_failure_reason='launch_unreachable', "
+        "last_launch_failure_at=clock_timestamp() WHERE id=%s",
+        (agent_id,),
+    )
+    db_conn.commit()
 
     class _Deferred(RuntimeAdmission):
         async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
@@ -93,6 +99,10 @@ async def test_deferred_admission_is_recorded_then_success_supersedes_it(
     refused_code, refused_at = _admission_observation(db_conn, agent_id)
     assert refused_code == "publication_deferred" and refused_at is not None
     assert db_conn.execute(
+        "SELECT last_launch_failure_reason FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone() == (None,)
+    assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("idling",)
 
@@ -102,6 +112,26 @@ async def test_deferred_admission_is_recorded_then_success_supersedes_it(
     assert admitted is not None
     code, admitted_at = _admission_observation(db_conn, agent_id)
     assert code == "admitted" and admitted_at is not None and admitted_at >= refused_at
+
+
+async def test_successful_admission_clears_launch_failure(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id, owner = _admission_agent(db_conn), uuid4()
+    db_conn.execute(
+        "UPDATE agents_meta SET last_launch_failure_reason='launch_rejected', "
+        "last_launch_failure_at=clock_timestamp() WHERE id=%s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    assert (
+        await admit_hosted_runtime(aops_pool, agent_id, "host-test", owner, expected_from="idling")
+        is not None
+    )
+    assert db_conn.execute(
+        "SELECT last_launch_failure_reason, last_launch_failure_at FROM agents_meta WHERE id=%s",
+        (agent_id,),
+    ).fetchone() == (None, None)
 
 
 async def test_guard_refusal_records_only_a_coarse_code(

@@ -67,7 +67,8 @@ async def _record_admission_refusal(
     async with async_write_transaction(pool) as conn:
         await conn.execute(
             "UPDATE agents_meta SET last_admission_outcome=%s, "
-            "last_admission_at=clock_timestamp() "
+            "last_admission_at=clock_timestamp(), "
+            "last_launch_failure_reason=NULL, last_launch_failure_at=NULL "
             "WHERE id=%s AND machine=%s AND status=%s "
             "AND (last_admission_at IS NULL OR last_admission_at <= %s)",
             (outcome.value, agent_id, machine, expected_from, attempt_at),
@@ -498,6 +499,7 @@ async def admit_hosted_runtime(
                     "runtime_protocol_version = %s, "
                     "last_admission_outcome = 'admitted', "
                     "last_admission_at = clock_timestamp(), "
+                    "last_launch_failure_reason = NULL, last_launch_failure_at = NULL, "
                     "lease_expires_at = now() + make_interval(secs => %s) "
                     "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
                     "AND status IN ('running','idling') "

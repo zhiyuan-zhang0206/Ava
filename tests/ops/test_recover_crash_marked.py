@@ -42,7 +42,9 @@ def _park_corpse(
     death marker NULL (the production stamp is
     `agent/hosted_ownership.stamp_turn_fatal`), so the scenario sets the
     marker, the settle fields, and any suppression window explicitly."""
-    aid, _birth = create_agent_row(spawner="user", machine=machine or machine_name())
+    aid, _birth, _prompt_id, _attempt_id = create_agent_row(
+        spawner="user", machine=machine or machine_name()
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET "

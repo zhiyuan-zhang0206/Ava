@@ -20,7 +20,9 @@ from tests.e2e.fakes.scenarios import lifecycle_restart
 def test_consumed_restart_selects_successor_script_without_claiming_completion(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, status: str
 ) -> None:
-    agent_id, _birth = create_agent_row(spawner="test", machine=machine_name())
+    agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
+        spawner="test", machine=machine_name()
+    )
     monkeypatch.setattr(ava.self, "AGENT_ID", agent_id)
     initial = lifecycle_restart.build("diagnostic")
     assert initial.script == lifecycle_restart.RESTART_SCRIPT
@@ -56,7 +58,9 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
 def test_pending_request_does_not_select_post_request_script(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    agent_id, _birth = create_agent_row(spawner="test", machine=machine_name())
+    agent_id, _birth, _prompt_id, _attempt_id = create_agent_row(
+        spawner="test", machine=machine_name()
+    )
     monkeypatch.setattr(ava.self, "AGENT_ID", agent_id)
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,status) "

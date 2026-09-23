@@ -14,6 +14,7 @@ the implementation's own reads.
 from shared.agents import history as history
 from shared.agents.contract import (
     EXCEPTION_BY_REASON,
+    AgentLaunchFailed,
     AgentNotFound,
     AgentStatus,
     AvaAgentError,
@@ -42,6 +43,7 @@ from shared.agents.contract import (
 
 __all__ = [
     "EXCEPTION_BY_REASON",
+    "AgentLaunchFailed",
     "AgentNotFound",
     "AgentStatus",
     "AvaAgentError",

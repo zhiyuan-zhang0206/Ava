@@ -126,6 +126,7 @@ class ErrorReason(StrEnum):
     SPAWN_TARGET_NOT_AGENT_RUNNER = "spawn_target_not_agent_runner"
     MACHINE_PAUSED = "machine_paused"
     CROSS_MACHINE_GATEWAY_UNAVAILABLE = "cross_machine_gateway_unavailable"
+    AGENT_LAUNCH_FAILED = "agent_launch_failed"
     INDEXER_UNAVAILABLE = "indexer_unavailable"
     CHANNEL_NOT_CONFIGURED = "channel_not_configured"
     INVALID_MODEL_CONFIG = "invalid_model_config"
@@ -366,6 +367,30 @@ class CrossMachineGatewayUnavailable(AvaAgentError):  # noqa: N818
 
     reason = ErrorReason.CROSS_MACHINE_GATEWAY_UNAVAILABLE
     http_status = 502
+
+
+class AgentLaunchFailed(AvaAgentError):  # noqa: N818
+    """A committed agent exists but its runner launch was not acknowledged.
+
+    Retry by `agent_id` through `retry_launch_path`; never retry the create POST.
+    The state is the gateway's latest read, or `unknown` if that read failed.
+    """
+
+    reason = ErrorReason.AGENT_LAUNCH_FAILED
+    http_status = 502
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        agent_id: int | None = None,
+        state: dict[str, object] | None = None,
+        retry_launch_path: str | None = None,
+    ) -> None:
+        super().__init__(detail)
+        self.agent_id = agent_id
+        self.state = state
+        self.retry_launch_path = retry_launch_path
 
 
 class InvalidModelConfig(AvaAgentError):  # noqa: N818 — state description, same style as AgentNotFound

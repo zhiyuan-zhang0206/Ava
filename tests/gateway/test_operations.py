@@ -128,11 +128,10 @@ def stub_pool() -> object:
 
 
 @pytest.mark.asyncio
-async def test_launch_agent_op_delivers_plain_spawn_prompt(
+async def test_legacy_launch_agent_op_delivers_plain_spawn_prompt(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object
 ) -> None:
-    """A plain spawn's first prompt is inserted + InboundArrived published on
-    the runner side after launch (inbound INSERT is within the runner role)."""
+    """An old gateway can still send its plain prompt during a rolling update."""
     seen: dict[str, object] = {}
 
     def _fake_insert(_pool: object, agent_id: int, prompt: str, source: str) -> int:
@@ -164,8 +163,7 @@ async def test_launch_agent_op_delivers_plain_spawn_prompt(
 async def test_launch_agent_op_skips_prompt_for_fork(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object
 ) -> None:
-    """A fork's prompt was already delivered pre-launch by create_agent_row —
-    the launch op must not insert a second inbound."""
+    """An old gateway's fork prompt was already delivered before launch."""
     inserted: list[int] = []
 
     def _fake_insert(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
@@ -1501,13 +1499,10 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
 
 @pytest.mark.asyncio
-async def test_launch_agent_op_hosted_failure_reclaims_its_row(
+async def test_launch_agent_op_hosted_failure_preserves_its_row(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object
 ) -> None:
-    """Hosted mode has no unclaimed-idling reaper (the restarter is retired), so
-    a failed hosted launch must reclaim its own corpse: any failure after the
-    row exists marks it terminated ('launch-confirm', the same class the
-    process-mode launch confirm stamps) and re-raises."""
+    """A failed legacy prompt insert leaves the row for explicit repair."""
 
     def _boom(_pool: object, _agent_id: int, _prompt: str, _source: str) -> int:
         raise RuntimeError("prompt insert failed")
@@ -1524,17 +1519,14 @@ async def test_launch_agent_op_hosted_failure_reclaims_its_row(
     body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
     with pytest.raises(RuntimeError, match="prompt insert failed"):
         await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
-    assert reclaimed == [(7, "launch-confirm")]
+    assert reclaimed == []
 
 
 @pytest.mark.asyncio
-async def test_launch_agent_op_hosted_validation_failure_reclaims_its_row(
+async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object
 ) -> None:
-    """A hosted row exists before validation runs, so a validation failure
-    must land inside the reclaim too: leaked outside it, the idling row has
-    no restarter reaper and the heartbeat pokes it into a prompt-less zombie
-    (QA #1029 required fix)."""
+    """A runner rejection is reported by the gateway; it never terminates creation."""
 
     def _boom_validate(*_a: object, **_k: object) -> None:
         raise RuntimeError("bad model config")
@@ -1551,4 +1543,4 @@ async def test_launch_agent_op_hosted_validation_failure_reclaims_its_row(
     body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
     with pytest.raises(RuntimeError, match="bad model config"):
         await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
-    assert reclaimed == [(7, "launch-confirm")]
+    assert reclaimed == []

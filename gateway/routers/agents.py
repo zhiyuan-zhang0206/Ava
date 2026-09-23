@@ -17,12 +17,13 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import Annotated
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
 from gateway import neighbors
-from gateway.routers.agents_forward import _forward_spawn_to_remote
+from gateway.routers.agents_forward import LaunchForwardError, _forward_spawn_to_remote
 from gateway.schemas import (
     AgentRow,
     BornChainResponse,
@@ -41,6 +42,7 @@ from ops.rpc_schemas import (
 from shared import agent_roster, agent_snapshot
 from shared.agent_observation import AgentAvailability, AvailabilityReason
 from shared.agents import (
+    AgentLaunchFailed,
     AgentNotFound,
     ForkConfigChangeNotAllowed,
     InvalidModelConfig,
@@ -49,6 +51,7 @@ from shared.agents import (
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.labels import publish_label_updated
+from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.machine import machine_name
 
@@ -399,8 +402,8 @@ async def create_and_launch_agent(
     The target runner's ops server runs as the least-privilege `ava_runner`
     role, which by design cannot INSERT agents / agents_meta — so the row is
     created HERE, in the gateway process, as the main data-plane identity. The
-    forward op (`kind="spawn-launch"`) only launches the detached child and
-    delivers the plain-spawn first prompt, both within the runner role.
+    forward op (`kind="spawn-launch-v2"`) validates and wakes the hosted runner.
+    The first prompt is committed with the row before this forward.
 
     Every spawn in the system funnels through this helper (POST /api/agents,
     the guide / packages / schedules draft routers, the MCP tools server), so
@@ -413,8 +416,7 @@ async def create_and_launch_agent(
     # append-only and "latest" drifts under concurrent writes, so the gateway
     # resolves an explicit id before creating the row.
     fork_checkpoint = await asyncio.to_thread(_spawn_prechecks_blocking, body, pool)
-    is_fork = body.fork_from is not None
-    new_id, birth_config = await asyncio.to_thread(
+    new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
         create_agent_row,
         spawner=body.spawner,
         fork_from=body.fork_from,
@@ -424,26 +426,34 @@ async def create_and_launch_agent(
         label=body.label,
         preset_name=preset_name,
         fork_tail_skills=tail_skills,
-        # A fork inherits the source's full history, so its prompt must reach
-        # the agent's FIRST claim batch — create_agent_row delivers it pre-launch
-        # (a separate insert, mirroring resurrect). A plain spawn has empty
-        # history and idles waiting, so it keeps the post-launch delivery in the
-        # launch op, which also carries the InboundArrived live-UI signal.
-        prompt=body.prompt if is_fork else None,
-        prompt_source=body.prompt_source if is_fork else None,
+        prompt=body.prompt,
+        prompt_source=body.prompt_source,
     )
+    if prompt_inbound_id is not None and body.prompt_source is not None and body.prompt is not None:
+        from ops.ops_events import publish_inbound_arrived
+
+        prompt_content = (
+            f"{body.prompt}\n\nYour label has been set to {body.label}."
+            if body.label
+            else body.prompt
+        )
+        try:
+            await publish_inbound_arrived(
+                new_id, prompt_inbound_id, "chat", body.prompt_source, prompt_content
+            )
+        except Exception as exc:
+            logger.warning("created agent {} inbound hint failed: {}", new_id, type(exc).__name__)
     launch = LaunchAgentRequest(
         agent_id=new_id,
+        launch_attempt_id=launch_attempt_id,
+        prompt_inbound_id=prompt_inbound_id,
         config=body.config,
         birth_config=birth_config,
-        prompt=body.prompt if not is_fork else None,
-        prompt_source=body.prompt_source if not is_fork else None,
-        label=body.label,
     )
     # The endpoint response is the launch op's verdict (the launched agent id —
     # equal to new_id in production; the runner answers for the launch). A
     # withdrawal settlement travels as the spawner's receipt (task #4306).
-    spawned = await _forward_spawn_to_remote(target, launch)
+    spawned = await _dispatch_committed_launch(pool, target, launch)
     if model_receipt is not None:
         spawned = spawned.model_copy(
             update={
@@ -452,12 +462,14 @@ async def create_and_launch_agent(
                 )
             }
         )
-    observed = await asyncio.to_thread(_creation_availability, pool, new_id)
+    return await _accepted_launch_receipt(pool, spawned)
+
+
+async def _accepted_launch_receipt(pool: ConnectionPool, spawned: SpawnedAgent) -> SpawnedAgent:
+    observed = await asyncio.to_thread(_creation_availability, pool, spawned.id)
     return spawned.model_copy(
         update={
             "accepted": True,
-            # Admission can race this read; neither it nor a 201 proves that
-            # the first inbound was claimed or the turn completed.
             "execution_observed": False,
             "reason": observed.reason,
             "observed_at": observed.observed_at,
@@ -465,12 +477,131 @@ async def create_and_launch_agent(
     )
 
 
+def _mark_launch_failure(
+    pool: ConnectionPool, agent_id: int, attempt_id: UUID, reason: AvailabilityReason
+) -> None:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET last_launch_failure_reason=%s, "
+            "last_launch_failure_at=clock_timestamp() "
+            "WHERE id=%s AND last_launch_attempt_id=%s AND status='idling' "
+            "AND last_admission_at IS NULL",
+            (reason.value, agent_id, attempt_id),
+        )
+        changed = cur.rowcount > 0
+    if changed:
+        publish_agent_updated_sync(agent_id)
+
+
+def _clear_launch_failure(pool: ConnectionPool, agent_id: int, attempt_id: UUID) -> None:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET last_launch_failure_reason=NULL, last_launch_failure_at=NULL "
+            "WHERE id=%s AND last_launch_attempt_id=%s",
+            (agent_id, attempt_id),
+        )
+        changed = cur.rowcount > 0
+    if changed:
+        publish_agent_updated_sync(agent_id)
+
+
+def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, object], bool, bool]:
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, last_admission_at, last_launch_attempt_id FROM agents_meta WHERE id=%s",
+            (agent_id,),
+        )
+        row = cur.fetchone()
+        snapshot = agent_snapshot.select_one(conn, agent_id)
+    if row is None or snapshot is None:
+        return {"status": "unknown", "availability": None}, False, False
+    status, admission_at, attempt_id = row
+    return (
+        {
+            "status": status,
+            "availability": snapshot.availability.model_dump(mode="json")
+            if snapshot.availability is not None
+            else None,
+        },
+        admission_at is not None and status != "terminated",
+        status == "idling" and admission_at is None and attempt_id is not None,
+    )
+
+
+async def _dispatch_committed_launch(
+    pool: ConnectionPool, target: str, launch: LaunchAgentRequest
+) -> SpawnedAgent:
+    attempt_id = launch.launch_attempt_id
+    if attempt_id is None:
+        raise RuntimeError("committed launch is missing its attempt ID")
+    try:
+        spawned = await _forward_spawn_to_remote(target, launch)
+        _require_matching_launch_receipt(spawned, launch.agent_id, target)
+    except Exception as exc:
+        reason = (
+            exc.reason if isinstance(exc, LaunchForwardError) else AvailabilityReason.LAUNCH_UNKNOWN
+        )
+        detail = str(exc) if isinstance(exc, LaunchForwardError) else type(exc).__name__
+        logger.warning(
+            "agent {} launch dispatch failed on {} attempt {}: {} ({})",
+            launch.agent_id,
+            target,
+            attempt_id,
+            reason.value,
+            detail,
+        )
+        state: dict[str, object]
+        try:
+            await asyncio.to_thread(_mark_launch_failure, pool, launch.agent_id, attempt_id, reason)
+            state, admitted, retry_legal = await asyncio.to_thread(
+                _read_launch_state, pool, launch.agent_id
+            )
+        except Exception as persistence_exc:
+            # The retry endpoint re-reads status/attempt once Postgres returns.
+            state = {"status": "unknown", "availability": None}
+            admitted = False
+            retry_legal = True
+            detail += f"; launch-state persistence/read failed ({type(persistence_exc).__name__})"
+        if admitted:
+            return SpawnedAgent(id=launch.agent_id)
+        raise AgentLaunchFailed(
+            f"Agent #{launch.agent_id} was created; launch dispatch to {target} failed: {detail}",
+            agent_id=launch.agent_id,
+            state=state,
+            retry_launch_path=(
+                f"/api/agents/{launch.agent_id}/retry-launch" if retry_legal else None
+            ),
+        ) from exc
+    try:
+        await asyncio.to_thread(_clear_launch_failure, pool, launch.agent_id, attempt_id)
+    except Exception as exc:
+        logger.warning(
+            "agent {} accepted launch but failure clear failed: {}",
+            launch.agent_id,
+            type(exc).__name__,
+        )
+    return spawned
+
+
+def _require_matching_launch_receipt(spawned: SpawnedAgent, agent_id: int, target: str) -> None:
+    if spawned.id != agent_id:
+        raise LaunchForwardError(
+            AvailabilityReason.LAUNCH_UNREACHABLE,
+            f"target machine={target!r} returned agent {spawned.id} for {agent_id}",
+        )
+
+
 def _creation_availability(pool: ConnectionPool, agent_id: int) -> AgentAvailability:
     try:
         with pool.connection() as conn:
             snap = agent_snapshot.select_one(conn, agent_id)
     except Exception as exc:
-        logger.warning("created agent {} receipt read failed: {}", agent_id, exc)
+        logger.warning(
+            "created agent {} receipt read failed ({}): {}",
+            agent_id,
+            type(exc).__name__,
+            exc,
+        )
         return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=datetime.now(UTC))
     if snap is None or snap.availability is None:
         logger.warning("created agent {} unavailable for receipt read", agent_id)
@@ -492,14 +623,9 @@ async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent
     is done asynchronously by the services/labeler daemon — does not block
     the spawn response.
 
-    Fork prompt delivery: for a fork, the prompt is inserted pre-launch by
-    create_agent_row (the forked agent inherits a full history and would
-    otherwise start a turn on the inherited task before a post-launch prompt
-    landed), with no InboundArrived (the agent's claim emits InboundCommitted
-    once it picks the prompt up — same as resurrect); for a plain spawn, the
-    launch op delivers the first prompt post-launch and publishes
-    InboundArrived so all UIs see the new agent received its first task in
-    real time.
+    Plain and fork first prompts commit with the row. The fork marker precedes
+    its chat in that transaction. InboundArrived is a best-effort live hint;
+    the pending scan recovers a missed wake.
 
     body.machine = None targets the local machine (which must be a registered
     agent-runner).
@@ -510,6 +636,50 @@ async def post_agents(body: SpawnAgentRequest, request: Request) -> SpawnedAgent
     """
     target = body.machine if body.machine is not None else machine_name()
     return await create_and_launch_agent(body, target, request.app.state.db_pool)
+
+
+def _prepare_retry_launch(
+    pool: ConnectionPool, agent_id: int
+) -> tuple[str, LaunchAgentRequest | None]:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT machine, config_overlay, birth_config, status, last_admission_at, "
+            "last_launch_attempt_id FROM agents_meta WHERE id=%s FOR UPDATE",
+            (agent_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        target, config, birth_config, status, admitted_at, prior_attempt = row
+        if admitted_at is not None and status != "terminated":
+            return target, None
+        if status != "idling" or prior_attempt is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"agent {agent_id} cannot retry launch in status {status}",
+            )
+        attempt_id = uuid4()
+        cur.execute(
+            "UPDATE agents_meta SET last_launch_attempt_id=%s WHERE id=%s",
+            (attempt_id, agent_id),
+        )
+    return target, LaunchAgentRequest(
+        agent_id=agent_id,
+        launch_attempt_id=attempt_id,
+        config=config,
+        birth_config=birth_config,
+    )
+
+
+@router.post("/api/agents/{agent_id}/retry-launch", response_model_exclude_none=True)
+async def retry_agent_launch(agent_id: int, request: Request) -> SpawnedAgent:
+    """Retry dispatch for one committed identity without adding an inbound."""
+    pool = request.app.state.db_pool
+    target, launch = await asyncio.to_thread(_prepare_retry_launch, pool, agent_id)
+    if launch is None:
+        return await _accepted_launch_receipt(pool, SpawnedAgent(id=agent_id))
+    spawned = await _dispatch_committed_launch(pool, target, launch)
+    return await _accepted_launch_receipt(pool, spawned)
 
 
 @router.get("/api/agents/{agent_id}")

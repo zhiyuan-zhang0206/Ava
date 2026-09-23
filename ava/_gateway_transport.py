@@ -170,6 +170,15 @@ def _raise_from_response(resp: httpx.Response) -> None:  # noqa: F821  # pyright
         resp.raise_for_status()
         return  # unreachable; raise_for_status has raised
     reason, body = wire
+    if reason == ErrorReason.AGENT_LAUNCH_FAILED:
+        from shared.agents import AgentLaunchFailed
+
+        raise AgentLaunchFailed(
+            body["detail"],
+            agent_id=body.get("agent_id"),
+            state=body.get("state"),
+            retry_launch_path=body.get("retry_launch_path"),
+        )
     raise EXCEPTION_BY_REASON[reason](body["detail"])
 
 

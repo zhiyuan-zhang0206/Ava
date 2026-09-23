@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { AgentAvailability } from "./agent-availability";
 import type { AgentRow } from "@/lib/types";
 
 const getAgent = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api", () => ({ api: { getAgent } }));
+const retryAgentLaunch = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api", () => ({ api: { getAgent, retryAgentLaunch } }));
 
 const now = new Date().toISOString();
 const agent = {
@@ -27,7 +28,7 @@ function show(selected: AgentRow = agent) {
   );
 }
 
-afterEach(() => getAgent.mockReset());
+afterEach(() => { getAgent.mockReset(); retryAgentLaunch.mockReset(); });
 
 it("shows a fresh host-down reason and machine diagnostics on the selected agent", async () => {
   getAgent.mockResolvedValue({ ...agent, availability: {
@@ -67,4 +68,25 @@ it("drops a stale cached admission label when detail cannot refresh", () => {
     observed_at: "2026-09-24T00:00:00Z",
   } });
   expect(screen.getByText("Start availability unknown")).toBeTruthy();
+});
+
+it("keeps a durable launch failure visible and retries the existing id", async () => {
+  getAgent.mockResolvedValue({ ...agent, status: "idling", availability: {
+    reason: "launch_unreachable",
+    observed_at: "2026-09-24T00:00:00Z",
+    evidence_at: "2026-09-24T00:00:00Z",
+  } });
+  retryAgentLaunch.mockResolvedValue({ id: 6571 });
+  show({ ...agent, status: "idling" });
+  expect(await screen.findByText("Launch failed: runner could not be reached")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry launch" }));
+  expect(retryAgentLaunch).toHaveBeenCalledWith(6571);
+});
+
+it("offers same-id retry for an unstarted row whose failure observation was unavailable", async () => {
+  getAgent.mockResolvedValue({ ...agent, status: "idling", started_at: null, availability: {
+    reason: "unknown", observed_at: now,
+  } });
+  show({ ...agent, status: "idling", started_at: null });
+  expect(await screen.findByRole("button", { name: "Retry launch" })).toBeTruthy();
 });

@@ -442,6 +442,13 @@ def _register_fleet_tools(
             # The old stdio serve forwarded the gateway's `detail` verbatim;
             # in-process the same business errors are AvaAgentError instances —
             # surface their message as a tool error, not a protocol error.
+            from shared.agents import AgentLaunchFailed
+
+            if isinstance(exc, AgentLaunchFailed):
+                raise ToolError(
+                    f"{exc}; created agent_id={exc.agent_id}, "
+                    f"state={exc.state}, retry_launch_path={exc.retry_launch_path}"
+                ) from exc
             raise ToolError(str(exc)) from exc
         return spawned.model_dump(mode="json")
 

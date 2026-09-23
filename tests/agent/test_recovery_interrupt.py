@@ -27,7 +27,7 @@ from tests.agent.test_hosted_db_recovery import _admit, _graph
 async def test_pending_external_interrupt_shortens_backoff_without_claiming(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, kind: str
 ) -> None:
-    agent, _ = create_agent_row(spawner="user", machine=machine_name())
+    agent, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
     incarnation = RuntimeIncarnation(agent, uuid4(), uuid4())
     command = insert_inbound_message(db_conn, agent, "", "user", kind=kind)
     db_conn.commit()
@@ -49,7 +49,7 @@ async def test_pending_external_interrupt_shortens_backoff_without_claiming(
 async def test_interrupt_arriving_during_backoff_is_observed(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    agent, _ = create_agent_row(spawner="user", machine=machine_name())
+    agent, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
     interrupt = RecoveryInterrupt(aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()))
     checked = asyncio.Event()
     original = recovery_interrupt.has_pending_interrupt
@@ -80,7 +80,7 @@ async def test_interrupt_arriving_during_backoff_is_observed(
 async def test_self_control_does_not_shorten_backoff(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    agent, _ = create_agent_row(spawner="user", machine=machine_name())
+    agent, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
     insert_inbound_message(db_conn, agent, "", "self", kind="terminate")
     db_conn.commit()
     interrupt = RecoveryInterrupt(aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()))

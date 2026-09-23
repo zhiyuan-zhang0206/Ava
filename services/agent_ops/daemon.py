@@ -108,7 +108,8 @@ _PIDFILE = settings.services.ops_pidfile
 # `api_idempotency` table (method='ops' rows — see `_dispatch_idempotent`): the
 # first dispatch owns the key, runs the op, and stores the outcome; later ones
 # replay it, so the gateway's retry of one logical op cannot duplicate its
-# effect (spawn -> twin agent). Rows are kept 7 days (matching the HTTP
+# effect (legacy launch prompt insertion, updates, lifecycle commands). The
+# versioned launch wake keeps the same dedupe envelope per attempt. Rows are kept 7 days (matching the HTTP
 # channel's retention, one shared table) and pruned on each new-key insert.
 _DEDUP_TTL_S = 7 * 86_400.0
 # A same-key dispatch while the owner is still executing is a caller bug
@@ -278,7 +279,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
 
     try:
         match kind:
-            case "spawn-launch":
+            case "spawn-launch" | "spawn-launch-v2":
                 spawned = await ops_lifecycle.launch_agent_op(
                     LaunchAgentRequest.model_validate(payload), pool
                 )

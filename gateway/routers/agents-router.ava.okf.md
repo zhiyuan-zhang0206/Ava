@@ -41,8 +41,12 @@ source's overlay + preset verbatim. See
 
 The POST receipt adds `accepted=true`, `execution_observed=false`, an observed
 availability reason, and `observed_at` while retaining `id` for older clients.
-The gateway reads the created row after the runner ops launch reply. A 201 says
-the launch request and first prompt were accepted; no agent-host turn or first
+The gateway commits the row, fork marker if present, and first prompt in one
+transaction before forwarding a `spawn-launch-v2` op. The runner validates and
+publishes a repeatable wake; it does not insert a new prompt or terminate the
+row on launch failure. The gateway reads the created row after the ops reply.
+A 201 says the launch request was accepted and the first prompt is pending;
+no agent-host turn or first
 message claim is synchronously confirmed. The host-down reason comes from the
 existing machine status probe, and a recent admission refusal comes from the
 agent's durable admission observation. Exact host boot exceptions remain in
@@ -50,6 +54,22 @@ machine diagnostics. If the post-launch availability read fails or the created
 row is unavailable, the receipt still returns 201 with
 `reason=unknown` and a fresh `observed_at` because row creation and the launch
 reply have already succeeded.
+
+If the forward fails after creation, the gateway conditionally records a typed
+launch failure on the row and responds 502 `agent_launch_failed` with
+`agent_id`, actual `state.status`, projected availability, and a legal
+`retry_launch_path`. The browser selects that agent and offers Retry launch.
+`POST /api/agents/{id}/retry-launch` rotates `last_launch_attempt_id`, reuses
+the stored machine/config/birth stamp, and forwards the same identity without
+another inbound. Within one attempt, `spawn-launch-v2` keeps its canonical RPC
+dedupe key; a new attempt is a repeatable wake. Admission racing a failed
+forward wins and produces an accepted receipt. A failure-state DB read/write
+outage still returns the committed ID with an unknown state. A lost HTTP
+response before the caller receives the ID remains a separate create-key gap.
+The versioned op name also gates a rolling runner: old ops servers reject it
+before reaching their old launch handler, so they cannot force-terminate the
+committed row. New runners still accept the legacy `spawn-launch` operation
+from an old gateway during the update window.
 
 ## List projections
 

@@ -1403,12 +1403,9 @@ def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("services.labeler.labeler.build_chat_model", _fake_factory)
 
 
-# The autouse `_stub_os_cron` that used to live here patched
-# `gateway.app.register_os_cron` to a no-op. It could only ever protect the pytest
-# process, and the registration that actually leaked ran in the e2e gateway
-# SUBPROCESS, where no monkeypatch reaches. `AVA_OS_JOBS_ENABLED=false` (set at
-# the top of this file, inherited by every child) replaces it and covers both.
-
+# The old `_stub_os_cron` patched only pytest; registration leaked in the e2e
+# gateway subprocess, where monkeypatch could not reach. The inherited
+# `AVA_OS_JOBS_ENABLED=false` setting covers both processes.
 
 # Test agents are durable rows; only a real host process executes their turns.
 
@@ -1424,7 +1421,9 @@ def spawn_agent(
     from shared.db import publish_inbound_wake
     from shared.machine import machine_name
 
-    agent_id, _ = create_agent_row(spawner=spawner, machine=machine_name(), config=config, **kw)
+    agent_id, _, _prompt_id, _attempt_id = create_agent_row(
+        spawner=spawner, machine=machine_name(), config=config, **kw
+    )
     publish_inbound_wake(agent_id, "0")
     return agent_id
 

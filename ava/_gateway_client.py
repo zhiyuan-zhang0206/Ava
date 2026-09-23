@@ -186,6 +186,13 @@ def spawn(
     return int(data["id"])
 
 
+def retry_launch(agent_id: int) -> int:
+    """Retry launch of one committed identity without creating a new agent."""
+    resp = _post(f"/api/agents/{agent_id}/retry-launch")
+    _raise_from_response(resp)
+    return int(resp.json()["id"])
+
+
 def send_message(
     agent_id: int,
     *,

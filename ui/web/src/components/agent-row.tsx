@@ -326,6 +326,12 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                 )}
               />
             ) : null}
+            {agent.availability?.reason.startsWith("launch_") && (
+              <span className="shrink-0 rounded bg-destructive/15 px-1 text-[9px] text-destructive"
+                title={t("launchFailed")}>
+                {t("launchFailed")}
+              </span>
+            )}
             {/* notices-awaiting-response badge — count colored by highest
                 priority; only when notification.awaiting_reply is on (a
                 jumping count is a dynamic signal). */}

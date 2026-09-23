@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 
 from ava._gateway_transport import _raise_from_response
 from gateway.app import _ava_agent_error_handler
-from shared.agents import EXCEPTION_BY_REASON, AvaAgentError
+from shared.agents import EXCEPTION_BY_REASON, AgentLaunchFailed, AvaAgentError
 
 
 @pytest.mark.parametrize(
@@ -76,3 +76,19 @@ def test_sdk_reconstructs_from_wire(reason, cls):
     )
     with pytest.raises(cls, match="forced wire-test message"):
         _raise_from_response(resp)
+
+
+def test_sdk_launch_failure_retains_committed_identity_and_state() -> None:
+    body = {
+        "detail": "created but launch failed",
+        "reason": "agent_launch_failed",
+        "agent_id": 123,
+        "state": {"status": "idling", "availability": {"reason": "launch_unreachable"}},
+        "retry_launch_path": "/api/agents/123/retry-launch",
+    }
+    response = httpx.Response(502, json=body)
+    with pytest.raises(AgentLaunchFailed) as raised:
+        _raise_from_response(response)
+    assert raised.value.agent_id == 123
+    assert raised.value.state == body["state"]
+    assert raised.value.retry_launch_path == body["retry_launch_path"]
