@@ -39,7 +39,6 @@ const {
         (
           agentId: number,
           hours?: number | null,
-          sinceCompact?: boolean,
           signal?: AbortSignal,
         ) => Promise<AgentInspectStatistics>
       >(),
@@ -164,7 +163,6 @@ function fixture(overrides: Partial<AgentInspectStatistics> = {}): AgentInspectS
   return {
     agent_id: 1,
     window_hours: 24,
-    since_compact: false,
     metadata: {
       collection: "observed",
       window_start: null,
@@ -527,7 +525,7 @@ describe("InspectorPanel", () => {
     });
 
     await waitFor(() =>
-      expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 1, false, expect.any(AbortSignal)),
+      expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 1, expect.any(AbortSignal)),
     );
     expect(screen.queryByText("$0.4213")).toBeNull();
     expect(screen.getByLabelText("Cost loading")).toBeTruthy();
@@ -956,13 +954,13 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 24, false, expect.any(AbortSignal));
+    expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 24, expect.any(AbortSignal));
     expect(screen.getByLabelText<HTMLSelectElement>("Cost + activity window").value).toBe("24");
 
     fireEvent.change(screen.getByLabelText("Cost + activity window"), { target: { value: "1" } });
 
     await waitFor(() =>
-      expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 1, false, expect.any(AbortSignal)),
+      expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, 1, expect.any(AbortSignal)),
     );
     // The select reflects the chosen window (the cost scope line was removed).
     await waitFor(() =>
@@ -985,22 +983,13 @@ describe("InspectorPanel", () => {
     );
   });
 
-  it("Compact window selects since_compact instead of hours", async () => {
-    // First load is 24h. After selecting Compact, the mock echoes since_compact=true.
-    getAgentInspectStatistics.mockResolvedValueOnce(fixture());
-    getAgentInspectStatistics.mockResolvedValue(fixture({ since_compact: true }));
+  it("offers only cumulative and time-based windows", async () => {
     render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-
-    fireEvent.change(screen.getByLabelText("Cost + activity window"), { target: { value: "-1" } });
-
-    await waitFor(() =>
-      expect(getAgentInspectStatistics).toHaveBeenCalledWith(1, null, true, expect.any(AbortSignal)),
-    );
-    await waitFor(() =>
-      expect(screen.getByLabelText<HTMLSelectElement>("Cost + activity window").value).toBe("-1"),
-    );
+    await screen.findByText("Persistent shells");
+    const select = screen.getByLabelText<HTMLSelectElement>("Cost + activity window");
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      "all", "0", "1", "24", "168",
+    ]);
   });
 
   it("shows an error message when the fetch fails", async () => {
@@ -1339,7 +1328,7 @@ describe("InspectorPanel mobile", () => {
   it("aborts both in-flight inspect requests when the panel closes", async () => {
     let windowedSignal: AbortSignal | undefined;
     let liveSignal: AbortSignal | undefined;
-    getAgentInspectStatistics.mockImplementation((_agentId, _hours, _sinceCompact, signal) => {
+    getAgentInspectStatistics.mockImplementation((_agentId, _hours, signal) => {
       windowedSignal = signal;
       return new Promise<AgentInspectStatistics>(() => undefined);
     });
@@ -1368,7 +1357,7 @@ describe("InspectorPanel mobile", () => {
 
   it("aborts the previous agent's inspect request before switching", async () => {
     const signals = new Map<number, AbortSignal | undefined>();
-    getAgentInspectStatistics.mockImplementation((agentId, _hours, _sinceCompact, signal) => {
+    getAgentInspectStatistics.mockImplementation((agentId, _hours, signal) => {
       signals.set(agentId, signal);
       return new Promise<AgentInspectStatistics>(() => undefined);
     });
@@ -1747,27 +1736,6 @@ describe("persisted metric evidence is internal (task #3869)", () => {
     await screen.findByText("$0.4213");
     expect(screen.queryByText("Historical coverage is incomplete")).toBeNull();
     expect(screen.queryByText(/Latest recorded observation:/)).toBeNull();
-  });
-
-  it("keeps the compact window empty without exposing the boundary verdict or all-time totals", async () => {
-    panelState.hours = -1;
-    const data = fixture({
-      since_compact: true,
-      cost: null,
-      stats: null,
-      tps: null,
-      activity: null,
-    });
-    data.metadata.window_start = null;
-    data.metadata.cost = { availability: "unavailable", sources: [] };
-    getAgentInspectStatistics.mockResolvedValue(data);
-    render(<InspectorPanel agentId={1} />);
-    await screen.findByText("Activity");
-    await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
-    expect(
-      screen.queryByText("The last completed compaction boundary is unavailable."),
-    ).toBeNull();
-    expect(screen.queryByText("$0.4213")).toBeNull();
   });
 });
 

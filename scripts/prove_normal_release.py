@@ -1261,14 +1261,14 @@ def create_namespace(conn: psycopg.Connection, namespace: str, home: Path) -> No
     # `lock_rollout` predicates `settle_hosts IS NULL` and the lease read selects
     # the settle trio; the real schema has carried it since the initial release.
     conn.execute(
-        "CREATE TABLE deployment_state(id int, phase text, kind text, note text, holder text,"
+        "CREATE TABLE deployment_state(id int, phase text, kind text, holder text,"
         " acquired_at timestamptz, expires_at timestamptz, target_sha text,"
         " managed_writer_evidence jsonb, settle_hosts text[], settle_note text,"
         " settle_started_at timestamptz)"
     )
     conn.execute(
-        "INSERT INTO deployment_state(id, phase, kind, note, holder, acquired_at, expires_at,"
-        " target_sha) VALUES (1, 'updating', 'rollout', NULL, 'proof-idle',"
+        "INSERT INTO deployment_state(id, phase, kind, holder, acquired_at, expires_at,"
+        " target_sha) VALUES (1, 'updating', 'rollout', 'proof-idle',"
         " clock_timestamp(), clock_timestamp() + interval '1 hour', %s)",
         (_TARGET_SHA,),
     )

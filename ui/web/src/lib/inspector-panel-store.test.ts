@@ -90,9 +90,9 @@ describe("useInspectorHours", () => {
   it("defaults to 24h and updates the shared client selection", () => {
     const { result } = renderHook(() => useInspectorHours());
     expect(result.current.inspectorHours).toBe(24);
-    act(() => result.current.setInspectorHours(-1));
-    expect(result.current.inspectorHours).toBe(-1);
-    expect(useStore.getState().inspectorHours).toBe(-1);
+    act(() => result.current.setInspectorHours(1));
+    expect(result.current.inspectorHours).toBe(1);
+    expect(useStore.getState().inspectorHours).toBe(1);
   });
 });
 

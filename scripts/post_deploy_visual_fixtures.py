@@ -63,7 +63,6 @@ INSPECT_STATISTICS = {
     "agent_id": 1,
     "window_hours": 24,
     "applied_window_hours": 24,
-    "since_compact": False,
     "metadata": {
         "collection": "observed",
         "window_start": "2026-09-01T00:00:00Z",

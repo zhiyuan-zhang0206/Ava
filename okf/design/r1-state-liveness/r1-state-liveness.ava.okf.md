@@ -50,7 +50,7 @@ Schema version is deployment state: applied set vs code-required set is the drif
 
 ### Event stream back to pure facts
 
-`agents_meta.last_compact_at` (synchronous update) replaces the events-table `OFFSET 1` hack; watchdog dedup gets one truth table (`delivery_watchdog_alerted`), dropping the memory double-write. State markers never enter the event stream.
+Inspector statistics use cumulative or time-based windows over persisted observations. Watchdog dedup uses one truth table (`delivery_watchdog_alerted`). State markers never enter the event stream.
 
 ## The five invariants
 

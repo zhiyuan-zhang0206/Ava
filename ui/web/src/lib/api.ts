@@ -286,17 +286,13 @@ export const api = {
 
   // Persisted observed statistics with explicit window, source precision, and
   // coverage. `hours` selects the window (0 = 5m); omitted = since spawn.
-  // `sinceCompact` takes precedence and is unavailable when no authoritative
-  // completed durable compact boundary exists.
   getAgentInspectStatistics: (
     agentId: number,
     hours?: number | null,
-    sinceCompact?: boolean,
     signal?: AbortSignal,
   ): Promise<AgentInspectStatistics> => {
     const params = new URLSearchParams();
     if (hours != null) params.set("hours", String(hours));
-    if (sinceCompact) params.set("since_compact", "true");
     const qs = params.toString();
     return jsonWithTimeout<AgentInspectStatistics>(
       `/api/agents/${agentId}/inspect/statistics${qs ? `?${qs}` : ""}`,

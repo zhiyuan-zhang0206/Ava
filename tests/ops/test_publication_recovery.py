@@ -157,7 +157,7 @@ def _abandoned_rollout(
 
 def _journal_snapshot(db_conn: psycopg.Connection) -> tuple[object, ...]:
     row = db_conn.execute(
-        "SELECT holder, target_sha, phase, kind, note, expires_at, "
+        "SELECT holder, target_sha, phase, kind, settle_note, expires_at, "
         "managed_writer_evidence::text FROM deployment_state WHERE id=1"
     ).fetchone()
     assert row is not None
@@ -354,19 +354,28 @@ def test_run_replaces_the_abandoned_operation_under_a_fresh_closure(
     assert result["units"] == 1
 
     row = recovery_db.execute(
-        "SELECT holder, target_sha, phase, kind, note, expires_at > clock_timestamp(), "
+        "SELECT holder, target_sha, phase, kind, settle_note, expires_at > clock_timestamp(), "
         "managed_writer_evidence->'pending'->'operation', "
         "managed_writer_evidence->'pending'->'challenge', "
         "managed_writer_evidence->'pending'->'collection'->'challenge', "
         "managed_writer_evidence->'current' FROM deployment_state WHERE id=1"
     ).fetchone()
     assert row is not None
-    holder, target_sha, phase, kind, note, lease_live, operation, challenge, collection, current = (
-        row
-    )
+    (
+        holder,
+        target_sha,
+        phase,
+        kind,
+        settle_note,
+        lease_live,
+        operation,
+        challenge,
+        collection,
+        current,
+    ) = row
     assert holder == new_holder
     assert target_sha == TARGET_SHA  # the replacement resumes the same rollout target
-    assert (phase, kind, note) == ("updating", "rollout", None)
+    assert (phase, kind, settle_note) == ("updating", "rollout", None)
     assert lease_live is True
     assert operation["holder"] == new_holder
     assert operation["target_sha"] == TARGET_SHA
@@ -647,13 +656,13 @@ def test_pre_stop_abort_clears_a_never_effective_window(
     ]
 
     row = recovery_db.execute(
-        "SELECT holder, acquired_at, expires_at, note, phase, kind, target_sha, "
+        "SELECT holder, acquired_at, expires_at, settle_note, phase, kind, target_sha, "
         "managed_writer_evidence->'pending', managed_writer_evidence->'current' "
         "FROM deployment_state WHERE id=1"
     ).fetchone()
     assert row is not None
-    holder, acquired_at, expires_at, note, phase, kind, target_sha, pending, current = row
-    assert (holder, acquired_at, expires_at, note) == (None, None, None, None)
+    holder, acquired_at, expires_at, settle_note, phase, kind, target_sha, pending, current = row
+    assert (holder, acquired_at, expires_at, settle_note) == (None, None, None, None)
     assert (phase, kind) == ("stable", None)
     # The target field is not this write's to clear; the release statement keeps it.
     assert target_sha == TARGET_SHA

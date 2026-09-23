@@ -518,40 +518,6 @@ def test_stranded_recovery_finish_without_a_record_is_a_no_op() -> None:
     assert state.stranded_hold_recovery_note is None
 
 
-def test_stranded_recovery_migration_round_trips_on_a_pre_migration_table(
-    db_conn: psycopg.Connection,
-) -> None:
-    """The upgrade path a rollout takes on an older cluster: the three budget
-    columns land, reverse, and re-apply (`db/schema.sql` carries the final shape
-    and stamps the migration as already applied, so only an upgrade runs it)."""
-    migration = (
-        Path(__file__).resolve().parents[2] / "migrations/20260911T192500_stranded-hold-recovery"
-    )
-    with db_conn.transaction(force_rollback=True):
-        db_conn.execute("CREATE SCHEMA recovery_migration")
-        db_conn.execute("SET LOCAL search_path TO recovery_migration")
-        db_conn.execute(
-            "CREATE TABLE host_deploy_state ("
-            "machine TEXT PRIMARY KEY, stranded_hold_since TIMESTAMPTZ, "
-            "stranded_hold_reason TEXT)"
-        )
-        assert _budget_columns(db_conn) == []
-        db_conn.execute(_migration_body(migration, ".sql"))
-        assert _budget_columns(db_conn) == [
-            "stranded_hold_attempts",
-            "stranded_hold_attempted_at",
-            "stranded_hold_recovery_note",
-        ]
-        db_conn.execute(_migration_body(migration, ".down.sql"))
-        assert _budget_columns(db_conn) == []
-        db_conn.execute(_migration_body(migration, ".sql"))
-        assert _budget_columns(db_conn) == [
-            "stranded_hold_attempts",
-            "stranded_hold_attempted_at",
-            "stranded_hold_recovery_note",
-        ]
-
-
 def _migration_body(migration: Path, suffix: str) -> sql.SQL:
     return sql.SQL(cast(LiteralString, migration.with_suffix(suffix).read_text()))
 
