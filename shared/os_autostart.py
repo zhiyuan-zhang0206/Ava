@@ -56,7 +56,6 @@ from shared.config import settings
 from shared.os_cron import (
     LAUNCHD_LABEL_PREFIX,
     ava_binary_path,
-    cleanup_legacy_macos_job,
     cron_env_prefix,
     launchd_env_block,
     os_jobs_enabled,
@@ -70,14 +69,6 @@ def _home_slug() -> str:
     from shared.paths import ava_home
 
     return home_slug(ava_home())
-
-
-def _legacy_tokens() -> list[str]:
-    """This home's pre-path-only label tokens (see os_cron._legacy_label_tokens),
-    used only to clean up old crontab/launchd entries."""
-    from shared.os_cron import _legacy_label_tokens
-
-    return _legacy_label_tokens()
 
 
 def _autostart_label(slug: str) -> str:
@@ -161,7 +152,6 @@ def _register_macos() -> int:
         f"  . '{label}' loads on next login/reboot; enable now with: "
         f"launchctl bootstrap gui/{os.getuid()} {plist_path}"
     )
-    cleanup_legacy_macos_job("autostart")
     return 0
 
 
@@ -235,12 +225,8 @@ def _register_linux() -> int:
             )
             return 1
         current = result.stdout if result.returncode == 0 else ""
-        # Replace this home's entry (slug marker) AND its pre-path-only entries
-        # (`--cluster <name>` markers, whose token was the old home-derived name).
-        stale_markers = [f"{_CRON_MARKER}.{slug}"] + [
-            f"{_CRON_MARKER}.{t}" for t in _legacy_tokens()
-        ]
-        lines = [line for line in current.splitlines() if not any(m in line for m in stale_markers)]
+        marker = f"{_CRON_MARKER}.{slug}"
+        lines = [line for line in current.splitlines() if marker not in line]
         lines.append(entry)
 
         result = subprocess.run(

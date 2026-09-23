@@ -268,15 +268,6 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
 # --- unit-state steps (need a configured unit) ----------------------------
 
 
-def _migrate_host_config_to_env(ctx: ConvergeCtx) -> None:
-    """One-time .env hygiene migration (host-override file) — idempotent,
-    file-only."""
-    del ctx  # signature kept uniform with the other converge steps
-    from shared import runtime_config
-
-    runtime_config.migrate_host_json_to_env()
-
-
 def _parses_as_int(value: str) -> bool:
     """Mirror of the derivation's own parse (`int()` in
     `env_registry.backfill_missing_health_ports`), so this step can name the

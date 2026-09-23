@@ -1,18 +1,12 @@
 """`$AVA_HOME/.env` is the single config source of truth.
 
-`shared/runtime_config.py` reads/writes `.env` by each field's env alias, and
-runs one one-time migration that retires the former per-machine host override
-file (`runtime_config.json`) into `.env`. It is precedence-correct (a key already
-set in `.env` is left untouched — env beat the override) and idempotent (the file
-is archived after the copy). The cluster-wide DB override table this once mirrored
-has been migrated into `.env` and dropped.
+`shared/runtime_config.py` reads/writes `.env` by each field's env alias.
 
 `fake_ava_home` redirects `_ava_home()` (and so `.env`) to tmp_path.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -22,7 +16,7 @@ from shared import runtime_config as rt
 
 @pytest.fixture
 def fake_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Redirect _ava_home (and so this unit's .env / legacy files) to tmp_path."""
+    """Redirect _ava_home (and so this unit's .env) to tmp_path."""
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     return tmp_path
 
@@ -96,44 +90,6 @@ class TestEnvRoundtrip:
         aliases = rt.read_env_aliases()
         assert aliases["AVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
         assert aliases["AVA_MODEL"] == "m1"
-
-
-# ─── host override file -> .env (one-time) ───
-
-
-class TestHostJsonMigration:
-    def test_copies_json_into_env_and_archives(self, fake_ava_home: Path) -> None:
-        (fake_ava_home / "runtime_config.json").write_text(
-            json.dumps({"ops_concurrency": 4, "browser_enabled": True})
-        )
-        rt.migrate_host_json_to_env()
-        aliases = rt.read_env_aliases()
-        assert aliases["AVA_OPS_CONCURRENCY"] == "4"
-        assert aliases["AVA_BROWSER_ENABLED"] == "true"
-        assert not (fake_ava_home / "runtime_config.json").exists()
-        assert (fake_ava_home / "runtime_config.json.migrated").exists()
-
-    def test_skips_key_already_in_env(self, fake_ava_home: Path) -> None:
-        _seed_env(fake_ava_home, {"AVA_OPS_CONCURRENCY": "9"})
-        (fake_ava_home / "runtime_config.json").write_text(json.dumps({"ops_concurrency": 4}))
-        rt.migrate_host_json_to_env()
-        assert rt.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "9"
-
-    def test_absent_file_noop(self, fake_ava_home: Path) -> None:
-        rt.migrate_host_json_to_env()
-        assert not (fake_ava_home / "runtime_config.json.migrated").exists()
-
-    def test_malformed_json_left_in_place(self, fake_ava_home: Path) -> None:
-        (fake_ava_home / "runtime_config.json").write_text("{ not json")
-        rt.migrate_host_json_to_env()
-        assert (fake_ava_home / "runtime_config.json").exists()
-        assert not (fake_ava_home / "runtime_config.json.migrated").exists()
-
-    def test_idempotent(self, fake_ava_home: Path) -> None:
-        (fake_ava_home / "runtime_config.json").write_text(json.dumps({"ops_concurrency": 4}))
-        rt.migrate_host_json_to_env()
-        rt.migrate_host_json_to_env()  # file now archived -> no-op
-        assert rt.read_env_aliases()["AVA_OPS_CONCURRENCY"] == "4"
 
 
 def test_rename_env_keys_finds_and_keeps_an_export_prefixed_line(fake_ava_home: Path) -> None:
