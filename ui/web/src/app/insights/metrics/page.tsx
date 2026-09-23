@@ -8,7 +8,7 @@
 // linked from /insights#ops — see ops/page.tsx).
 //
 // The backend /api/metrics + /api/metrics/agents endpoints are intentionally
-// left in place: scripts/metrics.py (the CLI mirror of shared/metrics.py) and
+// left in place: scripts/metrics.py (the CLI mirror of shared/metrics/report.py) and
 // any script consumers still read them, and the redirect notice points there
 // as the fallback when the Grafana proxy is off (AVA_GRAFANA_PROXY_ENABLED).
 //

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from shared import core_metrics
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import (
     DuplicateMetric,
     InvalidMetricQuery,

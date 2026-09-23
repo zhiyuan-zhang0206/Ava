@@ -15,7 +15,7 @@ own predicate, which the LogQL validator permits for ``logs`` panels.
 
 from __future__ import annotations
 
-from shared import core_metrics
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import MetricSpec
 
 core_metrics.register_core_metric(

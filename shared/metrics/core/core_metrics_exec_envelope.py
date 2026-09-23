@@ -1,6 +1,6 @@
 """Exec-envelope transfer-cost panels — task #2174.
 
-Split out of ``shared/core_metrics_observability.py`` when that module hit
+Split out of ``shared/metrics/core/core_metrics_observability.py`` when that module hit
 the 800-line code-structure ceiling (task #2174): the two panels unwrap the
 ``exec_envelope`` event (agent/graph/_exec_protocol.py::_log_envelope_transfer)
 and group by envelope/op — the transfer-cost display split out of the Exec
@@ -9,7 +9,7 @@ outcomes other bucket (PM ruling 2026-08-31).
 
 from __future__ import annotations
 
-from shared import core_metrics
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import MetricSpec
 
 # The transfer-cost display split from the Exec outcomes other bucket (PM

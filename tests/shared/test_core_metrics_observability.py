@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared import core_metrics
+from shared.metrics.core import core_metrics
 from shared.metrics_logql import validate_logql
 from shared.plugin_metrics import InvalidMetricQuery, render_query, render_targets
 
@@ -110,9 +110,9 @@ def _load_pack() -> None:
 
     core_metrics.clear_core_registry()
     for module_name in (
-        "shared.core_metrics_observability",
-        "shared.core_metrics_exec_envelope",
-        "shared.core_metrics_frontend",
+        "shared.metrics.core.core_metrics_observability",
+        "shared.metrics.core.core_metrics_exec_envelope",
+        "shared.metrics.core.core_metrics_frontend",
     ):
         sys.modules.pop(module_name, None)
         importlib.import_module(module_name)

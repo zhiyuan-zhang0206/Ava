@@ -22,11 +22,11 @@ dashboard render is being rebuilt (task #3697): ``shared.grafana_dashboard``
 renders the registries into the dashboard JSON, previewed by ``ava lgtm
 render`` and wired into converge by slice S3.
 
-Core definitions live in ``shared/core_metrics_panels.py`` (the migrated
-ops-dashboard panels), ``shared/core_metrics_observability.py`` (the migrated
-ava_observability pack), ``shared/core_metrics_events.py`` (the event-stream
+Core definitions live in ``shared/metrics/core/core_metrics_panels.py`` (the migrated
+ops-dashboard panels), ``shared/metrics/core/core_metrics_observability.py`` (the migrated
+ava_observability pack), ``shared/metrics/core/core_metrics_events.py`` (the event-stream
 panels: the Events trio and the gateway sample count) and
-``shared/core_metrics_host.py`` (the "Host & data plane" section), plus the
+``shared/metrics/core/core_metrics_host.py`` (the "Host & data plane" section), plus the
 smaller modules beside them (``core_metrics_cost`` / ``core_metrics_frontend``
 / ``core_metrics_dismissed`` / ``core_metrics_fleet`` / ``core_metrics_pr_flow``).
 The ``plugin`` field of
@@ -51,17 +51,17 @@ from shared.plugin_metrics import (
 # inspector listing. A missing module is tolerated (a partial checkout / test
 # env without the definitions) and renders an empty core section.
 _CORE_DEFINITION_MODULES = (
-    "shared.core_metrics_panels",
-    "shared.core_metrics_cost",
-    "shared.core_metrics_dismissed",
-    "shared.core_metrics_fleet",
-    "shared.core_metrics_pr_flow",
-    "shared.core_metrics_ci",
-    "shared.core_metrics_events",
-    "shared.core_metrics_host",
-    "shared.core_metrics_observability",
-    "shared.core_metrics_exec_envelope",
-    "shared.core_metrics_frontend",
+    "shared.metrics.core.core_metrics_panels",
+    "shared.metrics.core.core_metrics_cost",
+    "shared.metrics.core.core_metrics_dismissed",
+    "shared.metrics.core.core_metrics_fleet",
+    "shared.metrics.core.core_metrics_pr_flow",
+    "shared.metrics.core.core_metrics_ci",
+    "shared.metrics.core.core_metrics_events",
+    "shared.metrics.core.core_metrics_host",
+    "shared.metrics.core.core_metrics_observability",
+    "shared.metrics.core.core_metrics_exec_envelope",
+    "shared.metrics.core.core_metrics_frontend",
 )
 
 _CORE_REGISTRY: dict[str, MetricSpec] = {}

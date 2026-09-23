@@ -3,7 +3,7 @@
 Task #3697 slice S1 (parent #3689): the single shipped dashboard
 (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``)
 becomes a render of the metric registries — every panel comes from a
-registered ``MetricSpec`` (core definitions in ``shared/core_metrics_*``, plugin
+registered ``MetricSpec`` (core definitions in ``shared/metrics/core/core_metrics_*``, plugin
 definitions in each plugin's ``metrics.py``), and slice S3 writes the render
 into the station's provisioning directory.
 
