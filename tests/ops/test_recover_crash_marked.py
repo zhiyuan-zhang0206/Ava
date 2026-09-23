@@ -9,7 +9,7 @@ never raising, returning `(decision, reason)`.
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import psycopg
 import pytest
@@ -19,6 +19,7 @@ from ops.agent_spawn import create_agent_row
 from ops.rpc_schemas import RecoverCrashMarkedResponse
 from shared.agents import AgentNotFound
 from shared.machine import machine_name
+from shared.telemetry import Event
 
 
 class _Stubs(NamedTuple):
@@ -75,18 +76,39 @@ def _park_corpse(
 
 @pytest.fixture(autouse=True)
 def stubs(monkeypatch: pytest.MonkeyPatch) -> _Stubs:
-    """Capture the op's non-transactional side effects: the audit event enqueue
-    and the frontend snapshot publish (never touch Redis from these tests)."""
+    """Capture the prepared audit and frontend publish without touching Redis."""
     events: list[dict[str, object]] = []
     published: list[int] = []
+    prepare = ops_lifecycle.prepare_event_log
 
-    def _record_event(**kwargs: object) -> None:
-        events.append(kwargs)
+    def _record_event(
+        *,
+        event_type: str,
+        agent_id: int | None,
+        source: str,
+        target_agent_id: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> Event:
+        events.append(
+            {
+                "event_type": event_type,
+                "agent_id": agent_id,
+                "source": source,
+                "payload": payload or {},
+            }
+        )
+        return prepare(
+            event_type=event_type,
+            agent_id=agent_id,
+            source=source,
+            target_agent_id=target_agent_id,
+            payload=payload,
+        )
 
     def _record_publish(agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr(ops_lifecycle, "insert_event_log", _record_event)
+    monkeypatch.setattr(ops_lifecycle, "prepare_event_log", _record_event)
     monkeypatch.setattr(ops_lifecycle, "publish_agent_updated_sync", _record_publish)
     return _Stubs(events=events, published=published)
 
