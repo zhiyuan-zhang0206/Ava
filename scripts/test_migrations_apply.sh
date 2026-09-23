@@ -154,19 +154,27 @@ INSERT INTO agent_impersonations (
     accepted_generation, accepted_owner, automatic, event_delivery_protocol_version, activated_at
 ) VALUES (
     '00000000-0000-0000-0000-000000000006', 991006, 'external_agent:manifest-smoke',
-    'smoke-machine', 'manifest-smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
+    'smoke-machine', 'manifest-smoke-token', 'accepted', 300, clock_timestamp() + interval '5 minutes',
     '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 1,
-    clock_timestamp()
+    NULL
 );
 SELECT close_impersonation_event_manifest_admission('00000000-0000-0000-0000-000000000006');
+SELECT admit_impersonation_event_certifier(
+    '00000000-0000-0000-0000-000000000006',
+    'manifest-smoke-certification-secret-000001'
+);
+UPDATE agent_impersonations SET status='active', activated_at=clock_timestamp()
+WHERE id='00000000-0000-0000-0000-000000000006';
 SELECT freeze_impersonation_event_manifest(
     '00000000-0000-0000-0000-000000000006',
     'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 0, clock_timestamp()
 );
 UPDATE agent_impersonations SET status='released', ended_at=clock_timestamp()
 WHERE id='00000000-0000-0000-0000-000000000006';
-SELECT set_config('ava.impersonation_machine','smoke-machine',false);
-SELECT certify_impersonation_event_delivery('00000000-0000-0000-0000-000000000006');
+SELECT certify_impersonation_event_delivery(
+    '00000000-0000-0000-0000-000000000006',
+    'manifest-smoke-certification-secret-000001'
+);
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM agent_impersonations

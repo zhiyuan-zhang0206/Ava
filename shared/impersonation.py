@@ -202,11 +202,7 @@ def accept(
     (decision C).
     """
     if not start_message.strip():
-        raise ImpersonationError(
-            "A nonempty start message is required: write the briefing the "
-            "external session needs (current work, context, expectations, how "
-            "to ACK inbox messages)."
-        )
+        raise ImpersonationError("A nonempty start message is required for the external controller")
     if incarnation.agent_id != agent_id:
         raise ImpersonationError("Consent belongs to a different agent")
     with write_transaction() as conn:
@@ -229,6 +225,10 @@ def accept(
             "accepted_owner=%s,start_message=%s WHERE id=%s",
             (incarnation.generation, incarnation.owner, start_message, lease_id),
         )
+        if lease["event_delivery_protocol_version"] == 1:
+            from shared.agents.impersonation_manifest import admit_certifier
+
+            admit_certifier(conn, lease_id)
         result = public(lock_lease(conn, lease_id))
     _wake(agent_id)
     return result

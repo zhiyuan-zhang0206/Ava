@@ -68,20 +68,30 @@ def _inbound_rows(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str,
 
 def test_insert_restart_completed_inbound_traces_newest_restart(
     db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The completion marker retains the restart envelope the claim will render."""
     agent_id = _seed_agent(db_conn, "restarting")
     payload = {"config_overlay": {"model": "gpt-5"}}
+    post_commit_events = []
+    emitted = []
+    monkeypatch.setattr(db, "_emit_prepared_event", emitted.append)
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
             "VALUES (%s, %s, 'restart', 'self', %s::jsonb)",
             (agent_id, "restart with a new model", json.dumps(payload)),
         )
-        traced = db.insert_restart_completed_inbound(cur, agent_id)
+        traced = db.insert_restart_completed_inbound(
+            cur, agent_id, post_commit_events=post_commit_events
+        )
+        assert emitted == []
     db_conn.commit()
+    for event in post_commit_events:
+        db._emit_prepared_event(event)
 
     assert traced == ("self", "restart with a new model", payload)
+    assert len(emitted) == 1
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT kind, source, content, payload FROM inbound_messages "
@@ -100,7 +110,7 @@ def test_insert_restart_completed_inbound_without_restart_returns_none(
     """Callers decide how to handle a missing restart inbound; the helper does not insert."""
     agent_id = _seed_agent(db_conn, "restarting")
     with db_conn.cursor() as cur:
-        assert db.insert_restart_completed_inbound(cur, agent_id) is None
+        assert db.insert_restart_completed_inbound(cur, agent_id, post_commit_events=[]) is None
     db_conn.commit()
 
     assert _inbound_rows(db_conn, agent_id) == []

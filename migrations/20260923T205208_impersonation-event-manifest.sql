@@ -78,6 +78,18 @@ CREATE TABLE agent_impersonation_event_expected_items (
         REFERENCES agent_impersonation_event_expected_receipts(lease_id, origin_kind, origin_id)
         ON DELETE RESTRICT
 );
+-- The proof is deliberately in a table which the shared runner role cannot
+-- SELECT. This removes the caller-set custom-GUC claim: target-native
+-- acceptance binds the host-local value before the accepted row is visible,
+-- and a different runner cannot replace or discover it. Physical-machine
+-- identity is not encoded in the shared role; that remaining trust boundary
+-- is documented with the runtime protocol.
+CREATE TABLE agent_impersonation_event_certifiers (
+    lease_id UUID PRIMARY KEY REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
+    machine TEXT NOT NULL,
+    certification_secret TEXT NOT NULL CHECK (length(certification_secret) >= 32),
+    admitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 CREATE INDEX agent_impersonation_event_participant_items_envelope
     ON agent_impersonation_event_participant_items(lease_id, event_at);
 CREATE INDEX agent_impersonation_event_expected_items_envelope
@@ -86,6 +98,37 @@ CREATE INDEX agent_impersonations_manifest_pending
     ON agent_impersonations(machine, events_next_read_at)
     WHERE automatic AND event_delivery_protocol_version = 1
       AND events_completed_at IS NULL;
+
+CREATE FUNCTION public.admit_impersonation_event_certifier(
+    p_lease_id UUID,
+    p_certification_secret TEXT
+) RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $function$
+DECLARE lease public.agent_impersonations%ROWTYPE;
+BEGIN
+    SELECT * INTO lease FROM public.agent_impersonations WHERE id=p_lease_id FOR UPDATE;
+    IF NOT FOUND OR NOT lease.automatic OR lease.event_delivery_protocol_version <> 1
+       OR lease.status <> 'accepted' THEN
+        RAISE EXCEPTION 'Certification proof requires an accepted automatic protocol-v1 lease';
+    END IF;
+    IF length(p_certification_secret) < 32 THEN
+        RAISE EXCEPTION 'Certification proof is too short';
+    END IF;
+    INSERT INTO public.agent_impersonation_event_certifiers(lease_id,machine,certification_secret)
+    VALUES(p_lease_id,lease.machine,p_certification_secret)
+    ON CONFLICT (lease_id) DO NOTHING;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.agent_impersonation_event_certifiers
+        WHERE lease_id=p_lease_id AND machine=lease.machine
+          AND certification_secret=p_certification_secret
+    ) THEN
+        RAISE EXCEPTION 'Certification proof does not belong to this lease owner';
+    END IF;
+END;
+$function$;
 
 CREATE FUNCTION preserve_impersonation_event_protocol_version() RETURNS trigger AS $$
 BEGIN
@@ -239,10 +282,52 @@ BEGIN
 END;
 $function$;
 
--- This is the only completion-column writer. The agent host supplies its
--- machine through transaction-local `ava.impersonation_machine`; external
--- controllers never receive the function surface.
-CREATE FUNCTION public.certify_impersonation_event_delivery(p_lease_id UUID)
+CREATE FUNCTION public.record_impersonation_event_retention_loss(
+    p_lease_id UUID,
+    p_retention_horizon TIMESTAMPTZ
+) RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $function$
+BEGIN
+    UPDATE public.agent_impersonations
+    SET event_delivery_pending_reason='retention_loss',
+        event_delivery_retention_horizon_at=p_retention_horizon
+    WHERE id=p_lease_id
+      AND automatic
+      AND event_delivery_protocol_version=1
+      AND events_completed_at IS NULL
+      AND manifest_frozen_at IS NOT NULL
+      AND manifest_envelope_floor_at < p_retention_horizon;
+    RETURN FOUND;
+END;
+$function$;
+
+CREATE FUNCTION public.record_impersonation_event_integrity_alert(
+    p_lease_id UUID
+) RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $function$
+BEGIN
+    UPDATE public.agent_impersonations
+    SET event_delivery_integrity_alerted_at=clock_timestamp()
+    WHERE id=p_lease_id
+      AND events_completed_at IS NOT NULL
+      AND event_delivery_integrity_alerted_at IS NULL;
+    RETURN FOUND;
+END;
+$function$;
+
+-- This is the only completion-column writer. The agent host supplies the
+-- host-local per-lease certification secret; the shared runner role cannot
+-- read it and external controllers never receive the function surface.
+CREATE FUNCTION public.certify_impersonation_event_delivery(
+    p_lease_id UUID,
+    p_certification_secret TEXT
+)
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -261,8 +346,12 @@ BEGIN
     IF lease.events_completed_at IS NOT NULL THEN
         RETURN TRUE;
     END IF;
-    IF current_setting('ava.impersonation_machine', true) IS DISTINCT FROM lease.machine THEN
-        RAISE EXCEPTION 'Only the lease-owning agent host may certify event delivery';
+    IF NOT EXISTS (
+        SELECT 1 FROM public.agent_impersonation_event_certifiers
+        WHERE lease_id=p_lease_id AND machine=lease.machine
+          AND certification_secret=p_certification_secret
+    ) THEN
+        RAISE EXCEPTION 'Certification proof does not match the admitted lease proof';
     END IF;
     IF NOT lease.automatic OR lease.event_delivery_protocol_version <> 1
        OR lease.ended_at IS NULL OR lease.manifest_admission_closed_at IS NULL
@@ -342,9 +431,12 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.seal_impersonation_event_participant(UUID, TEXT, TEXT, TEXT, BIGINT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.freeze_impersonation_event_manifest(UUID, TEXT, BIGINT, TIMESTAMPTZ) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.certify_impersonation_event_delivery(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.certify_impersonation_event_delivery(UUID,TEXT) FROM PUBLIC;
 
 DO $$
 BEGIN
@@ -358,18 +450,24 @@ BEGIN
             ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version
         ) ON agent_impersonations TO ava_runner;
         GRANT UPDATE (
-            status,expires_at,rejection_reason,summary_inbound_id,summary,
+            status,ttl_seconds,expires_at,rejection_reason,summary_inbound_id,summary,
             accepted_generation,accepted_owner,consent_version,activated_at,ended_at,
             plugin_delta,delta_version,applied_version,relay_token_hash,relay_heartbeat_at,
             relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,
             events_cursor,events_next_read_at,handoff_document,handoff_path,handoff_applied_at,
-            next_entry,event_delivery_pending_reason
+            next_entry,event_delivery_pending_reason,start_message
         ) ON agent_impersonations TO ava_runner;
         GRANT SELECT, INSERT ON agent_impersonation_event_participants TO ava_runner;
         GRANT SELECT, INSERT ON agent_impersonation_event_participant_items TO ava_runner;
+        GRANT SELECT ON agent_impersonation_event_expected_receipts TO ava_runner;
+        GRANT SELECT ON agent_impersonation_event_expected_items TO ava_runner;
+        REVOKE ALL ON agent_impersonation_event_certifiers FROM ava_runner;
         GRANT EXECUTE ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID, TEXT, TEXT, TEXT, BIGINT, TEXT) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.freeze_impersonation_event_manifest(UUID, TEXT, BIGINT, TIMESTAMPTZ) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.certify_impersonation_event_delivery(UUID) TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.certify_impersonation_event_delivery(UUID,TEXT) TO ava_runner;
     END IF;
 END $$;

@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 
-from shared._impersonation_store import lock_lease
+from shared._impersonation_store import ImpersonationError, lock_lease
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.log import logger
@@ -61,6 +61,14 @@ def is_protocol_v1(lease: dict[str, Any]) -> bool:
     return (
         lease["automatic"] is True and lease["event_delivery_protocol_version"] == PROTOCOL_VERSION
     )
+
+
+def admit_certifier(conn: psycopg.Connection, lease_id: str) -> None:
+    """Bind the target native host's secret in its acceptance transaction."""
+    secret = settings.general.impersonation_event_manifest_certification_secret
+    if len(secret) < 32:
+        raise ImpersonationError("Manifest acceptance requires a certification secret")
+    conn.execute("SELECT admit_impersonation_event_certifier(%s,%s)", (lease_id, secret))
 
 
 def pending_reason(lease: dict[str, Any]) -> str | None:
@@ -206,6 +214,7 @@ def _insert_local_item(participant: LocalParticipant, event: Event) -> None:
 def _mark_participant_failed(participant: LocalParticipant, reason: str) -> None:
     try:
         with write_transaction() as conn:
+            lease = lock_lease(conn, participant.lease_id)
             conn.execute(
                 "SELECT seal_impersonation_event_participant(%s,%s,'failed',%s,NULL,NULL)",
                 (participant.lease_id, participant.source_key, reason),
@@ -215,8 +224,21 @@ def _mark_participant_failed(participant: LocalParticipant, reason: str) -> None
                 "WHERE id=%s AND events_completed_at IS NULL",
                 (participant.lease_id,),
             )
+            _upsert_manifest_alert(
+                _alerts_upsert(),
+                conn,
+                lease,
+                "ImpersonationManifestCaptureFailed",
+                datetime.now(UTC),
+            )
     except Exception:
         logger.exception("Could not record impersonation event-manifest capture failure")
+
+
+def _alerts_upsert() -> Any:
+    from shared.alerts import upsert_alert
+
+    return upsert_alert
 
 
 def seal_local_participant(participant: LocalParticipant) -> None:
@@ -316,6 +338,25 @@ def stage_central_expected_event(
     return tagged
 
 
+def emit_staged_central_event(event: Event, *, origin_kind: str, origin_id: int) -> None:
+    """Stage a service-owned audit event, commit it, then enqueue those exact bytes.
+
+    Services such as the computer daemon do not own the transaction that
+    produced their operation.  They still must not enqueue a v1 audit fact
+    until the matching expected receipt is durable, so this helper gives them
+    the same stage -> commit -> emit order as transaction-owning producers.
+    ``origin_id`` is the producer's durable request/action identity and keeps
+    redelivery idempotent alongside the immutable event-key check.
+    """
+    with write_transaction() as conn:
+        tagged = stage_central_expected_event(
+            conn, event, origin_kind=origin_kind, origin_id=origin_id
+        )
+    from shared import telemetry
+
+    telemetry.emit_prepared(tagged)
+
+
 def _source_actor(source: str) -> int | None:
     if not source.startswith("agent:"):
         return None
@@ -399,17 +440,164 @@ def set_pending_reason(lease_id: str, reason: str) -> None:
         )
 
 
-def certify(lease_id: str, *, machine: str) -> bool:
-    """Invoke the runner-only certification procedure and rebuild its handoff."""
+def monitor_manifest_health(*, machine: str) -> None:
+    """Persist operator alerts for aged, slow, or retention-lost local leases.
+
+    This is diagnostic-only: it never changes a pending manifest to complete
+    and a live receipt remains open until it seals or reports a real failure.
+    """
+    from shared.alerts import upsert_alert
+    from shared.loki_index_labels import retention_floor
+
+    now = datetime.now(UTC)
+    horizon = retention_floor(now)
+    with write_transaction() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT * FROM agent_impersonations WHERE machine=%s AND automatic "
+            "AND event_delivery_protocol_version=%s AND events_completed_at IS NULL",
+            (machine, PROTOCOL_VERSION),
+        )
+        rows = cur.fetchall()
+        for lease in rows:
+            _monitor_one_manifest(conn, upsert_alert, lease, now=now, horizon=horizon)
+
+
+def _monitor_one_manifest(
+    conn: psycopg.Connection,
+    upsert_alert: Any,
+    lease: dict[str, Any],
+    *,
+    now: datetime,
+    horizon: datetime,
+) -> None:
+    if _retention_lost(lease, horizon=horizon):
+        conn.execute(
+            "SELECT record_impersonation_event_retention_loss(%s,%s)",
+            (lease["id"], horizon),
+        )
+        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventRetentionLoss", now)
+        return
+    if _has_slow_open_participant(conn, str(lease["id"]), now=now):
+        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationManifestSealSlow", now)
+        return
+    if _is_old_pending(lease, now=now):
+        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventDeliveryPending", now)
+
+
+def _retention_lost(lease: dict[str, Any], *, horizon: datetime) -> bool:
+    return (
+        lease["manifest_frozen_at"] is not None
+        and lease["manifest_envelope_floor_at"] < horizon
+        and lease["events_completed_at"] is None
+    )
+
+
+def _has_slow_open_participant(conn: psycopg.Connection, lease_id: str, *, now: datetime) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM agent_impersonation_event_participants WHERE lease_id=%s "
+        "AND state='open' AND opened_at<%s LIMIT 1",
+        (
+            lease_id,
+            now
+            - timedelta(seconds=settings.general.impersonation_event_manifest_seal_wait_seconds),
+        ),
+    ).fetchone()
+    return row is not None
+
+
+def alert_if_participant_still_open(participant: LocalParticipant) -> None:
+    """Emit the detach-wait alert without changing a live participant's state.
+
+    An attachment can remain in a held SDK ``finally`` past the configured
+    detach wait.  That is evidence for an operator, not permission to call a
+    live producer failed or to freeze an empty manifest.
+    """
+    now = datetime.now(UTC)
+    with write_transaction() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT l.* FROM agent_impersonations l JOIN "
+            "agent_impersonation_event_participants p ON p.lease_id=l.id "
+            "WHERE p.lease_id=%s AND p.source_key=%s AND p.state='open'",
+            (participant.lease_id, participant.source_key),
+        )
+        lease = cur.fetchone()
+        if lease is not None:
+            _upsert_manifest_alert(
+                _alerts_upsert(), conn, lease, "ImpersonationManifestSealSlow", now
+            )
+
+
+def _is_old_pending(lease: dict[str, Any], *, now: datetime) -> bool:
+    ended = lease["ended_at"]
+    return ended is not None and ended < now - timedelta(
+        seconds=settings.general.impersonation_event_delivery_alert_age_seconds
+    )
+
+
+def _upsert_manifest_alert(
+    upsert_alert: Any,
+    conn: psycopg.Connection,
+    lease: dict[str, Any],
+    alertname: str,
+    now: datetime,
+) -> None:
+    upsert_alert(
+        conn,
+        {
+            "status": "firing",
+            "labels": {
+                "alertname": alertname,
+                "severity": "warning",
+                "lease_id": str(lease["id"]),
+                "machine": str(lease["machine"]),
+            },
+            "annotations": {
+                "pending_reason": str(lease["event_delivery_pending_reason"] or "unknown"),
+                "session": f"{lease['agent_id']}:{lease['session_id']}",
+            },
+            "starts_at": now.isoformat(),
+        },
+        source="machine-probe",
+    )
+
+
+def retention_loss_panel(*, machine: str) -> list[dict[str, Any]]:
+    """Read the retention-loss panel rows for operator diagnostics."""
+    with write_transaction() as conn:
+        rows = conn.execute(
+            "SELECT l.id,l.agent_id,l.session_id,l.manifest_envelope_floor_at,"
+            "l.event_delivery_retention_horizon_at,l.created_at,"
+            "GREATEST(0,l.manifest_item_count-(SELECT count(*) FROM agent_impersonation_entries e "
+            "WHERE e.lease_id=l.id AND e.kind IN ('sdk_call','api_event'))) AS missing_item_count "
+            "FROM agent_impersonations l "
+            "WHERE l.machine=%s AND l.event_delivery_pending_reason='retention_loss' "
+            "ORDER BY l.created_at",
+            (machine,),
+        ).fetchall()
+    return [
+        {
+            "lease_id": str(row[0]),
+            "agent_id": row[1],
+            "session_id": row[2],
+            "envelope_floor_at": row[3],
+            "retention_horizon_at": row[4],
+            "created_at": row[5],
+            "missing_item_count": row[6],
+        }
+        for row in rows
+    ]
+
+
+def certify(lease_id: str) -> bool:
+    """Invoke certification with this host's non-exported runner proof."""
     from psycopg.types.json import Jsonb
 
     from shared.impersonation_history import export_handoff
 
     with write_transaction() as conn:
-        conn.execute("SELECT set_config('ava.impersonation_machine',%s,true)", (machine,))
         row = conn.execute(
-            "SELECT certify_impersonation_event_delivery(%s)",
-            (lease_id,),
+            "SELECT certify_impersonation_event_delivery(%s,%s)",
+            (lease_id, settings.general.impersonation_event_manifest_certification_secret),
         ).fetchone()
         if row is None or row[0] is not True:
             return False
