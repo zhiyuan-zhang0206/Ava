@@ -176,6 +176,13 @@ export interface StickyController {
    * run: that is what lets a slow deliberate drag-up escape over and over
    * (#2311). */
   notifyPinnedToBottom(view: ScrollSnapshot, freshRun?: boolean): void;
+  /** Report a programmatic restore of a saved position (back/forward
+   *  re-entry of a kept history entry): following resumes exactly when the
+   *  restored position sits in the bottom zone. The one non-user position
+   *  change that must set the flag -- without it a reader's restored
+   *  mid-timeline position would be yanked to the bottom by the next layout
+   *  growth, and a restored at-bottom position would not keep following. */
+  notifyRestored(view: ScrollSnapshot): void;
   // There is deliberately no notify() for non-pin programmatic scrolls
   // (prepend compensation). They need none: the only reader of the
   // baseline is handleScroll, which re-syncs it on every event, so the
@@ -388,6 +395,15 @@ export function createStickyController(
       if (freshRun) upwardRun = 0;
       prevScrollTop = view.scrollTop;
       prevNearBottom = true;
+    },
+
+    notifyRestored(view) {
+      const atBottom = isAtBottom(view, thresholds);
+      if (atBottom) stick(view);
+      else unstick();
+      upwardRun = 0;
+      prevScrollTop = view.scrollTop;
+      prevNearBottom = atBottom;
     },
   };
 }
