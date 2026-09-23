@@ -503,7 +503,9 @@ repos:
         # wire schemas reference, and ops/rpc_terminate.py defines the terminate
         # hint models — all three feed the generated spec, so they trigger the
         # freshness check like the other schema sources.
-        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents/contract\.py$|shared/api_contracts/.*\.py$|shared/tasks/priority\.py$|shared/tasks/task_status\.py$|shared/agents/history/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_sample\.py$|ops/rpc_schemas\.py$|ops/rpc_terminate\.py$|ops/cluster\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$)
+        # Include defining modules behind schema re-exports. The CI closure
+        # test follows route annotations/imports so moves cannot escape here.
+        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents/contract\.py$|shared/api_contracts/.*\.py$|shared/tasks/priority\.py$|shared/tasks/task_status\.py$|shared/agents/history/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_sample\.py$|ops/rpc_schemas\.py$|ops/rpc_terminate\.py$|ops/cluster\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$|shared/agent_roster\.py$|shared/agent_observation\.py$|shared/agents/history/timeline_item\.py$|ops/rpc_messages\.py$|ops/rpc_completion\.py$|ops/rpc_billing_recovery\.py$|ops/cluster_status\.py$|ops/update_check\.py$|ops/updater_outcome\.py$|shared/last_update\.py$|shared/impersonation_history\.py$|shared/sdk_telemetry\.py$)
         pass_filenames: false
       - id: constants-codegen-fresh
         name: "constants-generated.ts in sync with shared/live_events.py (drift: run ./scripts/dump_frontend_constants.py)"
@@ -523,7 +525,9 @@ repos:
         # The EVENTS shards feed the registry too: a spec added/edited in
         # shared/events/registry*.py (e.g. registry_ops.py) must re-run the
         # freshness check locally, not only in the CI --all-files pass.
-        files: ^(shared/events/contract\.py$|shared/events/registry\.py$|shared/events/registry_ops\.py$|shared/events/system\.py$|shared/live_events\.py$|scripts/gen_event_registry\.py$|shared/events/registry\.md$)
+        # contract.py re-exports payload and lifecycle shards; CI verifies
+        # the recursive source-module closure against this pattern.
+        files: ^(shared/events/contract\.py$|shared/events/registry\.py$|shared/events/registry_ops\.py$|shared/events/system\.py$|shared/live_events\.py$|scripts/gen_event_registry\.py$|shared/events/registry\.md$|shared/events/payloads\.py$|shared/events/registry_lifecycle\.py$)
         pass_filenames: false
 
       # shared/config_lite_table.json must stay in sync with the config
