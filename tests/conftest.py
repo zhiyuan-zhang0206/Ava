@@ -304,6 +304,12 @@ os.environ["AVA_TELEMETRY_OTLP_PORT"] = "4318"
 # endpoint derives from the pinned port, and a test that needs an explicit
 # endpoint monkeypatches it.
 os.environ.pop("AVA_TELEMETRY_OTLP_ENDPOINT", None)
+# Native LGTM config must resolve from field defaults, as it does in CI.
+# A host running its own backends exports AVA_LGTM_*; those values reach
+# Settings at import and change the default-port configs asserted by the
+# native converge tests.
+for _lgtm_key in [key for key in os.environ if key.startswith("AVA_LGTM_")]:
+    del os.environ[_lgtm_key]
 os.environ["AVA_MACHINE_HOST"] = "localhost"
 
 # ── Grafana admin credential: the suite never carries a live one ──
@@ -517,6 +523,7 @@ assert os.environ.get("AVA_TELEMETRY_TEMPO_QUERY_URL") == "http://127.0.0.1:3200
 assert os.environ.get("AVA_TELEMETRY_TEMPO_ENDPOINT") == "http://127.0.0.1:14318"
 assert os.environ.get("AVA_TELEMETRY_OTLP_PORT") == "4318"
 assert "AVA_TELEMETRY_OTLP_ENDPOINT" not in os.environ
+assert not any(key.startswith("AVA_LGTM_") for key in os.environ)
 assert os.environ.get("AVA_MACHINE_HOST") == "localhost"
 assert os.environ.get("GRAFANA_ADMIN_PASSWORD") == ""
 assert settings.observability.telemetry_tempo_query_url == "http://127.0.0.1:3200"
