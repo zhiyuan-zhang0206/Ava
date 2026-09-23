@@ -24,9 +24,9 @@ from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation import flush_checkpoint
 from agent.startup import _wrap_saver_writes_with_nstep_interval
 from services.agent_host.host import AgentHost
+from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.config import settings
 from shared.context import AvaContext
-from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent

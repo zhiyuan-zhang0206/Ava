@@ -26,8 +26,8 @@ from agent.db import claim_inbound_batch
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.startup import _reconcile_claimed_inbounds_at_startup
 from services.agent_host import settlement as settlement_mod
+from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.context import AvaContext
-from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_hosted_db_recovery import _admit
 

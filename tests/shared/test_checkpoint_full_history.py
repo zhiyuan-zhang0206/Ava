@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from shared.checkpoint import (
+from shared.agents.history.checkpoint import (
     list_compact_boundary_checkpoint_ids,
     load_checkpoint_message_count,
     load_checkpoint_messages,
@@ -25,7 +25,7 @@ def test_compact_boundary_lookup_uses_a_closed_autocommit_pool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Checkpoint cold reads borrow an autocommit connection from shared.db.pool."""
-    from shared import checkpoint
+    from shared.agents.history import checkpoint
 
     class _Result:
         def fetchall(self) -> list[tuple[str]]:

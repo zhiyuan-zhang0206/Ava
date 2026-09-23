@@ -1,8 +1,8 @@
 """The TimelineItem model — one element of the rendered timeline view.
 
-Extracted from `shared/timeline.py` (file line budget; task #3323): the model
+Extracted from `shared/agents/history/timeline.py` (file line budget; task #3323): the model
 contains the wire fields and their metadata models. The projection logic
-that builds the items stays in `shared/timeline.py`, which re-exports this class so existing
+that builds the items stays in `shared/agents/history/timeline.py`, which re-exports this class so existing
 importers keep working.
 """
 

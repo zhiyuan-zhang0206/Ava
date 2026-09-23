@@ -32,9 +32,9 @@ from typing import Any
 
 from loguru import logger
 
-from shared.hierarchy import ENGINE_VERSION, PROMPT_VERSION
-from shared.hierarchy.seal import narrative_budget_tok
-from shared.hierarchy.tokens import count_tokens
+from shared.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
+from shared.agents.history.hierarchy.seal import narrative_budget_tok
+from shared.agents.history.hierarchy.tokens import count_tokens
 from shared.lm._call import invoke_text
 
 # The node kinds `build_prompt` serves: a leaf's input is rendered source

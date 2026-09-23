@@ -34,9 +34,9 @@ from typing import Any, NamedTuple
 
 from langchain_core.messages import BaseMessage
 
-from shared.checkpoint import load_checkpoint_messages_full
-from shared.hierarchy.blocks import COMPACT_ITEM_KINDS, Block, fold_blocks
-from shared.hierarchy.generate import (
+from shared.agents.history.checkpoint import load_checkpoint_messages_full
+from shared.agents.history.hierarchy.blocks import COMPACT_ITEM_KINDS, Block, fold_blocks
+from shared.agents.history.hierarchy.generate import (
     DEFAULT_MAX_CONCURRENT,
     DEFAULT_RETRY_ATTEMPTS,
     GenParams,
@@ -46,9 +46,9 @@ from shared.hierarchy.generate import (
     input_hash,
     text_hash,
 )
-from shared.hierarchy.nodes import MaterializedNode
-from shared.hierarchy.render import RenderParams, render_block
-from shared.hierarchy.seal import (
+from shared.agents.history.hierarchy.nodes import MaterializedNode
+from shared.agents.history.hierarchy.render import RenderParams, render_block
+from shared.agents.history.hierarchy.seal import (
     NodeSpec,
     SealParams,
     SealResult,
@@ -56,7 +56,7 @@ from shared.hierarchy.seal import (
     narrative_budget_tok,
     seal_cascade,
 )
-from shared.timeline import TimelineItem, build_timeline_items
+from shared.agents.history.timeline import TimelineItem, build_timeline_items
 
 
 @dataclass(frozen=True)

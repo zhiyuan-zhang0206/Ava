@@ -18,9 +18,9 @@ from typing import Any
 import pytest
 
 from scripts import build_hierarchy_once as build
+from shared.agents.history.hierarchy.generate import GenResult
+from shared.agents.history.hierarchy.pipeline import MaterializedNode, MaterializedTree
 from shared.config import settings
-from shared.hierarchy.generate import GenResult
-from shared.hierarchy.pipeline import MaterializedNode, MaterializedTree
 
 
 def _node(nid: str, level: int, trigger: str = "compact@i1") -> MaterializedNode:

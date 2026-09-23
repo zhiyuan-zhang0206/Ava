@@ -15,7 +15,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from shared import exec_request_evidence
-from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.paths import ava_home
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.session_backend import get_backend

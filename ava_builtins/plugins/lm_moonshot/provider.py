@@ -42,7 +42,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # standard `Authorization: Bearer` auth. K2.7 thinking is on by default,
     # streamed in the delta's `reasoning_content` field. ChatMoonshot captures
     # reasoning in `additional_kwargs["reasoning_content"]`; the streaming
-    # fan-out (`RedisStreamHandler`) and timeline (`shared/timeline.py`) both
+    # fan-out (`RedisStreamHandler`) and timeline (`shared/agents/history/timeline.py`) both
     # read that key so reasoning renders through the same path as every other
     # provider.
     api_key = require_key("MOONSHOT_API_KEY")

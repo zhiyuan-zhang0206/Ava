@@ -34,7 +34,7 @@ def _sanitize_thinking_blocks(final_msg: AIMessage) -> None:
     block round-trips the endpoint (probed 2026-07-25: 200; the key-missing shape
     400s with "missing field `thinking`"), and every downstream consumer — the
     streaming fan-out (`agent/graph/_callbacks.py`), the timeline renderer
-    (`shared/timeline.py`) — already skips empty-thinking blocks.
+    (`shared/agents/history/timeline.py`) — already skips empty-thinking blocks.
 
     Repair-in-place replaces the old fail-fast guard (raise → non-stream
     fallback): the drift is a permanent protocol quirk (~2% of deepseek turns),

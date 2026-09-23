@@ -691,8 +691,8 @@ def _narrative_for_window(
     to the window) that the sealed coverage does not explain -- the
     placeholders the layer track draws.
     """
-    from shared.hierarchy.serve import pending_spans, select_layers
-    from shared.hierarchy.store import load_coverage_extent, load_window_nodes
+    from shared.agents.history.hierarchy.serve import pending_spans, select_layers
+    from shared.agents.history.hierarchy.store import load_coverage_extent, load_window_nodes
 
     try:
         nodes = load_window_nodes(agent_id, window_start, window_end)
@@ -777,7 +777,7 @@ def _latest_compact_summary(agent_id: int) -> str | None:
     One latest-snapshot checkpoint read (the same read the context panel does);
     a read failure or an agent without a compaction degrades to None.
     """
-    from shared.checkpoint import load_checkpoint_messages
+    from shared.agents.history.checkpoint import load_checkpoint_messages
     from shared.message_kwargs import AvaMsgType, message_content, read_ava_kwargs
 
     try:

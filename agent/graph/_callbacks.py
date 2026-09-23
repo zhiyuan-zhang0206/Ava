@@ -20,7 +20,7 @@ openai). Providers differ on the chunk's `index`: anthropic sets the
 `tool_use` content_block_index, gemini leaves it `None`. The code item's
 block_idx is therefore computed locally (number of text/thinking content
 blocks + the tool call's first-appearance ordinal), matching the committed
-snapshot rule in `shared/timeline.py` rather than trusting the raw index.
+snapshot rule in `shared/agents/history/timeline.py` rather than trusting the raw index.
 
 `finish()` handles the rare case where partial JSON is only valid at the
 last fragment, and publishes LLMDone — LLMDone is the frontend's timeline
@@ -120,7 +120,7 @@ class RedisStreamHandler:
         self._total_reasoning_chars = 0
         # Distinct content-block indices seen for text/thinking blocks. Its
         # size is the offset where tool-call code items begin, matching the
-        # committed snapshot rule in shared/timeline.py: a tool call always
+        # committed snapshot rule in shared/agents/history/timeline.py: a tool call always
         # follows all narration/reasoning (it terminates the turn), so by the
         # time a tool_call_chunk arrives this set is final.
         self._content_block_indices: set[int] = set()

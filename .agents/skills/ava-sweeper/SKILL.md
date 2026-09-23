@@ -81,7 +81,7 @@ cases (2026-09-23): transport `Protocol` signatures read as unused parameters
 (interface, not dead code; bullet added above), and a file that fails vulture's
 `type_comments=True` parse — a `# type:`-prefixed comment does it — is skipped
 whole, so scan the run output for parse-error lines before trusting coverage
-(one instance: `shared/timeline.py`, fixed in the same pass).
+(one instance: `shared/agents/history/timeline.py`, fixed in the same pass).
 
 ### 6. boundary (anchored on recent PRs — the reasoned class)
 

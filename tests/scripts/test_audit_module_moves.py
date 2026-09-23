@@ -39,3 +39,13 @@ def test_is_excluded_covers_frozen_axes_and_hash_pinned_fixture() -> None:
     assert gate._is_excluded("scripts/legacy_lkg/compatibility.patch") is True
     assert gate._is_excluded("scripts/legacy_lkg/prepare.py") is False
     assert gate._is_excluded("shared/docs/notes.py") is False
+
+
+def test_missing_accepts_submodule_fallback() -> None:
+    """`from pkg import sub` resolves for a lean package __init__ (no re-exports)."""
+    assert gate._missing("shared.agents", {"history"}) == []
+    assert gate._missing("shared.agents.history", {"timeline"}) == []
+
+
+def test_missing_reports_unknown_names() -> None:
+    assert gate._missing("shared.agents", {"no_such_name_xyz"}) == ["no_such_name_xyz"]

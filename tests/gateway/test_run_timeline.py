@@ -13,8 +13,8 @@ from gateway.routers.run_timeline import (
     _narrative_for_window,
     aggregate_turn_timeline,
 )
+from shared.agents.history.hierarchy.store import StoredNode
 from shared.db import ChatInboundFact
-from shared.hierarchy.store import StoredNode
 
 
 def _event(
@@ -366,8 +366,8 @@ def test_narrative_for_window_uses_the_store_and_skips_summary_on_full_coverage(
     def _no_extent(_agent_id: int) -> None:
         return None
 
-    monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _nodes)
-    monkeypatch.setattr("shared.hierarchy.store.load_coverage_extent", _no_extent)
+    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _no_extent)
     layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
     assert pending is None
     assert summary is None
@@ -388,8 +388,8 @@ def test_narrative_for_window_degrades_to_none_without_nodes(
     def _no_extent(_agent_id: int) -> None:
         return None
 
-    monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _empty)
-    monkeypatch.setattr("shared.hierarchy.store.load_coverage_extent", _no_extent)
+    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _empty)
+    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _no_extent)
     layers, summary, pending = _narrative_for_window(
         424242,
         start,
@@ -429,8 +429,8 @@ def test_narrative_for_window_keeps_layers_and_adds_the_fallback_on_partial(
     def _extent(_agent_id: int) -> tuple[datetime, datetime]:
         return (start, start + timedelta(hours=1))
 
-    monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _nodes)
-    monkeypatch.setattr("shared.hierarchy.store.load_coverage_extent", _extent)
+    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _extent)
     monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _fallback)
     layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
     assert layers is not None
@@ -472,8 +472,8 @@ def test_narrative_for_window_clamps_activity_to_the_window(
     def _extent(_agent_id: int) -> tuple[datetime, datetime]:
         return (start, start + timedelta(hours=1))
 
-    monkeypatch.setattr("shared.hierarchy.store.load_window_nodes", _nodes)
-    monkeypatch.setattr("shared.hierarchy.store.load_coverage_extent", _extent)
+    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _extent)
     monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _empty_summary)
     _, _, pending = _narrative_for_window(
         405,

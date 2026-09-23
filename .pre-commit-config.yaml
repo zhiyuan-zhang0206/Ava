@@ -485,7 +485,7 @@ repos:
         # wire schemas reference, and ops/rpc_terminate.py defines the terminate
         # hint models — all three feed the generated spec, so they trigger the
         # freshness check like the other schema sources.
-        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents\.py$|shared/api_contracts/.*\.py$|shared/tasks/priority\.py$|shared/tasks/task_status\.py$|shared/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_sample\.py$|ops/rpc_schemas\.py$|ops/rpc_terminate\.py$|ops/cluster\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$)
+        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents/contract\.py$|shared/api_contracts/.*\.py$|shared/tasks/priority\.py$|shared/tasks/task_status\.py$|shared/agents/history/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_sample\.py$|ops/rpc_schemas\.py$|ops/rpc_terminate\.py$|ops/cluster\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$)
         pass_filenames: false
       - id: constants-codegen-fresh
         name: "constants-generated.ts in sync with shared/live_events.py (drift: run ./scripts/dump_frontend_constants.py)"

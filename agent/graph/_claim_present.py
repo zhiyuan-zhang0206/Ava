@@ -8,9 +8,9 @@ from __future__ import annotations
 from typing import Any
 
 from agent.db import list_chat_inbound_anchors
+from shared.agents.history.timeline import build_timeline_items, tail_window, timeline_default_limit
 from shared.context import AvaContext
 from shared.live_events import InboundCommitted, TimelineSnapshot
-from shared.timeline import build_timeline_items, tail_window, timeline_default_limit
 
 
 async def publish_inbound_committed(ctx: AvaContext, agent_id: int, inbound_ids: list[int]) -> None:

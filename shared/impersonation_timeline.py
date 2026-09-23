@@ -4,10 +4,10 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
+from shared.agents.history.timeline import TimelineItem
 from shared.db import connect
 from shared.impersonation_history import ImpersonationMetadata
 from shared.inbound_images import inbound_image_urls
-from shared.timeline import TimelineItem
 
 
 def hydrate(

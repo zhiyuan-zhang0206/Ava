@@ -1,4 +1,4 @@
-"""`shared.hierarchy.serve` — the run-timeline layer selection contract.
+"""`shared.agents.history.hierarchy.serve` — the run-timeline layer selection contract.
 
 Pure over stored-node shapes: the finest level that fits wins, coarser levels
 ride along as context, wire depths are relative to the selected top, and the
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from shared.hierarchy.serve import pending_spans, select_layers
-from shared.hierarchy.store import StoredNode
+from shared.agents.history.hierarchy.serve import pending_spans, select_layers
+from shared.agents.history.hierarchy.store import StoredNode
 
 W0 = datetime(2026, 9, 12, 4, 0, tzinfo=UTC)
 W1 = datetime(2026, 9, 12, 8, 0, tzinfo=UTC)

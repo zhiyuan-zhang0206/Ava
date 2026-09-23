@@ -30,8 +30,8 @@ from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import job as job_module
 from services.hierarchy_worker import runner
 from services.hierarchy_worker.scan import ScanOutcome, scan
+from shared.agents.history.hierarchy.pipeline import MaterializedTree
 from shared.config import settings
-from shared.hierarchy.pipeline import MaterializedTree
 from shared.paths import logs_dir
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

@@ -3,7 +3,7 @@ LangGraph checkpoint serde as pydantic-v2 ext objects.
 
 Lives in `shared` so both the agent runner (`agent/state.py` extends it with
 dynamically registered plugin state classes) and the gateway cold-load reader
-(`shared/checkpoint.py`) can build their `JsonPlusSerializer` allowlist
+(`shared/agents/history/checkpoint.py`) can build their `JsonPlusSerializer` allowlist
 without crossing the import layering (`shared` may not import `agent`).
 
 LangGraph's `JsonPlusSerializer` deserializes a type only when it is named in

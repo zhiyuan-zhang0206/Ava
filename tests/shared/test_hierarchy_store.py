@@ -1,4 +1,4 @@
-"""`shared.hierarchy.store` — the understanding-tree table contract.
+"""`shared.agents.history.hierarchy.store` — the understanding-tree table contract.
 
 Exercised against the session's real Postgres: the contract IS the upsert —
 one row per (agent, depth, span) identity, identical text is a no-op rewrite,
@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from shared.hierarchy.generate import input_hash, text_hash
-from shared.hierarchy.pipeline import MaterializedNode
-from shared.hierarchy.store import load_known_texts, load_window_nodes, write_tree
+from shared.agents.history.hierarchy.generate import input_hash, text_hash
+from shared.agents.history.hierarchy.pipeline import MaterializedNode
+from shared.agents.history.hierarchy.store import load_known_texts, load_window_nodes, write_tree
 
 AGENT_A = 990_128_901  # round-trip test
 AGENT_B = 990_128_902  # idempotence test

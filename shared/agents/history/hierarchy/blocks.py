@@ -1,7 +1,7 @@
 """Block units — fold the console item stream into the engine's level-0 units.
 
 Frozen rule (Q7 evidence, 2026-09-17; task #3704): the level-0 unit stream is
-`shared.timeline.build_timeline_items`' item stream folded back into block
+`shared.agents.history.timeline.build_timeline_items`' item stream folded back into block
 spans:
 - items of the same AI message (agent_reasoning / agent_chat / agent_code)
   extend the current block; items of a new AI message close it and open one;
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from shared.timeline import TimelineItem
+from shared.agents.history.timeline import TimelineItem
 
 AGENT_ITEM_KINDS = frozenset({"agent_chat", "agent_code", "agent_reasoning"})
 COMPACT_ITEM_KINDS = frozenset({"inbound_compact_summary", "inbound_compact_request"})

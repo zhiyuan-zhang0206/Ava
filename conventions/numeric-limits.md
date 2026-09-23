@@ -40,7 +40,7 @@ The permitted exception classes, with real sites:
 
 | Class | Why it stays | Examples |
 |---|---|---|
-| Protocol / format specs | the number is the format; changing it breaks the wire | msgpack ext-header bytes (`shared/checkpoint.py`); short-SHA display width 7 (`shared/source_tree_guard.py`); page-registration name/host/path bounds (`gateway/schemas/pages.py`) |
+| Protocol / format specs | the number is the format; changing it breaks the wire | msgpack ext-header bytes (`shared/agents/history/checkpoint.py`); short-SHA display width 7 (`shared/source_tree_guard.py`); page-registration name/host/path bounds (`gateway/schemas/pages.py`) |
 | External platform caps | the platform dictates it; any other value fails | Telegram caption 1024 (`ava_builtins/skills/telegram-send-file/scripts/send_file.py`); Baidu PCS SVIP single-file size (`services/pitr/baidu_pcs.py`) |
 | Self-imposed transport / payload guards | bounds one request or read so a single call cannot park unbounded bytes | message content ceiling (`gateway/routers/agents_state.py` — self-imposed, not an external protocol limit); attach ceilings (`shared/lm/attach_constants.py`); pty capture clamp (`shared/pty_sessions/_paths.py`); events `le=1000` / `offset` 10 000 (`gateway/routers/events.py`) |
 | Protective security / resource bounds | memory or abuse guard, not a tuning knob | login limiter's tracked-IP cap (`shared/rate_limit.py`); backup activation slots (`services/backup.py`); labeler poll batch (`services/labeler/daemon.py`); impersonation maintenance quantities (`shared/impersonation_maintenance.py`) |
