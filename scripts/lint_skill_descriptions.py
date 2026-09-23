@@ -4,7 +4,7 @@
 Three gates over every repo-shipped SKILL.md:
 
 1. **Frontmatter validity (hard fail).** The file must parse with the SAME
-   parser the runtime loader uses (`shared.frontmatter.parse_frontmatter`) and
+   parser the runtime loader uses (`shared.docs.frontmatter.parse_frontmatter`) and
    carry the required `name` + `description` fields. This is the merge gate the
    runtime loader cannot be: every agent reads every skill's frontmatter while
    assembling its system prompt, so a single malformed SKILL.md (an unquoted

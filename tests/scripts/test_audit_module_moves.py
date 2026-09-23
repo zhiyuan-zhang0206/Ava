@@ -29,3 +29,13 @@ def test_old_references_reports_dotted_parent_import_and_slash_lines() -> None:
 )
 def test_old_references_ignores_unrelated_or_inexact_paths(text: str) -> None:
     assert gate._old_references("pkg_old.mod_name", text) == []
+
+
+def test_is_excluded_covers_frozen_axes_and_hash_pinned_fixture() -> None:
+    assert gate._is_excluded("") is True
+    assert gate._is_excluded("decisions/x.md") is True
+    assert gate._is_excluded("postmortems/y.md") is True
+    assert gate._is_excluded("docs/history/2026/z.md") is True
+    assert gate._is_excluded("scripts/legacy_lkg/compatibility.patch") is True
+    assert gate._is_excluded("scripts/legacy_lkg/prepare.py") is False
+    assert gate._is_excluded("shared/docs/notes.py") is False

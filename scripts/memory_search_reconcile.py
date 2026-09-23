@@ -27,7 +27,7 @@ from services.memory_indexer.backends.base import MemorySearchBackend
 from services.memory_indexer.backends.factory import get_backend_named
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.memory_indexer.embeddings.factory import get_provider
-from shared.notes import walk_notes
+from shared.docs.notes import walk_notes
 from shared.paths import gateway_memory_dir
 
 

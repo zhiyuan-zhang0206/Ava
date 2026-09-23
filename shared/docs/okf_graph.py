@@ -25,8 +25,8 @@ from typing import Any, cast
 
 import yaml
 
-from shared.frontmatter import parse_frontmatter_typed
-from shared.notes import normalize_tags
+from shared.docs.frontmatter import parse_frontmatter_typed
+from shared.docs.notes import normalize_tags
 
 EXT = ".ava.okf.md"
 ROOT_NAME = f"index{EXT}"
@@ -56,7 +56,7 @@ def find_files(bundle_dir: str | Path) -> list[str]:
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """Adapter over `shared.frontmatter.parse_frontmatter_typed` — keeps this
+    """Adapter over `shared.docs.frontmatter.parse_frontmatter_typed` — keeps this
     module's historical lenient contract: absent/bad frontmatter → `({}, text)`,
     values keep their YAML types, and the body's leading newline is stripped.
 

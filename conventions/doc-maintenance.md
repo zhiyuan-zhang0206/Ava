@@ -78,7 +78,7 @@ flow — lives in the OKF graph, never in `conventions/`. The graph is
 describe (`agent/`, `ava/`, `ava_builtins/`, `cli/`, `ui/web/`, `gateway/`,
 `services/`, `shared/`); the rest are index-layer nodes in `okf/`.
 
-Hierarchy is filesystem-derived (`shared/okf_graph.py:compute_parent`):
+Hierarchy is filesystem-derived (`shared/docs/okf_graph.py:compute_parent`):
 `<dir>/<dir>.ava.okf.md` is the overview node for `<dir>/`, and the other files
 inside `<dir>/` are its children (user ruling 2026-08-12: a directory's
 overview lives *inside* the directory, not beside it at the parent level).
