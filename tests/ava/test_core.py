@@ -213,14 +213,28 @@ class TestRestart:
         assert after_row[0] == before_row[0]
 
     def test_restart_settles_withdrawn_model_to_registered_fallback(
-        self, db_conn: psycopg.Connection, monkeypatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A registered-but-withdrawn model passes the membership check but is
         settled to its registered fallback before persistence (task #4306): the
         overlay column and the restart payload both carry the fallback."""
+        from dataclasses import replace
+
+        from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+        from shared.lm.registry import MODELS
+
+        ensure_provider_plugins_loaded()
+        model = "deepseek-retired-fixture"
+        monkeypatch.setitem(
+            MODELS,
+            model,
+            replace(
+                MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"
+            ),
+        )
         ava._boot._agent_id = spawn_agent()
         with pytest.raises(ava.self.AgentRestart):
-            ava.self.restart(config_overlay={"llm_model": "deepseek-v4-flash"})
+            ava.self.restart(config_overlay={"llm_model": model})
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
