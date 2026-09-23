@@ -291,14 +291,15 @@ def _event_delivery_statistics(
 ) -> dict[str, Any]:
     """Describe whether observed handoff events have a complete emitted-event manifest.
 
-    Only `complete_delivery()` accepts the upstream manifest that can certify
-    coverage of emitted events. SDK sampling policy is not certified per
-    session, so zero consumed SDK events is never evidence of zero SDK calls.
+    The runner-only certification procedure accepts the frozen upstream
+    manifest. SDK sampling policy is not certified per session, so zero
+    consumed SDK events is never evidence of zero SDK calls.
     """
     complete = lease["events_completed_at"] is not None
     coverage = "complete_emitted_events" if complete else "unknown"
     return {
         "state": "complete" if complete else "pending",
+        "pending_reason": None if complete else _pending_delivery_reason(lease),
         "completion_basis": "upstream_manifest" if complete else None,
         "sdk_calls": {
             "coverage": coverage,
@@ -307,6 +308,15 @@ def _event_delivery_statistics(
         },
         "api_events": {"coverage": coverage, "consumed_event_count": len(api)},
     }
+
+
+def _pending_delivery_reason(lease: dict[str, Any]) -> str:
+    from shared.agents.impersonation_manifest import pending_reason
+
+    result = pending_reason(lease)
+    if result is None:
+        raise RuntimeError("A pending delivery must have a diagnostic reason")
+    return result
 
 
 def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:

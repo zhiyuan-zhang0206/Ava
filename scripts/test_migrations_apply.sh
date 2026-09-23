@@ -141,6 +141,43 @@ BEGIN
     END IF;
 END $$;
 
+-- Exercise the manifest's narrow certification writer and immutable admission
+-- version on the fresh squashed baseline. Empty is legitimate only when the
+-- v1 lease explicitly freezes an empty producer census.
+INSERT INTO agent_impersonations (
+    id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
+    accepted_generation, accepted_owner, automatic, event_delivery_protocol_version, activated_at
+) VALUES (
+    '00000000-0000-0000-0000-000000000006', 991005, 'external_agent:manifest-smoke',
+    'smoke-machine', 'manifest-smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
+    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 1,
+    clock_timestamp()
+);
+SELECT close_impersonation_event_manifest_admission('00000000-0000-0000-0000-000000000006');
+SELECT freeze_impersonation_event_manifest(
+    '00000000-0000-0000-0000-000000000006',
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 0, clock_timestamp()
+);
+UPDATE agent_impersonations SET status='released', ended_at=clock_timestamp()
+WHERE id='00000000-0000-0000-0000-000000000006';
+SELECT set_config('ava.impersonation_machine','smoke-machine',false);
+SELECT certify_impersonation_event_delivery('00000000-0000-0000-0000-000000000006');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM agent_impersonations
+                   WHERE id='00000000-0000-0000-0000-000000000006'
+                     AND events_completed_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'manifest certification did not own the completion stamp';
+    END IF;
+    BEGIN
+        UPDATE agent_impersonations SET event_delivery_protocol_version=NULL
+        WHERE id='00000000-0000-0000-0000-000000000006';
+    EXCEPTION WHEN raise_exception THEN
+        RETURN;
+    END;
+    RAISE EXCEPTION 'manifest protocol version was mutable after admission';
+END $$;
+
 -- Lifecycle status transitions preserve spawn lineage, even when the parent is
 -- terminated. This protects against a trigger reintroducing a spawner rewrite.
 INSERT INTO agents (id, label) VALUES

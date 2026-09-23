@@ -30,6 +30,7 @@ class AgentEventRow(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: int
+    line_sha256: str
     ts: datetime
     agent_id: int | None
     level: str

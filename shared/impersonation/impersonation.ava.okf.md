@@ -80,15 +80,17 @@ content remains in the file for the resumed agent to handle.
 
 SDK collection, sampling and instrumentation belong to the upstream collector.
 The consumption boundary is `shared/impersonation_events.py`: explicit scoped
-session binding, stable event IDs, time validation, deduplication and export
-refresh when late facts arrive. The agent-host background reconciler selects
-one due local session and consumes at most four pages per pass; a saved cursor
-continues large sweeps, and completed sweeps restart to recover late indexing.
-`complete_delivery` accepts an upstream manifest of exact event IDs, validates
-the durable set and certifies completion. Until then, accounting remains pending
-even after the native receipt. Version-2 handoff statistics expose
+session binding, stable event IDs, skew-guarded time validation, deduplication
+and export refresh when late facts arrive. Protocol-v1 controller receipts
+capture event identities before telemetry enqueue, central transactional audit
+producers stage their expected identities before commit, and the owning
+agent-host alone invokes the database certification procedure after the frozen
+union exactly matches tagged central rows and durable entries. Until then,
+accounting remains pending even after the native receipt. Manual and legacy
+leases never infer an empty receipt. Version-2 handoff statistics expose
 `event_delivery.state`, its manifest-only `completion_basis`, and separate
-SDK/API `coverage` plus `consumed_event_count`. Pending coverage is `unknown`:
+SDK/API `coverage` plus `consumed_event_count`, with an additive
+`pending_reason`. Pending coverage is `unknown`:
 a zero consumed count is not evidence of zero calls. `complete_emitted_events`
 means the manifest covers emitted events only; the SDK sampling policy is
 explicitly `unknown`, so a zero SDK count is never a zero-call fact. Statistics

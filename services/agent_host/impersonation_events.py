@@ -6,6 +6,7 @@ from psycopg.rows import dict_row
 
 from ava._impersonation_events import consume_recorded_events
 from shared import maintenance
+from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.log import logger
 from shared.machine import machine_name
@@ -27,11 +28,11 @@ def reconcile_one() -> None:
         # Advancing the due time schedules a retry, not a completeness receipt.
         # Even a failing session rotates behind other pending sessions.
         cur.execute(
-            "UPDATE agent_impersonations SET events_next_read_at=clock_timestamp()+interval '1 minute' "
+            "UPDATE agent_impersonations SET events_next_read_at=clock_timestamp()+%s*interval '1 second' "
             "WHERE id=%s",
-            (session["id"],),
+            (settings.general.impersonation_event_reconcile_interval_seconds, session["id"]),
         )
-    consume_recorded_events(session)
+    consume_recorded_events(session, page_budget=settings.general.impersonation_event_page_budget)
 
 
 async def reconcile_forever() -> None:
@@ -42,4 +43,4 @@ async def reconcile_forever() -> None:
                 await asyncio.to_thread(reconcile_one)
             except Exception:
                 logger.exception("Impersonation event replay failed; pending session will retry")
-        await asyncio.sleep(60)
+        await asyncio.sleep(settings.general.impersonation_event_reconcile_interval_seconds)

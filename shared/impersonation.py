@@ -1,8 +1,4 @@
-"""Cooperative same-machine leases; the native agent remains the checkpoint owner.
-
-No code is executed here. External Python processes bind their own SDK identity,
-read/ack durable inbox rows and stage plugin state until the native agent resumes.
-"""
+"""Cooperative same-machine leases; the native agent remains the checkpoint owner."""
 
 import secrets
 from typing import Any
@@ -78,21 +74,7 @@ def request(
     process_metadata: dict[str, Any] | None = None,
     automatic: bool = False,
 ) -> dict[str, Any]:
-    """Prepare a controller lease; return the scoped relay credential once (claude only).
-
-    The controller itself holds no deliverable secret: control authority is the
-    session id plus caller-presence attestation (user ruling 2026-09-16).
-
-    Every request must name its relay endpoint up front: the accepting runtime
-    never guesses one. A claude request also mints the scoped relay credential
-    here (its relay runs inside the controller's own session); the codex
-    credential is minted by the native side at activation instead.
-
-    ``relay_batch_window_seconds`` is the relay's routine-message merge window
-    (0..300; default 0 delivers immediately): when set, arrivals that are
-    neither a user chat nor a cancel coalesce into one hint per window (user
-    messages always hint immediately).
-    """
+    """Prepare a controller lease and return its scoped relay credential."""
     ttl = _ttl(ttl_seconds)
     if automatic and (not name.strip() or not executor_name.strip()):
         raise ValueError("Session name and executor name must be nonempty")
@@ -108,6 +90,7 @@ def request(
     relay_token = secrets.token_urlsafe(32) if relay_provider == "claude" else None
     lease_id = uuid4()
     delivery_config = current_field_values()
+    event_delivery_protocol_version = _manifest_protocol_version(automatic=automatic)
     with write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
         if meta["machine"] != machine_name():
@@ -135,8 +118,9 @@ def request(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,reason,"
             "status,ttl_seconds,expires_at,relay_provider,relay_thread_id,relay_codex_remote,"
             "relay_token_hash,relay_batch_window_seconds,name,executor_name,process_metadata,automatic,"
-            "ack_window_seconds,max_delivery_attempts) VALUES(%s,%s,%s,%s,%s,'requested',%s,"
-            "clock_timestamp()+%s*interval '1 second',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version) "
+            "VALUES(%s,%s,%s,%s,%s,'requested',%s,clock_timestamp()+%s*interval '1 second',"
+            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 lease_id,
                 agent_id,
@@ -156,6 +140,7 @@ def request(
                 automatic,
                 delivery_config["impersonation_ack_window_seconds"],
                 delivery_config["impersonation_max_delivery_attempts"],
+                event_delivery_protocol_version,
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))
@@ -163,6 +148,11 @@ def request(
     if relay_token is not None:
         return result | {"relay_token": relay_token}
     return result
+
+
+def _manifest_protocol_version(*, automatic: bool) -> int | None:
+    """Admit v1 only for new automatic leases while the cluster gate is on."""
+    return 1 if automatic and settings.general.impersonation_event_manifest_enabled else None
 
 
 def get(lease_id: str, caller: object) -> dict[str, Any]:
@@ -408,6 +398,14 @@ def renew(lease_id: str, caller: object, *, ttl_seconds: int | None = None) -> d
 def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
+    from shared.agents.impersonation_manifest import (
+        close_manifest_admission,
+        freeze_manifest,
+        is_protocol_v1,
+    )
+
+    # The admission fence is durable even when a live participant delays the
+    # release. Do not roll it back with the later freeze refusal.
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(lease, caller)
@@ -415,6 +413,23 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
+        if is_protocol_v1(lease):
+            close_manifest_admission(conn, lease_id)
+
+    with write_transaction() as conn:
+        lease = lock_lease(conn, lease_id)
+        authenticate(lease, caller)
+        if lease["status"] == "released":
+            return public(lease)
+        require_active_locked(conn, lease, caller)
+        set_actor(conn, lease["source"])
+        if is_protocol_v1(lease):
+            try:
+                freeze_manifest(conn, lease)
+            except RuntimeError as exc:
+                raise ImpersonationError(
+                    "Cannot release until every impersonation event participant seals"
+                ) from exc
         inbound_id = (
             None
             if lease["automatic"]
@@ -436,13 +451,7 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
 
 
 def inbox(lease_id: str, caller: object, *, limit: int = 100) -> list[dict[str, Any]]:
-    """The controller's pending inbox, oldest first, under the active-lease
-    check; each read records the rows as seen (idempotent).
-
-    ``limit`` is one page — 100 covers a burst while the read stays bounded
-    (validated 1..1000; task #3696 exception inventory), and the CLI's wait
-    loop re-reads until something arrives or its deadline passes.
-    """
+    """Read and record the controller's pending inbox page, oldest first."""
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
     with write_transaction() as conn:
@@ -554,13 +563,7 @@ def relay_get(lease_id: str, relay_token: str) -> dict[str, Any]:
 
 
 def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[dict[str, Any]]:
-    """The relay's inbox page and durable attempt state, under its scoped credential.
-
-    The controller identity cannot read here and the relay token cannot release,
-    renew or ACK anything — the handoff is scoped by construction. ``limit``
-    matches the controller inbox page (default 100, validated 1..1000)
-    — task #3696 exception inventory): one bounded read per relay poll.
-    """
+    """Read the relay's bounded inbox page and durable attempt state."""
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
     with write_transaction() as conn:
