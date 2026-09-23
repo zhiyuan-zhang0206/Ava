@@ -159,7 +159,7 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Pa
         result = await _run(
             tmp_path,
             (
-                "from shared.telemetry_otlp import backend\n"
+                "from shared.telemetry.otlp.telemetry_otlp import backend\n"
                 'print("OTLP_ENABLED_IN_CHILD:", backend._enabled())\n'
             ),
         )

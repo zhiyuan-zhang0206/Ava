@@ -13,17 +13,17 @@ tags:
 
 ## What it is
 
-`shared/telemetry_otlp.py` is the agent-side write half of the OTel + Tempo +
+`shared/telemetry/otlp/telemetry_otlp.py` is the agent-side write half of the OTel + Tempo +
 Loki + Prometheus + Grafana stack (2026-08-11 decision). The local OTel
 Collector sidecar (`ava-otel-collector`, task #1266) delivers the three signals
 and mirrors traces to local JSONL for recovery shipping. Which homes may export
 or collect, and the `cluster` Resource boundary that isolates co-located homes,
 are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
 
-- `shared/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
+- `shared/telemetry/otlp/telemetry_otlp.py` — events → OTLP logs + metrics when enabled
   (default **on** for the registered `.ava` production identity). Production
   exec children hold their records until exit, hold saturation, or the max-age
-  bound (`shared.telemetry_otlp_defer`, task #3816 M4b) instead of warming the
+  bound (`shared.telemetry.otlp.telemetry_otlp_defer`, task #3816 M4b) instead of warming the
   exporter stack at boot; test/ad-hoc exec children stay off unless an operator
   supplies an explicit endpoint. Their request-file handshake is not an export
   authority.
@@ -50,7 +50,7 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
 - **Metrics** (`_record_metrics`) — telemetry-category events only: numeric
   payload fields become Prometheus series via a per-field disposition, a
   per-process Resource, and latency-shaping Views — the full mapping contract
-  is its own node: [[shared/telemetry-otlp/metrics-mapping.ava.okf.md]].
+  is its own node: [[shared/telemetry/otlp/telemetry-otlp/metrics-mapping.ava.okf.md]].
 - **Traces** — exported with the cluster Resource by `shared/trace.py` to the sidecar's `/v1/traces`
   (OTLP/HTTP protobuf, content-stripped before leaving the process); the sidecar's
   file exporter mirrors each batch to `$AVA_HOME/traces/spans.jsonl`
@@ -96,7 +96,7 @@ single-box hosts collapse to the local receiver even when their secret is set.
 
 ## Key dependencies
 
-- `shared/telemetry.py` — caller: `_write_batch` runs the OTLP export after
+- `shared/telemetry/emitter.py` — caller: `_write_batch` runs the OTLP export after
   the JSONL mirror append; `_drain_on_exit` calls
   `telemetry_otlp.shutdown()` at exit.
 - OTel SDK (`opentelemetry-*`) — imported lazily inside `_build_providers` /
@@ -113,10 +113,10 @@ single-box hosts collapse to the local receiver even when their secret is set.
 
 ## Entry points
 
-- `shared/telemetry_otlp.py:export_batch(events)` — module singleton
+- `shared/telemetry/otlp/telemetry_otlp.py:export_batch(events)` — module singleton
   `backend`; no-op when the flag is off; `flush()` / `shutdown()` — test
   seam / process exit
-- `shared/telemetry.py:_export_otlp` — the drain-thread call site
+- `shared/telemetry/emitter.py:_export_otlp` — the drain-thread call site
   (suppress-guarded, deferred import)
 - `cli/commands/trace.py:cmd_trace_ship` — `ava trace ship
   [--since/--until] [--dry-run]`

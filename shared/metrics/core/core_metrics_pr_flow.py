@@ -2,7 +2,7 @@
 
 The four PR-flow tiles read what the daily macmini export job
 (``scripts/pr_flow_export.py``, ``pr_flow_daily`` / ``pr_flow_run`` events)
-publishes as OTLP gauges through ``shared/telemetry_otlp.py``: one absolute
+publishes as OTLP gauges through ``shared/telemetry/otlp/telemetry_otlp.py``: one absolute
 sample per complete cluster-tz day in a rolling 30-day window, re-emitted on
 every run, plus the point-in-time Trunk queue depth.
 

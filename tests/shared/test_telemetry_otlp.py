@@ -1,11 +1,10 @@
-"""Tests for the OTLP export backend (`shared.telemetry_otlp`).
+"""Tests for the OTLP export backend (`shared.telemetry.otlp.telemetry_otlp`).
 
-Pins the write-side contract of the OTel+Tempo+Loki+Prometheus stack: the
-three-signal mapping (events -> OTLP logs, telemetry numeric payloads -> OTLP
-metrics, traces shipped separately), the AVA_TELEMETRY_OTLP_ENABLED flag, and
-the failure isolation that keeps a broken OTLP side from ever touching the PG
-write. Mapping tests use in-memory OTel providers; the pipeline tests run the
-real emitter and assert both copies land.
+Pins the write-side contract of the OTel+Tempo+Loki+Prometheus stack: the three-signal
+mapping (events -> OTLP logs, telemetry numeric payloads -> OTLP metrics, traces shipped
+separately), the AVA_TELEMETRY_OTLP_ENABLED flag, and the failure isolation that keeps a
+broken OTLP side from ever touching the PG write. Mapping tests use in-memory providers;
+the pipeline tests run the real emitter and assert both copies land.
 """
 
 from __future__ import annotations
@@ -23,8 +22,9 @@ from typing import Any
 import psycopg
 import pytest
 
-from shared import observability, telemetry, telemetry_otlp, telemetry_otlp_metrics
+from shared import observability, telemetry
 from shared.telemetry import Event
+from shared.telemetry.otlp import telemetry_otlp, telemetry_otlp_metrics
 
 _AGENT = 8902
 

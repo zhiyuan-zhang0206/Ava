@@ -1,6 +1,6 @@
 """Deferred OTLP export for exec children (task #3816 M4b).
 
-Pins the deferral state machine (`shared.telemetry_otlp_defer` + the backend
+Pins the deferral state machine (`shared.telemetry.otlp.telemetry_otlp_defer` + the backend
 seams): hold without bring-up, the flush guard, saturation and max-age
 transitions, metrics replay exactly once, empty-hold completion, and the env
 knobs' parity with the declared Settings fields.
@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from shared import telemetry_otlp
 from shared.telemetry import Event
+from shared.telemetry.otlp import telemetry_otlp
 
 _AGENT = 8902
 
@@ -247,9 +247,9 @@ def test_flag_off_disables_defer(otlp_backend: Any, monkeypatch: pytest.MonkeyPa
 
 def test_env_defaults_locked_to_settings_fields() -> None:
     """The env-direct fallback mirrors the declared Settings defaults (one home
-    per fact — `shared/telemetry_otlp_defer` cannot import the config module)."""
+    per fact — `shared/telemetry/otlp/telemetry_otlp_defer` cannot import the config module)."""
     from shared.config.observability import ObservabilitySettings
-    from shared.telemetry_otlp_defer import CHILD_DEFER_MAX_AGE_DEFAULT_S
+    from shared.telemetry.otlp.telemetry_otlp_defer import CHILD_DEFER_MAX_AGE_DEFAULT_S
 
     fields = ObservabilitySettings.model_fields
     assert fields["telemetry_otlp_child_defer"].default is True

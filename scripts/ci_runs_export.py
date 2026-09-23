@@ -692,7 +692,8 @@ def emit_snapshot(snapshot: dict[str, Any]) -> None:
     the exporter process dimension: the schedule calls this module's ``main``
     rather than emitting a second, schedule-named event stream.
     """
-    from shared import telemetry, telemetry_otlp
+    from shared import telemetry
+    from shared.telemetry.otlp import telemetry_otlp
 
     telemetry.init_telemetry(process=PROCESS_NAME)
     telemetry_otlp.warmup()

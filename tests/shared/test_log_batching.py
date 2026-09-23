@@ -27,6 +27,7 @@ import pytest
 
 from shared import log as slog
 from shared import telemetry, telemetry_loss
+from shared.telemetry import emitter
 
 
 def _event(i: int, category: str = "log") -> telemetry.Event:
@@ -53,9 +54,9 @@ def tuned(monkeypatch: pytest.MonkeyPatch):
     """Shrink the batching constants so tests stay fast."""
 
     def _apply(batch: int = 10, interval: float = 0.05, maxsize: int = 100) -> None:
-        monkeypatch.setattr(telemetry, "_BATCH_SIZE", batch)
-        monkeypatch.setattr(telemetry, "_FLUSH_INTERVAL_S", interval)
-        monkeypatch.setattr(telemetry, "_QUEUE_MAXSIZE", maxsize)
+        monkeypatch.setattr(emitter, "_BATCH_SIZE", batch)
+        monkeypatch.setattr(emitter, "_FLUSH_INTERVAL_S", interval)
+        monkeypatch.setattr(emitter, "_QUEUE_MAXSIZE", maxsize)
 
     return _apply
 
@@ -394,8 +395,8 @@ def test_jsonl_mirror_failure_is_reported_not_silent(monkeypatch: pytest.MonkeyP
     # The module-level counter may be non-zero from a prior test in the
     # same process (xdist workers share the module) — reset it so the
     # first-failure report cadence assertion is deterministic.
-    monkeypatch.setattr(telemetry, "_jsonl_failures", 0)
-    monkeypatch.setattr(telemetry, "logs_dir", _boom)
+    monkeypatch.setattr(emitter, "_jsonl_failures", 0)
+    monkeypatch.setattr(emitter, "logs_dir", _boom)
     sink_id = logger.add(
         lambda m: captured.append(m.record["message"]),
         level="WARNING",

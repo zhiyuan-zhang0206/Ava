@@ -48,7 +48,7 @@ import agent.exec_child as exec_child  # the module under test
 
 exec_child._finalize_telemetry()  # the zero-record exit path
 
-watched = ("shared.telemetry", "shared.telemetry_otlp")
+watched = ("shared.telemetry", "shared.telemetry.otlp.telemetry_otlp")
 loaded = sorted(
     name
     for name in sys.modules
@@ -96,7 +96,7 @@ import agent.exec_child as exec_child
 exec_child._init_logger(999999)  # the real arm path (task #3816 M4b)
 exec_child._emit_child_boot_timing()  # the record that used to bring OTLP up
 
-from shared import telemetry_otlp
+from shared.telemetry.otlp import telemetry_otlp
 
 deadline = time.monotonic() + 5.0
 while telemetry_otlp.backend._queue.qsize() == 0 and time.monotonic() < deadline:
