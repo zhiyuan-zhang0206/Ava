@@ -75,19 +75,8 @@ crosses one admission boundary for the shared kernel PTY pool.
   there is no cluster name; see [[shared.ava.okf.md|the shared overview]].
 - `run/` exists so ephemeral runtime artifacts (pidfiles, sockets, session
   records) do not litter the home's top level.
-- A marker file's **name** is part of the contract with the operator, so renaming
-  one needs a migration or the recorded intent goes unread — silently, since an
-  absent marker is a legal state. `disabled_services` was `skipped_services`
-  before the affirmative-naming refactor; the converge step *legacy
-  disabled-services marker*
-  (`shared/disabled_services.py:migrate_legacy_marker`) carries a pre-rename file
-  over on every `ava start` / `ava update` / `ava converge` and logs what it
-  moved plus the resulting disabled set. When both names exist the current name
-  stays authoritative (it is what the code writes, so it is the operator's later
-  word — an empty file included) and the legacy one is kept as
-  `skipped_services.superseded`: evidence rather than silence when the two
-  disagree. The one other renamed path, `$AVA_HOME/<service>.pid` →
-  `run/<service>.pid`, was handled with a permanent dual read
-  (`legacy_pid_path()`), which is why this one is a one-shot rename instead.
+- `$AVA_HOME/disabled_services` records the operator's durable disabled set.
+  An empty file means no services are disabled; an absent file reads the same.
+  Operator starts rewrite it, while internal restarts and the watchdog read it.
 - Operational procedures that act on these paths (backup/restore, log reading,
   recovery) are in `.agents/skills/operating-ava-cluster/`.

@@ -1,10 +1,4 @@
-"""shared.os_cron — home-slug labels, legacy-label cleanup, crontab safety.
-
-The cleanup path is transitional (path-only cutover): a pre-cutover install left
-`com.ava.<cluster-name>.<kind>` launchd jobs; the register paths boot them out +
-delete the plists, scoped to THIS home's own legacy tokens so a co-located
-cluster's job is never touched.
-"""
+"""shared.os_cron — home-slug labels, launchd ownership, crontab safety."""
 
 from __future__ import annotations
 
@@ -50,68 +44,6 @@ def _never_descendant(_label: str) -> bool:
     return False
 
 
-def test_legacy_tokens_cover_convention_and_retired_cluster_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Tokens = the `~/.ava-<x>` convention name PLUS whatever the retired
-    `$AVA_HOME/cluster` file says (an explicitly-named pre-cutover home labeled
-    its jobs by that name, not the convention)."""
-    home = tmp_path / ".ava-t"
-    home.mkdir()
-    (home / "cluster").write_text("customname\n")
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
-    assert os_cron._legacy_label_tokens() == ["t", "customname"]
-
-
-def test_cleanup_boots_out_and_removes_legacy_plist(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The ACTIVE cleanup path: a legacy plist present → launchctl bootout with
-    the legacy label + the plist unlinked."""
-    monkeypatch.setattr(os_cron, "_legacy_label_tokens", lambda: ["t"])
-    plist = _plant_plist(fake_home, "com.ava.t.health-probe")
-    calls: list[list[str]] = []
-
-    def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
-        calls.append(list(cmd))  # pyright: ignore[reportUnknownArgumentType]
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(os_cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-    os_cron.cleanup_legacy_macos_job("health-probe")
-
-    assert not plist.exists()
-    assert any("bootout" in c and c[-1].endswith("com.ava.t.health-probe") for c in calls)
-    assert "removed legacy launchd job" in capsys.readouterr().out
-
-
-def test_cleanup_bootout_failure_never_claims_success(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(os_cron, "_legacy_label_tokens", lambda: ["t"])
-    plist = _plant_plist(fake_home, "com.ava.t.autostart")
-    monkeypatch.setattr(
-        os_cron.subprocess,
-        "run",
-        lambda *_a, **_k: types.SimpleNamespace(returncode=3, stdout="", stderr="boom"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    os_cron.cleanup_legacy_macos_job("autostart")
-
-    assert not plist.exists()  # the durable part still happens
-    captured = capsys.readouterr()
-    assert "removed legacy launchd job" not in captured.out  # no success claim
-    assert "bootout rc=3" in captured.err and "boom" in captured.err
-
-
-def test_cleanup_noop_without_legacy_plist(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(os_cron, "_legacy_label_tokens", lambda: ["t"])
-    called: list[object] = []
-    monkeypatch.setattr(os_cron.subprocess, "run", lambda *a, **_k: called.append(a))  # pyright: ignore[reportUnknownArgumentType]
-    os_cron.cleanup_legacy_macos_job("health-probe")
-    assert called == []
-
-
 def test_register_macos_never_reloads_its_own_launchd_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -129,27 +61,6 @@ def test_register_macos_never_reloads_its_own_launchd_job(
 
     assert os_cron._register_macos(300, 3) == 0
     assert plist.read_text() == "<old-plist/>"
-    assert calls == []
-
-
-def test_register_macos_never_relabels_its_own_legacy_launchd_job(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A pre-path-only probe can execute upgraded code. Its relabel cleanup is
-    still a self-bootout and must wait for an external converge."""
-    slug = "ava-t-cafe0123"
-    legacy_label = "com.ava.t.health-probe"
-    legacy_plist = _plant_plist(fake_home, legacy_label)
-    desired_plist = fake_home / "Library" / "LaunchAgents" / f"com.ava.{slug}.health-probe.plist"
-    monkeypatch.setenv("XPC_SERVICE_NAME", legacy_label)
-    monkeypatch.setattr(os_cron, "_home_slug", lambda: slug)
-    monkeypatch.setattr(os_cron, "_legacy_label_tokens", lambda: ["t"])
-    monkeypatch.setattr(os_cron, "_launchd_plist_content", _desired_plist)
-    calls = _record_launchctl(monkeypatch)
-
-    assert os_cron._register_macos(300, 3) == 0
-    assert legacy_plist.exists()
-    assert not desired_plist.exists()
     assert calls == []
 
 

@@ -26,18 +26,10 @@ processes that is (`restart_required`) and never restarts anything itself.
 - `host` -> the target machine's own `.env` (per-machine; the gateway proposes a
   write over the ops RPC and the host disposes).
 - `agent` -> never in `.env`; a per-agent overlay set at spawn / restart.
-
-`migrate_host_json_to_env` retires the former per-machine host override file
-(`runtime_config.json`) into `.env`, run in the converge phase (cli, before any
-process reads `.env`). It is precedence-correct (a key already present in `.env`
-is left untouched — env already won over the override) and idempotent (the source
-file is archived after the copy). The cluster-wide DB override table that this
-once mirrored has been retired (migrated into `.env` and dropped).
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -227,54 +219,6 @@ def write_fields(
     return captured
 
 
-# -- one-time host-file migration: runtime_config.json -> .env (run in converge) --
-
-# Value types env_value_text renders into a .env line the recipient re-parses:
-# scalars (bool via its int subclass), and flat lists/tuples of them (comma-joined).
-_ENV_PRIMITIVE = (str, int, float, bool)
-
-
-def _ensure_migratable(name: str, value: Any) -> None:
-    """Reject a legacy override value ``env_value_text`` would ``str()`` into a
-    corrupt .env line.
-
-    A dict / None / nested container is a shape pydantic-settings cannot re-parse
-    from its stringified form, so migrating it would silently write a broken value;
-    fail loud instead of corrupting the field.
-    """
-    if isinstance(value, _ENV_PRIMITIVE):
-        return
-    if isinstance(value, (list, tuple)) and all(
-        isinstance(v, _ENV_PRIMITIVE) for v in cast("list[Any] | tuple[Any, ...]", value)
-    ):
-        return
-    bad = cast("object", value)
-    raise TypeError(
-        f"host override {name!r} has non-primitive value of type {type(bad).__name__}; "
-        "only scalars and flat scalar lists can migrate into .env"
-    )
-
-
-def _filter_unset_in_env(overrides: dict[str, Any]) -> dict[str, Any]:
-    """Keep only override keys that are real fields AND not already set in `.env`.
-
-    A key already in `.env` was the effective value anyway (env beat the
-    override), so copying the dead override value would silently change config.
-    """
-    amap = _field_alias_map()
-    present = set(read_env_aliases())
-    return {
-        name: value
-        for name, value in overrides.items()
-        if name in amap and amap[name] not in present
-    }
-
-
-def _legacy_host_json_path() -> Path:
-    """The retired per-machine host override file."""
-    return _ava_home() / "runtime_config.json"
-
-
 def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
     """One-shot rename of legacy .env keys, returning a human line per change.
 
@@ -283,10 +227,9 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
     panel writes and preflights compare only the new name, so the legacy key
     left in place is a silent second source. Rewrite it here, once; a second
     run finds no legacy keys and is a no-op. When both names exist the new one
-    is authoritative and the legacy line is dropped (mirrors the
-    disabled-services marker rule). Keys are matched the way Settings parses
-    them, so an `export`-prefixed legacy line is found too, and its rewrite keeps
-    the prefix (#2981). Returns one line per changed/dropped key.
+    is authoritative and the legacy line is dropped. Keys are matched the way
+    Settings parses them, so an `export`-prefixed legacy line is found too, and
+    its rewrite keeps the prefix (#2981). Returns one line per changed/dropped key.
     """
     if not path.exists():
         return []
@@ -320,42 +263,3 @@ def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
 
             record_env_write(path, keys_written, keys_removed, site="migrate_rename_env_keys")
     return changed
-
-
-def migrate_host_json_to_env() -> None:
-    """One-time: copy this machine's retired host override file into its `.env`.
-
-    Runs on every host in the converge phase. Precedence-correct (skips keys
-    already in `.env`) and idempotent (the source file is archived to
-    `*.migrated` after the copy, so a re-run finds nothing).
-    """
-    src = _legacy_host_json_path()
-    if not src.exists():
-        return
-    try:
-        data = json.loads(src.read_text() or "{}")
-    except (OSError, json.JSONDecodeError):
-        _log.warning(
-            "migrate_host_json_to_env: %s unreadable, leaving in place", src, exc_info=True
-        )
-        return
-    if not isinstance(data, dict):
-        _log.warning("migrate_host_json_to_env: %s root not a dict, leaving in place", src)
-        return
-    to_write = _filter_unset_in_env(cast("dict[str, Any]", data))
-    for name, value in to_write.items():
-        _ensure_migratable(name, value)
-    if to_write:
-        write_fields(to_write, set(), audit_site="migrate_host_json_to_env")
-    archived = src.parent / (src.name + ".migrated")
-    try:
-        src.rename(archived)
-    except OSError:
-        _log.warning(
-            "migrate_host_json_to_env: rename %s failed (left in place)", src, exc_info=True
-        )
-    _log.info(
-        "migrate_host_json_to_env: copied %d host override(s) into %s",
-        len(to_write),
-        env_file_path(),
-    )

@@ -19,7 +19,6 @@ from xml.sax.saxutils import escape
 from loguru import logger
 
 import shared.os_cron
-import shared.platform
 from shared.platform import crontab_lock
 
 FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=3"
@@ -33,16 +32,8 @@ def _label(slug: str) -> str:
     return f"{shared.os_cron.LAUNCHD_LABEL_PREFIX}.{slug}.logs-maintenance"
 
 
-def _legacy_label(slug: str) -> str:
-    return f"{shared.os_cron.LAUNCHD_LABEL_PREFIX}.{slug}.log-retention"
-
-
 def _launchd_plist_path(slug: str) -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_label(slug)}.plist"
-
-
-def _legacy_launchd_plist_path(slug: str) -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_legacy_label(slug)}.plist"
 
 
 def _shell_command() -> str:
@@ -120,19 +111,8 @@ def _remove_macos_job(label: str, plist_path: Path) -> None:
     plist_path.unlink(missing_ok=True)
 
 
-def reap_legacy_macos_job() -> None:
-    """Remove the hand-made daily retention LaunchAgent for this cluster."""
-    slug = shared.os_cron._home_slug()
-    plist_path = _legacy_launchd_plist_path(slug)
-    if not plist_path.exists():
-        return
-    _remove_macos_job(_legacy_label(slug), plist_path)
-    logger.info("Removed legacy log-retention launchd job '{}'", _legacy_label(slug))
-
-
 def _unregister_macos(slug: str) -> int:
     _remove_macos_job(_label(slug), _launchd_plist_path(slug))
-    _remove_macos_job(_legacy_label(slug), _legacy_launchd_plist_path(slug))
     return 0
 
 
@@ -252,9 +232,3 @@ def unregister_logs_job(home: Path | None = None) -> None:
     from shared.platform_backend import get_backend
 
     get_backend().unregister_logs_job(slug_for_home(home))
-
-
-def reap_legacy_logs_job() -> None:
-    """Remove the pre-converge manual macOS retention job when present."""
-    if shared.os_cron.os_jobs_enabled() and shared.platform.IS_MACOS:
-        reap_legacy_macos_job()

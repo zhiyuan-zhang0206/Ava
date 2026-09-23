@@ -65,7 +65,6 @@ specific checkout, and that checkout's boot resolves the home it owns
 from __future__ import annotations
 
 import getpass
-import re
 import subprocess
 import time
 from collections.abc import Sequence
@@ -79,13 +78,6 @@ from shared.platform import CREATE_NO_WINDOW
 # Root folder for every task this repo registers, so `schtasks /Query /TN \Ava\`
 # shows the whole set and nothing of ours is loose in the root namespace.
 TASK_FOLDER = "Ava"
-
-# The shape every live cluster's task folder carries: `<basename>-<8-hex>`
-# (home_slug() has produced exactly this since the path-only identity cutover).
-# Anything under \Ava\ that does not match it cannot belong to a live cluster —
-# every cluster registers under its hash slug — so it is a leftover of an older
-# naming or of a deleted cluster, and the reap reclaims it.
-_CURRENT_SLUG_RE = re.compile(r".+-[0-9a-f]{8}$")
 
 # Delay before the one retry of a failed `schtasks /Create`. The failure class
 # this retry exists for is transient (win 2026-08-11, task #1196: a concurrent
@@ -508,98 +500,3 @@ def delete_task(kind: str, slug: str) -> int:
         return 0
     logger.info("scheduled task '{}' removed", name)
     return 0
-
-
-def _legacy_slug() -> str:
-    """This home's pre-hash slug form: the bare basename home_slug used before
-    the 8-hex suffix existed. A home whose slug was re-derived keeps its old
-    tasks registered under this older folder — the ghost-task class that made
-    the win host's converge race itself (task #1196, `\\Ava\\ava\\` next to
-    the current `\\Ava\\ava-<hash>\\`).
-    """
-    return _home_slug().rsplit("-", 1)[0]
-
-
-def _list_tasks() -> list[str]:
-    """Every scheduled task under the ``\\Ava\\`` folder, full task names.
-
-    CSV + no-header, filtered locally rather than scoping the query with
-    ``/TN \\Ava\\``: the folder-query recursion is not worth betting a cleanup
-    on, and the unfiltered shape is the one the suite's leak guard already
-    parses. Returns [] on any query failure (logged) — reap is best-effort.
-    """
-    result = _run(["schtasks", "/Query", "/FO", "CSV", "/NH"])
-    if result.returncode != 0:
-        logger.warning(
-            "schtasks /Query failed (rc={}): {} — skipping stale-task reap",
-            result.returncode,
-            result.stderr.strip(),
-        )
-        return []
-    names: list[str] = []
-    for line in result.stdout.splitlines():
-        name = line.split(",", 1)[0].strip('"')
-        if name.startswith("\\Ava\\"):
-            names.append(name)
-    return names
-
-
-def reap_stale_tasks() -> int:
-    """Delete every scheduled task under ``\\Ava\\`` that no live cluster can
-    own, returning how many were deleted.
-
-    A cluster's task lives at ``\\Ava\\<home-slug>\\<kind>``, and registration
-    (`/Create /F`) is idempotent only for the CURRENT slug — when a home's slug
-    changes, the old tasks keep firing under the old folder, each racing the
-    new ones' registration on every converge (win 2026-08-11, task #1196: the
-    ``\\Ava\\ava\\`` ghost fired a second watchdog probe every minute and the
-    concurrent `/Create` failed intermittently, holding the host offline for
-    ~45 minutes). This is the schtasks analog of
-    ``shared.os_cron.cleanup_legacy_macos_job``.
-
-    Only tasks a live cluster cannot own are touched:
-
-    - tasks under THIS home's own legacy slug folder (the bare-basename form
-      home_slug produced before the 8-hex suffix — ``ava`` for ``~/.ava``);
-    - tasks under any folder that does not match the current slug shape
-      `<basename>-<8-hex>` — no live cluster registers there, so it is a
-      leftover of an older naming or of a deleted cluster (tasks at the root
-      of ``\\Ava\\`` with no slug folder at all are reclaimed the same way);
-
-    A task under any OTHER current-shape slug folder is left alone — that is a
-    co-located cluster's live namespace, and the slug exists precisely to keep
-    those apart. The ``\\Ava\\`` folder is this repo's declared namespace
-    (``TASK_FOLDER``), so everything in it that is not a current slug is ours
-    to reclaim.
-
-    Never raises: reap is best-effort cleanup — a query or delete failure must
-    not fail the very converge that (re-)arms the current tasks, and the
-    register steps that follow remain the supervision-critical ones.
-    """
-    try:
-        names = _list_tasks()
-    except OSError:
-        logger.warning("schtasks unavailable — skipping stale-task reap")
-        return 0
-    current = _home_slug()
-    legacy = _legacy_slug()
-    deleted = 0
-    for name in names:
-        parts = name[len("\\Ava\\") :].split("\\")
-        folder = "\\".join(parts[:-1]) if len(parts) >= 2 else ""
-        if folder == current:
-            continue
-        if folder != legacy and _CURRENT_SLUG_RE.match(folder):
-            # Another live cluster's namespace — keep.
-            continue
-        result = _run(["schtasks", "/Delete", "/TN", name, "/F"])
-        if result.returncode != 0:
-            logger.warning(
-                "schtasks /Delete failed for stale task {}: {}",
-                name,
-                result.stderr.strip(),
-            )
-            continue
-        logger.info("removed stale scheduled task '{}'", name)
-        deleted += 1
-    return deleted
