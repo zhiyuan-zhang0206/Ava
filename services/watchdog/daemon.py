@@ -424,23 +424,9 @@ def _remove_pidfile(pidfile: Path) -> None:
 def _is_running(pidfile: Path) -> bool:
     """Check whether this capability's watchdog is already running (via pidfile).
 
-    Checks the new pidfile path first, then falls back to the legacy
-    $AVA_HOME/<name>.pid location for backward compat during the
-    transition to the run/ subdirectory. Pid-reuse-safe: a live pid whose
-    argv does not name the watchdog module is a recycled pid, not a running
-    watchdog (audit round 2, P1)."""
-    # Derive the role from which pidfile was passed to pick the right legacy name.
-    legacy_names: list[str] = []
-    if pidfile == settings.services.gateway_watchdog_pidfile:
-        legacy_names.append("gateway-watchdog")
-    elif pidfile == settings.services.agent_runner_watchdog_pidfile:
-        legacy_names.append("agent-runner-watchdog")
-    from shared.paths import legacy_pid_path
-
-    return any(
-        pidfile_holds_daemon(p, "services.watchdog.daemon")
-        for p in [pidfile] + [legacy_pid_path(n) for n in legacy_names]
-    )
+    Pid-reuse-safe: a live pid whose argv does not name the watchdog module
+    is a recycled pid, not a running watchdog (audit round 2, P1)."""
+    return pidfile_holds_daemon(pidfile, "services.watchdog.daemon")
 
 
 # Per-check last failure code the watchdog logged, so a healthcheck that keeps

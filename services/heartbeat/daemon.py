@@ -44,7 +44,6 @@ from shared.daemon_health import Liveness, health_port, start_health_server, sto
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
-from shared.paths import legacy_pid_path
 
 _log = logging.getLogger("services.heartbeat.daemon")
 
@@ -451,13 +450,11 @@ def _remove_pidfile() -> None:
 
 
 def _is_running() -> bool:
-    """Whether a daemon is already running (via pidfile, new + legacy paths).
+    """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.heartbeat.daemon") or pidfile_holds_daemon(
-        legacy_pid_path("heartbeat"), "services.heartbeat.daemon"
-    )
+    return pidfile_holds_daemon(_PIDFILE, "services.heartbeat.daemon")
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
