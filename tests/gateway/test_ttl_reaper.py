@@ -37,6 +37,7 @@ from gateway.watcher_ttl import reap_terminated_owner_watchers
 from ops.rpc_schemas import ShellKillResult
 from shared.config import settings
 from shared.db import create_agent
+from shared.watcher import AT_SESSION_TTL_GRACE_SECONDS
 
 
 @pytest.fixture()
@@ -694,25 +695,35 @@ async def test_reap_expired_shells_absent_machine_marks_watcher_reaped(
     assert _system_inbounds(db_conn, aid) == []  # live owner: silent
 
 
-async def test_reap_expired_shells_kills_watcher_past_deadline(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kind", ["launch", "cron", "at"])
+@pytest.mark.parametrize("expired", [False, True])
+async def test_reap_expired_shells_respects_watcher_deadline(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    expired: bool,
 ) -> None:
-    """One lifecycle (task #3411): a watcher session whose deadline passed is
-    reclaimed like any other — no registry skip — and its still-running row
-    is marked `reaped` so no later boot rebuilds it. The shell-shaped
-    interruption notice is suppressed (the reclaim ends a scheduled window,
-    not a user task)."""
+    """Unified watcher deadlines are left intact until expiry, then reclaimed
+    silently and marked reaped so boot reconcile never rebuilds them."""
     aid = _running_agent(db_conn)
+    deadline = datetime.now(UTC) + timedelta(minutes=-1 if expired else 60)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
-            "VALUES (%s, 21, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
-            (aid,),
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES (%s, 21, %s)",
+            (aid, deadline),
         )
         cur.execute(
-            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status, cron_end_at) "
-            "VALUES (%s, 21, 'cron', 'escalation-check', 'running', now() - interval '1 minute')",
-            (aid,),
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status, "
+            "created_at, timeout_secs, cron_end_at, fires_at) "
+            "VALUES (%s, 21, %s, 'check', 'running', %s, 3600, %s, %s)",
+            (
+                aid,
+                kind,
+                deadline - timedelta(hours=1),
+                deadline,
+                deadline - timedelta(seconds=AT_SESSION_TTL_GRACE_SECONDS),
+            ),
         )
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
     db_conn.commit()
@@ -726,70 +737,50 @@ async def test_reap_expired_shells_kills_watcher_past_deadline(
         return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_expired_shells(reaper_pool)
-
-    assert reaped == [(aid, 21)]
-    assert [d[0] for d in dispatched] == ["shell_kill"]
+    assert await _reap_expired_shells(reaper_pool) == ([(aid, 21)] if expired else [])
+    assert dispatched == ([("shell_kill", {"agent_id": aid, "session_id": 21})] if expired else [])
     with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 0
-    assert _watcher_status(db_conn, aid, 21) == "reaped"
-    assert (
-        _system_inbounds(db_conn, aid) == []
-    )  # watcher reclaim is not an "interrupted task" notice
+        cur.execute("SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        assert cur.fetchone() == (None if expired else (deadline,))
+    assert _watcher_status(db_conn, aid, 21) == ("reaped" if expired else "running")
+    assert _system_inbounds(db_conn, aid) == []
 
 
-async def test_reap_expired_shells_heals_legacy_watcher_before_deadline(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kind", ["launch", "cron", "at"])
+async def test_reap_expired_shells_leaves_watcher_with_missing_deadline(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    kind: str,
 ) -> None:
-    """Task #3411 migration: a running watcher whose recorded TTL is a stale
-    placeholder (spawned before the unified write path) while its true
-    deadline is still ahead is healed to that deadline — never reclaimed —
-    and the heal is idempotent (a second pass finds nothing)."""
+    """Incomplete running watcher data must warn without killing or rewriting."""
     aid = _running_agent(db_conn)
-    end = datetime.now(UTC) + timedelta(hours=6)
+    expired = datetime.now(UTC) - timedelta(minutes=1)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
-            "VALUES (%s, 21, now() - interval '1 minute', now() - interval '1 hour 1 minute')",
-            (aid,),
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES (%s, 21, %s)",
+            (aid, expired),
         )
         cur.execute(
-            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status, cron_end_at) "
-            "VALUES (%s, 21, 'cron', 'escalation-check', 'running', %s)",
-            (aid, end),
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name, status) "
+            "VALUES (%s, 21, %s, 'incomplete', 'running')",
+            (aid, kind),
         )
         cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
     db_conn.commit()
 
-    dispatched: list[tuple[str, object]] = []
-
-    async def _dispatch(
-        machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        dispatched.append((kind, payload))
-        return ShellKillResult(mode="killed", interrupted=True, name="x").model_dump()
+    async def _dispatch(*args: object, **kwargs: object) -> dict[str, object]:
+        pytest.fail("a watcher without a derivable deadline must not be killed")
 
     monkeypatch.setattr(ttl_reaper.cluster_rpc, "dispatch_to_machine", _dispatch)
-    reaped = await _reap_expired_shells(reaper_pool)
-
-    assert reaped == []
-    assert dispatched == []
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = 21",
-            (aid,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    assert abs((row[0] - end).total_seconds()) < 5  # rewritten to the true deadline
-    assert _watcher_status(db_conn, aid, 21) == "running"
-
-    # Idempotent: the healed row is no longer expired, so a second pass has
-    # nothing to heal and nothing to kill.
     assert await _reap_expired_shells(reaper_pool) == []
-    assert dispatched == []
+    assert "has no derivation deadline" in caplog.text
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
+        assert cur.fetchone() == (expired,)
+    assert _watcher_status(db_conn, aid, 21) == "running"
+    assert _system_inbounds(db_conn, aid) == []
 
 
 async def test_reap_expired_shells_reaps_zombie_session_of_rebuilt_row(

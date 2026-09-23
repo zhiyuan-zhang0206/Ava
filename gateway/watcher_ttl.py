@@ -7,9 +7,6 @@ write path, the boot reconcile, and this reclaim side. Everything here is
 that rule applied to the registry:
 
 - `watcher_deadline_of` reads the deadline off an expired-row record;
-- `heal_legacy_ttl` re-aligns a row spawned before the unified write path
-  (its recorded TTL is a placeholder, not the target) instead of reclaiming
-  a session still living its true window;
 - `mark_reaped_live_owner` / `mark_reaped_and_notify_if_owner_still_terminated`
   terminalize the registry row once a reclaim is definitive — past the
   deadline a watcher is never rebuilt, and the owner-appropriate notice is
@@ -53,33 +50,6 @@ def watcher_deadline_of(row: dict[str, Any]) -> datetime | None:
         fires_at=row["watcher_fires_at"],
         cron_end_at=row["watcher_cron_end_at"],
     )
-
-
-def heal_legacy_ttl(
-    pool: ConnectionPool, agent_id: int, session_id: int, deadline: datetime
-) -> bool:
-    """Re-align a legacy watcher session's TTL row to its true deadline.
-
-    Only rows spawned before the unified write path (user ruling 2026-09-14,
-    task #3411) carry a placeholder TTL (launch = min(timeout, 24h); cron and
-    at = 24h) that is NOT the watcher's target — reclaiming such a session at
-    the placeholder would cut short a schedule still living its intended
-    window (and permanently, once the row is marked reaped). Instead the
-    recorded deadline is rewritten to the true one, derived by
-    ``shared.watcher.session_deadline`` — the same source the spawn path
-    writes, so reclaim / reconcile / display read one value again.
-
-    The UPDATE is a CAS on ``expires_at <= clock_timestamp()``: a concurrent
-    heal or reclaim that already moved the row makes this a no-op — the heal
-    is idempotent by construction, and a renewed row is never touched.
-    Returns True when the row was rewritten."""
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_shell_ttls SET expires_at = %s "
-            "WHERE agent_id = %s AND session_id = %s AND expires_at <= clock_timestamp()",
-            (deadline, agent_id, session_id),
-        )
-        return bool(cur.rowcount == 1)
 
 
 def mark_reaped_live_owner(pool: ConnectionPool, agent_id: int, session_id: int) -> str | None:
