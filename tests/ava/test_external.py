@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from itertools import count
-from threading import Event
+from threading import Event, Timer
 from typing import Annotated, Any
 
 import pytest
@@ -16,8 +18,11 @@ import ava
 from agent import state as state_module
 from ava import _boot, _external_state, external
 from ava._external_state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
+from shared import telemetry
 from shared.config.turn_view import bind_agent_config, current_agent_config_pins, turn_settings
 from shared.plugin_config_view import bind_agent_plugin_config, current_plugin_config_view
+from shared.telemetry import Event as TelemetryEvent
+from shared.telemetry.otlp import telemetry_otlp
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:
@@ -330,6 +335,98 @@ def test_repeated_close_cannot_release_another_attachment(
         assert ava.self.AGENT_ID == 405
         with pytest.raises(RuntimeError, match="already has an external attachment"):
             external.attach("lease")
+
+
+def test_close_delivers_telemetry_when_plugin_flush_fails(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The close finally path must run delivery as well as detachment."""
+    attachment = external.attach("lease")
+    delivered: list[bool] = []
+
+    def fail_flush() -> None:
+        raise RuntimeError("plugin journal unavailable")
+
+    monkeypatch.setattr(attachment, "flush", fail_flush)
+    monkeypatch.setattr(
+        external, "_deliver_telemetry_before_detach", lambda: delivered.append(True)
+    )
+
+    with pytest.raises(RuntimeError, match="plugin journal unavailable"):
+        attachment.close()
+
+    assert delivered == [True]
+    assert _boot._external_identity is None
+    assert _boot._external_agent_id is None
+
+
+def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A closing attachment waits for the OTLP worker's already-dequeued tail."""
+    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    exporter = InMemoryLogRecordExporter()
+    logger_provider = LoggerProvider()
+    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
+    backend = telemetry_otlp._OtlpBackend(
+        providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()]))
+    )
+    monkeypatch.setattr(backend, "_enabled", lambda: True)
+    monkeypatch.setattr(telemetry_otlp, "backend", backend)
+
+    def no_sync(*_args: object, **_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr(telemetry, "sync", no_sync)
+    paused = Event()
+    release = Event()
+    original_emit = backend._emit_log
+
+    def pause_after_dequeue(event: TelemetryEvent) -> None:
+        paused.set()
+        assert release.wait(2), "close did not release the paused OTLP worker"
+        original_emit(event)
+
+    monkeypatch.setattr(backend, "_emit_log", pause_after_dequeue)
+    backend.export_batch(
+        [
+            TelemetryEvent(
+                ts=datetime.now(UTC),
+                trace_id=None,
+                span_id=None,
+                agent_id=405,
+                machine="test",
+                cluster="test",
+                process="external-test",
+                category="telemetry",
+                event_name="sdk_call",
+                level="info",
+                source="agent:405",
+                target_agent_id=None,
+                attributes={"fn": "files.read", "duration": 0.01},
+            )
+        ]
+    )
+    assert paused.wait(2), "OTLP worker did not dequeue the tail record"
+    attachment = external.attach("lease")
+    timer = Timer(0.1, release.set)
+    timer.daemon = True
+    timer.start()
+    try:
+        started = time.monotonic()
+        attachment.close()
+        assert time.monotonic() - started >= 0.08
+        assert len(exporter.get_finished_logs()) == 1
+    finally:
+        release.set()
+        timer.cancel()
+        backend.shutdown()
 
 
 def test_expired_lease_cannot_dispatch_through_local_mcp(

@@ -83,5 +83,7 @@ errors retain the native gate. An unavailable event backend leaves accounting ex
 pending without blocking the control handoff; the registered agent-host event
 reconciler supplements the same file after late events become readable. The
 resume note directs the native agent to `event_delivery`: pending coverage is
-unknown, so zero consumed events is not a zero-call claim; only the upstream
-manifest's `complete` state makes consumed counts final.
+unknown, so zero consumed events is not a zero-call claim. The upstream
+manifest's `complete_emitted_events` coverage is only a census of emitted
+events; SDK sampling policy remains unknown, so even a completed zero SDK count
+is not a zero-call claim.

@@ -42,7 +42,7 @@ def _deliver_telemetry_before_detach() -> None:
     with suppress(Exception):
         from shared import telemetry
 
-        telemetry.sync()
+        telemetry.sync(bounded=True)
         if "shared.telemetry.otlp.telemetry_otlp" in sys.modules:
             from shared.telemetry.otlp import telemetry_otlp
 

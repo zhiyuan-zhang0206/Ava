@@ -93,6 +93,11 @@ from shared.observability import (
 )
 from shared.telemetry import Event
 from shared.telemetry.otlp import telemetry_otlp_metrics
+from shared.telemetry.otlp.telemetry_otlp_barrier import (
+    WorkerFlushMarker,
+    stop_worker,
+    wait_for_worker,
+)
 from shared.telemetry.otlp.telemetry_otlp_defer import ChildDeferral
 from shared.telemetry.otlp.telemetry_otlp_gauges import (
     GaugeValues,
@@ -336,7 +341,7 @@ class _OtlpBackend:
         providers: tuple[Any, Any] | None = None,
         queue_maxsize: int = _QUEUE_MAXSIZE,
     ) -> None:
-        self._queue: queue.Queue[Event | None] = queue.Queue(maxsize=queue_maxsize)
+        self._queue: queue.Queue[Any] = queue.Queue(maxsize=queue_maxsize)
         self._dropped = 0
         self._dropped_lock = threading.Lock()
         self._providers = providers
@@ -406,36 +411,25 @@ class _OtlpBackend:
                 self._record_metrics(event)
 
     def flush(self, timeout: float = 2.0) -> None:
-        """Synchronously process queued events on the calling thread.
-
-        Test seam + shutdown helper. The worker thread may concurrently take
-        events; each event is processed exactly once by whichever thread
-        dequeues it, so a flush + worker race is harmless. Draining is
-        non-blocking (``get_nowait``) — a flush must never add a multi-second
-        wait to a short-lived process.
-
-        After draining, the SDK batch processors are force-flushed (bounded
-        by their own timeout): a short-lived process (the exec child) exits
-        before the 5s batch window would fire on its own, so without this the
-        queued OTLP records — SDK calls — never reach the collector.
-
-        While deferred the queue holds the unexported backlog and there is no
-        worker: draining it here would drop every held event (`_emit_log`
-        cannot emit without providers), so flushing a deferred backend is a
-        no-op — the hold is completed by finalize() (see
-        `shared.telemetry.otlp.telemetry_otlp_defer`) (task #3816 M4b)."""
+        """Drain queued and worker-held records boundedly, then flush providers."""
         if self._deferral.is_active():
             return
-        del timeout  # signature kept for callers; the drain is best-effort
-        while True:
-            try:
-                event = self._queue.get_nowait()
-            except queue.Empty:
-                break
-            if event is None:
-                break
-            with contextlib.suppress(Exception):
-                self._emit_log(event)
+        worker = self._thread
+        if worker is not None and worker.is_alive() and threading.current_thread() is not worker:
+            wait_for_worker(self._queue, timeout, self._report)
+        else:
+            while True:
+                try:
+                    event = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                if event is None:
+                    break
+                if isinstance(event, WorkerFlushMarker):
+                    event.done.set()
+                    continue
+                with contextlib.suppress(Exception):
+                    self._emit_log(event)
         with contextlib.suppress(Exception):
             if self._logs is not None:
                 self._logs.force_flush(timeout_millis=500)
@@ -450,8 +444,9 @@ class _OtlpBackend:
         # best-effort completion a clean exit gets through finalize().
         with contextlib.suppress(Exception):
             self.finalize()
-        with contextlib.suppress(Exception):
-            self._queue.put_nowait(None)
+        worker = self._thread
+        if worker is not None and worker.is_alive() and threading.current_thread() is not worker:
+            stop_worker(self._queue, worker, self._report)
         with contextlib.suppress(Exception):
             if self._logs is not None:
                 self._logs.force_flush(timeout_millis=2000)
@@ -600,6 +595,9 @@ class _OtlpBackend:
             event = self._queue.get()
             if event is None:
                 return
+            if isinstance(event, WorkerFlushMarker):
+                event.done.set()
+                continue
             with contextlib.suppress(Exception):
                 self._emit_log(event)
 

@@ -106,7 +106,7 @@ def complete_delivery(agent_id: int, session_id: int, event_ids: list[str | int]
 
     The collector calls this only after all its events for the closed activation
     interval have been delivered. Exact stable IDs must match the durable set.
-    This is a consumption receipt, not an instrumentation or flush implementation.
+    It certifies emitted events, never an SDK-call census under opt-in sampling.
     """
     from psycopg.types.json import Jsonb
 

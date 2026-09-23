@@ -19,6 +19,9 @@ emitted telemetry—synchronously drains the event pipeline and finalizes OTLP
 while the interpreter is still live. This gives a short `ava impersonate exec`
 process the same tail-record delivery boundary as an exec child; a last SDK call
 keeps its stable event identity, borrowed-agent attribution, and one export.
+The close-time pipeline and OTLP worker barriers are bounded: a timeout leaves
+the JSONL mirror and its delivery diagnostic intact rather than silently blocking
+or claiming an export that did not finish.
 
 `ava._boot.validate_external_identity` checks the lease, the caller's presence in
 the recorded controller tree, and the state version on SDK

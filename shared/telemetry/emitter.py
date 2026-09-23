@@ -72,6 +72,7 @@ from shared.events.contract import EVENTS, lineage_event_names
 from shared.events.contract import category_for_kind as registry_category
 from shared.observability import cluster_label
 from shared.paths import logs_dir
+from shared.telemetry.emitter_sync import synchronize
 
 __all__ = [
     "Category",
@@ -500,11 +501,7 @@ class _EventPipeline:
             report_loss(event, 1, "emitter")
 
     def flush(self) -> None:
-        """Synchronously drain whatever is queued (tests, shutdown seams).
-
-        Runs on the calling thread; a concurrent drain-thread flush can race,
-        which is harmless (both write whole batches in their own transaction).
-        """
+        """Synchronously drain queued records for tests and shutdown seams."""
         events: list[Event] = []
         while True:
             try:
@@ -518,7 +515,7 @@ class _EventPipeline:
             events.append(event)
         self._flush(events)
 
-    def sync(self, timeout: float = 5.0) -> None:
+    def sync(self, timeout: float = 5.0, *, bounded: bool = False) -> None:
         """Drain the queue AND wait for the drain thread's held batch to land.
 
         flush() drains the queue on the calling thread, but a batch the
@@ -529,16 +526,18 @@ class _EventPipeline:
         it flushes the queue, pokes the drain thread to write its held
         batch immediately, and blocks until that write completed.
         """
-        self.flush()
-        if threading.current_thread() is self._thread or not self._thread.is_alive():
-            return  # nothing to wait for (stop() already ran)
-        self._sync_done.clear()
-        self._queue.put(_SYNC)
-        if not self._sync_done.wait(timeout):
+        outcome = synchronize(
+            flush=self.flush,
+            event_queue=self._queue,
+            marker=_SYNC,
+            drain_thread=self._thread,
+            marker_done=self._sync_done,
+            timeout=timeout,
+            bounded=bounded,
+        )
+        if outcome is not None:
             _report_no_pipeline(
-                "[event-emitter] sync() timed out after {t}s — the drain "
-                "thread's held batch may not have landed; a subsequent "
-                "TRUNCATE or mirror read could lose it",
+                f"[event-emitter] sync() {outcome} timed out after {{t}}s — the mirror may land later",
                 t=timeout,
             )
 
@@ -752,13 +751,11 @@ def flush() -> None:
         pipeline.flush()
 
 
-def sync() -> None:
-    """Drain the queue AND wait for the drain thread's held batch to land —
-    the barrier to call before a TRUNCATE (or a mirror read) when the test
-    asserts exact contents afterwards (see _EventPipeline.sync)."""
+def sync(timeout: float = 5.0, *, bounded: bool = False) -> None:
+    """Drain and acknowledge the event pipeline; close uses the bounded form."""
     pipeline = _state["pipeline"]
     if pipeline is not None:
-        pipeline.sync()
+        pipeline.sync(timeout, bounded=bounded)
 
 
 def stop() -> None:

@@ -186,22 +186,28 @@ def test_consumer_retains_sdk_facts_without_sampling_or_reinstrumentation(
     assert result["statistics"]["api_operations"] == {"task_create": 1}
     assert result["version"] == 2
     assert "sdk_event_count" not in result["statistics"]
+    assert result["statistics"]["sdk_sampling_policy"] == "unknown"
     assert result["statistics"]["event_delivery"] == {
         "state": "pending",
         "completion_basis": None,
-        "sdk_calls": {"coverage": "unknown", "consumed_event_count": 1},
+        "sdk_calls": {
+            "coverage": "unknown",
+            "sampling_policy": "unknown",
+            "consumed_event_count": 1,
+        },
         "api_events": {"coverage": "unknown", "consumed_event_count": 1},
     }
     assert result["sdk_events"][0]["payload"] == events[0]
 
 
-def test_empty_manifest_certifies_a_complete_zero_event_session(
+def test_sampled_empty_manifest_certifies_emitted_events_not_zero_calls(
     db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
 ) -> None:
+    """An empty manifest cannot certify that opt-in sampling saw every SDK call."""
     from shared.impersonation_events import complete_delivery
 
     lease = start(owner)
-    leases.release(str(lease["id"]), attested_caller(lease), "No SDK calls")
+    leases.release(str(lease["id"]), attested_caller(lease), "SDK sampling was enabled")
     complete_delivery(owner.agent_id, 0, [])
     document = history.build_document(
         history.resolve(owner.agent_id, 0), history.entries(str(lease["id"]), db_conn)
@@ -209,9 +215,41 @@ def test_empty_manifest_certifies_a_complete_zero_event_session(
     assert document["statistics"]["event_delivery"] == {
         "state": "complete",
         "completion_basis": "upstream_manifest",
-        "sdk_calls": {"coverage": "complete", "consumed_event_count": 0},
-        "api_events": {"coverage": "complete", "consumed_event_count": 0},
+        "sdk_calls": {
+            "coverage": "complete_emitted_events",
+            "sampling_policy": "unknown",
+            "consumed_event_count": 0,
+        },
+        "api_events": {"coverage": "complete_emitted_events", "consumed_event_count": 0},
     }
+    assert document["statistics"]["sdk_sampling_policy"] == "unknown"
+
+
+def test_export_handoff_rebuilds_a_cached_v1_document(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An upgrade retry exports the v2 fields the resumption note requires."""
+    from psycopg.types.json import Jsonb
+
+    def workspace_for_agent(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    lease = start(owner)
+    leases.release(str(lease["id"]), attested_caller(lease), "Done")
+    db_conn.execute(
+        "UPDATE agent_impersonations SET handoff_document=%s WHERE id=%s",
+        (Jsonb({"version": 1, "session": {"handoff_path": "old"}}), lease["id"]),
+    )
+    db_conn.commit()
+
+    document, _ = history.export_handoff(history.resolve(owner.agent_id, 0), db_conn)
+
+    assert document["version"] == 2
+    assert document["statistics"]["event_delivery"]["state"] == "pending"
 
 
 def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
@@ -291,6 +329,7 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
     assert document["statistics"]["event_delivery"]["state"] == "pending"
     assert document["statistics"]["event_delivery"]["sdk_calls"] == {
         "coverage": "unknown",
+        "sampling_policy": "unknown",
         "consumed_event_count": 0,
     }
     db_conn.execute(
@@ -304,6 +343,7 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
     updated = json.loads(Path(path).read_text())
     assert updated["statistics"]["event_delivery"]["sdk_calls"] == {
         "coverage": "unknown",
+        "sampling_policy": "unknown",
         "consumed_event_count": 1,
     }
     with pytest.raises(ValueError, match="manifest differs"):
@@ -312,8 +352,12 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
     assert json.loads(Path(path).read_text())["statistics"]["event_delivery"] == {
         "state": "complete",
         "completion_basis": "upstream_manifest",
-        "sdk_calls": {"coverage": "complete", "consumed_event_count": 1},
-        "api_events": {"coverage": "complete", "consumed_event_count": 0},
+        "sdk_calls": {
+            "coverage": "complete_emitted_events",
+            "sampling_policy": "unknown",
+            "consumed_event_count": 1,
+        },
+        "api_events": {"coverage": "complete_emitted_events", "consumed_event_count": 0},
     }
     count = len(reads)
     reader.consume_recorded_events(lease)  # stale caller snapshot rechecks DB receipt

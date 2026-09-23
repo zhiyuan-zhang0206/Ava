@@ -89,8 +89,10 @@ the durable set and certifies completion. Until then, accounting remains pending
 even after the native receipt. Version-2 handoff statistics expose
 `event_delivery.state`, its manifest-only `completion_basis`, and separate
 SDK/API `coverage` plus `consumed_event_count`. Pending coverage is `unknown`:
-a zero consumed count is not evidence of zero calls. Only `complete` coverage
-makes a zero count a complete-session fact. Statistics never extrapolate samples.
+a zero consumed count is not evidence of zero calls. `complete_emitted_events`
+means the manifest covers emitted events only; the SDK sampling policy is
+explicitly `unknown`, so a zero SDK count is never a zero-call fact. Statistics
+never extrapolate samples.
 See the consumer module for delivery-completion semantics.
 
 ## CLI parameters: explicit, with four named exceptions

@@ -19,6 +19,7 @@ import json
 import queue
 import socket
 import threading
+import time
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -577,3 +578,74 @@ def test_audit_events_land_once_a_slot_frees() -> None:
     pipe._queue = _FreesQueue()  # type: ignore[attr-defined]
     telemetry._EventPipeline.enqueue(pipe, _mk_event("audit", "spawn"))
     assert pipe.dropped == 0
+
+
+def test_sync_bounds_a_stalled_caller_flush(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An attachment close cannot wait forever for a synchronous mirror write."""
+    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+    entered = threading.Event()
+    release = threading.Event()
+    pipe._queue = queue.Queue()
+    pipe._sync_done = threading.Event()
+
+    holder = threading.Thread(target=release.wait, daemon=True)
+    holder.start()
+    pipe._thread = holder
+
+    def blocked_flush() -> None:
+        entered.set()
+        assert release.wait(2), "sync did not release the stalled writer"
+
+    reports: list[str] = []
+
+    def report(message: str, **_extra: Any) -> None:
+        reports.append(message)
+
+    monkeypatch.setattr(pipe, "flush", blocked_flush)
+    monkeypatch.setattr(emitter, "_report_no_pipeline", report)
+    timer = threading.Timer(0.1, release.set)
+    timer.daemon = True
+    timer.start()
+    try:
+        started = time.monotonic()
+        pipe.sync(timeout=0.05, bounded=True)
+        assert entered.is_set()
+        assert time.monotonic() - started < 0.09
+        assert any("flush" in message for message in reports)
+    finally:
+        release.set()
+        timer.cancel()
+
+
+def test_sync_bounds_a_full_marker_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sync marker shares the close-time deadline when the queue is full."""
+    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
+    pipe._queue = queue.Queue(maxsize=1)
+    pipe._queue.put(_mk_event("telemetry", "turn_end"))
+    pipe._sync_done = threading.Event()
+
+    holder_done = threading.Event()
+    holder = threading.Thread(target=holder_done.wait, daemon=True)
+    holder.start()
+    pipe._thread = holder
+    monkeypatch.setattr(pipe, "flush", lambda: None)
+    reports: list[str] = []
+
+    def report(message: str, **_extra: Any) -> None:
+        reports.append(message)
+
+    monkeypatch.setattr(emitter, "_report_no_pipeline", report)
+
+    def free_slot() -> None:
+        time.sleep(0.1)
+        pipe._queue.get_nowait()
+
+    freer = threading.Thread(target=free_slot, daemon=True)
+    freer.start()
+    started = time.monotonic()
+    try:
+        pipe.sync(timeout=0.05, bounded=True)
+        assert time.monotonic() - started < 0.09
+        assert any("marker" in message for message in reports)
+    finally:
+        holder_done.set()

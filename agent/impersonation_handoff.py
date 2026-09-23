@@ -150,8 +150,9 @@ async def deliver_handoff(
             "It retains all messages, including ACKed messages, and the consumed API/SDK events. "
             "Read event_delivery before interpreting counts: while its state is pending, "
             "consumed_event_count is not final and zero means no events have been consumed yet, "
-            "not that no SDK calls occurred. Only event_delivery.state=complete, certified by "
-            "the upstream manifest, makes those counts final. "
+            "not that no SDK calls occurred. event_delivery.state=complete certifies only "
+            "the upstream manifest of emitted SDK/API events; SDK sampling policy is unknown, "
+            "so an SDK consumed_event_count of zero never proves no SDK calls. "
             "Incoming messages marked unacknowledged still need your attention. "
             "Your execution resumes with this note.",
             tag=NoteTag.IMPERSONATION,
