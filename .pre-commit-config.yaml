@@ -194,8 +194,9 @@ repos:
         pass_filenames: false
 
       # Structural lints for agent legibility — bans `if TYPE_CHECKING:` import
-      # folding; budgets are 800 lines/file and 20 direct entries/directory,
-      # over packages + tests/scripts, with a frozen shrink-only baseline.
+      # folding; budgets are 800 lines/file, 20 direct entries/directory,
+      # CC <15 (10-14 warn), and nesting <=5 over packages + tests/scripts,
+      # with a frozen shrink-only baseline checked against the base revision.
       # Rules + the _TYPE_CHECKING_ALLOWED list live in
       # scripts/lint_code_structure.py header. (print() bans are enforced by
       # ruff T20, not here.)
