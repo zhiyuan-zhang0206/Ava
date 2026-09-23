@@ -13,9 +13,18 @@ architecture overview (much of it is maintainer ops you can skip).
 hacking on the code:
 
 ```bash
-uv sync                      # Python deps + the `ava` CLI into .venv
-.venv/bin/pre-commit install    # lint hooks (fast; the test suite runs in CI)
+env -u VIRTUAL_ENV python3 scripts/guard_editable_venv.py .
+env -u VIRTUAL_ENV uv sync    # Python deps + the `ava` CLI into this checkout's .venv
+.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
+
+Install hooks from the main clone's stable `.venv`, never an ephemeral
+worktree: the shared hooks embed that interpreter's absolute path. See the
+[hook runbook](conventions/runbook.md#git-hooks-pre-commit--pre-push) for
+installation warnings and the heavy pre-push checks.
+Prefix every worktree `uv` command with `env -u VIRTUAL_ENV`. Never use bare
+`uv pip install`: an inherited environment can target a shared production
+venv and remove its launcher. Keep each worktree's `.venv` local and real.
 
 ## Workflow
 
