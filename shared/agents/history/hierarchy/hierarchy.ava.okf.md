@@ -12,14 +12,14 @@ tags:
 
 ## What it is
 
-`shared/hierarchy/` turns one agent's message history into a level tree of
+`shared/agents/history/hierarchy/` turns one agent's message history into a level tree of
 summaries. The design contract (user-confirmed 2026-09-14, task #3243): a node
 is **one text** read by humans and agents alike; units fold in batches of
 kappa = [5,15]; sealing is append-only. Storage and the run-timeline serving
 merge are the layers built on top.
 
 - `blocks.py` — `fold_blocks(items)` folds the console item stream
-  (`shared.timeline.build_timeline_items`) into level-0 blocks: one AI message
+  (`shared.agents.history.timeline.build_timeline_items`) into level-0 blocks: one AI message
   plus the tool results it answers, or one inbound message. Markers are
   transparent; compact items close the open block (trigger points). The fold
   reproduces the pilot `blocks_and_triggers` partition exactly — pinned by the

@@ -24,10 +24,10 @@ from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_c
 from agent.startup import _wrap_saver_writes_with_nstep_interval
 from ava._external_state import encode_plugin_delta
 from shared import impersonation as leases
+from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.caller_identity import CallerIdentity
 from shared.context import AvaContext
 from shared.db import create_agent, insert_inbound_message
-from shared.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.machine import machine_name
 from shared.plugin_context import PluginContext
 from shared.runtime_incarnation import RuntimeIncarnation

@@ -40,7 +40,7 @@ from ops.rpc_schemas import (
     ShellProbeResult,
 )
 from shared import pause_owner, ui_update_state, updater_handoff
-from shared.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.cluster_lock import (
     claim_recovery_lock,
     read_update_lease,

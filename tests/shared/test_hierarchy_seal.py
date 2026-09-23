@@ -1,4 +1,4 @@
-"""Contract tests for the hierarchy seal partition (`shared/hierarchy/seal.py`).
+"""Contract tests for the hierarchy seal partition (`shared/agents/history/hierarchy/seal.py`).
 
 The load-bearing invariants (user-confirmed 2026-09-14, productized under
 task #3704): fan-in stays within kappa = [5,15] (extended to 20 only when
@@ -10,7 +10,7 @@ generation pass (budget/ratio checks) is tested where generation lives.
 
 from __future__ import annotations
 
-from shared.hierarchy.seal import (
+from shared.agents.history.hierarchy.seal import (
     NARRATIVE_CAP_TOK,
     NodeSpec,
     SealParams,

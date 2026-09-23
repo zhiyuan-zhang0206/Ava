@@ -1,4 +1,4 @@
-"""Unit tests for the hierarchy message rendering (`shared/hierarchy/render.py`).
+"""Unit tests for the hierarchy message rendering (`shared/agents/history/hierarchy/render.py`).
 
 Contracts locked here: the projection is deterministic and content-faithful
 (thinking / text / tool calls / exits / inbound texts all reach the input); the
@@ -13,14 +13,14 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolCall, ToolMessage
 
-from shared.hierarchy.blocks import Block
-from shared.hierarchy.render import (
+from shared.agents.history.hierarchy.blocks import Block
+from shared.agents.history.hierarchy.render import (
     RenderParams,
     block_source_tokens,
     render_block_text,
     render_message,
 )
-from shared.hierarchy.tokens import count_tokens
+from shared.agents.history.hierarchy.tokens import count_tokens
 
 TS = "2026-09-12T12:03:27+08:00"
 

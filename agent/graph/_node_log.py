@@ -63,16 +63,16 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent._turn_progress import mark_turn_progress
 from agent.db import list_chat_inbound_anchors
-from shared.config import settings
-from shared.event_publisher import AgentEventPublisher
-from shared.live_events import TimelineSnapshot
-from shared.log import logger
-from shared.timeline import (
+from shared.agents.history.timeline import (
     build_timeline_items,
     needs_chat_anchors,
     tail_window,
     timeline_default_limit,
 )
+from shared.config import settings
+from shared.event_publisher import AgentEventPublisher
+from shared.live_events import TimelineSnapshot
+from shared.log import logger
 
 
 def awaiter_chain_lines(task: asyncio.Task) -> list[str]:

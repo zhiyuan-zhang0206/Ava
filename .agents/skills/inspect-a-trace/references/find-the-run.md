@@ -70,7 +70,7 @@ not, **except** for compaction boundaries.
 ## Reading history across compaction segments
 
 Every compaction stamps the thread's newest checkpoint
-`metadata->>'compact_boundary' = true` (`shared/checkpoint_cleanup.py:mark_compact_boundary`),
+`metadata->>'compact_boundary' = true` (`shared/agents/history/checkpoint_cleanup.py:mark_compact_boundary`),
 and the reaper's predicate excludes those rows from every trim:
 
 ```sql
@@ -94,7 +94,7 @@ involved — this is a query over what is already kept.
 ## Reading the messages
 
 ```python
-from shared.checkpoint import load_checkpoint_messages, load_checkpoint_messages_by_trace
+from shared.agents.history.checkpoint import load_checkpoint_messages, load_checkpoint_messages_by_trace
 
 msgs = load_checkpoint_messages(3048)                       # the agent's current state
 ckpt_id, msgs = load_checkpoint_messages_by_trace(3048, trace_id)   # by trace
@@ -114,7 +114,7 @@ saver.get_tuple({"configurable": {"thread_id": "3048", "checkpoint_id": "<uuid6>
 
 Always construct the serde with the allowlist
 (`JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)`,
-`shared/checkpoint_serde.py`) or every load spews deserialization warnings.
+`shared/agents/history/checkpoint_serde.py`) or every load spews deserialization warnings.
 
 ## Over HTTP instead
 

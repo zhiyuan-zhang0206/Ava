@@ -1198,7 +1198,7 @@ export interface paths {
          *
          *     One checkpoint segment is built at a time; windowing trims the payload +
          *     the frontend render. A checkpoint read failure renders an empty view + 200
-         *     (cold-load tolerance, see `shared.checkpoint`).
+         *     (cold-load tolerance, see `shared.agents.history.checkpoint`).
          */
         get: operations["get_timeline_api_agents__agent_id__timeline_get"];
         put?: never;

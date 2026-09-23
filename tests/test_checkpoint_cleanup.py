@@ -1,4 +1,4 @@
-"""Tests for shared/checkpoint_cleanup.py.
+"""Tests for shared/agents/history/checkpoint_cleanup.py.
 
 These drive the REAL LangGraph AsyncPostgresSaver against the session's test
 Postgres (the same saver prod uses), so the trim SQL is exercised against
@@ -27,7 +27,7 @@ from langgraph.graph.message import _messages_delta_reducer
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-from shared.checkpoint_cleanup import (
+from shared.agents.history.checkpoint_cleanup import (
     count_checkpoints,
     mark_compact_boundary,
     trim_checkpoints,
@@ -194,7 +194,7 @@ async def test_interrupted_trim_keeps_every_survivor_readable(
     aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A committed batch must stand alone if no later batch ever executes."""
-    import shared.checkpoint_cleanup as cleanup
+    import shared.agents.history.checkpoint_cleanup as cleanup
 
     ids = await _put_turns(aops_pool, "1", 8, with_scratch=True)
     monkeypatch.setattr(cleanup, "_TRIM_MAX_ROUNDS", 1)

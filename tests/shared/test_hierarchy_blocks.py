@@ -1,4 +1,4 @@
-"""Contract tests for the level-0 block fold (`shared/hierarchy/blocks.py`).
+"""Contract tests for the level-0 block fold (`shared/agents/history/hierarchy/blocks.py`).
 
 The fold rule is frozen by the Q7 equivalence evidence (task #3704): it must
 reproduce the pilot `blocks_and_triggers` partition on the console item
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from shared.hierarchy.blocks import Block, fold_blocks
-from shared.timeline import TimelineItem
+from shared.agents.history.hierarchy.blocks import Block, fold_blocks
+from shared.agents.history.timeline import TimelineItem
 
 ItemKind = Literal[
     "inbound_chat",

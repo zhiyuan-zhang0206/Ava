@@ -22,7 +22,7 @@ def test_conversation_recovery_sources_are_checkpoint_tables_not_events_archive(
     """Checkpoint tables are the backed-up write and recovery source; the PG
     events archive was dropped (task #1823) and Loki owns the live stream."""
     backup_path = _ROOT / "services" / "backup.py"
-    checkpoint_path = _ROOT / "shared" / "checkpoint.py"
+    checkpoint_path = _ROOT / "shared" / "agents" / "history" / "checkpoint.py"
     schema_path = _ROOT / "db" / "schema.sql"
 
     backup_source = backup_path.read_text(encoding="utf-8")

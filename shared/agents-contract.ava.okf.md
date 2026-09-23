@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent Cross-Process Contract
-description: '`shared/agents.py` defines the cross-process data contract between agent processes and the gateway — pure type definitions, no implementation. Both sides communicate over HTTP and must see the same status enums, exception hierarchy, and wire error protocol (bidirectional mapping between wire reason ↔ exception classes). The message-level half of the contract is its sibling `shared/message_kwargs.py`.'
+description: '`shared/agents/contract.py` defines the cross-process data contract between agent processes and the gateway — pure type definitions, no implementation. Both sides communicate over HTTP and must see the same status enums, exception hierarchy, and wire error protocol (bidirectional mapping between wire reason ↔ exception classes). The message-level half of the contract is its sibling `shared/message_kwargs.py`.'
 tags:
 - shared
 - library
@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`shared/agents.py` — the cross-process data contract between agent processes and the gateway: pure type definitions, no implementation. Both sides communicate over HTTP and must share the same status enums, exception types, and wire error protocol.
+`shared/agents/contract.py` — the cross-process data contract between agent processes and the gateway: pure type definitions, no implementation. Both sides communicate over HTTP and must share the same status enums, exception types, and wire error protocol.
 
 ## Core responsibilities
 
@@ -37,9 +37,9 @@ tags:
 
 ## Entry points
 
-- `shared/agents.py:AgentStatus.RUNNING` — status enum value
-- `shared/agents.py:AgentNotFound` — exception class (http_status=404, reason="agent_not_found")
-- `shared/agents.py:EXCEPTION_BY_REASON` — reverse lookup table from wire reason → exception class
+- `shared/agents/contract.py:AgentStatus.RUNNING` — status enum value
+- `shared/agents/contract.py:AgentNotFound` — exception class (http_status=404, reason="agent_not_found")
+- `shared/agents/contract.py:EXCEPTION_BY_REASON` — reverse lookup table from wire reason → exception class
 
 ## Notes
 

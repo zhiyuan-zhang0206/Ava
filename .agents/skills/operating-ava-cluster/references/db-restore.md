@@ -59,7 +59,7 @@ Expected facts:
 - `agents`, `checkpoint_blobs`, `checkpoints`, and `checkpoint_writes` are all
   present in the restored schema and their counts are printed.
 - `sample_agent` names a restored checkpoint thread; `messages` is read through
-  `shared.checkpoint.load_checkpoint_messages_full`, not raw table bytes.
+  `shared.agents.history.checkpoint.load_checkpoint_messages_full`, not raw table bytes.
 - The successful checkpoint-reader call is the service smoke: it proves the
   restored LangGraph schema and serialized conversation data are usable.
 

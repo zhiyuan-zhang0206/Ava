@@ -22,7 +22,7 @@ from pathlib import Path
 import psycopg
 
 from services import backup
-from shared import checkpoint as checkpoint_reader
+from shared.agents.history import checkpoint as checkpoint_reader
 from shared.config import settings
 from shared.log import logger
 from shared.pg_throwaway_base import format_bytes, select_throwaway_base

@@ -3,10 +3,10 @@
 Cold-load path only (page mount / agent switch). During a turn the frontend
 updates from agent-published `timeline_snapshot` events; this endpoint just
 serves the initial full view. Both render through the same
-`shared.timeline.build_timeline_items`, so the cold load and the live
+`shared.agents.history.timeline.build_timeline_items`, so the cold load and the live
 snapshots agree item-for-item.
 
-This is a cold-load checkpoint reader (see `shared.checkpoint` for the shared
+This is a cold-load checkpoint reader (see `shared.agents.history.checkpoint` for the shared
 read contract). It tolerates a checkpoint read failure by rendering an empty
 view + 200 so the UI is not blocked on a transient store hiccup.
 """
@@ -20,22 +20,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from gateway.routers._eval_guard import deny_isolated_result_read
-from shared.checkpoint import (
+from shared.agents.history.checkpoint import (
     CheckpointReadError,
     list_compact_boundary_checkpoint_ids,
     load_checkpoint_message_count,
     load_checkpoint_messages,
     load_checkpoint_messages_segment,
 )
-from shared.config import settings
-from shared.db import agent_exists, list_inbound_messages
-from shared.impersonation_timeline import hydrate
-from shared.timeline import (
+from shared.agents.history.timeline import (
     TimelineItem,
     build_timeline_items,
     tail_window,
     timeline_default_limit,
 )
+from shared.config import settings
+from shared.db import agent_exists, list_inbound_messages
+from shared.impersonation_timeline import hydrate
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -437,7 +437,7 @@ def get_timeline(
 
     One checkpoint segment is built at a time; windowing trims the payload +
     the frontend render. A checkpoint read failure renders an empty view + 200
-    (cold-load tolerance, see `shared.checkpoint`).
+    (cold-load tolerance, see `shared.agents.history.checkpoint`).
     """
     if limit is None:
         limit = timeline_default_limit()

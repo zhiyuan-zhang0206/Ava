@@ -29,8 +29,13 @@ from langchain_core.messages import BaseMessage, HumanMessage
 
 from gateway.app import app
 from gateway.routers.timeline import _window_before
+from shared.agents.history.timeline import (
+    TimelineItem,
+    _ai_message_items,
+    build_timeline_items,
+    tail_window,
+)
 from shared.db import create_agent, insert_inbound_message
-from shared.timeline import TimelineItem, _ai_message_items, build_timeline_items, tail_window
 
 
 @pytest.fixture
@@ -233,7 +238,6 @@ class TestAiMessageItems:
         """ava_exec_ms (the exec wall-clock stashed by the exec node) lands on
         the code_output item so the collapsed chip can read 'ran in Xs'."""
         from agent.messages import exec_output_message
-        from shared.timeline import build_timeline_items
 
         msg = exec_output_message(content="hello", tool_call_id="t1", exit_code=0, exec_ms=1300)
         items, _ = build_timeline_items([msg], [])
@@ -245,8 +249,6 @@ class TestAiMessageItems:
         """A historical exec_output checkpoint without ava_exec_ms keeps exec_ms
         None — the chip then just shows the line count."""
         from langchain_core.messages import ToolMessage
-
-        from shared.timeline import build_timeline_items
 
         msg = ToolMessage(
             content="hello",
@@ -265,7 +267,6 @@ class TestAiMessageItems:
         HumanMessage catch-all would still produce a system_marker, but with
         source=None (the red UnknownMarkerChip path)."""
         from agent.messages import NoteTag, system_note_message
-        from shared.timeline import build_timeline_items
 
         msg = system_note_message(content="use ava.agents.send_message", tag=NoteTag.AGENT_REPLY)
         items, _ = build_timeline_items([msg], [])
@@ -280,7 +281,6 @@ class TestAiMessageItems:
         the one-time hints, ts hidden). The frontend chip reads this flag to
         decide whether to render the wall-clock ts."""
         from agent.messages import NoteTag, system_note_message
-        from shared.timeline import build_timeline_items
 
         shown = {
             NoteTag.HEARTBEAT,
@@ -338,8 +338,6 @@ class TestAiMessageItems:
         as a `system_prompt` item with created_at None — it has no inbound anchor
         and is always the first item, so it carries no timestamp."""
         from langchain_core.messages import SystemMessage
-
-        from shared.timeline import build_timeline_items
 
         msg = SystemMessage(content="You are Ava.\nAct via execute_code.")
         items, msg_count = build_timeline_items([msg], [])
@@ -584,7 +582,6 @@ class TestAvaMsgTypeDispatch:
 
     @staticmethod
     def _render(msg: HumanMessage) -> list[TimelineItem]:
-        from shared.timeline import build_timeline_items
 
         return build_timeline_items([msg], [])[0]
 
@@ -1210,7 +1207,7 @@ class TestTimelineFailLoud:
         middleware and return 500.
         """
         from gateway.app import app
-        from shared import timeline as shared_timeline
+        from shared.agents.history import timeline as shared_timeline
 
         tid = create_agent(db_conn)
         self._put_minimal_aimessage(tid)
@@ -1301,7 +1298,6 @@ def test_timeline_anchor_filter_only_includes_chat_inbounds(
     inbounds do not pollute the chat anchor.
     """
     from shared.db import list_inbound_messages
-    from shared.timeline import build_timeline_items
 
     tid = create_agent(db_conn)
     # Mixed chat / lifecycle kinds, in INSERT order
@@ -1344,8 +1340,6 @@ def test_item_created_at_prefers_real_ava_created_at_over_synthetic() -> None:
     anchor+microsecond offset (which renders as 1970 when no chat preceded it)."""
     from langchain_core.messages import ToolMessage
 
-    from shared.timeline import build_timeline_items
-
     msg = ToolMessage(
         content="out",
         tool_call_id="t1",
@@ -1369,7 +1363,6 @@ def test_inbound_with_real_ts_still_advances_anchor_for_legacy_siblings() -> Non
     from langchain_core.messages import HumanMessage, ToolMessage
 
     from shared.db import InboundRow
-    from shared.timeline import build_timeline_items
 
     # In production, the inbound's ava_created_at IS the anchor row's created_at
     # (same DB row); here they are set apart only so the two assertions can tell
@@ -1408,7 +1401,6 @@ def test_compacted_inbound_uses_its_embedded_id_instead_of_oldest_anchor() -> No
     from langchain_core.messages import HumanMessage, ToolMessage
 
     from shared.db import InboundRow
-    from shared.timeline import build_timeline_items
 
     stale_anchor = InboundRow(
         4516,
@@ -1453,8 +1445,6 @@ def test_inbound_rejects_malformed_embedded_id(malformed_id: object) -> None:
     """A present correlation key is contractual, never a legacy fallback hint."""
     from langchain_core.messages import HumanMessage
 
-    from shared.timeline import build_timeline_items
-
     inbound = HumanMessage(
         content="message",
         additional_kwargs={
@@ -1476,7 +1466,6 @@ def test_missing_embedded_anchor_does_not_consume_legacy_fallback() -> None:
     from langchain_core.messages import HumanMessage, ToolMessage
 
     from shared.db import InboundRow
-    from shared.timeline import build_timeline_items
 
     missing_modern = HumanMessage(
         content="row no longer present",
@@ -1521,7 +1510,6 @@ def test_out_of_order_and_duplicate_embedded_ids_preserve_anchor_cursor() -> Non
     from langchain_core.messages import HumanMessage
 
     from shared.db import InboundRow
-    from shared.timeline import build_timeline_items
 
     def modern(inbound_id: int) -> HumanMessage:
         return HumanMessage(
@@ -1560,8 +1548,6 @@ def test_aimessage_blocks_share_one_real_ava_created_at() -> None:
     timeline no longer fans its reasoning/text/code items out across synthetic
     per-block microsecond offsets."""
     from langchain_core.messages import AIMessage
-
-    from shared.timeline import build_timeline_items
 
     msg = AIMessage(
         content=[
@@ -1637,7 +1623,6 @@ class TestMultimodalInbound:
         )
 
     def test_renders_text_and_images_not_base64(self) -> None:
-        from shared.timeline import build_timeline_items
 
         items, _ = build_timeline_items([self._msg()], [])
         (item,) = items
@@ -1648,7 +1633,6 @@ class TestMultimodalInbound:
         assert "QUJD" not in item.payload
 
     def test_image_only_payload_is_placeholder_text(self) -> None:
-        from shared.timeline import build_timeline_items
 
         msg = HumanMessage(
             content=[
@@ -1870,8 +1854,6 @@ class TestBuildTimelineItemsStartOffset:
     def test_start_offset_keeps_absolute_item_ids_and_full_msg_count(self):
         from langchain_core.messages import AIMessage, SystemMessage
 
-        from shared.timeline import build_timeline_items
-
         messages = [
             SystemMessage(content="prompt"),
             AIMessage(content="first"),
@@ -1884,8 +1866,6 @@ class TestBuildTimelineItemsStartOffset:
 
     def test_start_zero_matches_no_offset(self):
         from langchain_core.messages import AIMessage, SystemMessage
-
-        from shared.timeline import build_timeline_items
 
         messages = [SystemMessage(content="prompt"), AIMessage(content="first")]
         full, full_count = build_timeline_items(messages, [])
@@ -1900,8 +1880,6 @@ class TestBuildTimelineItemsStartOffset:
         # messages carry ava_created_at, so the anchor list is irrelevant on
         # the incremental path — pass [] and the item still renders.
         from langchain_core.messages import HumanMessage, SystemMessage
-
-        from shared.timeline import build_timeline_items
 
         msg = HumanMessage(
             content="hi",
@@ -1918,8 +1896,6 @@ class TestBuildTimelineItemsStartOffset:
 
     def test_start_offset_keeps_modern_embedded_inbound_id_without_anchors(self):
         from langchain_core.messages import HumanMessage, SystemMessage
-
-        from shared.timeline import build_timeline_items
 
         msg = HumanMessage(
             content="hi",
@@ -1939,8 +1915,6 @@ class TestBuildTimelineItemsStartOffset:
 
     def test_segment_prefix_keeps_local_message_and_block_positions(self):
         from langchain_core.messages import AIMessage, HumanMessage
-
-        from shared.timeline import build_timeline_items
 
         items, msg_count = build_timeline_items(
             [
@@ -2491,7 +2465,7 @@ class TestTimelineCompactHistory:
         from langchain_core.messages import AIMessage
 
         import gateway.routers.timeline as timeline_router
-        from shared.checkpoint import CheckpointReadError
+        from shared.agents.history.checkpoint import CheckpointReadError
         from shared.config import settings
 
         tid = create_agent(db_conn)

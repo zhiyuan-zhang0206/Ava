@@ -31,7 +31,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from shared.hierarchy.store import StoredNode
+from shared.agents.history.hierarchy.store import StoredNode
 
 
 @dataclass(frozen=True)

@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from shared.checkpoint import (
+from shared.agents.history.checkpoint import (
     attach_trace_to_checkpoint,
     load_checkpoint_messages_by_trace,
 )

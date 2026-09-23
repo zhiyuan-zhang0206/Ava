@@ -17,7 +17,7 @@ from langgraph.checkpoint.postgres.base import BasePostgresSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 
 from shared import checkpoint_postgres_walks
-from shared.checkpoint import load_checkpoint_messages_segment
+from shared.agents.history.checkpoint import load_checkpoint_messages_segment
 from shared.config import settings
 
 

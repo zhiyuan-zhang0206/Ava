@@ -28,8 +28,8 @@ from typing import Any, cast
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from shared.hierarchy.blocks import Block
-from shared.hierarchy.tokens import count_tokens
+from shared.agents.history.hierarchy.blocks import Block
+from shared.agents.history.hierarchy.tokens import count_tokens
 from shared.lm.content import content_blocks
 from shared.lm.reasoning import to_canonical_reasoning
 from shared.message_kwargs import AvaMsgType, message_content, read_ava_kwargs

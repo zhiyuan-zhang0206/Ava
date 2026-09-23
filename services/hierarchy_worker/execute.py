@@ -23,14 +23,17 @@ import time
 import traceback
 
 from services.hierarchy_worker.scan import KIND_COMPACT, KIND_TAIL
-from shared.checkpoint import latest_checkpoint_id, list_compact_boundary_checkpoint_ids
+from shared.agents.history.checkpoint import (
+    latest_checkpoint_id,
+    list_compact_boundary_checkpoint_ids,
+)
+from shared.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
+from shared.agents.history.hierarchy.generate import build_generation_llm
+from shared.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
+from shared.agents.history.hierarchy.store import load_known_texts, write_tree
 from shared.config import settings
 from shared.db import connect
 from shared.db_transaction import write_transaction
-from shared.hierarchy import ENGINE_VERSION, PROMPT_VERSION
-from shared.hierarchy.generate import build_generation_llm
-from shared.hierarchy.pipeline import MaterializedTree, build_agent_tree
-from shared.hierarchy.store import load_known_texts, write_tree
 from shared.lm.factory import close_chat_model
 from shared.log import logger
 

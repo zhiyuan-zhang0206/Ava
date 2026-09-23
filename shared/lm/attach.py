@@ -182,7 +182,7 @@ def pack_attachments(model: str, entries: list[AttachEntry]) -> AttachmentPack |
     # leading notice: [text(notice), text(line1), media1, text(line2), media2, ...].
     # Every delivered media block is immediately preceded by its own caption
     # text block, so consumers can pair a file's label with its image without
-    # re-parsing the joined caption (shared/timeline._attach_image_captions).
+    # re-parsing the joined caption (shared/agents/history/timeline._attach_image_captions).
     blocks: list[dict[str, object]] = [{"type": "text", "text": state.caption_lines[0]}]
     media_index = 0
     for line_block, delivered_flag in zip(state.line_blocks, state.delivered_flags, strict=True):

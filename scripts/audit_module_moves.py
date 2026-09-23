@@ -108,8 +108,23 @@ def _referenced_names(module: str, text: str) -> set[str]:
 
 
 def _missing(module: str, refs: set[str]) -> list[str]:
+    """Names a caller can still reach at `module`.
+
+    A reference resolves when it is an attribute of the module **or** a
+    submodule of it: `from <pkg> import <sub>` is Python's documented
+    fallback, so a package whose `__init__` stays lean (no eager submodule
+    re-exports) is not a broken move.
+    """
     loaded = importlib.import_module(module)
-    return sorted(name for name in refs if not hasattr(loaded, name))
+    missing: list[str] = []
+    for name in sorted(refs):
+        if hasattr(loaded, name):
+            continue
+        try:
+            importlib.import_module(f"{module}.{name}")
+        except ImportError:
+            missing.append(name)
+    return missing
 
 
 def _module_pair(value: str) -> tuple[str, str]:

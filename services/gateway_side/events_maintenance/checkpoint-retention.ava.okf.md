@@ -28,7 +28,7 @@ larger than one pass.
 
 ## Atomic trim and race guard
 
-`shared.checkpoint_cleanup.trim_checkpoints_sync` performs each thread trim as
+`shared.agents.history.checkpoint_cleanup.trim_checkpoints_sync` performs each thread trim as
 one PostgreSQL statement per bounded batch. The statement ranks checkpoint IDs
 newest first, deletes rows outside the keep window with their writes, and keeps
 blobs referenced by every checkpoint surviving that particular batch, including
@@ -54,7 +54,7 @@ does not consume the productive-thread cap, allowing later candidates to run.
 
 - `services/events_maintenance/checkpoint_reaper.py` owns candidate discovery,
   rotation, recheck, and the keep-three policy.
-- `shared/checkpoint_cleanup.py` owns the atomic trim, survivor references, and
+- `shared/agents/history/checkpoint_cleanup.py` owns the atomic trim, survivor references, and
   retained ancestry and in-flight-write guard. Compaction stamps boundaries but
   does not invoke the retired keep-one deletion flow.
 - `services/events_maintenance/daemon.py` owns the one-minute cadence and the

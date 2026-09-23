@@ -10,8 +10,8 @@ import pytest
 from fastapi import HTTPException
 
 from gateway.routers import run_timeline_strip as strip
-from shared import checkpoint
-from shared.timeline import TimelineItem
+from shared.agents.history import checkpoint
+from shared.agents.history.timeline import TimelineItem
 
 _ItemKind = Literal[
     "inbound_chat",
