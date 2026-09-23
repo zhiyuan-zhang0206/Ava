@@ -39,6 +39,7 @@ function ArchivePage({ query, props }: { query: string; props: InnerProps & { wi
       label={agent.label ?? undefined} active={props.activeId === agent.agent_id}
       pending={props.pendingActions[agent.agent_id]} wide={props.wide} depth={0} ancestorsIsLast={[]}
       onSelect={() => props.onSelect(agent.agent_id)} onTerminate={() => props.onTerminate(agent.agent_id)}
+      onForceExpire={(sessionId) => props.onForceExpire(agent.agent_id, sessionId)}
       onForceKill={() => props.onTerminate(agent.agent_id, true)} onRestart={() => props.onRestart(agent.agent_id)}
       onResurrect={(prompt) => props.onResurrect(agent.agent_id, prompt)} onFork={(prompt) => props.onFork(agent.agent_id, prompt)}
       onCompact={() => props.onCompact(agent.agent_id)} onRename={(label) => props.onRename(agent.agent_id, label)}

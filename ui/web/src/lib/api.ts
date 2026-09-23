@@ -457,6 +457,10 @@ export const api = {
     ).then(ok<TerminateAgentResponse>);
   },
 
+  forceExpireImpersonation: (agentId: number, sessionId: number): Promise<{ session_id: number; status: "expired" | "not_open" }> =>
+    f(`/api/agents/${agentId}/impersonation/force-expire`, POST_JSON({ session_id: sessionId }))
+      .then(ok<{ session_id: number; status: "expired" | "not_open" }>),
+
   restartAgent: (agentId: number): Promise<RestartAgentResponse> => {
     return f(`/api/agents/${agentId}/restart`, POST).then(ok<RestartAgentResponse>);
   },

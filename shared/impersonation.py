@@ -39,7 +39,8 @@ from shared.config.service_read import current_field_values
 from shared.db import connect, publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.impersonation_history import append, capture_pending, set_actor
-from shared.live_events import Cancelled, ImpersonationChanged
+from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
+from shared.live_events import Cancelled
 from shared.log import logger
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
@@ -55,13 +56,11 @@ def _ttl(value: int) -> int:
     return value
 
 
-def _wake(agent_id: int) -> None:
+def _wake(agent_id: int, *, roster_changed: bool = False) -> None:
     publish_inbound_wake(agent_id, "impersonation")
-    redis_client.publish_best_effort_sync(
-        settings.data_plane.events_channel,
-        ImpersonationChanged(agent_id=agent_id).model_dump_json(),
-        context="impersonation_changed",
-    )
+    publish_impersonation_changed_sync(agent_id)
+    if roster_changed:
+        publish_agent_updated_sync(agent_id)
 
 
 def request(
@@ -160,7 +159,7 @@ def request(
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))
-    _wake(agent_id)
+    _wake(agent_id, roster_changed=True)
     if relay_token is not None:
         return result | {"relay_token": relay_token}
     return result
@@ -170,7 +169,11 @@ def get(lease_id: str, caller: object) -> dict[str, Any]:
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(lease, caller)
-        return public(expire(conn, lease))
+        was_open = lease["status"] in OPEN
+        result = public(expire(conn, lease))
+    if was_open and result["status"] == "expired":
+        _wake(lease["agent_id"], roster_changed=True)
+    return result
 
 
 def require_active(lease_id: str, caller: object) -> dict[str, Any]:
@@ -259,7 +262,7 @@ def reject(
             (reason, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    _wake(agent_id)
+    _wake(agent_id, roster_changed=True)
     return result
 
 
@@ -270,30 +273,32 @@ def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]:
     with write_transaction() as conn:
         meta = require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
+        was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
         if lease["agent_id"] == incarnation.agent_id and lease["status"] == "expired":
             # Expiry between the driver's status read and this locked boundary
             # returns control; it is not a fatal native runtime failure.
-            return public(lease)
-        if lease["agent_id"] != incarnation.agent_id or lease["status"] != "accepted":
-            raise ImpersonationError("Activation requires accepted native consent")
-        if (lease["accepted_generation"], lease["accepted_owner"]) != (
-            incarnation.generation,
-            incarnation.owner,
-        ):
-            raise ImpersonationError("Activation belongs to another native incarnation")
-        if meta["incarnation_resources"] is not None:
-            resources = decode_resources(meta["incarnation_resources"])
-            if not isinstance(resources, IncarnationResources) or resources.requests:
-                raise ImpersonationError("The native agent's resources have not drained")
-        conn.execute(
-            "UPDATE agent_impersonations SET status='active',activated_at=clock_timestamp(),"
-            "expires_at=clock_timestamp()+ttl_seconds*interval '1 second' WHERE id=%s",
-            (lease_id,),
-        )
-        result = public(lock_lease(conn, lease_id))
-        capture_pending(conn, result)
-    _wake(incarnation.agent_id)
+            result = public(lease)
+        else:
+            if lease["agent_id"] != incarnation.agent_id or lease["status"] != "accepted":
+                raise ImpersonationError("Activation requires accepted native consent")
+            if (lease["accepted_generation"], lease["accepted_owner"]) != (
+                incarnation.generation,
+                incarnation.owner,
+            ):
+                raise ImpersonationError("Activation belongs to another native incarnation")
+            if meta["incarnation_resources"] is not None:
+                resources = decode_resources(meta["incarnation_resources"])
+                if not isinstance(resources, IncarnationResources) or resources.requests:
+                    raise ImpersonationError("The native agent's resources have not drained")
+            conn.execute(
+                "UPDATE agent_impersonations SET status='active',activated_at=clock_timestamp(),"
+                "expires_at=clock_timestamp()+ttl_seconds*interval '1 second' WHERE id=%s",
+                (lease_id,),
+            )
+            result = public(lock_lease(conn, lease_id))
+            capture_pending(conn, result)
+    _wake(incarnation.agent_id, roster_changed=was_open and result["status"] == "expired")
     return result
 
 
@@ -328,6 +333,7 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
             lease = cur.fetchone()
         if lease is None:
             return None
+        was_open = lease["status"] in OPEN
         lease = expire(conn, lease)
         if lease["status"] == "accepted" and (
             lease["accepted_generation"],
@@ -377,7 +383,10 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
                 lease_id=str(lease["id"]),
                 generation=str(incarnation.generation),
             )
-        return public(lease)
+        result = public(lease)
+    if was_open and result["status"] == "expired":
+        _wake(agent_id, roster_changed=True)
+    return result
 
 
 def renew(lease_id: str, caller: object, *, ttl_seconds: int | None = None) -> dict[str, Any]:
@@ -422,7 +431,7 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
         )
         dismiss_reminders(conn, lease)
         result = public(lock_lease(conn, lease_id))
-    _wake(lease["agent_id"])
+    _wake(lease["agent_id"], roster_changed=True)
     return result
 
 
@@ -537,7 +546,11 @@ def relay_get(lease_id: str, relay_token: str) -> dict[str, Any]:
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate_relay(lease, relay_token)
-        return public(expire(conn, lease))
+        was_open = lease["status"] in OPEN
+        result = public(expire(conn, lease))
+    if was_open and result["status"] == "expired":
+        _wake(lease["agent_id"], roster_changed=True)
+    return result
 
 
 def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -661,7 +674,7 @@ def fail_acceptance(lease_id: str, incarnation: RuntimeIncarnation, reason: str)
             (reason, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    _wake(lease["agent_id"])
+    _wake(lease["agent_id"], roster_changed=True)
     logger.error(
         "impersonation relay establishment failed; takeover rolled back",
         agent_id=lease["agent_id"],
@@ -743,7 +756,7 @@ def abort_lease(
             cur.execute("SELECT * FROM agent_impersonations WHERE id=%s", (lease_id,))
             ended = cur.fetchone()
             assert ended is not None  # noqa: S101 — locked overhead row exists
-    _wake(lease["agent_id"])
+    _wake(lease["agent_id"], roster_changed=True)
     return public(ended)
 
 

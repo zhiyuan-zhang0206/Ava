@@ -4,6 +4,7 @@
 // pending UI; lifecycle hints and explicit repair read the resulting roster.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "./api";
@@ -13,7 +14,7 @@ import { track } from "./telemetry";
 import { useStore } from "./store";
 import type { AgentRow, AgentRoster } from "./types";
 
-export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting";
+export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring";
 
 export interface AgentActions {
   pendingActions: Record<number, PendingAction>;
@@ -22,6 +23,7 @@ export interface AgentActions {
   spawn: (machine?: string, model?: string, preset?: string, reasoning_effort?: string) => Promise<number | null>;
   fork: (sourceId: number, prompt?: string) => Promise<number | null>;
   terminate: (id: number, force?: boolean) => Promise<void>;
+  forceExpire: (id: number, sessionId: number) => Promise<void>;
   restart: (id: number) => Promise<void>;
   resurrect: (id: number, prompt?: string) => Promise<void>;
   compact: (id: number) => Promise<void>;
@@ -32,6 +34,7 @@ export function useAgentActions(
   agents: readonly AgentRow[],
 ): AgentActions {
   const queryClient = useQueryClient();
+  const t = useTranslations("agentRow");
   const setActiveId = useStore((s) => s.setActiveId);
   // ── Lifecycle mutations — useMutation drives the per-row pending flag.
   // No optimistic writes: lifecycle hints trigger authoritative reads. The
@@ -121,6 +124,17 @@ export function useAgentActions(
     onError: (e: unknown) => showError(`Terminate failed: ${errMsg(e)}`),
   });
 
+  const forceExpireMutation = useMutation({
+    mutationFn: ({ id, sessionId }: { id: number; sessionId: number }) =>
+      api.forceExpireImpersonation(id, sessionId),
+    onSuccess: (result, { id }) => {
+      useStore.getState().showToast(t(result.status === "expired" ? "forceExpireDone" : "forceExpireNotOpen"));
+      void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: [...AGENT_DETAIL_QUERY_KEY, id] });
+    },
+    onError: (e: unknown) => showError(`${t("forceExpireFailed")}: ${errMsg(e)}`),
+  });
+
   const restartMutation = useMutation({
     mutationFn: (id: number) => api.restartAgent(id),
     onSuccess: () => track("restart"),
@@ -158,6 +172,9 @@ export function useAgentActions(
     if (compactMutation.isPending) {
       out[compactMutation.variables] = "compacting";
     }
+    if (forceExpireMutation.isPending) {
+      out[forceExpireMutation.variables.id] = "expiring";
+    }
     return out;
   }, [
     terminateMutation.isPending,
@@ -168,6 +185,8 @@ export function useAgentActions(
     resurrectMutation.variables,
     compactMutation.isPending,
     compactMutation.variables,
+    forceExpireMutation.isPending,
+    forceExpireMutation.variables,
   ]);
 
   // Track ids that have been spawned (mutation returned an id) but whose
@@ -362,6 +381,17 @@ export function useAgentActions(
     [compactMutation],
   );
 
+  const forceExpire = useCallback(
+    async (id: number, sessionId: number) => {
+      try {
+        await forceExpireMutation.mutateAsync({ id, sessionId });
+      } catch {
+        // error already handled in onError callback
+      }
+    },
+    [forceExpireMutation],
+  );
+
   return {
     pendingActions,
     pendingSpawnCount,
@@ -369,6 +399,7 @@ export function useAgentActions(
     spawn,
     fork,
     terminate,
+    forceExpire,
     restart,
     resurrect,
     compact,

@@ -29,4 +29,4 @@ The shared-layer domain map below complements the public
 - [[cluster_lock.ava.okf.md]] — the cluster deploy lease
 - [[host_deploy_state.ava.okf.md]] — per-host deploy posture + updater lease
 - [[watcher_registry.ava.okf.md]] — the `agent_watchers` registry
-- [[impersonation.ava.okf.md]] — cooperative local leases, native consent, external inbox ACKs and handoff
+- [[shared/impersonation/impersonation.ava.okf.md]] — cooperative local leases, native consent, external inbox ACKs and handoff
