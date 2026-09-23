@@ -20,7 +20,7 @@
     "tests/agent": 132,
     "tests/ava": 65,
     "tests/cli": 194,
-    "tests/e2e": 32,
+    "tests/e2e": 31,
     "tests/gateway": 118,
     "tests/ops": 47,
     "tests/scripts": 53,

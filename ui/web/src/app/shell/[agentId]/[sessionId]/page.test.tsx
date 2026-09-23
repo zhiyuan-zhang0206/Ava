@@ -2,7 +2,9 @@
 // mocked GET /api/agents/{id}/shell/{sid}?lines=N response. Tests cover the
 // header (agent/shell ids, session name), the lines input control (default 200,
 // Enter/blur commit, invalid revert), manual refresh button, and terminal output
-// (content / empty / error states).
+// (content / empty / error states). Route params come from next/navigation's
+// useParams (mocked below) — the hook resolves them on the first render, so a
+// warm cache paints the capture in the first commit.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -25,6 +27,17 @@ vi.mock("@/lib/api", () => ({
   api: { getAgentShell },
 }));
 
+// Route params + the history-entry key the scroll memory is keyed by; a test
+// can swap the params to exercise the invalid-params branch.
+const nav = vi.hoisted(() => ({
+  params: { agentId: "5", sessionId: "12" },
+  bfcacheId: "_b_test_",
+}));
+vi.mock("next/navigation", () => ({
+  useParams: () => nav.params,
+  useRouter: () => ({ bfcacheId: nav.bfcacheId }),
+}));
+
 // Terminal theme is a DB-backed user setting; the reactive mock cycles it +
 // re-renders on setSetting (no React Query network for settings).
 vi.mock("@/lib/use-user-settings", () => import("@/test-support/user-settings-mock"));
@@ -41,12 +54,9 @@ function render() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  // In Next.js 16, params is a Promise.  The page unwraps it via
-  // useState+useEffect — no Suspense boundary needed.
-  const params = Promise.resolve({ agentId: "5", sessionId: "12" });
   return rtlRender(
     <QueryClientProvider client={qc}>
-      <ShellMonitorPage params={params} />
+      <ShellMonitorPage />
     </QueryClientProvider>,
   );
 }
@@ -199,7 +209,7 @@ describe("ShellMonitorPage", () => {
 
     rtlRender(
       <QueryClientProvider client={qc}>
-        <ShellMonitorPage params={Promise.resolve({ agentId: "5", sessionId: "12" })} />
+        <ShellMonitorPage />
       </QueryClientProvider>,
     );
 
@@ -335,17 +345,40 @@ describe("ShellMonitorPage terminal theme", () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    // In Next.js 16, params is a Promise.  Passing NaN strings inside
-    // the Promise exercises the same validParams check.
-    const params = Promise.resolve({ agentId: "NaN", sessionId: "NaN" });
+    // Broken links (/shell/NaN/NaN) must render the message instantly, with
+    // the query left disabled.
+    nav.params = { agentId: "NaN", sessionId: "NaN" };
     rtlRender(
       <QueryClientProvider client={qc}>
-        <ShellMonitorPage params={params} />
+        <ShellMonitorPage />
       </QueryClientProvider>,
     );
 
     expect(screen.getByText("Invalid agent or session id")).toBeTruthy();
     // The query should not have been called — enabled=false
     expect(getAgentShell).not.toHaveBeenCalled();
+    nav.params = { agentId: "5", sessionId: "12" };
+  });
+
+  it("paints a warm cache on the first render — no loading frame", () => {
+    // useParams resolves route params synchronously, so a re-entry paints the
+    // cached capture in the first commit (the params-promise unwrap used to
+    // leave the first commit — and the whole SSR output — on the
+    // invalid-params branch, then 'Loading…').
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    qc.setQueryData(["agent-shell", 5, 12, 200], shellData({ lines: ["warm output"] }));
+    getAgentShell.mockResolvedValue(shellData({ lines: ["warm output"] }));
+
+    rtlRender(
+      <QueryClientProvider client={qc}>
+        <ShellMonitorPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText("Loading…")).toBeNull();
+    expect(screen.queryByText("Invalid agent or session id")).toBeNull();
+    expect(screen.getByText(/warm output/)).toBeTruthy();
   });
 });
