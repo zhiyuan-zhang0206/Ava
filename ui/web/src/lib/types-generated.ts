@@ -3801,6 +3801,11 @@ export interface components {
             created_at: string;
         };
         /**
+         * AdmissionOutcome
+         * @enum {string}
+         */
+        AdmissionOutcome: "admitted" | "maintenance_hold" | "publication_deferred" | "resource_fence" | "admission_guard_refused";
+        /**
          * AgentActivity
          * @description Active-rate: the share of an agent's alive wall-clock it spent actively
          *     working versus idle-waiting for its next input. The complement
@@ -3836,6 +3841,21 @@ export interface components {
             llm_seconds: number | null;
             /** Exec Seconds */
             exec_seconds: number;
+        };
+        /**
+         * AgentAvailability
+         * @description A time-bounded observation, never proof of first-message completion.
+         */
+        AgentAvailability: {
+            reason: components["schemas"]["AvailabilityReason"];
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Evidence At */
+            evidence_at?: string | null;
+            admission_outcome?: components["schemas"]["AdmissionOutcome"] | null;
         };
         /**
          * AgentCard
@@ -3879,6 +3899,7 @@ export interface components {
              * @enum {string}
              */
             liveness_state: "online" | "offline" | "unknown";
+            availability?: components["schemas"]["AgentAvailability"] | null;
             observation: components["schemas"]["AgentObservation"];
             /** Awaiting Response Count */
             awaiting_response_count: number;
@@ -4279,6 +4300,7 @@ export interface components {
             liveness_state: "online" | "offline" | "unknown";
             /** Last Probe At */
             last_probe_at: string | null;
+            availability?: components["schemas"]["AgentAvailability"] | null;
             observation?: components["schemas"]["AgentObservation"] | null;
             /** Notices Awaiting Response */
             notices_awaiting_response: components["schemas"]["OpenNotice"][];
@@ -4498,6 +4520,11 @@ export interface components {
             alerts: components["schemas"]["AlertRow"][];
             meta: components["schemas"]["AlertsListMeta"];
         };
+        /**
+         * AvailabilityReason
+         * @enum {string}
+         */
+        AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admission_refused" | "admitted";
         /**
          * BillingBalanceReport
          * @description Provider balance probe result carried on every billing-recovery response.
@@ -7850,12 +7877,22 @@ export interface components {
         };
         /**
          * SpawnedAgent
-         * @description POST /api/agents response — new agent_id (== agent_id).
+         * @description Creation receipt; execution_observed never asserts a completed turn.
+         *
+         *     Runner RPCs carry only `id`. The gateway adds the optional observation
+         *     fields after the launch request is accepted, preserving older ID consumers.
          */
         SpawnedAgent: {
             /** Id */
             id: number;
             config_normalized?: components["schemas"]["ConfigNormalization"] | null;
+            /** Accepted */
+            accepted?: boolean | null;
+            /** Execution Observed */
+            execution_observed?: boolean | null;
+            reason?: components["schemas"]["AvailabilityReason"] | null;
+            /** Observed At */
+            observed_at?: string | null;
         };
         /**
          * SseDropBucket

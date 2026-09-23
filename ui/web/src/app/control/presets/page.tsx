@@ -85,7 +85,7 @@ export default function PresetsPage() {
     onSuccess: (res) => {
       setNl("");
       setActiveId(res.id);
-      showToast(t("writerStarted", { id: res.id }));
+      showToast(t("writerCreated", { id: res.id }));
       router.push("/");
     },
     onError: (e: unknown) => showToast(t("draftFailed", { error: errMsg(e) })),

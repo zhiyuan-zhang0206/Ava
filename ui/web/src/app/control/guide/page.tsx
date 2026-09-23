@@ -34,7 +34,7 @@ export default function GuidePage() {
     onSuccess: (res) => {
       setNl("");
       setActiveId(res.agent_id);
-      showToast(t("started", { id: res.agent_id }));
+      showToast(t("created", { id: res.agent_id }));
       router.push("/");
     },
     onError: (err: unknown) => showToast(t("failed", { error: errMsg(err) })),

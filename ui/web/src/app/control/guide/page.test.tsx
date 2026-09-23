@@ -55,7 +55,7 @@ describe("GuidePage", () => {
 
     await waitFor(() => expect(draftGuide).toHaveBeenCalledWith("install the linear MCP server"));
     await waitFor(() => expect(setActiveId).toHaveBeenCalledWith(42));
-    expect(showToast).toHaveBeenCalledWith("Ava Guide #42 started — continue in the conversation");
+    expect(showToast).toHaveBeenCalledWith("Ava Guide #42 created — check its conversation for progress");
     expect(push).toHaveBeenCalledWith("/");
     expect((screen.getByPlaceholderText(/Describe an operations task/) as HTMLInputElement).value).toBe("");
   });

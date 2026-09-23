@@ -134,6 +134,34 @@ class FakeProbe:
 
 
 class TestLivenessPass:
+    def test_host_verdict_is_retained_and_cleared_on_probe_failure(
+        self, db_conn: psycopg.Connection, pool: ConnectionPool
+    ) -> None:
+        _register_machine(db_conn)
+
+        async def host_down(_target_machine: str = "", **_kwargs: object) -> dict[str, object]:
+            return {
+                "machine_name": _MACHINE,
+                "serve_gateway": False,
+                "serve_agent_runner": True,
+                "paused": False,
+                "agent_host_online": False,
+            }
+
+        import asyncio
+
+        asyncio.run(run_liveness_pass(pool, probe=host_down))
+        row = db_conn.execute(
+            "SELECT online,agent_host_online FROM machine_probe WHERE machine_name=%s", (_MACHINE,)
+        ).fetchone()
+        assert row == (True, False)
+
+        asyncio.run(run_liveness_pass(pool, probe=FakeProbe({_MACHINE: False})))
+        row = db_conn.execute(
+            "SELECT online,agent_host_online FROM machine_probe WHERE machine_name=%s", (_MACHINE,)
+        ).fetchone()
+        assert row == (False, None)
+
     def test_missing_probe_never_fabricates_online_or_observation_time(
         self, db_conn: psycopg.Connection, pool: ConnectionPool
     ) -> None:

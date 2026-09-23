@@ -29,6 +29,12 @@ AGENT: dict[str, object] = {
         "runtime_lease_expires_at": None,
         "runtime_owner": "unknown",
     },
+    "availability": {
+        "reason": "unknown",
+        "observed_at": "2026-09-01T00:00:00Z",
+        "evidence_at": None,
+        "admission_outcome": None,
+    },
 }
 AGENT_CARD: dict[str, object] = {
     **{

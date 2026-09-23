@@ -6841,6 +6841,17 @@
         "title": "ActivityEntry",
         "description": "One entry of an agent's self-reported activity trail (migration 0042).\n\nHistorical only: the SDK write verb (`ava.self.log`) was removed\n2026-08-02, so no new rows appear; this backs the frozen\nGET /api/agents/{id}/activity endpoint."
       },
+      "AdmissionOutcome": {
+        "type": "string",
+        "enum": [
+          "admitted",
+          "maintenance_hold",
+          "publication_deferred",
+          "resource_fence",
+          "admission_guard_refused"
+        ],
+        "title": "AdmissionOutcome"
+      },
       "AgentActivity": {
         "properties": {
           "active_seconds": {
@@ -6887,6 +6898,47 @@
         ],
         "title": "AgentActivity",
         "description": "Active-rate: the share of an agent's alive wall-clock it spent actively\nworking versus idle-waiting for its next input. The complement\n(`1 - active_rate`) is how much of its life the agent sat blocked on a\nhuman/peer message — the metric's reason for being: surface how much an\nagent is gated on people. A project-lead agent that decides/approves every\nminute reads near 100%; one woken once a week reads near 0%; a worker that\nruns flat-out then terminates reads ~100%.\n\n`active_seconds` = Σ `duration_seconds` of every non-`claim` graph\n`node_exit` in the window — llm generation + execute_code + before/after\nhooks, i.e. all real processing. `llm_seconds` = Σ `duration_seconds` of\nevery `turn_end` event within the window — the model's generation wall-clock\n(reasoning + output). `exec_seconds` = Σ `duration_seconds` of every\n`node_exit` for the `exec` node — the code execution wall-clock. The `claim`\nnode is excluded because its wall-clock IS the idle-wait (it parks the agent\nin the inbound wait between turns), so it falls into the blocked remainder.\n`alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate\nintervals, open tail to now), clipped to the same window — the same lifecycle\nbasis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped\nat 1.0 (a node that began before the window's leading edge counts in full, so\nraw active can momentarily exceed windowed alive); 0.0 when alive is 0. All\nfields follow the request's `?hours=` window."
+      },
+      "AgentAvailability": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/AvailabilityReason"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          },
+          "evidence_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence At"
+          },
+          "admission_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdmissionOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "observed_at"
+        ],
+        "title": "AgentAvailability",
+        "description": "A time-bounded observation, never proof of first-message completion."
       },
       "AgentCard": {
         "properties": {
@@ -6977,6 +7029,16 @@
               "unknown"
             ],
             "title": "Liveness State"
+          },
+          "availability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentAvailability"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "observation": {
             "$ref": "#/components/schemas/AgentObservation"
@@ -7920,6 +7982,16 @@
             ],
             "title": "Last Probe At"
           },
+          "availability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentAvailability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "observation": {
             "anyOf": [
               {
@@ -8390,6 +8462,17 @@
         ],
         "title": "AlertsListResponse",
         "description": "Unresolved-first alert history + the count the UI badge shows."
+      },
+      "AvailabilityReason": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "host_unavailable",
+          "awaiting_admission",
+          "admission_refused",
+          "admitted"
+        ],
+        "title": "AvailabilityReason"
       },
       "BillingBalanceReport": {
         "properties": {
@@ -15359,6 +15442,50 @@
                 "type": "null"
               }
             ]
+          },
+          "accepted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted"
+          },
+          "execution_observed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Observed"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
           }
         },
         "type": "object",
@@ -15366,7 +15493,7 @@
           "id"
         ],
         "title": "SpawnedAgent",
-        "description": "POST /api/agents response — new agent_id (== agent_id)."
+        "description": "Creation receipt; execution_observed never asserts a completed turn.\n\nRunner RPCs carry only `id`. The gateway adds the optional observation\nfields after the launch request is accepted, preserving older ID consumers."
       },
       "SseDropBucket": {
         "properties": {
