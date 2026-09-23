@@ -7,7 +7,7 @@ vs observation (report, proceed) — plus the two caller-shaped knobs: the
 `.venv` entry-point checks (`check_launcher` toggles the one only an update leg
 needs). The caller-level refusal contracts live in
 `test_update_agent_runner_preflight.py` (update leg) and
-`test_commands.py::test_cmd_restart_aborts_when_start_readiness_fails`.
+`test_commands_restart_stop.py::test_cmd_restart_aborts_when_start_readiness_fails`.
 """
 
 from __future__ import annotations

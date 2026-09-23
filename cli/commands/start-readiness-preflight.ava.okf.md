@@ -53,7 +53,7 @@ are — this gate narrows the window, it does not replace them.
 Tests: `tests/cli/test_start_readiness_preflight.py` pins each check family's
 disposition and the `check_launcher` toggle; the caller-level refusal contracts
 live in `tests/cli/test_update_agent_runner_preflight.py` (update leg) and
-`tests/cli/test_commands.py::test_cmd_restart_aborts_when_start_readiness_fails`.
+`tests/cli/test_commands_restart_stop.py::test_cmd_restart_aborts_when_start_readiness_fails`.
 
 ## Key Dependencies
 
