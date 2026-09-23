@@ -10,14 +10,22 @@
 // button toggles system → light → dark → system. The choice is a DB-backed user
 // setting (display.shell_terminal_theme) so it survives refreshes and syncs
 // across frontends.
+//
+// Back/forward: the reader's scroll position is remembered per history entry
+// (lib/scroll-memory.ts), so a browser back/forward returns to it instead of
+// snapping back to the tail, and the cached capture renders from the first
+// commit (useParams — the params prop is a promise, and unwrapping it via
+// state left the first commit on the invalid-params branch).
 
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Monitor, Moon, RefreshCw, Sun } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api";
 import { useDisplayLimit } from "@/lib/display-limits";
+import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/scroll-memory";
 import { useNow } from "@/lib/use-now";
 import { useUserSettings } from "@/lib/use-user-settings";
 import { formatShort, formatUptime } from "@/lib/time";
@@ -69,25 +77,19 @@ function useResolvedTheme(theme: TerminalTheme): "light" | "dark" {
   return systemDark ? "dark" : "light";
 }
 
-export default function ShellMonitorPage({
-  params,
-}: {
-  params: Promise<{ agentId: string; sessionId: string }>;
-}) {
-  // Next.js 16 passes params as a Promise.  Unwrap it with useState+useEffect
-  // (not use(), to avoid Suspense — the page stays self-contained).
-  const [resolved, setResolved] = useState<{ agentId: string; sessionId: string } | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    params
-      .then((p) => { if (!cancelled) setResolved(p); })
-      .catch(() => undefined); // Promise rejection is harmless — page stays on "invalid params"
-    return () => { cancelled = true; };
-  }, [params]);
-
-  const agentId = resolved ? Number(resolved.agentId) : Number.NaN;
-  const sessionId = resolved ? Number(resolved.sessionId) : Number.NaN;
-  const validParams = resolved !== null && Number.isFinite(agentId) && Number.isFinite(sessionId);
+export default function ShellMonitorPage() {
+  // Route params via useParams (a client hook — no Suspend): they are
+  // available on the FIRST render, so the query enables immediately and the
+  // cached capture paints in the first commit. Reading them off the params
+  // prop instead (a promise) needs a state+effect unwrap, which left the
+  // first commit (and the whole SSR output) on the invalid-params branch —
+  // the "full page reload" flash on entry. Number() keeps the NaN guard for
+  // broken links (/shell/NaN/NaN).
+  const params = useParams<{ agentId: string; sessionId: string }>();
+  const { bfcacheId } = useRouter();
+  const agentId = Number(params.agentId);
+  const sessionId = Number(params.sessionId);
+  const validParams = Number.isFinite(agentId) && Number.isFinite(sessionId);
 
   const configuredDefaultLines = useDisplayLimit(
     "AVA_SHELL_CAPTURE_DEFAULT_LINES",
@@ -113,12 +115,11 @@ export default function ShellMonitorPage({
     queryFn: () => api.getAgentShell(agentId, sessionId, lines),
     refetchInterval: POLL_MS,
     retry: false,
-    // Fetch on every entry, not just cold. staleTime 0 (not refetchOnMount:
-    // "always", which is evaluated at the disabled first mount and defeated by
-    // the params-gated `enabled` transition) keeps the capture always-stale, so
-    // the moment params resolve and the query enables it pulls fresh — the global
-    // 5min staleTime would otherwise show a cached capture until the next 3s poll.
-    // Cached output stays on screen while the refetch runs (no blank flash).
+    // Fetch on every entry, not just cold: the entry paints its cached
+    // capture immediately, and staleTime 0 keeps it always-stale so the query
+    // refetches it in the background on mount — the global 5min staleTime
+    // would otherwise leave a cached capture until the next 3s poll. The
+    // cached output stays on screen while the refetch runs (no blank flash).
     staleTime: 0,
     // Don't fire the query for NaN params (e.g. /shell/NaN/NaN from a
     // broken link) — show the invalid-params message instantly.
@@ -146,11 +147,45 @@ export default function ShellMonitorPage({
   // away on the next 3s poll.
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  // The position saved under this history entry, read once at mount and held
+  // until the restore effect lands it (see the effect below).
+  const pendingRestoreRef = useRef<SavedScroll | null>(
+    bfcacheId ? readScrollMemory(bfcacheId) : null,
+  );
+
+  // Back/forward restore: land the saved reading position. Runs on every
+  // commit while a restore is pending — the first commit of a re-entry can
+  // precede the cached capture's layout, and the position must arrive in the
+  // commit that can hold it (layout effects run before paint, so the reader
+  // never sees the tail first). stickRef follows the saved state: a follower
+  // returns following, a reader returns where they were.
+  useLayoutEffect(() => {
+    const saved = pendingRestoreRef.current;
+    if (!saved) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    if (saved.contentKey !== `${agentId}:${sessionId}`) {
+      pendingRestoreRef.current = null; // other content now — position is stale
+      return;
+    }
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 0) return; // no capture rendered yet — retry on the next commit
+    el.scrollTop = Math.min(saved.scrollTop, max);
+    stickRef.current = saved.followBottom;
+    pendingRestoreRef.current = null;
+  });
 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (bfcacheId && validParams) {
+      saveScrollMemory(bfcacheId, {
+        contentKey: `${agentId}:${sessionId}`,
+        scrollTop: el.scrollTop,
+        followBottom: stickRef.current,
+      });
+    }
   };
 
   useEffect(() => {
@@ -279,6 +314,7 @@ export default function ShellMonitorPage({
       <div
         ref={scrollRef}
         onScroll={onScroll}
+        data-testid="shell-pane"
         className={`min-h-0 flex-1 overflow-auto px-3 py-2 sm:px-4 ${terminalBg}`}
       >
         {!validParams ? (

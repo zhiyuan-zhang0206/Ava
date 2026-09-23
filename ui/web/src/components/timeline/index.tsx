@@ -93,6 +93,7 @@ import {
   isAtBottom,
 } from "@/lib/sticky";
 import type { BackendTimelineItem } from "@/lib/types";
+import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline-store";
 import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -111,6 +112,10 @@ interface Props {
   /** Identity of the timeline thread / active agent. A change means a new
    *  conversation is displayed, so all per-item and per-turn pins are dropped. */
   threadKey?: string;
+  /** History-entry memory key (router.bfcacheId) for the reader's scroll
+   *  position: a back/forward re-entry of a kept history entry restores it
+   *  instead of re-pinning to the bottom (see lib/scroll-memory.ts). */
+  scrollMemoryKey?: string;
   // Streaming-code flag: pass true when the last item is an agent_code
   // that is still streaming, so PythonCode shows a cursor
   streamingCode?: boolean;
@@ -212,6 +217,7 @@ function groupTimelineSegments(items: readonly BackendTimelineItem[]): RenderGro
 export function TimelineView({
   items,
   threadKey,
+  scrollMemoryKey,
   streamingCode = false,
   turnActive = false,
   onFork,
@@ -250,6 +256,16 @@ export function TimelineView({
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // Back/forward scroll restoration (lib/scroll-memory.ts): the position
+  // saved under this history entry, read once at mount and held until the
+  // restore effect lands it -- or a user-commanded force-scroll supersedes
+  // it. Nothing renders from it, so it lives in a ref.
+  const pendingRestoreRef = useRef<SavedScroll | null>(
+    scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null,
+  );
+  // Memory identity for the scroll handler (registered once with empty deps,
+  // so it reads the latest props through a ref).
+  const scrollMemoryRef = useRef<{ entryKey: string; contentKey: string } | null>(null);
   // Live mirrors for the scroll handler (registered once with empty deps, so
   // it must read the latest load-older props through refs, not a stale
   // closure). Synced in an effect — refs must not be written during render.
@@ -262,6 +278,10 @@ export function TimelineView({
     hasMoreOlderRef.current = hasMoreOlder;
     loadingOlderRef.current = loadingOlder;
     itemsRef.current = items;
+    scrollMemoryRef.current =
+      scrollMemoryKey && threadKey !== undefined
+        ? { entryKey: scrollMemoryKey, contentKey: threadKey }
+        : null;
   });
   // Pending anchor for scroll-position preservation on prepend. Captured at
   // the moment a load-older fetch is triggered (the topmost node the prepend
@@ -458,6 +478,35 @@ export function TimelineView({
     prevLoadingOlderRef.current = loadingOlder;
   }, [loadingOlder, captureAnchor]);
 
+  // Back/forward restore: land the saved reading position (see
+  // lib/scroll-memory.ts). Retried on every commit and in the ResizeObserver
+  // pass — the first commit of a re-entry can precede the cached items'
+  // measurable layout, and the position must land in whichever pass first can
+  // hold it, always before paint. notifyRestored fixes the sticky flag to the
+  // restored spot: a mid-timeline restore stops following, an at-bottom
+  // restore keeps following.
+  const applyPendingRestore = useCallback(
+    (viewport: HTMLElement | null) => {
+      const saved = pendingRestoreRef.current;
+      if (!saved || !viewport) return;
+      if (threadKey === undefined) return; // conversation not identified yet
+      if (saved.contentKey !== threadKey) {
+        pendingRestoreRef.current = null; // other content now -- position is stale
+        return;
+      }
+      const max = viewport.scrollHeight - viewport.clientHeight;
+      if (max <= 0) return; // content not laid out yet -- retried on the next pass
+      viewport.scrollTop = Math.min(saved.scrollTop, max);
+      controller.notifyRestored({
+        scrollTop: viewport.scrollTop,
+        scrollHeight: viewport.scrollHeight,
+        clientHeight: viewport.clientHeight,
+      });
+      pendingRestoreRef.current = null;
+    },
+    [controller, threadKey],
+  );
+
   useEffect(() => {
     const viewport = wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
     if (!viewport) return;
@@ -475,6 +524,17 @@ export function TimelineView({
       controller.handleScroll(snapshot());
       measureAtBottom();
       maybeLoadOlderAtTop();
+      const mem = scrollMemoryRef.current;
+      if (mem) {
+        // The reader's position for this history entry; the sticky flag rides
+        // along so a follower returns following instead of frozen at a stale
+        // offset.
+        saveScrollMemory(mem.entryKey, {
+          contentKey: mem.contentKey,
+          scrollTop: viewport.scrollTop,
+          followBottom: controller.isSticky(),
+        });
+      }
       stuckRafRef.current ??= requestAnimationFrame(() => {
         stuckRafRef.current = null;
         updateStuckHeader();
@@ -509,6 +569,11 @@ export function TimelineView({
 
     // ResizeObserver callbacks run after layout and before paint.
     const ro = new ResizeObserver(() => {
+      // The first measurable layout can arrive with no commit of its own
+      // (the mount's commit can render a zero-height surface); land a pending
+      // restore here, before handleLayoutChange can pin, so the reader never
+      // sees the bottom first.
+      applyPendingRestore(viewport);
       if (controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
       measureAtBottom();
       maybeLoadOlderAtTop();
@@ -524,7 +589,7 @@ export function TimelineView({
       viewport.removeEventListener("touchcancel", onTouchEnd);
       ro.disconnect();
     };
-  }, [controller, measureAtBottom, maybeLoadOlderAtTop, pinToBottom, updateStuckHeader]);
+  }, [applyPendingRestore, controller, measureAtBottom, maybeLoadOlderAtTop, pinToBottom, updateStuckHeader]);
 
   // The SINGLE force-scroll trigger. The store bumps scrollToBottomRequest on
   // exactly the two moments a scroll-to-bottom is unconditional — agent switch
@@ -552,9 +617,18 @@ export function TimelineView({
   const scrollToBottomRequest = useTimelineStore((s) => s.scrollToBottomRequest);
   useLayoutEffect(() => {
     pendingAnchorRef.current = null;
+    // A kept history entry's pending restore owns the position while it lasts
+    // (the effect right below lands it). This expects the mount's own switch
+    // bump — switchThread bumps on every mount, and that bump's pin run lands
+    // one commit after the restore's first look — so every request in the
+    // window is treated as part of entering the page. The window closes with
+    // the first commit whose content is measurable (the restore clears the
+    // flag), long before a user command can arrive; a restore abandoned on a
+    // content mismatch leaves sticky at its mount value, so growth still
+    // follows.
+    if (pendingRestoreRef.current) return;
     // We are about to force the viewport to the bottom, so hide the button
     // immediately rather than waiting for the post-scroll measurement.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-shot sync on force-scroll
     setAtBottom(true);
     const viewport =
       viewportRef.current ??
@@ -568,6 +642,14 @@ export function TimelineView({
     // streams in (user report 2026-09-19).
     pinToBottom(viewport, true);
   }, [scrollToBottomRequest, pinToBottom]);
+
+  useLayoutEffect(() => {
+    applyPendingRestore(
+      viewportRef.current ??
+        wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
+        null,
+    );
+  });
 
   // Streamed-growth auto-scroll lives in the ResizeObserver above — any
   // change to the content height (items commit, throttled parse flush,
