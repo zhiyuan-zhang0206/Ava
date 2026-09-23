@@ -257,6 +257,23 @@ def test_watch_work_baselines_actionable_status_until_its_mtime_changes(
     assert "STATUS: DONE" in fake.sent[0][1][1]
 
 
+def test_watch_work_heartbeats_an_unchanged_baselined_actionable_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A stale actionable status wakes once through the heartbeat branch."""
+    fake = _wire(monkeypatch, watch_work)
+    monkeypatch.setattr(watch_work, "HEARTBEAT_SECONDS", 0)
+    times = iter((0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0))
+    monkeypatch.setattr(watch_work.time, "monotonic", lambda: next(times))
+    work = tmp_path / "work.md"
+    work.write_text("STATUS: DONE\n")
+
+    watch_work.watch(str(work))
+
+    assert fake.calls == 1
+    assert "unchanged since arming" in fake.sent[0][1][1]
+
+
 def test_watch_work_terminal_wake_exits_2_on_exhaustion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
