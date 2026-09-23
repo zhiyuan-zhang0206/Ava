@@ -19,6 +19,7 @@ from shared import db, db_connections
 from shared.config import settings
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.redis_listener import RedisInboundListener
+from shared.telemetry import Event
 
 
 def test_connect_refuses_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,8 +74,8 @@ def test_insert_restart_completed_inbound_traces_newest_restart(
     """The completion marker retains the restart envelope the claim will render."""
     agent_id = _seed_agent(db_conn, "restarting")
     payload = {"config_overlay": {"model": "gpt-5"}}
-    post_commit_events = []
-    emitted = []
+    post_commit_events: list[Event] = []
+    emitted: list[Event] = []
     monkeypatch.setattr(db, "_emit_prepared_event", emitted.append)
     with db_conn.cursor() as cur:
         cur.execute(

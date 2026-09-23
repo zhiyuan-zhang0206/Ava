@@ -96,13 +96,16 @@ def attached_runtime(
     monkeypatch.setattr(external.control, "require_active", require)
     monkeypatch.setattr(external.control, "merge_plugin_delta", stage)
     monkeypatch.setattr(external, "process_metadata", lambda: {"pid": 777})
+
     # This suite models the pre-manifest lease boundary with a symbolic lease
     # id. The receipt seam is integration-tested against real UUID leases;
     # keeping it outside this state-machine fixture avoids an accidental DB
     # dial that the fixture cannot represent.
+    def no_local_participant(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
     monkeypatch.setattr(
-        "shared.agents.impersonation_manifest.open_local_participant",
-        lambda *_args, **_kwargs: False,
+        "shared.agents.impersonation_manifest.open_local_participant", no_local_participant
     )
     return lease, snapshot, staged
 

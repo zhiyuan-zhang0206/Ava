@@ -9978,6 +9978,10 @@
             "type": "integer",
             "title": "Id"
           },
+          "line_sha256": {
+            "type": "string",
+            "title": "Line Sha256"
+          },
           "ts": {
             "type": "string",
             "format": "date-time",
@@ -10070,6 +10074,7 @@
         "type": "object",
         "required": [
           "id",
+          "line_sha256",
           "ts",
           "trace_id",
           "span_id",
