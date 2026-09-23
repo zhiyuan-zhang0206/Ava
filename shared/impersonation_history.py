@@ -280,10 +280,28 @@ def _sdk_statistics(sdk: list[dict[str, Any]]) -> dict[str, Any]:
     calls = Counter(item["fn"] for item in attributes)
     return {
         "sdk_calls": dict(sorted(calls.items())),
-        "sdk_event_count": len(sdk),
         "sdk_statistics_basis": "consumed_events",
         "sdk_sampled": any(item.get("sample_rate", 1) != 1 for item in attributes),
         "sdk_duration_seconds": sum(item["duration"] for item in attributes),
+    }
+
+
+def _event_delivery_statistics(
+    lease: dict[str, Any], sdk: list[dict[str, Any]], api: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Describe whether observed handoff events are a complete session census.
+
+    Only `complete_delivery()` accepts the upstream manifest that can certify
+    coverage. Before that receipt, zero consumed events is an unknown result,
+    never evidence that the external controller made no calls.
+    """
+    complete = lease["events_completed_at"] is not None
+    coverage = "complete" if complete else "unknown"
+    return {
+        "state": "complete" if complete else "pending",
+        "completion_basis": "upstream_manifest" if complete else None,
+        "sdk_calls": {"coverage": coverage, "consumed_event_count": len(sdk)},
+        "api_events": {"coverage": coverage, "consumed_event_count": len(api)},
     }
 
 
@@ -295,7 +313,7 @@ def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[st
     directions = Counter(row["payload"]["direction"] for row in messages)
     started, ended = lease["activated_at"] or lease["created_at"], lease["ended_at"]
     return {
-        "version": 1,
+        "version": 2,
         "session": public_session(lease),
         "messages": messages,
         "lifecycle": [row for row in rows if row["kind"] == "lifecycle"],
@@ -305,7 +323,7 @@ def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[st
             **_sdk_statistics(sdk),
             **_api_statistics(api, lease["agent_id"]),
             "duration_seconds": (ended - started).total_seconds() if ended is not None else None,
-            "event_delivery": "complete" if lease["events_completed_at"] is not None else "pending",
+            "event_delivery": _event_delivery_statistics(lease, sdk, api),
             "incoming_messages": directions["in"],
             "outgoing_messages": directions["out"],
         },

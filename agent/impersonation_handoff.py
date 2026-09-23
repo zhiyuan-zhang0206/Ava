@@ -148,7 +148,10 @@ async def deliver_handoff(
             f"If you need more detail than the summary, the complete structured "
             f"record of this session is available at: {path}\n"
             "It retains all messages, including ACKed messages, and the consumed API/SDK events. "
-            "Event accounting may remain pending while upstream delivery catches up. "
+            "Read event_delivery before interpreting counts: while its state is pending, "
+            "consumed_event_count is not final and zero means no events have been consumed yet, "
+            "not that no SDK calls occurred. Only event_delivery.state=complete, certified by "
+            "the upstream manifest, makes those counts final. "
             "Incoming messages marked unacknowledged still need your attention. "
             "Your execution resumes with this note.",
             tag=NoteTag.IMPERSONATION,
