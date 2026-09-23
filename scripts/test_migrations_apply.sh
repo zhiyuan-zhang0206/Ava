@@ -102,6 +102,11 @@ INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
     VALUES (991005, 'idling', 'smoke-machine',
             '00000000-0000-0000-0000-000000000003',
             '00000000-0000-0000-0000-000000000004');
+INSERT INTO agents (id, label) VALUES (991006, 'manifest-owner-smoke');
+INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
+    VALUES (991006, 'idling', 'smoke-machine',
+            '00000000-0000-0000-0000-000000000003',
+            '00000000-0000-0000-0000-000000000004');
 INSERT INTO agent_impersonations (
     id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
     accepted_generation, accepted_owner, automatic
@@ -148,7 +153,7 @@ INSERT INTO agent_impersonations (
     id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
     accepted_generation, accepted_owner, automatic, event_delivery_protocol_version, activated_at
 ) VALUES (
-    '00000000-0000-0000-0000-000000000006', 991005, 'external_agent:manifest-smoke',
+    '00000000-0000-0000-0000-000000000006', 991006, 'external_agent:manifest-smoke',
     'smoke-machine', 'manifest-smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
     '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 1,
     clock_timestamp()
