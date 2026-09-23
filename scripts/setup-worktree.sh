@@ -6,13 +6,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "→ pre-commit hooks …"
+echo "→ shared git hook installation check …"
 cd "$REPO_ROOT"
-# pre-commit refuses to install if core.hooksPath is configured at all,
-# even when it points to the default .git/hooks. Unset it so the install
-# can proceed — the default path is correct.
-git config --local --unset core.hookspath 2>/dev/null || true
-.venv/bin/pre-commit install --install-hooks
+# Installation belongs to the main clone's stable venv: all worktrees share
+# hooks, and pre-commit stores the installing interpreter in INSTALL_PYTHON.
+python3 "$SCRIPT_DIR/provision/check_git_hooks.py"
 
 echo "→ editable venv guard …"
 python3 "$SCRIPT_DIR/guard_editable_venv.py" "$REPO_ROOT"

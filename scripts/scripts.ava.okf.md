@@ -12,7 +12,7 @@ tags:
 
 ## What is it
 
-`scripts/` houses Ava's engineering and ops scripts — both Python (`.py`) and Shell (`.sh`), invoked by developers, pre-commit / pre-push hooks, CI pipelines, and the `ava` CLI internally. They do not participate in agent runtime; they are infrastructure around the repo for building, validating, installing, and releasing.
+`scripts/` contains Python and shell engineering tools invoked by developers, git hooks, CI, and the CLI for installation, validation, and release.
 
 ## Script Categories
 
@@ -44,7 +44,8 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `test_selector.py` — stdlib-only, read-only PR selector that reverse-maps
   static direct test imports, preserves conservative full-suite escapes, and
   emits the shadow-run JSON consumed by `ci.yml`
-- `release_cut.py`, `pre-push-check.sh`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`, `test_uv_sync_write_window.sh`
+- `prepush-guard.sh` — host-wide flock/load guard for pyright, tsc and eslint; loud skips, real failures propagate. `provision/check_git_hooks.py` warns on missing hooks or interpreter drift.
+- `release_cut.py`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`, `test_uv_sync_write_window.sh`
 - `post_deploy_visual_check.py` — read-only five-surface production visual gate: a gateway `started_at` change distinguishes deployment waves from daily sentinels, the repo-pinned Playwright Chromium (headless, host-local) captures desktop/narrow light/dark combinations after an explicit settle predicate, shared structural probes fail P0, and stable two-frame pixel drift on static crops is attributed to the golden-to-wave frontend diff. It writes artifacts and exit codes only; the invoking agent owns notifications. Golden updates require an audited `--accept-wave`. Its engine-agnostic capture
 matrix lives in `post_deploy_visual_matrix.py`, shared with the blocking CI
 preview gate (`tests/e2e/test_preview_visual_gate.py`); combinations that
@@ -71,5 +72,5 @@ immediately.
 
 ## Notes
 
-- pre-commit runs lint scripts + ruff / ruff-format, pyright, frontend tsc / eslint / **full vitest**; heavy tasks pytest / migration smoke are left to CI
+- pre-commit runs lints / codegen / vitest; pre-push runs pyright / tsc / eslint. Full pytest / migration smoke stay in CI; local tests are targeted.
 - `start_agent.py` derives an agent via gateway `/api/agents`, respecting the ordering constraint "start gateway before agent"; `start_gateway.py` directly starts the gateway body (not agent derivation)
