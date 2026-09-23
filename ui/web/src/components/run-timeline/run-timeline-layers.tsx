@@ -8,6 +8,7 @@
 
 import type { FocusEvent, PointerEvent } from "react";
 
+import { FLEX } from "@/lib/layout";
 import type { RunTimelineResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -243,16 +244,20 @@ export function RawSummaryBand({
   onToggle: () => void;
 }) {
   return (
-    <div data-testid="raw-summary" className="rounded-[10px] border border-border bg-muted px-3 py-2">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{labels.layerSummary}</p>
-      <p className={cn("mt-1 text-xs leading-5", !open && "line-clamp-2")}>{summary.text}</p>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="mt-1 text-[10px] text-muted-foreground hover:text-foreground"
-      >
-        {open ? labels.showLess : labels.showMore}
-      </button>
+    <div data-testid="raw-summary" className="rounded-[10px] border border-border bg-muted px-3 py-1">
+      <div className={cn(FLEX, "items-center justify-between gap-2 text-[10px] leading-3 text-muted-foreground")}>
+        <p className="font-medium uppercase tracking-wide">{labels.layerSummary}</p>
+        <button
+          type="button"
+          onClick={onToggle}
+          data-testid="raw-summary-toggle"
+          aria-expanded={open}
+          className="shrink-0 hover:text-foreground"
+        >
+          {open ? labels.showLess : labels.showMore}
+        </button>
+      </div>
+      <p className={cn("mt-1 break-words text-xs leading-4", !open && "max-h-12 overflow-hidden line-clamp-3")}>{summary.text}</p>
     </div>
   );
 }
