@@ -43,7 +43,6 @@ from shared.daemon_shutdown import install_graceful_shutdown
 from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.machine import machine_name, reachable_host
-from shared.paths import legacy_pid_path
 from shared.session_backend import PtySessionBackend, SessionBackend, get_shell_backend
 from shared.session_record import SessionRecord
 
@@ -93,10 +92,8 @@ def _remove_pidfile() -> None:
 
 
 def _is_running() -> bool:
-    """Whether a daemon is already running (via pidfile, new + legacy paths)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.page_server.daemon") or pidfile_holds_daemon(
-        legacy_pid_path("page_server"), "services.page_server.daemon"
-    )
+    """Whether a daemon is already running (via its pidfile)."""
+    return pidfile_holds_daemon(_PIDFILE, "services.page_server.daemon")
 
 
 def _open_rows(pool: ConnectionPool, host: str) -> list[_PageRow]:

@@ -82,7 +82,7 @@ from shared.daemon_http import RouteHandler as RouteHandler
 from shared.daemon_http import start_daemon_http
 from shared.env_registry import health_port_env_aliases
 from shared.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
-from shared.paths import ava_home, legacy_pid_path
+from shared.paths import ava_home
 from shared.port_block import LEGACY_AVA_PORTS
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.
@@ -436,20 +436,12 @@ class DaemonProbe:
 _PROBE_TIMEOUT_S = 5.0
 
 
-def _recorded_pid(pidfile: Path, name: str) -> int | None:
-    """This unit's recorded pid for daemon ``name``, or None when no readable
-    pidfile exists.
-
-    Checks the configured path first, then the legacy ``$AVA_HOME/<name>.pid``
-    location — the same two-path lookup each daemon's own ``_is_running`` guard
-    performs, so the probe and the singleton guard can never disagree about which
-    file is authoritative."""
-    for path in (pidfile, legacy_pid_path(name)):
-        try:
-            return int(path.read_text().strip())
-        except (FileNotFoundError, ValueError):
-            continue
-    return None
+def _recorded_pid(pidfile: Path) -> int | None:
+    """This unit's recorded pid, or None when no readable pidfile exists."""
+    try:
+        return int(pidfile.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
 
 
 def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonProbe:
@@ -676,7 +668,7 @@ def _probe_daemon(
             f"identity mismatch on {url}: home={got_home!r} != {expected_home!r} — "
             "another unit's daemon holds this port"
         )
-    recorded = _recorded_pid(pidfile, name)
+    recorded = _recorded_pid(pidfile)
     if recorded is None:
         return DaemonProbe.down(
             f"{url} answers but no pidfile at {pidfile} — not this unit's daemon"

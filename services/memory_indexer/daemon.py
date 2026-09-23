@@ -83,7 +83,7 @@ from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.log import init_gateway_process
-from shared.paths import gateway_memory_dir, legacy_pid_path
+from shared.paths import gateway_memory_dir
 from shared.platform import CREATE_NO_WINDOW
 
 _log = logging.getLogger("services.memory_indexer.daemon")
@@ -169,13 +169,11 @@ def _remove_pidfile() -> None:
 
 
 def _is_running() -> bool:
-    """Whether a daemon is already running (via pidfile, new + legacy paths).
+    """Whether a daemon is already running (via its pidfile).
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.memory_indexer.daemon") or pidfile_holds_daemon(
-        legacy_pid_path("memory_indexer"), "services.memory_indexer.daemon"
-    )
+    return pidfile_holds_daemon(_PIDFILE, "services.memory_indexer.daemon")
 
 
 def _scan_disk(root: Path) -> dict[Path, float]:
