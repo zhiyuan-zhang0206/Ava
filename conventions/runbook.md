@@ -1776,7 +1776,7 @@ resources. It fans out:
   Tempo) + local JSONL mirror
   (`$AVA_HOME/traces/spans.jsonl`, rotated `spans-<ISO>.jsonl`).
 - **logs** — every unified event (the emitter's write path) dual-writes to
-  OTLP logs (Loki) via `shared/telemetry_otlp.py` → sidecar → Loki
+  OTLP logs (Loki) via `shared/telemetry/otlp/telemetry_otlp.py` → sidecar → Loki
   (`AVA_TELEMETRY_LOKI_URL` base, `/otlp` appended). The emitter makes
   `event_name`, `cluster` and, when present, `agent_id` resource dimensions per
   record before the SDK serializes a batch: Loki indexes those resource
@@ -1943,7 +1943,7 @@ and the collector's
 enqueue-failure counters make that loss visible. Every send attempt is bounded
 to five seconds and every exporter retries for at most 15 minutes before its
 counted failure path drops the batch. Cumulative metrics repair their totals on
-a later successful sample. `shared/telemetry_otlp.py`
+a later successful sample. `shared/telemetry/otlp/telemetry_otlp.py`
 also sheds (counted) instead of blocking, so an unreachable sidecar never
 touches the main write path. Exporter IDs stay `otlphttp/tempo`,
 `otlphttp/loki` and `otlphttp/prometheus`; in particular, renaming Tempo/Loki

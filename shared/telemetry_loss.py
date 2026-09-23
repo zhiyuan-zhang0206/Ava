@@ -48,7 +48,7 @@ def report_loss(event: Event, count: int, queue_name: str) -> Event:
             n=count,
         )
     with contextlib.suppress(Exception):
-        from shared import telemetry_otlp
+        from shared.telemetry.otlp import telemetry_otlp
 
         backend = telemetry_otlp.backend
         if backend._meter is not None:

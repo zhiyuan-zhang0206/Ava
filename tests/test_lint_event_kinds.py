@@ -98,8 +98,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit
         "telemetry_read_recovered",  # gateway/telemetry_staleness.py:_emit
-        "otlp_backend_disabled",  # shared/telemetry_otlp.py:_emit_backend_event
-        "otlp_backend_recovered",  # shared/telemetry_otlp.py:_emit_backend_event
+        "otlp_backend_disabled",  # shared/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
+        "otlp_backend_recovered",  # shared/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
         "prom_query_budget",  # gateway/prom_metrics.py:_emit_budget_observation
         # Class-resolution markers select their name from the event level at
         # runtime; services/events_maintenance/resolution.py emits the reopen

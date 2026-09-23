@@ -42,10 +42,10 @@ across the bucket); p50/p95 are histogram approximations (as before); max
 latency and the service/agent breakdowns stay exact.
 
 Instrumentation points (collection layer, all on the existing loguru →
-unified emitter (`shared/telemetry.py`) → OTLP export, zero schema change):
+unified emitter (`shared/telemetry/emitter.py`) → OTLP export, zero schema change):
 
 - `shared/event_publisher.py` — `AgentEventPublisher` sheds → `sse_drop`
-- `shared/telemetry.py` — emitter queue-full shedding (`event_log_drop`) →
+- `shared/telemetry/emitter.py` — emitter queue-full shedding (`event_log_drop`) →
   `event_log_drop`; `init_gateway_process` boot → `service_started`
 - `agent/graph/_llm.py` + `agent/observe.py` — whole-call wall-clock →
   `llm_usage.latency_ms` → Prometheus histogram + counters (OTLP)

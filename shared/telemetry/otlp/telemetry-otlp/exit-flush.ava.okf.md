@@ -11,7 +11,7 @@ tags:
 
 # OTLP exit flush
 
-`shared/telemetry_otlp_metrics._build_providers` builds both SDK providers
+`shared/telemetry/otlp/telemetry_otlp_metrics._build_providers` builds both SDK providers
 with `shutdown_on_exit=False`, so neither registers an atexit shutdown of
 its own. `shared.telemetry._drain_on_exit` is the single ordered exit seam:
 it flushes the emitter, then `telemetry_otlp.shutdown()` completes any

@@ -90,15 +90,15 @@ _PROVIDER_KEY_ENV_VARS = frozenset(
 
 # Vars read from the live environment BY DESIGN (not via the Settings singleton,
 # which is constructed once at module load). The exec-child OTLP deferral knobs
-# are read on the child arm path in shared/telemetry_otlp_defer.py, where
+# are read on the child arm path in shared/telemetry/otlp/telemetry_otlp_defer.py, where
 # constructing Settings would import the config chain the deferral exists to
 # avoid (task #3816 M4b) — so in tests, monkeypatch.setenv on them is a REAL
 # seam, the same class as the provider keys above. Every entry must have its
 # reader file in _ALLOWED_FILES.
 _LIVE_READ_ENV_VARS = frozenset(
     {
-        "AVA_TELEMETRY_OTLP_CHILD_DEFER",  # shared/telemetry_otlp_defer.py
-        "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S",  # shared/telemetry_otlp_defer.py
+        "AVA_TELEMETRY_OTLP_CHILD_DEFER",  # shared/telemetry/otlp/telemetry_otlp_defer.py
+        "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S",  # shared/telemetry/otlp/telemetry_otlp_defer.py
     }
 )
 
@@ -158,7 +158,7 @@ _ALLOWED_FILES = frozenset(
         "shared/proc_tree.py",  # process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config
         "ava/_attach.py",  # attach() reads the one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; it is not Settings config and only an exec child receives it
         "shared/observability.py",  # endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit
-        "shared/telemetry_otlp_defer.py",  # the exec-child OTLP deferral knobs (AVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as shared/observability.py
+        "shared/telemetry/otlp/telemetry_otlp_defer.py",  # the exec-child OTLP deferral knobs (AVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as shared/observability.py
         "shared/turn_identity.py",  # effective_agent_id() reads the ambient AVA_AGENT_ID as the outermost identity fallback (the same per-process identity channel as ava/_boot.py / ava/_mcp_remote.py); the turn contextvar layers above it and Settings models neither  # _current_agent_id() reads the ambient AVA_AGENT_ID to stamp MCP daemon envelopes; the key is the process identity channel, not Settings-managed, and importing ava.self here is circular (moved from ava/mcps.py, 2026-08-13 #1229)
         "services/computer/mcp_wrapper.py",  # _agent_id() reads the ambient AVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed
         "agent/_process_boot.py",  # boot sets os.environ["AVA_AGENT_ID"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)

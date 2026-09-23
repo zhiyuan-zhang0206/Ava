@@ -15,6 +15,7 @@ import pytest
 from shared import observed_metrics as metrics
 from shared import telemetry
 from shared.config import settings
+from shared.telemetry import emitter
 
 _AT = datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC)
 
@@ -205,7 +206,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(telemetry, "logs_dir", lambda: tmp_path)
+    monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(metrics, "_failures", 0)
     monkeypatch.setattr(metrics, "write_observations", Mock(side_effect=RuntimeError("DB down")))
     diagnostic = Mock()
@@ -213,7 +214,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     emitted = Mock(side_effect=AssertionError("diagnostics must bypass emitter"))
     monkeypatch.setattr(telemetry, "emit", emitted)
     exported = Mock()
-    monkeypatch.setattr(telemetry, "_export_otlp", exported)
+    monkeypatch.setattr(emitter, "_export_otlp", exported)
     event = _event("turn_end", ok=True, duration_seconds=2.5)
     telemetry._write_batch([event])
     exported.assert_called_once_with([event])

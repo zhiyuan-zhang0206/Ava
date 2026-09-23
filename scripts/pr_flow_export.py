@@ -15,7 +15,7 @@ the unified telemetry pipeline:
   unreachable; the event itself stays as the daily breadcrumb).
 
 Every numeric payload field is dispositioned as an ObservableGauge in
-``shared/telemetry_otlp.py`` — the values are per-day absolute state, never
+``shared/telemetry/otlp/telemetry_otlp.py`` — the values are per-day absolute state, never
 sums, and re-emission must replace them rather than accrue them.
 
 Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
@@ -681,7 +681,8 @@ def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool) -> None:
 
 def _emit_events(snapshot: dict[str, Any]) -> None:
     """The pipeline write (separate seam so tests can assert dry-run silence)."""
-    from shared import telemetry, telemetry_otlp
+    from shared import telemetry
+    from shared.telemetry.otlp import telemetry_otlp
 
     telemetry.init_telemetry(process=PROCESS_NAME)
     telemetry_otlp.warmup()

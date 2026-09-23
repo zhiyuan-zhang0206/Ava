@@ -13,7 +13,7 @@
     "services": 27,
     "services/healthchecks": 31,
     "services/pitr": 66,
-    "shared": 297,
+    "shared": 279,
     "shared/config": 40,
     "shared/lm": 24,
     "tests": 80,

@@ -35,7 +35,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
     # lm/telegram/feishu are real gateway-side reads (routers read llm_model;
     # im_bridge reads telegram/feishu) — capability says agent-runner, the
     # consumption matrix says gateway. Consumption wins. observability: the
-    # gateway's event emitter dual-writes via shared.telemetry_otlp, which
+    # gateway's event emitter dual-writes via shared.telemetry.otlp.telemetry_otlp, which
     # reads the AVA_TELEMETRY_OTLP_* fields (2026-08-11 OTel stack).
     "gateway": frozenset(
         {
@@ -91,7 +91,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
     # runner support daemons (ops / watchdog / browser / browser-mcp /
     # gate / permissions-helper / healthchecks). sandbox is consumed by the
     # browser MCP daemon (settings.sandbox.mcp_connect_timeout_seconds);
-    # observability by the daemons' event emitter via shared.telemetry_otlp.
+    # observability by the daemons' event emitter via shared.telemetry.otlp.telemetry_otlp.
     "runner": frozenset(
         {
             "services",

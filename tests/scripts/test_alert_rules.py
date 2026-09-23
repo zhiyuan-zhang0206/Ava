@@ -33,8 +33,8 @@ import pytest
 import yaml
 
 from shared.events.contract import EVENTS, payload_keys, telemetry_events
-from shared.telemetry_otlp import _METRIC_DISPOSITION
-from shared.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
+from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
+from shared.telemetry.otlp.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
 
 _RULES = (
     Path(__file__).resolve().parent.parent.parent

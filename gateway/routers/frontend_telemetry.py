@@ -4,7 +4,7 @@ The web frontend's user-modeling telemetry (`ui/web/src/lib/telemetry.ts`)
 batches tracked interactions — key-control clicks, page views, user_settings
 changes — and posts them here; this router validates the batch and emits one
 `frontend_interaction` event (category=telemetry, source=user) per accepted
-interaction into the unified event stream (shared/telemetry.py). Loki is
+interaction into the unified event stream (shared/telemetry/emitter.py). Loki is
 the store; the Grafana core-metrics panels aggregate it.
 
 Two volume guards sit between the browser and the event stream:

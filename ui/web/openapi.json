@@ -9892,7 +9892,7 @@
           "attributes"
         ],
         "title": "EventRow",
-        "description": "One row of the unified event stream.\n\nEvery signal shares this shape (event-system design doc §1): audit\n(legacy `event_log`), telemetry and log (formerly `agent_events`) all land\nin it, written through the unified emitter (`shared/telemetry.py`).\n`trace_id` is the correlation key — one turn = one trace id, every event\ninside it carries the same value. `agent_id` is None for service-level\nevents (gateway / daemons); `machine` is the host dimension. `level` is\nLOWERCASE (`debug`/`info`/`warning`/`error`/`critical`) — the retired\n`agent_events` mirror stored loguru's uppercase; the W9 read-path switch\nflipped API consumers to lowercase."
+        "description": "One row of the unified event stream.\n\nEvery signal shares this shape (event-system design doc §1): audit\n(legacy `event_log`), telemetry and log (formerly `agent_events`) all land\nin it, written through the unified emitter (`shared/telemetry/emitter.py`).\n`trace_id` is the correlation key — one turn = one trace id, every event\ninside it carries the same value. `agent_id` is None for service-level\nevents (gateway / daemons); `machine` is the host dimension. `level` is\nLOWERCASE (`debug`/`info`/`warning`/`error`/`critical`) — the retired\n`agent_events` mirror stored loguru's uppercase; the W9 read-path switch\nflipped API consumers to lowercase."
       },
       "EventsMeta": {
         "properties": {
