@@ -64,8 +64,8 @@ Per-panel provenance:
 
 from __future__ import annotations
 
-from shared import core_metrics
 from shared.events.contract import DELIVERY_STALLED_KEYS, GATEWAY_LATENCY_KEYS, LLM_USAGE_KEYS
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import MetricSpec, ThresholdStep
 
 # ── LogQL fragments (Task #1280) ──────────────────────────────────────────────

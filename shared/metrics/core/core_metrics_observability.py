@@ -6,7 +6,7 @@ plugin, retired with this migration): cluster-wide and per-agent metrics over
 the unified ``events`` stream in Loki — LLM spend and health, turn outcomes,
 exec outcomes, code-repair triggers, agent lifecycle, SDK usage, delivery
 health and the total event rate. Replaces the information content of the
-retired Metrics page (shared/metrics.py).
+retired Metrics page (shared/metrics/report.py).
 
 Migrated plugin -> core (user ruling 2026-08-06: core metrics + plugin
 metrics two-tier architecture): the 21 MetricSpec definitions below register
@@ -58,7 +58,6 @@ Data provenance (verified against the live prod stream, 2026-08-04):
 
 from __future__ import annotations
 
-from shared import core_metrics
 from shared.events.contract import (
     FRONTEND_INTERACTION_KEYS,
     HALT_KEYS,
@@ -67,6 +66,7 @@ from shared.events.contract import (
     SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
 )
+from shared.metrics.core import core_metrics
 from shared.plugin_metrics import MetricSpec
 
 # ── LogQL fragments (Task #1280) ──────────────────────────────────────────────
