@@ -27,9 +27,10 @@ workspace is directly the impersonator's working directory (other locations
 are not forbidden; this is the recommended default). A workspace that already
 carries a live canonical generation is refused (`--cancel-generation` it
 first). Both launch paths are live: `spawn_claude.py --impersonate-self` takes
-the same inline `--brief`; its executor starts the Claude Monitor relay itself,
-armed with `timeout_ms: 1800000` and re-armed at each expiry notice, from the
-briefing and the request output.
+the same inline `--brief`; its relay starts automatically with the session (the
+bundled `ava-relay` plugin, resident mode — no `timeout_ms` arming; the request
+output names the credential stub and the manual fallback). `--no-relay-resident`
+restores the executor-armed flow.
 
 The two states, and nothing else:
 

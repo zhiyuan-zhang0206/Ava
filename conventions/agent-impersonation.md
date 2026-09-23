@@ -30,7 +30,11 @@ also records observed process names, IDs, executable and parent chain, separatel
 from the declaration. `--provider` selects `codex` or `claude` relay transport.
 Codex's own thread UUID is a provider address, not the Ava session handle.
 Preserve `CODEX_HOME` and optionally supply `--codex-remote` so the native relay
-reaches the owning server. Claude starts its Monitor relay immediately after the
+reaches the owning server. A Claude takeover launched through the launcher starts
+its relay with the session: the bundled `ava-relay` plugin consumes the credential
+stub the request writes, and the executor arms no Monitor watch — if no relay
+heartbeat starts, fall back to the manual flow. With `--no-relay-resident`, or on
+a host that starts the relay by hand, start the Monitor immediately after the
 request, armed with `timeout_ms: 1800000` and re-armed at each expiry notice.
 See [host setup](agent-impersonation-hosts.md).
 

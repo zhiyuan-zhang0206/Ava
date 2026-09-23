@@ -21,6 +21,8 @@ def bootstrap_message(
     brief: str,
     guide: Path,
     codex_remote: str | None = None,
+    *,
+    relay_resident: bool = False,
 ) -> str:
     """Name both identities explicitly and inline the briefing in the launch message."""
     if provider not in ("codex", "claude") or not name.strip():
@@ -59,12 +61,20 @@ def bootstrap_message(
         "runs an explicit app server, pass --codex-remote with its endpoint — the TUI and the "
         "relay must share one endpoint."
     )
-    routing = (
-        codex_routing
-        if provider == "codex"
-        else "Immediately start the Claude Monitor relay with --session <returned id> and the "
-        "returned relay credential, as the request output instructs."
-    )
+    if provider == "codex":
+        routing = codex_routing
+    elif relay_resident:
+        routing = (
+            "Its relay is started automatically for this session by the loaded Ava relay "
+            "plugin: the request output names the credential stub it writes; do not arm a "
+            "Monitor watch. If the stub is not consumed and no relay heartbeat starts, "
+            "fall back to the manual flow the request output describes."
+        )
+    else:
+        routing = (
+            "Immediately start the Claude Monitor relay with --session <returned id> and the "
+            "returned relay credential, as the request output instructs."
+        )
     return (
         f"You will take over Ava agent {agent_id}, the agent that launched you. "
         f"The briefing:\n{brief}\n\n"

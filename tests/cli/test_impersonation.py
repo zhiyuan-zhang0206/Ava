@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from argparse import Namespace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -656,3 +657,46 @@ def test_numeric_options_accept_runtime_boundaries(
     for value in values:
         parsed = _args(*command, option, value)
         assert getattr(parsed, option.removeprefix("--")) == float(value)
+
+
+def test_request_writes_the_resident_stub_when_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "id": "lease",
+            "session_id": 9,
+            "relay_token": "tok-123",
+            "status": "preparing",
+        }
+
+    stub = tmp_path / ".ava-relay.env"
+    monkeypatch.setattr(sessions, "request", request)
+    monkeypatch.setenv("AVA_IMPERSONATION_RELAY_STUB", str(stub))
+    assert (
+        cli.cmd_impersonate(
+            _args(
+                "request",
+                "--name",
+                "Fix login",
+                "--agent",
+                "405",
+                "--as",
+                "Claude: task1",
+                "--ttl",
+                "3600",
+                "--provider",
+                "claude",
+                "--batch-window",
+                "0",
+            )
+        )
+        == 0
+    )
+    assert stub.read_text() == "SID=9\nAGENT=405\nAVA_IMPERSONATION_RELAY_TOKEN=tok-123\n"
+    assert (stub.stat().st_mode & 0o777) == 0o600
+    err = capsys.readouterr().err
+    assert "session plugin starts the claude relay automatically" in err
+    assert "arm it as a Monitor watch" in err

@@ -287,3 +287,19 @@ def test_launch_requires_native_identity_before_creating_workspace(
     with pytest.raises(RuntimeError, match="No launching Ava identity"):
         module.main()
     assert not target.exists()
+
+
+def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
+    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    message = bootstrap_message(42, "Fix login", "claude", "brief", guide, relay_resident=True)
+    assert "Ava relay plugin" in message
+    assert "do not arm a Monitor watch" in message
+    assert "fall back to the manual flow" in message
+    assert "Immediately start the Claude Monitor relay" not in message
+
+
+def test_codex_bootstrap_ignores_the_resident_flag() -> None:
+    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    message = bootstrap_message(42, "Fix login", "codex", "brief", guide, relay_resident=True)
+    assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
+    assert "Ava relay plugin" not in message

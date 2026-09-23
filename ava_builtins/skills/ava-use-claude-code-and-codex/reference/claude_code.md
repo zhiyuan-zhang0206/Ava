@@ -12,8 +12,9 @@ contract message:
 ```
 
 For a takeover (`--impersonate-self --impersonation-name '…' --brief '<text>'`)
-the script is file-less: no task/work files, nothing to watch, and the briefing
-tells the executor to start its own Claude Monitor relay. The full procedure is
+the script is file-less: no task/work files, nothing to watch, and the session
+relay starts automatically via the bundled `ava-relay` plugin (resident mode;
+`--no-relay-resident` restores the executor-armed flow). The full procedure is
 [Let the coding agent take over your identity](impersonate_self.md).
 
 Manual launch (for full control):
