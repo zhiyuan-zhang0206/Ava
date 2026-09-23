@@ -1,4 +1,4 @@
-"""shared.google_drive: detect a writable Google Drive synced folder.
+"""shared.host.converge.google_drive: detect a writable Google Drive synced folder.
 
 `Path.home()` resolves through `$HOME` (CPython); tests patch it to a tmp dir
 and patch `gd.sys.platform` so the per-OS candidate logic runs regardless of the
@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-import shared.google_drive as gd
+import shared.host.converge.google_drive as gd
 
 # Permission test no-ops as root (root bypasses fs perms); CI runs as root.
 _skip_if_root = pytest.mark.skipif(

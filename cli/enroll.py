@@ -20,7 +20,6 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from shared import bootstrap
-from shared.browser_deps import browser_deps_notice, browser_deps_warning, ensure_browser_deps
 from shared.dotenv_boot import AVA_ENV_PATH
 from shared.env_registry import (
     WSL_DEFAULT_HEALTH_PORT_BASE,
@@ -33,6 +32,11 @@ from shared.envfile import (
     env_lock_path,
     snapshot_env,
     upsert_env,
+)
+from shared.host.converge.browser_deps import (
+    browser_deps_notice,
+    browser_deps_warning,
+    ensure_browser_deps,
 )
 from shared.platform import IS_WSL, file_lock
 

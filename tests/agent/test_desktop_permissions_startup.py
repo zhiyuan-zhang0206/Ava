@@ -12,30 +12,30 @@ from pathlib import Path
 import pytest
 
 from agent.startup import _notify_desktop_permissions_at_startup
-from shared.accessibility import (
+from shared.host.converge.accessibility import (
     AccessibilityState,
     AccessibilityStatus,
 )
-from shared.accessibility import (
+from shared.host.converge.accessibility import (
     read_status as read_accessibility_status,
 )
-from shared.accessibility import (
+from shared.host.converge.accessibility import (
     status_file_path as accessibility_status_file_path,
 )
-from shared.accessibility import (
+from shared.host.converge.accessibility import (
     write_status as write_accessibility_status,
 )
-from shared.screen_capture import (
+from shared.host.converge.screen_capture import (
     ScreenCaptureState,
     ScreenCaptureStatus,
 )
-from shared.screen_capture import (
+from shared.host.converge.screen_capture import (
     read_status as read_screen_capture_status,
 )
-from shared.screen_capture import (
+from shared.host.converge.screen_capture import (
     status_file_path as screen_capture_status_file_path,
 )
-from shared.screen_capture import (
+from shared.host.converge.screen_capture import (
     write_status as write_screen_capture_status,
 )
 
@@ -68,8 +68,8 @@ def fake_ui(monkeypatch: pytest.MonkeyPatch) -> _FakeUI:
 
 
 def _patch_status_homes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("shared.screen_capture.ava_home", lambda: tmp_path)
-    monkeypatch.setattr("shared.accessibility.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.host.converge.screen_capture.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.host.converge.accessibility.ava_home", lambda: tmp_path)
 
 
 class TestNotifyDesktopPermissionsAtStartup:

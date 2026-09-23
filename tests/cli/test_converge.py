@@ -1620,7 +1620,7 @@ def _screen_capture_env(
 ):
     from shared.config import settings
 
-    monkeypatch.setattr("shared.screen_capture.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.host.converge.screen_capture.ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(
         "shared.platform_probes.permissions_helper_incapability", lambda: incapability
@@ -1630,7 +1630,11 @@ def _screen_capture_env(
 def test_screen_capture_step_records_the_helpers_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ):
-    from shared.screen_capture import ScreenCaptureState, ScreenCaptureStatus, read_status
+    from shared.host.converge.screen_capture import (
+        ScreenCaptureState,
+        ScreenCaptureStatus,
+        read_status,
+    )
 
     _screen_capture_env(monkeypatch, tmp_path)
     status = ScreenCaptureStatus(
@@ -1649,7 +1653,7 @@ def test_screen_capture_step_records_the_helpers_answer(
 def test_screen_capture_step_clears_a_stale_file_when_the_grant_is_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    from shared.screen_capture import (
+    from shared.host.converge.screen_capture import (
         ScreenCaptureState,
         ScreenCaptureStatus,
         read_status,
@@ -1677,7 +1681,7 @@ def test_screen_capture_step_skips_hosts_with_no_helper(
 ):
     """Nothing to ask when no helper can exist here -- and the helper step has
     already said so, making a second derived complaint noise rather than news."""
-    from shared.screen_capture import (
+    from shared.host.converge.screen_capture import (
         ScreenCaptureState,
         ScreenCaptureStatus,
         read_status,
@@ -1705,7 +1709,7 @@ def _accessibility_env(
 ) -> None:
     from shared.config import settings
 
-    monkeypatch.setattr("shared.accessibility.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.host.converge.accessibility.ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(
         "shared.platform_probes.permissions_helper_incapability", lambda: incapability
@@ -1715,7 +1719,11 @@ def _accessibility_env(
 def test_accessibility_step_records_the_helpers_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    from shared.accessibility import AccessibilityState, AccessibilityStatus, read_status
+    from shared.host.converge.accessibility import (
+        AccessibilityState,
+        AccessibilityStatus,
+        read_status,
+    )
 
     _accessibility_env(monkeypatch, tmp_path)
     status = AccessibilityStatus(
@@ -1734,7 +1742,7 @@ def test_accessibility_step_records_the_helpers_answer(
 def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    from shared.accessibility import (
+    from shared.host.converge.accessibility import (
         AccessibilityState,
         AccessibilityStatus,
         read_status,
@@ -1763,7 +1771,7 @@ def test_accessibility_step_skips_hosts_with_no_helper(
     enabled: bool,
     incapability: str | None,
 ):
-    from shared.accessibility import (
+    from shared.host.converge.accessibility import (
         AccessibilityState,
         AccessibilityStatus,
         read_status,

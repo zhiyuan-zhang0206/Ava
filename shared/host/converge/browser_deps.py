@@ -35,7 +35,8 @@ def install_nodejs() -> bool:
     if sys.platform == "win32":
         return False
     if sys.platform == "darwin" or sys.platform.startswith("linux"):
-        provisioner = Path(__file__).resolve().parents[1] / "scripts" / "provision" / "node.sh"
+        # shared/host/converge/browser_deps.py -> repo root is three parents up.
+        provisioner = Path(__file__).resolve().parents[3] / "scripts" / "provision" / "node.sh"
         try:
             subprocess.run(  # noqa: S603 — fixed repo-owned provisioner path
                 ["bash", str(provisioner)],

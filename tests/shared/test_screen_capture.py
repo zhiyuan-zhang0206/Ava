@@ -1,4 +1,4 @@
-"""Tests for shared.screen_capture -- the status type and its status file.
+"""Tests for shared.host.converge.screen_capture -- the status type and its status file.
 
 The probe that produces a status lives with the process it interrogates
 (`services.permissions_helper.client.check_screen_capture`, covered by
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.screen_capture import (
+from shared.host.converge.screen_capture import (
     ScreenCaptureState,
     ScreenCaptureStatus,
     clear_status,
@@ -71,7 +71,7 @@ class TestScreenCaptureStatus:
 
 class TestStatusFile:
     def test_write_read_clear_cycle(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-        monkeypatch.setattr("shared.screen_capture.ava_home", lambda: tmp_path)
+        monkeypatch.setattr("shared.host.converge.screen_capture.ava_home", lambda: tmp_path)
         write_status(ScreenCaptureStatus(state=ScreenCaptureState.NO_GRANT, diagnostic="test"))
 
         assert status_file_path().exists()

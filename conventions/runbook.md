@@ -489,7 +489,7 @@ that does not want the probe can set `AVA_CROSS_MACHINE_TRANSFER_BACKEND=none`
 host whose memory must stay on-box instead runs `AVA_MEMORY_KEEP_LOCAL=true`: the pool
 becomes a local-only git repo (no remote, no push / pull / PR), and the GitHub-PR gate
 is skipped regardless of role. The transfer probe
-(`_ensure_cross_machine_transfer` → `shared/google_drive.py:find_writable_google_drive`)
+(`_ensure_cross_machine_transfer` → `shared/host/converge/google_drive.py:find_writable_google_drive`)
 is how the fleet does cross-machine file transfer without a relay when Drive is present:
 every agent-runner mounts the same Google Drive account, so an agent hands a file to
 another machine by dropping it in its local Drive folder (the synced `My Drive` area —
