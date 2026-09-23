@@ -27,7 +27,7 @@ from shared.lm.factory import (
     close_chat_model,
     validate_model_config,
 )
-from shared.lm.registry import SUPPORTED_MODELS, resolve_setting
+from shared.lm.registry import MODELS, SUPPORTED_MODELS, resolve_setting
 
 ensure_provider_plugins_loaded()
 
@@ -1639,6 +1639,22 @@ class TestThinkingDisabledAcrossRoster:
         self._stub_all_keys(monkeypatch)
         llm = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(llm, BaseChatModel)
+
+    def test_unregistered_gemini_thinking_disabled_is_noop(
+        self, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict]
+    ) -> None:
+        """An intentionally unregistered Gemini id has no thinking_level vocabulary:
+        disabled must send no thinking parameters and warn (issue #190)."""
+        model = "gemini-2.5-flash"
+        assert model not in MODELS
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        llm = build_chat_model(model, thinking={"type": "disabled"})
+        assert isinstance(llm, ChatGoogleGenerativeAI)
+        assert llm.thinking_level is None
+        assert llm.include_thoughts is None
+        assert any(model in r["message"] and "ignored" in r["message"] for r in loguru_records)
 
     def test_gemini_3_1_thinking_disabled_maps_to_lowest_declared_level(
         self, monkeypatch: pytest.MonkeyPatch
