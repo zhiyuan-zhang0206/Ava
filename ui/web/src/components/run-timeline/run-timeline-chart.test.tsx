@@ -485,6 +485,18 @@ describe("RunTimelineChart", () => {
 
     expect(screen.getByTestId("raw-summary")).toBeTruthy();
     expect(screen.getByText("raw context summary")).toBeTruthy();
+    const toggle = screen.getByTestId("raw-summary-toggle");
+    const text = screen.getByText("raw context summary");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(text.className).toContain("max-h-12");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.textContent).toBe(labels.showLess);
+    expect(text.className).not.toContain("max-h-12");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toBe(labels.showMore);
+
     fireEvent.click(screen.getByRole("button", { name: "Show more" }));
     expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
   });
