@@ -1714,10 +1714,10 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     relay_minted_at TIMESTAMPTZ,
     relay_minted_generation UUID,
     relay_minted_owner UUID,
-    ack_window_seconds INTEGER NOT NULL DEFAULT 180 CHECK (ack_window_seconds > 0),
-    max_delivery_attempts INTEGER NOT NULL DEFAULT 2 CHECK (max_delivery_attempts > 0),
     relay_batch_window_seconds INTEGER NOT NULL DEFAULT 0
         CHECK (relay_batch_window_seconds BETWEEN 0 AND 300),
+    ack_window_seconds INTEGER NOT NULL DEFAULT 180 CHECK (ack_window_seconds > 0),
+    max_delivery_attempts INTEGER NOT NULL DEFAULT 2 CHECK (max_delivery_attempts > 0),
     CHECK (applied_version >= 0 AND applied_version <= delta_version),
     CHECK (jsonb_array_length(plugin_delta) = delta_version),
     CHECK ((accepted_generation IS NULL) = (accepted_owner IS NULL)),
