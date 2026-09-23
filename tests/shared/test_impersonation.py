@@ -62,6 +62,47 @@ def _active(owner: RuntimeIncarnation) -> dict[str, Any]:
     return lease
 
 
+def test_impersonation_wake_reconciles_roster_only_for_status_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timeline: list[int] = []
+    roster: list[int] = []
+
+    def no_wake(_agent_id: int, _reason: str) -> None:
+        pass
+
+    monkeypatch.setattr(leases, "publish_inbound_wake", no_wake)
+    monkeypatch.setattr(leases, "publish_impersonation_changed_sync", timeline.append)
+    monkeypatch.setattr(leases, "publish_agent_updated_sync", roster.append)
+    leases._wake(7)
+    leases._wake(7, roster_changed=True)
+    assert timeline == [7, 7]
+    assert roster == [7]
+
+
+def test_controller_read_that_expires_lease_refreshes_roster(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _agent(db_conn)
+    lease = _active(owner)
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
+        "WHERE id=%s",
+        (lease["id"],),
+    )
+    db_conn.commit()
+    notices: list[tuple[int, bool]] = []
+
+    def record_wake(agent_id: int, *, roster_changed: bool = False) -> None:
+        notices.append((agent_id, roster_changed))
+
+    monkeypatch.setattr(leases, "_wake", record_wake)
+    assert leases.get(lease["id"], attested_caller(lease))["status"] == "expired"
+    assert notices == [(owner.agent_id, True)]
+    assert leases.get(lease["id"], attested_caller(lease))["status"] == "expired"
+    assert notices == [(owner.agent_id, True)]
+
+
 @pytest.fixture
 def short_lock_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     transaction = leases.write_transaction
@@ -423,9 +464,15 @@ def test_renew_replaces_ttl_and_reject_records_reason(db_conn: psycopg.Connectio
 
 def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
     db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from shared import impersonation_maintenance as maintenance
     from shared.db import pool
-    from shared.impersonation_maintenance import reap_impersonations
+
+    announced: list[int] = []
+    roster_announced: list[int] = []
+    monkeypatch.setattr(maintenance, "publish_impersonation_changed_sync", announced.append)
+    monkeypatch.setattr(maintenance, "publish_agent_updated_sync", roster_announced.append)
 
     owner = _agent(db_conn)
     lease = _active(owner)
@@ -436,21 +483,141 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
     )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert reap_impersonations(reaper_pool) == 1
+        assert maintenance.reap_impersonations(reaper_pool) == 1
+        assert announced == [owner.agent_id]
+        assert roster_announced == [owner.agent_id]
         db_conn.execute(
             "UPDATE agent_impersonations SET ended_at=clock_timestamp()-interval '8 days' WHERE id=%s",
             (lease["id"],),
         )
         db_conn.commit()
-        assert reap_impersonations(reaper_pool) == 0
+        assert maintenance.reap_impersonations(reaper_pool) == 0
         assert leases.get(lease["id"], attested_caller(lease))["status"] == "expired"
         db_conn.execute(
             "UPDATE inbound_messages SET status='done' WHERE agent_id=%s", (owner.agent_id,)
         )
         db_conn.commit()
-        reap_impersonations(reaper_pool)
+        maintenance.reap_impersonations(reaper_pool)
     assert db_conn.execute("SELECT count(*) FROM agent_impersonations").fetchone() == (1,)
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (1,)
+
+
+@pytest.mark.parametrize("lease_status", ["requested", "accepted", "active"])
+def test_operator_force_expire_closes_only_observed_session(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, lease_status: str
+) -> None:
+    from shared import impersonation_maintenance as maintenance
+    from shared.db import pool
+
+    owner = _agent(db_conn)
+    lease = _request(owner)
+    if lease_status in ("accepted", "active"):
+        leases.accept(lease["id"], owner.agent_id, owner, "Brief")
+    if lease_status == "active":
+        leases.activate(lease["id"], owner)
+        db_conn.execute(
+            "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+            "VALUES(%s,'Renew soon','reminder','system',jsonb_build_object('lease_id',%s::text))",
+            (owner.agent_id, str(lease["id"])),
+        )
+        db_conn.commit()
+    wakes: list[int] = []
+    announcements: list[int] = []
+    roster_announcements: list[int] = []
+
+    def record_wake(agent_id: int, _reason: str) -> None:
+        wakes.append(agent_id)
+
+    monkeypatch.setattr(maintenance, "publish_inbound_wake", record_wake)
+    monkeypatch.setattr(maintenance, "publish_impersonation_changed_sync", announcements.append)
+    monkeypatch.setattr(maintenance, "publish_agent_updated_sync", roster_announcements.append)
+    with pool(max_size=2) as gateway_pool:
+        assert (
+            maintenance.force_expire_impersonation(
+                gateway_pool, owner.agent_id, lease["session_id"] + 1, "user_session:administrator"
+            )
+            == "not_open"
+        )
+        assert (
+            maintenance.force_expire_impersonation(
+                gateway_pool, owner.agent_id, lease["session_id"], "user_session:administrator"
+            )
+            == "expired"
+        )
+        assert (
+            maintenance.force_expire_impersonation(
+                gateway_pool, owner.agent_id, lease["session_id"], "user_session:administrator"
+            )
+            == "not_open"
+        )
+    assert wakes == [owner.agent_id]
+    assert announcements == [owner.agent_id]
+    assert roster_announcements == [owner.agent_id]
+    row = db_conn.execute(
+        "SELECT status,ended_at,rejection_reason,summary_inbound_id "
+        "FROM agent_impersonations WHERE id=%s",
+        (lease["id"],),
+    ).fetchone()
+    assert row is not None
+    status, ended_at, reason, inbound_id = row
+    assert (status, reason) == ("expired", "force-expired: ended by an operator")
+    assert ended_at is not None
+    assert (inbound_id is not None) == (lease_status == "active")
+    if inbound_id is not None:
+        note = db_conn.execute(
+            "SELECT content,kind,source FROM inbound_messages WHERE id=%s", (inbound_id,)
+        ).fetchone()
+        assert note is not None
+        content, kind, source = note
+        assert (kind, source) == ("chat", "system:impersonation")
+        assert "Control has returned" in content
+        assert "handoff" not in content.lower()
+        assert "read the" not in content.lower()
+        assert db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE kind='reminder' AND agent_id=%s",
+            (owner.agent_id,),
+        ).fetchone() == ("done",)
+    entry_row = db_conn.execute(
+        "SELECT payload FROM agent_impersonation_entries WHERE lease_id=%s "
+        "AND kind='lifecycle' ORDER BY seq DESC LIMIT 1",
+        (lease["id"],),
+    ).fetchone()
+    assert entry_row is not None
+    entry = entry_row[0]
+    assert entry["status"] == "expired"
+    assert entry["source"] == "user_session:administrator"
+
+
+def test_operator_force_expire_automatic_session_has_no_manual_end_note(
+    db_conn: psycopg.Connection,
+) -> None:
+    from shared.db import pool
+    from shared.impersonation_maintenance import force_expire_impersonation
+
+    owner = _agent(db_conn)
+    lease = leases.request(
+        owner.agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
+        reason="Handle the next message",
+        process_metadata=recorded_tree(),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+        automatic=True,
+        name="Automatic takeover",
+        executor_name="Codex: test",
+    )
+    leases.accept(lease["id"], owner.agent_id, owner, "Brief")
+    leases.activate(lease["id"], owner)
+    with pool(max_size=2) as gateway_pool:
+        assert (
+            force_expire_impersonation(
+                gateway_pool, owner.agent_id, lease["session_id"], "local_operator"
+            )
+            == "expired"
+        )
+    assert db_conn.execute(
+        "SELECT summary_inbound_id FROM agent_impersonations WHERE id=%s", (lease["id"],)
+    ).fetchone() == (None,)
 
 
 def test_request_requires_a_relay_binding(db_conn: psycopg.Connection) -> None:

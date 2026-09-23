@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Literal
 
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Request
 from psycopg_pool import ConnectionPool, PoolTimeout
+from pydantic import BaseModel, Field
 
 from gateway.routers.agents_forward import _forward_to_home_machine
 from gateway.schemas import CancelRequest, CompactEnqueued
@@ -36,7 +38,9 @@ from ops.rpc_schemas import (
     TerminateAgentRequest,
     TerminateAgentResponse,
 )
+from shared._impersonation_store import ImpersonationError
 from shared.db import agent_exists, insert_compact_request_inbound
+from shared.impersonation_maintenance import force_expire_impersonation
 
 router = APIRouter()
 
@@ -44,6 +48,41 @@ _log = logging.getLogger(__name__)
 
 # The open-task hint shows at most this many rows; `more` counts the rest.
 _OPEN_TASKS_SHOWN = 5
+
+
+class ForceExpireImpersonationRequest(BaseModel):
+    session_id: int = Field(ge=0)
+
+
+class ForceExpireImpersonationResponse(BaseModel):
+    session_id: int
+    status: Literal["expired", "not_open"]
+
+
+@router.post("/api/agents/{agent_id}/impersonation/force-expire")
+async def post_force_expire_impersonation(
+    agent_id: int, body: ForceExpireImpersonationRequest, request: Request
+) -> ForceExpireImpersonationResponse:
+    """End the caller's observed takeover without terminating the native agent."""
+    verified_by = getattr(request.state, "source_verified_by", None)
+    principal = getattr(request.state, "auth_principal", None)
+    subject = getattr(principal, "subject", None)
+    actor = (
+        f"{verified_by}:{subject}"
+        if isinstance(verified_by, str) and isinstance(subject, str)
+        else "local_operator"
+    )
+    try:
+        status = await asyncio.to_thread(
+            force_expire_impersonation,
+            request.app.state.db_pool,
+            agent_id,
+            body.session_id,
+            actor,
+        )
+    except ImpersonationError as exc:
+        raise HTTPException(status_code=404, detail=f"agent {agent_id} not found") from exc
+    return ForceExpireImpersonationResponse(session_id=body.session_id, status=status)
 
 
 @router.post("/api/agents/{agent_id}/compact")

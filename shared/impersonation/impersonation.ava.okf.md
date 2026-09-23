@@ -24,32 +24,8 @@ tree. Relay credentials are returned once and stored as hashes.
 
 ## Ownership and return
 
-The public state machine is `preparing -> active -> released | expired | rejected`.
-Internally, preparing uses requested/accepted to preserve the drain handshake.
-A trusted controller does not require a native model approval. The native claim
-gate accepts automatically, ends that invocation, drains execution resources,
-repairs and flushes a checkpoint timeline anchor, verifies the relay heartbeat,
-then activates. Only one executor owns decisions. A new native incarnation
-reconciles preparation; active control survives native restarts. Administrative
-restart/terminate still reach the native dispatcher; termination revokes control.
-Legacy live requests retain their original consent flow during an upgrade.
-
-Explicit renewal replaces the database deadline; attaching and relay heartbeats
-never renew. The existing TTL reaper expires abandoned sessions even when the
-runner is offline, and sends a reminder once per approaching deadline. This is
-coordination among processes already holding local cluster authority, not a
-security boundary against arbitrary shell execution. Capability, machine,
-incarnation and caller-attestation checks still prevent accidental
-cross-session control.
-
-`ava.external.attach(session_id, agent_id=...)` loads saved state and
-binds SDK identity in the external process. Plugin changes append ordered deltas;
-only the native graph writes checkpoints. On return it applies the journal with
-a durable lease/version receipt. It then writes the handoff file, checkpoints
-the first resumed system note, and finally marks the handoff applied in the DB.
-A crash retries the same note identity and flushes even when its checkpoint
-receipt is already visible. New sessions and ordinary input remain gated until
-this receipt succeeds. File or checkpoint failures cannot resume native work.
+See [[shared/impersonation/ownership.ava.okf.md]] for the lease state machine,
+native return, renewal, and operator closure.
 
 ## Bounded delivery
 
@@ -131,6 +107,6 @@ keep a default because one value is the only reading:
 - `relay` `--debounce` 0.5 — internal host machinery (the relay coalesces wake
   hints); not an operator parameter.
 
-See [[../ava/external.ava.okf.md]],
-[external agent procedure](../conventions/agent-impersonation.md), and
-[host relay setup](../conventions/agent-impersonation-hosts.md).
+See [[ava/external.ava.okf.md]],
+[external agent procedure](../../conventions/agent-impersonation.md), and
+[host relay setup](../../conventions/agent-impersonation-hosts.md).

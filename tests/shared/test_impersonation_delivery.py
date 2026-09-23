@@ -107,6 +107,32 @@ def test_two_attempts_each_get_a_full_window_then_native_observes_expiry(
     assert "did not ACK" in note[0] and "Unacknowledged messages remain pending" in note[0]
 
 
+def test_delivery_reservation_that_expires_lease_refreshes_roster(
+    db_conn: psycopg.Connection, active: ActiveSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lease, owner, message_id = active
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
+        "WHERE id=%s",
+        (lease["id"],),
+    )
+    db_conn.commit()
+    wakes: list[int] = []
+    timelines: list[int] = []
+    rosters: list[int] = []
+
+    def record_wake(agent_id: int, _reason: str) -> None:
+        wakes.append(agent_id)
+
+    monkeypatch.setattr(delivery, "publish_inbound_wake", record_wake)
+    monkeypatch.setattr(delivery, "publish_impersonation_changed_sync", timelines.append)
+    monkeypatch.setattr(delivery, "publish_agent_updated_sync", rosters.append)
+    assert reserve(lease, message_id) == frozenset()
+    assert wakes == timelines == rosters == [owner.agent_id]
+    assert reserve(lease, message_id) == frozenset()
+    assert wakes == timelines == rosters == [owner.agent_id]
+
+
 def test_ack_in_final_window_prevents_expiry(
     db_conn: psycopg.Connection, active: ActiveSession
 ) -> None:

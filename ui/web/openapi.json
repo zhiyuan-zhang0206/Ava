@@ -498,6 +498,56 @@
         }
       }
     },
+    "/api/agents/{agent_id}/impersonation/force-expire": {
+      "post": {
+        "summary": "Post Force Expire Impersonation",
+        "description": "End the caller's observed takeover without terminating the native agent.",
+        "operationId": "post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForceExpireImpersonationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForceExpireImpersonationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/compact": {
       "post": {
         "summary": "Post Compact",
@@ -6970,6 +7020,17 @@
               }
             ],
             "title": "Heartbeat Paused Until"
+          },
+          "open_impersonation_session_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Impersonation Session Id"
           }
         },
         "type": "object",
@@ -6991,7 +7052,8 @@
           "awaiting_response_count",
           "highest_notice_priority",
           "unread_notice_count",
-          "heartbeat_paused_until"
+          "heartbeat_paused_until",
+          "open_impersonation_session_id"
         ],
         "title": "AgentCard",
         "description": "Scalar list state; selected-agent details and notice bodies are separate reads."
@@ -10077,6 +10139,42 @@
         ],
         "title": "FleetGraphResponse",
         "description": "GET /api/fleet/graph response.\n\n`stale` identifies data-level degradation: a fallback snapshot, truncated\nedge stream, or failed source response. `telemetry_stale` separately says\nthe heartbeat guard was old or missing while this otherwise fresh graph was\nread. `snapshot_at` records when a successful graph snapshot was produced;\na fallback retains that timestamp so clients can show its age."
+      },
+      "ForceExpireImpersonationRequest": {
+        "properties": {
+          "session_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Session Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "ForceExpireImpersonationRequest"
+      },
+      "ForceExpireImpersonationResponse": {
+        "properties": {
+          "session_id": {
+            "type": "integer",
+            "title": "Session Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "expired",
+              "not_open"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "status"
+        ],
+        "title": "ForceExpireImpersonationResponse"
       },
       "GuideDraftRequest": {
         "properties": {

@@ -50,6 +50,7 @@ class AgentCard(AgentLineage):
     highest_notice_priority: Priority | None
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
+    open_impersonation_session_id: int | None
 
 
 class AgentDirectoryPage(BaseModel):
@@ -75,7 +76,8 @@ _CARD_COLUMNS = """
     a.config_overlay ->> 'llm_model' AS effective_model,
     mp.last_probe_at AS machine_probe_at, a.lease_expires_at,
     attention.awaiting_response_count, attention.highest_notice_priority,
-    fyi.unread_notice_count
+    fyi.unread_notice_count,
+    open_impersonation.session_id AS open_impersonation_session_id
 """
 _CARD_FROM = """
     FROM selected s
@@ -96,6 +98,10 @@ _CARD_FROM = """
         WHERE agent_id = a.id AND NOT require_response AND resolved_at IS NULL
           AND created_at > now() - interval '30 days'
     ) fyi ON true
+    LEFT JOIN LATERAL (
+        SELECT session_id FROM agent_impersonations
+        WHERE agent_id = a.id AND status IN ('requested', 'accepted', 'active')
+    ) open_impersonation ON true
 """
 # UNION (not UNION ALL) deduplicates ancestors shared by many live agents and
 # terminates even on corrupt cyclic links. Fork-source existence takes priority;

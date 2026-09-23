@@ -270,6 +270,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/inventory"): RouteContract(),
     ("PUT", "/api/inventory"): RouteContract(note="full inventory replace — PUT is idempotent"),
     # ── gateway/routers/agents_lifecycle.py ───────────────────────────
+    ("POST", "/api/agents/{agent_id}/impersonation/force-expire"): RouteContract(
+        note="observed-session CAS close — repeated or stale requests leave the lease unchanged"
+    ),
     ("POST", "/api/agents/{agent_id}/compact"): RouteContract(
         note="enqueue compact — repeats just re-summarize"
     ),

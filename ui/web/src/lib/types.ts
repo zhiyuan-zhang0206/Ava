@@ -37,9 +37,10 @@ export type PublicAgentStatus = Extract<
   WireAgentStatus,
   "running" | "idling" | "terminated"
 >;
-export type AgentRow = Omit<WireAgentCard, "status" | "observation"> & {
+export type AgentRow = Omit<WireAgentCard, "status" | "observation" | "open_impersonation_session_id"> & {
   readonly status: PublicAgentStatus;
   readonly observation?: WireAgentCard["observation"] | null;
+  readonly open_impersonation_session_id?: number | null;
 };
 
 /** Collapse every known wire lifecycle state into the public three-state model.
@@ -90,6 +91,7 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     highest_notice_priority: "highest_notice_priority" in row ? row.highest_notice_priority : (row.notices_awaiting_response.map((n) => n.priority).sort()[0] ?? null),
     unread_notice_count: row.unread_notice_count,
     heartbeat_paused_until: row.heartbeat_paused_until,
+    open_impersonation_session_id: "open_impersonation_session_id" in row ? row.open_impersonation_session_id : null,
   };
 }
 // OpenNotice rides the agent snapshot (notices_awaiting_response — the open
