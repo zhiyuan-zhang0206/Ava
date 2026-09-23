@@ -1432,6 +1432,22 @@ class TestNormalizedModelConfig:
 
         ensure_provider_plugins_loaded()
 
+    @pytest.fixture
+    def withdrawn_model(self, monkeypatch: pytest.MonkeyPatch, _load_provider_plugins: None) -> str:
+        from dataclasses import replace
+
+        from shared.lm.registry import MODELS
+
+        model = "deepseek-retired-fixture"
+        monkeypatch.setitem(
+            MODELS,
+            model,
+            replace(
+                MODELS["deepseek-flash"], spawnable=False, unavailable_fallback="deepseek-flash"
+            ),
+        )
+        return model
+
     @pytest.fixture(autouse=True)
     def _isolate_settlement_reconcile(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """These tests lock config normalization and its exact warning list;
@@ -1440,9 +1456,9 @@ class TestNormalizedModelConfig:
         monkeypatch.setattr(settlement, "reconcile_inbounds_after_turn", AsyncMock())
 
     async def test_a_withdrawn_birth_pin_is_normalized_before_the_turn_binds_it(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch, withdrawn_model: str
     ) -> None:
-        """A birth_config pin on the withdrawn vision experiment resolves to its
+        """A birth_config pin on a withdrawn model resolves to its
         registered fallback — the same resolution build_chat_model applies only
         at the final build."""
         import services.agent_host.host as host_mod
@@ -1453,7 +1469,7 @@ class TestNormalizedModelConfig:
             warnings.append((event, details))
 
         monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
-        host, graph, _ = wired({1: _Row(birth={"llm_model": "deepseek-v4-flash-vision-exp"})})
+        host, graph, _ = wired({1: _Row(birth={"llm_model": withdrawn_model})})
 
         await asyncio.wait_for(host.run_turn(1), 2)
 
@@ -1464,14 +1480,13 @@ class TestNormalizedModelConfig:
         # row attributed to the withdrawn pin can be reconciled against it.
         assert [event for event, _ in warnings] == ["host_config_normalized"]
         assert warnings[0][1]["agent_id"] == 1
-        assert warnings[0][1]["requested"] == "deepseek-v4-flash-vision-exp"
+        assert warnings[0][1]["requested"] == withdrawn_model
         assert warnings[0][1]["resolved"] == "deepseek-flash"
 
     async def test_a_withdrawn_pin_normalizes_and_an_available_pin_is_untouched(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch, withdrawn_model: str
     ) -> None:
-        """deepseek-v4-pro is withdrawn to the same fallback; an available model
-        passes through unchanged."""
+        """A withdrawn pin resolves; an available model passes through."""
         import services.agent_host.host as host_mod
 
         warnings: list[str] = []
@@ -1481,7 +1496,7 @@ class TestNormalizedModelConfig:
 
         monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
         rows = {
-            1: _Row(overlay={"llm_model": "deepseek-v4-pro"}),
+            1: _Row(overlay={"llm_model": withdrawn_model}),
             2: _Row(overlay={"llm_model": "gemini-3.7-flash"}),
         }
         host, graph, _ = wired(rows)
@@ -1497,7 +1512,7 @@ class TestNormalizedModelConfig:
         assert warnings == ["host_config_normalized"]
 
     async def test_the_normalization_warns_once_per_stored_config_state(
-        self, wired: _Build, monkeypatch: pytest.MonkeyPatch
+        self, wired: _Build, monkeypatch: pytest.MonkeyPatch, withdrawn_model: str
     ) -> None:
         """Repeated wakes on the same stale pin stay quiet until the stored
         config changes; the counter still sees every normalized wake."""
@@ -1509,7 +1524,7 @@ class TestNormalizedModelConfig:
             warnings.append(event)
 
         monkeypatch.setattr(host_mod.logger, "warning", _record_warning)
-        rows = {1: _Row(overlay={"llm_model": "deepseek-v4-flash-vision-exp"})}
+        rows = {1: _Row(overlay={"llm_model": withdrawn_model})}
         host, graph, _ = wired(rows)
 
         await asyncio.wait_for(host.run_turn(1), 2)

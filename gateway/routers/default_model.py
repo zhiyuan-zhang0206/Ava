@@ -34,8 +34,8 @@ def _view(stored: str | None) -> DefaultModelView:
     chain showing through — both resolved through the registry's availability
     resolution, the call the spawn boundary makes
     (`shared/lm/factory.py:validate_model_config`). A withdrawn id registered
-    with a fallback (deepseek-v4-pro after #2140) therefore reports the model a
-    new agent actually runs, never the id that is dead on the wire."""
+    with a fallback therefore reports the model a new agent actually runs,
+    never the id that is dead on the wire."""
     from shared.lm._plugin_providers import ensure_provider_plugins_loaded
     from shared.lm.registry import resolve_available_model
 

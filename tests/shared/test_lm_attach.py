@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,20 @@ from shared.lm.attach_constants import (
 )
 from shared.lm.factory import media_types_for_model
 from shared.lm.provider_api import AttachPolicy, ProviderBinding
+from shared.lm.registry import MODELS
+
+
+@pytest.fixture
+def deepseek_vision_model(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Exercise DeepSeek's attachment policy without a retired registry id."""
+    ensure_provider_plugins_loaded()
+    model = "deepseek-vision-fixture"
+    monkeypatch.setitem(
+        MODELS,
+        model,
+        replace(MODELS["deepseek-flash"], media_types=frozenset({"image"})),
+    )
+    return model
 
 
 def _entry(path: Path, label: str | None = None) -> AttachEntry:
@@ -39,11 +54,11 @@ def _padded_png(path: Path, file_size: int, *, dimensions: tuple[int, int] = (2,
     path.write_bytes(image_bytes + b"\0" * (file_size - len(image_bytes)))
 
 
-def test_deepseek_image_uses_a_data_uri_block(tmp_path: Path) -> None:
+def test_deepseek_image_uses_a_data_uri_block(tmp_path: Path, deepseek_vision_model: str) -> None:
     image_path = tmp_path / "example.png"
     image_bytes = _png(image_path)
 
-    pack = pack_attachments("deepseek-v4-flash-vision-exp", [_entry(image_path)])
+    pack = pack_attachments(deepseek_vision_model, [_entry(image_path)])
 
     assert pack is not None
     assert pack.delivered == [str(image_path.resolve())]
@@ -167,14 +182,16 @@ def test_claude_attach_policy_size_limits(tmp_path: Path) -> None:
     ]
 
 
-def test_core_size_ceiling_precedes_provider_policy_limits(tmp_path: Path) -> None:
+def test_core_size_ceiling_precedes_provider_policy_limits(
+    tmp_path: Path, deepseek_vision_model: str
+) -> None:
     oversized_image = tmp_path / "oversized.png"
     delivered_image = tmp_path / "delivered.png"
     _padded_png(oversized_image, 21 * 1024 * 1024)
     _padded_png(delivered_image, 9 * 1024 * 1024)
 
     pack = pack_attachments(
-        "deepseek-v4-flash-vision-exp",
+        deepseek_vision_model,
         [_entry(oversized_image), _entry(delivered_image)],
     )
 
@@ -206,6 +223,7 @@ def test_provider_without_attach_policy_uses_core_size_and_dimension_defaults(
 def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    deepseek_vision_model: str,
 ) -> None:
     from shared.lm import attach
 
@@ -222,7 +240,7 @@ def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
     _png(image_15, (4097, 1))
     entries.append(_entry(image_15))
 
-    pack = pack_attachments("deepseek-v4-flash-vision-exp", entries)
+    pack = pack_attachments(deepseek_vision_model, entries)
 
     assert pack is not None
     assert str(image_14.resolve()) in pack.delivered
@@ -271,7 +289,9 @@ def test_per_turn_file_count_and_total_byte_caps_keep_first_entries(tmp_path: Pa
     assert size_pack.skipped[-1][1] == "would exceed 48 MiB total limit"
 
 
-def test_image_dimensions_and_model_capabilities_are_enforced(tmp_path: Path) -> None:
+def test_image_dimensions_and_model_capabilities_are_enforced(
+    tmp_path: Path, deepseek_vision_model: str
+) -> None:
     huge_image = tmp_path / "huge.png"
     Image.new("1", (9000, 9000)).save(huge_image)
     ordinary_image = tmp_path / "ordinary.png"
@@ -279,9 +299,9 @@ def test_image_dimensions_and_model_capabilities_are_enforced(tmp_path: Path) ->
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"video")
 
-    deepseek_pack = pack_attachments("deepseek-v4-flash-vision-exp", [_entry(huge_image)])
+    deepseek_pack = pack_attachments(deepseek_vision_model, [_entry(huge_image)])
     claude_pack = pack_attachments("claude-sonnet-5", [_entry(huge_image)])
-    text_only_pack = pack_attachments("deepseek-v4-pro", [_entry(ordinary_image)])
+    text_only_pack = pack_attachments("deepseek-flash", [_entry(ordinary_image)])
     claude_video_pack = pack_attachments("claude-sonnet-5", [_entry(video)])
 
     assert deepseek_pack is not None
@@ -335,7 +355,7 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(tmp_path: Path) 
 
     assert pack_attachments("gemini-3.8-flash", []) is None
 
-    pack = pack_attachments("deepseek-v4-pro", [_entry(image_path)])
+    pack = pack_attachments("deepseek-flash", [_entry(image_path)])
 
     assert pack is not None
     # The skipped entry's caption line is a text block; no media block.
