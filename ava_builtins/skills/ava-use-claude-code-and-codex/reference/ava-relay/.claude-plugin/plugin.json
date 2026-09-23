@@ -1,0 +1,5 @@
+{
+  "name": "ava-relay",
+  "description": "Ava impersonation relay — session-lifetime relay for Claude takeovers (task #4612)",
+  "version": "1.0.0"
+}

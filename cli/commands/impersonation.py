@@ -57,6 +57,65 @@ def _emit(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, default=_json_value))
 
 
+def _write_relay_stub(path: Path, *, agent_id: int, session_id: int, token: str) -> None:
+    """Write the resident-relay credential stub the session plugin consumes once.
+
+    The takeover launcher scopes the path per session through
+    ``AVA_IMPERSONATION_RELAY_STUB``; the plugin wrapper deletes the file
+    immediately after loading it into the relay's environment. The file is
+    created 0600 (``fchmod`` defeats the umask): the credential is never
+    briefly world-readable between create and write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)  # apply the exact mode even under a permissive umask
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            fd = -1
+            stream.write(
+                f"SID={session_id}\nAGENT={agent_id}\nAVA_IMPERSONATION_RELAY_TOKEN={token}\n"
+            )
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
+def _print_claude_relay_instructions(response: dict[str, Any], *, agent_id: int) -> None:
+    """Name the claude relay start-up path: the resident stub handoff, else the manual flow."""
+    # env-ok: per-session relay stub handoff, not cluster configuration
+    stub_path = os.environ.get("AVA_IMPERSONATION_RELAY_STUB")
+    token = response.get("relay_token")
+    if stub_path and token:
+        _write_relay_stub(
+            Path(stub_path),
+            agent_id=agent_id,
+            session_id=int(response["session_id"]),
+            token=str(token),
+        )
+        print(
+            "The session plugin starts the claude relay automatically: its "
+            f"credential stub was written to {stub_path}; do not arm a Monitor "
+            "watch. If the stub is not consumed and no relay heartbeat starts, "
+            "fall back to the manual flow: start the relay (ava impersonate "
+            "relay) inside the controller session with "
+            "AVA_IMPERSONATION_RELAY_TOKEN set to the relay token printed above, "
+            "arm it as a Monitor watch with timeout_ms 1800000 and re-arm on "
+            "each expiry notice (see the host conventions). Preparation fails "
+            "without its heartbeat.",
+            file=sys.stderr,
+        )
+        return
+    print(
+        "Start the claude relay (ava impersonate relay) inside the controller "
+        "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
+        "relay token printed above; arm it as a Monitor watch with timeout_ms "
+        "1800000 and re-arm on each expiry notice (see the host conventions). "
+        "Preparation fails without its heartbeat.",
+        file=sys.stderr,
+    )
+
+
 async def _wait_inbox(
     lease_id: str, caller: dict[str, Any], limit: int, wait: float
 ) -> list[dict[str, Any]]:
@@ -135,20 +194,19 @@ def _dispatch(args: argparse.Namespace) -> int:
         endpoint = args.relay_codex_remote
         if args.relay_provider == "codex":
             endpoint = require_control_endpoint(endpoint)
-        _emit(
-            sessions.request(
-                args.agent_id,
-                name=args.name,
-                executor_name=args.caller,
-                process_metadata=process_metadata(),
-                ttl_seconds=args.ttl,
-                reason=args.reason,
-                provider=args.relay_provider,
-                thread_id=args.relay_thread_id,
-                codex_remote=endpoint,
-                batch_window_seconds=args.relay_batch_window_seconds,
-            )
+        response = sessions.request(
+            args.agent_id,
+            name=args.name,
+            executor_name=args.caller,
+            process_metadata=process_metadata(),
+            ttl_seconds=args.ttl,
+            reason=args.reason,
+            provider=args.relay_provider,
+            thread_id=args.relay_thread_id,
+            codex_remote=endpoint,
+            batch_window_seconds=args.relay_batch_window_seconds,
         )
+        _emit(response)
         if args.relay_provider == "codex":
             print(
                 "The runtime starts the codex relay automatically at activation; "
@@ -161,14 +219,7 @@ def _dispatch(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         else:
-            print(
-                "Start the claude relay (ava impersonate relay) inside the controller "
-                "session immediately, with AVA_IMPERSONATION_RELAY_TOKEN set to the "
-                "relay token printed above; arm it as a Monitor watch with timeout_ms "
-                "1800000 and re-arm on each expiry notice (see the host conventions). "
-                "Preparation fails without its heartbeat.",
-                file=sys.stderr,
-            )
+            _print_claude_relay_instructions(response, agent_id=args.agent_id)
         return 0
     if command == "list":
         _emit(sessions.list_sessions(args.agent_id, before=args.before, limit=args.limit))
