@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 212 | event stream |
+| telemetry (category=telemetry) | `events` | 213 | event stream |
 | log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 212)
+## 3. Telemetry events (category=telemetry, 213)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -195,6 +195,7 @@ consumers: see the comments at each emit point.
 | `task_usage_record_failed` | task usage recording failed | anomaly | — | — | events |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events |
 | `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events |
+| `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events |
 | `delivery_poisoned` | delivery backlog — permanently-failing inbound poisoned (dispatch cap reached) | anomaly | inbound_id, dispatch_count, age_s | — | events |
 | `delivery_wake_suppressed` | automatic delivery wakes suppressed after repeated resurrection failures | anomaly | consecutive_failures, suppress_seconds, suppress_count, reason | — | events |
 | `delivery_recovery_decision` | stalled crash-marked recovery decision (harvest / refusal) | anomaly | inbound_id, decision, reason | — | events |

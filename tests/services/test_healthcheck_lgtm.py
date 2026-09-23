@@ -6,7 +6,8 @@ listener is up; only a connection-level failure re-runs the idempotent start
 script immediately. Once listeners answer, three generic Loki write/read probe
 failures trigger the same repair. A body-qualified stuck ingester is force-restarted
 immediately when its storage disk is below the WAL throttle threshold. The check
-self-gates on the $AVA_HOME/lgtm-host marker.
+self-gates on the $AVA_HOME/lgtm-host marker. Repeated HTTP 429s produce a
+separate advisory warning without a stack restart.
 """
 
 from __future__ import annotations
@@ -177,6 +178,70 @@ def test_write_path_probe_rejects_400_push(monkeypatch: pytest.MonkeyPatch) -> N
     assert hc.write_path_probe() == (False, "push_http_400")
 
 
+def test_write_path_probe_retries_429_with_bounded_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[urllib.request.Request] = []
+    sleeps: list[int] = []
+
+    def _reject(request: urllib.request.Request, **_kwargs: object) -> None:
+        requests.append(request)
+        raise urllib.error.HTTPError(  # pyright: ignore[reportArgumentType]
+            request.full_url, 429, "throttled", email.message.Message(), None
+        )
+
+    monkeypatch.setattr(hc._local_http, "open", _reject)
+    monkeypatch.setattr(hc.time, "sleep", sleeps.append)
+
+    assert hc.write_path_probe() == (False, "push_http_429")
+    assert len(requests) == 3
+    assert requests[0] is requests[1] is requests[2]
+    assert sleeps == [1, 2]
+
+
+def test_write_path_probe_retry_then_success_resets_counters(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(hc, "down_probes", list)
+    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
+    requests: list[urllib.request.Request] = []
+    sleeps: list[int] = []
+
+    def _open(request: urllib.request.Request, **_kwargs: object) -> _Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return _Response(status=429)
+        if len(requests) == 2:
+            return _Response(status=204)
+        body = requests[0].data
+        assert isinstance(body, bytes)
+        payload = cast(dict[str, Any], json.loads(body))
+        marker = payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["body"]["stringValue"]
+        return _Response(
+            status=200,
+            body=json.dumps({"data": {"result": [{"values": [["1", marker]]}]}}).encode(),
+        )
+
+    def _fail(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("healthy")
+
+    monkeypatch.setattr(hc._local_http, "open", _open)
+    monkeypatch.setattr(hc.time, "sleep", sleeps.append)
+    monkeypatch.setattr(hc.telemetry, "emit", _fail)
+    monkeypatch.setattr(hc, "_restart_stack", lambda: pytest.fail("healthy"))
+    hc._write_counter(2)
+    hc._write_throttle_counter(2)
+
+    hc.main()
+
+    assert len(requests) == 3
+    assert sleeps == [1]
+    assert hc._read_counter() == 0
+    assert hc._read_throttle_counter() == 0
+
+
 def test_write_path_probe_identifies_stuck_ingester(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(_request: object, **_kwargs: object) -> None:
         raise urllib.error.HTTPError(  # pyright: ignore[reportArgumentType]
@@ -264,7 +329,7 @@ def test_write_path_probe_finds_marker_in_numeric_query_window(
             record = resource_log["scopeLogs"][0]["logRecords"][0]
             marker = record["body"]["stringValue"]
             assert attributes == {
-                "agent_id": marker,
+                "agent_id": "watchdog",
                 "event_name": "watchdog-write-probe",
             }
             assert record["timeUnixNano"] == marker.removeprefix("watchdog-write-probe-")
@@ -276,7 +341,9 @@ def test_write_path_probe_finds_marker_in_numeric_query_window(
 
     assert hc.write_path_probe() == (True, "ok")
     query = urllib.parse.parse_qs(urllib.parse.urlparse(requests[1].full_url).query)
-    assert query["query"] == [f'{{agent_id="{marker}"}}']
+    assert query["query"] == [
+        f'{{agent_id="watchdog", event_name="watchdog-write-probe"}} |= "{marker}"'
+    ]
     assert query["start"][0].isdigit()
     assert query["end"][0].isdigit()
     marker_ts = int(marker.removeprefix("watchdog-write-probe-"))
@@ -311,6 +378,14 @@ def test_write_probe_counter_round_trip_and_corruption(
     assert hc._read_counter() == 2
     hc._write_probe_counter_path().write_text("not-an-int", encoding="utf-8")
     assert hc._read_counter() == 0
+    assert hc._write_probe_throttle_counter_path() == (
+        tmp_path / "lgtm-write-probe-consecutive-throttles"
+    )
+    assert hc._read_throttle_counter() == 0
+    hc._write_throttle_counter(2)
+    assert hc._read_throttle_counter() == 2
+    hc._write_probe_throttle_counter_path().write_text("not-an-int", encoding="utf-8")
+    assert hc._read_throttle_counter() == 0
 
 
 def test_restart_runs_start_sh_in_deploy_dir(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -360,26 +435,31 @@ def test_main_noop_without_marker(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_write_counter_survives_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     """A counter write failure (e.g. full disk) must not crash the round."""
     monkeypatch.setattr(hc, "_write_probe_counter_path", lambda: Path("/no-such-dir/x"))
+    monkeypatch.setattr(hc, "_write_probe_throttle_counter_path", lambda: Path("/no-such-dir/y"))
 
     hc._write_counter(3)  # no raise — the lost increment only delays the verdict
+    hc._write_throttle_counter(3)
 
 
-def test_main_restarts_on_down_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_restarts_on_down_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A down backend on the marked host triggers the start.sh re-run; a failed
     re-run exits non-zero (the watchdog's failure contract)."""
     monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
     monkeypatch.setattr(hc, "down_probes", lambda: ["loki"])
+    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
     counters: list[int] = []
     monkeypatch.setattr(hc, "_write_counter", counters.append)
     write_probed: list[bool] = []
     monkeypatch.setattr(hc, "write_path_probe", lambda: write_probed.append(True) or (True, "ok"))
     restarted: list[bool] = []
     monkeypatch.setattr(hc, "_restart_stack", lambda: restarted.append(True) or True)
+    hc._write_throttle_counter(2)
 
     hc.main()
     assert restarted == [True]
     assert counters == [0]
+    assert hc._read_throttle_counter() == 0
     assert write_probed == []
 
     monkeypatch.setattr(hc, "_restart_stack", lambda: False)
@@ -422,6 +502,84 @@ def test_main_restarts_on_third_write_probe_failure_and_emits_each_round(
     assert all(entry[1]["level"] == "warning" for entry in emitted)
     assert all(entry[1]["source"] == "system" for entry in emitted)
     assert "write path probe failed 3 consecutive rounds" in capsys.readouterr().err
+
+
+def test_main_429_preserves_generic_counter_without_restarting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(hc, "down_probes", list)
+    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
+    reason = "push_http_429"
+    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, reason))
+    restarts: list[bool] = []
+    monkeypatch.setattr(hc, "_restart_stack", lambda: restarts.append(True) or True)
+    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _emit(*args: object, **kwargs: object) -> None:
+        emitted.append((args, kwargs))
+
+    monkeypatch.setattr(hc.telemetry, "emit", _emit)
+    hc._write_counter(2)
+
+    for _ in range(3):
+        hc.main()
+
+    assert restarts == []
+    assert hc._read_counter() == 2
+    assert hc._read_throttle_counter() == 3
+    assert [entry[0] for entry in emitted] == [("telemetry", "loki_write_path_probe_throttled")]
+    assert emitted[0][1]["attributes"] == {"consecutive_throttles": 3, "reason": reason}
+    assert emitted[0][1]["level"] == "warning"
+    assert emitted[0][1]["source"] == "system"
+
+    reason = "probe_not_visible"
+    hc.main()
+    assert restarts == [True]
+    assert hc._read_counter() == 0
+    assert hc._read_throttle_counter() == 0
+    assert emitted[-1][0] == ("telemetry", "loki_write_path_probe_failed")
+
+
+def test_main_persistent_429_emits_every_30_rounds_and_recovery_resets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(hc, "down_probes", list)
+    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
+    reason = "push_http_429"
+    monkeypatch.setattr(hc, "write_path_probe", lambda: (reason == "ok", reason))
+    monkeypatch.setattr(hc, "_restart_stack", lambda: pytest.fail("throttling cannot restart"))
+    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _emit(*args: object, **kwargs: object) -> None:
+        emitted.append((args, kwargs))
+
+    monkeypatch.setattr(hc.telemetry, "emit", _emit)
+
+    for _ in range(61):
+        hc.main()
+    assert hc._read_throttle_counter() == 61
+    assert [entry[1]["attributes"] for entry in emitted] == [
+        {"consecutive_throttles": count, "reason": "push_http_429"} for count in (3, 30, 60)
+    ]
+    assert all(entry[0] == ("telemetry", "loki_write_path_probe_throttled") for entry in emitted)
+
+    reason = "ok"
+    hc.main()
+    assert hc._read_throttle_counter() == 0
+    assert hc._read_counter() == 0
+    reason = "push_http_429"
+    hc.main()
+    hc.main()
+    assert len(emitted) == 3
+    hc.main()
+    assert emitted[-1][1]["attributes"] == {
+        "consecutive_throttles": 3,
+        "reason": "push_http_429",
+    }
 
 
 def test_main_kickstarts_stuck_ingester_when_disk_is_below_threshold(

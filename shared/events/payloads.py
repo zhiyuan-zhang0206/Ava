@@ -688,6 +688,13 @@ class LokiWritePathProbeFailed(TypedDict):
     reason: str
 
 
+class LokiWritePathProbeThrottled(TypedDict):
+    """`loki_write_path_probe_throttled` payload — LGTM write-path healthcheck."""
+
+    consecutive_throttles: int
+    reason: str
+
+
 class DeliveryPoisoned(TypedDict):
     """`delivery_poisoned` payload — delivery watchdog dispatch guard."""
 
