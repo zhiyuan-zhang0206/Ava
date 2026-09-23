@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from gateway import loki_events, loki_query_budget, prom_metrics
 from gateway._cors import cors_allowed_origins
 from gateway.error_envelope import error_response
-from shared.agents import AvaAgentError
+from shared.agents import AgentLaunchFailed, AvaAgentError
 
 _log = logging.getLogger(__name__)
 
@@ -27,6 +27,19 @@ async def _ava_agent_error_handler(request: Request, exc: AvaAgentError) -> JSON
         detail=str(exc),
         retryable=False,
         reason=exc.reason,
+        extensions=(
+            {
+                "agent_id": exc.agent_id,
+                "state": exc.state,
+                **(
+                    {"retry_launch_path": exc.retry_launch_path}
+                    if exc.retry_launch_path is not None
+                    else {}
+                ),
+            }
+            if isinstance(exc, AgentLaunchFailed)
+            else None
+        ),
     )
 
 

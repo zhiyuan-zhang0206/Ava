@@ -70,8 +70,9 @@ its life promising a heartbeat these tables have never had; liveness is the live
 `status_probe`
 ([why](../decisions/2026-07-29-liveness-is-written-by-the-live-process.md)).
 
-Cross-machine spawn is a direct dial, not a queue: the gateway POSTs a `spawn`
-op to the target runner's ops server (address read from this table), which calls
+Cross-machine spawn is a direct dial, not a queue: after committing the row and
+first prompt, the gateway POSTs a `spawn-launch-v2` op to the target runner's ops
+server (address read from this table), which calls
 `ops/ops_lifecycle.py:launch_agent_op` in-process and returns the result in
 the same response. Runners run **no** local gateway process — an agent's SDK
 reaches the gateway over HTTP via `gateway_api_base()`.

@@ -393,7 +393,7 @@
       },
       "post": {
         "summary": "Post Agents",
-        "description": "Spawn a new agent — uniform HTTP path for SDK / frontend / scripts.\n\nSpawn is HTTP-uniform: every spawn funnels through\n`create_and_launch_agent`, which creates the agent row in the gateway\nprocess (the main data-plane identity — the target runner's ops server\nruns as the least-privilege `ava_runner` role and cannot INSERT agents)\nand forwards a launch-only op to the target runner's ops server, whether\nthe runner is remote or co-located on this box (localhost) — one code\npath, uniform logs/traces, no in-process shortcut. Auto label generation\nis done asynchronously by the services/labeler daemon — does not block\nthe spawn response.\n\nFork prompt delivery: for a fork, the prompt is inserted pre-launch by\ncreate_agent_row (the forked agent inherits a full history and would\notherwise start a turn on the inherited task before a post-launch prompt\nlanded), with no InboundArrived (the agent's claim emits InboundCommitted\nonce it picks the prompt up — same as resurrect); for a plain spawn, the\nlaunch op delivers the first prompt post-launch and publishes\nInboundArrived so all UIs see the new agent received its first task in\nreal time.\n\nbody.machine = None targets the local machine (which must be a registered\nagent-runner).\n\n400: the target machine is registered but has no agent-runner capability\n(wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the\nregistry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).",
+        "description": "Spawn a new agent — uniform HTTP path for SDK / frontend / scripts.\n\nSpawn is HTTP-uniform: every spawn funnels through\n`create_and_launch_agent`, which creates the agent row in the gateway\nprocess (the main data-plane identity — the target runner's ops server\nruns as the least-privilege `ava_runner` role and cannot INSERT agents)\nand forwards a launch-only op to the target runner's ops server, whether\nthe runner is remote or co-located on this box (localhost) — one code\npath, uniform logs/traces, no in-process shortcut. Auto label generation\nis done asynchronously by the services/labeler daemon — does not block\nthe spawn response.\n\nPlain and fork first prompts commit with the row. The fork marker precedes\nits chat in that transaction. InboundArrived is a best-effort live hint;\nthe pending scan recovers a missed wake.\n\nbody.machine = None targets the local machine (which must be a registered\nagent-runner).\n\n400: the target machine is registered but has no agent-runner capability\n(wire `reason='spawn_target_not_agent_runner'`). 404: the target is not in the\nregistry. 409: the fork_from agent has no checkpoint (no LLM/exec step yet).",
         "operationId": "post_agents_api_agents_post",
         "requestBody": {
           "required": true,
@@ -441,6 +441,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentRoster"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/retry-launch": {
+      "post": {
+        "summary": "Retry Agent Launch",
+        "description": "Retry dispatch for one committed identity without adding an inbound.",
+        "operationId": "retry_agent_launch_api_agents__agent_id__retry_launch_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpawnedAgent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -6938,7 +6978,7 @@
           "observed_at"
         ],
         "title": "AgentAvailability",
-        "description": "A time-bounded observation, never proof of first-message completion."
+        "description": "Dispatch/admission evidence, never proof of first-message completion."
       },
       "AgentCard": {
         "properties": {
@@ -8470,7 +8510,10 @@
           "host_unavailable",
           "awaiting_admission",
           "admission_refused",
-          "admitted"
+          "admitted",
+          "launch_unreachable",
+          "launch_rejected",
+          "launch_unknown"
         ],
         "title": "AvailabilityReason"
       },

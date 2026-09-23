@@ -349,6 +349,49 @@ def insert_inbound_message(
     return new_id
 
 
+def insert_spawn_prompt_in_transaction(
+    cur: psycopg.Cursor, agent_id: int, content: str, source: str
+) -> int:
+    """Persist a spawn's first chat in the caller's row-creation transaction.
+
+    This path deliberately does not commit or publish. The caller announces the
+    committed inbound after the transaction, while the pending scan covers a
+    lost announcement. Spawn prompts have no multimodal payload or transport
+    provenance; caller identity still follows the ordinary inbound rules.
+    """
+    from shared.caller_identity import caller_payload
+    from shared.envelope import reject_unnegotiated_caller, validate_writable_source
+
+    validate_writable_source(source)
+    reject_unnegotiated_caller(source)
+    payload = caller_payload(source, None)
+    cur.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+        "VALUES (%s, %s, 'chat', %s, %s::jsonb) RETURNING id",
+        (agent_id, content, source, json.dumps(payload) if payload else None),
+    )
+    return fetch_one(cur, "insert spawn prompt")[0]
+
+
+def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: str) -> None:
+    """Emit the ordinary chat audit and wake hints after the prompt commits."""
+    try:
+        if source.startswith("agent:"):
+            from shared.audit_events import insert_event_log
+
+            insert_event_log(
+                event_type="send_message",
+                agent_id=agent_id,
+                source=source,
+                target_agent_id=int(source.removeprefix("agent:")),
+                payload={"inbound_id": inbound_id, "content": content}
+                if content
+                else {"inbound_id": inbound_id},
+            )
+    finally:
+        publish_inbound_wake(agent_id, str(inbound_id))
+
+
 def insert_restart_completed_inbound(
     cur: psycopg.Cursor,
     agent_id: int,

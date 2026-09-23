@@ -372,13 +372,10 @@ class TestSpawn:
         assert "prompt_source" in resp.text
 
 
-def test_unhandled_route_exception_500_carries_cors_headers(
+def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unhandled route exception surfaces as a 500 WITH CORS headers — the
-    catch-all Exception handler routes it back through the middleware stack
-    (CORSMiddleware is outermost), so a browser caller sees the real status
-    instead of "Failed to fetch" (#187)."""
+    """An unexpected post-commit error retains the identity and CORS headers."""
     # The autouse conftest fixture stubs _forward_spawn_to_remote in-process;
     # this test's monkeypatch runs later and wins, making the route itself blow up.
     import gateway.routers.agents as _agents_router
@@ -388,16 +385,17 @@ def test_unhandled_route_exception_500_carries_cors_headers(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(_agents_router, "_forward_spawn_to_remote", _explode)
-    # ServerErrorMiddleware re-raises the exception after answering; the test
-    # client would otherwise surface it as a test failure instead of the 500.
     allowed_origin = cors_allowed_origins()[0]
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with TestClient(app) as client:
         resp = client.post(
             "/api/agents",
             json={},
             headers={"Origin": allowed_origin},
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
+    assert resp.json()["reason"] == "agent_launch_failed"
+    assert resp.json()["agent_id"] > 0
+    assert resp.json()["state"]["availability"]["reason"] == "launch_unknown"
     assert resp.headers["access-control-allow-origin"] == allowed_origin
     assert resp.headers["access-control-allow-credentials"] == "true"
 

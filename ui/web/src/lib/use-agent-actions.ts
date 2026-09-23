@@ -7,7 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import { errMsg } from "./errors";
 import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./fold/agents";
 import { track } from "./telemetry";
@@ -72,7 +72,16 @@ export function useAgentActions(
           : {}),
       }),
     onSuccess: () => { track("spawn"); },
-    onError: (e: unknown) => showError(`Spawn failed: ${errMsg(e)}`),
+    onError: (e: unknown) => {
+      if (e instanceof ApiError && e.agentId !== undefined) {
+        setActiveId(e.agentId);
+        void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+        void queryClient.invalidateQueries({ queryKey: [...AGENT_DETAIL_QUERY_KEY, e.agentId] });
+        showError(t("launchFailedCreated", { id: e.agentId }));
+        return;
+      }
+      showError(`Spawn failed: ${errMsg(e)}`);
+    },
   });
 
   const forkMutation = useMutation({
@@ -98,7 +107,16 @@ export function useAgentActions(
       });
     },
     onSuccess: () => { track("fork"); },
-    onError: (e: unknown) => showError(`Fork failed: ${errMsg(e)}`),
+    onError: (e: unknown) => {
+      if (e instanceof ApiError && e.agentId !== undefined) {
+        setActiveId(e.agentId);
+        void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+        void queryClient.invalidateQueries({ queryKey: [...AGENT_DETAIL_QUERY_KEY, e.agentId] });
+        showError(t("launchFailedCreated", { id: e.agentId }));
+        return;
+      }
+      showError(`Fork failed: ${errMsg(e)}`);
+    },
   });
 
   const terminateMutation = useMutation({

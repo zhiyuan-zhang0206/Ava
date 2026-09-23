@@ -101,6 +101,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="spawn — pure INSERT; a retry twins the agent (#698)"
     ),
+    ("POST", "/api/agents/{agent_id}/retry-launch"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="explicit same-ID launch retry rotates the attempt key; each call dispatches once",
+    ),
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
     # ── gateway/routers/alerts.py ───────────────────────────────────

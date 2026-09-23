@@ -77,6 +77,7 @@ _CARD_COLUMNS = """
     a.config_overlay ->> 'llm_model' AS effective_model,
     mp.last_probe_at AS machine_probe_at, mp.agent_host_online, a.lease_expires_at,
     a.last_admission_outcome, a.last_admission_at,
+    a.last_launch_failure_reason, a.last_launch_failure_at,
     attention.awaiting_response_count, attention.highest_notice_priority,
     fyi.unread_notice_count,
     open_impersonation.session_id AS open_impersonation_session_id
@@ -143,6 +144,8 @@ def _card(data: dict[str, Any]) -> AgentCard:
     lease = data.pop("lease_expires_at")
     admission_outcome = data.pop("last_admission_outcome")
     admission_at = data.pop("last_admission_at")
+    launch_failure_reason = data.pop("last_launch_failure_reason")
+    launch_failure_at = data.pop("last_launch_failure_at")
     probe_at = datetime.fromisoformat(probe) if probe else None
     data["observation"] = observation(
         probe_at,
@@ -154,6 +157,8 @@ def _card(data: dict[str, Any]) -> AgentCard:
         probe_at=probe_at,
         admission_outcome=admission_outcome,
         admission_at=datetime.fromisoformat(admission_at) if admission_at else None,
+        launch_failure_reason=launch_failure_reason,
+        launch_failure_at=datetime.fromisoformat(launch_failure_at) if launch_failure_at else None,
     )
     return AgentCard.model_validate(data)
 

@@ -35,3 +35,9 @@ refused, and unknown labels link to Machine diagnostics. The labels distinguish
 host admission from first-turn completion. Guide, preset, schedule, and
 package-draft creation toasts say "created" and point to the conversation for
 progress; they do not claim that a turn started.
+
+A launch-failure reason stays visible regardless of probe age. The roster row
+shows a launch-failed badge; the selected view shows the reason, failure time,
+target machine, and Retry launch action. A structured create 502 selects its
+committed `agent_id` and refreshes roster/detail instead of inviting another
+create. Retry posts to the existing ID and reconciles the authoritative read.

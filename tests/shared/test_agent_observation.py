@@ -127,6 +127,42 @@ def test_stale_admission_outcome_is_unknown_even_with_live_host() -> None:
     )
 
 
+def test_launch_failure_remains_visible_without_a_fresh_host_probe() -> None:
+    failed_at = NOW - timedelta(hours=2)
+    observed = availability(
+        status="idling",
+        host_online=None,
+        probe_at=None,
+        admission_outcome=None,
+        admission_at=None,
+        launch_failure_reason="launch_unreachable",
+        launch_failure_at=failed_at,
+        now=NOW,
+    )
+    assert observed.reason == AvailabilityReason.LAUNCH_UNREACHABLE
+    assert observed.evidence_at == failed_at
+    assert observed.observed_at == NOW
+
+
+def test_launch_failure_projects_on_card_and_detail(db_conn: psycopg.Connection) -> None:
+    aid = spawn_agent(spawner="user")
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET last_launch_failure_reason='launch_rejected', "
+            "last_launch_failure_at=clock_timestamp() WHERE id=%s",
+            (aid,),
+        )
+    db_conn.commit()
+    card = next(row for row in select_roster(db_conn).agents if row.agent_id == aid)
+    detail = select_one(db_conn, aid)
+    assert detail is not None
+    assert card.availability is not None and detail.availability is not None
+    assert (
+        card.availability.reason == detail.availability.reason == AvailabilityReason.LAUNCH_REJECTED
+    )
+    assert card.availability.evidence_at == detail.availability.evidence_at
+
+
 def test_snapshot_and_roster_share_machine_verdict(db_conn: psycopg.Connection) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(

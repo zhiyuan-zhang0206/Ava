@@ -34,6 +34,15 @@ is the source observation time. `admitted` means the ownership row was claimed,
 not that a message was claimed or a turn completed. Lifecycle `status` is
 unchanged.
 
+`agents_meta.last_launch_failure_reason` and `last_launch_failure_at` hold a
+per-agent failed dispatch observation (`launch_unreachable`, `launch_rejected`,
+or `launch_unknown`). For a nonterminated row it takes precedence over host
+probe evidence and does not expire silently. The paired fields clear on a
+successful dispatch for the same `last_launch_attempt_id` or in the same
+transaction as a host admission result. A delayed failure response cannot
+replace a newer attempt or admission. Cards and detail expose the same typed
+reason and timestamp while lifecycle status remains `idling`.
+
 Inspector `shells_available=false` means the runner observation failed;
 `true` with an empty list means a successful empty result. Missing availability
 from older servers is unknown. Known RPC failures emit a bounded-reason metric

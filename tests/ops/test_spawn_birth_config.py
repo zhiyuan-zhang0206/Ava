@@ -34,7 +34,7 @@ def _spawn_agent(
     the stamp rides out to the child)."""
     from shared.machine import machine_name
 
-    agent_id, _birth_config = create_agent_row(
+    agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         spawner=spawner, machine=machine_name(), config=config, **kw
     )
     return agent_id

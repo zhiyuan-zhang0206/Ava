@@ -479,6 +479,15 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key(
     assert keys[3] != keys[0]
 
 
+def test_versioned_launch_key_is_stable_within_attempt_and_rotates_between_attempts() -> None:
+    first = {"agent_id": 42, "launch_attempt_id": "attempt-one"}
+    second = {"agent_id": 42, "launch_attempt_id": "attempt-two"}
+    key = cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", first)
+    assert key == cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", first)
+    assert key != cluster_rpc._default_idempotency_key("wsl", "spawn-launch-v2", second)
+    assert key.startswith("spawn-launch-v2:wsl:42:")
+
+
 @pytest.mark.asyncio
 async def test_only_spawn_launch_reuses_a_business_idempotency_key(
     monkeypatch: pytest.MonkeyPatch,

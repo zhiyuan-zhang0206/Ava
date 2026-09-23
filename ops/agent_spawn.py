@@ -13,19 +13,19 @@ never on the target runner — its ops server dials as the least-privilege
 
 - **create_agent_row(*, spawner="user", fork_from=None, fork_checkpoint=None,
   machine=<target>)** — new agent + new agents_meta row, NO launch; returns
-  `(new_id, birth_config)`. `spawner` string ("user" / "agent:N" / arbitrary
+  `(new_id, birth_config, prompt_inbound_id, launch_attempt_id)`. `spawner` string ("user" / "agent:N" / arbitrary
   external trigger name); frontend uses it to build the tree. `fork_from` +
   `fork_checkpoint` must be passed as a pair (the caller — the gateway routing
   layer — resolves "latest" to an explicit id first). The launch half is the
-  runner's `launch` op: detached child launch + launch-confirm scheduling
-  (agents_meta UPDATE — within the runner role) + the plain-spawn first prompt
-  (inbound INSERT — within the runner role too).
+  runner's `launch` op: validation and a repeatable hosted wake. Every first prompt is in the
+  gateway's row-creation transaction, before the launch forward.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from uuid import UUID, uuid4
 
 import psycopg
 
@@ -33,7 +33,8 @@ import shared.db
 from shared.agents import ForkCheckpointNotFound
 from shared.audit_events import insert_event_log
 from shared.birth_config import resolve_birth_config
-from shared.db import fetch_one, insert_inbound_message
+from shared.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
+from shared.labels import spawn_prompt_with_label
 from shared.live_announce import publish_agent_spawned_sync
 from shared.lm.registry import normalize_overlay_llm_model
 from shared.log import logger
@@ -255,6 +256,48 @@ def _spawner_agent_id_malformed(spawner: str) -> bool:
     return int(m.group(1)) <= 0
 
 
+def _announce_created_agent(
+    agent_id: int,
+    spawner: str,
+    fork_from: int | None,
+    fork_checkpoint: str | None,
+    target_machine: str,
+    prompt_inbound_id: int | None,
+    prompt_content: str | None,
+    prompt_source: str | None,
+) -> None:
+    """Publish advisory audit/live hints after the birth transaction commits."""
+    spawner_target: int | None = None
+    if spawner.startswith("agent:"):
+        spawner_target = int(spawner.removeprefix("agent:"))
+    try:
+        insert_event_log(
+            event_type="fork" if fork_from is not None else "spawn",
+            agent_id=agent_id,
+            source=spawner,
+            target_agent_id=fork_from if fork_from is not None else spawner_target,
+            payload={
+                "machine": target_machine,
+                "fork_from": fork_from,
+                "fork_checkpoint": fork_checkpoint,
+            },
+        )
+    except Exception:
+        # The committed row and prompt are authoritative; the pending scan and
+        # roster reads recover from a lost Redis/telemetry hint.
+        logger.exception("agent {} spawn audit announcement failed", agent_id)
+    if prompt_inbound_id is not None and prompt_content is not None:
+        assert prompt_source is not None  # noqa: S101 — paired at entry
+        try:
+            announce_spawn_prompt(agent_id, prompt_inbound_id, prompt_content, prompt_source)
+        except Exception:
+            logger.exception("agent {} prompt announcement failed", agent_id)
+    try:
+        publish_agent_spawned_sync(agent_id)
+    except Exception:
+        logger.exception("agent {} roster announcement failed", agent_id)
+
+
 def create_agent_row(
     *,
     spawner: str = "user",
@@ -267,7 +310,7 @@ def create_agent_row(
     prompt_source: str | None = None,
     preset_name: str | None = None,
     fork_tail_skills: list[str] | None = None,
-) -> tuple[int, dict[str, object] | None]:
+) -> tuple[int, dict[str, object] | None, int | None, UUID]:
     """Create the agent row: agents + agents_meta + fork copy, NO launch.
 
     The DB half of what used to be `spawn_agent` (Task #1236 follow-up): the
@@ -275,18 +318,15 @@ def create_agent_row(
     target runner's ops server runs as the least-privilege `ava_runner` role,
     which by design cannot INSERT agents / agents_meta. The gateway resolves
     the fork checkpoint, creates the row (unclaimed status='idling'), and forwards a
-    launch-only op to the target runner; `_launch_agent_process` + the
-    launch-confirm then run on the runner (agents_meta UPDATE is within the
-    runner role). `machine` is the TARGET host (the row's placement) — always
+    launch-only op to the target runner; the hosted runner validates and wakes
+    the pending work. `machine` is the TARGET host (the row's placement) — always
     explicit here, never "local".
 
-    Returns `(new_id, birth_config)` — birth_config rides the launch op so the
-    child replays the same stamp the row was born with.
+    Returns `(new_id, birth_config, prompt_inbound_id, launch_attempt_id)`.
 
     A fork (fork_from set) auto-INSERTs a kind='fork' lifecycle inbound and
-    copies the source's checkpoint chain in the same transaction; a fork
-    `prompt` is delivered pre-launch as a chat inbound. A plain spawn delivers
-    no inbound here — its first prompt lands post-launch from the launch op.
+    copies the source's checkpoint chain in the same transaction. Every first
+    prompt is committed as a chat inbound with the row, before launch.
 
     Args:
         spawner: identifier of the entity that triggered the spawn — "user" /
@@ -326,12 +366,12 @@ def create_agent_row(
             role). When given, it is written with label_user_set=TRUE so the
             labeler's CAS treats it as already-set and does not overwrite it.
             None = leave NULL (labeler may auto-generate one if a prompt is given).
-        prompt: optional chat message delivered pre-launch (forks only);
+        prompt: optional chat message committed with the row;
             paired with prompt_source (both None or both given).
         prompt_source: provenance tag for `prompt` ('agent:N' / 'user').
 
     Returns:
-        (new agent_id, birth_config dict).
+        (new agent_id, birth_config dict, chat inbound id, launch attempt id).
 
     Raises:
         ForkCheckpointNotFound: fork_checkpoint does not exist on fork_from.
@@ -358,6 +398,9 @@ def create_agent_row(
     # agent-runner capability on the target itself.
     target_machine = machine
 
+    launch_attempt_id = uuid4()
+    prompt_inbound_id: int | None = None
+    prompt_content: str | None = None
     with shared.db.connect() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         # label: when the spawner assigns one, store it sticky (label_user_set=TRUE)
@@ -407,8 +450,9 @@ def create_agent_row(
         lineage_spawner = f"agent:{fork_from}" if fork_from is not None else spawner
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
-            "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name) "
-            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s)",
+            "fork_source_checkpoint_id, status, machine, config_overlay, birth_config, preset_name, "
+            "last_launch_attempt_id) "
+            "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s::jsonb, %s::jsonb, %s, %s)",
             (
                 new_id,
                 lineage_spawner,
@@ -419,6 +463,7 @@ def create_agent_row(
                 json.dumps(config) if config else None,
                 json.dumps(birth_config, sort_keys=True),
                 preset_name,
+                launch_attempt_id,
             ),
         )
         if fork_from is not None and fork_checkpoint is not None:
@@ -445,54 +490,25 @@ def create_agent_row(
                     json.dumps({"tail_skills": fork_tail_skills}) if fork_tail_skills else None,
                 ),
             )
-        conn.commit()
-        # --- lifecycle event ---
-        # Emitted AFTER the commit above: the event is keyed by the fresh
-        # agent_id, and readers join events against the live agents set — an
-        # unknown reference is dropped, so a pre-commit emit could lose the
-        # FleetView parent/child edge for the spawn. The retired PG writer was
-        # stricter still: the drain thread read through its own READ COMMITTED
-        # connection, so a pre-commit emit made the fresh id look dangling and
-        # the row was silently skipped (every spawn's edge lost).
-        # Lineage direction (user ruling 2026-08-28, task #1879): the event's
-        # target_agent_id is the lineage PARENT — the spawner for a plain
-        # spawn, the FORK SOURCE for a fork (one agent may fork another from a
-        # third; the parent is the source, never the executor). The executor
-        # who triggered the operation stays in `source`: for a fork that is
-        # the calling agent, not the fork source.
-        spawner_target: int | None = None
-        if spawner.startswith("agent:"):
-            import contextlib
-
-            with contextlib.suppress(ValueError):
-                spawner_target = int(spawner.removeprefix("agent:"))
-        event_type = "fork" if fork_from is not None else "spawn"
-        insert_event_log(
-            event_type=event_type,
-            agent_id=new_id,
-            source=spawner,
-            target_agent_id=fork_from if fork_from is not None else spawner_target,
-            payload={
-                "machine": target_machine,
-                "fork_from": fork_from,
-                "fork_checkpoint": fork_checkpoint,
-            },
-        )
-        # Fork prompt: deliver BEFORE launch as a separate transaction (not
-        # folded into the checkpoint-copy txn — insert_inbound_message commits
-        # on its own). The forked agent inherits a full history, so its first
-        # claim would dispatch the committed fork marker and start a turn on
-        # the inherited task before a post-launch prompt lands — committing here
-        # puts it in that first batch. Same pre-launch delivery as resurrect
-        # (no arrival).
         if prompt is not None:
             assert prompt_source is not None, "prompt requires prompt_source (validated above)"  # noqa: S101
-            if label:
-                prompt = f"{prompt}\n\nYour label has been set to {label}."
-            insert_inbound_message(conn, new_id, prompt, source=prompt_source)
-        # After commit, invalidate the live roster so readers include this row
-        # and its true ancestry. Later status changes publish the same kind of hint.
-        publish_agent_spawned_sync(new_id)
+            prompt_content = spawn_prompt_with_label(prompt, label)
+            prompt_inbound_id = insert_spawn_prompt_in_transaction(
+                cur, new_id, prompt_content, prompt_source
+            )
+        conn.commit()
+        # Lineage/audit and live hints are emitted only after commit. A fork's
+        # audit parent is the source agent, even when a third agent executed it.
+        _announce_created_agent(
+            new_id,
+            spawner,
+            fork_from,
+            fork_checkpoint,
+            target_machine,
+            prompt_inbound_id,
+            prompt_content,
+            prompt_source,
+        )
     # Launch is the runner's job now (the launch op) — the row is created and
     # the caller forwards it. The `agent_spawned` telemetry event keeps its
     # registered name (contract.py) — the row INSERT is still the spawn
@@ -506,4 +522,4 @@ def create_agent_row(
         forked_from=fork_from,
         machine=target_machine,
     )
-    return new_id, birth_config
+    return new_id, birth_config, prompt_inbound_id, launch_attempt_id

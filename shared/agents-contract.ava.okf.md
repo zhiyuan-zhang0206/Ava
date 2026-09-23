@@ -22,7 +22,7 @@ tags:
 - Operation result enums: `TerminateResult` / `RestartResult` / `ResurrectResult` — encode idempotent operation outcomes (enqueued / already_terminated / already_alive …) as wire strings.
 
 ### Wire error protocol
-- `ErrorReason` (StrEnum) is the error identifier on the SDK ↔ gateway HTTP wire (currently 9 values: `agent_not_found` / `fork_source_empty` / `fork_checkpoint_not_found` / `machine_not_registered` / `spawn_target_not_agent_runner` / `cross_machine_gateway_unavailable` / `indexer_unavailable` / `channel_not_configured` / `invalid_model_config`).
+- `ErrorReason` (StrEnum) is the error identifier on the SDK ↔ gateway HTTP wire. `agent_launch_failed` is the post-commit spawn case: the envelope and SDK exception preserve the committed `agent_id`, current state, and ID-based retry path.
 - Gateway side: catches `AvaAgentError` subclasses → response body `{"detail": str(exc), "reason": exc.reason}` + `exc.http_status`.
 - SDK side: parses the response `reason` → looks up `EXCEPTION_BY_REASON` to reconstruct the same exception type and throw to caller (preserving the original message).
 - `AvaAgentError.__init_subclass__` auto-registers subclasses into `EXCEPTION_BY_REASON` at declaration and enforces both `reason`/`http_status` ClassVars (missing → `TypeError` at import)—the table is the single source of truth. New error = enum value + exception class; registration is automatic.

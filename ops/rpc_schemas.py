@@ -13,6 +13,7 @@ are re-exported here so every import path stays stable.
 
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -135,12 +136,14 @@ class LaunchAgentRequest(BaseModel):
     forwards only the launch to the target runner — the runner's ops server
     runs as the least-privilege `ava_runner` role, which by design cannot
     INSERT agents. `config` / `birth_config` are the per-agent overlay the
-    child replays (carried in the child env, never argv); `prompt` /
-    `prompt_source` / `label` are the plain-spawn first-prompt delivery
-    (post-launch, runner-side — inbound INSERT is within the runner role).
+    child replays (carried in the child env, never argv). `launch_attempt_id`
+    fences delayed responses and gives an explicit retry a new RPC dedupe key.
+    The gateway has already committed the first prompt; `prompt` and `label`
+    remain for old gateway compatibility.
     """
 
     agent_id: int
+    launch_attempt_id: UUID | None = None
     config: dict[str, object] | None = None
     birth_config: dict[str, object] | None = None
     prompt: str | None = None
@@ -373,6 +376,7 @@ class SessionInfo(BaseModel):
 # `ops.cluster_rpc` re-exports it for its existing importers.
 OpKind = Literal[
     "spawn-launch",
+    "spawn-launch-v2",
     "lifecycle",
     "cluster_stop",
     "cluster_update",

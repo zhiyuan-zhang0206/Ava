@@ -8,6 +8,7 @@ import ava
 import ava._boot
 from ava import _gateway_client as _client
 from ava._sdk_validation import coerce_str, coerce_typed
+from shared.agents import AgentLaunchFailed as AgentLaunchFailed
 
 # Redundant-alias re-exports: importable from this module but deliberately not
 # in __all_for_ava__ — error types never render into the SDK docs every agent carries;
@@ -51,6 +52,7 @@ __all_for_ava__ = [
     "list_machines",
     "presets",
     "restart",
+    "retry_launch",
     "resurrect",
     "send_message",
     "spawn",
@@ -393,6 +395,16 @@ def spawn(
         config=config_overlay,
         label=None,
     )
+
+
+def retry_launch(agent_id: int) -> int:
+    """Retry starting an existing agent after a launch failure.
+
+    This keeps its identity and first prompt. Use the agent id returned in the
+    failed creation response.
+    """
+    agent_id = coerce_typed(agent_id, "agent_id", int)
+    return _client.retry_launch(agent_id)
 
 
 def _spawn_impl(
