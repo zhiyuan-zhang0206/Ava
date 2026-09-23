@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from shared import browser_deps, platform_probes
+from shared import platform_probes
+from shared.host.converge import browser_deps
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

@@ -43,7 +43,7 @@ def materialize_cluster_extensions() -> None:
     up.
     """
     from shared import db, extension_materialize, paths
-    from shared.converge_preserve_report import report_converge_preserve
+    from shared.host.converge.converge_preserve_report import report_converge_preserve
 
     try:
         # The pool opens eagerly and owns worker threads; close it here rather

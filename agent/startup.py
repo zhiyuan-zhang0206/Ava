@@ -460,10 +460,14 @@ async def _notify_desktop_permissions_at_startup() -> None:
 
     Must run after SDK init so ava.ui.notify is registered.
     """
-    from shared.accessibility import AccessibilityStatus
-    from shared.accessibility import status_file_path as accessibility_status_file_path
-    from shared.screen_capture import ScreenCaptureStatus
-    from shared.screen_capture import status_file_path as screen_capture_status_file_path
+    from shared.host.converge.accessibility import AccessibilityStatus
+    from shared.host.converge.accessibility import (
+        status_file_path as accessibility_status_file_path,
+    )
+    from shared.host.converge.screen_capture import ScreenCaptureStatus
+    from shared.host.converge.screen_capture import (
+        status_file_path as screen_capture_status_file_path,
+    )
 
     claimed: list[tuple[Path, Path, ScreenCaptureStatus | AccessibilityStatus]] = []
     for status_path, status_type in (

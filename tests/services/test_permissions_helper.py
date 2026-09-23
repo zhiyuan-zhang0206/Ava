@@ -26,9 +26,9 @@ import pytest
 
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
-from shared.accessibility import AccessibilityState
 from shared.config import settings
-from shared.screen_capture import ScreenCaptureState
+from shared.host.converge.accessibility import AccessibilityState
+from shared.host.converge.screen_capture import ScreenCaptureState
 
 
 def _read_line(conn: socket.socket) -> bytes:
