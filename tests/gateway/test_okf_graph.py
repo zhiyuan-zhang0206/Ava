@@ -92,13 +92,17 @@ def test_parse_frontmatter_equivalent_to_legacy_on_repo_bundles() -> None:
         assert body == legacy_body, f"{rel}: body differs from legacy"
 
 
-def test_parse_frontmatter_keeps_legacy_tolerance_for_spaced_fences() -> None:
-    """`"--- "` opener/closer lines predate the shared parser; the adapter
-    still accepts them (the strict shared parser rejects them)."""
+@pytest.mark.parametrize(
+    "text",
+    [
+        "--- \ntitle: X\n--- \n\nBody\n",
+        "---\ntitle: [unclosed\n---\nBody\n",
+        "---\ntitle: X\nBody\n",
+        "no frontmatter\n",
+    ],
+)
+def test_parse_frontmatter_returns_original_text_for_unknown_or_bad_fences(text: str) -> None:
+    """Unknown fences and structurally invalid blocks are plain body text."""
     from shared.docs.okf_graph import parse_frontmatter
 
-    fm, body = parse_frontmatter("--- \ntitle: X\n--- \n\nBody\n")
-    assert fm == {"title": "X"}
-    assert body == "Body\n"
-    # and bad frontmatter still degrades to ({}, text), not an exception
-    assert parse_frontmatter("no frontmatter\n") == ({}, "no frontmatter\n")
+    assert parse_frontmatter(text) == ({}, text)

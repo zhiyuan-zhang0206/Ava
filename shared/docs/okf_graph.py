@@ -21,9 +21,7 @@ import os
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
-
-import yaml
+from typing import Any
 
 from shared.docs.frontmatter import parse_frontmatter_typed
 from shared.docs.notes import normalize_tags
@@ -56,29 +54,14 @@ def find_files(bundle_dir: str | Path) -> list[str]:
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """Adapter over `shared.docs.frontmatter.parse_frontmatter_typed` — keeps this
-    module's historical lenient contract: absent/bad frontmatter → `({}, text)`,
-    values keep their YAML types, and the body's leading newline is stripped.
-
-    The legacy tolerance for an opener/closer line with trailing spaces
-    (`"--- "`) is preserved for files written before the shared parser, which
-    only recognizes a bare `---` fence.
+    """Adapter over `shared.docs.frontmatter.parse_frontmatter_typed` — absent/bad
+    frontmatter returns `({}, text)`; valid YAML keeps its value types and the
+    body's leading newline is stripped.
     """
     parsed = parse_frontmatter_typed(text)
     if parsed is not None:
         fm, body = parsed
         return fm, body.lstrip("\n")
-    lines = text.split("\n")
-    if not lines or lines[0].strip() != "---":
-        return {}, text
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            try:
-                loaded = yaml.safe_load("\n".join(lines[1:i]))
-            except yaml.YAMLError:
-                loaded = None
-            fm = cast("dict[str, Any]", loaded) if isinstance(loaded, dict) else {}
-            return fm, "\n".join(lines[i + 1 :]).lstrip("\n")
     return {}, text
 
 
