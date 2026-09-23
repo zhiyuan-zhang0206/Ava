@@ -130,11 +130,13 @@ in the CI coverage report and `coverage.xml`, not here.
 Push/PR → CI
   ├── backend: pytest + pyright + coverage
   │   coverage output to CI log + xml (can be integrated with external services)
-  ├── frontend: tsc + vitest
+  ├── frontend: eslint + tsc + vitest
   └── e2e: Playwright (required checks accept success or skipped; skips only on docs-only diffs)
 ```
 
-Pre-commit does not run pytest (needs DB), but runs ruff + pyright + frontend tsc + frontend vitest.
+Pre-commit runs lint and codegen checks; pre-push runs pyright and frontend
+tsc, eslint and the full Vitest suite. Local development tests are targeted;
+see the [hook runbook](../conventions/runbook.md#git-hooks-pre-commit--pre-push).
 
 ## `.test_durations` — pytest-split duration data
 

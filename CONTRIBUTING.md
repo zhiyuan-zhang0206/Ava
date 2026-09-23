@@ -33,6 +33,9 @@ Standard fork-and-PR — use whatever local git setup you like:
 1. Fork, branch from `main`, one focused change per PR.
 2. Make the change; run the tests for the area you touched
    (`.venv/bin/pytest tests/<area>`) and `.venv/bin/pre-commit run --all-files`.
+   Heavy checks run at pre-push; see the
+   [hook runbook](conventions/runbook.md#git-hooks-pre-commit--pre-push) for
+   manual stage invocation and targeted frontend verification.
 3. Open a PR with a clear **what + why**. Rebase onto latest `main` before
    pushing (see [`.agents/skills/ship-a-change/SKILL.md`](.agents/skills/ship-a-change/SKILL.md)). CI must
    be green; the PR then merges through the Trunk queue as a squash merge

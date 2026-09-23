@@ -61,9 +61,9 @@ suite and the post-deploy visual gate consume it so their definitions cannot dri
 
 ### CI integration
 - `.github/workflows/` — GitHub Actions runs the full suite automatically
-- pre-commit runs ruff / ruff-format, pyright, frontend tsc, eslint, **full frontend vitest** in addition to lint (`.pre-commit-config.yaml`); just doesn't run pytest
+- pre-commit runs lint and codegen checks; pre-push runs pyright, frontend tsc, eslint and **full frontend vitest** (`.pre-commit-config.yaml`). Neither stage runs pytest.
 - CI runs all non-e2e tests + e2e + coverage thresholds
-- Every pre-commit hook runs in CI too, so no lint is local-only: the `backend` job runs `pre-commit run --all-files` (skipping the four npx hooks the `frontend` job covers), and the classify-independent `doc-lints` job runs the doc-lint family on every PR — including docs-only diffs, which skip `backend` entirely — so the doc lints (OKF size/format, doc symbol + roster sync, AGENTS.md / SKILL.md ceilings) still gate exactly the PRs that can break them
+- CI owns every local check except the warn-only hook-installation check: `backend-structure` runs structural lints plus a conditional, explicit codegen segment; `backend-static` owns pyright and `frontend` owns tsc, eslint and vitest. The classify-independent `doc-lints` job covers docs-only PRs too. See the [CI runbook](../conventions/runbook.md#ci-continuous-integration) for ownership and selector safety nets.
 
 ## Key dependencies
 

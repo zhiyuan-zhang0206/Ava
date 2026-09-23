@@ -474,12 +474,14 @@ repos:
         files: ^ui/web/.*\.(ts|tsx|js|mjs)$
         pass_filenames: false
 
-      # Frontend unit tests — vitest run executes the full suite in ~1.5s
-      # (fast enough). Triggers on ts/tsx changes so core logic like timeline
-      # reducer / merge / use-timeline stays covered.
+      # Full frontend unit suite belongs at push: measured ~23s locally.
+      # CI independently runs vitest with coverage; keep the full local suite.
+      # Decision: decisions/2026-09-24-vitest-prepush-selection.md.
       - id: frontend-vitest
         name: frontend vitest run
-        entry: bash -c 'cd ui/web && npx --no-install vitest run'
+        entry: bash scripts/prepush-guard.sh vitest -- bash -c 'cd ui/web && npx --no-install vitest run'
+        stages: [pre-push]
+        verbose: true
         language: system
         files: ^ui/web/.*\.(ts|tsx)$
         pass_filenames: false

@@ -432,7 +432,7 @@ jobs:
     # freshness hooks only when the PR diff matches their configured files:
     # regexes. Pushes and selector errors run B; a no-match PR logs STEP SKIPPED.
     # Other CI jobs own ruff/pyright/migrations/clock, frontend gates and core
-    # manifests. Pre-push-only pyright/tsc/eslint remain redundant SKIP entries.
+    # manifests. Pre-push-only pyright/tsc/eslint/vitest remain redundant SKIP entries.
     # Runs when EITHER side changed: frontend-only edits can break generated
     # contracts too. Main pushes run all four hooks as a safety net; the merge
     # queue re-evaluates the same selector on the combined tree before landing.
@@ -1570,7 +1570,7 @@ jobs:
       # clean checkout resolves it to a widened `string`. Without this step CI
       # checks every route link against that widened type, and a typed-route
       # regression cannot fail the build. It also makes CI disagree with the
-      # local `frontend tsc --noEmit` pre-commit hook, which runs typegen
+      # local `frontend tsc --noEmit` pre-push hook, which runs typegen
       # first: the same line is then flagged in one environment and not the
       # other. Generating the types here is what makes the two agree.
       - name: Generate Next.js route types (typedRoutes)

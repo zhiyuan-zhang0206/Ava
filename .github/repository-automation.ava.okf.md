@@ -10,6 +10,15 @@ tags:
 
 # Repository Automation
 
+## Proof workflow triggers
+
+Proof workflows use path-filtered push/PR entry points; job predicates can
+further restrict execution. `tests/ci/test_workflow_paths.py` checks every
+workflow push/PR event for nonempty `paths` / `paths-ignore` or an explicit,
+event-specific exemption, rejecting stale exemptions. Branch/tag/activity
+filters alone do not qualify. Schedules and other event kinds are outside
+that guard.
+
 ## `workflows/ci-rerun.yml`
 
 A failed or cap-cancelled completed CI run can dispatch one rerun of its failed
