@@ -55,7 +55,7 @@ export function PackageDraftEntry({ kind }: { kind: PackageKind }) {
     onSuccess: (res) => {
       setNl("");
       setActiveId(res.agent_id);
-      showToast(`Installer #${res.agent_id} started — continue in the conversation`);
+      showToast(`Installer #${res.agent_id} created — check its conversation for progress`);
       router.push("/");
     },
     onError: (err: unknown) => showToast(`Install failed: ${errMsg(err)}`),

@@ -15,6 +15,7 @@ live tail + historical REST query) live in routers/agent_events.py.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -38,6 +39,7 @@ from ops.rpc_schemas import (
     SpawnedAgent,
 )
 from shared import agent_roster, agent_snapshot
+from shared.agent_observation import AgentAvailability, AvailabilityReason
 from shared.agents import (
     AgentNotFound,
     ForkConfigChangeNotAllowed,
@@ -450,7 +452,30 @@ async def create_and_launch_agent(
                 )
             }
         )
-    return spawned
+    observed = await asyncio.to_thread(_creation_availability, pool, new_id)
+    return spawned.model_copy(
+        update={
+            "accepted": True,
+            # Admission can race this read; neither it nor a 201 proves that
+            # the first inbound was claimed or the turn completed.
+            "execution_observed": False,
+            "reason": observed.reason,
+            "observed_at": observed.observed_at,
+        }
+    )
+
+
+def _creation_availability(pool: ConnectionPool, agent_id: int) -> AgentAvailability:
+    try:
+        with pool.connection() as conn:
+            snap = agent_snapshot.select_one(conn, agent_id)
+    except Exception as exc:
+        logger.warning("created agent {} receipt read failed: {}", agent_id, exc)
+        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=datetime.now(UTC))
+    if snap is None or snap.availability is None:
+        logger.warning("created agent {} unavailable for receipt read", agent_id)
+        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=datetime.now(UTC))
+    return snap.availability
 
 
 @router.post("/api/agents", status_code=201, response_model_exclude_none=True)

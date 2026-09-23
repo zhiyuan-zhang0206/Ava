@@ -108,7 +108,7 @@ export default function SchedulesPage() {
     onSuccess: (res) => {
       setNl("");
       setActiveId(res.agent_id);
-      showToast(`Schedule writer #${res.agent_id} started — finish it in the conversation`);
+      showToast(t("writerCreated", { id: res.agent_id }));
       router.push("/");
     },
     onError: onErr("Draft"),

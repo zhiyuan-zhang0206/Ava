@@ -4,14 +4,14 @@
 //
 // Pulls /api/status to inspect cluster.machines. Agent processes only run on
 // agent-runner machines (the gateway refuses local spawn with HTTP 400 —
-// see `gateway/app.py:post_agents`), so the spawn target list is filtered to
-// online, not-paused, role=agent-runner rows.
+// see `gateway/routers/agents.py:post_agents`), so the spawn target list requires
+// online, unpaused agent-runner rows with an observed live agent host.
 //
 // - 0 spawnable → button disabled with a tooltip explaining
-// - 1 spawnable → plain button passes that machine's name to onSpawn
+// - 1 eligible, spawnable → plain button passes that machine's name to onSpawn
 //   (we never call onSpawn(undefined) on a gateway-hosted frontend,
 //   because the backend would interpret it as "spawn here" and reject)
-// - >=2 spawnable → Popover trigger; clicking an entry calls onSpawn(name)
+// - >=2 eligible → Popover trigger with host-down entries disabled + explained
 //
 // The model picker is a custom Popover dropdown (not a native <select>) so each
 // option can lay out the model name (left) and pricing (right) with flexbox —
@@ -85,13 +85,13 @@ export function SpawnButton({ onSpawn, variant }: Props) {
   const setSelectedReasoningEffort = (v: string | undefined) =>
     setSetting("behavior.spawn_reasoning_effort", v ?? null);
 
-  // Agent processes only run on agent-runner machines whose probe returned a
-  // determinate unpaused verdict. `online=true, paused=null` means the ops
-  // server was reached but status is unknown, so spawning must fail closed.
+  // Ops reachability is not agent-host readiness. Keep the existing host-alive
+  // verdict's meaning, and show non-spawnable hosts in the picker with a reason.
   const allMachines = statusData?.cluster.machines ?? [];
-  const spawnable = allMachines.filter(
+  const eligible = allMachines.filter(
     (m) => m.serve_agent_runner && m.online && m.paused === false,
   );
+  const spawnable = eligible.filter((m) => m.agent_host_online === true);
 
   // Provider-grouped model list for the picker — providers in response
   // order, models within each provider in order (see lib/models.ts).
@@ -349,14 +349,18 @@ export function SpawnButton({ onSpawn, variant }: Props) {
 
   if (spawnable.length === 0) {
     return (
-      <TriggerButton
-        variant={variant}
-        disabled
-      />
+      <span
+        className="inline-flex"
+        title={eligible.length === 1
+          ? eligible[0].agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")
+          : t("noReadyRunner")}
+      >
+        <TriggerButton variant={variant} disabled />
+      </span>
     );
   }
 
-  if (spawnable.length === 1) {
+  if (spawnable.length === 1 && eligible.length === 1) {
     const only = spawnable[0];
     if (variant === "icon") {
       // Icon variant has no room to render the model select; the selection
@@ -384,8 +388,9 @@ export function SpawnButton({ onSpawn, variant }: Props) {
     );
   }
 
-  // ≥2 spawnable agent-runners → popover picker, alphabetical
-  const sorted = [...spawnable].sort((a, b) => a.name.localeCompare(b.name));
+  // Multiple eligible runners: the picker includes host-down entries so the
+  // unavailable reason is visible instead of silently hiding the machine.
+  const sorted = [...eligible].sort((a, b) => a.name.localeCompare(b.name));
 
   if (variant === "icon") {
     return (
@@ -407,13 +412,19 @@ export function SpawnButton({ onSpawn, variant }: Props) {
                 <li key={m.name}>
                   <button
                     type="button"
+                    disabled={m.agent_host_online !== true}
+                    title={m.agent_host_online === true ? undefined
+                      : m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")}
                     onClick={() => {
                       onSpawn(buildOpts(m.name));
                       setOpen(false);
                     }}
-                    className={cn("w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent items-center justify-between gap-3", FLEX)}
+                    className={cn("w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent disabled:opacity-50 items-center justify-between gap-3", FLEX)}
                   >
                     <span className="truncate">{m.name}</span>
+                    {m.agent_host_online !== true && <span className="text-xs">
+                      {m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")}
+                    </span>}
                   </button>
                 </li>
               ))}
@@ -450,13 +461,19 @@ export function SpawnButton({ onSpawn, variant }: Props) {
                 <li key={m.name}>
                   <button
                     type="button"
+                    disabled={m.agent_host_online !== true}
+                    title={m.agent_host_online === true ? undefined
+                      : m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")}
                     onClick={() => {
                       onSpawn(buildOpts(m.name));
                       setOpen(false);
                     }}
-                    className={cn("w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent items-center justify-between gap-3", FLEX)}
+                    className={cn("w-full text-left px-3 py-1.5 text-sm hover:bg-sidebar-accent disabled:opacity-50 items-center justify-between gap-3", FLEX)}
                   >
                     <span className="truncate">{m.name}</span>
+                    {m.agent_host_online !== true && <span className="text-xs">
+                      {m.agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")}
+                    </span>}
                   </button>
                 </li>
               ))}

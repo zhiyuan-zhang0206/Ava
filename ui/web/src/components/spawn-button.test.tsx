@@ -61,6 +61,7 @@ function statusWith(
     name: string;
     online: boolean;
     paused?: boolean | null;
+    agentHostOnline?: boolean | null;
     serveGateway?: boolean;
     serveAgentRunner?: boolean;
   }[],
@@ -88,6 +89,7 @@ function statusWith(
         up_since_at: "2026-05-19T00:00:00Z",
         online: m.online,
         paused: m.paused !== undefined ? m.paused : m.online ? false : null,
+        agent_host_online: m.agentHostOnline !== undefined ? m.agentHostOnline : m.online ? true : null,
         shell_count: 0,
         agent_count: 0,
         session_count: 0,
@@ -309,6 +311,33 @@ describe("SpawnButton status polling", () => {
 });
 
 describe("SpawnButton zero-spawnable", () => {
+  it("a reachable runner with a down host is disabled with the host reason", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(statusWith([
+      { name: "cloud", online: true },
+      { name: "test-host", online: true, agentHostOnline: false },
+    ]));
+    const onSpawn = vi.fn();
+    wrap(<SpawnButton variant="sm" onSpawn={onSpawn} />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Spawn agent").parentElement?.getAttribute("title"))
+        .toBe("Agent host unavailable");
+    });
+    fireEvent.click(screen.getByLabelText("Spawn agent"));
+    expect(onSpawn).not.toHaveBeenCalled();
+  });
+
+  it("an absent host verdict stays disabled as unknown", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(statusWith([
+      { name: "cloud", online: true },
+      { name: "test-host", online: true, agentHostOnline: null },
+    ]));
+    wrap(<SpawnButton variant="sm" onSpawn={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Spawn agent").parentElement?.getAttribute("title"))
+        .toBe("Agent host status unknown");
+    });
+  });
+
   it("status not loaded yet → renders disabled button (no machines visible)", () => {
     vi.mocked(api.getSystemStatus).mockReturnValue(new Promise(() => undefined));
     const onSpawn = vi.fn();
@@ -427,6 +456,23 @@ describe("SpawnButton single-spawnable", () => {
 });
 
 describe("SpawnButton multi-spawnable picker", () => {
+  it("shows a down host as a disabled picker entry beside a ready host", async () => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(statusWith([
+      { name: "cloud", online: true },
+      { name: "ready", online: true },
+      { name: "blocked", online: true, agentHostOnline: false },
+    ]));
+    const onSpawn = vi.fn();
+    wrap(<SpawnButton variant="sm" onSpawn={onSpawn} />);
+    await waitForPopoverRender();
+    fireEvent.click(screen.getByLabelText("Spawn agent"));
+    const blocked = await screen.findByRole("button", { name: /blocked/ });
+    expect(blocked.hasAttribute("disabled")).toBe(true);
+    expect(blocked.textContent).toContain("Agent host unavailable");
+    fireEvent.click(blocked);
+    expect(onSpawn).not.toHaveBeenCalled();
+  });
+
   it("two agent-runner online → popover with both, alphabetical", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(
       statusWith([

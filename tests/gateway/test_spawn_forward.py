@@ -28,8 +28,38 @@ def _force_local_machine(set_machine_identity) -> str:
 
 
 class TestRouting:
+    @pytest.mark.parametrize("failure", ["exception", "missing"])
+    def test_receipt_read_failure_keeps_accepted_creation(
+        self,
+        _force_local_machine: str,
+        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
+        failure: str,
+    ) -> None:
+        async def _capture_forward(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            return SpawnedAgent(id=body.agent_id)
+
+        def _unreadable(_conn: psycopg.Connection, _agent_id: int) -> None:
+            if failure == "exception":
+                raise RuntimeError("receipt read unavailable")
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(app_module.agent_snapshot, "select_one", _unreadable)
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"machine": "local-test"})
+        assert resp.status_code == 201
+        body = resp.json()
+        assert db_conn.execute("SELECT id FROM agents_meta WHERE id=%s", (body["id"],)).fetchone()
+        assert body["accepted"] is True
+        assert body["execution_observed"] is False
+        assert body["reason"] == "unknown"
+        assert body["observed_at"]
+
     def test_machine_eq_local_forwards_to_local_target(
-        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+        self,
+        _force_local_machine: str,
+        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
     ) -> None:
         """body.machine == local → spawn is HTTP-uniform: still forwarded, with
         target == local (the co-located runner's ops server over localhost)."""
@@ -41,10 +71,19 @@ class TestRouting:
             return SpawnedAgent(id=777)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        db_conn.execute(
+            "INSERT INTO machine_probe (machine_name,online,agent_host_online) "
+            "VALUES ('local-test',TRUE,FALSE)"
+        )
+        db_conn.commit()
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "local-test"})
         assert resp.status_code == 201
-        assert resp.json() == {"id": 777}
+        assert resp.json()["id"] == 777
+        assert resp.json()["accepted"] is True
+        assert resp.json()["execution_observed"] is False
+        assert resp.json()["reason"] == "host_unavailable"
+        assert resp.json()["observed_at"]
         assert captured["target"] == "local-test"
 
     def test_machine_none_forwards_to_local_target(
@@ -144,7 +183,10 @@ class TestRouting:
                 json={"machine": "remote-mac", "spawner": "user"},
             )
         assert resp.status_code == 201
-        assert resp.json() == {"id": 999}
+        assert resp.json()["id"] == 999
+        assert resp.json()["accepted"] is True
+        assert resp.json()["execution_observed"] is False
+        assert resp.json()["reason"] == "unknown"
         assert captured["target"] == "remote-mac"
         # The forward op is the launch half of the #1236 split — the row was
         # already created by the gateway, so the body carries the new agent id,
