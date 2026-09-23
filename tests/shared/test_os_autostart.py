@@ -123,20 +123,20 @@ def test_register_linux_adds_reboot_entry(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_register_linux_replaces_only_this_clusters_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace this home's slug-marked entry and preserve a co-located cluster."""
-    captured: dict = {}
+    captured: dict[str, str] = {}
     current_line = "@reboot /old/ava boot  # ava-autostart.ava-t-cafe0123"
     other_line = "@reboot /other/ava boot  # ava-autostart.ava-other-deadbeef"
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd: list[str], **kw: object) -> types.SimpleNamespace:
         if cmd[:2] == ["crontab", "-l"]:
             return types.SimpleNamespace(returncode=0, stdout=f"{current_line}\n{other_line}\n")
         if cmd == ["crontab", "-"]:
-            captured["input"] = kw.get("input")  # pyright: ignore[reportUnknownMemberType]
+            captured["input"] = str(kw["input"])
             return types.SimpleNamespace(returncode=0, stderr="")
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(os_autostart.shutil, "which", lambda _name: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(os_autostart.subprocess, "run", fake_run)
     assert os_autostart._register_linux() == 0
     assert "ava-autostart.ava-t-cafe0123" in captured["input"]
     assert current_line not in captured["input"]
