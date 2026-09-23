@@ -83,8 +83,16 @@ Hand-edit entries only to lower a still-over-budget value or delete an entry.
 Function renames have one allowance: an added function key must pair with a
 distinct removed key in the **same section and file**, with a new value no
 greater than the removed value. One removal cannot cover two additions.
-Directory and file sections never permit added keys. All sections reject
-raised values. New files belong in existing subdirectories with room, or
+File renames carry their frozen keys: when `git diff -M` detects a move between
+the comparison base and the working tree (any similarity — a real move also
+rewrites import paths, so keyed files typically land around R9x), the `files`,
+`complexity`, and `nesting` keys of the old path are read as the new path's
+keys. Migrate the baseline entries with the move — remove the old key, add the
+new one with the same value; the guard accepts that edit. The frozen values
+still cap the new path: a raised value or an unpaired new key stays a violation,
+and a rewrite git no longer detects as a rename is evaluated fresh. Directory
+counts follow the move (they are per-directory, not per-file). Directory and file sections never
+permit added keys. All sections reject raised values. New files belong in existing subdirectories with room, or
 arrive with a real directory split that lowers counts, without raising the
 baseline.
 

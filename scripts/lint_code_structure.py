@@ -58,6 +58,11 @@ a file also checks its parent directory. The baseline guard always runs.
 Function budgets: Radon 6.0.1 CC >=15 is hard, 10-14 warns; control-flow nesting
 >5 is hard. The complexity/nesting baseline sections use path::qualname keys.
 Same-file one-to-one removals may cover renamed keys with equal or lower values.
+Renames git -M detects carry their frozen keys: migrate the baseline entries to
+the new path — remove the old key, add the new one with the same value — and the
+guard accepts the edit. The frozen values still cap the new path: a raise, or an
+unpaired new key, stays a violation. Moves whose edit breaks rename detection (a
+rewrite, not an import-path touch-up) are evaluated fresh under the new path.
 Use --complexity-warnings-full anywhere in argv to unfold all warning file counts.
 """
 
@@ -377,12 +382,84 @@ def _baseline_base() -> str:
     return "HEAD"
 
 
-def _section_guard(kind: str, current: dict[str, int], previous: dict[str, int]) -> list[str]:
+def _rename_map(base: str) -> dict[str, str]:
+    """Old -> new paths for the renames git -M detects between `base` and the working tree.
+
+    A detected rename carries its frozen baseline keys to the new path: move the
+    baseline entries with it — remove the old key, add the new one with the same
+    value — and the guard accepts the edit. The frozen values still cap the new
+    path: a raise stays a violation and a new key without a paired removal stays
+    an addition. A rewrite git no longer detects as a rename is evaluated fresh.
+    """
+    result = _git("diff", "-M", "--name-status", "--diff-filter=R", "--no-color", base)
+    if result.returncode:
+        print(f"note: rename map unavailable ({base} diff failed)", file=sys.stderr)
+        return {}
+    renames: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        status, _, rest = line.partition("\t")
+        old, separator, new = rest.partition("\t")
+        if status.startswith("R") and separator and old and new:
+            renames[old] = new
+    return renames
+
+
+def _rename_map_or_empty() -> dict[str, str]:
+    """The rename map for the guard's comparison base; an unresolvable base maps nothing."""
+    try:
+        return _rename_map(_baseline_base())
+    except ValueError:
+        # The baseline guard reports the unresolvable base itself.
+        return {}
+
+
+def _remap_renamed_keys(
+    kind: str, entries: dict[str, int], renames: dict[str, str]
+) -> dict[str, int]:
+    """Carry each renamed file's entry over to its new path (files/complexity/nesting)."""
+    if not renames or kind == "directories":
+        return entries
+    remapped: dict[str, int] = {}
+    for name, value in entries.items():
+        if kind == "files":
+            target = renames.get(name, name)
+        else:
+            path, separator, qualname = name.partition("::")
+            target = f"{renames.get(path, path)}{separator}{qualname}"
+        if target in remapped:
+            # Unreachable for a valid baseline; keep the stricter (smaller) cap.
+            remapped[target] = min(remapped[target], value)
+        else:
+            remapped[target] = value
+    return remapped
+
+
+def _renamed_to(kind: str, name: str, renames: dict[str, str]) -> str | None:
+    """The new path of a stale entry's renamed file (files/complexity/nesting), if known."""
+    if kind == "files":
+        return renames.get(name)
+    return renames.get(name.partition("::")[0])
+
+
+def _section_guard(
+    kind: str,
+    current: dict[str, int],
+    previous: dict[str, int],
+    *,
+    renames: dict[str, str] | None = None,
+) -> list[str]:
     errors: list[str] = []
     additions = current.keys() - previous.keys()
     if kind in quality.QUALITY_SECTIONS:
         additions = set(quality.unpaired_additions(current, previous))
     for name in sorted(additions):
+        moved_to = _renamed_to(kind, name, renames or {})
+        if moved_to is not None:
+            errors.append(
+                f"{_BASELINE_PATH}: {kind} entry {name} was not migrated after its file "
+                f"moved to {moved_to} — move this key to the new path with the same value"
+            )
+            continue
         rule = (
             "added key without a paired same-file removal of equal or greater value"
             if kind in quality.QUALITY_SECTIONS
@@ -398,7 +475,9 @@ def _section_guard(kind: str, current: dict[str, int], previous: dict[str, int])
     return errors
 
 
-def _baseline_guard(baseline: dict[str, dict[str, int]]) -> list[str]:
+def _baseline_guard(
+    baseline: dict[str, dict[str, int]], *, renames: dict[str, str] | None = None
+) -> list[str]:
     try:
         base = _baseline_base()
     except ValueError as exc:
@@ -422,7 +501,14 @@ def _baseline_guard(baseline: dict[str, dict[str, int]]) -> list[str]:
                 file=sys.stderr,
             )
         else:
-            errors.extend(_section_guard(kind, entries, previous[kind]))
+            errors.extend(
+                _section_guard(
+                    kind,
+                    entries,
+                    _remap_renamed_keys(kind, previous[kind], renames or {}),
+                    renames=renames,
+                )
+            )
     return errors
 
 
@@ -471,7 +557,12 @@ def _ast_rule_files(argv: list[str]) -> set[Path]:
 
 
 def _check_ast_and_quality(
-    argv: list[str], targets: list[Path], baseline: dict[str, dict[str, int]], *, full: bool
+    argv: list[str],
+    targets: list[Path],
+    baseline: dict[str, dict[str, int]],
+    *,
+    full: bool,
+    renames: dict[str, str] | None = None,
 ) -> list[str]:
     files, _ = _budget_targets(targets)
     ast_files = _ast_rule_files(argv)
@@ -497,7 +588,7 @@ def _check_ast_and_quality(
         if path in files:
             for kind, values in quality.measure_quality(tree, rel).items():
                 measurements[kind].update(values)
-    errors.extend(quality.quality_errors(measurements, baseline))
+    errors.extend(quality.quality_errors(measurements, baseline, renames=renames))
     quality.render_warnings(measurements["complexity"], full=full)
     return errors
 
@@ -522,9 +613,10 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         print(f"{_BASELINE_PATH}: invalid baseline: {exc}", file=sys.stderr)
         return 1
-    errors = _baseline_guard(baseline)
+    renames = _rename_map_or_empty()
+    errors = _baseline_guard(baseline, renames=renames)
     errors.extend(_check_budgets(targets, baseline))
-    errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full))
+    errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full, renames=renames))
     for error in errors:
         print(error)
     if errors:
