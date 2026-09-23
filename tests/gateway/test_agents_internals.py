@@ -225,10 +225,27 @@ class TestSpawnAgent:
     def test_snapshot_reports_effective_model_vision_support(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from dataclasses import replace
+
+        from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+        from shared.lm.registry import MODELS
+
+        ensure_provider_plugins_loaded()
+        model = "deepseek-vision-fixture"
+        monkeypatch.setitem(
+            MODELS,
+            model,
+            replace(
+                MODELS["deepseek-flash"],
+                spawnable=False,
+                unavailable_fallback="deepseek-flash",
+                media_types=frozenset({"image"}),
+            ),
+        )
         monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
         default_model_agent = _spawn_agent()
-        text_only_agent = _spawn_agent(config={"llm_model": "deepseek-v4-pro"})
-        withdrawn_vision_agent = _spawn_agent(config={"llm_model": "deepseek-v4-flash-vision-exp"})
+        text_only_agent = _spawn_agent(config={"llm_model": "deepseek-flash"})
+        withdrawn_vision_agent = _spawn_agent(config={"llm_model": model})
 
         default_snapshot = select_one(db_conn, default_model_agent)
         text_only_snapshot = select_one(db_conn, text_only_agent)

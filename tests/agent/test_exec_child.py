@@ -389,7 +389,7 @@ def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
     proc, _request, result = _spawn(
         tmp_path,
         "import ava\nava.self.attach('/tmp/render.png')",
-        config_overlay={"llm_model": "deepseek-v4-pro"},
+        config_overlay={"llm_model": "deepseek-flash"},
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -704,7 +704,7 @@ def test_child_help_hides_attach_for_text_only_model(
         "with contextlib.redirect_stdout(buf):\n"
         "    ava.help(ava.self)\n"
         "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
-        config_overlay={"llm_model": "deepseek-v4-pro"},
+        config_overlay={"llm_model": "deepseek-flash"},
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -738,10 +738,7 @@ def test_child_help_keeps_attach_for_media_capable_model(
 def test_child_help_hides_attach_for_withdrawn_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A withdrawn model's child gates media on the fallback that will run: a
-    deepseek-v4-flash-vision-exp pin resolves to the text-only
-    deepseek-flash, so interactive help omits the attach contract and the
-    docs gate matches the attach call (task #3212)."""
+    """A withdrawn vision model's child gates media on its text-only fallback."""
     # help(ava.self) renders MACHINE_SPEC, which needs a machine identity —
     # the child's bare $AVA_HOME must carry its own machine_name file (env
     # identity is dropped when the home's .env does not declare it).
@@ -750,11 +747,18 @@ def test_child_help_hides_attach_for_withdrawn_model(
     proc, _request, _result = _spawn(
         tmp_path,
         "import ava, io, contextlib\n"
+        "from dataclasses import replace\n"
+        "from shared.lm._plugin_providers import ensure_provider_plugins_loaded\n"
+        "from shared.lm.registry import MODELS\n"
+        "ensure_provider_plugins_loaded()\n"
+        "MODELS['deepseek-vision-fixture'] = replace(MODELS['deepseek-flash'], "
+        "spawnable=False, unavailable_fallback='deepseek-flash', "
+        "media_types=frozenset({'image'}))\n"
         "buf = io.StringIO()\n"
         "with contextlib.redirect_stdout(buf):\n"
         "    ava.help(ava.self)\n"
         "print('HAS_ATTACH' if 'def attach(' in buf.getvalue() else 'NO_ATTACH')",
-        config_overlay={"llm_model": "deepseek-v4-flash-vision-exp"},
+        config_overlay={"llm_model": "deepseek-vision-fixture"},
     )
 
     assert proc.returncode == 0, proc.stderr

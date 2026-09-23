@@ -503,12 +503,7 @@ def test_deepseek_plugin_prices_equal_archive_current_base_tier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ensure_provider_plugins_loaded()
-    model_ids = (
-        "deepseek-flash",
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "deepseek-v4-flash-vision-exp",
-    )
+    model_ids = ("deepseek-flash",)
     outside_daily_override = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {model: _plugin_rates(model, outside_daily_override) for model in model_ids}
     archive_raw = _pricing_catalog_raw()
@@ -683,7 +678,6 @@ def test_mimo_plugin_prices_equal_archive_current_base_tier(
 ) -> None:
     model_ids = (
         "mimo-v2.5-pro",
-        "mimo-v2.5-pro-ultraspeed",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     )

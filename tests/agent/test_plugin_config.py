@@ -302,7 +302,7 @@ def test_validate_config_overlay_unknown_llm_model_raises(isolated_registry, uni
     with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
         validate_config_overlay({"llm_model": "deepseek-v4-flash-vision"})
 
-    assert "deepseek-v4-flash-vision-exp" in str(exc_info.value)
+    assert "deepseek-flash" in str(exc_info.value)
 
 
 def test_validate_config_overlay_registered_llm_model_passes(isolated_registry, unit_home):
@@ -321,7 +321,7 @@ def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
         from shared.plugin_config_registry import validate_config_overlay
 
         assert not MODELS, "fresh process must start with an empty registry"
-        validate_config_overlay({"llm_model": "deepseek-v4-flash"})
+        validate_config_overlay({"llm_model": "deepseek-flash"})
         print("ok")
         """
     )
@@ -364,7 +364,7 @@ def test_validate_config_overlay_unknown_model_field_raises(
     with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
         validate_config_overlay({field: "deepseek-v4-flash-vision"})
 
-    assert "deepseek-v4-flash-vision-exp" in str(exc_info.value)
+    assert "deepseek-flash" in str(exc_info.value)
     assert field in str(exc_info.value)
 
 

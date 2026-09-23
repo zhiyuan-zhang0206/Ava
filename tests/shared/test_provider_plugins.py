@@ -67,9 +67,6 @@ _REPO_MODEL_VENDORS = {
     "claude-sonnet-4-6": "anthropic",
     "claude-sonnet-5": "anthropic",
     "deepseek-flash": "deepseek",
-    "deepseek-v4-flash": "deepseek",
-    "deepseek-v4-flash-vision-exp": "deepseek",
-    "deepseek-v4-pro": "deepseek",
     "gemini-2.5-flash": "google",
     "gemini-2.5-pro": "google",
     "gemini-3.1-pro-preview": "google",
@@ -89,7 +86,6 @@ _REPO_MODEL_VENDORS = {
     "gpt-6-astra": "openai",
     "kimi-k3": "moonshot",
     "mimo-v2.5-pro": "xiaomi",
-    "mimo-v2.5-pro-ultraspeed": "xiaomi",
     "mimo-v2.6-pro": "xiaomi",
     "mimo-v2.6-pro-ultraspeed": "xiaomi",
     "qwen3.8-27b": "alibaba",
@@ -298,15 +294,18 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 39
+    assert len(_REPO_MODEL_VENDORS) == 35
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
-    # longer carries — the removed v4.1 beta stays priceable from the archive
-    # for historical usage rows.
+    # longer carries — historical usage stays priceable from the archive.
     assert set(pricing._CATALOG) == {
         "gemini-embedding-2",
         "deepseek-v4.1-flash-expires-on-0910",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "mimo-v2.5-pro-ultraspeed",
     }
     assert {
         model: pricing.model_vendor(model) for model in pricing._PLUGIN_PRICES
@@ -346,21 +345,9 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
     assert config.plugins["lm_deepseek"].enabled
     ensure_provider_plugins_loaded()
 
-    deepseek_models = {
-        "deepseek-flash",
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "deepseek-v4-flash-vision-exp",
-    }
-    assert deepseek_models <= MODELS.keys()
-    # V4 Pro, the renamed-away V4 Flash id and the vision experiment stay
-    # registered (facts + final price) but are withdrawn from the spawn picker
-    # (user orders 2026-09-10 / 2026-09-17); all three resolve to
-    # deepseek-flash before provider construction.
+    assert {model for model in MODELS if model.startswith("deepseek-")} == {"deepseek-flash"}
     assert set(SUPPORTED_MODELS["deepseek"]) == {"deepseek-flash"}
-    assert MODELS["deepseek-v4-pro"].unavailable_fallback == "deepseek-flash"
-    assert MODELS["deepseek-v4-flash"].unavailable_fallback == "deepseek-flash"
-    assert MODELS["deepseek-v4-flash-vision-exp"].unavailable_fallback == "deepseek-flash"
+    assert "deepseek-v4-pro" not in pricing._PLUGIN_PRICES
     assert pricing.model_vendor("deepseek-v4-pro") == "deepseek"
 
     from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map
@@ -603,18 +590,18 @@ def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> No
 
     mimo_models = {
         "mimo-v2.5-pro",
-        "mimo-v2.5-pro-ultraspeed",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     }
-    assert mimo_models <= MODELS.keys()
+    assert {model for model in MODELS if model.startswith("mimo-")} == mimo_models
     assert set(SUPPORTED_MODELS["mimo"]) == {
         "mimo-v2.5-pro",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     }
     assert MODELS["mimo-v2.5-pro"].superseded_by == "mimo-v2.6-pro"
-    assert MODELS["mimo-v2.5-pro-ultraspeed"].unavailable_fallback == "mimo-v2.6-pro-ultraspeed"
+    assert "mimo-v2.5-pro-ultraspeed" not in pricing._PLUGIN_PRICES
+    assert pricing.model_vendor("mimo-v2.5-pro-ultraspeed") == "xiaomi"
     assert pricing.model_vendor("mimo-v2.5-pro") == "xiaomi"
 
     from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map, provider_key_of_model
