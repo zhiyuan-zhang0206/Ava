@@ -392,7 +392,7 @@ app = FastAPI(
 
 # Pause exemptions are a route-declared attribute: the middleware consumes
 # only the tested decision function `gateway._pause_policy.should_bypass_pause`,
-# which reads the CONTROL_PLANE doorplates from `shared/contracts.py`. The
+# which reads the CONTROL_PLANE doorplates from `shared/api_contracts/contracts.py`. The
 # exempt surface (control plane + agent self-reports) is enumerable and
 # audited by tests/gateway/test_route_contracts.py — a new exemption is a
 # deliberate declaration, not an incident patch.

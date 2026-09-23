@@ -29,7 +29,7 @@ from gateway import _idempotency
 from gateway.app import app
 from ops.rpc_schemas import ContentBlock
 from shared.agents import AgentStatus
-from shared.contracts import Idempotency
+from shared.api_contracts.contracts import Idempotency
 
 
 @pytest.fixture

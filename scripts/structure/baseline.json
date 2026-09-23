@@ -13,7 +13,7 @@
     "services": 27,
     "services/healthchecks": 31,
     "services/pitr": 66,
-    "shared": 299,
+    "shared": 297,
     "shared/config": 40,
     "shared/lm": 24,
     "tests": 80,
@@ -23,7 +23,7 @@
     "tests/e2e": 32,
     "tests/gateway": 118,
     "tests/ops": 47,
-    "tests/scripts": 52,
+    "tests/scripts": 53,
     "tests/services": 163,
     "tests/shared": 278,
     "tests/skills": 22

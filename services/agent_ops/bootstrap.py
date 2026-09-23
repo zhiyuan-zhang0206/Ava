@@ -27,6 +27,7 @@ import psutil
 import psycopg
 from pydantic import Field, SecretStr, ValidationError, field_validator
 
+from shared.api_contracts.op_envelope import OpEnvelope
 from shared.daemon_http import start_daemon_http
 from shared.hop_ledger import build_ledger_payload
 from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity, lock_rollout
@@ -37,7 +38,6 @@ from shared.managed_writer_observation import (
     ObservationChallenge,
     UnitObserver,
 )
-from shared.op_envelope import OpEnvelope
 from shared.proc_tree import stable_create_time
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.session_record import pid_starttime_ticks

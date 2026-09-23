@@ -180,16 +180,16 @@ from gateway.schemas.user_settings import (
 
 # API contract types downshifted to shared so `cli` decodes them too (re-exported
 # here under their unchanged OpenAPI schema names).
-from shared.api_contracts import (
+from shared.api_contracts.config import (
     ConfigAuditView,
     ConfigFieldView,
     ConfigFieldWriteResult,
     ConfigView,
     ConfigWriteResult,
-    MachineStatus,
     ResolvedConfigView,
     ResolvedFieldView,
 )
+from shared.api_contracts.status import MachineStatus
 
 __all__ = [
     "AgentActivity",
