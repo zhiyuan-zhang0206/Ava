@@ -58,8 +58,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # wire vocabulary (official guide: start at "low" when coming from
     # either), so an explicit AVA_REASONING_EFFORT=none/minimal or a
     # thinking-disabled build must not reach the wire unclamped. Models
-    # without a declared vocabulary (gpt-5.5, gpt-5.4-mini) keep the
-    # historic verbatim passthrough.
+    # without a declared vocabulary keep the historic verbatim passthrough.
     model_levels = ctx.spec.effort_levels if ctx.spec is not None else None
     if model_levels is not None:
         gpt_effort = _clamp_effort(gpt_effort, model_levels, target=ctx.model)
@@ -147,25 +146,10 @@ register(
             tuning=ModelTuning(reasoning_effort="medium"),  # OpenAI default (see gpt-5.6-sol)
             media_types=frozenset({"image"}),
         ),
-        "gpt-5.5": ModelSpec(
-            provider="gpt",
-            context_window=256_000,
-            knowledge_cutoff="2025-12",
-            # Official vocabulary (none, low, medium, high, xhigh — no max);
-            # declared so the builder clamps out-of-range efforts instead of
-            # passing them to the wire verbatim.
-            effort_levels=("none", "low", "medium", "high", "xhigh"),
-            media_types=frozenset({"image"}),
-        ),
-        "gpt-5.4-mini": ModelSpec(
-            provider="gpt",
-            context_window=256_000,
-            knowledge_cutoff="2025-08",
-            # Same vocabulary as gpt-5.5 (official docs), same reason to
-            # declare it.
-            effort_levels=("none", "low", "medium", "high", "xhigh"),
-            media_types=frozenset({"image"}),
-        ),
+        # Removed 2026-09-23 (task #4508): gpt-5.5 and gpt-5.4-mini
+        # were never selectable here (implicit spawnable=False) and have no
+        # live references. Historical prices remain in
+        # shared/lm/pricing_catalog_archive.json.
     },
     pricing={
         "gpt-6-astra": PriceRates(
@@ -293,61 +277,6 @@ register(
                             cache_miss="0.40",
                             cache_hit="0.04",
                             output="1.80",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "gpt-5.5": PriceRates(
-            # >272K input: 2x input and cache, 1.5x output for the full
-            # session (official model page).
-            cache_miss=5.0,
-            cache_hit=0.5,
-            output=30.0,
-            source_url="https://openai.com/api/pricing/",
-            source_checked_at="2026-06-27",
-            vendor="openai",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=272_000,
-                            cache_miss="5.0",
-                            cache_hit="0.5",
-                            output="30.0",
-                        ),
-                        PriceTier(
-                            input_tokens_min=272_001,
-                            input_tokens_max=None,
-                            cache_miss="10.0",
-                            cache_hit="1.0",
-                            output="45.0",
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        "gpt-5.4-mini": PriceRates(
-            cache_miss=0.75,
-            cache_hit=0.075,
-            output=4.5,
-            source_url="https://openai.com/api/pricing/",
-            source_checked_at="2026-06-27",
-            vendor="openai",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="0.75",
-                            cache_hit="0.075",
-                            output="4.5",
                         ),
                     ),
                 ),

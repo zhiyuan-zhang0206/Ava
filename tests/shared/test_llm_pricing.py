@@ -307,7 +307,7 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
     ("model", "expected"),
     [
         # in=1M (all cache-miss) + out=1M + cached=0 -> miss_rate + out_rate USD.
-        ("claude-opus-4-8", 5.0 + 25.0),
+        ("claude-opus-5", 5.0 + 25.0),
         ("gemini-3.5-flash", 1.5 + 9.0),
         # 1M input selects Gemini's documented >200K tier.
         ("gemini-3.1-pro-preview", 4.0 + 18.0),
@@ -529,8 +529,6 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier(
         "gemini-3.7-flash",
         "gemini-3.5-flash",
         "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
@@ -557,11 +555,6 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier(
         "claude-opus-5",
         "claude-fable-5",
         "claude-fable-5-1",
-        "claude-opus-4-8",
-        "claude-sonnet-4-6",
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-haiku-4-5",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
@@ -586,8 +579,6 @@ def test_openai_plugin_prices_equal_archive_current_base_tier(
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
-        "gpt-5.5",
-        "gpt-5.4-mini",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {model: _plugin_rates(model, current_instant) for model in model_ids}
@@ -718,7 +709,6 @@ def test_rates_at_rejects_a_negative_tier_input() -> None:
         ("gpt-5.6-sol", (4.0, 0.4, 20.0), (8.0, 0.8, 30.0)),
         ("gpt-5.6-terra", (2.0, 0.2, 12.0), (4.0, 0.4, 18.0)),
         ("gpt-5.6-luna", (0.2, 0.02, 1.2), (0.4, 0.04, 1.8)),
-        ("gpt-5.5", (5.0, 0.5, 30.0), (10.0, 1.0, 45.0)),
     ],
 )
 def test_gpt_272k_tier_boundary(
@@ -732,10 +722,3 @@ def test_gpt_272k_tier_boundary(
     assert base is not None and over is not None
     assert base.as_tuple() == pytest.approx(tier1)  # pyright: ignore[reportUnknownMemberType]
     assert over.as_tuple() == pytest.approx(tier2)  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_gpt54_mini_has_no_272k_tier() -> None:
-    """gpt-5.4-mini's official page carries no >272K rule — flat only."""
-    flat = rates_at("gpt-5.4-mini", input_tokens=1_000_000)
-    assert flat is not None
-    assert flat.as_tuple() == pytest.approx((0.75, 0.075, 4.5))  # pyright: ignore[reportUnknownMemberType]

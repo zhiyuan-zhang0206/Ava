@@ -27,7 +27,7 @@ from shared.lm.factory import (
     close_chat_model,
     validate_model_config,
 )
-from shared.lm.registry import SUPPORTED_MODELS, resolve_setting
+from shared.lm.registry import MODELS, SUPPORTED_MODELS, resolve_setting
 
 ensure_provider_plugins_loaded()
 
@@ -46,7 +46,7 @@ class TestBuildChatModel:
 
     def test_claude_prefix_returns_chat_anthropic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-        llm = build_chat_model("claude-opus-4-7")
+        llm = build_chat_model("claude-opus-5")
         assert isinstance(llm, ChatAnthropic)
         assert llm.anthropic_api_key.get_secret_value() == "sk-ant-test"
 
@@ -274,7 +274,7 @@ class TestBuildChatModel:
         silently hung, the agent process stuck in the LLM call never returning."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
-            build_chat_model("claude-opus-4-7")
+            build_chat_model("claude-opus-5")
 
     def test_gemini_branch_builds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "llm_override", "")
@@ -447,20 +447,6 @@ class TestBuildChatModel:
         m = build_chat_model("gpt-6-astra", thinking={"type": "disabled"})
         assert isinstance(m, ChatOpenAI)
         assert m.reasoning == {"effort": "low"}
-
-    def test_gpt55_clamps_max_onto_declared_xhigh_rung(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """gpt-5.5's official vocabulary has no max (none..xhigh) — a
-        declared effort_levels now keeps out-of-range values off the wire."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
-        from langchain_openai import ChatOpenAI
-
-        m = build_chat_model("gpt-5.5")
-        assert isinstance(m, ChatOpenAI)
-        assert m.reasoning == {"effort": "xhigh", "summary": "auto"}
 
     def test_gpt_thinking_disabled_drops_to_effort_none(
         self, monkeypatch: pytest.MonkeyPatch
@@ -904,9 +890,6 @@ class TestReasoningEffortDispatch:
             "claude-opus-5",
             "claude-fable-5",
             "claude-fable-5-1",
-            "claude-opus-4-8",
-            "claude-opus-4-7",
-            "claude-sonnet-4-6",
         ):
             llm = build_chat_model(model)
             assert isinstance(llm, ChatAnthropic)
@@ -1657,22 +1640,21 @@ class TestThinkingDisabledAcrossRoster:
         llm = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(llm, BaseChatModel)
 
-    def test_gemini_2_5_thinking_disabled_is_noop(
+    def test_unregistered_gemini_thinking_disabled_is_noop(
         self, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict]
     ) -> None:
-        """gemini-2.5-flash has no thinking_level vocabulary: disabled must not
-        put thinking parameters on the wire (the 400 of issue #190) and must
-        warn instead of silently dropping the request."""
+        """An intentionally unregistered Gemini id has no thinking_level vocabulary:
+        disabled must send no thinking parameters and warn (issue #190)."""
+        model = "gemini-2.5-flash"
+        assert model not in MODELS
         monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        llm = build_chat_model("gemini-2.5-flash", thinking={"type": "disabled"})
+        llm = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(llm, ChatGoogleGenerativeAI)
         assert llm.thinking_level is None
         assert llm.include_thoughts is None
-        assert any(
-            "gemini-2.5-flash" in r["message"] and "ignored" in r["message"] for r in loguru_records
-        )
+        assert any(model in r["message"] and "ignored" in r["message"] for r in loguru_records)
 
     def test_gemini_3_1_thinking_disabled_maps_to_lowest_declared_level(
         self, monkeypatch: pytest.MonkeyPatch
