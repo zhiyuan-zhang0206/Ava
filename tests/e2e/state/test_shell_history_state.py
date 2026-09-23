@@ -270,39 +270,56 @@ def _place_pane_reader(page: Page) -> None:
     )
 
 
-def _assert_returned_pages_painted_content(
-    page: Page, back_marker: int, forward_marker: int
-) -> None:
-    """No blank / wrong-content frame on either return."""
-    frames = _frames(page)
-    # A frame belongs to a page when its DOM is that page's (a popstate swaps
-    # the URL one task before the new tree commits; in between, the old page's
-    # DOM is the ordinary transition, not a blank frame).
-    back_frames = [f for f in frames[back_marker:forward_marker] if f["p"] == "/" and f["home"]]
-    forward_frames = [
-        f for f in frames[forward_marker:] if f["p"].startswith("/shell/") and f["pane"]
-    ]
+# Frame ownership: a frame belongs to a page when its DOM is that page's (a
+# popstate swaps the URL one task before the new tree commits; in between, the
+# old page's DOM is the ordinary transition, not a blank frame).
+def _is_home_frame(frame: _Frame) -> bool:
+    return frame["p"] == "/" and frame["home"]
 
+
+def _is_shell_frame(frame: _Frame) -> bool:
+    return frame["p"].startswith("/shell/") and frame["pane"]
+
+
+def _assert_no_placeholder_frame(page: Page, frames: list[_Frame]) -> None:
     placeholders = [f for f in frames if f["ph"]]
     assert not placeholders, (
         "the layout placeholder painted "
         f"{len(placeholders)} frame(s): {placeholders[:4]}; frames tail={_frames_tail(page)}"
     )
 
+
+def _assert_home_frames_show_content(back_frames: list[_Frame]) -> None:
     blank_home = [f for f in back_frames if f["n"] == 0 or f["txt"] == 0]
-    if blank_home:
-        first = back_frames.index(blank_home[0])
-        window = back_frames[max(0, first - 6) : first + 12]
-        raise AssertionError(
-            f"the returned home page painted {len(blank_home)} frame(s) without "
-            f"timeline content: window={window} all={blank_home}"
-        )
+    if not blank_home:
+        return
+    first = back_frames.index(blank_home[0])
+    window = back_frames[max(0, first - 6) : first + 12]
+    raise AssertionError(
+        f"the returned home page painted {len(blank_home)} frame(s) without "
+        f"timeline content: window={window} all={blank_home}"
+    )
+
+
+def _assert_shell_frames_show_capture(page: Page, forward_frames: list[_Frame]) -> None:
     bad_shell = [f for f in forward_frames if f["pre"] is None or f["pre"] == 0]
     assert not bad_shell, (
         f"the returned shell page painted {len(bad_shell)} frame(s) without the "
         f"capture (invalid-params/loading state): {bad_shell}; "
         f"frames tail={_frames_tail(page)}"
     )
+
+
+def _assert_returned_pages_painted_content(
+    page: Page, back_marker: int, forward_marker: int
+) -> None:
+    """No blank / wrong-content frame on either return."""
+    frames = _frames(page)
+    back_frames = [f for f in frames[back_marker:forward_marker] if _is_home_frame(f)]
+    forward_frames = [f for f in frames[forward_marker:] if _is_shell_frame(f)]
+    _assert_no_placeholder_frame(page, frames)
+    _assert_home_frames_show_content(back_frames)
+    _assert_shell_frames_show_capture(page, forward_frames)
 
 
 def _assert_poll_and_refresh_alive(page: Page, captures: list[float]) -> None:
