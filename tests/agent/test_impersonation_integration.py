@@ -501,6 +501,18 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is not None
 
 
+def _assert_resume_note_delivery_contract(content: str) -> None:
+    """Check that pending delivery cannot be read as no SDK activity."""
+    assert "External work complete" in content
+    assert "structured handoff" not in content
+    assert "the complete structured record of this session is available at:" in content
+    assert "impersonation/0.json" in content
+    assert "zero means no events have been consumed yet" in content
+    assert "not that no SDK calls occurred" in content
+    assert "manifest of emitted SDK/API events" in content
+    assert "never proves no SDK calls" in content
+
+
 async def test_end_note_resumes_an_empty_queue(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -549,10 +561,7 @@ async def test_end_note_resumes_an_empty_queue(
         note = model_calls[0].messages[-1]
         assert note.id == f"impersonation-handoff:{owner.agent_id}:0"
         assert note.additional_kwargs["ava_note_tag"] == "impersonation"
-        assert "External work complete" in note.content
-        assert "structured handoff" not in note.content
-        assert "the complete structured record of this session is available at:" in note.content
-        assert "impersonation/0.json" in note.content
+        _assert_resume_note_delivery_contract(note.content)
         # The note is consumed once: another pass finds an idle agent, not a resume.
         await graph.ainvoke(reset, config, context=ctx)
         assert len(model_calls) == 1
