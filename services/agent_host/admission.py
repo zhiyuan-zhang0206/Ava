@@ -25,9 +25,7 @@ semaphore cannot express:
   cancellation.
 
 ``limit <= 0`` disables the gate: ``admit()`` yields without touching any
-state, preserving the documented zero-limit semantics and the legacy bootstrap
-projection (``shared/config/service_read.py`` serves old runners a positive
-default instead of a zero they would read as "no slots").
+state, preserving the documented zero-limit semantics.
 """
 
 from __future__ import annotations
