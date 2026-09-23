@@ -28,7 +28,7 @@ from ops.ops_lifecycle import _force_mark_terminated
 from shared import machines
 from shared.db_transaction import write_transaction
 from shared.machine import machine_name
-from shared.task_notes import task_note_line
+from shared.tasks.task_notes import task_note_line
 
 router = APIRouter()
 
@@ -57,7 +57,7 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
     to the drain owner (#405), appending a note on each so the new owner knows
     why it landed on their board.
 
-    The note goes through `shared.task_notes.task_note_line`, the same builder
+    The note goes through `shared.tasks.task_notes.task_note_line`, the same builder
     the SDK task registry uses, so the two writers into one `results` column
     cannot drift apart on format or timezone; the write resets the reminder
     clock like a normal update would. Agents already terminated before the

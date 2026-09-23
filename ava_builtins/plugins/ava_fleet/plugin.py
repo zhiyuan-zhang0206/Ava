@@ -46,7 +46,7 @@ import ava
 import ava._boot
 import ava.agents
 from ava._sdk_validation import coerce_str, coerce_typed
-from shared.priority import validate_priority
+from shared.tasks.priority import validate_priority
 
 from . import task_registry
 

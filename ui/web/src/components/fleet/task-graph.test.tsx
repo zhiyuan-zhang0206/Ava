@@ -110,7 +110,7 @@ describe("TaskGraph (graph mode)", () => {
   it("status set and legend stay single-sourced (displayable == backend set)", () => {
     // The FE displayable set is exactly the three backend statuses (the type
     // is the generated wire schema; a pytest locks the schema to
-    // shared/task_status.py + db/schema.sql).
+    // shared/tasks/task_status.py + db/schema.sql).
     expect(Object.keys(STATUS_FILL).sort()).toEqual(["cancelled", "done", "in_progress"]);
     // Legend entries == the categories rendered in the default view: the
     // in-progress swatch + the root's reserved violet.

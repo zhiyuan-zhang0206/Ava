@@ -47,7 +47,7 @@ from shared.plugin_inspector import (
     drop_plugin_inspect_widgets,
     registered_inspect_widgets,
 )
-from shared.priority import Priority
+from shared.tasks.priority import Priority
 
 # The shipped-plugin inspector directory — every builtin plugin dir with an
 # inspector.py is part of the in-process registry (the metric loader's

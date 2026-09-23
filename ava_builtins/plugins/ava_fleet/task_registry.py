@@ -13,9 +13,9 @@ import ava
 import ava._boot
 import ava.agents
 from ava._sdk_validation import coerce_str, coerce_typed
-from shared.task_owner_notifications import owner_change_notifications
-from shared.task_reparent import resolve_reparent
-from shared.task_timestamps import render_task_timestamps
+from shared.tasks.task_owner_notifications import owner_change_notifications
+from shared.tasks.task_reparent import resolve_reparent
+from shared.tasks.task_timestamps import render_task_timestamps
 
 if TYPE_CHECKING:
     # Annotation-only here (cursor params); the runtime import sits at the raise

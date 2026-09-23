@@ -25,8 +25,8 @@ from gateway.schemas import (
     TaskUpdateRequest,
 )
 from shared.db_transaction import write_transaction
-from shared.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
-from shared.task_reparent import resolve_reparent
+from shared.tasks.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
+from shared.tasks.task_reparent import resolve_reparent
 
 router = APIRouter()
 
