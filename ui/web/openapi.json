@@ -5163,6 +5163,22 @@
             }
           },
           {
+            "name": "impersonation_session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Impersonation Session"
+            }
+          },
+          {
             "name": "machine",
             "in": "query",
             "required": false,
@@ -7243,6 +7259,10 @@
             "type": "integer",
             "title": "Id"
           },
+          "line_sha256": {
+            "type": "string",
+            "title": "Line Sha256"
+          },
           "ts": {
             "type": "string",
             "format": "date-time",
@@ -7276,6 +7296,7 @@
         "type": "object",
         "required": [
           "id",
+          "line_sha256",
           "ts",
           "agent_id",
           "level",

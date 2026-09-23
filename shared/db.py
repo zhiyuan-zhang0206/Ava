@@ -309,6 +309,7 @@ def insert_inbound_message(
         with contextlib.suppress(ValueError):
             target_agent_id = int(source.removeprefix("agent:"))
 
+    prepared_event = None
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages "
@@ -329,9 +330,10 @@ def insert_inbound_message(
         )
         new_id = fetch_one(cur, "insert inbound message")[0]
         if event_type is not None:
-            from shared.audit_events import insert_event_log
+            from shared.agents.impersonation_manifest import stage_central_expected_event
+            from shared.audit_events import prepare_event_log
 
-            insert_event_log(
+            prepared_event = prepare_event_log(
                 event_type=event_type,
                 agent_id=agent_id,
                 source=source,
@@ -340,7 +342,14 @@ def insert_inbound_message(
                 if content
                 else {"inbound_id": new_id},
             )
+            prepared_event = stage_central_expected_event(
+                db,
+                prepared_event,
+                origin_kind="inbound_message",
+                origin_id=new_id,
+            )
     db.commit()
+    _emit_prepared_event(prepared_event)
     # Publish to Redis to wake the idle agent. Agents subscribe to
     # `<prefix>:inbound:{agent_id}` (inbound_channel) via RedisInboundListener.
     # Fire-and-forget: the agent's defensive SELECT recheck catches inbound
@@ -377,9 +386,10 @@ def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: 
     """Emit the ordinary chat audit and wake hints after the prompt commits."""
     try:
         if source.startswith("agent:"):
-            from shared.audit_events import insert_event_log
+            from shared.agents.impersonation_manifest import stage_central_expected_event
+            from shared.audit_events import prepare_event_log
 
-            insert_event_log(
+            prepared_event = prepare_event_log(
                 event_type="send_message",
                 agent_id=agent_id,
                 source=source,
@@ -388,8 +398,24 @@ def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: 
                 if content
                 else {"inbound_id": inbound_id},
             )
+            with write_transaction() as conn:
+                prepared_event = stage_central_expected_event(
+                    conn,
+                    prepared_event,
+                    origin_kind="inbound_message",
+                    origin_id=inbound_id,
+                )
+            _emit_prepared_event(prepared_event)
     finally:
         publish_inbound_wake(agent_id, str(inbound_id))
+
+
+def _emit_prepared_event(event: object | None) -> None:
+    """Enqueue a transactional audit event only after its commit succeeded."""
+    if event is not None:
+        from shared import telemetry
+
+        telemetry.emit_prepared(event)
 
 
 def insert_restart_completed_inbound(

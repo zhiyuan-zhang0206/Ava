@@ -3981,6 +3981,8 @@ export interface components {
         AgentEventRow: {
             /** Id */
             id: number;
+            /** Line Sha256 */
+            line_sha256: string;
             /**
              * Ts
              * Format: date-time
@@ -12227,6 +12229,7 @@ export interface operations {
                 event_name?: string | null;
                 agent_id?: number | null;
                 trace_id?: string | null;
+                impersonation_session?: string | null;
                 machine?: string | null;
                 level?: string | null;
                 tier?: string | null;

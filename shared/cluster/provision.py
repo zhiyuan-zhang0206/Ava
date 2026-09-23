@@ -591,30 +591,15 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         )
         # SDK surfaces the runner process writes directly: ava.tasks,
         # ava.watcher, and the page close at exit.
-        for table in (
-            "agent_tasks",
-            "agent_watchers",
-            "agent_impersonations",
-            "agent_impersonation_messages",
-        ):
+        for table in ("agent_tasks", "agent_watchers", "agent_impersonation_messages"):
             conn.execute(
                 pgsql.SQL("GRANT INSERT, UPDATE ON {} TO {}").format(
                     pgsql.Identifier(table), pgsql.Identifier(RUNNER_ROLE)
                 )
             )
-        # The named-impersonation session trail: the lifecycle and inbound
-        # triggers, plus the handoff writer, INSERT rows; the relay and readers
-        # SELECT them back. Append-only — the preserve trigger rejects rewrites
-        # and no runner path updates rows — so UPDATE/DELETE stay out.
-        # Regression for task #3549: the table shipped (20260913T180056)
-        # without this entry, and every cluster past the runner-role cutover
-        # rejected lease creation with InsufficientPrivilege on
-        # agent_impersonation_entries until the role could write the trail.
-        conn.execute(
-            pgsql.SQL("GRANT SELECT, INSERT ON agent_impersonation_entries TO {}").format(
-                pgsql.Identifier(RUNNER_ROLE)
-            )
-        )
+        from shared.agents.impersonation_manifest_grants import grant_manifest_runner_access
+
+        grant_manifest_runner_access(conn, RUNNER_ROLE)
         # The understanding-tree generation pass ships as a gateway-side worker,
         # but its operational first-run / ad-hoc regeneration path executes from
         # the agent/runner side (task #3704) — SELECT, INSERT, UPDATE, and
