@@ -15,7 +15,7 @@ from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
 from shared.agent_observation import AgentObservation
 from shared.agent_snapshot import OpenNotice
-from shared.priority import Priority
+from shared.tasks.priority import Priority
 
 
 class AgentCost(BaseModel):

@@ -686,7 +686,7 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
 // The task registry — persistent, process-decoupled work items that outlive
 // the agent doing them. Backs the Task Graph (a free D3-force view).
 
-// The task lifecycle status set — the backend's shared/task_status.py enum,
+// The task lifecycle status set — the backend's shared/tasks/task_status.py enum,
 // surfaced through the generated wire schema (a pytest locks db/schema.sql and
 // openapi.json to it; 'ongoing' was removed by user ruling 2026-09-15). The
 // system root is not a status: it is pinned in_progress and immutable.

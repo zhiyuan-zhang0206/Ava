@@ -19,7 +19,7 @@ from shared.agents import AgentStatus
 from shared.config import settings
 from shared.lm.factory import model_supports_vision
 from shared.lm.registry import resolve_available_model
-from shared.priority import Priority
+from shared.tasks.priority import Priority
 
 AgentDirectoryScope = Literal["live", "terminated", "all"]
 
