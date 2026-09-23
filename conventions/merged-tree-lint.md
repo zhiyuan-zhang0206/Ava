@@ -30,8 +30,10 @@ clears the staged merge (including `MERGE_HEAD`) and `git clean -fd` removes
 merged-only files, so the runner is back at the PR head before the job ends.
 
 With the merged tree staged in the real index, `pre-commit run --all-files`
-enumerates exactly the merged tree. The same `SKIP` list as
-`backend-structure` avoids repeating hooks owned by other CI jobs.
+enumerates exactly the merged tree. Its `SKIP` list excludes hooks owned by
+other CI jobs and the local hook-installation warning. Unlike the required
+`backend-structure` job's conditional codegen segment, this informational job
+runs all four freshness hooks whenever the merged tree is available.
 
 A merge conflict is not a failed lint: the job records the conflicted paths
 (`git diff --name-only --diff-filter=U`), marks the run skipped, and does not

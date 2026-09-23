@@ -2226,6 +2226,28 @@ worker (`tests/_containers.py`: `initdb` + `redis-server` on ephemeral
 the toolchain (Python, Node, uv, Postgres + Redis server binaries; e2e also
 needs Playwright chromium) — no Docker, no shared engine.
 
+The required `backend structure (pre-commit lint + codegen freshness)` check
+keeps one job with two segments when the frontend/backend classifier selects it:
+
+- **Structure lint (A)** always runs `pre-commit run --all-files`, skipping the
+  hooks owned by other CI jobs, the local installation warning, and the four
+  codegen freshness hooks. The existing pyright, frontend-tsc and frontend-eslint
+  SKIP entries are redundant since those hooks run only at pre-push; CI still
+  runs their underlying checks directly in `backend-static` and `frontend`.
+- **Codegen freshness (B)** installs Node/frontend dependencies and explicitly
+  runs `types-codegen-fresh`, `constants-codegen-fresh`, `events-registry-fresh`
+  and `config-lite-table-fresh`. On a PR, the selector compares the fetched,
+  event-pinned base revision with HEAD and matches the changed paths against
+  these hooks' `files:` regexes in `.pre-commit-config.yaml`. Rename detection
+  is disabled so moving an input out of the union still checks its deletion.
+  An unreadable diff runs B. A no-match diff skips B and prints
+  `STEP SKIPPED: codegen freshness` with the reason and safety nets in the log.
+
+Main pushes always select B within this job. The Trunk merge queue re-evaluates
+the selector on the combined tree before landing; required check names and
+failure reporting are unchanged. CI remains the merge gate, including when
+local pre-push checks visibly skip for load or missing tooling.
+
 > The maintainer's deployment runs CI on a dedicated self-hosted runner fleet
 > (per-job runner isolation for timing determinism) instead of the GitHub-hosted
 > runners. That setup — host roster, provisioning scripts, the eval Docker
