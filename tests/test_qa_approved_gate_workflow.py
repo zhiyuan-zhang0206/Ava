@@ -124,3 +124,31 @@ def test_trunk_prs_stay_exempt_without_reading_labels(tmp_path: Path) -> None:
     result, calls = run_gate(tmp_path, live_labels=[], head_ref="trunk-merge/pr-42/x")
     assert result.returncode == 0, result.stderr
     assert calls == []
+
+
+def test_evaluator_issue_comment_face_is_guarded_by_the_receipt_literal() -> None:
+    """The evaluator runs for every other face unchanged; on the issue_comment
+    face only a deletion or a receipt-literal body may execute it (evaluation
+    #4628 option C — non-receipt comment runs skip the job, zero runner spend)."""
+    job = yaml.safe_load(WORKFLOW.read_text())["jobs"]["evaluate-qa-evidence"]
+    normalized = " ".join(str(job["if"]).split())
+    assert normalized == (
+        "github.event_name != 'pull_request' && "
+        "(github.event_name != 'issue_comment' || "
+        "github.event.action == 'deleted' || "
+        "contains(github.event.comment.body, 'ava_qa_version'))"
+    )
+
+
+def test_evaluator_concurrency_and_label_face_stay_unchanged() -> None:
+    """The two event paths must never cancel each other, and the label face
+    stays pull_request-only: the guard may not touch either."""
+    jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
+    concurrency = jobs["evaluate-qa-evidence"]["concurrency"]
+    assert concurrency["cancel-in-progress"] is True
+    assert concurrency["group"] == (
+        "qa-evidence-${{ github.event.pull_request.number || "
+        "github.event.issue.number || "
+        "github.event.workflow_run.pull_requests[0].number }}"
+    )
+    assert jobs["qa-approved-gate"]["if"] == "github.event_name == 'pull_request'"
