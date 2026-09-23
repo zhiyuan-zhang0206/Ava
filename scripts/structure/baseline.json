@@ -419,7 +419,6 @@
     "shared/alerts.py::upsert_alert": 26,
     "shared/coding_session_owner.py::claim": 23,
     "shared/config/physical_backup.py::PhysicalBackupSettings._validate_contract": 80,
-    "shared/config/service_read.py::bootstrap_config_values": 16,
     "shared/config_registry.py::_build_registry": 19,
     "shared/db.py::insert_inbound_message": 23,
     "shared/delivery_outbox.py::flush": 18,
