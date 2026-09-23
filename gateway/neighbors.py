@@ -454,13 +454,26 @@ def compute(
 ) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]], bool]:
     """(neighbors, ancestors, archive_degraded) for `root` — the first two
     are lists of (agent_id, depth, score) rows; neighbors strongest first,
-    ancestors nearest first. `archive_degraded` is True when the frozen
-    archive read degraded this request; it affects ties only, never the DB
-    birth chain. The Python counterpart of the retired agent_neighbors() SQL
-    function, plus the immutable spawn-chain read it never had."""
+    ancestors nearest first. `archive_degraded` is True when the tie graph's
+    event-stream read degraded this request (a frozen-archive failure, or
+    the no-observability refusal of the live tail); it affects ties only,
+    never the DB birth chain. The Python counterpart of the retired
+    agent_neighbors() SQL function, plus the immutable spawn-chain read it
+    never had."""
     now = datetime.now(UTC)
     archive_rows, archive_degraded = _fetch_archive_rows()
-    loki_rows = _fetch_loki_edges(now=now)
+    try:
+        loki_rows = _fetch_loki_edges(now=now)
+    except loki_events.ObservabilityReadUnavailable as exc:
+        # No-observability cluster: the read gate refuses the live tail by
+        # configuration — retrying cannot clear it — so degrade like the
+        # archive side: the DB birth chain with empty ties + the degraded
+        # flag, not a 503 that locks out the chain half. A configuration
+        # state, not a degradation episode: the response's `degraded` flag
+        # is the signal (no telemetry event).
+        logger.warning("neighbors live tail refused — serving birth chain, empty ties: {}", exc)
+        loki_rows = []
+        archive_degraded = True
     weights = _merge_weights(archive_rows, loki_rows, k=k, now=now)
     parents = _fetch_born_spawner_parents(db_pool, root=root)
     return (

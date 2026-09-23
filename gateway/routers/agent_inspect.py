@@ -8,13 +8,15 @@ import time as time_mod
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from opentelemetry import metrics
 from psycopg import Error as DatabaseError
 from psycopg_pool import ConnectionPool, PoolTimeout
 
-from gateway import neighbors
+from gateway import loki_query_budget, neighbors
 from gateway.routers import _inspect_metrics, _plugin_inspector, _plugin_metrics
+from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
 from gateway.routers._inspect_live import db_rows_blocking, notice_blocking, project_heartbeat
 from gateway.schemas import (
@@ -297,12 +299,21 @@ def get_agent_neighbors(
         depth = settings.display.neighbors_default_depth
     if limit is None:
         limit = settings.display.neighbors_default_limit
-    ranked, ancestors_ranked, archive_degraded = neighbors.compute(
-        root=agent_id,
-        max_depth=depth,
-        limit=limit,
-        db_pool=request.app.state.db_pool,
-    )
+    try:
+        ranked, ancestors_ranked, archive_degraded = neighbors.compute(
+            root=agent_id,
+            max_depth=depth,
+            limit=limit,
+            db_pool=request.app.state.db_pool,
+        )
+    except loki_query_budget.LokiQueryBudgetError:
+        # Local admission saturation has its own typed 503 contract;
+        # the global handler preserves its reason.
+        raise
+    except httpx.HTTPError as exc:
+        # The 8s-bounded live read fails fast on a stall; the wire answer is
+        # the same retriable 503 the other Loki-reading routes return.
+        raise_backend_unavailable(exc)
     ids = list({r[0] for r in ranked} | {r[0] for r in ancestors_ranked})
     label_status: dict[int, tuple[str | None, str]] = {}
     if ids:
