@@ -12,13 +12,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, cast
 
+from shared.atomic_io import fsync_parent, write_text_atomic
 from shared.paths import run_dir
 from shared.platform import file_lock
 
@@ -63,11 +63,7 @@ def _read_state() -> tuple[Literal["starting", "serving"], str] | None:
 def _fsync_parent(path: Path) -> None:
     if os.name == "nt":
         return
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    fsync_parent(path)
 
 
 def _sync_parent_or_log(path: Path) -> None:
@@ -82,24 +78,17 @@ def _sync_parent_or_log(path: Path) -> None:
 def _write_state(state: Literal["starting", "serving"], generation: str) -> None:
     path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=".start-serving-", suffix=".tmp")
-    if os.name != "nt":
-        os.fchmod(fd, 0o600)
-    tmp = Path(raw_tmp)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(
-                {"schema_version": _SCHEMA_VERSION, "state": state, "generation": generation},
-                stream,
-                separators=(",", ":"),
-                sort_keys=True,
-            )
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)  # noqa: PTH105 — atomic marker commit
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_text_atomic(
+        path,
+        json.dumps(
+            {"schema_version": _SCHEMA_VERSION, "state": state, "generation": generation},
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+        mode=0o600,
+        prefix=".start-serving-",
+    )
     _sync_parent_or_log(path)
 
 

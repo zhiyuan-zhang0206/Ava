@@ -28,7 +28,6 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
-import os
 import platform
 import shutil
 import sys
@@ -43,6 +42,7 @@ from urllib.parse import unquote, urlsplit
 from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
 from cli.commands._rendered_file import write_rendered_guarded
+from shared.atomic_io import write_text_atomic
 from shared.machine import MachineRoles
 from shared.observability import collector_allowed_for_home
 
@@ -579,16 +579,7 @@ def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
 
 def _atomic_write(path: Path, rendered: str) -> None:
     """Replace ``path`` with ``rendered`` atomically (mkstemp + rename)."""
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(rendered)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_text_atomic(path, rendered, encoding="utf-8", suffix="")
 
 
 def _write_config(path: Path, rendered: str) -> None:

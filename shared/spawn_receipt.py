@@ -52,7 +52,6 @@ import os
 import re
 import stat
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,6 +60,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field, model_validator
 
+from shared.atomic_io import fsync_parent, write_text_atomic
 from shared.config import settings
 from shared.log import logger
 from shared.managed_writer_barrier import Digest, EvidenceModel
@@ -220,29 +220,13 @@ def session_lock_path(home: Path, generation: str, session: str) -> Path:
 
 
 def _fsync_parent(path: Path) -> None:
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    fsync_parent(path)
 
 
 def _write_atomic_text(path: Path, text: str) -> None:
     """Durably publish ``text`` at ``path``: temp + fsync + rename + dir fsync."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    if os.name != "nt":
-        os.fchmod(fd, 0o600)
-    tmp = Path(raw_tmp)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(text)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)  # noqa: PTH105 — explicit atomic replace injection seam
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_text_atomic(path, text, encoding="utf-8", mode=0o600)
     try:
         _fsync_parent(path)
     except OSError:
