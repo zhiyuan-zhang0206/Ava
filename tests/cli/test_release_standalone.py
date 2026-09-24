@@ -585,7 +585,7 @@ def test_normal_activation_enters_the_checked_chain(
 
     monkeypatch.setattr(normal, "_drive_checked_normal_release", drive)
     plan = Mock(spec=normal.PreparedNormalRelease)
-    normal.execute_normal_release(plan, "generation")
+    assert normal.execute_normal_release(plan, "generation") == 0
     assert driven == [(plan, "generation")]
 
 
