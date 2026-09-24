@@ -89,11 +89,11 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
       viewport.dispatchEvent(new Event('scroll'));
       viewport.scrollTop = 0;
       viewport.dispatchEvent(new Event('scroll'));
-      const top = viewport.getBoundingClientRect().top;
+      const viewportTop = viewport.getBoundingClientRect().top;
       const row = [...viewport.querySelectorAll('.timeline-item')]
-        .find((node) => node.getBoundingClientRect().bottom > top);
+        .find((node) => node.getBoundingClientRect().bottom > viewportTop);
       if (!row) throw new Error('no visible reading anchor');
-      return { id: row.dataset.itemId, top: row.getBoundingClientRect().top };
+      return { id: row.dataset.itemId, viewportOffsetPx: row.getBoundingClientRect().top - viewportTop };
     }""")
     page.wait_for_timeout(1500)
     assert older_requests, "a parked reader did not request older history"
@@ -103,14 +103,15 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
         )
         > 50_000
     ), "deep history did not land"
-    landed_top = page.evaluate(
+    landed_offset = page.evaluate(
         """id => {
-      const row = document.querySelector(`.timeline-item[data-item-id="${CSS.escape(id)}"]`);
-      return row?.getBoundingClientRect().top ?? null;
+      const viewport = document.querySelector('[role=log]')?.closest('[data-slot=scroll-area-viewport]');
+      const row = viewport?.querySelector(`.timeline-item[data-item-id="${CSS.escape(id)}"]`);
+      return viewport && row ? row.getBoundingClientRect().top - viewport.getBoundingClientRect().top : null;
     }""",
         anchor["id"],
     )
-    assert landed_top is not None, (
+    assert landed_offset is not None, (
         "the reading anchor was released during prepend",
         anchor,
         page.evaluate("""() => ({
@@ -119,7 +120,7 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
           scrollTop: document.querySelector('[role=log]')?.closest('[data-slot=scroll-area-viewport]')?.scrollTop,
         })"""),
     )
-    assert abs(landed_top - anchor["top"]) < 3, (anchor, landed_top)
+    assert abs(landed_offset - anchor["viewportOffsetPx"]) < 3, (anchor, landed_offset)
     sample = page.evaluate("""async () => {
       const viewport = document.querySelector('[role=log]')?.closest('[data-slot=scroll-area-viewport]');
       if (!viewport) throw new Error('timeline viewport missing');
@@ -158,7 +159,7 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
     sample["jsHeapUsedBytes"] = next(
         metric["value"] for metric in metrics if metric["name"] == "JSHeapUsedSize"
     )
-    sample["prependAnchorDeltaPx"] = landed_top - anchor["top"]
+    sample["prependAnchorDeltaPx"] = landed_offset - anchor["viewportOffsetPx"]
     if kind == "agent_chat" and (output := os.environ.get("AVA_TIMELINE_BENCH_OUT")):
         Path(output).write_text(json.dumps(sample, indent=2, sort_keys=True) + "\n")
     _assert_bounded_sample(sample, kind)

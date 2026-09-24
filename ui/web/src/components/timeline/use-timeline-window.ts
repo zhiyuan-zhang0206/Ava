@@ -8,7 +8,15 @@ import type { BackendTimelineItem } from "@/lib/types";
 import { useDisplayLimit } from "@/lib/display-limits";
 
 const GAP = 12; // space-y-3 on the timeline and expanded turn body
+// KEEP (task #3696 exception inventory): task #4709 fixes one viewport of buffer on each side as window geometry, not an operator limit.
 const BUFFER_VIEWPORTS = 1;
+// KEEP (task #3696 exception inventory): 24 is roughly three 8-row screens before geometry exists; it caps initial DOM mounts, not a user window.
+const BOOTSTRAP_WINDOW_ROWS = 24;
+const BOOTSTRAP_PIN_LEAD_ROWS = BOOTSTRAP_WINDOW_ROWS / 2;
+// KEEP (task #3696 exception inventory): 680px estimates one screen only until the real viewport is measured; steady behavior uses that measurement.
+const UNMEASURED_VIEWPORT_HEIGHT_PX = 680;
+// KEEP (task #3696 exception inventory): 500 keys cover twice the default 250-item follower slice before cache sweeping; this is housekeeping.
+const HEIGHT_CACHE_SWEEP_FLOOR = 500;
 const ACTIVATION_ROWS_FALLBACK = 100;
 const TURN_ROWS_FALLBACK = 100;
 const MEASURE_ROWS_FALLBACK = 75;
@@ -236,12 +244,12 @@ export function useTimelineWindow({
     if (!enabled) return { start: 0, end: groups.length, before: 0, after: 0 };
     if (view.height <= 0) {
       if (pinnedIndex >= 0) {
-        const start = Math.max(0, pinnedIndex - 12);
-        const end = Math.min(groups.length, start + 24);
+        const start = Math.max(0, pinnedIndex - BOOTSTRAP_PIN_LEAD_ROWS);
+        const end = Math.min(groups.length, start + BOOTSTRAP_WINDOW_ROWS);
         return { start, end, before: span(sizes, 0, start), after: span(sizes, end, sizes.length) };
       }
-      if (restoreTop !== null) return windowForSizes(sizes, restoreTop, 680, view.origin);
-      const start = Math.max(0, groups.length - 24);
+      if (restoreTop !== null) return windowForSizes(sizes, restoreTop, UNMEASURED_VIEWPORT_HEIGHT_PX, view.origin);
+      const start = Math.max(0, groups.length - BOOTSTRAP_WINDOW_ROWS);
       return { start, end: groups.length, before: span(sizes, 0, start), after: 0 };
     }
     let top = view.top;
@@ -264,12 +272,12 @@ export function useTimelineWindow({
       const childPin = groupIndex === pinnedIndex && pin
         ? rows.findIndex((key) => key.endsWith(`:${pin.id}`)) : -1;
       if (childPin >= 0) {
-        const start = Math.max(0, childPin - 12);
-        const end = Math.min(rows.length, start + 24);
+        const start = Math.max(0, childPin - BOOTSTRAP_PIN_LEAD_ROWS);
+        const end = Math.min(rows.length, start + BOOTSTRAP_WINDOW_ROWS);
         return { start, end, before: span(childSizes, 0, start), after: span(childSizes, end, rows.length) };
       }
-      if (restoreTop !== null) return windowForSizes(childSizes, restoreTop, 680, view.origin + 60);
-      const start = Math.max(0, rows.length - 24);
+      if (restoreTop !== null) return windowForSizes(childSizes, restoreTop, UNMEASURED_VIEWPORT_HEIGHT_PX, view.origin + 60);
+      const start = Math.max(0, rows.length - BOOTSTRAP_WINDOW_ROWS);
       return { start, end: rows.length, before: span(childSizes, 0, start), after: 0 };
     }
     const groupTop = view.origin + span(sizes, 0, groupIndex) + (groupIndex ? GAP : 0);
@@ -322,7 +330,7 @@ export function useTimelineWindow({
       // ResizeObserver runs after layout. Keep the reader observed before the
       // height change; recapturing here would select the newly grown row.
       preserveRef.current = readingRef.current;
-      if (nextHeights.size > Math.max(500, groups.length * 2)) {
+      if (nextHeights.size > Math.max(HEIGHT_CACHE_SWEEP_FLOOR, groups.length * 2)) {
         const live = new Set(groups.flatMap((group) => [group.key, ...(group.expandedRows ?? [])]));
         for (const key of nextHeights.keys()) {
           if (!live.has(key)) nextHeights.delete(key);
