@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDuration, summarizeCode, summarizeOutput } from "./item-summary";
+import { formatDuration, orderSdkCalls, sdkNamespace, summarizeCode, summarizeOutput } from "./item-summary";
 
 describe("summarizeCode", () => {
-  it("renders recorded calls descending by count, ties by method name", () => {
+  it("renders recorded calls by namespace, then count and method name", () => {
     const s = summarizeCode("", [
-      { method: "shell.run", count: 1 },
+      { method: "shell.run", count: 5 },
       { method: "files.read", count: 2 },
       { method: "files.write", count: 1 },
     ]);
     expect(s.calls).toEqual([
       { method: "files.read", count: 2 },
       { method: "files.write", count: 1 },
-      { method: "shell.run", count: 1 },
+      { method: "shell.run", count: 5 },
     ]);
-    expect(s.totalCalls).toBe(4);
+    expect(s.totalCalls).toBe(8);
   });
 
   it("recorded calls win — the payload text never adds or removes entries", () => {
@@ -52,6 +52,56 @@ describe("summarizeCode", () => {
       });
     },
   );
+});
+
+describe("orderSdkCalls", () => {
+  it("groups interleaved namespaces alphabetically even when counts tie", () => {
+    expect(orderSdkCalls([
+      { method: "shell.run", count: 3 },
+      { method: "files.write", count: 2 },
+      { method: "agents.spawn", count: 3 },
+      { method: "files.read", count: 3 },
+      { method: "shell.sessions.list", count: 2 },
+    ])).toEqual([
+      { method: "agents.spawn", count: 3 },
+      { method: "files.read", count: 3 },
+      { method: "files.write", count: 2 },
+      { method: "shell.run", count: 3 },
+      { method: "shell.sessions.list", count: 2 },
+    ]);
+    expect(sdkNamespace("shell.sessions.list")).toBe("shell");
+  });
+
+  it("returns an empty list for no calls", () => {
+    expect(orderSdkCalls([])).toEqual([]);
+  });
+
+  it("keeps a single call", () => {
+    expect(orderSdkCalls([{ method: "files.read", count: 1 }])).toEqual([
+      { method: "files.read", count: 1 },
+    ]);
+  });
+
+  it("uses the whole method as the namespace when there is no dot", () => {
+    expect(sdkNamespace("status")).toBe("status");
+    expect(orderSdkCalls([
+      { method: "status", count: 2 },
+      { method: "shell.run", count: 1 },
+    ])).toEqual([
+      { method: "shell.run", count: 1 },
+      { method: "status", count: 2 },
+    ]);
+  });
+
+  it("keeps namespace order independent of counts", () => {
+    expect(orderSdkCalls([
+      { method: "shell.run", count: 100 },
+      { method: "agents.spawn", count: 1 },
+    ])).toEqual([
+      { method: "agents.spawn", count: 1 },
+      { method: "shell.run", count: 100 },
+    ]);
+  });
 });
 
 describe("summarizeOutput", () => {
