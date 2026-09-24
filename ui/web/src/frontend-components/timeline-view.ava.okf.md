@@ -8,7 +8,7 @@ tags:
 
 # Timeline View
 
-`components/timeline/` renders the BackendTimelineItem list (chat / code / output / reasoning / system marker) and is the only item-list surface of a thread. Directory: `index`, `segments` (compact grouping), `use-compact-transition-anchor` (reading position), `card`, `item`, `buttons`, `markers`, `timestamp`, `reasoning-clock`, `runs` (turn grouping), `run-block`.
+`components/timeline/` renders the BackendTimelineItem list (chat / code / output / reasoning / system marker) and is the only item-list surface of a thread. Directory: `index`, `segments` (compact grouping), `use-compact-transition-anchor` (reading position), `use-timeline-window` (bounded DOM), `card`, `item`, `buttons`, `markers`, `timestamp`, `reasoning-clock`, `runs` (turn grouping), `run-block`.
 
 ## Streaming rows
 
@@ -38,7 +38,13 @@ responsible for non-compact scroll-up pages.
 
 The first short viewport fills at most two older pages, stopping once content exceeds its height. After that, only an actual upward scroll movement classified by the sticky controller can load a page at the top. Layout changes, pin echoes, and following the bottom cannot page; a sustained upward gesture has a three-page budget, refilled by downward motion or a 750 ms arrival pause — the landing's own compensation echo is not downward motion. The spinner remains visible while a page is in flight. Deliberate scroll-up can continue through backend `has_more` and the configured `AVA_TIMELINE_COMPACT_HISTORY` depth.
 
-While following the bottom, `display.timeline_retained_items_max` (250 by default) evicts the oldest selected-thread rows and keeps older paging available. A reader parked in history keeps the loaded and visible window until returning to the bottom. The temporary compact transition buffer is kept intact through its anchor handoff, then the canonical list is trimmed. CSS containment does not virtualize rows, so a deliberately opened deep history can still have a large DOM until the reader returns to the tail. After a compact, `display.compact_history_sessions` controls automatic history pages above the new summary: 0 skips them, positive values fetch that many pages, and -1 walks all available pages serially. The store edge and retention hook live in [[ui/web/src/frontend-state/timeline-cache.ava.okf.md|Selected Timeline State]].
+While following the bottom, `display.timeline_retained_items_max` (250 by default) evicts the oldest selected-thread rows and keeps older paging available. A reader parked in history keeps the loaded and visible window until returning to the bottom. The temporary compact transition buffer is kept intact through its anchor handoff, then the canonical list is trimmed.
+
+## Bounded mounted window
+
+When the expanded display exceeds `display.timeline_window_activation_rows` (100 by default), `use-timeline-window` mounts the viewport plus one viewport of buffer on each side. Remote groups become two estimated-height spacers; children of an expanded `TurnBlock` use their own bounded window above `display.timeline_window_turn_rows` (100 by default). A ResizeObserver records actual heights for mounted groups and rows, and the scroll position follows the last observed visible row when those estimates change. Group and child wrappers stay stable across activation; measurement starts at `display.timeline_window_measure_rows` (75 by default), capped below the activation count so an operator's lower activation setting still has a premeasurement interval. A lower value arriving after mount first gets a measured render, then activates the window on the next commit. All three values come from `/api/config` with baked fallbacks. The compact transition pins a rank-qualified item through its rekey and scroll transfer; load-older pins the exact reading item through prepend. Back/forward memory also saves the visible item, rank and viewport offset, with a collapsed-turn fallback. A short timeline keeps its existing CSS containment path. The canonical item list remains in the store for parked readers; only the DOM window is released. Following readers still use the separate 250-item retention rule.
+
+After a compact, `display.compact_history_sessions` controls automatic history pages above the new summary: 0 skips them, positive values fetch that many pages, and -1 walks all available pages serially. The store edge and retention hook live in [[ui/web/src/frontend-state/timeline-cache.ava.okf.md|Selected Timeline State]].
 
 ## Deep collapse
 

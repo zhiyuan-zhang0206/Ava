@@ -224,6 +224,60 @@ class DisplaySettings(EnvSettings):
         },
     )
 
+    timeline_window_activation_rows: int = Field(
+        default=100,
+        ge=2,
+        le=5000,
+        alias="AVA_TIMELINE_WINDOW_ACTIVATION_ROWS",
+        description=(
+            "Expanded timeline row count above which the web UI mounts only the viewport "
+            "and its buffers. 100 keeps short conversations on their simple render path "
+            "while bounding deep-history DOM growth."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    timeline_window_turn_rows: int = Field(
+        default=100,
+        ge=1,
+        le=5000,
+        alias="AVA_TIMELINE_WINDOW_TURN_ROWS",
+        description=(
+            "Expanded child-row count above which one turn uses its own bounded DOM window. "
+            "100 avoids spacer churn for ordinary turns while releasing remote children "
+            "of unusually long turns."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    timeline_window_measure_rows: int = Field(
+        default=75,
+        ge=1,
+        le=4999,
+        alias="AVA_TIMELINE_WINDOW_MEASURE_ROWS",
+        description=(
+            "Expanded row count where the web UI starts measuring heights before the "
+            "bounded window activates. 75 prepares measured anchors ahead of the default "
+            "100-row switch without observing every short conversation."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     events_default_limit: int = Field(
         default=100,
         alias="AVA_EVENTS_DEFAULT_LIMIT",
