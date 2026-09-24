@@ -49,6 +49,8 @@ TZ = settings.general.timezone
 # 2026-08-09 ruling (daily reports replaced the weekly ones); an env override
 # wins, and an explicit empty env value skips the report.
 REPORT_AGENT = os.environ.get("AVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
+# Measured >=55 min under concurrent load (2026-09-25, #4743): 2h ~2x; wedged -> ALERT/wake.
+_SCAN_TIMEOUT_SECONDS = 7200
 
 
 def ensure_agent(label: str, prompt: str) -> int:
@@ -85,7 +87,7 @@ def run_scan() -> None:
     try:
         r = subprocess.run(
             [sys.executable, DAILY, "--days", "1"],
-            timeout=1800,
+            timeout=_SCAN_TIMEOUT_SECONDS,
             capture_output=True,
             text=True,
             check=False,
@@ -106,10 +108,10 @@ def run_scan() -> None:
                 f"Daily scan failed rc={r.returncode}:\n{err}\nCheck the schedule log and daily_scan.py.",
             )
     except subprocess.TimeoutExpired:
-        print("scan timed out after 1800s")
+        print(f"scan timed out after {_SCAN_TIMEOUT_SECONDS}s")
         ensure_agent(
             "self-evolution",
-            "Daily scan timed out after 1800s — check whether daily_scan.py is stuck.",
+            f"Daily scan timed out after {_SCAN_TIMEOUT_SECONDS}s — check whether daily_scan.py is stuck.",
         )
         return
     if REPORT_AGENT:
