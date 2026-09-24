@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from shared.inbound import InterruptReason
 from shared.lifecycle import (
     AgentImpersonation,
     AgentRestart,
@@ -60,11 +61,12 @@ class _ExecDone:
 
 @dataclass(frozen=True)
 class _ExecCancelled:
-    """User pressed Stop -> child got SIGINT -> KeyboardInterrupt -> exit;
+    """External abort -> child interruption and owned-resource cleanup;
     `output` contains accumulated partial output + KeyboardInterrupt traceback."""
 
     output: str
     stream_cap: StreamCap | None = None
+    reason: InterruptReason = InterruptReason.USER
 
 
 @dataclass(frozen=True)

@@ -14,19 +14,20 @@ behavior).
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import pytest
 
+from agent.graph._interrupt import InterruptEvent
+
 
 @pytest.fixture
-def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
-    event = asyncio.Event()
+def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
+    event = InterruptEvent()
 
     @asynccontextmanager
-    async def fake_subscribe(_pool, _agent_id) -> AsyncGenerator[asyncio.Event]:
+    async def fake_subscribe(_pool, _agent_id) -> AsyncGenerator[InterruptEvent]:
         yield event
 
     monkeypatch.setattr("agent.graph._llm_cancel.subscribe_interrupt", fake_subscribe)  # pyright: ignore[reportUnknownArgumentType]

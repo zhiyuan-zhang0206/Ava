@@ -61,9 +61,11 @@ Node-level discard semantics differ, and deliberately so:
 
 - **llm_node** discards the partial generation whole — nothing was committed, so
   there is nothing worth keeping.
-- **exec_node** keeps the partial stdout/stderr and appends a `[cancelled by
-  user]` tool_result — the side effects already happened, so hiding the output
-  would make them invisible.
+- **exec_node** keeps partial stdout/stderr and attributes the tool result to
+  the first observed interrupt: `[cancelled by user]` for a user command,
+  `[cancelled by system]` for maintenance or another external system command.
+  The watcher retains that attribution through subprocess cleanup; a later
+  inbound cannot relabel it. Existing side effects are not undone or replayed.
 
 Durability is what makes this correct under a race: a cancel landing *between*
 actions is not lost, because the row is dispatched by the next claim pass.

@@ -23,13 +23,17 @@ Coverage (cancel/timeout behavior inside nodes):
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import cast
 from unittest.mock import MagicMock
 
+import psycopg
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import exec_node, llm_node
 from agent.graph._exec import (
@@ -41,7 +45,9 @@ from agent.graph._exec import (
 )
 from agent.state import AgentState
 from shared.context import AvaContext
+from shared.db import create_agent
 from shared.live_events import EVENT_ADAPTER, Cancelled
+from shared.machine import machine_name
 from tests.agent._fakes import make_fake_ops_pool
 
 # Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a
@@ -255,6 +261,68 @@ async def test_llm_node_cancel_event_race_normal_completion(
 # ---------------------------------------------------------------------------
 # exec_node cancel_event race (mock _run_in_subprocess returns sum-type variant + payload)
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("kind", "source", "expected"),
+    [("cancel", "user", "user"), ("restart", "system:maintenance", "system")],
+)
+async def test_exec_node_preserves_durable_interrupt_attribution(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    source: str,
+    expected: str,
+) -> None:
+    """The real watcher aborts once, preserves partial output, and leaves claim its command."""
+    agent_id = create_agent(db_conn)
+    payload = None
+    if kind == "restart":
+        payload = Jsonb({"maintenance": {"holder": "ops:test:cancel"}})
+        db_conn.execute(
+            "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
+            "VALUES(%s,'restarting',%s,'hosted')",
+            (agent_id, machine_name()),
+        )
+    command = db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,kind,source,content,payload) "
+        "VALUES(%s,%s,%s,'',%s) RETURNING id",
+        (agent_id, kind, source, payload),
+    ).fetchone()
+    assert command is not None
+    db_conn.commit()
+    calls = 0
+
+    async def interrupted_child(
+        code: str,
+        child_agent_id: int,
+        cancel_event: asyncio.Event,
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[_ExecCancelled, None]:
+        nonlocal calls
+        calls += 1
+        await asyncio.wait_for(cancel_event.wait(), timeout=5)
+        return (_ExecCancelled(output="external side effect already happened\n"), None)
+
+    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
+    result = await exec_node(
+        AgentState(messages=[_ai_with_code("pass")], halted=False),
+        _make_runtime(ops_pool=aops_pool),
+        {"configurable": {"thread_id": str(agent_id)}},
+    )
+    assert calls == 1
+    assert result.goto == "after_exec"
+    assert result.update["halted"] is True
+    message = cast(ToolMessage, result.update["messages"][0])
+    assert f"[cancelled by {expected}]" in message.content
+    assert "external side effect already happened" in message.content
+    assert message.additional_kwargs["ava_cancelled"] is True
+    assert db_conn.execute(
+        "SELECT status,claimed_at,applied_at,observed_at FROM inbound_messages WHERE id=%s",
+        (command[0],),
+    ).fetchone() == ("pending", None, None, None)
 
 
 async def test_exec_node_cancel_event_returns_cancelled_command(
