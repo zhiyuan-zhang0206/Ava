@@ -7,10 +7,11 @@ wrappers: the cluster-wide SDK event collector owns those responsibilities.
 
 import math
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from shared._impersonation_store import lock_lease
+from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.impersonation_history import append, event_belongs_to_agent, resolve
 
@@ -31,9 +32,10 @@ def _validate_event(event: dict[str, Any], lease: dict[str, Any]) -> datetime:
         timestamp = datetime.fromisoformat(timestamp)
     if not isinstance(timestamp, datetime) or timestamp.tzinfo is None:
         raise ValueError("SDK events require a timezone-aware timestamp")
-    if lease["activated_at"] is None or timestamp < lease["activated_at"]:
+    skew = settings.general.impersonation_event_clock_skew_guard_seconds
+    if lease["activated_at"] is None or timestamp < lease["activated_at"] - timedelta(seconds=skew):
         raise ValueError("SDK event predates session activation")
-    if lease["ended_at"] is not None and timestamp > lease["ended_at"]:
+    if lease["ended_at"] is not None and timestamp > lease["ended_at"] + timedelta(seconds=skew):
         raise ValueError("SDK event occurred after the session ended")
     return timestamp
 
@@ -66,6 +68,13 @@ def consume_events(agent_id: int, session_id: int, events: Iterable[dict[str, An
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         for event in events:
+            if (
+                lease["event_delivery_protocol_version"] == 1
+                and event["attributes"].get("impersonation_session") != f"{agent_id}:{session_id}"
+            ):
+                raise ValueError(
+                    "Protocol-v1 events require the immutable impersonation session tag"
+                )
             if not event_belongs_to_agent(event, agent_id):
                 raise ValueError("SDK/API event belongs to another agent")
             kind = "sdk_call" if event["event_name"] == "sdk_call" else "api_event"
@@ -99,56 +108,3 @@ def consume_events(agent_id: int, session_id: int, events: Iterable[dict[str, An
                     (Jsonb(document), lease_id),
                 )
     return inserted
-
-
-def complete_delivery(agent_id: int, session_id: int, event_ids: list[str | int]) -> None:
-    """Consume an upstream manifest certifying all SDK/API events for this session.
-
-    The collector calls this only after all its events for the closed activation
-    interval have been delivered. Exact stable IDs must match the durable set.
-    It certifies emitted events, never an SDK-call census under opt-in sampling.
-    """
-    from psycopg.types.json import Jsonb
-
-    from shared.impersonation_history import export_handoff
-
-    lease_id = str(resolve(agent_id, session_id)["id"])
-    expected = {_event_key(event_id) for event_id in event_ids}
-    if len(expected) != len(event_ids):
-        raise ValueError("Delivery manifest contains duplicate event identities")
-    with write_transaction() as conn:
-        lease = lock_lease(conn, lease_id)
-        if lease["ended_at"] is None:
-            raise ValueError("Delivery completion requires a closed session")
-        actual = {
-            row[0]
-            for row in conn.execute(
-                "SELECT event_key FROM agent_impersonation_entries WHERE lease_id=%s "
-                "AND kind IN ('sdk_call','api_event')",
-                (lease_id,),
-            ).fetchall()
-        }
-        if actual != expected:
-            raise ValueError("Delivery manifest differs from consumed SDK/API events")
-        if lease["events_completed_at"] is not None:
-            return
-        row = conn.execute(
-            "UPDATE agent_impersonations SET events_completed_at=clock_timestamp(),events_cursor=NULL,"
-            "handoff_document=NULL WHERE id=%s RETURNING events_completed_at",
-            (lease_id,),
-        ).fetchone()
-        assert row is not None  # noqa: S101 - locked session exists
-        lease["events_completed_at"] = row[0]
-        lease["handoff_document"] = None
-        append(
-            conn,
-            lease_id,
-            "lifecycle",
-            {"event": "event_delivery_complete", "event_count": len(actual)},
-        )
-        if lease["handoff_path"] is not None:
-            document, _ = export_handoff(lease, conn)
-            conn.execute(
-                "UPDATE agent_impersonations SET handoff_document=%s WHERE id=%s",
-                (Jsonb(document), lease_id),
-            )

@@ -30,6 +30,7 @@ def _row(
 ) -> dict[str, Any]:
     return {
         "id": 1,
+        "line_sha256": "a" * 64,
         "ts": datetime.fromisoformat(ts),
         "agent_id": agent_id,
         "machine": "machine-1",
@@ -74,8 +75,8 @@ class TestAgentEventsQuery:
             "oldest",
             "newest",
         ]  # query_events order is preserved
-        # wire shape: id / ts / agent_id / level / event / payload
-        assert set(items[0]) == {"id", "ts", "agent_id", "level", "event", "payload"}
+        # wire shape includes the canonical-line identity shared by all event APIs
+        assert set(items[0]) == {"id", "line_sha256", "ts", "agent_id", "level", "event", "payload"}
 
     def test_scopes_to_agent(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
         with TestClient(app) as client:

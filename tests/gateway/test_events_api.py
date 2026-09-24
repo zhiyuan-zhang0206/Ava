@@ -24,6 +24,7 @@ from gateway.app import app
 
 _EVENT_KEYS = {
     "id",
+    "line_sha256",
     "ts",
     "trace_id",
     "span_id",
@@ -43,6 +44,7 @@ _EVENT_KEYS = {
 def _row(**over: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "id": 1,
+        "line_sha256": "a" * 64,
         "ts": datetime(2026, 8, 12, tzinfo=UTC),
         "trace_id": None,
         "span_id": None,

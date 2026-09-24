@@ -36,10 +36,7 @@ from ops.agents import (
     resurrect_agent,
 )
 
-# Re-exported (explicit-alias form) so the module-qualified callers —
-# gateway/routers/notices.py, the ops server, tests — keep their call sites
-# unchanged after the Task #1999 split: these helpers now live in
-# `ops/ops_events.py`.
+# Re-exported from ops_events after Task #1999; callers retain module-qualified sites.
 from ops.ops_events import (
     publish_inbound_arrived as publish_inbound_arrived,
 )
@@ -62,9 +59,7 @@ from ops.ops_exit import (
     _publish_force_terminate_inbound as _publish_force_terminate_inbound,
 )
 
-# Re-exported (explicit-alias form) so the gateway routers and tests keep their
-# call sites unchanged after the Task #1999 split: the launch op cluster now
-# lives in `ops/ops_launch.py`.
+# Re-exported from ops_launch after Task #1999; routers and tests retain their call sites.
 # Re-exported (explicit-alias form) so the gateway routers and tests keep their
 # call sites unchanged after the Task #1999 split: the launch op cluster now
 # lives in `ops/ops_launch.py`.
@@ -110,12 +105,13 @@ from ops.rpc_schemas import (
     TerminateAgentRequest,
     TerminateAgentResponse,
 )
+from shared import telemetry
 from shared.agents import (
     AgentNotFound,
     AgentStatus,
     ResurrectAlreadyAlive,
 )
-from shared.audit_events import insert_event_log
+from shared.audit_events import prepare_event_log
 from shared.db import insert_inbound_message
 from shared.live_announce import publish_agent_updated_sync
 from shared.lm.registry import normalize_overlay_llm_model
@@ -627,19 +623,24 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
             "WHERE id = %s AND status = 'idling' AND last_turn_fatal_at IS NOT NULL",
             (agent_id,),
         )
-        insert_event_log(
+        prepared_event = prepare_event_log(
             event_type="status_change",
             agent_id=agent_id,
             source="system",
             payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
         )
+        from shared.agents.impersonation_manifest import stage_central_expected_event
+
+        prepared_event = stage_central_expected_event(
+            conn, prepared_event, origin_kind="ops_lifecycle_reaper", origin_id=agent_id
+        )
+    telemetry.emit_prepared(prepared_event)
     _log.info(
         "recover-crash-marked-v2: harvested crash-marked corpse for agent %s "
         "(termination_source=reaper; the relaxed trigger resumes its queued work)",
         agent_id,
     )
     try:
-        # Best-effort, after the durable flip: refresh mounted frontends.
         publish_agent_updated_sync(agent_id)
     except Exception:
         _log.exception(

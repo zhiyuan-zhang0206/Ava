@@ -23,7 +23,8 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
 from gateway import neighbors
-from gateway.routers.agents_forward import LaunchForwardError, _forward_spawn_to_remote
+from gateway.routers import agents_forward
+from gateway.routers.agents_forward import _forward_spawn_to_remote
 from gateway.schemas import (
     AgentRow,
     BornChainResponse,
@@ -534,9 +535,13 @@ async def _dispatch_committed_launch(
         _require_matching_launch_receipt(spawned, launch.agent_id, target)
     except Exception as exc:
         reason = (
-            exc.reason if isinstance(exc, LaunchForwardError) else AvailabilityReason.LAUNCH_UNKNOWN
+            exc.reason
+            if isinstance(exc, agents_forward.LaunchForwardError)
+            else AvailabilityReason.LAUNCH_UNKNOWN
         )
-        detail = str(exc) if isinstance(exc, LaunchForwardError) else type(exc).__name__
+        detail = (
+            str(exc) if isinstance(exc, agents_forward.LaunchForwardError) else type(exc).__name__
+        )
         logger.warning(
             "agent {} launch dispatch failed on {} attempt {}: {} ({})",
             launch.agent_id,
@@ -580,7 +585,7 @@ async def _dispatch_committed_launch(
 
 def _require_matching_launch_receipt(spawned: SpawnedAgent, agent_id: int, target: str) -> None:
     if spawned.id != agent_id:
-        raise LaunchForwardError(
+        raise agents_forward.LaunchForwardError(
             AvailabilityReason.LAUNCH_UNREACHABLE,
             f"target machine={target!r} returned agent {spawned.id} for {agent_id}",
         )

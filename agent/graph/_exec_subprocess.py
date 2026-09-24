@@ -44,7 +44,12 @@ from agent.graph._exec_result import (
 )
 from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
 from shared import editable_install
-from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from shared.env_registry import (
+    AGENT_BIRTH_CONFIG_ENV,
+    AGENT_CONFIG_OVERLAY_ENV,
+    MANIFEST_CERTIFICATION_FINALIZER_ENV,
+    MANIFEST_CERTIFICATION_SECRET_ENV,
+)
 from shared.log import logger
 from shared.paths import exec_run_dir
 from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
@@ -155,6 +160,11 @@ def _build_child_env(
     env = os.environ.copy()
     env.pop(AGENT_CONFIG_OVERLAY_ENV, None)
     env.pop(AGENT_BIRTH_CONFIG_ENV, None)
+    # The agent-host finalizer owns this proof, never model-executed code.  The
+    # parent can retain it to certify only after its gateway equality read;
+    # every execute_code subprocess gets a deliberately proof-free env.
+    env.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
+    env.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None)
     source_root = editable_install.current_interpreter_source_root()
     if source_root is not None and not _cwd_is_inside_checkout(
         Path.cwd().resolve(), source_root.resolve()
