@@ -330,12 +330,20 @@ def _build_llm_retry() -> RetryPolicy:
         _reset_stall_pair_streak,
         _stall_pair_streak,
     )
+    from agent.hooks.compact import CompactionFailedError
 
     def _should_retry(exc: Exception) -> bool:
         # asyncio.CancelledError is a BaseException subclass (not Exception),
         # so it won't reach this callable. All other exceptions: retry.
         if isinstance(
-            exc, (FatalLLMStreamError, FatalProviderError, KeyboardInterrupt, SystemExit)
+            exc,
+            (
+                FatalLLMStreamError,
+                FatalProviderError,
+                CompactionFailedError,
+                KeyboardInterrupt,
+                SystemExit,
+            ),
         ):
             _retry_budget_state.remaining_seconds = None
             _retry_budget_state.stall_pair_sleep = None

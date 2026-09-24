@@ -36,6 +36,7 @@ from agent.graph._llm_stream import _consume_llm, _consume_stream_with_stall_tim
 from agent.state import AgentState
 from shared.config import settings
 from shared.context import AvaContext
+from shared.lm.registry import MODELS, ModelSpec
 from shared.turn_identity import bind_turn_identity
 from tests.agent._fakes import make_fake_ops_pool
 
@@ -347,6 +348,11 @@ async def test_stall_events_carry_provider_health_fields(
     fake_llm.ainvoke = _fallback_also_hangs
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
+    # This synthetic provider now crosses the LLM node's compaction gate too;
+    # declare its context budget instead of depending on an installed plugin.
+    monkeypatch.setitem(
+        MODELS, "deepseek-v4-flash", ModelSpec(provider="deepseek", context_window=128_000)
+    )
     original = settings.lm.llm_model
     try:
         settings.lm.llm_model = "deepseek-v4-flash"
