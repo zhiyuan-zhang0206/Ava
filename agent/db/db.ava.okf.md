@@ -27,9 +27,11 @@ or a blocked graph invocation.
 - **Checkpoint reconciliation**: startup, compaction and co-batch deferral use
   the same owner lock. They only mutate chat rows and never acknowledge a
   lifecycle command using missing checkpoint evidence.
-- **Interrupt peek**: `has_pending_interrupt` reads pending external cancel or
-  terminate commands so an in-flight LLM or exec can abort. Claim remains the
-  authority for dispatch and acknowledgement.
+- **Interrupt peek**: `pending_interrupt_reason` reads pending external cancel or
+  terminate commands and maintenance reap marks so an in-flight operation can
+  abort. It retains user/system attribution from the first matching inbound;
+  `has_pending_interrupt` projects presence for backoff/ownership consumers.
+  Claim remains the authority for dispatch and acknowledgement.
 - **Wake delivery**: queue writers publish a Redis wake after durable insertion.
   The host subscription handles delivery; its durable scan recovers missed
   publishes. Redis is a notification channel, not the queue authority.

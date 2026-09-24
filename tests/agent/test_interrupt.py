@@ -16,9 +16,10 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.db import has_pending_interrupt
+from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph._interrupt import subscribe_interrupt
 from shared.db import create_agent
+from shared.inbound import InterruptReason
 from shared.machine import machine_name
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
@@ -50,6 +51,29 @@ def _insert(
 
 
 class TestHasPendingInterrupt:
+    @pytest.mark.parametrize(
+        ("source", "reason"),
+        [("user", InterruptReason.USER), ("agent:9", InterruptReason.SYSTEM)],
+    )
+    async def test_reason_retains_first_pending_command(
+        self, db_conn, aops_pool: AsyncConnectionPool, source: str, reason: InterruptReason
+    ):
+        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        _insert(db_conn, tid, "cancel", source=source)  # pyright: ignore[reportUnknownArgumentType]
+        _insert(db_conn, tid, "cancel", source="user")  # pyright: ignore[reportUnknownArgumentType]
+        assert await pending_interrupt_reason(aops_pool, tid) is reason
+        async with subscribe_interrupt(aops_pool, tid) as event:
+            await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
+            assert event.reason is reason
+            event.set(
+                InterruptReason.SYSTEM if reason is InterruptReason.USER else InterruptReason.USER
+            )
+            assert event.reason is reason
+        assert db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
+            "SELECT status,claimed_at FROM inbound_messages WHERE agent_id=%s ORDER BY id",
+            (tid,),
+        ).fetchall() == [("pending", None), ("pending", None)]
+
     async def test_false_when_empty(self, db_conn, aops_pool: AsyncConnectionPool):
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         assert await has_pending_interrupt(aops_pool, tid) is False
@@ -109,6 +133,7 @@ class TestHasPendingInterrupt:
         )
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         assert await has_pending_interrupt(aops_pool, tid) is True
+        assert await pending_interrupt_reason(aops_pool, tid) is InterruptReason.SYSTEM
 
     async def test_false_on_unmarked_maintenance_restart(
         self, db_conn, aops_pool: AsyncConnectionPool
@@ -267,7 +292,7 @@ class TestWatcherDecoupledFromSharedListener:
         no shared resource, a lingering survivor is inert."""
         from agent.graph import _interrupt as mod
 
-        real = mod.has_pending_interrupt
+        real = mod.pending_interrupt_reason
         entered = asyncio.Event()
         swallowed = False
 
@@ -285,7 +310,7 @@ class TestWatcherDecoupledFromSharedListener:
 
         monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 0.5)
         monkeypatch.setattr(mod, "_INTERRUPT_POLL_S", 0.05)
-        monkeypatch.setattr(mod, "has_pending_interrupt", _swallow_once)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(mod, "pending_interrupt_reason", _swallow_once)  # pyright: ignore[reportUnknownArgumentType]
 
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
         async with subscribe_interrupt(aops_pool, tid):
@@ -311,7 +336,7 @@ class TestWatcherDecoupledFromSharedListener:
         inject a KeyboardInterrupt into the next action)."""
         from agent.graph import _interrupt as mod
 
-        real = mod.has_pending_interrupt
+        real = mod.pending_interrupt_reason
         recorded_events: list[asyncio.Event] = []
         entered = asyncio.Event()
         swallowed = False
@@ -333,7 +358,7 @@ class TestWatcherDecoupledFromSharedListener:
 
         monkeypatch.setattr(mod, "_WATCHER_EXIT_TIMEOUT_S", 1.0)
         monkeypatch.setattr(mod, "_INTERRUPT_POLL_S", 0.05)
-        monkeypatch.setattr(mod, "has_pending_interrupt", _swallow_once)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(mod, "pending_interrupt_reason", _swallow_once)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(mod, "_watch_for_interrupt", _recording_watch)  # pyright: ignore[reportUnknownArgumentType]
 
         tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]

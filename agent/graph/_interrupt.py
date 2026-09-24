@@ -43,20 +43,38 @@ from contextlib import asynccontextmanager
 
 from psycopg_pool import AsyncConnectionPool
 
-from agent.db import has_pending_interrupt
+from agent.db import pending_interrupt_reason
 from agent.graph._node_log import awaiter_chain_lines
+from shared.inbound import InterruptReason
 from shared.log import logger
+
+
+class InterruptEvent(asyncio.Event):
+    """An abort event retaining the first observed cause through cleanup.
+
+    Setting the event never claims or applies the durable command. Later
+    commands cannot relabel an execution that was already interrupted.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reason = InterruptReason.USER
+
+    def set(self, reason: InterruptReason = InterruptReason.USER) -> None:
+        if not self.is_set():
+            self.reason = reason
+            super().set()
 
 
 async def _watch_for_interrupt(
     pool: AsyncConnectionPool,
-    event: asyncio.Event,
+    event: InterruptEvent,
     agent_id: int,
     stop: asyncio.Event,
 ) -> None:
     """Set `event` as soon as a pending cancel/terminate row exists for agent_id.
 
-    Polls `has_pending_interrupt` on `_INTERRUPT_POLL_S` cadence. Deliberately
+    Polls `pending_interrupt_reason` on `_INTERRUPT_POLL_S` cadence. Deliberately
     does NOT touch the Redis inbound listener: that listener is owned by the
     claim node's idle wait, and a watcher sharing it can starve the claim wait
     of wakes (module docstring — the 2026-08-02 lost-wake incident). Between
@@ -71,14 +89,17 @@ async def _watch_for_interrupt(
     """
     stop_task = asyncio.create_task(stop.wait())
     try:
-        while not stop.is_set() and not await has_pending_interrupt(pool, agent_id):
+        while not stop.is_set():
+            reason = await pending_interrupt_reason(pool, agent_id)
+            if reason is not None:
+                if not stop.is_set():
+                    event.set(reason)
+                return
             done, _ = await asyncio.wait({stop_task}, timeout=_INTERRUPT_POLL_S)
             if done:
                 break
     finally:
         stop_task.cancel()
-    if not stop.is_set():
-        event.set()
 
 
 # How long exit waits for the cancelled watcher to unwind. Cancellation lands
@@ -101,7 +122,7 @@ _INTERRUPT_POLL_S = 2.0
 async def subscribe_interrupt(
     pool: AsyncConnectionPool | None,
     agent_id: int,
-) -> AsyncGenerator[asyncio.Event]:
+) -> AsyncGenerator[InterruptEvent]:
     """RAII watch for a durable interrupt (cancel/terminate) on this agent.
 
     Yields an `asyncio.Event` the node races its work against. On body exit
@@ -112,7 +133,7 @@ async def subscribe_interrupt(
     `pool` None (container/eval, no inbound queue) -> yields an event that
     never fires; the wrapped action runs uninterruptibly.
     """
-    event = asyncio.Event()
+    event = InterruptEvent()
     if pool is None:
         yield event
         return

@@ -18,6 +18,13 @@ a dev cluster's `&<prefix>:*` redis ACL grant.
 from enum import StrEnum
 
 
+class InterruptReason(StrEnum):
+    """Attribution of an observed interrupt; claim still owns its semantics."""
+
+    USER = "user"
+    SYSTEM = "system"
+
+
 class InboundKind(StrEnum):
     """Legal values for inbound_messages.kind — in sync with the CHECK constraint in db/schema.sql.
 
