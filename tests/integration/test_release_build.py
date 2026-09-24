@@ -303,3 +303,55 @@ def test_migration_expectations_precede_archive_filters_and_build_hooks(
             python=Path(sys.executable),
         )
     assert not (tmp_path / "output/build-receipt.json").exists()
+
+
+def test_depth_one_checkout_builds_without_parent_objects(
+    committed_repo: tuple[Path, str], tmp_path: Path
+) -> None:
+    repo, _ = committed_repo
+    (repo / "shared/__init__.py").write_text('VALUE = "second commit"\n')
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-qm",
+            "second",
+        ],
+        check=True,
+    )
+    clone = tmp_path.resolve() / "shallow"
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "clone",
+            "-q",
+            "--depth=1",
+            repo.as_uri(),
+            str(clone),
+        ],
+        check=True,
+    )
+    assert (clone / ".git/shallow").is_file()
+    commit = subprocess.check_output(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"], text=True
+    ).strip()
+    result = build.build_application(
+        clone,
+        commit,
+        tmp_path.resolve() / "output",
+        uv=_builder(tmp_path),
+        python=Path(sys.executable),
+    )
+    with zipfile.ZipFile(result.wheel) as wheel:
+        assert wheel.read("shared/__init__.py") == b'VALUE = "second commit"\n'

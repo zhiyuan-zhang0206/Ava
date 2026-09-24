@@ -122,6 +122,17 @@ def _isolated_objects(repo: Path, destination: Path) -> Path:
     return isolated
 
 
+def _source_epoch(repo: Path, commit: str) -> str:
+    # Pretty-printing a commit can parse its parent even with `show -s`.
+    # Read the object itself so a depth-one CI checkout needs no parent/history.
+    header = _git(repo, "cat-file", "commit", commit).split("\n\n", 1)[0]
+    lines = [line for line in header.splitlines() if line.startswith("committer ")]
+    match = re.fullmatch(r"committer .+ (\d+) [+-]\d{4}", lines[0]) if len(lines) == 1 else None
+    if match is None:
+        raise ReleaseRejectedError("source commit has no supported committer epoch")
+    return match[1]
+
+
 def _archive(repo: Path, commit: str, destination: Path) -> dict[str, object]:
     if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise ReleaseRejectedError("application build requires an exact commit SHA")
@@ -244,7 +255,7 @@ def build_application(
         env={
             "PATH": os.defpath,
             "HOME": str(Path.home()),
-            "SOURCE_DATE_EPOCH": _git(destination / "git", "show", "-s", "--format=%ct", commit),
+            "SOURCE_DATE_EPOCH": _source_epoch(destination / "git", commit),
         },
         timeout=300,
         capture_output=True,
