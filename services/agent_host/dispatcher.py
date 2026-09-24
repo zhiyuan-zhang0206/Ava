@@ -221,14 +221,14 @@ class TurnScheduler:
         Otherwise a pre-start cancel leaves a phantom agent (task #3085,
         PR #2217); a running task releases its own slot.
         """
+        if self._reaped_successors.get(agent_id) is task:
+            self._reaped_successors.pop(agent_id)
         if self._tasks.get(agent_id) is not task:
             return
         self._tasks.pop(agent_id)
         if not self._closed and agent_id in self._pending:
             self._start(agent_id)
-            successor = self._tasks.get(agent_id)
-            if successor is not None:
-                self._reaped_successors[agent_id] = successor
+            self._reaped_successors[agent_id] = self._tasks[agent_id]
 
     async def _pump(self, agent_id: int) -> None:
         """One Task owns one actual turn; a queued successor gets a new Task.
