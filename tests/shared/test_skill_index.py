@@ -1,4 +1,4 @@
-"""shared/skill_index.py: the materialized skill scan (doorplate ⑤).
+"""shared/packages/skills/skill_index.py: the materialized skill scan (doorplate ⑤).
 
 The index is the single scan behind every skill read path — the runtime loader
 mounts from it (tests/ava/test_skills.py covers the tree semantics on top),
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.skill_index import (
+from shared.packages.skills.skill_index import (
     SkillFormatError,
     SkillIndex,
     parse_skill_frontmatter,

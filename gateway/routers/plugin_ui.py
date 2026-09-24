@@ -36,7 +36,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-from shared import plugins_config, skill_names
+from shared import plugins_config
+from shared.packages.skills import skill_names
 
 router = APIRouter()
 

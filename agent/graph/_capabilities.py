@@ -17,7 +17,7 @@ from typing import Any, NamedTuple
 
 from shared.config.turn_view import turn_settings
 from shared.lm.registry import resolve_setting
-from shared.skill_names import match_key
+from shared.packages.skills.skill_names import match_key
 
 # A description is free-form text from a SKILL.md frontmatter block — including
 # ones dropped into `~/.ava/skills/` by a user or a plugin. A YAML block scalar
@@ -109,7 +109,7 @@ def resolve_prompt_skills(wanted: list[str], *, config_field: str) -> list[Any]:
     `*` selects the whole loaded catalog. Otherwise each name resolves by
     `.`-identifier first (unambiguous for namespaced skills like `ava-code.pr`),
     then bare frontmatter name for flat entries. Both sides of the match go
-    through `shared.skill_names.match_key`, so a stored value still spelled
+    through `shared.packages.skills.skill_names.match_key`, so a stored value still spelled
     `ava_code.pr` (a preset row written before the dash rename, an operator
     typing the Python form) resolves to the same skill as `ava-code.pr`. An
     unresolved name warns once per process (naming `config_field` so the operator

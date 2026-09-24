@@ -874,7 +874,7 @@ def test_auto_promote_help_renders_root_skill(
 #
 # Dash is canonical on disk and in `identifier`; underscore is the Python
 # projection rendered by `target` and used for attribute access. Everything in
-# between folds through `shared.skill_names.match_key`.
+# between folds through `shared.packages.skills.skill_names.match_key`.
 
 
 def test_dash_dir_renders_dash_identifier_and_underscore_target(fake_skills_dir: Path) -> None:
@@ -960,7 +960,7 @@ def test_two_skills_claiming_one_frontmatter_name_are_refused(fake_skills_dir: P
     identity check fires first."""
     _write_skill(fake_skills_dir, "first", "name: first\ndescription: a")
     _write_skill(fake_skills_dir, "second", "name: first\ndescription: b")
-    from shared.skill_names import SkillIdentityMismatch
+    from shared.packages.skills.skill_names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
         skills_mod._names()
@@ -1484,7 +1484,7 @@ def test_frontmatter_name_not_folding_to_dir_is_refused(
     family as SkillNameCollision)."""
     _write_skill(fake_skills_dir, "wechat-ocr", "name: wechat\ndescription: read wechat")
     monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"wechat-ocr"})
-    from shared.skill_names import SkillIdentityMismatch
+    from shared.packages.skills.skill_names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
         skills_mod._names()

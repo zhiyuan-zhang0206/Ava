@@ -22,7 +22,7 @@ from gateway.schemas import SkillEnableUpdate, SkillsView, SkillView
 from gateway.schemas.skills import SkillLayer
 from shared import install_registry, paths
 from shared.install_registry import IGNORED_NAMES, PackageOrigin, tree_hash
-from shared.skill_names import display_name, match_key
+from shared.packages.skills.skill_names import display_name, match_key
 
 router = APIRouter()
 

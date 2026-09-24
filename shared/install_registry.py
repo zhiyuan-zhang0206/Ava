@@ -27,9 +27,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from shared import paths
+from shared.packages.skills.skill_names import match_key
 from shared.platform import LockTimeoutError as LockTimeoutError
 from shared.platform import file_lock
-from shared.skill_names import match_key
 
 # Junk that must affect neither a package's tree hash nor its synced copy —
 # otherwise e.g. a __pycache__ appearing in a source tree would read as a
@@ -100,7 +100,7 @@ TrustTier = Literal["builtin", "reviewed", "unreviewed"]
   ships under the same review as the code. Written by converge.
 - "reviewed" — third-party content a human on this cluster read and approved
   (`ava skill trust <name>`). Never inferred: a clean
-  `shared.skill_scan` report is "no rule matched", not "someone looked".
+  `shared.packages.skills.skill_scan` report is "no rule matched", not "someone looked".
 - "unreviewed" — the default for anything ingested from outside. Installed and
   usable by an agent that deliberately opens it, but any runtime layer that
   pulls skill text into a context *without* a human in the loop (skill recall)
@@ -194,7 +194,7 @@ class InstalledPackage(BaseModel):
     timestamps.
 
     `trust` is the content trust tier (see `TrustTier`); `scanned_at` is when
-    `shared.skill_scan` last ran over it, and `accepted_findings` holds the rule
+    `shared.packages.skills.skill_scan` last ran over it, and `accepted_findings` holds the rule
     ids a human waved through with `--accept-risk`. An accepted-risk package
     stays `unreviewed` — the override records a decision, it does not promote.
     """
@@ -256,7 +256,7 @@ class SchemaInvalid(InstallRegistryError):  # noqa: N818
 class DuplicatePackageName(InstallRegistryError):  # noqa: N818
     """Two registry rows fold to the same package key.
 
-    Dash and underscore are one name (`shared.skill_names.match_key`), so
+    Dash and underscore are one name (`shared.packages.skills.skill_names.match_key`), so
     `ava-code` and `ava_code` as separate rows are the same package twice —
     the dual-row state that made the skill scanner crash fleet-wide (audit
     02 #4). One package must have exactly one row (design R2-B1), so the
@@ -345,7 +345,7 @@ def save(registry: Registry) -> None:
 def get(name: str) -> InstalledPackage | None:
     """Return the tracked package with this name, or None.
 
-    Name matching is dash/underscore-insensitive (`shared.skill_names`): a row
+    Name matching is dash/underscore-insensitive (`shared.packages.skills.skill_names`): a row
     written before the dash rename and a caller asking for the dash spelling
     mean one package,
     so a rename does not orphan a registry row mid-upgrade."""

@@ -147,7 +147,7 @@ class SkillIdentity:
                 f"skill identity mismatch: directory '{self.name}' (key "
                 f"{self.key!r}) vs frontmatter name '{other.name}' (key "
                 f"{other.key!r}) — dash and underscore are the same name "
-                "(shared/skill_names.py); the frontmatter name must fold to "
+                "(shared/packages/skills/skill_names.py); the frontmatter name must fold to "
                 "the directory name. Rename one; the directory is canonical."
             )
 

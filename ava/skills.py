@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from ava import _skill_sources
 from shared.log import logger
+from shared.packages.skills.skill_names import SkillIdentity, display_name, match_key
 from shared.paths import ava_home
-from shared.skill_names import SkillIdentity, display_name, match_key
 
 if TYPE_CHECKING:
     # Annotation-only on the mount signatures; imported at the call site so the
     # stack stays off every exec child (task #3816; _TYPE_CHECKING_ALLOWED).
-    from shared.skill_index import SkillFile
+    from shared.packages.skills.skill_index import SkillFile
 
 _recorded_skill_invocations: set[tuple[int, str]] = set()
 # Per-agent-run dedup set: (agent_id, skill_identifier) tuples — one row per
@@ -70,7 +70,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # label); if both exist the SKILL.md wins.
 #
 # Two renderings of a skill's location, and one fold between them
-# (`shared/skill_names.py` — dash is canonical outward, underscore is the Python
+# (`shared/packages/skills/skill_names.py` — dash is canonical outward, underscore is the Python
 # projection inward):
 #   - composer / display identifier — `.`-joined dash form:
 #     superpowers.brainstorming, coding.tdd, or bare `goal` (see `identifier`).
@@ -87,7 +87,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # this host (`engines.ava` / `requires_commit`) is dropped too, with the reason
 # visible in `ava packages status`. Keeps stray copies from silently loading.
 # Provider roots are scanned last (override). The scan is the shared,
-# mtime-cached SkillIndex (doorplate ⑤) — see shared/skill_index.py.
+# mtime-cached SkillIndex (doorplate ⑤) — see shared/packages/skills/skill_index.py.
 # Frontmatter requires name + description; other files in a skill dir are read
 # by the agent via ava.files.read.
 
@@ -239,7 +239,7 @@ def _claim(claimed: dict[tuple[str, ...], str], attr_path: tuple[str, ...], src:
     if prev is not None and prev != src:
         raise SkillNameCollision(
             f"skill path {'.'.join(attr_path)!r} is claimed by both {prev} and {src} — "
-            "dash and underscore are the same name (shared/skill_names.py). "
+            "dash and underscore are the same name (shared/packages/skills/skill_names.py). "
             "Rename one; dash is canonical."
         )
     claimed[attr_path] = src
@@ -251,7 +251,7 @@ class SkillIndexBuilder:
     Owns the state the mount threads through — the tree, the per-root
     claimed-paths registry, and the cross-root seen-hashes dedup set — as
     instance state. The folder scan + frontmatter parse itself lives in
-    `shared.skill_index` (doorplate ⑤): one builder behind every skill read
+    `shared.packages.skills.skill_index` (doorplate ⑤): one builder behind every skill read
     path, so the loader and the lint cannot drift (they had: the INDEX.md gate
     compared raw names where the SKILL.md gate folded dash/underscore, and the
     lint's separate traversal once skipped a three-deep tree entirely).
@@ -291,13 +291,15 @@ class SkillIndexBuilder:
         # refused between two directories of the SAME mount root.
         self._claimed = {}
         gate_keys = None if gate is None else {match_key(g) for g in gate}
-        # The scan is `shared.skill_index` (doorplate ⑤), mtime-cached: this
+        # The scan is `shared.packages.skills.skill_index` (doorplate ⑤), mtime-cached: this
         # mount runs on every system-prompt rebuild, so the cache turns the
         # repeated scans into a stat walk. Entries arrive parent-before-child
         # (sorted folders) — the arrival order the tree converges under — and
         # include the mount point itself, so a SKILL.md at the root (empty
         # rel) still loads as a bare root skill.
-        from shared.skill_index import SkillIndex  # heavy stack, deferred per-call (task #3816)
+        from shared.packages.skills.skill_index import (
+            SkillIndex,  # heavy stack, deferred per-call (task #3816)
+        )
 
         index = SkillIndex.cached([root])
         for entry in index.entries:

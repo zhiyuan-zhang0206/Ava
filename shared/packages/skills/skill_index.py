@@ -15,7 +15,7 @@ with the parsed frontmatter (name/description), a content hash for cross-root
 dedup, and file stats for cache invalidation. Tree building, namespace
 mounting, gating and collision refusal stay in `ava.skills` (R2's identity
 entity); this module never builds a filesystem path out of a name — the key
-fold is `shared.skill_names.match_key`, the same comparison key every other
+fold is `shared.packages.skills.skill_names.match_key`, the same comparison key every other
 skill surface uses.
 
 Tolerance contract: `build()` never raises on a bad skill. A malformed or
@@ -26,7 +26,7 @@ are exactly what `ava.skills._parse_frontmatter` enforced before this module
 existed.
 
 Supply-chain gate: every SKILL.md/INDEX.md body is ALSO run through the
-`shared.skill_scan` critical rule table (the same rules the CLI install path
+`shared.packages.skills.skill_scan` critical rule table (the same rules the CLI install path
 gates on). A critical hit lands on the entry as `security_rules` — the runtime
 loader refuses to mount it, closing the project-skill bypass (a `git clone`
 drops `.claude/skills/` into the scan with no user action).
@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shared.docs.frontmatter import FrontmatterError, parse_frontmatter
-from shared.skill_names import match_key
+from shared.packages.skills.skill_names import match_key
 
 _REQUIRED_FIELDS = ("name", "description")
 
@@ -105,7 +105,7 @@ def _scan_critical(text: str) -> tuple[str, ...]:
     """Distinct critical rule ids matched in one skill text blob (SKILL.md or
     INDEX.md) — the runtime supply-chain gate. Empty tuple = clean. Sorted for
     deterministic messages."""
-    from shared.skill_scan import scan_text_critical
+    from shared.packages.skills.skill_scan import scan_text_critical
 
     return tuple(sorted({f.rule_id for f in scan_text_critical(text)}))
 
