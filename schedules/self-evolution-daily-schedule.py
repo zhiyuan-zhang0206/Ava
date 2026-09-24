@@ -49,8 +49,13 @@ TZ = settings.general.timezone
 # 2026-08-09 ruling (daily reports replaced the weekly ones); an env override
 # wins, and an explicit empty env value skips the report.
 REPORT_AGENT = os.environ.get("AVA_SELF_EVOLUTION_DAILY_REPORT_AGENT", "228")
-# Measured >=55 min under concurrent load (2026-09-25, #4743): 2h ~2x; wedged -> ALERT/wake.
-_SCAN_TIMEOUT_SECONDS = 7200
+# Measured full-day scan T >= 108 min: 112.9 min total on 2026-09-25 while
+# two collect streams ran (task #4743 log, #4750 tracker). 10800 s = 180 min,
+# about 1.6x the measured contended T. This remains the final bound between
+# a slow scan (allowed) and a wedged one: beyond it, subprocess.TimeoutExpired
+# prints the timeout line and wakes the agent. The longer bound only delays
+# wedge detection, which is accepted.
+_SCAN_TIMEOUT_SECONDS = 10800
 
 
 def ensure_agent(label: str, prompt: str) -> int:
