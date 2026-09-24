@@ -1,9 +1,8 @@
 """Whole-response cache + last-good stale serving for the stats-dashboard route.
 
-Entries persist after the fresh TTL expires: besides the 60s hit path, the
-route's stale-serving fallback reads the most recent successful response for a
-window (`cache_get_last_good`) and serves it marked `stale` (`serve_stale`)
-when a recompute fails (task #3973).
+Expired entries within the SWR cap return immediately while one daemon thread
+refreshes the window. Cold or over-cap reads wait for the same recompute lock.
+Transient failures retain the last-good response and rate-cap stale events.
 """
 
 from __future__ import annotations
@@ -11,23 +10,26 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
 from typing import Any, NamedTuple, cast
 
+import httpx
 from psycopg_pool import ConnectionPool
 
+from gateway.loki_query_budget import LokiQueryBudgetError
 from gateway.schemas import PluginStat, PluginStatStatus, StatsDashboard, StatsWindowHours
 from shared import plugin_stats, telemetry
 from shared.config import settings
 from shared.events.contract import StatsDashboardStaleReason
 from shared.loki_index_labels import ledger_gap_plan, retention_floor
 
-# The sidebar polls every 30 seconds. Caching the complete response for 60
-# seconds avoids re-running its roughly 36-query Loki fan-out on every poll.
-_CACHE_TTL_S = 60.0
 _cache: dict[int, tuple[float, StatsDashboard]] = {}
 _cache_lock = threading.Lock()
+_refresh_failed_at: dict[StatsWindowHours, float] = {}
+# Bounded by the route's closed window enum; never hold _cache_lock during I/O.
+_refresh_locks = {hours: threading.Lock() for hours in StatsWindowHours}
 
 
 def _monotonic() -> float:
@@ -49,6 +51,7 @@ def cache_clear() -> None:
     """Test seam: drop all windowed dashboard responses."""
     with _cache_lock:
         _cache.clear()
+        _refresh_failed_at.clear()
 
 
 def plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
@@ -77,7 +80,7 @@ def cache_get(hours: StatsWindowHours) -> StatsDashboard | None:
     """Return a fresh cached response for the requested window, if present."""
     with _cache_lock:
         hit = _cache.get(int(hours))
-        if hit is None or hit[0] + _CACHE_TTL_S <= _monotonic():
+        if hit is None or hit[0] + settings.display.stats_dashboard_cache_ttl_s <= _monotonic():
             return None
         return hit[1]
 
@@ -86,6 +89,7 @@ def cache_put(hours: StatsWindowHours, response: StatsDashboard) -> None:
     """Store the immutable response after its complete backend read succeeds."""
     with _cache_lock:
         _cache[int(hours)] = (_monotonic(), response)
+        _refresh_failed_at.pop(hours, None)
 
 
 def cache_get_last_good(hours: StatsWindowHours, *, max_age_s: float) -> StatsDashboard | None:
@@ -103,6 +107,109 @@ def cache_get_last_good(hours: StatsWindowHours, *, max_age_s: float) -> StatsDa
         if hit is None or _monotonic() - hit[0] > max_age_s:
             return None
         return hit[1]
+
+
+def _swr_response(hours: StatsWindowHours) -> StatsDashboard | None:
+    """Healthy refreshes preserve the payload; failed attempts use the failure cap."""
+    with _cache_lock:
+        failed = hours in _refresh_failed_at
+        max_age_s = settings.display.stats_dashboard_swr_max_s
+        if failed:
+            max_age_s = min(max_age_s, settings.display.stats_dashboard_stale_max_s)
+        hit = _cache.get(int(hours))
+        if max_age_s <= 0 or hit is None or _monotonic() - hit[0] > max_age_s:
+            return None
+        return hit[1].model_copy(update={"stale": True}) if failed else hit[1]
+
+
+def _refresh_due(hours: StatsWindowHours) -> bool:
+    """Back off a failed background attempt for one TTL before retrying."""
+    with _cache_lock:
+        failed_at = _refresh_failed_at.get(hours)
+        return (
+            failed_at is None
+            or _monotonic() - failed_at >= settings.display.stats_dashboard_cache_ttl_s
+        )
+
+
+def _record_refresh_failure(hours: StatsWindowHours) -> None:
+    with _cache_lock:
+        _refresh_failed_at[hours] = _monotonic()
+
+
+def refresh_or_serve(
+    hours: StatsWindowHours, compute: Callable[[], StatsDashboard]
+) -> StatsDashboard:
+    """After a fresh miss, refresh once per window; eligible stale reads never wait.
+
+    The caller supplies the same backend pipeline for synchronous and background
+    reads, including Loki admission. The callback owns no request-scoped resources.
+    """
+    last_good = _swr_response(hours)
+    lock = _refresh_locks[hours]
+    if last_good is None:
+        with lock:
+            cached = cache_get(hours)
+            return cached if cached is not None else _recompute(hours, compute)
+    if lock.acquire(blocking=False):
+        # Another refresh may have finished between the fresh miss and acquire.
+        cached = cache_get(hours)
+        if cached is not None:
+            lock.release()
+            return cached
+        if not _refresh_due(hours):
+            lock.release()
+            return last_good
+        try:
+            threading.Thread(
+                target=_refresh_background,
+                args=(hours, compute),
+                name=f"stats-dashboard-refresh-{int(hours)}",
+                daemon=True,
+            ).start()
+        except Exception:
+            lock.release()
+            raise
+    return last_good
+
+
+def _recompute(hours: StatsWindowHours, compute: Callable[[], StatsDashboard]) -> StatsDashboard:
+    """Synchronous read with the existing capped transient-failure fallback."""
+    try:
+        response = compute()
+    except LokiQueryBudgetError:
+        _record_refresh_failure(hours)
+        stale = serve_stale(hours, reason="loki_budget")
+        if stale is None:
+            raise
+        return stale
+    except httpx.HTTPError:
+        _record_refresh_failure(hours)
+        stale = serve_stale(hours, reason="loki_failed")
+        if stale is None:
+            raise
+        return stale
+    cache_put(hours, response)
+    return response
+
+
+def _refresh_background(hours: StatsWindowHours, compute: Callable[[], StatsDashboard]) -> None:
+    """Keep last-good on failure; release the flight even for unexpected errors."""
+    try:
+        response = compute()
+        cache_put(hours, response)
+    except LokiQueryBudgetError:
+        _record_refresh_failure(hours)
+        _emit_stale("loki_budget")
+    except httpx.HTTPError:
+        _record_refresh_failure(hours)
+        _emit_stale("loki_failed")
+    except Exception:
+        _record_refresh_failure(hours)
+        # Non-Loki failures have no reason in the closed stale-event vocabulary.
+        _log.exception("stats-dashboard background refresh failed for hours=%s", int(hours))
+    finally:
+        _refresh_locks[hours].release()
 
 
 # ── stale serving (task #3973) ─────────────────────────────────────────────
