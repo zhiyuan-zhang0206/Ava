@@ -27,6 +27,13 @@ tree. Relay credentials are returned once and stored as hashes.
 See [[shared/impersonation/ownership.ava.okf.md]] for the lease state machine,
 native return, renewal, and operator closure.
 
+## Relay binding
+
+`shared/impersonation/relay.py` owns relay credential provisioning and
+re-provisioning, relay reads, heartbeats, failure stamps, and aborting a lease
+when a component dies. The package door re-exports this surface, so callers
+keep importing `shared.impersonation`.
+
 ## Bounded delivery
 
 `shared/impersonation_delivery.py` reserves host submissions against the
