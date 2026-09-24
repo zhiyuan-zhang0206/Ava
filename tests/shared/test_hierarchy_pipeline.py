@@ -16,7 +16,13 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from shared.agents.history.hierarchy import pipeline as pipeline_module
 from shared.agents.history.hierarchy.blocks import fold_blocks
@@ -71,7 +77,12 @@ class FakeLLM:
     def __init__(self, responder: Callable[[list[BaseMessage]], str | Exception]) -> None:
         self.responder = responder
         self.calls: list[list[BaseMessage]] = []
+        self.bound_tools: list[list[Any]] = []
         self._lock = threading.Lock()
+
+    def bind_tools(self, tools: list[Any]) -> FakeLLM:
+        self.bound_tools.append(list(tools))
+        return self
 
     def invoke(self, messages: list[BaseMessage]) -> AIMessage:
         with self._lock:
@@ -162,6 +173,39 @@ def test_materialize_generates_a_leaf_group() -> None:
     assert material.startswith("# node L1#1 - 6 source blocks")
     assert "### block 0 (messages i0-i0" in material
     assert node.input_hash == input_hash("leaf", material)
+
+
+def test_requests_carry_the_agent_prefix_when_tools_are_supplied() -> None:
+    # msgs[0] is the agent's SystemMessage snapshot; the request prefix is
+    # everything before the leaf's span (task #4674) — here just the system
+    # message — and the tail carries the material + prompt + text-only clause.
+    system = SystemMessage(content="SP")
+    msgs: list[BaseMessage] = [system, *(inbound(f"m{i}") for i in range(6))]
+    sealed, table = _six_block_tree(msgs)
+    fake = FakeLLM(lambda _m: "summary text")
+    tool = object()
+    tree = materialize(msgs, sealed, table, llm=fake, model=MODEL, retry_attempts=0, tools=[tool])
+    assert tree.nodes
+    assert fake.bound_tools == [[tool]]
+    (call,) = fake.calls
+    assert call[0] is system  # the agent's own head, byte-identical
+    assert len(call) == 2  # prefix + one trailing request message
+    tail = call[-1]
+    assert isinstance(tail.content, list)
+    parts = [str(cast("dict[str, Any]", part)["text"]) for part in cast("list[Any]", tail.content)]
+    assert parts[0].startswith("# node L1#1")
+    assert "plain text only" in parts[2]
+
+
+def test_materialize_without_tools_keeps_the_material_only_request() -> None:
+    system = SystemMessage(content="SP")
+    msgs: list[BaseMessage] = [system, *(inbound(f"m{i}") for i in range(6))]
+    sealed, table = _six_block_tree(msgs)
+    fake = FakeLLM(lambda _m: "summary text")
+    materialize(msgs, sealed, table, llm=fake, model=MODEL, retry_attempts=0)
+    assert fake.bound_tools == []
+    (call,) = fake.calls
+    assert len(call) == 1  # the legacy single-message request
 
 
 def test_materialize_reuses_known_input_hash_without_a_call() -> None:

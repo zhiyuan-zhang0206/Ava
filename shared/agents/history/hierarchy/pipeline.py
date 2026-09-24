@@ -32,7 +32,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, NamedTuple
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 
 from shared.agents.history.checkpoint import load_checkpoint_messages_full
 from shared.agents.history.hierarchy.blocks import COMPACT_ITEM_KINDS, Block, fold_blocks
@@ -57,6 +57,7 @@ from shared.agents.history.hierarchy.seal import (
     seal_cascade,
 )
 from shared.agents.history.timeline import TimelineItem, build_timeline_items
+from shared.log import logger
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,7 @@ def materialize(
     gen_params: GenParams | None = None,
     max_concurrent: int = DEFAULT_MAX_CONCURRENT,
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    tools: Sequence[Any] | None = None,
     deadline: float | None = None,
 ) -> MaterializedTree:
     """Generate the sealed tree's nodes, level by level, newest stretch first.
@@ -179,8 +181,17 @@ def materialize(
     whose input hash is known reuses its text without a model call (counted in
     `reused`). A node with a failed child has no input to build and fails
     without a call — its error names the missing child.
+
+    `tools` (task #4674) is the agent's tool schema list (`[execute_code]`)
+    threaded into the generation calls; together with each request's prefix it
+    selects the agent-shaped request — see `generate.generate_nodes`.
     """
     known = known_texts or {}
+    if tools is not None and msgs and not isinstance(msgs[0], SystemMessage):
+        logger.warning(
+            "hierarchy generation has tools but no SystemMessage head — requests "
+            "fall back to the material-only shape (no prefix cache)"
+        )
     texts: dict[str, str] = {}
     nodes: list[MaterializedNode] = []
     errors: list[GenResult] = []
@@ -215,6 +226,7 @@ def materialize(
             gen_params=gen_params,
             max_concurrent=max_concurrent,
             retry_attempts=retry_attempts,
+            tools=tools,
             chunk_size=chunk_size,
             deadline=deadline,
         )
@@ -259,6 +271,23 @@ class _LevelPlan(NamedTuple):
     queued: list[tuple[GenRequest, NodeSpec, str]]
     cached: int
     failed: int
+
+
+def _request_prefix(msgs: Sequence[BaseMessage], spec: NodeSpec) -> tuple[BaseMessage, ...]:
+    """The request prefix for one node: everything before its span start (#4674).
+
+    The agent's SystemMessage snapshot plus the conversation up to (not
+    including) the node's first span message — byte-identical to the head of
+    the agent's own requests, so the generation call rides the provider's
+    prefix cache. Empty when the history head is not a SystemMessage: the
+    request then falls back to the material-only shape.
+    """
+    if not msgs or not isinstance(msgs[0], SystemMessage):
+        return ()
+    cut = spec.span[0]
+    if cut < 1:
+        return ()
+    return tuple(msgs[:cut])
 
 
 def _classify_level_specs(
@@ -312,7 +341,12 @@ def _classify_level_specs(
             continue
         queued.append(
             (
-                GenRequest(nid=spec.nid, kind=kind_of_input, input_text=input_text),
+                GenRequest(
+                    nid=spec.nid,
+                    kind=kind_of_input,
+                    input_text=input_text,
+                    prefix=_request_prefix(msgs, spec),
+                ),
                 spec,
                 key,
             )
@@ -343,6 +377,7 @@ def _run_chunks(
     gen_params: GenParams | None,
     max_concurrent: int,
     retry_attempts: int,
+    tools: Sequence[Any] | None,
     chunk_size: int,
     deadline: float | None,
 ) -> _ChunkRun:
@@ -369,6 +404,7 @@ def _run_chunks(
             params=gen_params,
             max_concurrent=max_concurrent,
             retry_attempts=retry_attempts,
+            tools=tools,
         )
         for result in results:
             src_tokens += result.src_tok
@@ -484,6 +520,7 @@ def build_agent_tree(
     seal_params: SealParams | None = None,
     max_concurrent: int = DEFAULT_MAX_CONCURRENT,
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    tools: Sequence[Any] | None = None,
     deadline: float | None = None,
 ) -> MaterializedTree:
     """One full run for an agent over its retained checkpoint history.
@@ -514,6 +551,7 @@ def build_agent_tree(
         gen_params=gen_params,
         max_concurrent=max_concurrent,
         retry_attempts=retry_attempts,
+        tools=tools,
         deadline=deadline,
     )
     return replace(tree, batches=len(batches))

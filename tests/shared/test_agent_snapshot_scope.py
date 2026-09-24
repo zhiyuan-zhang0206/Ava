@@ -1,4 +1,9 @@
-"""The live-tree cost follows its actual nodes, never the unrelated archive."""
+"""The live-tree cost follows its actual nodes, never the unrelated archive.
+
+The effective-model lookup's resolution order is pinned here too (task #4674).
+"""
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -6,7 +11,9 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from shared import agent_snapshot
 from shared.agent_roster import _LIVE_SQL, AgentCard, list_directory, select_roster
+from shared.config import settings
 
 
 def seed(conn: psycopg.Connection, rows: list[tuple[int, str, str]]) -> None:
@@ -168,3 +175,65 @@ def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.
         return visited + sum(visited_notices(child) for child in node.get("Plans", []))
 
     assert visited_notices(plan) < 100
+
+
+class _FakeConn:
+    """A connection stand-in serving one `fetchone()` result as a context manager."""
+
+    def __init__(self, row: tuple[Any, ...] | None) -> None:
+        self.row = row
+        self.queries: list[tuple[str, tuple[Any, ...]]] = []
+
+    def execute(self, sql: str, params: tuple[Any, ...]) -> _FakeConn:
+        self.queries.append((sql, tuple(params)))
+        return self
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self.row
+
+    def __enter__(self) -> _FakeConn:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+
+def _install_conn(monkeypatch: pytest.MonkeyPatch, row: tuple[Any, ...] | None) -> _FakeConn:
+    conn = _FakeConn(row)
+
+    def _connect(**_kwargs: object) -> _FakeConn:
+        return conn
+
+    monkeypatch.setattr(agent_snapshot, "connect", _connect)
+    return conn
+
+
+def test_effective_model_overlay_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    conn = _install_conn(monkeypatch, ({"llm_model": "deepseek-v4-pro"},))
+    assert agent_snapshot.agent_effective_model(42, fallback="fallback-x") == "deepseek-v4-pro"
+    ((sql, params),) = conn.queries
+    assert "agents_meta" in sql and params == (42,)
+
+
+def test_effective_model_defaults_to_the_fleet_model_without_an_overlay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_conn(monkeypatch, ({},))
+    assert agent_snapshot.agent_effective_model(42, fallback="fallback-x") == settings.lm.llm_model
+
+
+def test_effective_model_defaults_to_the_fleet_model_when_the_row_vanished(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_conn(monkeypatch, None)
+    assert agent_snapshot.agent_effective_model(42, fallback="fallback-x") == settings.lm.llm_model
+
+
+def test_effective_model_read_failure_returns_the_callers_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(**_kw: object) -> None:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(agent_snapshot, "connect", boom)
+    assert agent_snapshot.agent_effective_model(42, fallback="fallback-x") == "fallback-x"

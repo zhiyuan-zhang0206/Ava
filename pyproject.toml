@@ -255,6 +255,13 @@ ignore_imports = [
     "services.agent_host.host -> agent.impersonation",
     "services.agent_host.* -> agent.startup",
     "services.agent_host.* -> agent.state",
+    # The hierarchy worker's build child binds the agent's own tool schema
+    # (`execute_code`) onto generation requests, so their leading bytes match
+    # the agent's own calls — the prefix-cache parity task #4674 exists to
+    # restore. `agent.llm` is a dependency-free schema leaf (langchain only),
+    # and the alternative — a second copy of the schema under services — is
+    # exactly the drift class this ratchet cannot catch.
+    "services.hierarchy_worker.execute -> agent.llm",
 ]
 
 # The one reverse edge shared must never grow: `shared` is the bottom layer,

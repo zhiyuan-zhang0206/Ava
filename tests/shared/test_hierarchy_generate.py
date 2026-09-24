@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from shared.agents.history.hierarchy.generate import (
     GenParams,
@@ -57,14 +57,23 @@ def call_pair(call: list[BaseMessage]) -> tuple[str, str]:
 
 class FakeLLM:
     """Deterministic chat model: one responder over invoke calls, with
-    in-flight accounting for the fan-out bound."""
+    in-flight accounting for the fan-out bound. `bind_tools` records the bound
+    schemas and returns self (task #4674) — the request-shape assertions read
+    the recorded call, not a provider."""
 
-    def __init__(self, responder: Callable[[list[BaseMessage]], str | Exception]) -> None:
+    def __init__(
+        self, responder: Callable[[list[BaseMessage]], str | AIMessage | Exception]
+    ) -> None:
         self.responder = responder
         self.calls: list[list[BaseMessage]] = []
+        self.bound_tools: list[list[Any]] = []
         self.max_in_flight = 0
         self._in_flight = 0
         self._lock = threading.Lock()
+
+    def bind_tools(self, tools: list[Any]) -> FakeLLM:
+        self.bound_tools.append(list(tools))
+        return self
 
     def invoke(self, messages: list[BaseMessage]) -> AIMessage:
         with self._lock:
@@ -79,6 +88,8 @@ class FakeLLM:
                 self._in_flight -= 1
         if isinstance(content, Exception):
             raise content
+        if isinstance(content, AIMessage):
+            return content
         return AIMessage(content=content)
 
 
@@ -235,6 +246,105 @@ def test_generate_nodes_rejects_caller_bugs_before_any_call() -> None:
         generate_nodes([leaf_req("L1#1")], model=MODEL, llm=fake, max_concurrent=0)
     assert fake.calls == []
     assert generate_nodes([], model=MODEL, llm=fake) == []
+
+
+# ---- agent-shaped requests (task #4674): prefix + tool schema + refusal loop ----
+
+
+class _ToolSchema:
+    """Stand-in tool schema — the fakes only record what got bound."""
+
+
+def agent_req(nid: str, *, chars: int = 2000) -> GenRequest:
+    return GenRequest(
+        nid=nid,
+        kind="leaf",
+        input_text=filler(chars),
+        prefix=(SystemMessage(content="system"), HumanMessage(content="earlier")),
+    )
+
+
+def _tool_call_response() -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "execute_code", "args": {"code": "print(1)"}, "id": "tc1", "type": "tool_call"}
+        ],
+    )
+
+
+def _tail_parts(messages: list[BaseMessage]) -> list[str]:
+    content = messages[-1].content
+    assert isinstance(content, list)
+    return [str(cast("dict[str, Any]", part)["text"]) for part in cast("list[Any]", content)]
+
+
+def test_agent_shaped_request_keeps_prefix_and_binds_tools() -> None:
+    tool = _ToolSchema()
+    req = agent_req("L1#1")
+    fake = FakeLLM(lambda _m: "ok")
+    (res,) = generate_nodes([req], model=MODEL, llm=fake, retry_attempts=0, tools=[tool])
+    assert res.ok and res.text == "ok"
+    assert fake.bound_tools == [[tool]]
+    (call,) = fake.calls
+    assert list(call[:-1]) == list(req.prefix)  # the prefix rides unchanged at the head
+    parts = _tail_parts(call)
+    assert parts[0] == req.input_text
+    assert parts[1] == build_prompt("leaf", res.src_tok)
+    assert "plain text only" in parts[2]
+
+
+def test_tool_call_is_refused_and_the_next_text_returned() -> None:
+    tool = _ToolSchema()
+    req = agent_req("L1#1")
+    responses: list[AIMessage] = [_tool_call_response(), AIMessage(content="ok")]
+    fake = FakeLLM(lambda _m: responses.pop(0))
+    (res,) = generate_nodes([req], model=MODEL, llm=fake, retry_attempts=0, tools=[tool])
+    assert res.ok and res.text == "ok"
+    assert len(fake.calls) == 2
+    retry = fake.calls[1]
+    assert isinstance(retry[-2], AIMessage) and retry[-2].tool_calls  # the refused call rides along
+    last = retry[-1]
+    assert isinstance(last, ToolMessage)
+    assert last.tool_call_id == "tc1"
+    assert "unavailable" in str(last.content)
+
+
+def test_tool_rounds_exhausted_fails_the_node() -> None:
+    tool = _ToolSchema()
+    fake = FakeLLM(lambda _m: _tool_call_response())
+    (res,) = generate_nodes(
+        [agent_req("L1#1")], model=MODEL, llm=fake, retry_attempts=0, tools=[tool]
+    )
+    assert not res.ok and res.error is not None and "kept calling tools" in res.error
+    assert len(fake.calls) == 1 + GenParams().tool_rounds
+
+
+def test_agent_shaped_empty_text_fails_without_tool_calls() -> None:
+    tool = _ToolSchema()
+    fake = FakeLLM(lambda _m: AIMessage(content=""))
+    (res,) = generate_nodes(
+        [agent_req("L1#1")], model=MODEL, llm=fake, retry_attempts=0, tools=[tool]
+    )
+    assert not res.ok and res.error is not None and "empty response" in res.error
+    assert len(fake.calls) == 1
+
+
+def test_agent_shape_needs_both_prefix_and_tools() -> None:
+    tool = _ToolSchema()
+    # No prefix: legacy material-only request, tools never bound.
+    fake = FakeLLM(lambda _m: "ok")
+    (res,) = generate_nodes(
+        [leaf_req("L1#1")], model=MODEL, llm=fake, retry_attempts=0, tools=[tool]
+    )
+    assert res.ok and fake.bound_tools == []
+    (call,) = fake.calls
+    assert isinstance(call[0], HumanMessage) and len(_tail_parts(call)) == 2  # no text-only clause
+    # Prefix but no tools: same legacy shape.
+    fake2 = FakeLLM(lambda _m: "ok")
+    (res2,) = generate_nodes([agent_req("L1#2")], model=MODEL, llm=fake2, retry_attempts=0)
+    assert res2.ok and fake2.bound_tools == []
+    assert len(fake2.calls[0]) == 1
 
 
 # ---- model lifecycle (task #3915): the builder closes what it built ----

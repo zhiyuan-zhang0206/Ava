@@ -37,7 +37,12 @@ merge are the layers built on top.
   skipped) assembled per block, with head+tail truncation for oversized bodies.
 - `generate.py` — node-text generation: prompt with the node's character ask,
   bounded parallel fan-out with per-node isolation, over-budget compression,
-  `input_hash`/`text_hash` identity helpers.
+  `input_hash`/`text_hash` identity helpers. With a caller-supplied prefix and
+  tool schema the request is **agent-shaped** (task #4674): the agent's own
+  leading messages (byte-identical, provider-side prefix-cache hits) plus a
+  trailing material + prompt + text-only message, tools bound for schema
+  parity; a tool-call response is refused with a `ToolMessage` error and
+  re-invoked up to `GenParams.tool_rounds` rounds.
 - `pipeline.py` — assembly: items to blocks to units to trigger batches to the
   seal cascade, then `materialize` walks levels bottom-up (leaves render
   blocks, upper nodes reduce children texts, aliases copy their child) using
