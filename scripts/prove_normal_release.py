@@ -1525,7 +1525,7 @@ def main() -> None:
     # proof does, and restore the previous table at the end of the run.
     original_cron = read_crontab(datetime.now(UTC) + timedelta(seconds=30))
     require(not original_cron.strip(), "proof refuses to replace another CI job")
-    install_cron(f"@reboot AVA_HOME={home} /bin/true # ava-normal-release-proof\n".encode())
+    install_cron(f"@reboot AVA_HOME={home} /usr/bin/true # ava-normal-release-proof\n".encode())
     namespace = "normal_" + uuid4().hex
     unit_env_path = home / ".env"
     require(unit_env_path.exists(), "unit .env is missing; runtime-prepare must have written it")
