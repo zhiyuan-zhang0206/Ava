@@ -183,9 +183,13 @@ async def test_generate_summary_emits_agent_billing_span(
             return span
 
     tracer = _Tracer()
+
     # The summary's billing behavior requires a known provider; a bare test
     # process has no installed provider plugins and must declare that input.
-    monkeypatch.setattr("shared.lm.billing.vendor_of_model", lambda _model: "deepseek")
+    def vendor_of_model(_model: str) -> str:
+        return "deepseek"
+
+    monkeypatch.setattr("shared.lm.billing.vendor_of_model", vendor_of_model)
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(trace_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
@@ -576,7 +580,9 @@ def _over_threshold_messages() -> list[AnyMessage]:
     ]
 
 
-async def test_compact_reminder_zero_to_one(_ava_compact_loaded, monkeypatch: pytest.MonkeyPatch):
+async def test_compact_reminder_zero_to_one(
+    _ava_compact_loaded: tuple[type[AgentState], object], monkeypatch: pytest.MonkeyPatch
+):
     """First compact successful → compact.version increments from 0 to 1, dict contains messages."""
     state_cls, _ = _ava_compact_loaded
     wrap_fn = auto_compact_for_llm
@@ -592,7 +598,7 @@ async def test_compact_reminder_zero_to_one(_ava_compact_loaded, monkeypatch: py
 
 
 async def test_compact_reminder_increments_from_existing(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
+    _ava_compact_loaded: tuple[type[AgentState], object], monkeypatch: pytest.MonkeyPatch
 ):
     """Not first compact: state already has compact.version=5 → wrap increments to 6."""
     state_cls, _ = _ava_compact_loaded

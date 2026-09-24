@@ -34,7 +34,7 @@ Covered:
 import inspect
 import sys
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -993,8 +993,8 @@ async def test_real_runner_compaction_wins_no_note(
         HOOKS["before_llm"][:] = saved
 
     assert cmd.goto == "llm"
-    assert isinstance(cmd.update, dict)
-    assert "messages" not in cmd.update
+    hook_update = cast("dict[str, object]", cmd.update)
+    assert isinstance(hook_update, dict) and "messages" not in hook_update
     from agent.graph._llm import llm_node
 
     cmd = await llm_node(state, _runtime_for_runner(), _config())
