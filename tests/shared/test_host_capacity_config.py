@@ -25,6 +25,21 @@ def test_recovery_wake_batch_default_bounds_and_metadata() -> None:
     }
 
 
+def test_recovery_wake_inflight_default_bounds_and_metadata() -> None:
+    field = DaemonSettings.model_fields["host_recovery_wake_inflight"]
+    assert field.default == 4
+    assert DaemonSettings(AVA_HOST_RECOVERY_WAKE_INFLIGHT=1).host_recovery_wake_inflight == 1
+    with pytest.raises(ValidationError):
+        DaemonSettings(AVA_HOST_RECOVERY_WAKE_INFLIGHT=0)
+    assert field.json_schema_extra == {
+        "capability": "agent-runner",
+        "restart_required": "agent",
+        "writable": True,
+        "sensitive": False,
+        "scope": "cluster-pinned",
+    }
+
+
 @pytest.mark.parametrize(
     ("name", "default", "valid", "invalid"),
     [
