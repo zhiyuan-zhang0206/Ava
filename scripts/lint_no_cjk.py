@@ -52,12 +52,14 @@ Error format `file:line: U+XXXX 'c' | <line content>` + non-zero exit.
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 # Project root (this script lives under scripts/)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 # East Asian text: CJK ideographs U+3400-U+9FFF (incl. ext A) +
 # compatibility ideographs U+F900-U+FAFF, hiragana U+3040-U+309F,
@@ -96,34 +98,16 @@ _LOCALE_PY_FILES = frozenset({"shared/alerts_copy.py", "shared/docs/pages_copy.p
 
 def _tracked_files() -> list[str]:
     """Every git-tracked file, repo-relative, posix separators."""
-
-    # Fixed command line ("git ls-files"), no untrusted input; the repo path
-    # comes from this script's own __file__, never from callers.
-    out = subprocess.run(  # noqa: S603 - fixed argv, repo-root derived from __file__
-        ["git", "-C", str(_REPO_ROOT), "ls-files"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
-    return [p for p in out.stdout.splitlines() if p]
+    return lint_common.tracked_files(_REPO_ROOT)
 
 
 def _scan_file(rel_path: str) -> list[tuple[int, str, str]]:
     """Return violations [(lineno, char, line_stripped), ...]."""
     if _is_locale_path(rel_path) or rel_path in _LOCALE_PY_FILES:
         return []
-    path = _REPO_ROOT / rel_path
-    try:
-        data = path.read_bytes()
-    except OSError:
+    text = lint_common.read_utf8_text(_REPO_ROOT / rel_path)
+    if text is None:
         return []
-    if b"\x00" in data[:8192]:
-        return []  # binary
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return []  # not UTF-8 text (e.g. latin-1 legacy) — not CJK-relevant
     violations: list[tuple[int, str, str]] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
         m = _CJK_RE.search(line)
@@ -132,44 +116,13 @@ def _scan_file(rel_path: str) -> list[tuple[int, str, str]]:
     return violations
 
 
-def _rel_or_abs(path: Path) -> str:
-    """Repo-relative posix path, or the absolute path for a target outside the repo."""
-    try:
-        return path.relative_to(_REPO_ROOT).as_posix()
-    except ValueError:
-        return path.as_posix()
-
-
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if argv:
-        # Explicit paths: resolve against the repo root when a relative path
-        # does not exist under the caller's CWD (pre-commit passes absolute
-        # paths; a manual `python3 scripts/lint_no_cjk.py some/file` runs from
-        # the repo root anyway, but a test or wrapper may not).
-        targets = []
-        for a in argv:
-            p = Path(a)
-            if not p.is_absolute():
-                cand = _REPO_ROOT / p
-                if cand.exists():
-                    p = cand
-            targets.append(p.resolve())
-        missing = [a for a, t in zip(argv, targets, strict=True) if not t.exists()]
+        scan, missing = lint_common.resolve_targets(argv, _REPO_ROOT)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-        files = []
-        for t in targets:
-            if t.is_file():
-                files.append(_rel_or_abs(t))
-            elif t.is_dir():
-                for p in t.rglob("*"):
-                    if p.is_file():
-                        files.append(_rel_or_abs(p))
-        # Explicit paths: scan them (git-tracked or not — a worktree edit
-        # that is not yet added still must be caught).
-        scan = sorted(set(files))
     else:
         scan = _tracked_files()
 
@@ -179,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         for lineno, ch, content in _scan_file(rel):
             total += 1
-            print(f"{rel}:{lineno}: U+{ord(ch):04X} {ch!r} | {content}")
+            print(lint_common.format_violation(rel, lineno, f"U+{ord(ch):04X} {ch!r}", content))
 
     if total:
         print(

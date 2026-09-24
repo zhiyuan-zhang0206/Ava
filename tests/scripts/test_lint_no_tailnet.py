@@ -174,6 +174,32 @@ def test_explicit_path_scan_catches_untracked_violation(
     assert gate.main([str(f)]) == 1
 
 
+def test_tracked_scan_preserves_git_order_and_line_output(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = _cgnat_ip(64, "0.2")
+    second = _cgnat_ip(127, "0.3")
+    _write(repo, "docs/z.md", f"clean\n  host = '{first}'  \n")
+    _write(repo, "docs/a.md", f"host = '{second}'\n")
+    monkeypatch.setattr(gate, "_tracked_files", lambda: ["docs/z.md", "docs/a.md"])
+    assert gate.main([]) == 1
+    assert capsys.readouterr().out == (
+        f"docs/z.md:2: {first} | host = '{first}'\ndocs/a.md:1: {second} | host = '{second}'\n"
+    )
+
+
+def test_explicit_targets_are_sorted_deduplicated_and_honor_opt_out(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = _cgnat_ip(64, "0.2")
+    second = _cgnat_ip(127, "0.3")
+    _write(repo, "docs/z.md", f"host = '{first}'\n")
+    _write(repo, "docs/a.md", f"host = '{second}'  # tailnet-ip-ok: fixture\n")
+    monkeypatch.setattr(gate, "_tracked_files", lambda: pytest.fail("unexpected git scan"))
+    assert gate.main(["docs/z.md", "docs"]) == 1
+    assert capsys.readouterr().out == f"docs/z.md:1: {first} | host = '{first}'\n"
+
+
 def test_explicit_missing_target_is_an_error(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

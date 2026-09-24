@@ -68,8 +68,15 @@ def test_fullwidth_punctuation_fails(repo: Path) -> None:
 
 
 def test_binary_file_skipped(repo: Path) -> None:
-    _write(repo, "assets/logo.png", "\x00\x01\x02binary")
+    _write(repo, "assets/logo.png", "\x00\x01\x02\u4e2d\u6587")
     assert gate._scan_file("assets/logo.png") == []
+
+
+def test_non_utf8_file_skipped(repo: Path) -> None:
+    p = repo / "assets/legacy.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes("\u4e2d".encode() + b"\xff")
+    assert gate._scan_file("assets/legacy.txt") == []
 
 
 def test_next_intl_messages_catalog_exempt(repo: Path) -> None:
@@ -119,12 +126,38 @@ def test_main_returns_1_on_hits_and_0_when_clean(
     assert gate.main([]) == 1
 
 
+def test_tracked_scan_preserves_git_order_and_line_output(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(repo, "docs/z.md", "clean\n  \u4e2d first  \n\u6587 second\n")
+    _write(repo, "docs/a.md", "\u65e5 later\n")
+    monkeypatch.setattr(gate, "_tracked_files", lambda: ["docs/z.md", "docs/a.md"])
+    assert gate.main([]) == 1
+    assert capsys.readouterr().out == (
+        "docs/z.md:2: U+4E2D '\u4e2d' | \u4e2d first\n"
+        "docs/z.md:3: U+6587 '\u6587' | \u6587 second\n"
+        "docs/a.md:1: U+65E5 '\u65e5' | \u65e5 later\n"
+    )
+
+
 def test_explicit_paths_scan_untracked_edits(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pre-commit runs whole-repo, but an explicit path must catch a CJK edit
     even before `git add` (the tracked-file list would miss it)."""
     _write(repo, "new.txt", "\u4e2d\u6587\n")
     monkeypatch.setattr(gate, "_tracked_files", list)
     assert gate.main(["new.txt"]) == 1
+
+
+def test_explicit_targets_are_sorted_and_deduplicated(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(repo, "docs/z.md", "\u4e2d\n")
+    _write(repo, "docs/a.md", "\u6587\n")
+    monkeypatch.setattr(gate, "_tracked_files", lambda: pytest.fail("unexpected git scan"))
+    assert gate.main(["docs/z.md", "docs"]) == 1
+    assert capsys.readouterr().out == (
+        "docs/a.md:1: U+6587 '\u6587' | \u6587\ndocs/z.md:1: U+4E2D '\u4e2d' | \u4e2d\n"
+    )
 
 
 def test_explicit_missing_target_is_an_error(
