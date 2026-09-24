@@ -14,11 +14,11 @@ import datetime as dt
 import json
 import logging
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
 
+from shared.atomic_io import fsync_parent, write_text_atomic
 from shared.hold_driver import HoldDriver, mint_driver
 from shared.maintenance_state import MaintenanceHold
 from shared.platform import file_lock
@@ -124,28 +124,17 @@ def read() -> PauseOwnerSnapshot:
 def _fsync_parent(path: Path) -> None:
     if os.name == "nt":
         return
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    fsync_parent(path)
 
 
 def _write_atomic(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=".pause-owner-", suffix=".tmp")
-    if os.name != "nt":
-        os.fchmod(fd, 0o600)
-    tmp = Path(raw_tmp)
-    try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(payload, stream, separators=(",", ":"), sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)  # noqa: PTH105 — explicit atomic replace injection seam
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_text_atomic(
+        path,
+        json.dumps(payload, separators=(",", ":"), sort_keys=True),
+        mode=0o600,
+        prefix=".pause-owner-",
+    )
     try:
         _fsync_parent(path)
     except OSError:

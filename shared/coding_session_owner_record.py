@@ -8,11 +8,12 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
+
+from shared.atomic_io import fsync_parent, write_text_atomic
 
 SCHEMA_VERSION = 1
 _TOOL_RE = re.compile(r"[a-z][a-z0-9-]*")
@@ -354,27 +355,17 @@ def _payload(owner: CodingSessionOwner) -> dict[str, object]:
 def _fsync_parent(path: Path) -> None:
     if os.name == "nt":
         return
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    fsync_parent(path)
 
 
 def write_unlocked(owner: CodingSessionOwner) -> None:
     path = state_path(owner.key)
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=".coding-owner-", suffix=".tmp")
-    if os.name != "nt":
-        os.fchmod(fd, 0o600)
-    tmp = Path(raw_tmp)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(_payload(owner), stream, separators=(",", ":"), sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)  # noqa: PTH105 — generation publication commit point
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_text_atomic(
+        path,
+        json.dumps(_payload(owner), separators=(",", ":"), sort_keys=True),
+        encoding="utf-8",
+        mode=0o600,
+        prefix=".coding-owner-",
+    )
     with contextlib.suppress(OSError):
         _fsync_parent(path)
