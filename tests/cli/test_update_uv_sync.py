@@ -27,6 +27,7 @@ from types import SimpleNamespace
 import pytest
 
 from cli.commands import _update_uv_sync as _native_sync
+from shared import editable_install
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
 
@@ -235,6 +236,135 @@ def test_nonzero_exit_passes_through_untouched(
     monkeypatch.setattr(_native_sync, "run_bounded", _fail)
 
     assert _native_sync.run_uv_sync(repo).returncode == 3
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes")
+@pytest.mark.parametrize("outcome", ["success", "nonzero", "timeout", "exception"])
+def test_sync_replaces_launcher_and_restores_protected_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcome: str
+) -> None:
+    """Reinstall writes bin/ava only inside the window, even on failed syncs."""
+    repo = tmp_path / "source"
+    bin_dir = _fake_venv_python(repo).parent
+    launcher = bin_dir / "ava"
+    launcher.write_text("old launcher")
+    pth = _read_only_pth(repo)
+    direct_url = _editable_direct_url(repo)
+    directories = (bin_dir, pth.parent, direct_url.parent)
+    for directory in directories:
+        directory.chmod(0o555)
+
+    def run_uv(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        assert all(_read_mode(path) == 0o755 for path in directories)
+        if argv[1] == "export":
+            return subprocess.CompletedProcess(argv, returncode=0)
+        launcher.unlink()
+        replacement = launcher.with_suffix(".tmp")
+        replacement.write_text("new launcher")
+        replacement.replace(launcher)
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, timeout=1)
+        if outcome == "exception":
+            raise RuntimeError("injected sync exception")
+        return subprocess.CompletedProcess(argv, returncode=3 if outcome == "nonzero" else 0)
+
+    monkeypatch.setattr(_native_sync, "run_bounded", run_uv)
+    if outcome == "exception":
+        with pytest.raises(RuntimeError, match="injected sync exception"):
+            _native_sync.run_uv_sync(repo, reinstall_package="ava")
+    else:
+        result = _native_sync.run_uv_sync(repo, reinstall_package="ava")
+        assert result.returncode == {"success": 0, "nonzero": 3, "timeout": 124}[outcome]
+    assert launcher.read_text() == "new launcher"
+    assert all(_read_mode(path) == 0o555 for path in directories)
+    assert _read_mode(pth) == 0o444
+    with pytest.raises(PermissionError):
+        launcher.unlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes")
+def test_write_window_rolls_back_partial_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    paths = (tmp_path / "bin", tmp_path / "site-packages")
+    for path in paths:
+        path.mkdir(mode=0o555)
+    chmod = Path.chmod
+
+    def fail_open(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        if path == paths[1] and mode == 0o755:
+            raise PermissionError("injected open failure")
+        chmod(path, mode, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "chmod", fail_open)
+    with (
+        pytest.raises(PermissionError, match="injected open failure"),
+        editable_install._write_window(paths),
+    ):
+        pytest.fail("window must not yield after failed entry")
+    assert [_read_mode(path) for path in paths] == [0o555, 0o555]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes")
+def test_write_window_attempts_every_restore_after_chmod_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    paths = (tmp_path / "bin", tmp_path / "site-packages")
+    for path in paths:
+        path.mkdir(mode=0o555)
+    chmod = Path.chmod
+    attempted: list[Path] = []
+
+    def fail_first_restore(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        if mode == 0o555:
+            attempted.append(path)
+            if len(attempted) == 1:
+                raise PermissionError("injected restore failure")
+        chmod(path, mode, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "chmod", fail_first_restore)
+    with (
+        pytest.raises(PermissionError, match="injected restore failure"),
+        editable_install._write_window(paths),
+    ):
+        pass
+    assert set(attempted) == set(paths)
+    assert _read_mode(attempted[1]) == 0o555
+    chmod(attempted[0], 0o555)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes")
+def test_protected_paths_include_bin_without_editable_records(tmp_path: Path) -> None:
+    bin_dir = tmp_path / ".venv" / "bin"
+    site_packages = tmp_path / ".venv" / "lib" / "python3.12" / "site-packages"
+    dist_info = site_packages / "ava-0.1.5.dist-info"
+    assert editable_install.protected_editable_paths(tmp_path) == ()
+    bin_dir.mkdir(parents=True)
+    dist_info.mkdir(parents=True)
+    assert set(editable_install.protected_editable_paths(tmp_path)) == {
+        bin_dir,
+        site_packages,
+        dist_info,
+    }
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Simulate Windows chmod policy on POSIX")
+def test_windows_write_window_preserves_legacy_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pth = _read_only_pth(tmp_path)
+    direct_url = _editable_direct_url(tmp_path)
+    bin_dir = _fake_venv_python(tmp_path).parent
+    for directory in (bin_dir, pth.parent, direct_url.parent):
+        directory.chmod(0o555)
+    # Patch the owning module's OS view without changing pathlib's host class.
+    monkeypatch.setattr(editable_install, "os", SimpleNamespace(name="nt"))
+    with editable_install.editable_pth_write_window(tmp_path):
+        assert _read_mode(bin_dir) == _read_mode(pth.parent) == 0o555
+        assert _read_mode(direct_url.parent) == 0o755
+        assert _read_mode(pth) == 0o644
+    assert _read_mode(direct_url.parent) == 0o555
+    assert _read_mode(pth) == 0o444
 
 
 def test_verified_sync_rejects_a_fake_successful_half_uninstall(

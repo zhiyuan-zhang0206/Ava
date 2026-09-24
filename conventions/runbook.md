@@ -199,16 +199,40 @@ the installed prod source for prod), never the worktree being removed. The same
 check applies to the editable URL uv records beside the pointer — in each venv,
 `cat` the `ava-*.dist-info/direct_url.json` and confirm `url` is the stable
 checkout's `file://` URL. If either record is wrong, do **not** delete the
-worktree: run `env -u VIRTUAL_ENV uv sync` from the affected stable checkout
-and recheck. `ava converge` / `ava start` independently assert and auto-repair
-both prod records, then make their site-packages directories read-only outside
-the narrow update/repair write window. Every `execute_code` spawn also checks
+worktree: use [manual editable-install recovery](#manual-editable-install-recovery)
+from the affected stable checkout and recheck. `ava converge` / `ava start`
+independently assert and auto-repair
+both prod records, then make site-packages, `ava-*.dist-info`, and `.venv/bin`
+directories read-only outside the narrow update/repair write window.
+Every `execute_code` spawn also checks
 the current interpreter's records: the first poisoned call repairs the install
 and returns a retryable structured error, preventing a flood of failed child
 imports. The dev-clone pointer remains part of this mandatory deletion check.
 This is the operating half of the editable-install guard specification; the
 incident and escape analysis are in
 [`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
+
+### Manual editable-install recovery
+
+Production recovery normally goes through `ava cluster update`. For an
+operator-authorized manual reinstall, run the shared sync helper from the
+affected checkout so every protected directory opens and closes together:
+
+```bash
+env -u VIRTUAL_ENV .venv/bin/python - <<'PY'
+from pathlib import Path
+from cli.commands._update_uv_sync import run_uv_sync
+
+raise SystemExit(run_uv_sync(Path.cwd(), reinstall_package="ava").returncode)
+PY
+```
+
+The helper pins uv to this checkout's interpreter and restores prior permissions
+on success and failure. Any emergency `chmod u+w` recipe must cover
+`site-packages`, each `ava-*.dist-info`, **and `.venv/bin`**, plus any read-only
+editable records, then restore their exact original modes. Prefer the shared
+write window over a shell sequence that can leave directories writable on error.
+Fresh worktree installs have no production protection and need no manual chmod.
 
 A typical small deployment runs the **gateway as a single-box unit** on an
 always-on host (`gateway,agent-runner`, one home `~/.ava`, code `~/.ava/source`,

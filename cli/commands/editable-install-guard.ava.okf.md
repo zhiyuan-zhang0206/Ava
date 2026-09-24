@@ -46,18 +46,22 @@ callers.
   Any residual record, missing launcher, or failed import
   raises after a clear stderr diagnostic, so `ava start`, `ava converge`, and
   `ava cluster update` fail fast instead of accepting uv's false-success exit.
-  The manual equivalent is `cd <source> && uv sync --reinstall-package ava`;
-  `ava cluster update` performs the managed recovery.
+  Manual reinstall must use the same write window (see the runbook's
+  "Manual editable-install recovery" recipe); `ava cluster update` performs
+  the managed recovery.
 - `converge_host` rejects host-global steps before execution in `.worktrees/`
   and `.claude/worktrees/` checkouts, so a worktree's own legal pointer is never
   inspected or rewritten. `ava start` inherits the same converge step.
 - Update, recovery, rollback, and start's source-integrity auto-heal route each
   `uv sync` through `editable_pth_write_window`. The window temporarily opens
-  both the editable records and their site-packages directories, so uv's atomic
-  replacement can complete; their exact original modes are restored in
-  `finally`, including non-zero syncs. It discovers all existing site-packages
-  directories in the supported virtualenv layouts structurally, so a partially
-  failed sync cannot hide a protected directory by deleting its records. Outside
+  editable records plus `protected_editable_paths`: site-packages,
+  `ava-*.dist-info`, and POSIX `.venv/bin`. Converge protection, updater sync,
+  exec-gate reinstall, and direct record repair use this single directory set.
+  Discovery is structural, so missing records or a missing launcher cannot hide
+  an existing protected directory. The window restores exact prior modes after
+  success, non-zero sync, timeout, an exception, or partial entry failure.
+  Rollback callbacks unwind in reverse order and attempt every restoration even
+  if a chmod fails; that error propagates. Outside
   an active cluster update, converge protects those POSIX directories as `0555`,
   which rejects an unsanctioned replacement at the directory boundary. During an
   update it defers that protection until the next quiescent start, allowing an
@@ -73,6 +77,8 @@ callers.
   `python -m cli.commands._update_uv_sync`, giving it the same write window as
   the in-process POSIX/WSL paths. Discovery scans Windows `Lib`, POSIX `lib`,
   and `lib64` virtualenv layouts explicitly.
+  Windows retains the legacy record/dist-info write adjustments while skipping
+  site-packages/bin chmod and converge directory protection.
 
 ## Invariants
 
@@ -88,6 +94,10 @@ callers.
   recreation because this layer cannot invent a distribution version.
 - Repair changes editable-record content only. The write window restores every
   record and directory mode that existed before lifecycle code entered it.
+  This is exception-safe permission restoration, not a filesystem transaction:
+  process termination or an OS refusal to restore permissions still requires
+  operator recovery. Directory protection prevents launcher unlink/replacement;
+  it does not recursively protect dependency files from in-place writes.
 - Session creation projects `VIRTUAL_ENV` only when its cwd is inside the
   spawning checkout and not below its `.worktrees/` or `.claude/worktrees/`
   directories; foreign-cwd and sibling-worktree Codex sessions retain the venv
