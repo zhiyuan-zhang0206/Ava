@@ -11,6 +11,16 @@ tags: []
 turns. `TurnScheduler` serializes each agent while allowing bounded concurrency
 between agents. A wake with no work creates no model call; idle ends the task.
 
+The pending scan admits new recovery turns through two gates:
+`AVA_HOST_RECOVERY_WAKE_BATCH` limits starts per scan and
+`AVA_HOST_RECOVERY_WAKE_INFLIGHT` limits scan-started recovery turns still in
+flight (both default to 4). Only a recovery turn started by that scan spends an
+in-flight slot. Direct pub/sub wakes, force-cancel re-wakes with no task, and
+turn-level stale-cancellation re-wakes do not spend one. Ordinary work, including
+impersonation, and held maintenance wakes are exempt. The slot is released when
+that recovery turn's own task ends; queued work successors remain free to run
+without occupying it.
+
 `AgentHost._invoke_until_done()` invokes the same checkpoint thread until idle
 or a native lifecycle command ends the turn. Each invocation has its own trace.
 Normal return flushes the final checkpoint before lifecycle application; a

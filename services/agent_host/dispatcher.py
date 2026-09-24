@@ -201,18 +201,20 @@ class TurnScheduler:
         must exit. The dispatcher loop picks it up at the next iteration."""
         return self._restart_required
 
-    def wake(self, agent_id: int) -> None:
+    def wake(self, agent_id: int) -> asyncio.Task[None] | None:
         """Record a wake for `agent_id` and make sure a turn will follow.
 
         Idempotent while a turn is running: the flag is set and the running
         task will loop. Safe to call from the dispatcher's read loop — it never
         awaits, so it cannot interleave with a task's exit check.
+        Return the turn task so callers release accounting when that turn ends.
         """
         if self._closed:
-            return
+            return None
         self._pending.add(agent_id)
         if agent_id not in self._tasks:
             self._start(agent_id)
+        return self._tasks.get(agent_id)
 
     def _start(self, agent_id: int) -> None:
         task = asyncio.create_task(self._pump(agent_id), name=f"turn-{agent_id}")
@@ -483,7 +485,7 @@ class _WakeScheduler(Protocol):
     @property
     def restart_required(self) -> bool: ...
 
-    def wake(self, agent_id: int) -> None: ...
+    def wake(self, agent_id: int) -> asyncio.Task[None] | None: ...
 
     async def cancel_agent(self, agent_id: int) -> bool: ...
 
@@ -553,7 +555,7 @@ class InboundWakeDispatcher:
         self._scan_interval_s = scan_interval_s
         self._recovery_wake_batch = recovery_wake_batch
         self._recovery_wake_inflight = recovery_wake_inflight
-        self._recovery_in_flight: set[int] = set()
+        self._recovery_in_flight: dict[int, asyncio.Task[None]] = {}
         self._max_scan_backoff_s = max_scan_backoff_s
         self._subscription_read_timeout_s = subscription_read_timeout_s
         self._subscription_read_deadline_grace_s = subscription_read_deadline_grace_s
@@ -682,38 +684,52 @@ class InboundWakeDispatcher:
             started.add(candidate.agent_id)
             if candidate.recovery:
                 recovery_started += 1
-        self._scheduler.wake(candidate.agent_id)
-        if candidate.recovery and starts_turn:
-            # A wake on a closed scheduler may start no task. The next scan
-            # drops that id if it never appeared in active_agents.
-            self._recovery_in_flight.add(candidate.agent_id)
+        task = self._scheduler.wake(candidate.agent_id)
+        if candidate.recovery and starts_turn and task is not None:
+            self._recovery_in_flight[candidate.agent_id] = task
+            task.add_done_callback(partial(self._release_recovery_slot, candidate.agent_id))
+            logger.info(
+                "hosted recovery wake started for agent {agent_id}; {in_flight} in flight",
+                event="host_recovery_wake_started",
+                agent_id=candidate.agent_id,
+                in_flight=len(self._recovery_in_flight),
+            )
         return recovery_started
 
-    async def scan_once(self) -> None:
-        """Wake all work; bound recovery starts by batch and in-flight limits.
+    def _release_recovery_slot(self, agent_id: int, task: asyncio.Task[None]) -> None:
+        if self._recovery_in_flight.get(agent_id) is not task:
+            return
+        del self._recovery_in_flight[agent_id]
+        logger.info(
+            "hosted recovery wake released for agent {agent_id}; {in_flight} in flight",
+            event="host_recovery_wake_released",
+            agent_id=agent_id,
+            in_flight=len(self._recovery_in_flight),
+        )
 
-        This is public only as the narrow test seam for the durable backstop.
-        Production calls it before each deadline-bounded subscription read.
-        """
+    def _release_completed_recovery_slots(self) -> None:
+        # Cover a done task whose callback has not run yet.
+        for agent_id, task in tuple(self._recovery_in_flight.items()):
+            if task.done():
+                self._release_recovery_slot(agent_id, task)
+
+    async def scan_once(self) -> None:
+        """Wake all work; bound recovery starts by batch and in-flight limits."""
         if self._pending_scan is None:
             return
         if self._stale_after_s is None:
             raise RuntimeError("hosted pending scan configured without stale_after_s")
         if maintenance.in_stop_leg():
-            # The stop leg schedules nothing and cancels nothing: pending rows
-            # stay durable in the DB for the first scan after the start leg
-            # begins, and a stale turn here belongs to the operator's stop
-            # (which handles its own stragglers), not to a live host needing
-            # recovery. The start leg deliberately scans while the unit is
-            # still held — recovery may not wait for the hold to release,
-            # because pub/sub has no replay.
+            # Leave pending rows for the start leg, which scans even while held;
+            # pub/sub has no replay. The operator owns stop-leg cancellation.
             return
 
-        self._recovery_in_flight.intersection_update(self._scheduler.active_agents)
+        # Task completion normally releases the slot via callback. Queued work
+        # successors and turns from other wake paths never spend one.
+        self._release_completed_recovery_slots()
 
-        # Inbox/DB timestamps describe accumulated work, not this turn. A
-        # freshly resumed stream may have old pending rows until its next claim.
-        # Only the current monotonic progress clock can license cancellation.
+        # Old inbox/DB timestamps cannot license cancellation; only the current
+        # monotonic progress clock can.
         started: set[int] = set()
         recovery_started = 0
         candidates = await self._pending_scan(self._stale_after_s)
@@ -727,9 +743,8 @@ class InboundWakeDispatcher:
                 and (age := turn_progress_age_s(candidate.agent_id)) is not None
                 and age >= self._stale_after_s
             ):
-                # The unwind verdict is the captured task's own done-state
-                # (`cancel_agent`'s return) — registry membership is not it:
-                # a pre-start reap releases the slot the moment the task ends.
+                # The captured task's done-state, not registry membership,
+                # proves unwind when a pre-start reap replaces it.
                 unwound = await self._scheduler.cancel_agent(candidate.agent_id)
                 if not unwound:
                     raise HostRestartRequiredError(
@@ -737,34 +752,19 @@ class InboundWakeDispatcher:
                     )
             recovery_started = self._wake_scanned_candidate(candidate, started, recovery_started)
 
-        # Turn-level fake-alive: an in-flight agent whose turn-progress clock
-        # is stale is not making progress even though NO pending inbound has
-        # aged — the exact shape the pending-row checks above cannot see.
-        # The 2026-09-04 incident: agent 2998 claimed its whole inbound queue
-        # (the chats are committed into the checkpoint, none stay 'pending'),
-        # then hung inside graph.ainvoke for 3.5 hours; every detector keyed on
-        # a pending row or a pid stayed blind, and the row kept its heartbeat
-        # lease. An in-flight agent is the answer to "is anything running for
-        # this agent" — its stale clock is the answer to "has that turn done
-        # ANYTHING since" (see agent/_turn_progress.py for what counts).
+        # Turn-level fake-alive: a task can claim its entire inbox, then hang
+        # with no pending rows. Its progress clock detects that stalled turn
+        # (2026-09-04 incident, agent 2998).
         for agent_id in self._scheduler.active_agents:
-            # A task just started by this scan has not entered its pump yet.
-            # Neither an idle agent's old clock nor its predecessor's clock
-            # justifies cancelling that new task before it can run.
+            # Do not apply an old clock to a task this scan just started.
             if agent_id in started or _database_waiting(agent_id) or _admission_waiting(agent_id):
                 continue
             age = turn_progress_age_s(agent_id)
             if age is None or age < self._stale_after_s:
                 continue
-            # This loop walks a snapshot of the active set; an earlier
-            # candidate's cancel awaits its unwind (up to
-            # CANCEL_UNWIND_TIMEOUT_S), and a turn that completes naturally
-            # inside that window is gone from the registry by its turn here.
-            # `cancel_agent` reports the missing task as False — "nothing
-            # left to unwind", not "refused to unwind" — so the verdict
-            # below must not read it as a straggler. The membership read
-            # shares one tick with `cancel_agent`'s lookup (no await
-            # between): presence here is presence there.
+            # Earlier cancellation may have let this snapshotted task finish;
+            # cancel_agent reports a missing task as False, not a straggler.
+            # This membership check and cancel_agent's lookup cannot interleave.
             if agent_id not in self._scheduler.active_agents:
                 continue
             unwound = await self._scheduler.cancel_agent(agent_id)
