@@ -15,13 +15,11 @@ Kept alive by the gateway watchdog's 60s healthcheck (`services/healthchecks/lab
 """
 
 import asyncio
-import contextlib
 import logging
 import os
 import signal
 import sys
 import time
-from typing import NoReturn
 
 import psycopg
 from loguru import logger
@@ -32,7 +30,8 @@ from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidf
 from services.labeler.labeler import generate_label_async
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.labeler.daemon")
@@ -293,36 +292,6 @@ async def run() -> None:
         _log.info("[labeler] daemon stopped")
 
 
-def _hard_exit(code: int) -> NoReturn:
-    """End the process now, skipping interpreter teardown. Never returns.
-
-    Teardown is exactly what a stop signal must not wait on. ``asyncio.run``
-    closes its runner in a ``finally``: cancel-drain, then
-    ``shutdown_default_executor`` behind CPython's ``THREAD_JOIN_TIMEOUT`` cap
-    of 300 s — the stop flow's entire budget (``PAUSE_TIMEOUT_SECONDS``) — and
-    a worker still in flight after that cap keeps interpreter teardown waiting
-    with no bound at all (measured: a ``shutdown(wait=False)`` worker is still
-    joined at exit; only ``os._exit`` escapes). This daemon declares no long
-    executor job, but a stop window can still land mid-flight: the label LLM
-    client (langchain-openai) resolves names through the loop's default
-    executor. Nothing after ``run()`` needs those workers — the pool close,
-    health stop and pidfile drop run in ``run``'s finally, which the drain
-    already ran — so none of that wait buys anything. Logs are flushed first:
-    they are the one thing a skipped teardown would lose. Same shape as
-    services/agent_ops/daemon.py and services/pitr/uploader_daemon.py.
-    """
-    with contextlib.suppress(Exception):
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-    with contextlib.suppress(Exception):
-        logging.shutdown()
-    for stream in (sys.stdout, sys.stderr):
-        with contextlib.suppress(Exception):
-            stream.flush()
-    os._exit(code)
-
-
 def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
@@ -352,12 +321,7 @@ def main() -> None:
         # tasks explicitly: `run`'s finally still closes the DB pool, stops the
         # health server and removes the pidfile. The executor is deliberately
         # NOT drained.
-        loop = runner.get_loop()
-        tasks = asyncio.all_tasks(loop)
-        for task in tasks:
-            task.cancel()
-        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-        failures = [result for result in results if isinstance(result, Exception)]
+        failures = cancel_and_drain(runner)
         if failures:
             _log.error("[labeler] async shutdown failed: %r", failures)
             code = 1

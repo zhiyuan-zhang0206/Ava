@@ -7,13 +7,10 @@ import contextlib
 import errno
 import json
 import logging
-import os
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import NoReturn
 
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
@@ -28,6 +25,7 @@ from services.pitr.uploader import (
 from shared import health_schema
 from shared.config import settings
 from shared.daemon_health import Liveness, start_health_server, stop_health_server
+from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.daemon_shutdown import install_graceful_shutdown
 from shared.log import init_gateway_process
 from shared.paths import ava_home
@@ -370,32 +368,6 @@ async def run() -> None:
         executor.shutdown(wait=False)
         remove_pidfile(pidfile)
         await stop_health_server(server)
-
-
-def _hard_exit(code: int) -> NoReturn:
-    """End the process now, skipping interpreter teardown. Never returns.
-
-    Teardown is precisely what hangs: the interpreter's atexit handler joins
-    every non-daemon worker in the upload pool with no bound (the ops daemon
-    measured the same shape after its 2026-08-12 wedge). One wedged GCS
-    upload would therefore hold a daemon that has already finished every
-    piece of cleanup it owns — run()'s finally layers run first (pool drop,
-    pidfile, health server), and what is skipped after them is bookkeeping
-    for an interpreter about to stop existing.
-
-    Logs are flushed first: they are the one thing a skipped teardown would
-    lose, and this log is where the next stall has to be legible.
-    """
-    with contextlib.suppress(Exception):
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-    with contextlib.suppress(Exception):
-        logging.shutdown()
-    for stream in (sys.stdout, sys.stderr):
-        with contextlib.suppress(Exception):
-            stream.flush()
-    os._exit(code)
 
 
 def main() -> None:

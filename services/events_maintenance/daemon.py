@@ -53,7 +53,6 @@ deadline makes `/healthz` return 503 for watchdog recovery.
 """
 
 import asyncio
-import contextlib
 import logging
 import os
 import signal
@@ -61,7 +60,7 @@ import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import NoReturn, cast
+from typing import cast
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -85,7 +84,8 @@ from shared.daemon_health import (
     start_health_server,
     stop_health_server,
 )
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 
@@ -447,34 +447,6 @@ async def run() -> None:
         _log.info("[events-maintenance] daemon stopped")
 
 
-def _hard_exit(code: int) -> NoReturn:
-    """End the process now, skipping interpreter teardown. Never returns.
-
-    Teardown is precisely what hangs: every maintenance pass runs on the
-    default executor (``_maintenance_with_liveness``'s ``asyncio.to_thread``)
-    and is DB work that can run for minutes — an in-flight rollup, trim or
-    resolution slice is exactly what a stop can land on. ``asyncio.Runner.close``
-    joins that executor behind CPython's ``THREAD_JOIN_TIMEOUT`` cap (300 s) —
-    the stop flow's entire budget (`PAUSE_TIMEOUT_SECONDS`) — and a pass still
-    in flight at SIGTERM then keeps interpreter teardown waiting with no bound
-    at all (measured: a ``shutdown(wait=False)`` worker is still joined at
-    exit, task #3940). Nothing after ``run()`` needs that pass: every pass is
-    idempotent and self-catching-up, re-derived by the next process. Logs are
-    flushed first: they are the one thing a skipped teardown would lose. Same
-    shape as services/agent_ops/daemon.py and services/pitr/uploader_daemon.py.
-    """
-    with contextlib.suppress(Exception):
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-    with contextlib.suppress(Exception):
-        logging.shutdown()
-    for stream in (sys.stdout, sys.stderr):
-        with contextlib.suppress(Exception):
-            stream.flush()
-    os._exit(code)
-
-
 def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
@@ -505,12 +477,7 @@ def main() -> None:
         # tasks explicitly: run()'s finally still closes the pool, stops the
         # health server and removes the pidfile. The executor is deliberately
         # NOT drained.
-        loop = runner.get_loop()
-        tasks = asyncio.all_tasks(loop)
-        for task in tasks:
-            task.cancel()
-        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-        failures = [result for result in results if isinstance(result, Exception)]
+        failures = cancel_and_drain(runner)
         if failures:
             _log.error("[events-maintenance] async shutdown failed: %r", failures)
             code = 1

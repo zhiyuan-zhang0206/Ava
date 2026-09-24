@@ -9,7 +9,6 @@ daemon when its schedule has stopped making progress.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import signal
@@ -19,7 +18,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
 from functools import partial
-from typing import NoReturn
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.backup import _cluster_tz, is_due, run_backup
@@ -32,7 +30,8 @@ from services.backup_scheduler.worker import run_job
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.health_schema import DEGRADED, OK, component
 from shared.log import init_gateway_process
 
@@ -217,36 +216,6 @@ async def run() -> None:
         _log.info("[pg-backup] daemon stopped")
 
 
-def _hard_exit(code: int) -> NoReturn:
-    """End the process now, skipping interpreter teardown. Never returns.
-
-    Teardown is exactly what a stop signal must not wait on. ``asyncio.run``
-    closes its runner in a ``finally``: cancel-drain, then
-    ``shutdown_default_executor`` behind CPython's ``THREAD_JOIN_TIMEOUT`` cap
-    of 300 s — the stop flow's entire budget (``PAUSE_TIMEOUT_SECONDS``) — and
-    a worker still in flight after that cap keeps interpreter teardown waiting
-    with no bound at all (measured: a ``shutdown(wait=False)`` worker is still
-    joined at exit; only ``os._exit`` escapes). This daemon declares no long
-    executor job — the dump runs in a child process — but the stop window must
-    not depend on that staying true, so the fleet-uniform shape applies here
-    too. Nothing after ``run()`` needs a threadpool join — the health stop and
-    pidfile drop run in ``run``'s finally, which the drain already ran — so the
-    wait would buy nothing. Logs are flushed first: they are the one thing a
-    skipped teardown would lose. Same shape as services/agent_ops/daemon.py
-    and services/pitr/uploader_daemon.py.
-    """
-    with contextlib.suppress(Exception):
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-    with contextlib.suppress(Exception):
-        logging.shutdown()
-    for stream in (sys.stdout, sys.stderr):
-        with contextlib.suppress(Exception):
-            stream.flush()
-    os._exit(code)
-
-
 def main() -> None:
     """Entry point for the gateway service session."""
     from shared.migrations import assert_schema_current
@@ -270,12 +239,7 @@ def main() -> None:
         # tasks explicitly: `run`'s finally still stops the health server and
         # removes the pidfile, and an in-flight dump job is cancelled and reaped
         # with its own cleanup. The executor is deliberately NOT drained.
-        loop = runner.get_loop()
-        tasks = asyncio.all_tasks(loop)
-        for task in tasks:
-            task.cancel()
-        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-        failures = [result for result in results if isinstance(result, Exception)]
+        failures = cancel_and_drain(runner)
         if failures:
             _log.error("[pg-backup] async shutdown failed: %r", failures)
             code = 1

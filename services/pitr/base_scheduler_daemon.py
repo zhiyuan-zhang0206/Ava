@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import multiprocessing
-import os
 import queue
 import signal
-import sys
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import NoReturn, cast
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from services._pidfile import acquire_pidfile, remove_pidfile
@@ -73,7 +70,8 @@ from services.pitr.worker_process import worker_bootstrap as _worker_bootstrap
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 from shared.platform import LockTimeoutError, file_lock
@@ -526,36 +524,6 @@ async def run() -> None:
         remove_pidfile(pidfile)
 
 
-def _hard_exit(code: int) -> NoReturn:
-    """End the process now, skipping interpreter teardown. Never returns.
-
-    Teardown is precisely what hangs. The default executor here hosts the
-    retention refresh/delete jobs — multi-minute scans by design (#3345) — and
-    ``asyncio.Runner.close`` joins that executor behind CPython's
-    ``THREAD_JOIN_TIMEOUT`` cap (300 s), which equals the stop flow's entire
-    budget (`PAUSE_TIMEOUT_SECONDS`); a job still in flight at SIGTERM then
-    keeps interpreter teardown waiting with no bound at all (measured: a
-    ``shutdown(wait=False)`` worker is still joined at exit). The 2026-09-18
-    wsl half-stop was this shape (task #3940): the stop lost the 300 s race by
-    ~2 s and the unit waited out the watchdog respawn. Nothing after ``run()``
-    needs those jobs — the dry-run plan is written atomically and re-derived
-    next tick, deletions are arm-gated and journalled — so none of that wait
-    buys anything. Logs are flushed first: they are the one thing a skipped
-    teardown would lose. Same shape as services/agent_ops/daemon.py and
-    services/pitr/uploader_daemon.py.
-    """
-    with contextlib.suppress(Exception):
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-    with contextlib.suppress(Exception):
-        logging.shutdown()
-    for stream in (sys.stdout, sys.stderr):
-        with contextlib.suppress(Exception):
-            stream.flush()
-    os._exit(code)
-
-
 def main() -> None:
     init_gateway_process(name="pitr-base-candidate")
     install_graceful_shutdown("pitr-base-candidate")
@@ -575,12 +543,7 @@ def main() -> None:
         # tasks explicitly: run()'s finally still stops the health server and
         # removes the pidfile, and an in-flight candidate worker still reaps
         # its process group. The executor is deliberately NOT drained.
-        loop = runner.get_loop()
-        tasks = asyncio.all_tasks(loop)
-        for task in tasks:
-            task.cancel()
-        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-        failures = [result for result in results if isinstance(result, Exception)]
+        failures = cancel_and_drain(runner)
         if failures:
             _log.error("[pitr-base-candidate] async shutdown failed: %r", failures)
             code = 1
