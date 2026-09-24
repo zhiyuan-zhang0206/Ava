@@ -9,6 +9,7 @@ from psycopg import sql
 from ops.resurrection_retry import ResurrectExitDeferredError
 from ops.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
 from ops.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
+from shared import telemetry
 from shared.agents import (
     AgentNotFound,
     AgentStatus,
@@ -17,7 +18,7 @@ from shared.agents import (
     ResurrectBudgetExhausted,
     ResurrectRefused,
 )
-from shared.audit_events import insert_event_log
+from shared.audit_events import prepare_event_log
 from shared.config import field_alias, get_field, settings
 from shared.db import fetch_one, publish_inbound_wake
 from shared.db_transaction import write_transaction
@@ -152,7 +153,7 @@ def _prepare_resurrect_attempt(
     trigger_inbound_id: int | None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
     billing_recovery: bool = False,
-) -> bool:
+) -> tuple[bool, telemetry.Event]:
     """Commit resurrection and its optional prompt before waking the host.
 
     Returns whether this call reopened a closed agent (the explicit branch
@@ -243,10 +244,47 @@ def _prepare_resurrect_attempt(
                 "VALUES (%s, %s, 'chat', %s)",
                 (agent_id, prompt, resurrected_by),
             )
+        prepared_event = _stage_resurrect_event(
+            conn,
+            agent_id,
+            resurrected_by,
+            prompt,
+            reopened=reopened,
+            billing_recovery=billing_recovery,
+            origin_id=int(resurrect_row[0]),
+        )
         conn.commit()
         publish_agent_updated_sync(agent_id)
     publish_inbound_wake(agent_id, "0")
-    return reopened
+    return reopened, prepared_event
+
+
+def _stage_resurrect_event(
+    conn: psycopg.Connection,
+    agent_id: int,
+    resurrected_by: str,
+    prompt: str | None,
+    *,
+    reopened: bool,
+    billing_recovery: bool,
+    origin_id: int,
+) -> telemetry.Event:
+    """Stage the exact resurrection audit fact inside the owning transaction."""
+    payload: dict[str, object] = {"prompt": prompt} if prompt else {}
+    if reopened:
+        payload["reopened"] = True
+    if billing_recovery:
+        payload["via"] = "billing_recovery"
+    event = prepare_event_log(
+        event_type="resurrect",
+        agent_id=agent_id,
+        source=resurrected_by,
+        target_agent_id=_resurrect_event_target(resurrected_by),
+        payload=payload,
+    )
+    from shared.agents.impersonation_manifest import stage_central_expected_event
+
+    return stage_central_expected_event(conn, event, origin_kind="agent_wake", origin_id=origin_id)
 
 
 def resurrect_agent(
@@ -280,7 +318,7 @@ def resurrect_agent(
     """
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
-    reopened = _prepare_resurrect_attempt(
+    reopened, prepared_event = _prepare_resurrect_attempt(
         agent_id,
         resurrected_by=resurrected_by,
         prompt=prompt,
@@ -288,9 +326,7 @@ def resurrect_agent(
         trigger_inbound_kind=trigger_inbound_kind,
         billing_recovery=billing_recovery,
     )
-    payload: dict[str, object] = {"prompt": prompt} if prompt else {}
     if reopened:
-        payload["reopened"] = True
         # LOUD operator-side audit: clearing the durable closure marker must be
         # findable without reading the resurrect event's payload — one distinct
         # WARNING line rides the existing log/event pipelines (no new surface).
@@ -300,15 +336,7 @@ def resurrect_agent(
             agent_id=agent_id,
             resurrected_by=resurrected_by,
         )
-    if billing_recovery:
-        payload["via"] = "billing_recovery"
-    insert_event_log(
-        event_type="resurrect",
-        agent_id=agent_id,
-        source=resurrected_by,
-        target_agent_id=_resurrect_event_target(resurrected_by),
-        payload=payload,
-    )
+    telemetry.emit_prepared(prepared_event)
     logger.info(
         "agent {agent_id} resurrected by {resurrected_by}",
         event="agent_resurrected",

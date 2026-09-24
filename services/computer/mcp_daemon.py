@@ -149,6 +149,8 @@ class ComputerMcpDaemon:
 
     async def _dispatch(self, req: Request) -> Response:
         req_id = req.get("id")
+        if not isinstance(req_id, int) or isinstance(req_id, bool):
+            return {"id": None, "ok": False, "error": "request id must be an integer"}
         method = req.get("method")
         if method == "ping":
             return {"id": req_id, "ok": True, "result": "pong"}
@@ -227,7 +229,7 @@ class ComputerMcpDaemon:
                             # silent either — a contract mismatch (unregistered
                             # event name, FK hiccup) must be audible.
                             logger.warning(f"[computer-mcp] task-session event failed: {e}")
-            self._emit_action(agent_id, tool, args, outcome, error, result=result)
+            self._emit_action(agent_id, tool, args, outcome, error, result=result, origin_id=req_id)
             if error is not None:
                 return {"id": req_id, "ok": False, "error": error}
             assert result is not None  # noqa: S101 — no error ⇒ execution succeeded
@@ -246,7 +248,7 @@ class ComputerMcpDaemon:
             if args.get("force") and released is not None:
                 # Operator kick: no agent identity, so no audit row — log it.
                 logger.info(f"[computer-mcp] operator forced release of agent {released}")
-            self._emit_action(agent_id, "release_control", args, outcome, error)
+            self._emit_action(agent_id, "release_control", args, outcome, error, origin_id=req_id)
             if released is None:
                 return {"id": req_id, "ok": False, "error": "not the screen holder"}
             return {
@@ -262,6 +264,7 @@ class ComputerMcpDaemon:
         args: dict[str, Any],
         outcome: str,
         error: str | None,
+        origin_id: int,
         result: dict[str, Any] | None = None,
     ) -> None:
         """One computer_action audit event per call — facts for later review."""
@@ -282,7 +285,7 @@ class ComputerMcpDaemon:
         app = None
         with suppress(Exception):
             app = helper.frontmost_app()["app"] or None
-        audit_events.insert_event_log(
+        event = audit_events.prepare_event_log(
             event_type="computer_action",
             agent_id=agent_id,
             source=f"agent:{agent_id}",
@@ -296,17 +299,30 @@ class ComputerMcpDaemon:
                 "task_id": args.get("task_id"),
             },
         )
+        from shared.agents.impersonation_manifest import emit_staged_central_event
+
+        emit_staged_central_event(
+            event,
+            origin_kind="computer_action",
+            origin_id=origin_id,
+        )
 
     @staticmethod
     def _emit_session_event(event_type: str, agent_id: int, payload: dict[str, Any]) -> None:
         """One computer_session_start/end audit row (no app lookup — the
         envelope describes the task, not a screen state)."""
-        audit_events.insert_event_log(
+        event = audit_events.prepare_event_log(
             event_type=event_type,
             agent_id=agent_id,
             source=f"agent:{agent_id}",
             payload=payload,
         )
+        task_id = payload["task_id"]
+        if not isinstance(task_id, int) or isinstance(task_id, bool):
+            raise TypeError("computer task-session audit requires an integer task id")
+        from shared.agents.impersonation_manifest import emit_staged_central_event
+
+        emit_staged_central_event(event, origin_kind=f"computer_{event_type}", origin_id=task_id)
 
 
 async def _socket_in_use(path: Path) -> bool:

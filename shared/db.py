@@ -47,6 +47,7 @@ from shared.db_connections import pool as pool
 from shared.db_transaction import write_transaction
 from shared.inbound_provenance import InboundProvenance, content_sha256, source_assertion_match
 from shared.log import logger
+from shared.telemetry import Event
 
 
 class InboundRow(NamedTuple):
@@ -309,6 +310,7 @@ def insert_inbound_message(
         with contextlib.suppress(ValueError):
             target_agent_id = int(source.removeprefix("agent:"))
 
+    prepared_event = None
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages "
@@ -329,9 +331,10 @@ def insert_inbound_message(
         )
         new_id = fetch_one(cur, "insert inbound message")[0]
         if event_type is not None:
-            from shared.audit_events import insert_event_log
+            from shared.agents.impersonation_manifest import stage_central_expected_event
+            from shared.audit_events import prepare_event_log
 
-            insert_event_log(
+            prepared_event = prepare_event_log(
                 event_type=event_type,
                 agent_id=agent_id,
                 source=source,
@@ -340,7 +343,14 @@ def insert_inbound_message(
                 if content
                 else {"inbound_id": new_id},
             )
+            prepared_event = stage_central_expected_event(
+                db,
+                prepared_event,
+                origin_kind="inbound_message",
+                origin_id=new_id,
+            )
     db.commit()
+    _emit_prepared_event(prepared_event)
     # Publish to Redis to wake the idle agent. Agents subscribe to
     # `<prefix>:inbound:{agent_id}` (inbound_channel) via RedisInboundListener.
     # Fire-and-forget: the agent's defensive SELECT recheck catches inbound
@@ -377,9 +387,10 @@ def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: 
     """Emit the ordinary chat audit and wake hints after the prompt commits."""
     try:
         if source.startswith("agent:"):
-            from shared.audit_events import insert_event_log
+            from shared.agents.impersonation_manifest import stage_central_expected_event
+            from shared.audit_events import prepare_event_log
 
-            insert_event_log(
+            prepared_event = prepare_event_log(
                 event_type="send_message",
                 agent_id=agent_id,
                 source=source,
@@ -388,13 +399,31 @@ def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: 
                 if content
                 else {"inbound_id": inbound_id},
             )
+            with write_transaction() as conn:
+                prepared_event = stage_central_expected_event(
+                    conn,
+                    prepared_event,
+                    origin_kind="inbound_message",
+                    origin_id=inbound_id,
+                )
+            _emit_prepared_event(prepared_event)
     finally:
         publish_inbound_wake(agent_id, str(inbound_id))
+
+
+def _emit_prepared_event(event: Event | None) -> None:
+    """Enqueue a transactional audit event only after its commit succeeded."""
+    if event is not None:
+        from shared import telemetry
+
+        telemetry.emit_prepared(event)
 
 
 def insert_restart_completed_inbound(
     cur: psycopg.Cursor,
     agent_id: int,
+    *,
+    post_commit_events: list[Event],
 ) -> tuple[str, str, dict[str, object] | None] | None:
     """Trace the newest restart inbound into a restart-completed marker.
 
@@ -403,9 +432,10 @@ def insert_restart_completed_inbound(
     wording. The payload passes through unchanged so the lifecycle marker can
     render this restart's config diff. After claiming the marker, the new
     process writes its full effective-config snapshot; this row guarantees the
-    original restart envelope survives until then. ``None`` means no restart
-    inbound exists; the caller owns the appropriate integrity or best-effort
-    response.
+    original restart envelope survives until then. The caller owns the outer
+    transaction and must emit every returned ``post_commit_events`` item only
+    after that transaction commits. ``None`` means no restart inbound exists;
+    the caller owns the appropriate integrity or best-effort response.
     """
     cur.execute(
         "SELECT source, content, payload FROM inbound_messages "
@@ -425,17 +455,28 @@ def insert_restart_completed_inbound(
     config_overlay: dict[str, object] | None = config_overlay_row[0]
     cur.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-        "VALUES (%s, %s, 'restart_completed', %s, %s::jsonb)",
+        "VALUES (%s, %s, 'restart_completed', %s, %s::jsonb) RETURNING id",
         (agent_id, content, source, json.dumps(payload) if payload else None),
     )
-    from shared.audit_events import insert_event_log
+    restart_completed_row = cur.fetchone()
+    if restart_completed_row is None:
+        raise RuntimeError("restart-completed inbound INSERT returned no id")
+    from shared.agents.impersonation_manifest import stage_central_expected_event
+    from shared.audit_events import prepare_event_log
 
-    insert_event_log(
+    prepared_event = prepare_event_log(
         event_type="restart_completed",
         agent_id=agent_id,
         source=source,
         payload={"config_overlay": config_overlay} if config_overlay else {},
     )
+    prepared_event = stage_central_expected_event(
+        cur.connection,
+        prepared_event,
+        origin_kind="restart_completed",
+        origin_id=int(restart_completed_row[0]),
+    )
+    post_commit_events.append(prepared_event)
     return source, content, payload
 
 
