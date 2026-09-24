@@ -161,21 +161,28 @@ def test_codex_supervisor_uses_projected_session_environment(
     monkeypatch.setattr(spawn_codex.ava._boot, "_agent_id", 41)
     monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 7)
     monkeypatch.setattr(sessions, "_shell_prefix", lambda: "ava-agent-41-shell-")
-    monkeypatch.setattr(sessions, "workspace_dir", lambda _agent_id: workspace)
+
+    def workspace_for_owner(_agent_id: int) -> Path:
+        return workspace
+
+    def record_no_ttl(_sid: int, _ttl: float) -> None:
+        return None
+
+    monkeypatch.setattr(sessions, "workspace_dir", workspace_for_owner)
     monkeypatch.setattr(sessions, "get_shell_backend", lambda: backend)
-    monkeypatch.setattr(sessions, "_record_ttl", lambda _sid, _ttl: None)
+    monkeypatch.setattr(sessions, "_record_ttl", record_no_ttl)
+
     # Execute a probe in place of the long-running supervisor; session birth,
     # envfile transport, host fork, and shell command delivery remain real.
-    monkeypatch.setattr(
-        spawn_codex,
-        "_supervisor_code",
-        lambda _owner: (
+    def supervisor_probe(_owner: coding_session_owner.CodingSessionOwner) -> str:
+        return (
             "import json, os; from pathlib import Path; "
             f"report = Path({str(report)!r}); pending = report.with_suffix('.tmp'); "
             "pending.write_text(json.dumps(dict("
             "virtual_env=os.environ.get('VIRTUAL_ENV'), cwd=os.getcwd()))); pending.replace(report)"
-        ),
-    )
+        )
+
+    monkeypatch.setattr(spawn_codex, "_supervisor_code", supervisor_probe)
     name = coding_session_owner.full_session_name(41, 7, spawn_codex._supervisor_name(owner))
     try:
         sid, actual_name = spawn_codex._launch_supervisor(owner, 120)
