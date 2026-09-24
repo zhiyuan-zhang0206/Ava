@@ -595,3 +595,33 @@ describe("AgentRow right-click context menu", () => {
   // is a Radix interaction not exercised here (it recurses under happy-dom;
   // it works in a real browser — marked NOT tested in the PR).
 });
+
+describe("AgentRow takeover control", () => {
+  it("shows an open takeover and ends the observed session from a visible button", () => {
+    const onForceExpire = vi.fn();
+    const confirmMock = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirmMock);
+    render(<AgentRow {...baseProps} onForceExpire={onForceExpire}
+      agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />);
+
+    expect(screen.getByText("Takeover open")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "End external takeover session" }));
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("agent resumes its own work"));
+    expect(onForceExpire).toHaveBeenCalledExactlyOnceWith(7);
+  });
+
+  it("shows no takeover control without an open session, and disables it while an action is pending", () => {
+    const onForceExpire = vi.fn();
+    render(<AgentRow {...baseProps} onForceExpire={onForceExpire}
+      agent={ag(1)} depth={0} ancestorsIsLast={[]} />);
+    expect(screen.queryByText("Takeover open")).toBeNull();
+    expect(screen.queryByRole("button", { name: "End external takeover session" })).toBeNull();
+
+    cleanup();
+    render(<AgentRow {...baseProps} onForceExpire={onForceExpire} pending="expiring"
+      agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />);
+    expect(screen.getByText("Ending takeover…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "End external takeover session" })).toBeNull();
+    expect(onForceExpire).not.toHaveBeenCalled();
+  });
+});
