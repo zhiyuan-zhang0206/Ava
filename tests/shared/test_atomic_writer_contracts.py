@@ -8,15 +8,17 @@ import stat
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
-from cli.commands import _observatory_urls, _otel_collector
+from cli.commands import _grafana_render, _observatory_urls, _otel_collector
 from ops import pty_close_notices
 from shared import (
     atomic_io,
     coding_session_owner_record,
     delivery_outbox,
+    editable_install,
     pause_owner,
     spawn_receipt,
     start_serving,
@@ -252,3 +254,100 @@ def test_bytes_helper_can_skip_sync_without_skipping_atomic_replace(
     atomic_io.write_bytes_atomic(path, b"new", sync_file=False)
     assert path.read_bytes() == b"new"
     assert sorted(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fchmod mode contract is POSIX-only")
+def test_text_helper_applies_requested_public_mode(tmp_path: Path) -> None:
+    path = tmp_path / "pointer.pth"
+    atomic_io.write_text_atomic(path, "target", mode=0o644, sync_file=False)
+    assert path.read_bytes() == b"target"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize(
+    "writer", [editable_install._atomic_write_text, _grafana_render._atomic_write]
+)
+def test_visible_text_writers_use_distinct_sibling_temps_under_concurrency(
+    writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.txt"
+    barrier = Barrier(2)
+    sources: list[Path] = []
+    original_replace = Path.replace
+
+    def rendezvous(source: Path, target: Path) -> Path:
+        sources.append(source)
+        barrier.wait(timeout=5)
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", rendezvous)
+    values = ["first" * 4096, "second" * 4096]
+
+    def write(value: str) -> None:
+        writer(path, value)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(write, values))
+
+    assert path.read_text() in values
+    assert len(set(sources)) == 2
+    assert all(source.parent == path.parent for source in sources)
+    assert all(
+        source.name.startswith(f".{path.name}.") and source.suffix == ".tmp" for source in sources
+    )
+    assert sorted(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize(
+    "writer", [editable_install._atomic_write_text, _grafana_render._atomic_write]
+)
+def test_visible_text_writers_clean_temp_after_failed_replace(
+    writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.txt"
+    path.write_text("old")
+
+    def fail_replace(_source: Path, _target: Path) -> Path:
+        raise OSError("replace failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="replace failure"):
+        writer(path, "new")
+    assert path.read_text() == "old"
+    assert sorted(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fchmod mode contract is POSIX-only")
+@pytest.mark.parametrize(
+    "writer", [editable_install._atomic_write_text, _grafana_render._atomic_write]
+)
+def test_visible_text_writers_set_public_mode_without_sync(
+    writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.txt"
+
+    def unexpected_sync(_fd: int) -> None:
+        pytest.fail("visible writer must not fsync")
+
+    monkeypatch.setattr(os, "fsync", unexpected_sync)
+    old_umask = os.umask(0o077)
+    try:
+        writer(path, "café")
+    finally:
+        os.umask(old_umask)
+    assert path.read_bytes() == "café".encode()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not Windows ACLs")
+def test_atomic_pointer_replacement_restores_read_only_mode(tmp_path: Path) -> None:
+    path = tmp_path / "pointer.pth"
+    path.write_text("old")
+    path.chmod(0o444)
+
+    with editable_install._write_window((path,)):
+        editable_install._atomic_write_text(path, "new")
+        assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+    assert path.read_text() == "new"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o444

@@ -33,6 +33,7 @@ import httpx
 from services.im_bridge.types import IMAdapter, InboundMessage
 from shared.config import settings
 from shared.log import logger
+from shared.private_storage import write_private_bytes
 
 ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
 EP_GET_UPDATES = "ilink/bot/getupdates"
@@ -88,13 +89,8 @@ def _state_dir() -> Path:
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
-    """Write JSON atomically (tmp file + rename) so readers never see a partial file;
-    tmp chmod 0600 pre-rename → every output (tokens, buffers, account) is owner-only."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-    tmp.chmod(0o600)
-    tmp.replace(path)
+    """Write all credential-bearing JSON through the private atomic writer."""
+    write_private_bytes(path, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
 
 
 def load_account() -> dict[str, Any] | None:
