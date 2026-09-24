@@ -106,6 +106,8 @@ LEASE = {{
     "delta_version": 0,
     "applied_version": 0,
     "plugin_delta": [],
+    "automatic": False,
+    "event_delivery_protocol_version": None,
 }}
 
 external.control.require_active = lambda _lease_id, _caller: dict(LEASE)

@@ -722,9 +722,9 @@ def _exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int
     trigger rejects rewrites) and no runner path updates rows.
     """
     lease = conn.execute(
-        "INSERT INTO agent_impersonations (id, agent_id, session_id, source, machine,"
-        " token_hash, status, ttl_seconds, expires_at)"
-        " VALUES (gen_random_uuid(), %s, 0, 'codex', 'test-machine', 'hash', 'requested',"
+        "INSERT INTO agent_impersonations (id, agent_id, source, machine,"
+        " status, ttl_seconds, expires_at)"
+        " VALUES (gen_random_uuid(), %s, 'codex', 'test-machine', 'requested',"
         " 3600, now() + interval '1 hour') RETURNING id",
         (agent_id,),
     ).fetchone()
@@ -995,9 +995,9 @@ def test_impersonation_entry_grant_reaches_a_cluster_born_before_the_table(
 
     def create_lease(conn: psycopg.Connection) -> tuple[object, ...] | None:
         return conn.execute(
-            "INSERT INTO agent_impersonations (id, agent_id, session_id, source, machine,"
-            " token_hash, status, ttl_seconds, expires_at)"
-            " VALUES (gen_random_uuid(), %s, 0, 'codex', 'test-machine', 'hash', 'requested',"
+            "INSERT INTO agent_impersonations (id, agent_id, source, machine,"
+            " status, ttl_seconds, expires_at)"
+            " VALUES (gen_random_uuid(), %s, 'codex', 'test-machine', 'requested',"
             " 3600, now() + interval '1 hour') RETURNING id",
             (agent_id,),
         ).fetchone()

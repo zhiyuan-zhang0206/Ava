@@ -21,13 +21,14 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from ops import billing_recovery
+from ops import agent_wake, billing_recovery
 from ops.agent_wake import resurrect_agent
 from ops.billing_recovery import enumerate_candidates, enumerate_halted_alive, run_billing_recovery
 from ops.rpc_schemas import BillingBalanceReport
 from shared.agents import ResurrectRefused
 from shared.db import create_agent
 from shared.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
+from shared.telemetry import Event
 
 
 @pytest.fixture()
@@ -87,6 +88,40 @@ def _resurrect_inbounds(conn: psycopg.Connection, agent_id: int) -> int:
     ).fetchone()
     assert row is not None
     return int(row[0])
+
+
+def _capture_resurrect_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Observe the prepared audit fact while retaining the real event shape."""
+    events: list[dict[str, Any]] = []
+    prepare = agent_wake.prepare_event_log
+
+    def _record_event(
+        *,
+        event_type: str,
+        agent_id: int | None,
+        source: str,
+        target_agent_id: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> Event:
+        events.append(
+            {
+                "event_type": event_type,
+                "agent_id": agent_id,
+                "source": source,
+                "target_agent_id": target_agent_id,
+                "payload": payload or {},
+            }
+        )
+        return prepare(
+            event_type=event_type,
+            agent_id=agent_id,
+            source=source,
+            target_agent_id=target_agent_id,
+            payload=payload,
+        )
+
+    monkeypatch.setattr(agent_wake, "prepare_event_log", _record_event)
+    return events
 
 
 def _balance(ok: bool, detail: str = "probe detail") -> BillingBalanceReport:
@@ -332,12 +367,7 @@ def test_runner_resurrects_a_billing_halt_and_marks_the_via_payload(
 ) -> None:
     aid = _agent(db_conn)
     _halt(db_conn, aid)
-    events: list[dict[str, Any]] = []
-
-    def _record_event(**kw: Any) -> None:
-        events.append(kw)
-
-    monkeypatch.setattr("ops.agent_wake.insert_event_log", _record_event)
+    events = _capture_resurrect_events(monkeypatch)
 
     resurrect_agent(aid, resurrected_by="user", billing_recovery=True)
 
@@ -352,12 +382,7 @@ def test_explicit_resurrect_still_reopens_a_closed_agent(
 ) -> None:
     aid = _agent(db_conn)
     _halt(db_conn, aid, closed=True)
-    events: list[dict[str, Any]] = []
-
-    def _record_event(**kw: Any) -> None:
-        events.append(kw)
-
-    monkeypatch.setattr("ops.agent_wake.insert_event_log", _record_event)
+    events = _capture_resurrect_events(monkeypatch)
 
     resurrect_agent(aid, resurrected_by="user")
 

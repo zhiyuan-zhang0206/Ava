@@ -30,10 +30,13 @@ from uuid import UUID, uuid4
 import psycopg
 
 import shared.db
+from shared import telemetry
 from shared.agents import ForkCheckpointNotFound
-from shared.audit_events import insert_event_log
+from shared.agents.impersonation_manifest import stage_central_expected_event
+from shared.audit_events import prepare_event_log
 from shared.birth_config import resolve_birth_config
 from shared.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
+from shared.db_transaction import write_transaction
 from shared.labels import spawn_prompt_with_label
 from shared.live_announce import publish_agent_spawned_sync
 from shared.lm.registry import normalize_overlay_llm_model
@@ -271,7 +274,7 @@ def _announce_created_agent(
     if spawner.startswith("agent:"):
         spawner_target = int(spawner.removeprefix("agent:"))
     try:
-        insert_event_log(
+        prepared_event = prepare_event_log(
             event_type="fork" if fork_from is not None else "spawn",
             agent_id=agent_id,
             source=spawner,
@@ -282,6 +285,17 @@ def _announce_created_agent(
                 "fork_checkpoint": fork_checkpoint,
             },
         )
+        # The agent row is already durable. Its audit event gets its own
+        # durable staging transaction, so a telemetry loss remains visible to
+        # the finalizer instead of silently completing the delivery set.
+        with write_transaction() as conn:
+            prepared_event = stage_central_expected_event(
+                conn,
+                prepared_event,
+                origin_kind="agent_spawn",
+                origin_id=agent_id,
+            )
+        telemetry.emit_prepared(prepared_event)
     except Exception:
         # The committed row and prompt are authoritative; the pending scan and
         # roster reads recover from a lost Redis/telemetry hint.
