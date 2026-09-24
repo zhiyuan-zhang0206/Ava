@@ -18,6 +18,7 @@ from agent.startup import (
     _repair_dangling_tool_use_at_startup,
 )
 from services.agent_host.recovery_interrupt import RecoveryInterrupt
+from shared.config import settings
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import AGENT_LEASE_TTL_S
 from shared.hosted_db_wait import DatabaseWait, database_wait
@@ -28,6 +29,10 @@ _PROBE_TIMEOUT_SECONDS = 5.0
 _DATABASE_PHASE_TIMEOUT_SECONDS = 30.0
 _INITIAL_BACKOFF_SECONDS = 1.0
 _MAX_BACKOFF_SECONDS = 30.0
+
+
+class DatabaseRecoveryBudgetExceededError(RuntimeError):
+    """The original turn exhausted its database-recovery ladder budget."""
 
 
 @asynccontextmanager
@@ -119,17 +124,41 @@ async def recover_database(
     External interrupt intent shortens one backoff; repair still completes before
     the normal claim applies control, so an unreadable checkpoint cannot be paused
     by falsely acknowledging its pending cancel.
+
+    The total budget is checked before each attempt, outside the retry handler.
+    A bounded attempt and its backoff may finish beyond it; no further attempt
+    starts once it is spent. Exhaustion uses the existing turn crash path.
     """
+    recovery_started = time.monotonic()
     if current_incarnation(incarnation.agent_id) != incarnation:
         raise RuntimeOwnershipLostError("database recovery needs the original bound incarnation")
     backoff = _INITIAL_BACKOFF_SECONDS
     interrupt = RecoveryInterrupt(pool, incarnation)
     attempt = 0
+    phase = "owner_probe"
+    last_error_type: str | None = None
+    last_sqlstate: str | None = None
+    prolonged = False
     logger.warning("host turn waiting for checkpoint recovery", agent_id=incarnation.agent_id)
     with database_wait(incarnation) as waiting:
         while True:
-            attempt += 1
             started = time.monotonic()
+            total_elapsed = started - recovery_started
+            if total_elapsed >= settings.daemon.host_db_recovery_budget_seconds:
+                logger.error(
+                    "host checkpoint recovery abandoned",
+                    agent_id=incarnation.agent_id,
+                    attempts=attempt,
+                    total_elapsed_seconds=total_elapsed,
+                    final_phase=phase,
+                    last_error_type=last_error_type,
+                    last_sqlstate=last_sqlstate,
+                )
+                raise DatabaseRecoveryBudgetExceededError(
+                    f"agent {incarnation.agent_id} exhausted database recovery budget "
+                    f"after {attempt} attempts in {total_elapsed:.3f}s"
+                )
+            attempt += 1
             phase = "owner_probe"
             try:
                 # Each DB-only stage carries its own 30s `database_phase()`
@@ -160,23 +189,44 @@ async def recover_database(
                 phase = "repaired_owner_validation"
                 await _run_bounded_stage(waiting, lambda: _refresh_owner(pool, incarnation))
                 waiting.complete()
+                completed = time.monotonic()
                 logger.info(
                     "host turn checkpoint recovered",
                     agent_id=incarnation.agent_id,
                     attempt=attempt,
-                    elapsed_seconds=time.monotonic() - started,
+                    elapsed_seconds=completed - started,
+                    total_attempts=attempt,
+                    total_elapsed_seconds=completed - recovery_started,
                 )
                 return
             except (psycopg.OperationalError, PoolTimeout, TimeoutError) as exc:
+                failed = time.monotonic()
+                total_elapsed = failed - recovery_started
+                last_error_type = type(exc).__name__
+                last_sqlstate = exc.sqlstate if isinstance(exc, psycopg.Error) else None
                 logger.warning(
                     "host checkpoint recovery retry",
                     agent_id=incarnation.agent_id,
                     attempt=attempt,
                     phase=phase,
-                    elapsed_seconds=time.monotonic() - started,
-                    error_type=type(exc).__name__,
-                    sqlstate=exc.sqlstate if isinstance(exc, psycopg.Error) else None,
+                    elapsed_seconds=failed - started,
+                    error_type=last_error_type,
+                    sqlstate=last_sqlstate,
                     backoff_seconds=backoff,
                 )
+                if not prolonged and (
+                    attempt >= settings.daemon.host_db_recovery_prolonged_attempts
+                    or total_elapsed >= settings.daemon.host_db_recovery_prolonged_seconds
+                ):
+                    prolonged = True
+                    logger.warning(
+                        "host checkpoint recovery prolonged",
+                        agent_id=incarnation.agent_id,
+                        attempts=attempt,
+                        total_elapsed_seconds=total_elapsed,
+                        phase=phase,
+                        error_type=last_error_type,
+                        sqlstate=last_sqlstate,
+                    )
                 await interrupt.wait_backoff(backoff)
                 backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)

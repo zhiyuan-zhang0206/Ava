@@ -52,6 +52,48 @@ class DaemonSettings(
         },
     )
 
+    host_db_recovery_prolonged_attempts: int = Field(
+        default=6,
+        ge=1,
+        alias="AVA_HOST_DB_RECOVERY_PROLONGED_ATTEMPTS",
+        description="Hosted agent-runner: warn once per database-recovery ladder when this attempt count or AVA_HOST_DB_RECOVERY_PROLONGED_SECONDS is reached when a retry fails. The observed normal band is at most 5 attempts over a couple of minutes; 6 attempts is clearly beyond a transient flap while far below the recovery budget. This warning does not interrupt recovery.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    host_db_recovery_prolonged_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        alias="AVA_HOST_DB_RECOVERY_PROLONGED_SECONDS",
+        description="Hosted agent-runner: warn once per database-recovery ladder when this total elapsed time or AVA_HOST_DB_RECOVERY_PROLONGED_ATTEMPTS is reached when a retry fails. The observed normal band is at most 5 attempts over a couple of minutes; 300 seconds (5 minutes) is clearly beyond a transient flap while far below the recovery budget. This warning does not interrupt recovery. This threshold must stay below AVA_HOST_DB_RECOVERY_BUDGET_SECONDS.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    host_db_recovery_budget_seconds: float = Field(
+        default=3600.0,
+        ge=600,
+        alias="AVA_HOST_DB_RECOVERY_BUDGET_SECONDS",
+        description="Hosted agent-runner: total database-recovery ladder budget, checked before each attempt. Exhaustion emits an error and exits through the existing turn crash path so the next wake can retry. This safety fuse provides a final, alertable convergence channel for a live host with a half-dead database for hours. The default 3600 seconds is approximately 4 times the observed maximum of 853 seconds, deliberately far above any normal flap so it never acts as a throttle. There is no middle tier.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     host_admission_wait_alert_seconds: float = Field(
         default=2400.0,
         gt=0,
@@ -667,6 +709,15 @@ class DaemonSettings(
             "remote_writable": True,
         },
     )
+
+    @model_validator(mode="after")
+    def _validate_db_recovery_prolonged_below_budget(self) -> DaemonSettings:
+        """The prolonged warning must precede the final recovery fuse."""
+        if self.host_db_recovery_prolonged_seconds >= self.host_db_recovery_budget_seconds:
+            raise ValueError(
+                "host_db_recovery_prolonged_seconds must be below host_db_recovery_budget_seconds"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_hierarchy_budget_below_deadline(self) -> DaemonSettings:

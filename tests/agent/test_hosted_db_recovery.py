@@ -3,7 +3,9 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, LiteralString
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import psycopg
@@ -29,6 +31,7 @@ from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
+from shared.hosted_db_wait import database_wait_snapshot
 from shared.hosted_force import install_hosted_force
 from shared.incarnation_resources import ResourceBirth
 from shared.machine import machine_name
@@ -44,6 +47,9 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(db_recovery, "_PROBE_TIMEOUT_SECONDS", 0.03)
     monkeypatch.setattr(db_recovery, "_INITIAL_BACKOFF_SECONDS", 0.01)
     monkeypatch.setattr(db_recovery, "_MAX_BACKOFF_SECONDS", 0.02)
+    monkeypatch.setattr(settings.daemon, "host_db_recovery_prolonged_attempts", 6)
+    monkeypatch.setattr(settings.daemon, "host_db_recovery_prolonged_seconds", 300.0)
+    monkeypatch.setattr(settings.daemon, "host_db_recovery_budget_seconds", 3600.0)
 
 
 async def _admit(pool: AsyncConnectionPool) -> RuntimeIncarnation:
@@ -509,3 +515,162 @@ async def test_healthy_stages_each_get_their_own_deadline(
     assert all(elapsed < 5 for _, kind, elapsed in events if kind == "query_complete")
     assert any(isinstance(msg, ToolMessage) and msg.tool_call_id == "private-tool" for msg in msgs)
     assert not graph_calls
+
+
+@pytest.fixture
+def recovery_observation(monkeypatch: pytest.MonkeyPatch) -> tuple[list[float], Mock, AsyncMock]:
+    clock = [1000.0]
+    # Replace only this module's clock; real pool and asyncio deadlines still run.
+    monkeypatch.setattr(db_recovery, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    log = Mock()
+    monkeypatch.setattr(db_recovery, "logger", log)
+
+    async def advance_backoff(_delay: float) -> None:
+        clock[0] += 10.0
+
+    backoff = AsyncMock(side_effect=advance_backoff)
+    monkeypatch.setattr(db_recovery.RecoveryInterrupt, "wait_backoff", backoff)
+    return clock, log, backoff
+
+
+@pytest.mark.parametrize(
+    ("error", "stage_seconds", "expected_error_type"),
+    [
+        (PoolTimeout("unavailable"), 290.0, "PoolTimeout"),
+        (psycopg.errors.AdminShutdown(), 300.0, "AdminShutdown"),
+        (TimeoutError("unavailable"), 290.0, "PoolTimeout"),
+    ],
+)
+async def test_recovery_budget_abandons_at_attempt_boundary(
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    recovery_observation: tuple[list[float], Mock, AsyncMock],
+    error: Exception,
+    stage_seconds: float,
+    expected_error_type: str,
+) -> None:
+    clock, log, backoff = recovery_observation
+    monkeypatch.setattr(settings.daemon, "host_db_recovery_budget_seconds", 600.0)
+    incarnation = await _admit(aops_pool)
+    graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
+    attempts = 0
+
+    async def failed_repair(_graph: Any, _agent: int) -> None:
+        nonlocal attempts
+        attempts += 1
+        assert attempts <= 2, "a spent ladder must not start another repair attempt"
+        clock[0] += stage_seconds
+        raise error
+
+    monkeypatch.setattr(db_recovery, "_repair_dangling_tool_use_at_startup", failed_repair)
+    with (
+        bind_turn_identity(incarnation.agent_id, incarnation=incarnation),
+        pytest.raises(db_recovery.DatabaseRecoveryBudgetExceededError, match="after 2 attempts"),
+    ):
+        await db_recovery.recover_database(
+            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+        )
+    assert attempts == backoff.await_count == 2
+    assert database_wait_snapshot(incarnation.agent_id) is None
+    log.error.assert_called_once_with(
+        "host checkpoint recovery abandoned",
+        agent_id=incarnation.agent_id,
+        attempts=2,
+        total_elapsed_seconds=2 * (stage_seconds + 10.0),
+        final_phase="tool_state_repair",
+        last_error_type=expected_error_type,
+        last_sqlstate=error.sqlstate if isinstance(error, psycopg.Error) else None,
+    )
+    assert (
+        sum(c.args[0] == "host checkpoint recovery retry" for c in log.warning.call_args_list) == 2
+    )
+    log.info.assert_not_called()
+
+
+@pytest.mark.parametrize(("attempt_limit", "seconds_limit"), [(2, 300.0), (99, 50.0), (2, 50.0)])
+async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    recovery_observation: tuple[list[float], Mock, AsyncMock],
+    attempt_limit: int,
+    seconds_limit: float,
+) -> None:
+    clock, log, backoff = recovery_observation
+    monkeypatch.setattr(settings.daemon, "host_db_recovery_prolonged_attempts", attempt_limit)
+    monkeypatch.setattr(settings.daemon, "host_db_recovery_prolonged_seconds", seconds_limit)
+    incarnation = await _admit(aops_pool)
+    graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
+    flush = db_recovery.flush_checkpoint
+    attempts = 0
+
+    async def flaky_flush(checkpointer: AsyncPostgresSaver, agent: int) -> None:
+        nonlocal attempts
+        attempts += 1
+        clock[0] += 20.0
+        if attempts <= 3:
+            raise PoolTimeout("checkpoint unavailable")
+        await flush(checkpointer, agent)
+
+    monkeypatch.setattr(db_recovery, "flush_checkpoint", flaky_flush)
+    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
+        await db_recovery.recover_database(
+            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+        )
+    warnings = [
+        c for c in log.warning.call_args_list if c.args[0] == "host checkpoint recovery prolonged"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0].kwargs == {
+        "agent_id": incarnation.agent_id,
+        "attempts": 2,
+        "total_elapsed_seconds": 50.0,
+        "phase": "checkpoint_flush",
+        "error_type": "PoolTimeout",
+        "sqlstate": None,
+    }
+    assert attempts == 4
+    assert backoff.await_count == 3
+    log.error.assert_not_called()
+    log.info.assert_called_once()
+
+
+@pytest.mark.parametrize("failures", [0, 2])
+async def test_recovery_summary_counts_all_attempts_and_backoff_time(
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    recovery_observation: tuple[list[float], Mock, AsyncMock],
+    failures: int,
+) -> None:
+    clock, log, backoff = recovery_observation
+    incarnation = await _admit(aops_pool)
+    graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
+    refresh = db_recovery._refresh_owner
+    failed_probes = 0
+
+    async def flaky_probe(pool: AsyncConnectionPool, original: RuntimeIncarnation) -> None:
+        nonlocal failed_probes
+        clock[0] += 1.0
+        if failed_probes < failures:
+            failed_probes += 1
+            raise PoolTimeout("owner unavailable")
+        await refresh(pool, original)
+
+    monkeypatch.setattr(db_recovery, "_refresh_owner", flaky_probe)
+    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
+        await db_recovery.recover_database(
+            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+        )
+    assert backoff.await_count == failures
+    assert database_wait_snapshot(incarnation.agent_id) is not None
+    log.info.assert_called_once_with(
+        "host turn checkpoint recovered",
+        agent_id=incarnation.agent_id,
+        attempt=failures + 1,
+        elapsed_seconds=3.0,
+        total_attempts=failures + 1,
+        total_elapsed_seconds=failures * 11.0 + 3.0,
+    )
+    assert all(
+        c.args[0] != "host checkpoint recovery prolonged" for c in log.warning.call_args_list
+    )
+    log.error.assert_not_called()
