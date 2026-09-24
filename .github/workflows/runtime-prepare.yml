@@ -165,8 +165,11 @@ jobs:
         run: |
           set -euo pipefail
           uv python install 3.12
-          python3 scripts/prepare_plugin_fixture.py "$RUNNER_TEMP/prepare/plugin-input"
-          python3 scripts/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$(uv python find --managed-python 3.12)" --uv "$(command -v uv)"
+          # The proof retires the checkout, including .venv. Resolve its base
+          # interpreter outside that tree, using the same Python as validation.
+          proof_python=$(uv run --locked --no-dev python -c 'import pathlib, sys; p = pathlib.Path(sys.executable).resolve(strict=True); assert not p.is_relative_to(pathlib.Path.cwd()); print(p)')
+          "$proof_python" scripts/prepare_plugin_fixture.py "$RUNNER_TEMP/prepare/plugin-input"
+          "$proof_python" scripts/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$proof_python" --uv "$(command -v uv)"
           test -s "$RUNNER_TEMP/prepare/proof.json"
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/ops-bootstrap-proof.json"; fi
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/inventory-proof.json"; fi
@@ -183,6 +186,7 @@ jobs:
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
           build = json.loads((root / 'application-build/build-receipt.json').read_bytes())
           proof = json.loads((root / 'proof.json').read_bytes())
+          assert proof['platform'] == platform.platform(), (proof['platform'], platform.platform())
           image = verify_release(root / 'unit/releases', proof['artifact_digest'],
               manifest_digest=proof['manifest_digest'], platform_tag=platform.platform(),
               schema_digest=build['schema_digest'])
