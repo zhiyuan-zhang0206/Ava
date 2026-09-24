@@ -10,7 +10,7 @@ onto an entry point in `agent/hooks/compact.py` / `ava/self.py`.
 
 | Mode | Trigger / entry point | Who writes the summary | Declinable |
 |---|---|---|---|
-| **forced compact** | `before_llm` hook over the ceiling -> `generate_summary` | the model, in a separate compaction LLM call | no — the hard backstop |
+| **forced compact** | LLM node over the ceiling -> `generate_summary` | the model, in a separate compaction LLM call | no — the hard backstop |
 | **command compact** | a `/compact` command (prompt template `commands/compact.md`), typed or reminder-triggered -> housekeeping turns -> `ava.self.compact(summary)` | the agent, in its own turn | yes |
 | **spontaneous compact** | the agent decides on its own to call `ava.self.compact(summary)` (guided only by that SDK docstring) | the agent | yes — its own choice |
 
@@ -50,8 +50,8 @@ compaction.
   own housekeeping turns push the context past the ceiling, forced compact fires anyway.
 - **command**: a **qualitative** reminder, injected by the compact hook (`agent/hooks/compact.py`, moved into core from the ava_compact plugin)
   when the estimated context crosses `soft_compact_tokens` (set *earlier* than the ceiling,
-  leaving room for the housekeeping turns). It is the same hook as forced compact — the branch
-  below the ceiling — so the two are mutually exclusive and never both write the turn. Agent-side
+  leaving room for the housekeeping turns). The reminder hook defers above the ceiling, where the LLM node runs forced
+  compaction through the durable cancellation boundary. Agent-side
   only: no `InboundKind`, no nudge / heartbeat rail. It fires at most once per context window
   (re-arms via `compact.version`) and defers to ava_sdk_reminder's agent-reply note when both would
   write `messages` in one pass. The reminder does **not** report a remaining-token count.
@@ -100,7 +100,7 @@ The one runtime safety the forced path keeps (no agent in the loop to notice a w
 a **length-triggered retry**. The summary length is logged on every attempt as a monitoring
 metric. A summary below `COMPACT_MIN_SUMMARY_CHARS` (or no text at all) is taken as "ignored the
 template" and the cache-mostly request is retried up to `COMPACT_MAX_ATTEMPTS`; if every attempt
-stays short, `auto_compact_before_llm` **raises** rather than overwrite history with a non-summary
+stays short, `auto_compact_for_llm` **raises** rather than overwrite history with a non-summary
 (the agent-240 failure: 236 chars for a near-full window). One length signal used only to trigger
 a retry — not a guard deciding accept/reject. Quality regressions show up in the length metric,
 and the fix is to iterate on the **template**, not to grow the gate.

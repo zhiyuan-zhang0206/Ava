@@ -7,7 +7,7 @@
   bind_tools(execute_code)) + a final COMPACTION_INSTRUCTION — hits prefix cache.
   Returns summary text (response.text; block content extracts text blocks; thinking excluded).
   LLM returns empty text (tool_use-only blocks, empty string) → RuntimeError; conversation empty → ValueError.
-- `auto_compact_before_llm` built-in before_llm hook — when over threshold runs generate_summary,
+- `auto_compact_for_llm` built-in before_llm hook — when over threshold runs generate_summary,
   replaces entire history with `[system, summary]` (leaves no raw tail). Short summary retries ≤
   COMPACT_MAX_ATTEMPTS, still short then fail-fast. On success emits CompactDone.
 
@@ -39,7 +39,7 @@ from agent.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
     COMPACTION_INSTRUCTION,
     CompactionFailedError,
-    auto_compact_before_llm,
+    auto_compact_for_llm,
     compose_summary_message,
     generate_summary,
 )
@@ -183,6 +183,9 @@ async def test_generate_summary_emits_agent_billing_span(
             return span
 
     tracer = _Tracer()
+    # The summary's billing behavior requires a known provider; a bare test
+    # process has no installed provider plugins and must declare that input.
+    monkeypatch.setattr("shared.lm.billing.vendor_of_model", lambda _model: "deepseek")
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(trace_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
@@ -296,7 +299,7 @@ async def test_generate_summary_raises_on_empty_conversation():
         await generate_summary([SystemMessage(content="<sys>")], _fake_llm())
 
 
-# --- auto_compact_before_llm hook tests ---
+# --- auto_compact_for_llm hook tests ---
 
 
 def _over_threshold_state() -> AgentState:
@@ -332,7 +335,7 @@ async def test_auto_compact_triggers_on_real_input_tokens_not_chars(
         ],
         halted=False,
     )
-    result = await auto_compact_before_llm(
+    result = await auto_compact_for_llm(
         state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
     )
     assert result is not None  # 300K measured input_tokens > 200K ceiling -> compact
@@ -356,7 +359,7 @@ async def test_auto_compact_skips_when_input_tokens_below_ceiling_despite_chars(
         ],
         halted=False,
     )
-    result = await auto_compact_before_llm(state, _runtime_with_llm(_fake_llm()), _fake_config())
+    result = await auto_compact_for_llm(state, _runtime_with_llm(_fake_llm()), _fake_config())
     assert result is None  # 50K measured < 200K ceiling, though chars/4 is far over
 
 
@@ -371,7 +374,7 @@ async def test_auto_compact_falls_back_to_chars_before_first_call(monkeypatch: p
         ],  # chars/4 = 1000
         halted=False,
     )
-    result = await auto_compact_before_llm(
+    result = await auto_compact_for_llm(
         state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
     )
     assert result is not None  # 1000 chars/4 estimate > 100 ceiling -> compact
@@ -381,7 +384,7 @@ async def test_auto_compact_hook_returns_none_when_under_threshold(monkeypatch: 
     """token estimate ≤ threshold → hook returns None, no-op pass-through to llm."""
     _patch_compact_config(monkeypatch, auto_compact_tokens=1_000_000)
     state = AgentState(messages=[HumanMessage(content="hi" * 100)], halted=False)
-    result = await auto_compact_before_llm(state, _runtime_with_llm(_fake_llm()), _fake_config())
+    result = await auto_compact_for_llm(state, _runtime_with_llm(_fake_llm()), _fake_config())
     assert result is None
 
 
@@ -399,7 +402,7 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     state = _over_threshold_state()
 
     fake_llm = _fake_llm(_LONG_SUMMARY)
-    result = await auto_compact_before_llm(state, _runtime_with_llm(fake_llm), _fake_config())
+    result = await auto_compact_for_llm(state, _runtime_with_llm(fake_llm), _fake_config())
 
     assert result is not None
     _compaction_ainvoke(fake_llm).assert_called_once()
@@ -411,7 +414,7 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     reset = result["context_reset"]
     assert [m.content for m in reset.tail] == [compose_summary_message(_LONG_SUMMARY)]  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(reset.tail[0], HumanMessage)  # pyright: ignore[reportUnknownMemberType]
-    assert reset.resume == "llm"  # pyright: ignore[reportUnknownMemberType]
+    assert reset.resume == "claim"  # pyright: ignore[reportUnknownMemberType]
     assert result["goto"] == "init_context"
     [monitoring] = [
         record
@@ -437,7 +440,7 @@ async def test_auto_compact_hook_skips_when_no_conversation(monkeypatch: pytest.
     state = AgentState(messages=[SystemMessage(content="x" * 100)], halted=False)
 
     llm = _fake_llm()
-    result = await auto_compact_before_llm(state, _runtime_with_llm(llm), _fake_config())
+    result = await auto_compact_for_llm(state, _runtime_with_llm(llm), _fake_config())
     assert result is None
     _compaction_ainvoke(llm).assert_not_called()
 
@@ -452,7 +455,7 @@ async def test_auto_compact_hook_raises_when_summary_empty_every_attempt(
     state = _over_threshold_state()
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
-        await auto_compact_before_llm(state, _runtime_with_llm(llm), _fake_config())
+        await auto_compact_for_llm(state, _runtime_with_llm(llm), _fake_config())
     assert _compaction_ainvoke(llm).call_count == COMPACT_MAX_ATTEMPTS
 
 
@@ -468,7 +471,7 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
     ctx = AvaContext(ops_pool=None, llm=llm, event_publisher=publisher)
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
-        await auto_compact_before_llm(state, Runtime(context=ctx), _fake_config())
+        await auto_compact_for_llm(state, Runtime(context=ctx), _fake_config())
 
     assert _compaction_ainvoke(llm).call_count == COMPACT_MAX_ATTEMPTS
     # Task #3323: the failed run still reaches its terminal signal — the live
@@ -485,7 +488,7 @@ async def test_auto_compact_hook_retries_short_then_accepts_long(monkeypatch: py
     llm = _fake_llm_seq("too short", _LONG_SUMMARY)  # short, then long
     state = _over_threshold_state()
 
-    result = await auto_compact_before_llm(state, _runtime_with_llm(llm), _fake_config())
+    result = await auto_compact_for_llm(state, _runtime_with_llm(llm), _fake_config())
 
     assert result is not None
     assert _compaction_ainvoke(llm).call_count == 2  # stopped as soon as one cleared the floor
@@ -500,26 +503,10 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
     the summary message carries the durable anchor ava_compact_id."""
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     publisher = MagicMock()
-    pool = AsyncMock()
-
-    # Set up pool.connection() as a no-op async context manager so the
-    # insert_event_log_async call does not produce an unawaited-coroutine warning.
-    async def _noop_conn():
-        conn = AsyncMock()
-        cur = AsyncMock()
-        conn.cursor = MagicMock(return_value=cur)
-        return conn
-
-    pool.connection = MagicMock(
-        return_value=AsyncMock(
-            __aenter__=AsyncMock(side_effect=_noop_conn),
-            __aexit__=AsyncMock(return_value=None),
-        )
-    )
-    ctx = AvaContext(ops_pool=pool, llm=_fake_llm(_LONG_SUMMARY), event_publisher=publisher)
+    ctx = AvaContext(ops_pool=None, llm=_fake_llm(_LONG_SUMMARY), event_publisher=publisher)
     state = _over_threshold_state()
 
-    result = await auto_compact_before_llm(state, Runtime(context=ctx), _fake_config())
+    result = await auto_compact_for_llm(state, Runtime(context=ctx), _fake_config())
 
     assert result is not None
     events = [json.loads(c.args[0]) for c in publisher.emit.call_args_list]
@@ -537,7 +524,7 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
     assert tail[0].additional_kwargs["ava_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
 
 
-# --- _auto_compact_with_version_bump (plugins/ava_compact/plugin.py) tests ---
+# --- _compact_reminder (plugins/ava_compact/plugin.py) tests ---
 #
 # This wrapper is the implementation side of the Layer 3 monotonic counter producer. Tests cover three things:
 # 1. inner returns None → wrap returns None (no bump version, pass-through)
@@ -556,20 +543,20 @@ def _ava_compact_loaded():
 
     Teardown clears hook registrations to prevent leakage into other tests.
     """
-    from agent.hooks.compact import _auto_compact_with_version_bump
+    from agent.hooks.compact import _compact_reminder
     from agent.state import build_agent_state, clear_plugin_registrations
 
     clear_plugin_registrations()
 
-    yield build_agent_state(), _auto_compact_with_version_bump
+    yield build_agent_state(), _compact_reminder
 
     clear_plugin_registrations()
 
 
-async def test_auto_compact_with_version_bump_passthrough_none(
+async def test_compact_reminder_passthrough_none(
     _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
 ):
-    """inner auto_compact_before_llm returns None (under threshold) → wrap also returns None."""
+    """inner auto_compact_for_llm returns None (under threshold) → wrap also returns None."""
     state_cls, wrap_fn = _ava_compact_loaded
 
     _patch_compact_config(monkeypatch, auto_compact_tokens=1_000_000)
@@ -589,11 +576,10 @@ def _over_threshold_messages() -> list[AnyMessage]:
     ]
 
 
-async def test_auto_compact_with_version_bump_zero_to_one(
-    _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
-):
+async def test_compact_reminder_zero_to_one(_ava_compact_loaded, monkeypatch: pytest.MonkeyPatch):
     """First compact successful → compact.version increments from 0 to 1, dict contains messages."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, _ = _ava_compact_loaded
+    wrap_fn = auto_compact_for_llm
 
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     state = state_cls(
@@ -605,11 +591,12 @@ async def test_auto_compact_with_version_bump_zero_to_one(
     assert "messages" in result
 
 
-async def test_auto_compact_with_version_bump_increments_from_existing(
+async def test_compact_reminder_increments_from_existing(
     _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
 ):
     """Not first compact: state already has compact.version=5 → wrap increments to 6."""
-    state_cls, wrap_fn = _ava_compact_loaded
+    state_cls, _ = _ava_compact_loaded
+    wrap_fn = auto_compact_for_llm
 
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     state = state_cls(
@@ -683,8 +670,7 @@ async def test_compact_reminder_silent_below_threshold(
 async def test_compact_reminder_yields_to_force_above_ceiling(
     _ava_compact_loaded, monkeypatch: pytest.MonkeyPatch
 ):
-    """est > ceiling → the force branch runs (history replaced + version bump),
-    never the reminder; the two are mutually exclusive in the one hook."""
+    """Above the ceiling, defer all model work and history changes to the LLM node."""
     state_cls, wrap_fn = _ava_compact_loaded
     _patch_compact_config(monkeypatch, compact_reminder_tokens=0, auto_compact_tokens=1)
     result = await wrap_fn(
@@ -693,14 +679,7 @@ async def test_compact_reminder_yields_to_force_above_ceiling(
         _fake_config(),
     )
 
-    assert result is not None
-    assert (
-        result["compact"].version == 1  # pyright: ignore[reportUnknownMemberType]
-    )  # force path bumped version
-    assert (
-        result["compact"].reminder_shown is False  # pyright: ignore[reportUnknownMemberType]
-    )  # force preserves the flag, does not set it
-    assert isinstance(result["messages"][0], RemoveMessage)  # full replacement
+    assert result is None  # The hook never calls the model; the LLM node owns compaction.
 
 
 async def test_compact_reminder_once_per_window(
@@ -1123,7 +1102,7 @@ async def test_auto_compact_summary_message_carries_msg_type(monkeypatch: pytest
     state = _over_threshold_state()
 
     fake_llm = _fake_llm(_LONG_SUMMARY)
-    result = await auto_compact_before_llm(state, _runtime_with_llm(fake_llm), _fake_config())
+    result = await auto_compact_for_llm(state, _runtime_with_llm(fake_llm), _fake_config())
     assert result is not None
 
     tail = result["context_reset"].tail  # pyright: ignore[reportUnknownMemberType]

@@ -32,6 +32,7 @@ def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
 
     monkeypatch.setattr("agent.graph._llm_cancel.subscribe_interrupt", fake_subscribe)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("agent.graph._exec.subscribe_interrupt", fake_subscribe)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.hooks.compact.subscribe_interrupt", fake_subscribe)
     return event
 
 

@@ -272,18 +272,11 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """The composed failure the drift check's defer exists to prevent.
+    """A simultaneous skill install survives the hook-to-LLM compaction path.
 
-    A compaction and a mid-session install can land in the same before_llm pass.
-    Compaction writes `RemoveMessage(REMOVE_ALL)` and parks the summary for this
-    node; a drift note would ride the same `messages` channel, and `add_messages`
-    applies the wipe and THEN the append — so an undeferred note is the one thing
-    that survives it. This node's sole trigger is an empty channel, so it would
-    read that single note as an intact history: summary dropped, SystemMessage
-    never laid down, and the agent runs the whole next window on one orphan note.
-
-    Driven through the real hook runner and the real reducer, because the bug
-    lives in exactly that composition — each hook is correct on its own.
+    Drive the real hooks, LLM node, reducer, and context rebuilder: reminders
+    defer, the LLM operation clears the old window, and the new standing head
+    contains the newly installed skill along with the committed summary.
     """
     from langgraph.graph.message import add_messages
 
@@ -291,7 +284,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     from agent.hooks import HOOKS, make_hook_runner
     from agent.hooks import compact as compact_mod
     from agent.hooks.capabilities import _newly_installed_skills
-    from agent.hooks.compact import _auto_compact_with_version_bump
+    from agent.hooks.compact import _compact_reminder
     from shared.lm.context_budget import ContextBudget
 
     d = tmp_path / "skills"
@@ -337,7 +330,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         capabilities=established.update["capabilities"],  # type: ignore[index]
     )
     saved = list(HOOKS["before_llm"])
-    HOOKS["before_llm"][:] = [_auto_compact_with_version_bump, _newly_installed_skills]
+    HOOKS["before_llm"][:] = [_compact_reminder, _newly_installed_skills]
     try:
         cmd = await make_hook_runner("before_llm", default_next="llm")(
             state, _runtime(aops_pool), _config(tid)
@@ -345,6 +338,12 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     finally:
         HOOKS["before_llm"][:] = saved
 
+    assert cmd.goto == "llm"
+    assert isinstance(cmd.update, dict)
+    assert "messages" not in cmd.update  # Both hooks defer to the model operation.
+    from agent.graph._llm import llm_node
+
+    cmd = await llm_node(state, _runtime(aops_pool), _config(tid))
     assert cmd.goto == "init_context"
     assert isinstance(cmd.update, dict)
     # The reducer that makes the bug possible. With the note deferred there is
