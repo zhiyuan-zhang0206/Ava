@@ -80,8 +80,8 @@ def _prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> 
     their ownership evidence.
 
     In-flight work this actor did not author is bounded-waited (task #3591):
-    an agent lifecycle command, and claimed ordinary work on a parked agent,
-    are retried until they resolve, up to
+    an agent lifecycle command, or a parked claim left after orphan settlement,
+    is retried until it resolves, up to
     `settings.gateway.pause_lifecycle_wait_seconds` (0 refuses immediately),
     and only then aborts with the wait result in the message. A
     maintenance-authored command still refuses immediately.

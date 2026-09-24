@@ -145,11 +145,11 @@ the final exit checkpoint. Only the parked status changes; historical leases,
 identity, messages, checkpoints and lifecycle acknowledgements are preserved.
 An expired lease alone, unfinished lifecycle/graph work or an uncertain
 checkpoint still refuses; queued ordinary messages remain available for resume.
-Unfinished in-flight work is bounded-waited before refusing — an agent
-lifecycle command (a competing restart/terminate), or claimed ordinary work on
-a parked agent; preparation retries under the same row locks until it resolves,
-then proceeds or aborts (task #3591); maintenance-authored commands still refuse
-immediately.
+Preparation settles orphaned ordinary claims on non-cold parked agents and
+bounded-waits unfinished lifecycle commands. Maintenance-authored commands
+still refuse immediately. See the
+[preparation settlement and wait contract](../shared/maintenance/lifecycle-wait.ava.okf.md)
+for eligibility, stale cutoff, and retry semantics.
 
 ## Explicit maintenance steps
 

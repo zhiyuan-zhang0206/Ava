@@ -7,14 +7,15 @@ refuse. No lifecycle target, acknowledgement, or checkpoint is invented here.
 """
 
 from datetime import datetime
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 from uuid import UUID
 
 import psycopg
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
-from shared import maintenance, pause_owner
+from shared import maintenance, pause_owner, telemetry
+from shared.config import settings
 from shared.hold_driver import HoldDriver
 from shared.maintenance_state import MaintenanceHold
 
@@ -27,7 +28,7 @@ class LifecycleCollisionError(RuntimeError):
     re-derives the cohort from the resolved world under the same row locks.
     ``waitable`` is True only when every competing row carries no maintenance
     payload: an ordinary agent lifecycle operation (``restart``/``terminate``)
-    and claimed ordinary work on a parked agent both enter the bounded wait;
+    and any parked claims left after orphan settlement enter the bounded wait;
     maintenance-authored commands keep their refuse-now semantics, and a mix
     refuses too.
     """
@@ -54,7 +55,8 @@ def prepare(
     same cohort and finds already committed commands by the exact operation.
     A captured cohort is returned unchanged when no unsettled failures remain.
     Terminated agents never enter the cohort. A previous lifecycle operation,
-    stale/unknown runtime requires separate resolution.
+    stale/unknown runtime requires separate resolution. Ordinary orphan claims
+    on non-cold parked agents settle before the collision guards run.
 
     An unfinished agent lifecycle command belonging to another actor raises
     ``LifecycleCollisionError`` before the cohort is frozen; the caller may
@@ -96,6 +98,7 @@ def prepare(
         cold = frozenset(
             row[0] for row in rows if host_absent and _RuntimeRow(*row).cold_hosted_idle()
         )
+        settled = _settle_orphan_claims(conn, captured, cold)
         _refuse_inflight_lifecycle(conn, captured, cold, holder=holder, acquired_at=acquired_at)
         _require_resolved(conn, captured, cold=cold)
         if captured != hold:
@@ -106,6 +109,7 @@ def prepare(
         commands: dict[int, int] = {}
         for agent_id in sorted(hold.commands):
             commands[agent_id] = _restart(conn, agent_id, holder, acquired_at)
+    _emit_orphan_settlements(settled)
     draining = MaintenanceHold("draining", commands, parked=hold.parked)
     pause_owner.change_maintenance(
         holder, acquired_at, hold, draining, refresh_driver=driver is not None
@@ -165,6 +169,85 @@ class _RuntimeRow(NamedTuple):
             and self.owner == owner
             and self.generation is not None
             and self.fresh is True
+        )
+
+
+class OrphanClaim(NamedTuple):
+    """An ordinary claimed inbound on a parked, runtime-less agent."""
+
+    agent_id: int
+    message_id: int
+    age_s: float
+
+
+def orphaned_claims(
+    conn: psycopg.Connection,
+    *,
+    parked: tuple[int, ...] | None = None,
+    cold: frozenset[int] = frozenset(),
+) -> list[OrphanClaim]:
+    """Read the ordinary claims eligible for preparation's orphan settlement.
+
+    Preparation supplies its locked, classified parked set and excludes cold
+    agents whose ordinary claims never block `_unresolved_parked`. Preflight
+    omits the set for a read-only snapshot across machines, using the same
+    unowned-idle predicate as `_classify`; that snapshot authorizes no writes.
+    """
+    if parked is None:
+        rows = conn.execute(
+            "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
+            "lease_expires_at>clock_timestamp(),pid,incarnation_resources FROM agents_meta "
+            "WHERE status='idling' ORDER BY id"
+        ).fetchall()
+        parked = tuple(row[0] for row in rows if _RuntimeRow(*row).unowned_idle())
+    agents = sorted(set(parked) - cold)
+    if not agents:
+        return []
+    return [
+        OrphanClaim(*row)
+        for row in conn.execute(
+            "SELECT agent_id,id,"
+            "EXTRACT(EPOCH FROM (now()-COALESCE(claimed_at,created_at)))::double precision "
+            "FROM inbound_messages WHERE agent_id=ANY(%s) AND status='claimed' "
+            "AND payload->'maintenance' IS NULL AND kind NOT IN ('restart','terminate') "
+            "ORDER BY agent_id,id",
+            (agents,),
+        ).fetchall()
+    ]
+
+
+def _settle_orphan_claims(
+    conn: psycopg.Connection, hold: MaintenanceHold, cold: frozenset[int]
+) -> list[tuple[OrphanClaim, Literal["pending", "done"]]]:
+    """Settle under preparation's agent row locks; preserve boot's stale cutoff."""
+    settled: list[tuple[OrphanClaim, Literal["pending", "done"]]] = []
+    cutoff = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
+    for row in orphaned_claims(conn, parked=hold.parked, cold=cold):
+        outcome = "done" if row.age_s > cutoff else "pending"
+        changed = conn.execute(
+            "UPDATE inbound_messages SET status=%s WHERE id=%s AND status='claimed'",
+            (outcome, row.message_id),
+        ).rowcount
+        if changed:
+            settled.append((row, outcome))
+    return settled
+
+
+def _emit_orphan_settlements(
+    settled: list[tuple[OrphanClaim, Literal["pending", "done"]]],
+) -> None:
+    """Report only committed CAS changes, never a rolled-back preparation attempt."""
+    for row, outcome in settled:
+        telemetry.emit(
+            "telemetry",
+            "pause_orphan_claim_settled",
+            agent_id=row.agent_id,
+            attributes={
+                "agent": row.agent_id,
+                "message_id": row.message_id,
+                "age_s": round(row.age_s, 3),
+                "outcome": outcome,
+            },
         )
 
 
@@ -301,8 +384,8 @@ def _refuse_inflight_lifecycle(
     ``_restart`` and the parked-agent predicate of ``_require_resolved`` — one
     step earlier, carrying the waitability the retry decision needs: ordinary
     work without a maintenance payload is waitable — both an in-flight agent
-    lifecycle operation (restart/terminate) and claimed ordinary work on a
-    parked agent; maintenance-authored commands are not.
+    lifecycle operation (restart/terminate) and any parked claim left after
+    orphan settlement; maintenance-authored commands are not.
     """
     agents = sorted(set(hold.commands) | set(hold.parked))
     if not agents:
