@@ -84,25 +84,18 @@ interface UISlice {
 // Cluster-coordination Slice
 // =============================================================
 //
-// Single coordination point for SSE resilience. Two independent triggers
-// funnel through `bumpReconnect()`:
-//   - the heartbeat watchdog in useEventStream (45s with no frame at all =
-//     half-dead connection; a proxy hop stayed OPEN but stopped delivering)
-//   - the update-done detector in use-cluster-health (cluster paused
-//     true -> false = a rollout/restart just finished; the old SSE socket
-//     was severed when the gateway bounced)
-// Both bump `reconnectNonce`; useEventStream lists it in its effect deps, so
-// a bump tears down the stale EventSource and opens a fresh one (whose
-// onopen reconciles agents via the existing open handler).
+// The update-done detector in use-cluster-health bumps reconnectNonce after
+// a gateway bounce. The shared transport asks the leader to replace its
+// EventSources; the legacy per-page path reopens its own. The SSE heartbeat
+// watchdog also repairs a half-dead socket, directly through the shared
+// transport or through bumpReconnect() on the legacy path.
 
 import type { ConnectionState } from "@/lib/use-timeline";
 
 interface ClusterSlice {
-  /** Monotonic token — bumping it forces useEventStream to tear down the
-   * current EventSource and open a fresh one (it is in the effect deps). */
+  /** Monotonic token requesting fresh system EventSources after a gateway bounce. */
   reconnectNonce: number;
-  /** Bump reconnectNonce — the single entry point for forcing a clean SSE
-   * reopen (watchdog half-dead detection + cluster-update-done both call it). */
+  /** Bump reconnectNonce for the cluster-update and legacy watchdog paths. */
   bumpReconnect: () => void;
 
   /** Global SSE connection health, tracked here so any component can read it

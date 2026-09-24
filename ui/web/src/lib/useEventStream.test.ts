@@ -162,6 +162,14 @@ function withProviderAndClient() {
 // -- tests ─────────────────────────────────────────────────────────────────
 
 describe("EventStreamProvider connection lifecycle", () => {
+  it("without profile APIs, separate pages keep their own EventSources", async () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitFor(() => expect(instances).toHaveLength(2));
+    expect(instances.map((source) => source.url)).toEqual(["/api/system", "/api/system"]);
+  });
+
   it("mount + open → subscriber receives onConnectionEvent({type:'open'})", async () => {
     const onSystem = vi.fn();
     const onConn = vi.fn<(ev: ConnectionEvent) => void>();
@@ -625,6 +633,40 @@ describe("EventStreamProvider heartbeat frame", () => {
 describe("EventStreamProvider half-dead watchdog", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("shared CONNECTING state keeps the watchdog armed until a frame arrives", async () => {
+    const locks = {
+      request: (_name: string, _options: LockOptions, callback: (lock: Lock) => Promise<void>) =>
+        callback({ name: "ava-ui-sse", mode: "exclusive" }),
+    };
+    const nativeNavigator = navigator;
+    vi.stubGlobal("navigator", new Proxy(nativeNavigator, {
+      get(target, key): unknown {
+        if (key === "locks") return locks;
+        const value: unknown = Reflect.get(target, key, target);
+        return value;
+      },
+    }));
+    vi.stubGlobal("BroadcastChannel", class {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      postMessage(_message: unknown): void { /* one-tab test */ }
+      close(): void { /* one-tab test */ }
+    });
+
+    renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitFor(() => expect(instances).toHaveLength(2));
+    const system = instances.find((source) => source.url === "/api/system");
+    if (!system) throw new Error("system source missing");
+    vi.useFakeTimers();
+    act(() => {
+      system.fireOpen();
+      system.fireErrorWithReadyState(MockEventSource.CONNECTING);
+      vi.advanceTimersByTime(45_000);
+    });
+
+    expect(system.readyState).toBe(MockEventSource.CLOSED);
+    expect(instances.filter((source) => source.url === "/api/system")).toHaveLength(2);
   });
 
   it("45s with NO frame → notifies reconnecting + bumps reconnectNonce", async () => {
