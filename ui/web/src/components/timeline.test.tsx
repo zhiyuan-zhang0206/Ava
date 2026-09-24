@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/types";
 import type { CompactTransitionBuffer } from "@/lib/compact-transition";
+import { useTimelineStore } from "@/lib/timeline-store";
 
 vi.mock("./markdown", () => ({
   ChatMarkdown: ({ content }: { content: string }) => (
@@ -368,6 +369,8 @@ describe("compact history segment dividers", () => {
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
     render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
     const viewport = screen.getByTestId("scroll-viewport");
+    Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
 
     // Not at the top yet — no trigger.
     viewport.scrollTop = 100;
@@ -413,8 +416,12 @@ describe("compact history segment dividers", () => {
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
     const { rerender } = render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
     const viewport = screen.getByTestId("scroll-viewport");
+    Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
 
     // First arrival: fires and captures the anchor.
+    viewport.scrollTop = 100;
+    viewport.dispatchEvent(new Event("scroll"));
     viewport.scrollTop = 0;
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
@@ -1478,8 +1485,12 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
     vi.useRealTimers();
   });
 
-  // The auto-load trigger (task #4186): reaching the top fires the fetch.
+  // A real upward movement through a scrollable viewport reaches the top.
   const triggerAtTop = (viewport: HTMLElement) => {
+    Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    viewport.scrollTop = 500;
+    viewport.dispatchEvent(new Event("scroll"));
     viewport.scrollTop = 0;
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
@@ -1494,6 +1505,8 @@ describe("load-older prepend anchor (#659, #817, #1272; auto-load #4186)", () =>
     ];
     render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
     const viewport = screen.getByTestId("scroll-viewport");
+    Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
 
     // Scrolling up inside the list: no trigger yet.
     viewport.scrollTop = 50;
@@ -4091,6 +4104,205 @@ describe("touch drag vs streaming pin (#1016)", () => {
     viewportGeom(viewport, 1200, 600);
     fireRO();
     expect(viewport.scrollTop).toBe(1200); // pinned (real browser: 600)
+  });
+});
+
+describe("bounded timeline history (#4702)", () => {
+  let roCallback: ResizeObserverCallback | null = null;
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(cb: ResizeObserverCallback) { roCallback = cb; }
+      /* eslint-disable @typescript-eslint/no-empty-function -- manual observer stub */
+      observe() {}
+      disconnect() {}
+      /* eslint-enable @typescript-eslint/no-empty-function */
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    useTimelineStore.getState().switchThread(null, [], false);
+  });
+
+  function geometry(viewport: HTMLElement, scrollHeight: number, clientHeight = 600) {
+    Object.defineProperty(viewport, "scrollHeight", { value: scrollHeight, configurable: true });
+    Object.defineProperty(viewport, "clientHeight", { value: clientHeight, configurable: true });
+  }
+  const rowRect = (top: number): DOMRect =>
+    ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
+  function layoutChange() {
+    act(() => roCallback!([], {} as ResizeObserver));
+  }
+
+  it("fills a short cold viewport but layout echoes never walk more than two pages", () => {
+    const loadOlder = vi.fn();
+    const item = (id: number) => makeItem({ item_id: `${id}.0`, kind: "agent_chat", payload: `row ${id}` });
+    const { rerender } = render(<TimelineView threadKey="42" items={[item(30)]}
+      hasMoreOlder onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    geometry(viewport, 300);
+    layoutChange();
+    expect(loadOlder).toHaveBeenCalledTimes(1); // first screen still fills
+    for (let i = 0; i < 8; i++) layoutChange();
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    rerender(<TimelineView threadKey="42" items={[item(30)]}
+      hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
+    rerender(<TimelineView threadKey="42" items={[item(20), item(30)]}
+      hasMoreOlder onLoadOlder={loadOlder} />);
+    geometry(viewport, 450);
+    layoutChange();
+    expect(loadOlder).toHaveBeenCalledTimes(2);
+    rerender(<TimelineView threadKey="42" items={[item(20), item(30)]}
+      hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
+    rerender(<TimelineView threadKey="42" items={[item(10), item(20), item(30)]}
+      hasMoreOlder onLoadOlder={loadOlder} />);
+    geometry(viewport, 500);
+    for (let i = 0; i < 8; i++) layoutChange();
+    expect(loadOlder).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not load from layout changes when the viewport already scrolls", () => {
+    const loadOlder = vi.fn();
+    render(<TimelineView threadKey="42" items={[makeItem({ item_id: "30.0", kind: "agent_chat", payload: "tail" })]}
+      hasMoreOlder onLoadOlder={loadOlder} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    geometry(viewport, 1200);
+    for (let i = 0; i < 10; i++) layoutChange();
+    expect(loadOlder).not.toHaveBeenCalled();
+  });
+
+  it("trims many fetched pages and streamed rows while following, preserving older paging", () => {
+    const rows = (first: number, last: number) => Array.from(
+      { length: last - first + 1 },
+      (_, i) => makeItem({ item_id: `${first + i}.0`, kind: "agent_chat", payload: `row ${first + i}` }),
+    );
+    useTimelineStore.getState().switchThread(42, rows(251, 300), true);
+    function SelectedTimeline() {
+      const items = useTimelineStore((s) => s.items);
+      return <TimelineView threadKey="42" items={items} retainedItemsMax={250} />;
+    }
+    const { container } = render(<SelectedTimeline />);
+    for (let page = 4; page >= 0; page--) {
+      act(() => useTimelineStore.getState().prependOlder(rows(page * 50 + 1, page * 50 + 50), true));
+    }
+    act(() => useTimelineStore.setState((s) => ({ items: [...s.items, ...rows(301, 350)] })));
+    const state = useTimelineStore.getState();
+    expect(state.items).toHaveLength(250);
+    expect(state.hasMoreOlder).toBe(true);
+    expect(state.items.at(-1)?.item_id).toBe("350.0");
+    expect(container.querySelectorAll(".timeline-item").length).toBeLessThanOrEqual(250);
+  });
+
+  it("keeps a parked reader's history until they return to the bottom", () => {
+    const rows = (first: number, last: number) => Array.from(
+      { length: last - first + 1 },
+      (_, i) => makeItem({ item_id: `${first + i}.0`, kind: "agent_chat", payload: `row ${first + i}` }),
+    );
+    useTimelineStore.getState().switchThread(42, rows(201, 210), true);
+    function SelectedTimeline() {
+      const items = useTimelineStore((s) => s.items);
+      return <TimelineView threadKey="42" items={items} retainedItemsMax={200} />;
+    }
+    const { container } = render(<SelectedTimeline />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    geometry(viewport, 1200);
+    viewport.scrollTop = 500;
+    act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    viewport.scrollTop = 100;
+    act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    act(() => useTimelineStore.getState().prependOlder(rows(1, 200), true));
+    expect(useTimelineStore.getState().items).toHaveLength(210);
+    expect(container.querySelectorAll(".timeline-item").length).toBeGreaterThan(200);
+    viewport.scrollTop = 600;
+    act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    expect(useTimelineStore.getState().items).toHaveLength(200);
+  });
+
+  // QA nit N1. A landing's compensation echo classifies as "down" without
+  // being user motion; before this guard the echo reset the budget after
+  // every landing, so the three-page cap could never bind (a sustained pull
+  // walked history page after page). The drive below is that pull: fetch
+  // lands (front row changes, scrollByDelta compensates), the browser echoes
+  // the write, and the reader keeps pulling back to the top.
+  it("caps a sustained top-arrival burst at three pages and refills after a pause or a real downward move", () => {
+    let clock = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    let rowTop = 0;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        return rowRect(this.getAttribute("data-item-id") ? rowTop : 0);
+      },
+    );
+
+    const loadOlder = vi.fn();
+    const item = (id: number) =>
+      makeItem({ item_id: `${id}.0`, kind: "agent_chat", payload: `row ${id}` });
+    const rows = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10].map(item);
+    let loaded = 1;
+    let items = [rows[0]];
+    const { rerender } = render(
+      <TimelineView threadKey="42" items={items} hasMoreOlder onLoadOlder={loadOlder} />,
+    );
+    const viewport = screen.getByTestId("scroll-viewport");
+    geometry(viewport, 1200);
+
+    const scrollTo = (next: number) => {
+      viewport.scrollTop = next;
+      act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    };
+    const arriveAtTop = () => {
+      rowTop = 0;
+      scrollTo(0);
+      clock += 10;
+    };
+
+    // Initial arrival: the user scrolls up from mid-history; page one loads.
+    scrollTo(500);
+    clock += 10;
+    arriveAtTop();
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    const cycle = () => {
+      clock += 10;
+      const prev = items;
+      items = [rows[loaded], ...prev];
+      loaded += 1;
+      rowTop = 300;
+      rerender(
+        <TimelineView threadKey="42" items={prev} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />,
+      );
+      rerender(<TimelineView threadKey="42" items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+      scrollTo(300); // the compensation echo — must not refill the budget
+      clock += 10;
+      arriveAtTop();
+    };
+
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(2);
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(3);
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(3); // three-page budget: the 4th arrival is spent
+
+    // A real downward move (no echo pending) refills the burst.
+    scrollTo(240);
+    clock += 10;
+    arriveAtTop();
+    expect(loadOlder).toHaveBeenCalledTimes(4);
+
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(5);
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(6);
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(6); // capped again
+
+    // A 750 ms arrival pause refills it as well.
+    clock += 800;
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(7);
   });
 });
 

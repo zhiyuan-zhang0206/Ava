@@ -308,7 +308,7 @@ function HomeContent({
   // switchThread (in the same set() that swaps in the new thread's items),
   // so there is no parent-side switch effect here.
 
-  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading } =
+  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax } =
     useTimeline(activeId, showError);
   const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = useTokenUsage(
     activeId,
@@ -429,6 +429,7 @@ function HomeContent({
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
             onLoadOlder={loadOlder}
+            retainedItemsMax={retainedItemsMax}
             loading={isLoading}
             maxWidthCss={contentColumnMaxWidth}
           />

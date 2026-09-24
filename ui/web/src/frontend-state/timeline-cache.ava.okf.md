@@ -53,12 +53,15 @@ and preserves the immediate swap. Switch clears the buffer; hide and reconnect
 invalidate a page owner's epoch while preserving it; a newer compact captures
 the current display at a new epoch. Late pages cannot enter a newer epoch.
 
-History remains fully accessible through explicit paging. Switching releases
+History remains fully accessible through scroll-up paging. Switching releases
 the inactive store view (scroll-loaded history is not retained); only the tail
 window stays cached, for the 30-minute window. Durable records are untouched.
-The active view still retains all
-pages the user loads; this change does not claim a bound on deep-history memory
-or DOM size. Those rendering concerns are independent of subscription ownership.
+While the reader follows the bottom, `TimelineView` asks the store to trim the
+oldest canonical rows to `display.timeline_retained_items_max` (250 by default),
+sets `hasMoreOlder` so evicted rows can be reloaded, and resets the next older
+page to its base size. The compact transition buffer keeps its anchor until
+release; trimming resumes afterward. A reader parked mid-history retains every
+loaded row, so deliberate deep-history reading can still grow memory and DOM.
 
 Timeline snapshots merge with provisional streaming items. The current
 wire format does not provide a shared checkpoint revision between REST and live
