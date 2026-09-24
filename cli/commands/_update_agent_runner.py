@@ -88,13 +88,9 @@ def _run_agent_runner_self_update(  # noqa: PLR0915 — one existing lock/handof
             raise ValueError("prepared bootstrap hop cannot use source-update flags")
         prepared = prepare_bootstrap_hop(bootstrap_request)
         if prepared.request.normal_release_path is not None:
-            from cli.commands._update_normal_release import (
-                prepare_after_bootstrap,
-                require_checked_normal_activation,
-            )
+            from cli.commands._update_normal_release import prepare_after_bootstrap
 
             normal_continuation = prepare_after_bootstrap(prepared)
-            require_checked_normal_activation()
 
     from shared import ui_update_state, updater_handoff
     from shared.host_deploy_state import (

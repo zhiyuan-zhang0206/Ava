@@ -16,19 +16,21 @@ import subprocess
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import uuid4
 
 import psutil
 import pytest
 from pydantic import SecretStr
 
+from cli.commands import _managed_writer_mode as mode_mod
 from cli.commands import _update_normal_release as normal
 from cli.commands import _update_normal_release_standalone as standalone
 from cli.commands._release_selector import read_selector, selector_bytes
 from cli.commands._release_services import PreparedService
 from cli.commands._update_bootstrap import BootstrapHopRequest
 from services.agent_ops.bootstrap import ObserverProjection, PreparedObservation
-from shared import ui_update_state, updater_handoff
+from shared import spawn_receipt, ui_update_state, updater_handoff
 from shared.cluster import session_name
 from shared.managed_writer_observation import ExpectedProcess, ProcessVerdict
 from shared.managed_writer_publication import PublishedUnit
@@ -38,11 +40,20 @@ from shared.session_record import SessionRecord
 from shared.updater_recovery import NormalReleaseRecoveryJournal
 from tests.cli.test_release_normal import (
     GENERATION,
+    _attempt_for,
+    _await_birth_stub,
+    _birth_receipt,
+    _ChainRig,
     _context,
     _journal,
+    _journal_for,
+    _observe_as,
     _prepared_plan,
     _prepared_service,
     _published_unit,
+    _record_for,
+    _seed_environment,
+    _two_service_setup,
     _write_ops_record,
 )
 from tests.cli.test_release_normal import (
@@ -413,7 +424,7 @@ def test_prepare_refuses_a_foreign_handoff_owner(
 def test_run_normal_release_claims_before_entering_execute(
     monkeypatch: pytest.MonkeyPatch, unit_home: Path
 ) -> None:
-    """Simulates the flip: prepare -> fence -> lock -> claim -> execute -> clear."""
+    """The flipped entry: prepare -> lock -> claim -> execute -> clear."""
     plan = _prepared_plan(unit_home, ())
     order: list[str] = []
     routed: list[tuple[object, str]] = []
@@ -421,9 +432,6 @@ def test_run_normal_release_claims_before_entering_execute(
     def prepare(_path: Path) -> normal.PreparedNormalRelease:
         order.append("prepare")
         return plan
-
-    def lifted() -> None:
-        order.append("fence")
 
     def acquire() -> bool:
         order.append("lock")
@@ -445,7 +453,6 @@ def test_run_normal_release_claims_before_entering_execute(
         routed.append((routed_plan, generation))
 
     monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
-    monkeypatch.setattr(standalone, "require_checked_normal_activation", lifted)
     monkeypatch.setattr(standalone, "try_acquire_updater_lock", acquire)
     monkeypatch.setattr(standalone, "release_updater_lock", release)
     monkeypatch.setattr(updater_handoff, "resume_bootstrap", resume)
@@ -458,37 +465,12 @@ def test_run_normal_release_claims_before_entering_execute(
     assert routed == [(plan, GENERATION)]
     assert order == [
         "prepare",
-        "fence",
         "lock",
         f"resume:{GENERATION}:direct-updater:pid{os.getpid()}",
         "execute",
         f"clear:{GENERATION}",
         "release",
     ]
-
-
-def test_run_normal_release_refuses_before_any_ownership_change(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
-    """While the fence is up the entry fails before updater ownership moves."""
-    plan = _prepared_plan(unit_home, ())
-    calls: list[str] = []
-
-    def prepare(_path: Path) -> normal.PreparedNormalRelease:
-        calls.append("prepare")
-        return plan
-
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        calls.append("ownership")
-
-    monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
-    monkeypatch.setattr(standalone, "try_acquire_updater_lock", forbidden)
-    monkeypatch.setattr(standalone, "release_updater_lock", forbidden)
-    monkeypatch.setattr(standalone, "execute_normal_release", forbidden)
-
-    with pytest.raises(ReleaseRejectedError, match="checked crash recovery"):
-        standalone.run_normal_release(unit_home / "normal-request.json")
-    assert calls == ["prepare"]
 
 
 def test_run_normal_release_declines_when_another_updater_holds_the_lock(
@@ -500,9 +482,6 @@ def test_run_normal_release_declines_when_another_updater_holds_the_lock(
     def prepare(_path: Path) -> normal.PreparedNormalRelease:
         return plan
 
-    def lifted() -> None:
-        return None
-
     def decline() -> bool:
         calls.append("lock")
         return False
@@ -511,7 +490,6 @@ def test_run_normal_release_declines_when_another_updater_holds_the_lock(
         calls.append("side-effect")
 
     monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
-    monkeypatch.setattr(standalone, "require_checked_normal_activation", lifted)
     monkeypatch.setattr(standalone, "try_acquire_updater_lock", decline)
     monkeypatch.setattr(standalone, "release_updater_lock", forbidden)
     monkeypatch.setattr(standalone, "execute_normal_release", forbidden)
@@ -520,6 +498,51 @@ def test_run_normal_release_declines_when_another_updater_holds_the_lock(
     with pytest.raises(ReleaseRejectedError, match="another updater holds this unit"):
         standalone.run_normal_release(unit_home / "normal-request.json")
     assert calls == ["lock"]
+
+
+def test_run_normal_release_does_not_clear_after_a_declined_claim(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
+    """A declined claim must not drop retained state that was never taken over.
+
+    The ``claimed`` guard is the only thing between a failed re-claim and a
+    destructive clear of another owner's retained bootstrap state; the entry
+    must fall straight from the declined resume to releasing the host lock.
+    """
+    plan = _prepared_plan(unit_home, ())
+    calls: list[str] = []
+
+    def prepare(_path: Path) -> normal.PreparedNormalRelease:
+        return plan
+
+    def acquire() -> bool:
+        calls.append("lock")
+        return True
+
+    def release() -> None:
+        calls.append("release")
+
+    def decline(generation: str, *, expected_session: str) -> bool:
+        calls.append("resume")
+        return False
+
+    def forbidden_clear(*_args: object, **_kwargs: object) -> None:
+        calls.append("clear")
+
+    def forbidden_execute(*_args: object, **_kwargs: object) -> None:
+        calls.append("execute")
+
+    monkeypatch.setattr(standalone, "prepare_normal_release", prepare)
+    monkeypatch.setattr(standalone, "try_acquire_updater_lock", acquire)
+    monkeypatch.setattr(standalone, "release_updater_lock", release)
+    monkeypatch.setattr(updater_handoff, "resume_bootstrap", decline)
+    monkeypatch.setattr(updater_handoff, "clear", forbidden_clear)
+    monkeypatch.setattr(ui_update_state, "lifecycle_lock", nullcontext)
+    monkeypatch.setattr(standalone, "execute_normal_release", forbidden_execute)
+
+    with pytest.raises(ReleaseRejectedError, match="could not claim its existing handoff"):
+        standalone.run_normal_release(unit_home / "normal-request.json")
+    assert calls == ["lock", "resume", "release"]
 
 
 def test_claim_allows_the_first_journal_cas_for_a_dead_owner(
@@ -546,3 +569,106 @@ def test_claim_allows_the_first_journal_cas_for_a_dead_owner(
     stored = _journal(unit_home)
     assert stored is not None
     assert stored.stage == "waiting"
+
+
+# ── the #4117 S5 flip: activation pin + checked-chain probes (relocated under the 800-line ceiling) ──
+
+
+def test_normal_activation_enters_the_checked_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The flip removed the fence: the entry drives the checked chain directly."""
+    driven: list[tuple[object, str]] = []
+
+    def drive(plan: object, generation: str) -> None:
+        driven.append((plan, generation))
+
+    monkeypatch.setattr(normal, "_drive_checked_normal_release", drive)
+    plan = Mock(spec=normal.PreparedNormalRelease)
+    normal.execute_normal_release(plan, "generation")
+    assert driven == [(plan, "generation")]
+
+
+def test_checked_chain_reenters_from_waiting_behind_a_written_selector(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
+    """INJ-3 window: the selector CAS landed but the journal still reads waiting.
+
+    Re-entry re-proves the selector idempotently (the CAS replay) and still
+    converges to the same readback without duplicate effects.
+    """
+    plan, readbacks, selector = _two_service_setup(unit_home)
+    journal = _journal_for(plan, "waiting")
+    _seed_environment(unit_home, normal_release=journal.model_dump(mode="json"))
+    rig = _ChainRig(monkeypatch, unit_home, plan, selector=selector, readbacks=readbacks)
+
+    result = rig.drive()
+
+    assert rig.calls[0] == "migration-receipt"
+    assert "selector-cas" in rig.calls
+    assert "stop-bootstrap" in rig.calls
+    assert result.services == (readbacks["ava-frontend"], readbacks["ava-ops"])
+    assert rig.landed == [result]
+
+
+def test_checked_chain_replays_a_fully_observed_roster_without_extra_effects(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+) -> None:
+    """INJ-10 window: every service was observed; the journal still reads starting.
+
+    The crash lands before the ``observed`` journal write with the last attempt
+    still retained. Re-entry adjudicates that attempt, re-observes both recorded
+    services, and converges with zero new spawns and no extra effects.
+    """
+    plan, readbacks, selector = _two_service_setup(unit_home)
+    first, last = plan.services
+    attempt = _attempt_for(unit_home, last)
+    journal = _journal_for(
+        plan, "starting", starting_session=last.identity.session, starting_attempt=attempt
+    )
+    _seed_environment(unit_home, normal_release=journal.model_dump(mode="json"))
+    receipt = _birth_receipt(unit_home, attempt)
+    last_record = _record_for(attempt, receipt, last)
+    first_attempt = _attempt_for(unit_home, first)
+    first_record = _record_for(first_attempt, _birth_receipt(unit_home, first_attempt), first)
+
+    def read_record(_home: Path, session: str) -> SessionRecord | None:
+        if session == first.identity.session:
+            return first_record
+        if session == last.identity.session:
+            return last_record
+        return None
+
+    monkeypatch.setattr(
+        spawn_receipt,
+        "await_birth",
+        _await_birth_stub(spawn_receipt.SpawnOutcome("spawned_alive", receipt, "alive")),
+    )
+    monkeypatch.setattr(spawn_receipt, "read_session_record", read_record)
+    monkeypatch.setattr(normal, "observe_process", _observe_as("alive"))
+    rig = _ChainRig(monkeypatch, unit_home, plan, selector=selector, readbacks=readbacks)
+
+    result = rig.drive()
+
+    assert rig.starts == []
+    assert rig.adopted == [("ava-ops", first_record), ("ava-frontend", last_record)]
+    assert rig.calls == [
+        "selector-cas",
+        "ready:ava-ops",
+        "ready:ava-frontend",
+        "read-readbacks",
+        "unit-readback",
+    ]
+    assert rig.stages == ["observed"]
+    assert rig.landed == [result]
+    assert result.services == (readbacks["ava-frontend"], readbacks["ava-ops"])
+    retained = _journal(unit_home)
+    assert retained is not None and retained.stage == "observed" and retained.readback == result
+
+
+def test_checked_activation_declaration_is_present_in_the_real_module() -> None:
+    """The flip (#4117 S5) declares the guard in the module whose state it proves."""
+    assert (
+        mode_mod._guard_ready("cli.commands._update_normal_release", "CHECKED_ACTIVATION_READY")
+        is True
+    )

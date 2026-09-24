@@ -1,8 +1,8 @@
 """Normal updater producer contracts; actual cold launch remains a CI gate.
 
-The checked chain (#4117 S3) is driven directly here while the activation fence
-is still up: these tests call ``_drive_checked_normal_release`` and
-``start_normal_service`` the way the prove scripts will. Journal writes go
+The checked chain (#4117 S3) is driven directly here: these tests call
+``_drive_checked_normal_release`` and ``start_normal_service`` the way the
+prove scripts will. Journal writes go
 through the real ``updater_handoff`` writer against a unit-local ``$AVA_HOME``,
 so the ownership, monotonic-transition and I8 ``replaces`` checks are exercised
 for real instead of mocked.
@@ -155,17 +155,6 @@ def test_malformed_service_commands_are_controlled_refusals(
     )
     with pytest.raises(ReleaseRejectedError, match=message):
         _command(spec, image)
-
-
-def test_normal_activation_is_disabled_before_the_chain(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("the checked chain must not run while the gate refuses")
-
-    monkeypatch.setattr(normal, "_drive_checked_normal_release", forbidden)
-    with pytest.raises(ReleaseRejectedError, match="checked crash recovery"):
-        normal.execute_normal_release(Mock(spec=normal.PreparedNormalRelease), "generation")
 
 
 @pytest.mark.parametrize(
