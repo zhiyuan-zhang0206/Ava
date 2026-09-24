@@ -1,7 +1,7 @@
 """Hermetic delivery-retry tests for the skill reference watchers.
 
-Four reference watchers wake the launching agent with a single send at their
-trigger point: ``watch_idle.py`` (ava-watcher and ava-goal), ``watch_work.py``
+Five reference watchers wake the launching agent with a single send at their
+trigger point: ``watch_idle.py`` (ava-watcher, ava-goal, and ava-fleet), ``watch_work.py``
 (ava-use-claude-code-and-codex), and ``gather_files.py``
 (ava-dynamic-workflow). A gateway / agent restart window (an update wave,
 ``ava cluster update``) outlasts the SDK's own 3 quick retries; before this the
@@ -14,6 +14,7 @@ imports, a fake ``ava`` that records sends and can refuse the first N of them.
 
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import importlib.util
 import os
@@ -41,6 +42,7 @@ def _load(name: str, path: Path) -> ModuleType:
 _WATCH_IDLE_PATHS = {
     "ava-watcher": _REPO / "ava_builtins/skills/ava-watcher/reference/watch_idle.py",
     "ava-goal": _REPO / "ava_builtins/skills/ava-goal/reference/watch_idle.py",
+    "ava-fleet": _REPO / "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py",
 }
 watch_idle_modules = [
     _load(f"watch_idle_{label.replace('-', '_')}_under_test", path)
@@ -102,6 +104,25 @@ def _wire(monkeypatch: pytest.MonkeyPatch, module: ModuleType, send_failures: in
     monkeypatch.setattr(module, "ava", fake)
     monkeypatch.setattr(module, "WAKE_BACKOFF_S", 0.0)
     return fake
+
+
+def test_watch_idle_bodies_match_after_module_docstring() -> None:
+    """The three copyable watchers share one byte-identical executable body."""
+    bodies: dict[str, bytes] = {}
+    for label, path in _WATCH_IDLE_PATHS.items():
+        source = path.read_bytes()
+        first = ast.parse(source).body[0]
+        assert isinstance(first, ast.Expr)
+        assert isinstance(first.value, ast.Constant) and isinstance(first.value.value, str)
+        assert first.lineno == 1 and first.col_offset == 0
+        assert first.end_lineno is not None and first.end_col_offset is not None
+        lines = source.splitlines(keepends=True)
+        offset = sum(map(len, lines[: first.end_lineno - 1])) + first.end_col_offset
+        bodies[label] = source[offset:]
+
+    reference = bodies["ava-watcher"]
+    for label, body in bodies.items():
+        assert body == reference, f"{label} watch_idle body differs from ava-watcher"
 
 
 def _rewrite_as_done_after_first_sleep(
