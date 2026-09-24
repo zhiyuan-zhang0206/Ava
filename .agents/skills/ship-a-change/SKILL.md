@@ -125,8 +125,10 @@ Still on you:
    **Long waits: launch the reference CI watcher instead of polling in-turn.**
    `reference/ci_watcher.py` wraps `check_ci()` and wakes you with exactly one
    message when CI settles (green, red, conflict, or no-workflow-run — never a
-   silent timeout). Configure it by string-replacing its placeholders, then
-   `ava.watcher.launch(code, timeout="3h", name="ci-watch-<pr>")`:
+   silent timeout). Arm it from an agent-profile process carrying the runner
+   DB and Redis URLs; a secured default-home profile-less launcher is refused
+   before session creation. Configure it by string-replacing its placeholders,
+   then `ava.watcher.launch(code, timeout="3h", name="ci-watch-<pr>")`:
 
    ```python
    import ava
@@ -141,10 +143,13 @@ Still on you:
    ```
 
    The watcher persists the settled verdict to `ci-verdict-<pr>.txt` in your
-   workspace before it tries to deliver, and retries delivery for ~10 minutes:
+   workspace before it tries to deliver, and retries transport failures for
+   ~10 minutes:
    an update wave or `ava cluster update` refuses connections for minutes —
    longer than any single send survives. If no wake arrives, read that file;
-   the verdict is there.
+   the verdict is there. For a persistent owner-URL config error, delivery
+   stops after one attempt and the exit notice names the absolute verdict
+   path and cause.
 
    Never write an ad-hoc `gh pr checks` + exit-code poll: `gh pr checks`
    exits non-zero when a check FAILS, so a `returncode == 0` condition never

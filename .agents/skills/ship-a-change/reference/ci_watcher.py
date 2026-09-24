@@ -1,6 +1,7 @@
 """Reference watcher: watch a PR's CI and wake the agent once it settles.
 
-One-shot — delivers exactly one wake message, then exits.  Launch it with
+One-shot — delivers exactly one wake message, then exits. Launch it from an
+agent-profile process carrying the runner DB and Redis URLs with
 `ava.watcher.launch(code, timeout=..., name="ci-watch-<pr>")` right after
 pushing a PR; the wake message carries the verdict.
 
@@ -10,9 +11,10 @@ with a bounded retry (gaps doubling from 10s to a 160s cap, ~10.5 min in
 total).  A gateway / agent restart window (an update wave, `ava cluster
 update`) refuses connections for minutes and outlasts the SDK's own 3 quick
 send retries; without persistence + retry a wake landing in that window is
-lost with nothing left behind.  Exit codes: 0 the wake was delivered, 1 the
-CI probe raised, 2 delivery was exhausted — the persisted verdict file is
-then the record to read after the fact.
+lost with nothing left behind. A persistent agent-profile owner-URL config
+error stops after one attempt. Exit codes: 0 the wake was delivered, 1 the CI
+probe raised, 2 delivery failed — the absolute verdict path and cause are in
+the log and exit notice, and the persisted file is the fallback record.
 
 Uses `scripts/ci_utils.py:check_ci` — the repo-provided, correct CI polling
 logic.  Do NOT write ad-hoc `gh pr checks` + exit-code checks: `gh pr checks`
@@ -40,16 +42,22 @@ raw gh output):
 Usage:
 1. Read this file with `ava.files.read(...)`
 2. Replace the placeholders (REPO_ROOT / PR_NUMBER / CI_UTILS / WATCHER_ID)
-3. Launch with `ava.watcher.launch(code, timeout="3h", name="ci-watch-<pr>")`
+3. Launch from an agent-profile process with `ava.watcher.launch(code,
+   timeout="3h", name="ci-watch-<pr>")`
 4. When no wake arrives, read `ci-verdict-<PR>.txt` in your workspace — it
    was already persisted before the watcher tried to deliver.
 """
 
+import atexit
 import os
 import sys
 import time
 
+from pydantic import ValidationError
+
 import ava
+from shared.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+from shared.paths import workspace_dir
 
 # ── Configure before launching ───────────────────────────────────────────────
 REPO_ROOT = ""  # e.g. "/home/user/ava/.worktrees/ava-1234-task" — the worktree
@@ -69,31 +77,47 @@ WAKE_BACKOFF_MAX_S = 160.0  # cap for one gap
 VERDICT_FILE = f"ci-verdict-{PR_NUMBER}.txt"  # relative — `ava.files` resolves
 # it in the launching agent's workspace: the settled verdict is persisted
 # there before any delivery attempt and stays behind after a failed delivery
+VERDICT_PATH = (workspace_dir(WATCHER_ID) / VERDICT_FILE).resolve()
 
 os.chdir(REPO_ROOT)
 sys.path.insert(0, CI_UTILS)
 from ci_utils import CIStatus, check_ci  # noqa: E402
 
 
-def wake(message: str) -> bool:
+def persistent_config_cause(exc: Exception) -> str | None:
+    """Recognize the owner-URL guard through Pydantic's ValidationError wrapper."""
+    if not isinstance(exc, ValidationError):
+        return None
+    for issue in exc.errors(include_input=False):
+        cause = issue.get("ctx", {}).get("error")
+        if isinstance(cause, AgentProfileOwnerDbUrlRefusedError):
+            return str(cause)
+    return None
+
+
+def wake(message: str) -> tuple[bool, int, str | None]:
     """Deliver `message` to the agent, retrying across a restart window.
 
     The SDK already retries 3 times, but a gateway restart window refuses
-    connections for minutes: the growing gaps below ride it out.  Returns
-    False when every attempt failed — `finish` reports the fallback record
-    and the caller exits non-zero.
+    connections for minutes: the growing gaps below ride it out. The owner-URL
+    guard is persistent, so it returns after one attempt. Other errors retain
+    the full retry window. Return delivery, attempts, and failure cause.
     """
     delay = WAKE_BACKOFF_S
     for attempt in range(1, WAKE_ATTEMPTS + 1):
         try:
             ava.agents.send_message(WATCHER_ID, message)
-            return True
-        except Exception as exc:  # any transport failure retries
-            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {exc!r}", flush=True)
+            return True, attempt, None
+        except Exception as exc:
+            config_cause = persistent_config_cause(exc)
+            cause = config_cause or f"{type(exc).__name__}: {exc}"
+            print(f"wake attempt {attempt}/{WAKE_ATTEMPTS} failed: {cause}", flush=True)
+            if config_cause is not None:
+                return False, attempt, cause
             if attempt < WAKE_ATTEMPTS:
                 time.sleep(delay)
                 delay = min(delay * 2, WAKE_BACKOFF_MAX_S)
-    return False
+    return False, WAKE_ATTEMPTS, cause
 
 
 def finish(message: str) -> bool:
@@ -111,13 +135,21 @@ def finish(message: str) -> bool:
         persisted = False
         print(f"verdict persist failed: {exc!r}", flush=True)
     print(message, flush=True)
-    delivered = wake(message)
+    delivered, attempts, cause = wake(message)
     if not delivered:
         if persisted:
-            fallback = f"the verdict is at {VERDICT_FILE}"
+            fallback = f"the verdict is at {VERDICT_PATH}"
         else:
-            fallback = "the verdict was not persisted — the message above is the record"
-        print(f"wake delivery failed after {WAKE_ATTEMPTS} attempts — {fallback}", flush=True)
+            fallback = (
+                f"the verdict was not persisted at {VERDICT_PATH} — the message above is the record"
+            )
+        summary = f"wake delivery failed after {attempts} attempts — cause: {cause}; {fallback}"
+        print(summary, flush=True)
+        # The generated watcher boot may log a registry-cleanup traceback after
+        # this script exits. Repeat the summary last so --tail-file includes
+        # both the absolute fallback path and cause in the shell exit notice.
+        if __name__ == "__main__":
+            atexit.register(print, summary, flush=True)
     return delivered
 
 
