@@ -398,14 +398,9 @@ def renew(lease_id: str, caller: object, *, ttl_seconds: int | None = None) -> d
 def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
-    from shared.agents.impersonation_manifest import (
-        close_manifest_admission,
-        freeze_manifest,
-        is_protocol_v1,
-    )
+    from shared.agents import impersonation_manifest as manifest
 
-    # The admission fence is durable even when a live participant delays the
-    # release. Do not roll it back with the later freeze refusal.
+    # Keep the admission fence durable when a live participant delays release.
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(lease, caller)
@@ -413,8 +408,8 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
-        if is_protocol_v1(lease):
-            close_manifest_admission(conn, lease_id)
+        if manifest.is_protocol_v1(lease):
+            manifest.close_manifest_admission(conn, lease_id)
 
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
@@ -423,9 +418,9 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
-        if is_protocol_v1(lease):
+        if manifest.is_protocol_v1(lease):
             try:
-                freeze_manifest(conn, lease)
+                manifest.freeze_manifest(conn, lease)
             except RuntimeError as exc:
                 raise ImpersonationError(
                     "Cannot release until every impersonation event participant seals"
