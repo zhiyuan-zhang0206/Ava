@@ -501,6 +501,7 @@ def _expiry_at_stop_wait(
 ) -> tuple[str, Callable[[], None], Callable[[], None]]:
     _seed_environment(home)
     plan, _, _ = _two_service_setup(home)
+    assert plan.bootstrap is not None
     expired = replace(
         plan,
         context=_context(
