@@ -1939,7 +1939,7 @@ def _write_agent_plist(
         plistlib.dumps(
             {
                 "Label": label,
-                "ProgramArguments": ["/bin/true"],
+                "ProgramArguments": ["/usr/bin/true"],
                 "EnvironmentVariables": {env_key: sock},
             }
         )

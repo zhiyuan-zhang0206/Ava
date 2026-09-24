@@ -278,7 +278,7 @@ def test_relay_wrapper_marks_the_standby_stub_consumed(tmp_path: Path) -> None:
         env=os.environ
         | {
             "AVA_IMPERSONATION_RELAY_STUB": str(stub),
-            "AVA_IMPERSONATION_RELAY_PY": "/bin/true",
+            "AVA_IMPERSONATION_RELAY_PY": "/usr/bin/true",
             "AVA_IMPERSONATION_RELAY_STUB_WAIT_SECONDS": "1",
         },
         capture_output=True,
