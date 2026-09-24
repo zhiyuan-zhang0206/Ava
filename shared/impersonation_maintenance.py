@@ -55,6 +55,7 @@ def force_expire_impersonation(
     from psycopg.rows import dict_row
 
     from shared._impersonation_store import dismiss_reminders, insert_handoff, lock_agent
+    from shared.agents.impersonation_manifest import close_manifest_admission, is_protocol_v1
     from shared.impersonation_history import set_actor
     from shared.log import logger
 
@@ -70,6 +71,8 @@ def force_expire_impersonation(
         if lease is None or lease["session_id"] != session_id:
             return "not_open"
         set_actor(conn, actor)
+        if is_protocol_v1(lease):
+            close_manifest_admission(conn, str(lease["id"]))
         inbound_id = None
         if lease["status"] == "active" and not lease["automatic"]:
             inbound_id = insert_handoff(

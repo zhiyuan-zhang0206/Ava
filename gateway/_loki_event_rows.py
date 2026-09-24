@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, cast
 
 from gateway import _loki_logql, _loki_transport, loki_events_cache
@@ -31,6 +32,7 @@ def _parse_line(line: str, ts_ns: int) -> dict[str, Any] | None:
         ts = datetime.fromtimestamp(ts_ns / 1e9, UTC)
     return {
         "id": _event_id(line, ts_ns),
+        "line_sha256": sha256(line.encode()).hexdigest(),
         "ts": ts,
         "trace_id": obj.get("trace_id"),
         "span_id": obj.get("span_id"),

@@ -1098,8 +1098,8 @@ def test_gateway_profile_excludes_agent_domains(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Agent profile constructs its matrix domains; daemon included (ava_fleet
-    plugin's in-agent task_maintenance reads it); alerts/telegram/feishu excluded."""
+    """Agent profile constructs its matrix domains; manifest health emits alerts;
+    telegram/feishu remain excluded."""
     from shared import config
 
     s = config.Settings(profile="agent")
@@ -1114,19 +1114,18 @@ def test_agent_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
         "gateway",
         "services",
         "daemon",
+        "alerts",
     ):
         assert s.has_domain(domain), domain
-    for domain in ("alerts", "telegram", "feishu"):
+    for domain in ("telegram", "feishu"):
         assert not s.has_domain(domain), domain
         with pytest.raises(AttributeError):
             getattr(s, domain)
 
 
 def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Support daemons include browser sandbox, telemetry, and backup settings.
-
-    Agent execution settings belong to the agent-host's separate agent profile.
-    """
+    """Support daemons include browser sandbox, telemetry, backup, and alerts;
+    agent execution stays in the agent-host's separate profile."""
     from shared import config
 
     s = config.Settings(profile="runner")
@@ -1140,9 +1139,10 @@ def test_runner_profile_domains(monkeypatch: pytest.MonkeyPatch) -> None:
         "sandbox",
         "observability",
         "physical_backup",
+        "alerts",
     ):
         assert s.has_domain(domain), domain
-    for domain in ("agent", "web", "alerts", "telegram", "feishu"):
+    for domain in ("agent", "web", "telegram", "feishu"):
         assert not s.has_domain(domain), domain
         with pytest.raises(AttributeError):
             getattr(s, domain)

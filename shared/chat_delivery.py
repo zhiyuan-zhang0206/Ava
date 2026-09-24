@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import psycopg
 
-from shared.audit_events import insert_event_log
+from shared import telemetry
 from shared.caller_identity import caller_payload
 from shared.caller_protocol import require_caller_protocol
 from shared.db import fetch_one, publish_inbound_wake
@@ -123,7 +123,7 @@ def insert_chat_inbound_once(
     """Insert one logical chat, or return its existing same-key inbound id."""
     with db.transaction():
         require_caller_protocol(db, agent_id, source)
-        receipt = _insert_chat_inbound_once(
+        receipt, prepared_event = _insert_chat_inbound_once(
             db,
             agent_id=agent_id,
             content=content,
@@ -133,6 +133,8 @@ def insert_chat_inbound_once(
             provenance=provenance,
         )
     db.commit()
+    if prepared_event is not None:
+        telemetry.emit_prepared(prepared_event)
     if receipt.inserted:
         publish_inbound_wake(agent_id, str(receipt.inbound_id))
     return receipt
@@ -147,7 +149,7 @@ def _insert_chat_inbound_once(
     payload: dict[str, object] | None,
     client_message_id: str | None,
     provenance: InboundProvenance | None,
-) -> ChatInboundReceipt:
+) -> tuple[ChatInboundReceipt, telemetry.Event | None]:
     """The locked INSERT body; ownership cannot change before commit."""
     payload = caller_payload(source, payload)
     encoded_payload = json.dumps(payload) if payload else None
@@ -199,16 +201,26 @@ def _insert_chat_inbound_once(
                 pending=True,
             )
 
+        prepared_event: telemetry.Event | None = None
         if receipt.inserted and source.startswith("agent:"):
             sender_id: int | None = None
             with contextlib.suppress(ValueError):
                 sender_id = int(source.removeprefix("agent:"))
-            insert_event_log(
-                event_type="send_message",
+            prepared_event = telemetry.prepare_event(
+                "audit",
+                "send_message",
                 agent_id=agent_id,
                 source=source,
                 target_agent_id=sender_id,
-                payload={"inbound_id": receipt.inbound_id, "content": content},
+                attributes={"inbound_id": receipt.inbound_id, "content": content},
+            )
+            from shared.agents.impersonation_manifest import stage_central_expected_event
+
+            prepared_event = stage_central_expected_event(
+                db,
+                prepared_event,
+                origin_kind="chat_inbound",
+                origin_id=receipt.inbound_id,
             )
 
-    return receipt
+    return receipt, prepared_event

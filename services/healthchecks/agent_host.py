@@ -44,10 +44,12 @@ def _probe() -> DaemonProbe:
 
 def _agent_host_env() -> dict[str, str]:
     """The agent-profile environment for every hosted-agent-host launch."""
+    from shared.env_registry import manifest_certification_secret_env
+
     return {
         "AVA_PROCESS_PROFILE": _HOST_PROCESS_PROFILE,
         "AVA_DB_URL": runner_db_url_projection(settings.data_plane.db_url),
-    }
+    } | manifest_certification_secret_env()
 
 
 def _restart_daemon() -> DaemonProbe:
