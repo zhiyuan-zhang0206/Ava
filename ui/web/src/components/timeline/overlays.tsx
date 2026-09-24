@@ -2,8 +2,9 @@
 
 // Floating overlay chrome for the timeline view: the load-older spinner, the
 // cold-load spinner, and the scroll-to-bottom button. (The load-earlier
-// button, the in-divider pill and the pull-to-load ring are gone — reaching
-// the top auto-loads older pages, task #4186.)
+// button, the in-divider pill and the pull-to-load ring are gone — older
+// pages load when an actual upward scroll gesture reaches the top, bounded
+// per burst, tasks #4186/#4702.)
 
 import { ArrowDown, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -11,8 +12,8 @@ import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1 } from "@/lib/layout";
 
-// Load-older spinner — shown while an automatic scroll-up paging fetch
-// (reaching the top with older pages remaining) is in flight. Always
+// Load-older spinner — shown while a scroll-up paging fetch (an upward
+// gesture reaching the top with older pages remaining) is in flight. Always
 // mounted (opacity-only visibility) and an absolutely-positioned overlay
 // outside the scrolled content, so it never shifts scrollHeight or disturbs
 // the prepend anchor; pointer-events-none in every state so it can never
@@ -100,8 +101,8 @@ const DIVIDER_RULE_CLASS =
 // Segment divider — a pure label, never a control: rank 0 marks the live
 // boundary between retained history and the current post-compact segment
 // (task #3698); the historical ranks carry the scroll-back copy. The label
-// carries no arrow glyph (task #3870); older history loads by scrolling to
-// the top (task #4186).
+// carries no arrow glyph (task #3870); older history loads when an upward
+// scroll gesture reaches the top (tasks #4186/#4702).
 export function CompactHistoryDivider({ rank }: { readonly rank: number }) {
   const t = useTranslations("timeline");
   const label = rank === 0 ? t("compactBoundaryDivider") : t("compactHistoryDivider");

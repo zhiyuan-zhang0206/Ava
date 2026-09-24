@@ -4121,6 +4121,7 @@ describe("bounded timeline history (#4702)", () => {
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     useTimelineStore.getState().switchThread(null, [], false);
   });
 
@@ -4128,6 +4129,8 @@ describe("bounded timeline history (#4702)", () => {
     Object.defineProperty(viewport, "scrollHeight", { value: scrollHeight, configurable: true });
     Object.defineProperty(viewport, "clientHeight", { value: clientHeight, configurable: true });
   }
+  const rowRect = (top: number): DOMRect =>
+    ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
   function layoutChange() {
     act(() => roCallback!([], {} as ResizeObserver));
   }
@@ -4215,6 +4218,91 @@ describe("bounded timeline history (#4702)", () => {
     viewport.scrollTop = 600;
     act(() => { viewport.dispatchEvent(new Event("scroll")); });
     expect(useTimelineStore.getState().items).toHaveLength(200);
+  });
+
+  // QA nit N1. A landing's compensation echo classifies as "down" without
+  // being user motion; before this guard the echo reset the budget after
+  // every landing, so the three-page cap could never bind (a sustained pull
+  // walked history page after page). The drive below is that pull: fetch
+  // lands (front row changes, scrollByDelta compensates), the browser echoes
+  // the write, and the reader keeps pulling back to the top.
+  it("caps a sustained top-arrival burst at three pages and refills after a pause or a real downward move", () => {
+    let clock = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    let rowTop = 0;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        return rowRect(this.getAttribute("data-item-id") ? rowTop : 0);
+      },
+    );
+
+    const loadOlder = vi.fn();
+    const item = (id: number) =>
+      makeItem({ item_id: `${id}.0`, kind: "agent_chat", payload: `row ${id}` });
+    const rows = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10].map(item);
+    let loaded = 1;
+    let items = [rows[0]];
+    const { rerender } = render(
+      <TimelineView threadKey="42" items={items} hasMoreOlder onLoadOlder={loadOlder} />,
+    );
+    const viewport = screen.getByTestId("scroll-viewport");
+    geometry(viewport, 1200);
+
+    const scrollTo = (next: number) => {
+      viewport.scrollTop = next;
+      act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    };
+    const arriveAtTop = () => {
+      rowTop = 0;
+      scrollTo(0);
+      clock += 10;
+    };
+
+    // Initial arrival: the user scrolls up from mid-history; page one loads.
+    scrollTo(500);
+    clock += 10;
+    arriveAtTop();
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+
+    const cycle = () => {
+      clock += 10;
+      const prev = items;
+      items = [rows[loaded], ...prev];
+      loaded += 1;
+      rowTop = 300;
+      rerender(
+        <TimelineView threadKey="42" items={prev} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />,
+      );
+      rerender(<TimelineView threadKey="42" items={items} hasMoreOlder onLoadOlder={loadOlder} />);
+      scrollTo(300); // the compensation echo — must not refill the budget
+      clock += 10;
+      arriveAtTop();
+    };
+
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(2);
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(3);
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(3); // three-page budget: the 4th arrival is spent
+
+    // A real downward move (no echo pending) refills the burst.
+    scrollTo(240);
+    clock += 10;
+    arriveAtTop();
+    expect(loadOlder).toHaveBeenCalledTimes(4);
+
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(5);
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(6);
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(6); // capped again
+
+    // A 750 ms arrival pause refills it as well.
+    clock += 800;
+    cycle();
+    expect(loadOlder).toHaveBeenCalledTimes(7);
   });
 });
 

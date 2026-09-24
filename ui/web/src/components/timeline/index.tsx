@@ -372,8 +372,12 @@ export function TimelineView({
   // the controller: prepend always shifts DOWN (the older window pushes
   // the anchor down) and the position rule never unsticks on downward
   // motion, so the echo is inert and re-syncs the baseline on its own.
+  // It is NOT inert for the paging budget, which resets on downward
+  // classification — mark the echo so onScroll can spare it: a page's own
+  // landing must not refill the burst the page came from.
   const scrollByDelta = useCallback((viewport: HTMLElement, delta: number) => {
     viewport.scrollTop += delta;
+    prependEchoRef.current = true;
   }, []);
 
   // Capture the scroll anchor at the trigger moment. The anchor is the
@@ -426,9 +430,16 @@ export function TimelineView({
 
   const coldFillRef = useRef({ pages: 0, open: true, inFlight: false, sawLoading: false });
   const upwardGestureRef = useRef({ lastAt: 0, pages: 0 });
+  // A landing's compensation write (scrollByDelta) echoes back as a scroll
+  // event the controller classifies "down", though it is no user motion. The
+  // scroll handler consumes this mark on the next event so the echo cannot
+  // reset the paging budget — with a reset after every landing, the
+  // three-page cap could never bind.
+  const prependEchoRef = useRef(false);
   useLayoutEffect(() => {
     coldFillRef.current = { pages: 0, open: true, inFlight: false, sawLoading: false };
     upwardGestureRef.current = { lastAt: 0, pages: 0 };
+    prependEchoRef.current = false;
   }, [threadKey]);
   useEffect(() => {
     const fill = coldFillRef.current;
@@ -453,8 +464,8 @@ export function TimelineView({
     if (!userScrolledUp || !viewport || viewport.scrollTop > 0 || controller.isSticky()) return;
     const gesture = upwardGestureRef.current;
     const now = Date.now();
-    if (now - gesture.lastAt > 750) gesture.pages = 0;
-    gesture.lastAt = now;
+    if (now - gesture.lastAt > 750) gesture.pages = 0; // a paused burst refills
+    gesture.lastAt = now; // a continuously arriving pull stays capped until it pauses
     if (gesture.pages >= 3) return; // one sustained gesture cannot walk unbounded history
     if (loadOneOlderPage()) gesture.pages += 1;
   }, [controller, loadOneOlderPage]);
@@ -524,7 +535,11 @@ export function TimelineView({
     const onScroll = () => {
       const direction = controller.handleScroll(snapshot());
       if (direction === "up") coldFillRef.current.open = false;
-      if (direction === "down") upwardGestureRef.current.pages = 0;
+      // One landing, one echo: consume the mark on this event so only a
+      // genuine downward move (not the prepend echo below it) ends the burst.
+      const isPrependEcho = prependEchoRef.current;
+      prependEchoRef.current = false;
+      if (direction === "down" && !isPrependEcho) upwardGestureRef.current.pages = 0;
       measureAtBottom();
       maybeLoadOlderAtTop(direction === "up");
       trimFollowing();
