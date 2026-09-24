@@ -105,3 +105,26 @@ it("hides the strip for a fresh unknown observation", () => {
   expect(screen.queryByText("Start availability unknown")).toBeNull();
   expect(screen.queryByRole("link", { name: "Machine diagnostics" })).toBeNull();
 });
+
+it("shows a just-fetched observation whose server stamp leads the client clock", async () => {
+  getAgent.mockResolvedValue({ ...agent, availability: {
+    reason: "admitted",
+    observed_at: new Date(Date.now() + 2_000).toISOString(),
+  } });
+  show();
+  expect(await screen.findByText("Host admission observed; first turn completion is not confirmed"))
+    .toBeTruthy();
+});
+
+it("hides an observation stamped beyond the future-skew allowance", async () => {
+  getAgent.mockResolvedValue({ ...agent, availability: {
+    reason: "admitted",
+    observed_at: new Date(Date.now() + 6_000).toISOString(),
+  } });
+  show();
+  await waitFor(() => expect(getAgent).toHaveBeenCalled());
+  // Let the query result commit and the component re-render; without this the
+  // null assertion can pass before a too-large skew would have shown the strip.
+  await new Promise((r) => setTimeout(r, 120));
+  expect(screen.queryByRole("status")).toBeNull();
+});

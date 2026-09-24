@@ -72,6 +72,7 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
   ) {
     return row as AgentRow;
   }
+  // Hand-rebuilt allowlist: an omitted optional field vanishes silently (availability, task #4723).
   return {
     agent_id: row.agent_id,
     spawner: row.spawner,
@@ -86,6 +87,7 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     machine: row.machine,
     supports_vision: row.supports_vision,
     liveness_state: row.liveness_state,
+    availability: row.availability,
     observation: row.observation,
     awaiting_response_count: "awaiting_response_count" in row ? row.awaiting_response_count : row.notices_awaiting_response.length,
     highest_notice_priority: "highest_notice_priority" in row ? row.highest_notice_priority : (row.notices_awaiting_response.map((n) => n.priority).sort()[0] ?? null),
