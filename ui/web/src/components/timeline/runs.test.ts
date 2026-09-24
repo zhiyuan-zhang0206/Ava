@@ -216,14 +216,40 @@ describe("summarizeTurn — SDK call aggregation", () => {
         payload: "ava.files.read('b')\nava.shell.run('ls')",
         sdk_calls: [
           { method: "files.read", count: 1 },
-          { method: "shell.run", count: 1 },
+          { method: "shell.run", count: 3 },
         ],
       }),
     ];
     const s = summarizeTurn(run);
     expect(s.sdkCalls).toEqual([
       { method: "files.read", count: 2 },
-      { method: "shell.run", count: 1 },
+      { method: "shell.run", count: 3 },
+    ]);
+  });
+
+  it("groups SDK calls by namespace after aggregating multiple code items", () => {
+    const run = [
+      item("agent_code", null, undefined, {
+        sdk_calls: [
+          { method: "shell.run", count: 4 },
+          { method: "files.write", count: 2 },
+          { method: "agents.spawn", count: 1 },
+        ],
+      }),
+      item("agent_code", null, undefined, {
+        sdk_calls: [
+          { method: "shell.run", count: 1 },
+          { method: "files.read", count: 3 },
+          { method: "files.write", count: 2 },
+          { method: "agents.spawn", count: 1 },
+        ],
+      }),
+    ];
+    expect(summarizeTurn(run).sdkCalls).toEqual([
+      { method: "agents.spawn", count: 2 },
+      { method: "files.write", count: 4 },
+      { method: "files.read", count: 3 },
+      { method: "shell.run", count: 5 },
     ]);
   });
 

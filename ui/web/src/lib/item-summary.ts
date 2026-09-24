@@ -14,8 +14,9 @@ export interface SdkCall {
 }
 
 export interface CodeSummary {
-  /** Per-method call counts as recorded by the executing run, descending by
-   *  count then method name. `method` is the full dotted path after `ava.`
+  /** Per-method call counts as recorded by the executing run, grouped by
+   *  namespace alphabetically, then descending by count and method name.
+   *  `method` is the full dotted path after `ava.`
    *  (e.g. `files.read`, `self.log`) so reads and writes on the same
    *  namespace stay distinct. Empty when none were recorded (plain Python,
    *  or the field is absent while streaming). */
@@ -35,6 +36,24 @@ export interface OutputSummary {
   readonly hasError: boolean;
 }
 
+/** The first dotted segment of a method; an undotted method is its own namespace. */
+export function sdkNamespace(method: string): string {
+  const dot = method.indexOf(".");
+  return dot === -1 ? method : method.slice(0, dot);
+}
+
+/** Order namespace groups lexicographically, independent of counts, so a live
+ *  tally cannot move a whole group. Within each group, sort by descending
+ *  count, breaking ties by method name. Only positions within a group can
+ *  change as counts grow. */
+export function orderSdkCalls(calls: readonly SdkCall[]): SdkCall[] {
+  return [...calls].sort((a, b) =>
+    sdkNamespace(a.method).localeCompare(sdkNamespace(b.method))
+    || b.count - a.count
+    || a.method.localeCompare(b.method),
+  );
+}
+
 export function summarizeCode(
   payload: string,
   sdkCalls?: readonly SdkCall[] | null,
@@ -43,9 +62,7 @@ export function summarizeCode(
   // metadata projected onto the item; the runtime that executed the snippet
   // counted its real calls. No text scanning, not even as a streaming
   // fallback: while the field is absent the chip shows the line count alone.
-  const calls = [...(sdkCalls ?? [])].sort(
-    (a, b) => b.count - a.count || a.method.localeCompare(b.method),
-  );
+  const calls = orderSdkCalls(sdkCalls ?? []);
   return {
     calls,
     totalCalls: calls.reduce((sum, c) => sum + c.count, 0),
