@@ -8,7 +8,7 @@ tags: [agent-lifecycle, concurrency]
 # Cooperative external impersonation
 
 `agent/impersonation.py` connects the durable lease in
-`shared/impersonation.py` to the native graph. The native runtime remains the
+`shared/impersonation/` to the native graph. The native runtime remains the
 only checkpoint writer; an external process executes the SDK directly.
 
 The claim gate accepts named automatic requests without a model decision and
