@@ -85,16 +85,16 @@ def test_conflicting_caller_rejected_before_insert(db_conn: psycopg.Connection) 
 def test_single_and_batch_audit_carry_structured_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import Mock
 
-    emit = Mock()
-    monkeypatch.setattr("shared.audit_events.telemetry.emit", emit)
+    emit_prepared = Mock()
+    monkeypatch.setattr("shared.audit_events.telemetry.emit_prepared", emit_prepared)
     insert_event_log(event_type="restart", agent_id=42, source=_SOURCE, payload={"inbound_id": 9})
     insert_event_log_many(
         event_type="restart", agent_id=42, source=_SOURCE, payloads=[{"inbound_id": 10}]
     )
-    assert emit.call_count == 2
-    for call in emit.call_args_list:
-        assert call.kwargs["attributes"]["caller_identity"] == _CALLER
-        assert "auth_principal" not in call.kwargs["attributes"]
+    assert emit_prepared.call_count == 2
+    for call in emit_prepared.call_args_list:
+        assert call.args[0].attributes["caller_identity"] == _CALLER
+        assert "auth_principal" not in call.args[0].attributes
 
 
 def test_internal_chat_and_lifecycle_writes_cannot_bypass_rollout_fence(
