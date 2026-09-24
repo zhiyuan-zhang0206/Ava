@@ -7,10 +7,12 @@ the store on the first vanilla write. Fork copying and the startup inbound
 reconciler are covered end to end (review #6143 I2/I3a — task #3180/#3181).
 """
 
+import asyncio
 from collections.abc import Callable, Sequence
 from typing import Annotated, Any, TypedDict, cast
 
 import psycopg
+import pytest
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -20,6 +22,7 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 from langgraph.channels.delta import DeltaChannel
+from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
@@ -40,6 +43,7 @@ from shared.agents.history.checkpoint import (
 from shared.agents.history.delta_read_compat import (
     _fold_messages,
     areconstruct_delta_messages,
+    recovery_reconstruction_scope,
     wrap_saver_reads_with_delta_reconstruction,
 )
 from shared.db import create_agent
@@ -118,6 +122,53 @@ def _config(thread_id: str, checkpoint_id: str | None = None) -> RunnableConfig:
     return {"configurable": configurable}
 
 
+def _synthetic_recovery_saver() -> tuple[AsyncPostgresSaver, list[tuple[str, str, str]], list[Any]]:
+    """A saver whose exact tuple and history reads are independently observable."""
+    saver = AsyncPostgresSaver(cast(Any, object()))
+    walks: list[tuple[str, str, str]] = []
+    pending: list[Any] = [("task", "other", "before")]
+
+    async def raw_tuple(config: RunnableConfig) -> CheckpointTuple:
+        configurable = dict(config["configurable"])  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        return CheckpointTuple(
+            {"configurable": configurable},
+            cast(
+                Any,
+                {
+                    "id": configurable["checkpoint_id"],
+                    "channel_values": {},
+                    "channel_versions": {"messages": "v"},
+                },
+            ),
+            cast(Any, {"counters_since_delta_snapshot": {"messages": 1}}),
+            None,
+            list(pending),
+        )
+
+    async def history(*, config: RunnableConfig, channels: Sequence[str]) -> dict[str, Any]:
+        assert channels == ["messages"]
+        values = config["configurable"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        key = (values["thread_id"], values["checkpoint_id"], values["checkpoint_ns"])
+        walks.append(key)
+        return {
+            "messages": {"writes": [("task", "messages", [HumanMessage(id="m", content=str(key))])]}
+        }
+
+    async def write(_config: RunnableConfig, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def flush(_thread_id: str) -> None:
+        return None
+
+    saver.aget_tuple = raw_tuple  # type: ignore[method-assign]
+    saver.aget_delta_channel_history = history  # type: ignore[method-assign]
+    saver.aput = write  # type: ignore[method-assign]
+    saver.aput_writes = write  # type: ignore[method-assign]
+    saver._ava_nstep_flush = flush  # type: ignore[attr-defined]
+    wrap_saver_reads_with_delta_reconstruction(saver)
+    return saver, walks, pending
+
+
 def _ids(messages: Sequence[Any]) -> list[str]:
     return [m.id for m in messages]
 
@@ -182,6 +233,221 @@ async def test_delta_thread_reconstructs_resumes_and_self_heals(
         )
         row = await cur.fetchone()
     assert row is not None and row[0] >= 1, "vanilla resume must materialize a messages blob"
+
+
+async def test_delta_read_span_has_phase_fields(
+    aops_pool: AsyncConnectionPool, loguru_records: list[Any]
+) -> None:
+    saver = _saver(aops_pool)
+    cfg = _config("drc-span")
+    await _delta_app(saver).ainvoke({"messages": [], "n": 0, "target": 2}, cfg)  # pyright: ignore[reportUnknownMemberType]
+    wrap_saver_reads_with_delta_reconstruction(saver)
+    checkpoint = await saver.aget(cfg)
+    assert checkpoint is not None
+    spans = [
+        record["extra"]
+        for record in loguru_records
+        if record["extra"].get("event") == "delta_read_compat"
+        and record["extra"].get("checkpoint_id") == checkpoint["id"]
+    ]
+    assert spans
+    span = spans[-1]
+    assert all(
+        span[field] >= 0 for field in ("tuple_read_ms", "history_read_ms", "decode_ms", "fold_ms")
+    )
+    assert span["stage1_pages"] >= 1
+    assert span["stage1_rows"] >= span["stage1_pages"]
+    assert span["stage2_rows"] >= 1
+    assert span["stage2_blob_bytes"] > 0
+    assert span["decode_ms"] > 0
+    assert span["history_build_ms"] >= span["decode_ms"]
+    assert span["fold_path"] in {"fast", "fallback"}
+
+
+async def test_recovery_cache_exact_key_and_invalidation() -> None:
+    saver, walks, pending = _synthetic_recovery_saver()
+    first = _config("thread-a", "checkpoint-a")
+    changed = _config("thread-a", "checkpoint-b")
+    namespace: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-a",
+            "checkpoint_id": "checkpoint-a",
+            "checkpoint_ns": "other",
+        }
+    }
+    other_thread = _config("thread-b", "checkpoint-a")
+    with recovery_reconstruction_scope(saver, "thread-a"):
+        initial = await saver.aget_tuple(first)
+        pending[:] = [("task", "other", "after")]
+        reused = await saver.aget_tuple(first)
+        assert initial is not None and reused is not None
+        assert len(walks) == 1
+        assert reused.pending_writes == pending
+        initial.checkpoint["channel_values"]["messages"].clear()
+        copied = cast(CheckpointTuple, await saver.aget_tuple(first))
+        assert len(copied.checkpoint["channel_values"]["messages"]) == 1
+        copied.checkpoint["channel_values"]["messages"][0].content = "changed on hit"
+        isolated = cast(CheckpointTuple, await saver.aget_tuple(first))
+        assert isolated.checkpoint["channel_values"]["messages"][0].content != "changed on hit"
+
+        await saver._ava_nstep_flush("thread-a")  # type: ignore[attr-defined]
+        await saver.aget_tuple(first)
+        assert len(walks) == 2
+        await saver.aput_writes(first, [], "task")
+        await saver.aget_tuple(first)
+        assert len(walks) == 3
+        await saver.aput(first, {}, {}, {})  # type: ignore[arg-type]
+        await saver.aget_tuple(first)
+        assert len(walks) == 4
+
+        await saver.aget_tuple(changed)
+        await saver.aget_tuple(namespace)
+        await saver.aget_tuple(other_thread)
+        assert walks[-3:] == [
+            ("thread-a", "checkpoint-b", ""),
+            ("thread-a", "checkpoint-a", "other"),
+            ("thread-b", "checkpoint-a", ""),
+        ]
+    await saver.aget_tuple(first)
+    assert len(walks) == 8
+
+
+@pytest.mark.parametrize("operation", ["aput", "aput_writes", "flush"])
+async def test_recovery_cache_write_commit_revokes_fill_and_flush_reuse(operation: str) -> None:
+    saver, walks, _pending = _synthetic_recovery_saver()
+    config = _config("thread-a", "checkpoint-a")
+    entered = asyncio.Event()
+    commit = asyncio.Event()
+    stored = "old"
+
+    async def history(*, config: RunnableConfig, channels: Sequence[str]) -> dict[str, Any]:
+        walks.append(("thread-a", "checkpoint-a", ""))
+        return {
+            "messages": {"writes": [("task", "messages", [HumanMessage(id="m", content=stored)])]}
+        }
+
+    async def write(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal stored
+        entered.set()
+        await commit.wait()
+        stored = "new"
+
+    saver.aget_delta_channel_history = history  # type: ignore[method-assign]
+    if operation == "aput":
+        saver.aput = write  # type: ignore[method-assign]
+    elif operation == "aput_writes":
+        saver.aput_writes = write  # type: ignore[method-assign]
+    else:
+        saver._ava_nstep_flush = write  # type: ignore[attr-defined]
+    with recovery_reconstruction_scope(saver, "thread-a") as scope:
+        assert scope is not None
+        first = cast(CheckpointTuple, await saver.aget_tuple(config))
+        flushed_generation = scope.generation
+        if operation == "aput":
+            writer = asyncio.create_task(saver.aput(config, {}, {}, {}))  # type: ignore[arg-type]
+        elif operation == "aput_writes":
+            writer = asyncio.create_task(saver.aput_writes(config, [], "task"))
+        else:
+            writer = asyncio.create_task(saver._ava_nstep_flush("thread-a"))  # type: ignore[attr-defined]
+        await entered.wait()
+        during = cast(CheckpointTuple, await saver.aget_tuple(config))
+        generation_during_write = scope.generation
+        commit.set()
+        await writer
+        after = cast(CheckpointTuple, await saver.aget_tuple(config))
+        values = [
+            item.checkpoint["channel_values"]["messages"][0].content
+            for item in (first, during, after)
+        ]
+        assert values == ["old", "old", "new"]
+        assert len(walks) == 3
+        assert scope.generation > generation_during_write > flushed_generation
+
+
+async def test_recovery_cache_concurrent_reads_and_cancelled_reconstruction(
+    loguru_records: list[Any],
+) -> None:
+    saver, walks, _pending = _synthetic_recovery_saver()
+    config = _config("thread-a", "checkpoint-a")
+    with recovery_reconstruction_scope(saver, "thread-a"):
+        reads = await asyncio.gather(*(saver.aget_tuple(config) for _ in range(3)))
+        assert all(read is not None for read in reads)
+        assert len(walks) == 1
+
+    original_history = saver.aget_delta_channel_history
+    entered = asyncio.Event()
+    attempts = 0
+
+    async def blocked_history(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            entered.set()
+            await asyncio.Event().wait()
+        return await original_history(config=config, channels=channels)
+
+    saver.aget_delta_channel_history = blocked_history  # type: ignore[method-assign]
+    with recovery_reconstruction_scope(saver, "thread-a"):
+        task = asyncio.create_task(saver.aget_tuple(config))
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        cancelled = [
+            record["extra"]
+            for record in loguru_records
+            if record["extra"].get("outcome") == "cancelled"
+        ]
+        assert len(cancelled) == 1
+        assert cancelled[0]["failed_phase"] == "history_read"
+        assert cancelled[0]["cache_hit"] is None
+        assert cancelled[0]["message_count"] is None
+        assert await saver.aget_tuple(config) is not None
+        assert attempts == 2
+    assert await saver.aget_tuple(config) is not None
+    assert attempts == 3
+
+
+async def test_recovery_cache_isolated_across_concurrent_agents() -> None:
+    saver, walks, _pending = _synthetic_recovery_saver()
+
+    async def read_twice(thread_id: str) -> None:
+        config = _config(thread_id, "same-checkpoint-id")
+        with recovery_reconstruction_scope(saver, thread_id):
+            await saver.aget_tuple(config)
+            await saver.aget_tuple(config)
+
+    await asyncio.gather(read_twice("thread-a"), read_twice("thread-b"))
+    assert walks.count(("thread-a", "same-checkpoint-id", "")) == 1
+    assert walks.count(("thread-b", "same-checkpoint-id", "")) == 1
+
+
+async def test_recovery_cache_invalidates_on_graph_state_update(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saver = _saver(aops_pool)
+    graph = _delta_app(saver)
+    config = _config("drc-state-write")
+    await graph.ainvoke({"messages": [], "n": 0, "target": 2}, config)  # pyright: ignore[reportUnknownMemberType]
+    previous = await AsyncPostgresSaver.aget_tuple(saver, config)
+    assert previous is not None
+    wrap_saver_reads_with_delta_reconstruction(saver)
+    history = saver.aget_delta_channel_history
+    walks = 0
+
+    async def counted(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
+        nonlocal walks
+        walks += 1
+        return await history(config=config, channels=channels)
+
+    monkeypatch.setattr(saver, "aget_delta_channel_history", counted)
+    with recovery_reconstruction_scope(saver, "drc-state-write"):
+        await saver.aget_tuple(previous.config)
+        await saver.aget_tuple(previous.config)
+        assert walks == 1
+        await graph.aupdate_state(config, {"messages": [HumanMessage(id="new", content="new")]})  # pyright: ignore[reportUnknownMemberType]
+        await saver.aget_tuple(previous.config)
+        assert walks == 2
 
 
 async def test_snapshot_tip_unwraps_and_mid_chain_walks(

@@ -74,7 +74,41 @@ async def test_slow_acquire_warns(loguru_records, monkeypatch: pytest.MonkeyPatc
     assert len(recs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert recs[0]["extra"]["event"] == "db_pool_acquire_slow"
     assert recs[0]["extra"]["name"] == "ops"
+    assert recs[0]["extra"]["slot_wait_ms"] >= 0
+    assert recs[0]["extra"]["check_ms"] >= 0
+    assert recs[0]["extra"]["check_attempts"] == 0
     assert recs[0]["level"].name == "WARNING"  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_slow_acquire_separates_slot_wait_and_check(
+    loguru_records, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool = _pool()
+    clock = [0.0]
+    sentinel = object()
+
+    async def slot(_self: Any, _timeout: float) -> object:
+        clock[0] += 2.0
+        return sentinel
+
+    async def check(_self: Any, _conn: object) -> None:
+        clock[0] += 2.0
+
+    async def borrow(self: Any, timeout: float | None = None) -> object:
+        conn = await self._getconn_unchecked(timeout or 5.0)
+        await self._check_connection(conn)
+        return conn
+
+    monkeypatch.setattr(db.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(AsyncConnectionPool, "_getconn_unchecked", slot)
+    monkeypatch.setattr(AsyncConnectionPool, "_check_connection", check)
+    monkeypatch.setattr(AsyncConnectionPool, "getconn", borrow)
+
+    assert await pool.getconn() is sentinel
+    record = _acquire_records(loguru_records)[0]["extra"]  # pyright: ignore[reportUnknownArgumentType]
+    assert record["slot_wait_ms"] == 2000.0
+    assert record["check_ms"] == 2000.0
+    assert record["check_attempts"] == 1
 
 
 async def test_pool_timeout_errors_and_propagates(
@@ -111,6 +145,8 @@ async def test_pool_timeout_errors_and_propagates(
     assert recs[0]["extra"]["pool_available"] == 0
     assert recs[0]["extra"]["requests_waiting"] == 3
     assert recs[0]["extra"]["connections_errors"] == 0
+    assert recs[0]["extra"]["slot_wait_ms"] >= 0
+    assert recs[0]["extra"]["check_ms"] >= 0
     assert recs[0]["level"].name == "ERROR"  # pyright: ignore[reportUnknownMemberType]
 
 
