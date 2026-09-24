@@ -459,17 +459,19 @@ def agent_id_from_channel(channel: str) -> int | None:
 
 @dataclass(frozen=True)
 class PendingInboundWake:
-    """One local hosted agent with a pending inbound row.
+    """One local hosted agent needing a durable scan wake.
 
     ``stale`` means BOTH that one pending inbound has passed the running
     turn grace and that the agent has made no completed-turn progress for
     that grace (an active turn may legitimately run up to the exec +
     LLM-retry budget). A fresh pending row still receives the scan's normal
     wake, but does not interrupt a legitimate turn that happens to be running.
+    ``recovery`` marks a wake without ordinary inbound or active lease work.
     """
 
     agent_id: int
     stale: bool
+    recovery: bool = False
 
 
 class _WakeScheduler(Protocol):
@@ -537,6 +539,7 @@ class InboundWakeDispatcher:
         pending_scan: Callable[[float], Awaitable[list[PendingInboundWake]]] | None = None,
         stale_after_s: float | None = None,
         scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
+        recovery_wake_batch: int = 4,
         max_scan_backoff_s: float = _DEFAULT_MAX_SCAN_BACKOFF_S,
         subscription_read_timeout_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         subscription_read_deadline_grace_s: float = _DEFAULT_SUBSCRIPTION_READ_SLACK_S,
@@ -547,6 +550,7 @@ class InboundWakeDispatcher:
         self._pending_scan = pending_scan
         self._stale_after_s = stale_after_s
         self._scan_interval_s = scan_interval_s
+        self._recovery_wake_batch = recovery_wake_batch
         self._max_scan_backoff_s = max_scan_backoff_s
         self._subscription_read_timeout_s = subscription_read_timeout_s
         self._subscription_read_deadline_grace_s = subscription_read_deadline_grace_s
@@ -658,8 +662,21 @@ class InboundWakeDispatcher:
             scan_backoff_s=self._scan_interval_s,
         )
 
+    def _wake_scanned_candidate(
+        self, candidate: PendingInboundWake, started: set[int], recovery_started: int
+    ) -> int:
+        starts_turn = candidate.agent_id not in self._scheduler.active_agents
+        if candidate.recovery and starts_turn and recovery_started >= self._recovery_wake_batch:
+            return recovery_started
+        if starts_turn:
+            started.add(candidate.agent_id)
+            if candidate.recovery:
+                recovery_started += 1
+        self._scheduler.wake(candidate.agent_id)
+        return recovery_started
+
     async def scan_once(self) -> None:
-        """Schedule every locally pending agent; cancel stale active turns first.
+        """Wake all work and one recovery batch; cancel stale active turns first.
 
         This is public only as the narrow test seam for the durable backstop.
         Production calls it before each deadline-bounded subscription read.
@@ -682,6 +699,7 @@ class InboundWakeDispatcher:
         # freshly resumed stream may have old pending rows until its next claim.
         # Only the current monotonic progress clock can license cancellation.
         started: set[int] = set()
+        recovery_started = 0
         candidates = await self._pending_scan(self._stale_after_s)
         _raise_if_cancellation_pending()
         for candidate in candidates:
@@ -701,9 +719,7 @@ class InboundWakeDispatcher:
                     raise HostRestartRequiredError(
                         f"hosted turn for agent {candidate.agent_id} did not unwind"
                     )
-            if candidate.agent_id not in self._scheduler.active_agents:
-                started.add(candidate.agent_id)
-            self._scheduler.wake(candidate.agent_id)
+            recovery_started = self._wake_scanned_candidate(candidate, started, recovery_started)
 
         # Turn-level fake-alive: an in-flight agent whose turn-progress clock
         # is stale is not making progress even though NO pending inbound has

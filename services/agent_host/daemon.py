@@ -411,10 +411,9 @@ async def _recover_hosted_forces_at_boot(
             )
 
 
-async def _schedule_watcher_recovery(host: AgentHost, scheduler: TurnScheduler) -> None:
-    """Once per host boot, prepare watcher owners even with an empty inbox."""
-    for agent_id in await host.watcher_boot_wakes():
-        scheduler.wake(agent_id)
+async def _schedule_watcher_recovery(host: AgentHost) -> None:
+    """Once per host boot, arm watcher owners for the paced pending scan."""
+    await host.watcher_boot_wakes()
 
 
 async def _open_host_pools(
@@ -528,17 +527,17 @@ async def run() -> None:
         # no per-agent page_reconcile_loop (loop.py:main() is process-only).
         background = _spawn_background_tasks(workload_pool)
         try:
-            await _schedule_watcher_recovery(host, scheduler)
+            await _schedule_watcher_recovery(host)
             # Settled reap rows need one admission each: the cold build's
             # reconcile re-delivers the claimed ordinary work the reap cut
             # short, and the dangling-tool repair closes the truncated turn.
-            for agent_id in settled_reaps:
-                scheduler.wake(agent_id)
+            host.arm_settled_reaps(settled_reaps)
             await InboundWakeDispatcher(
                 settings.data_plane.redis_url,
                 scheduler,
                 pending_scan=host.pending_inbound_wakes,
                 stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
+                recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
                 scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
                 subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
             ).run()
