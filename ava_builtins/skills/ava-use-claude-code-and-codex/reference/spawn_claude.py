@@ -157,11 +157,12 @@ def _contract_path() -> Path:
 
 
 def _claude_ui_ready(output: str) -> bool:
-    """Require the title and a composer cue, not a setup dialog's title alone."""
-    composer = "? for shortcuts" in output or (
-        bool(re.search(r"(?m)^[ \t]*\u276f[ \t]", output)) and "bypass permissions on" in output
+    """Require the title and a composer cue, normalizing Unicode prompt spacing."""
+    normalized = re.sub(r"[^\S\r\n]", " ", output)
+    composer = "? for shortcuts" in normalized or (
+        bool(re.search(r"(?m)^ *\u276f ", normalized)) and "bypass permissions on" in normalized
     )
-    return bool(re.search(r"\bClaude\s+Code\b", output)) and composer
+    return bool(re.search(r"\bClaude\s+Code\b", normalized)) and composer
 
 
 def _check_missing_claude(failure_marker: Path | None, output: str = "") -> None:

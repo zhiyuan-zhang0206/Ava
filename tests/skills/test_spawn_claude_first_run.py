@@ -137,7 +137,7 @@ def test_ready_accepts_recorded_claude_2_1_281_panel(
         "  ▝▝ ▝▝    <cwd>\n"
         "  ... (usage note)\n"
         "─────────────────────────────────────────────\n"
-        '\u276f Try "how does <filepath> work?"\n'
+        '\u276f\u00a0Try "fix lint errors"\n'
         "─────────────────────────────────────────────\n"
         "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n"
     )
@@ -153,6 +153,16 @@ def test_ready_accepts_recorded_claude_2_1_281_panel(
     monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
 
     spawn_claude._wait_for_ready(7, timeout=1)
+
+
+def test_ready_accepts_other_unicode_spacing_without_a_fixed_suggestion() -> None:
+    panel = 'Claude Code v2.1.281\n\u276f\u2009Try "explain this file"\nbypass permissions on\n'
+    assert spawn_claude._claude_ui_ready(panel)
+
+
+def test_ready_rejects_non_claude_panel_with_a_composer() -> None:
+    panel = 'Other CLI v2.1.281\n\u276f\u00a0Try "fix lint errors"\nbypass permissions on\n'
+    assert not spawn_claude._claude_ui_ready(panel)
 
 
 def test_exited_session_reports_missing_executable_from_marker(
