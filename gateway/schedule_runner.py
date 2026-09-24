@@ -74,7 +74,7 @@ _PARK_FRAME_NAMES = frozenset({"sleep", "wait", "wait_for", "run_forever", "acqu
 # Cache the code's filenames, the same identities the sampled frames carry.
 # Unlike module __file__, these also work with loaders that omit __file__;
 # a missing attribute must not turn every guard tick into a skipped check.
-_SUBPROCESS_FILENAME = subprocess.Popen.wait.__code__.co_filename
+_SUBPROCESS_FILENAME = subprocess.Popen[bytes].wait.__code__.co_filename
 _SELECTORS_FILENAME = selectors.SelectSelector.select.__code__.co_filename
 
 

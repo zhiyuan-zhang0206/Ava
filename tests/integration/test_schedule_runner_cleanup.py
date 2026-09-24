@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
@@ -35,7 +35,7 @@ def _alive(process: psutil.Process) -> bool:
 
 
 @contextmanager
-def _processes(root: Path) -> Iterator[list[psutil.Process]]:
+def _processes(root: Path) -> Generator[list[psutil.Process], None, None]:
     """Own every test process, including deliberately exempt double-fork daemons."""
     tracked: list[psutil.Process] = []
     try:
@@ -100,7 +100,7 @@ def _scripts(root: Path, *, complete: bool) -> str:
 
 
 def _capture_children(root: Path, runner_pid: int) -> list[psutil.Process]:
-    owned = []
+    owned: list[psutil.Process] = []
     for name in ("child", "grandchild", "session", "daemon"):
         path = root / f"{name}.pid"
         _await_file(path)
