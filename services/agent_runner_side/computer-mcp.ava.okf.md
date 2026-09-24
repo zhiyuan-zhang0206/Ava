@@ -66,7 +66,12 @@ agent execute_code
 It lands in the audit stream, where it is likewise self-reported by the
 agent's own process. Local fallback (no mcp-daemon):
 `services/computer/mcp_wrapper.py` (the `.mcp.json` command) dials the daemon
-directly and stamps the same identity.
+directly and stamps the same identity on every request, including `list_tools`.
+It uses `services/browser/mcp_socket_bridge.py` for socket framing and
+reconnection; its own policy closes a connection after any delivered error.
+P1 safety change: write/drain errors now surface without retry because delivery
+may be unknown and a desktop action could repeat; a closed socket detected
+before writing remains retryable.
 
 ## Tool surface
 `snapshot` / `click` / `type_text` / `key` / `scroll` / `window_info` /

@@ -32,6 +32,9 @@ class FakeWriter:
     def close(self) -> None:
         self.closed = True
 
+    def is_closing(self) -> bool:
+        return self.closed
+
 
 class FailingWriter(FakeWriter):
     def __init__(self, fail_stage: str) -> None:
@@ -40,12 +43,12 @@ class FailingWriter(FakeWriter):
 
     def write(self, b: bytes) -> None:
         if self.fail_stage == "write":
-            raise BrokenPipeError("socket closed before delivery")
+            raise BrokenPipeError("socket broke")
         super().write(b)
 
     async def drain(self) -> None:
         if self.fail_stage == "drain":
-            raise BrokenPipeError("socket closed before delivery")
+            raise BrokenPipeError("socket broke")
 
 
 class FakeReader:
@@ -95,6 +98,22 @@ async def test_request_without_identity(monkeypatch: pytest.MonkeyPatch) -> None
     assert sent["tool"] == "click"
 
 
+async def test_agent_identity_is_injected_for_each_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    reader = FakeReader(
+        [
+            _line({"id": 1, "ok": True, "result": None}),
+            _line({"id": 2, "ok": True, "result": None}),
+        ]
+    )
+    writer = FakeWriter()
+    link = _Link(reader, writer)  # type: ignore[arg-type]
+    monkeypatch.setenv("AVA_AGENT_ID", "7")
+    await link.request({"method": "list_tools", "agent_id": 99})
+    monkeypatch.delenv("AVA_AGENT_ID")
+    await link.request({"method": "call_tool", "tool": "click"})
+    assert [json.loads(line)["agent_id"] for line in writer.written] == [7, None]
+
+
 async def test_request_raises_on_error_response() -> None:
     reader = FakeReader([_line({"id": 1, "ok": False, "error": "quota exceeded"})])
     link = _Link(reader, FakeWriter())  # type: ignore[arg-type]
@@ -116,14 +135,12 @@ async def test_request_raises_on_id_mismatch() -> None:
 
 
 @pytest.mark.parametrize("fail_stage", ["write", "drain"])
-async def test_request_classifies_pre_delivery_failure(fail_stage: str) -> None:
-    from services.computer.mcp_wrapper import _NotDeliveredError
-
+async def test_request_preserves_unknown_delivery_error(fail_stage: str) -> None:
     writer = FailingWriter(fail_stage)
     link = _Link(FakeReader([]), writer)  # type: ignore[arg-type]
-    with pytest.raises(_NotDeliveredError) as error:
+    with pytest.raises(BrokenPipeError, match="socket broke"):
         await link.request({"method": "call_tool", "tool": "click", "args": {}})
-    assert isinstance(error.value.__cause__, BrokenPipeError)
+    assert len(writer.written) == (1 if fail_stage == "drain" else 0)
 
 
 # ── _ReconnectingLink ───────────────────────────────────────────────────────
@@ -182,7 +199,7 @@ async def test_reconnecting_link_never_retries_delivered_call(
 
 
 @pytest.mark.parametrize("fail_stage", ["write", "drain"])
-async def test_reconnecting_link_retries_not_delivered(
+async def test_reconnecting_link_does_not_retry_write_or_drain_failure(
     no_retry_delay: None, fail_stage: str
 ) -> None:
     attempts = 0
@@ -198,11 +215,14 @@ async def test_reconnecting_link_retries_not_delivered(
 
     rl = _ReconnectingLink()
     rl._connect_once = _connect_once  # type: ignore[method-assign]
-    assert await rl.request({"method": "call_tool", "tool": "type", "args": {}}) == "ok"
-    assert attempts == 2
+    with pytest.raises(BrokenPipeError, match="socket broke"):
+        await rl.request({"method": "call_tool", "tool": "type", "args": {}})
+    assert attempts == 1
     assert failed_writer.closed
-    assert len(success_writer.written) == 1
+    assert len(success_writer.written) == 0
     assert len(failed_writer.written) == (1 if fail_stage == "drain" else 0)
+    assert await rl.request({"method": "list_tools"}) == "ok"
+    assert attempts == 2
 
 
 @pytest.mark.parametrize(
