@@ -198,10 +198,11 @@ def _root_argv(run_dir: Path, manifests: Path) -> list[str]:
 
 
 def _root_child_env() -> dict[str, str]:
-    """The root daemon's env: the daemon-policy forwarding view (venv + PATH + host scope)."""
+    """The root env, including the proof it may pass only to agent-host."""
+    from shared.env_registry import manifest_certification_secret_env
     from shared.session_env import forward_env_dict
 
-    return forward_env_dict()
+    return forward_env_dict() | manifest_certification_secret_env()
 
 
 def _write_tree_manifests(

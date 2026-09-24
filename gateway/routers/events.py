@@ -30,6 +30,7 @@ Two hard contract rules keep every query bounded and unambiguous:
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -50,6 +51,7 @@ router = APIRouter()
 _CATEGORIES = frozenset({"audit", "telemetry", "log"})
 _LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
 _TIERS = ("business", "anomaly", "observation", "noise")
+_IMPERSONATION_SESSION = re.compile(r"^[0-9]+:[0-9]+$")
 
 # Longest retention (audit = 365d); anything longer is a no-op window anyway.
 # Protective constant, evaluated at import for the `hours` Query bound — not
@@ -122,12 +124,25 @@ def _parse_tiers(tier: str | None) -> list[EventTier] | None:
     return tiers
 
 
+def _impersonation_filters(session: str | None) -> dict[str, str] | None:
+    """Validate the private replay correlation value and build its Loki filter."""
+    if session is None:
+        return None
+    if not _IMPERSONATION_SESSION.fullmatch(session):
+        raise HTTPException(
+            status_code=422,
+            detail="impersonation_session must be an agent_id:session_id pair",
+        )
+    return {"impersonation_session": session}
+
+
 @router.get("/api/events", dependencies=[Depends(deny_isolated_result_read)])
 def get_events(
     category: Annotated[str | None, Query()] = None,
     event_name: Annotated[str | None, Query()] = None,
     agent_id: Annotated[int | None, Query()] = None,
     trace_id: Annotated[str | None, Query()] = None,
+    impersonation_session: Annotated[str | None, Query()] = None,
     machine: Annotated[str | None, Query()] = None,
     level: Annotated[str | None, Query()] = None,
     tier: Annotated[str | None, Query()] = None,
@@ -187,6 +202,7 @@ def get_events(
     request named none. An empty window returns `items: []`.
     """
     level = _validate(category=category, level=level, from_=from_, to=to, hours=hours)
+    attribute_filters = _impersonation_filters(impersonation_session)
     tiers = _parse_tiers(tier)
     effective_limit = limit if limit is not None else settings.display.events_default_limit
 
@@ -212,6 +228,7 @@ def get_events(
                 trace_id=trace_id.lower() if trace_id is not None else None,
                 machine=machine,
                 level=level,
+                attribute_filters=attribute_filters,
                 from_=window_from,
                 to=to,
             )
@@ -223,6 +240,7 @@ def get_events(
             trace_id=trace_id.lower() if trace_id is not None else None,
             machine=machine,
             level=level,
+            attribute_filters=attribute_filters,
             from_=window_from,
             to=to,
             limit=effective_limit,
@@ -240,6 +258,7 @@ def get_events(
     items = [
         EventRow(
             id=row["id"],
+            line_sha256=row["line_sha256"],
             ts=row["ts"],
             trace_id=row["trace_id"],
             span_id=row["span_id"],

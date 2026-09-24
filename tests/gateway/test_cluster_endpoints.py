@@ -39,7 +39,6 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     simulating the pause with a file. The fixture is about "the process agrees on
     one paused signal", not which storage (the old-signal sweep, PR5, retired the
     real flag file).
-
     The gateway middleware reads the posture through the async
     `gateway.app._cluster_is_paused` (pool + to_thread + TTL cache, audit
     P1-1), so the middleware's bound name is shimmed with an async stand-in;
@@ -2127,6 +2126,7 @@ def _row(
 ) -> dict[str, Any]:
     return {
         "id": 1,
+        "line_sha256": "a" * 64,
         "ts": datetime(2026, 8, 12, tzinfo=UTC),
         "agent_id": agent_id,
         "machine": "machine-1",
@@ -2151,8 +2151,8 @@ class TestAdminEvents:
         assert r.status_code == 200
         items = r.json()["items"]
         assert [i["payload"]["msg"] for i in items] == ["oldest", "newest"]
-        # wire shape: id / ts / agent_id / level / event / payload
-        assert set(items[0]) == {"id", "ts", "agent_id", "level", "event", "payload"}
+        # Wire shape includes the canonical-line identity shared by all event APIs.
+        assert set(items[0]) == {"id", "line_sha256", "ts", "agent_id", "level", "event", "payload"}
 
     def test_telemetry_and_log_categories_only(
         self, fake_admin_events: dict[str, list[dict[str, Any]]]

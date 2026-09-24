@@ -67,12 +67,62 @@ class TestScopeDerivationRules:
         assert len(expected) > 150  # the six-gap class lives in this set
 
     def test_session_forward_is_host_scope(self) -> None:
-        from shared.env_registry import session_forward_keys
+        from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV, session_forward_keys
 
-        expected = _aliases_with(scope=("host",))
+        expected = _aliases_with(scope=("host",)) - {MANIFEST_CERTIFICATION_SECRET_ENV}
         assert session_forward_keys() == expected
         # The F-s3-4 headline: per-agent identity never rides a daemon session.
         assert "AVA_AGENT_ID" not in session_forward_keys()
+
+    def test_manifest_certification_proof_is_not_forwarded_to_model_children(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The host finalizer receives its proof only through a dedicated projection."""
+        from shared import dotenv_boot
+        from shared.env_registry import (
+            MANIFEST_CERTIFICATION_FINALIZER_ENV,
+            MANIFEST_CERTIFICATION_SECRET_ENV,
+            child_env,
+            manifest_certification_secret_env,
+        )
+
+        monkeypatch.setattr(
+            dotenv_boot,
+            "manifest_certification_secret_from_env_file",
+            lambda: "host-finalizer-proof",
+        )
+        assert manifest_certification_secret_env() == {
+            MANIFEST_CERTIFICATION_SECRET_ENV: "host-finalizer-proof",
+            MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
+        }
+        for role in ("gateway", "runner", "agent"):
+            assert MANIFEST_CERTIFICATION_SECRET_ENV not in child_env(role, "posix")
+            assert MANIFEST_CERTIFICATION_FINALIZER_ENV not in child_env(role, "posix")
+
+    def test_finalizer_boot_ticket_retains_proof_from_its_unit_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The ticket is consumed before the finalizer loads its unit `.env`."""
+        from shared import dotenv_boot
+        from shared.env_registry import (
+            MANIFEST_CERTIFICATION_FINALIZER_ENV,
+            MANIFEST_CERTIFICATION_SECRET_ENV,
+        )
+
+        proof = "host-finalizer-proof"
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"{MANIFEST_CERTIFICATION_SECRET_ENV}={proof}\n")
+        monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
+        monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "mirror.env")
+        monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", lambda: None)
+        monkeypatch.setattr(dotenv_boot, "_manifest_finalizer_boot_authorized", False)
+        monkeypatch.delenv(MANIFEST_CERTIFICATION_SECRET_ENV, raising=False)
+        monkeypatch.setenv(MANIFEST_CERTIFICATION_FINALIZER_ENV, "1")
+
+        dotenv_boot.load_ava_env()
+
+        assert os.environ[MANIFEST_CERTIFICATION_SECRET_ENV] == proof
+        assert MANIFEST_CERTIFICATION_FINALIZER_ENV not in os.environ
 
     def test_session_forward_carries_the_ambient_passthroughs(self) -> None:
         from shared.env_registry import HOST_PASSTHROUGH_KEYS
