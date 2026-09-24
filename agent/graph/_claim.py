@@ -25,9 +25,9 @@ after_exec **always** routes to claim now (no longer only when halted=True),
 ensuring user chat in the middle of a multi-step loop can also be promptly
 claimed and merged into the next LLM round.
 
-Auto-compact logic now lives in `agent/hooks/compact.py:auto_compact_before_llm`
-as a builtin before_llm hook — claim no longer does maintenance work, only
-inbound dispatch.
+Automatic compaction runs in the LLM node via `agent/hooks/compact.py:auto_compact_for_llm`
+after the before_llm hooks commit. Claim still dispatches explicit compaction
+requests and circuit-breaker rescue.
 
 Deps injected via `runtime.context: AvaContext` (see agent/graph/_context.py).
 agent_id read from RunnableConfig (LangGraph checkpointer standard).

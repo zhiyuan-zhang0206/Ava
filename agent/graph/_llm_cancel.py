@@ -15,8 +15,6 @@ acyclic.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 from collections.abc import Coroutine
 from typing import Any
 
@@ -28,7 +26,7 @@ from shared.live_events import Cancelled
 from shared.log import logger
 
 from ._callbacks import RedisStreamHandler
-from ._interrupt import subscribe_interrupt
+from ._interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
 from ._llm import LlmGoto
 from ._llm_errors import LLMStreamError, _classify_and_log_provider_error, _record_consecutive_error
 
@@ -47,8 +45,8 @@ async def _race_stream_vs_cancel(
     consecutive-error tracker and provider-error classification applied).
 
     subscribe_interrupt is RAII: on node entry it watches for a durable
-    interrupt inbound (kind cancel/terminate) for this agent via the same
-    Redis pub/sub path as every inbound, with an initial SELECT. On context
+    interrupt inbound (kind cancel/terminate) by polling the durable queue,
+    with an initial SELECT. On context
     exit the watcher is cancelled. A missed signal is not lost — it stays a
     pending row the claim node dispatches next pass.
     """
@@ -56,37 +54,9 @@ async def _race_stream_vs_cancel(
         "_race_stream_vs_cancel requires ctx.event_publisher"
     )
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
-        stream_task = asyncio.create_task(stream_coro)
-        cancel_task = asyncio.create_task(cancel_event.wait())
         try:
-            done, _ = await asyncio.wait(
-                {stream_task, cancel_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-        except BaseException:
-            stream_task.cancel()
-            cancel_task.cancel()
-            # gather(return_exceptions=True) swallows task internal exceptions
-            # back into the result list; the only thing suppress here can catch
-            # is gather's own CancelledError (e.g. when the outer task is also
-            # cancelled). Real BaseExceptions like MemoryError / SystemExit
-            # are not swallowed — otherwise the outer raise would obscure the
-            # original root cause when re-raising.
-            with contextlib.suppress(asyncio.CancelledError):
-                await asyncio.gather(stream_task, cancel_task, return_exceptions=True)
-            raise
-
-        if cancel_task in done:
-            # cancel_event arrived first — abort streaming (same-tick race
-            # trade-off as the exec subprocess poll: cancel always wins)
-            stream_task.cancel()
-            # Narrow to CancelledError — a real exception in stream_task (e.g. a
-            # chunk decode bug) should propagate (through outer BaseException
-            # cleanup); don't widen to suppress(Exception) which would swallow
-            # it together with cancel.
-            with contextlib.suppress(asyncio.CancelledError):
-                await stream_task
-            cancel_task.cancel()
+            await interruptible_model(stream_coro, cancel_event)
+        except ModelInterruptedError:
             # Notify frontend the turn was aborted — the SSE Cancelled event
             # resets turn-active state and drops the still-streaming partial
             # bubble. emit() is non-blocking (best-effort live view).
@@ -115,12 +85,6 @@ async def _race_stream_vs_cancel(
             )
             return Command[LlmGoto](update={"halted": True}, goto=AFTER_EXEC)
 
-        # Stream completed normally (stream_task entered done first)
-        cancel_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cancel_task
-        try:
-            stream_task.result()  # Propagate any internal stream exception
         except LLMStreamError as e:
             _record_consecutive_error(str(agent_id), e)
             raise

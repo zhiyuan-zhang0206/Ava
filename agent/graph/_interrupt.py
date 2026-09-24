@@ -38,8 +38,10 @@ matching the pre-existing no-cancel behavior there.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
+import contextlib
+from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
+from typing import Any
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -64,6 +66,36 @@ class InterruptEvent(asyncio.Event):
         if not self.is_set():
             self.reason = reason
             super().set()
+
+
+class ModelInterruptedError(Exception):
+    """A model operation settled without a result; claim still owns the command."""
+
+
+async def interruptible_model[T](
+    operation: Coroutine[Any, Any, T],
+    event: asyncio.Event,
+) -> T:
+    """Race side-effect-free model work against a durable interruption.
+
+    The same-tick race belongs to cancellation. Wait for the owned operation
+    to settle before returning to claim; the host's external stop boundary
+    owns escalation if a provider refuses to unwind.
+    """
+    task = asyncio.create_task(operation)
+    interrupted = asyncio.create_task(event.wait())
+    try:
+        done, _ = await asyncio.wait({task, interrupted}, return_when=asyncio.FIRST_COMPLETED)
+        if interrupted in done:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            raise ModelInterruptedError
+        return task.result()
+    finally:
+        task.cancel()
+        interrupted.cancel()
+        await asyncio.gather(task, interrupted, return_exceptions=True)
 
 
 async def _watch_for_interrupt(

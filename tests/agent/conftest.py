@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import pytest
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._interrupt import InterruptEvent
 
@@ -27,11 +28,14 @@ def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
     event = InterruptEvent()
 
     @asynccontextmanager
-    async def fake_subscribe(_pool, _agent_id) -> AsyncGenerator[InterruptEvent]:
+    async def fake_subscribe(
+        _pool: AsyncConnectionPool | None, _agent_id: int
+    ) -> AsyncGenerator[InterruptEvent]:
         yield event
 
-    monkeypatch.setattr("agent.graph._llm_cancel.subscribe_interrupt", fake_subscribe)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("agent.graph._exec.subscribe_interrupt", fake_subscribe)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph._llm_cancel.subscribe_interrupt", fake_subscribe)
+    monkeypatch.setattr("agent.graph._exec.subscribe_interrupt", fake_subscribe)
+    monkeypatch.setattr("agent.hooks.compact.subscribe_interrupt", fake_subscribe)
     return event
 
 

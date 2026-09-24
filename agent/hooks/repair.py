@@ -51,12 +51,9 @@ Pairing is global by tool_call id: each preceding tool_use has exactly one kept
 ToolMessage anywhere later in the history. Physical adjacency is retained only
 for newly synthesized results; a non-adjacent kept real result remains valid.
 
-Residual gap, accepted: a force-compact whose threshold trips on the same turn
-that materializes a pending-write dangling runs its summarization LLM call
-(`compact.py:_force_compact`) over the pre-repair state and 400s — hooks in one
-pass all see the same pre-hook state. That needs hard-cancel mid-exec + stranded
-pending write + context crossing the force threshold on the same turn; the next
-turn's claim path is guarded by the boot-pass-repaired checkpoint shape.
+Automatic compaction runs inside the LLM node, after the repair hook update
+commits. Its summarization request therefore sees the repaired tool pairing,
+even when cancellation damage and the compaction threshold occur together.
 """
 
 from collections.abc import Sequence
