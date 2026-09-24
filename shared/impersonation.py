@@ -664,7 +664,10 @@ def fail_acceptance(lease_id: str, incarnation: RuntimeIncarnation, reason: str)
                 f"Impersonation takeover {lease['id']} was rolled back: {reason} "
                 "You remain the native agent; no external controller was admitted.",
                 Jsonb(
-                    caller_payload("system:impersonation", {"impersonation_id": str(lease["id"])})
+                    caller_payload(
+                        "system:impersonation",
+                        {"impersonation_id": str(lease["id"]), "note_tag": "impersonation"},
+                    )
                 ),
             ),
         )
