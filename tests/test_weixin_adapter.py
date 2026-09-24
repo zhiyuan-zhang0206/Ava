@@ -12,12 +12,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import stat
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 from typing import Any
 
 import httpx
 import pytest
 
+from services.im_bridge.adapters import weixin
 from services.im_bridge.adapters.weixin import (
     InboundMessage,
     WeixinAdapter,
@@ -98,6 +103,70 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Path:
 
 def _state_file(tmp_path: Any, name: str) -> Path:
     return tmp_path / "state" / "im_bridge" / name
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes are not Windows ACLs")
+def test_atomic_json_preserves_bytes_and_tightens_private_modes(tmp_path: Path) -> None:
+    path = tmp_path / "state" / "im_bridge" / "weixin_sync.json"
+    path.parent.mkdir(parents=True, mode=0o755)
+    path.parent.chmod(0o755)
+    payload = {"token": "café", "items": [1, 2]}
+
+    weixin._atomic_write_json(path, payload)
+
+    assert path.read_bytes() == json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert sorted(path.parent.iterdir()) == [path]
+
+
+def test_atomic_json_concurrent_writes_use_distinct_temps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "state" / "im_bridge" / "weixin_sync.json"
+    path.parent.mkdir(parents=True)
+    barrier = Barrier(2)
+    sources: list[Path] = []
+    original_replace = os.replace
+
+    def rendezvous(source: os.PathLike[str] | str, target: os.PathLike[str] | str) -> None:
+        sources.append(Path(source))
+        barrier.wait(timeout=5)
+        original_replace(source, target)
+
+    monkeypatch.setattr(os, "replace", rendezvous)
+    values = [{"token": "first" * 4096}, {"token": "second" * 4096}]
+
+    def write(value: dict[str, str]) -> None:
+        weixin._atomic_write_json(path, value)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(write, values))
+
+    assert json.loads(path.read_bytes()) in values
+    assert len(set(sources)) == 2
+    assert all(source.parent == path.parent for source in sources)
+    assert all(
+        source.name.startswith(f".{path.name}.") and source.suffix == ".tmp" for source in sources
+    )
+    assert sorted(path.parent.iterdir()) == [path]
+
+
+def test_atomic_json_failed_replace_keeps_old_content_and_cleans_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "state" / "im_bridge" / "weixin_sync.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"old")
+
+    def fail_replace(_source: os.PathLike[str] | str, _target: os.PathLike[str] | str) -> None:
+        raise OSError("replace failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replace failure"):
+        weixin._atomic_write_json(path, {"new": True})
+    assert path.read_bytes() == b"old"
+    assert sorted(path.parent.iterdir()) == [path]
 
 
 async def test_poll_forwards_message_and_caches_context_token(env: Any, tmp_path: Any) -> None:
