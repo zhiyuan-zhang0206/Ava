@@ -42,7 +42,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import history_dump
 from agent.graph import claim_node
-from agent.hooks.compact import auto_compact_before_llm, compose_summary_message
+from agent.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from shared.config import settings
@@ -371,7 +371,7 @@ async def test_auto_compact_injects_dump_note_after_summary(
     _patch_compact_config(monkeypatch)
     state = _over_threshold_state()
 
-    result = await auto_compact_before_llm(
+    result = await auto_compact_for_llm(
         state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
     )
     assert result is not None
@@ -396,7 +396,7 @@ async def test_auto_compact_no_note_when_disabled(monkeypatch: pytest.MonkeyPatc
     _patch_compact_config(monkeypatch)
     state = _over_threshold_state()
 
-    result = await auto_compact_before_llm(
+    result = await auto_compact_for_llm(
         state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
     )
     assert result is not None
@@ -418,7 +418,7 @@ async def test_auto_compact_proceeds_when_dump_fails(
     monkeypatch.setattr("agent.history_dump.workspace_dir", _boom)
     state = _over_threshold_state()
 
-    result = await auto_compact_before_llm(
+    result = await auto_compact_for_llm(
         state, _runtime_with_llm(_fake_llm(_LONG_SUMMARY)), _fake_config()
     )
     assert result is not None
