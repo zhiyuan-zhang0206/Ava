@@ -17,6 +17,115 @@ from shared.config._base import EnvSettings
 
 
 class GeneralSettings(EnvSettings):
+    impersonation_event_manifest_enabled: bool = Field(
+        default=False,
+        alias="AVA_IMPERSONATION_EVENT_MANIFEST_ENABLED",
+        description="Admit protocol-v1 manifests for new automatic impersonation leases. Disabled by default so schema and readers can roll out before every external controller process has been restarted; changing it never recasts an existing lease.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    impersonation_event_manifest_certification_secret: str = Field(
+        default="",
+        alias="AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET",
+        description="Host-local random secret projected only into the agent-host finalizer to certify manifests for leases on its machine. A one-use finalizer launch ticket retains it at config boot; every non-finalizer boot removes the `.env` value before Settings constructs. It is never returned by the gateway, readable through the runner database role, or forwarded to sessions or model execute_code children. Enabling manifest leases requires a distinct nonempty value on every participating agent-runner. Processes running as the same OS user may read the unit `.env`; this proof is not a security boundary against such code.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": False,
+            "sensitive": True,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    impersonation_event_reconcile_interval_seconds: int = Field(
+        default=60,
+        alias="AVA_IMPERSONATION_EVENT_RECONCILE_INTERVAL_SECONDS",
+        description="Seconds between retry passes for a pending event-delivery manifest. This bounds ordinary completion latency and read load only; it is never a completion timeout.",
+        gt=0,
+        le=3600,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    impersonation_event_page_budget: int = Field(
+        default=4,
+        alias="AVA_IMPERSONATION_EVENT_PAGE_BUDGET",
+        description="Maximum event-store pages one pending manifest reads per reconciliation pass. Four preserves fair scheduling; increasing it trades fairness for faster high-volume recovery.",
+        gt=0,
+        le=100,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    impersonation_event_manifest_seal_wait_seconds: int = Field(
+        default=10,
+        alias="AVA_IMPERSONATION_EVENT_MANIFEST_SEAL_WAIT_SECONDS",
+        description="Seconds an external detach waits before alerting about a still-live manifest participant. This instruments slow drains only; a live participant may seal later and is never converted to empty or complete by this wait.",
+        gt=0,
+        le=86400,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    impersonation_event_clock_skew_guard_seconds: int = Field(
+        default=30,
+        alias="AVA_IMPERSONATION_EVENT_CLOCK_SKEW_GUARD_SECONDS",
+        description="Timestamp margin for both manifest query envelopes and event-ingestion validation. Thirty seconds covers normal NTP skew; exact session tags, event ids, and digests still decide membership.",
+        ge=0,
+        le=3600,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    impersonation_event_delivery_alert_age_seconds: int = Field(
+        default=1800,
+        alias="AVA_IMPERSONATION_EVENT_DELIVERY_ALERT_AGE_SECONDS",
+        description="Age before a pending event-delivery manifest raises an operator alert. Eighteen hundred seconds covers finite collector retry plus indexing margin; it changes alerting only, never certification.",
+        gt=0,
+        le=604800,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    impersonation_event_manifest_max_items: int = Field(
+        default=100000,
+        alias="AVA_IMPERSONATION_EVENT_MANIFEST_MAX_ITEMS",
+        description="Maximum eligible event records one protocol-v1 manifest may capture. 100000 is about 1280 times the measured 78-event session maximum; hitting it alerts and leaves delivery pending rather than dropping a tail.",
+        gt=0,
+        le=1000000,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     ava_home: Path = Field(
         default=Path.home() / ".ava",
         alias="AVA_HOME",

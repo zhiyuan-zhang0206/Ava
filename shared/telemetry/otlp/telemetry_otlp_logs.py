@@ -19,11 +19,10 @@ the function so flag-off processes never pay for the SDK.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
-from shared.telemetry import Event
+from shared.telemetry import Event, event_line
 
 # Log-record severity mapping — OTel SeverityNumber values (plain ints; the
 # enum is constructed at the record site, see _emit_log_record).
@@ -63,26 +62,7 @@ def _emit_log_record(logs: Any, event: Event) -> None:
         attributes["agent_id"] = event.agent_id
     if event.target_agent_id is not None:
         attributes["target_agent_id"] = event.target_agent_id
-    body = json.dumps(
-        {
-            "ts": event.ts.isoformat(),
-            "trace_id": event.trace_id,
-            "span_id": event.span_id,
-            "agent_id": event.agent_id,
-            "machine": event.machine,
-            "cluster": event.cluster,
-            "process": event.process,
-            "category": event.category,
-            "event_name": event.event_name,
-            "level": event.level,
-            "source": event.source,
-            "target_agent_id": event.target_agent_id,
-            "attributes": event.attributes,
-        },
-        default=str,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
+    body = event_line(event)
     # Trace correlation via `context` (the non-deprecated LogRecord
     # constructor): a NonRecordingSpan carries the captured trace/span ids
     # into the OTLP LogRecord fields. No ids -> no context -> trace_id 0

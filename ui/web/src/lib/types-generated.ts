@@ -3117,6 +3117,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/alerts/impersonation-event-retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Impersonation Event Retention
+         * @description Operator panel rows for frozen manifests that crossed Loki retention.
+         *
+         *     The query is machine-scoped because the runner that owns the manifest
+         *     detects its retention floor. The normal alerts list already exposes the
+         *     accompanying alert; this endpoint supplies the lease/floor/missing-count
+         *     evidence needed to investigate it without permitting a local mirror to
+         *     clear the condition.
+         */
+        get: operations["list_impersonation_event_retention_api_alerts_impersonation_event_retention_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -3981,6 +4007,8 @@ export interface components {
         AgentEventRow: {
             /** Id */
             id: number;
+            /** Line Sha256 */
+            line_sha256: string;
             /**
              * Ts
              * Format: date-time
@@ -5306,6 +5334,8 @@ export interface components {
         EventRow: {
             /** Id */
             id: number;
+            /** Line Sha256 */
+            line_sha256: string;
             /**
              * Ts
              * Format: date-time
@@ -5601,6 +5631,32 @@ export interface components {
             anchor_item_id?: string | null;
             /** Seq */
             seq?: number | null;
+        };
+        /**
+         * ImpersonationRetentionLossRow
+         * @description One incomplete manifest whose required Loki envelope has expired.
+         */
+        ImpersonationRetentionLossRow: {
+            /** Lease Id */
+            lease_id: string;
+            /** Agent Id */
+            agent_id: number;
+            /** Session Id */
+            session_id: number;
+            /**
+             * Envelope Floor At
+             * Format: date-time
+             */
+            envelope_floor_at: string;
+            /** Retention Horizon At */
+            retention_horizon_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Missing Item Count */
+            missing_item_count: number;
         };
         /**
          * InspectMetricsMetadata
@@ -12227,6 +12283,7 @@ export interface operations {
                 event_name?: string | null;
                 agent_id?: number | null;
                 trace_id?: string | null;
+                impersonation_session?: string | null;
                 machine?: string | null;
                 level?: string | null;
                 tier?: string | null;
@@ -12544,6 +12601,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_impersonation_event_retention_api_alerts_impersonation_event_retention_get: {
+        parameters: {
+            query: {
+                machine: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImpersonationRetentionLossRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -207,13 +207,17 @@ def _launch_roster(roles: MachineRoles, skip: set[str]) -> tuple[ServiceSpec, ..
 
 
 def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
-    """Profile and database projection required by one service session."""
+    """Profile, database, and finalizer-only projection for one service."""
     extra: dict[str, str] = {}
     marker = profile_marker(spec)
     if marker is not None:
         extra["AVA_PROCESS_PROFILE"] = marker
     if marker == "agent":
         extra["AVA_DB_URL"] = runner_db_url_projection(settings.data_plane.db_url)
+    if spec.session == "agent-host":
+        from shared.env_registry import manifest_certification_secret_env
+
+        extra.update(manifest_certification_secret_env())
     return extra
 
 

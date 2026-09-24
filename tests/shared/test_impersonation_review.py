@@ -15,6 +15,7 @@ from ava import _impersonation_events as recorded
 from shared import impersonation as leases
 from shared import impersonation_history as history
 from shared import impersonation_sessions as sessions
+from shared import telemetry
 from shared.chat_delivery import insert_chat_inbound_once
 from shared.db import create_agent
 from shared.machine import machine_name
@@ -79,19 +80,22 @@ def peer_events(
     """Capture the real chat emitter's row shape, replacing only its event sink."""
     events: list[dict[str, Any]] = []
 
-    def capture(category: str, event_name: str, **fields: Any) -> None:
-        if category == "audit" and event_name == "send_message":
+    def capture(event: telemetry.Event) -> None:
+        if event.category == "audit" and event.event_name == "send_message":
             events.append(
                 {
                     "id": len(events) + 1,
                     "ts": datetime.now(UTC).isoformat(),
-                    "category": category,
-                    "event_name": event_name,
-                    **fields,
+                    "category": event.category,
+                    "event_name": event.event_name,
+                    "agent_id": event.agent_id,
+                    "source": event.source,
+                    "target_agent_id": event.target_agent_id,
+                    "attributes": event.attributes,
                 }
             )
 
-    monkeypatch.setattr("shared.audit_events.telemetry.emit", capture)
+    monkeypatch.setattr("shared.audit_events.telemetry.emit_prepared", capture)
     recipient = create_agent(db_conn)
     incoming_sender = create_agent(db_conn)
     db_conn.commit()
