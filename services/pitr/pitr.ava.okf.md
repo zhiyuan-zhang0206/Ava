@@ -20,7 +20,7 @@ mandatory.
 ## Entry Points
 
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
-- `services/pitr/activation_state.py` — strict schema-v3 atomic activation record; CAS transitions persist config digests, restart handoffs, exact WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`
+- `services/pitr/activation_state.py` — strict schema-v4 atomic activation record; CAS transitions persist config digests, restart handoffs, exact WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 - `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
 - `services/pitr/retention_planner.py` — the default-off local dry-run planner (see *Remote retention* below)

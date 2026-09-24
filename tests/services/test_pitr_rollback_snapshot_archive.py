@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from services.pitr.checksums import CRC32C, ObjectChecksum, digest_bytes
 from services.pitr.object_store import RemoteObjectAck
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.rollback_snapshot_archive import (
+    RollbackSnapshotArchive,
     SnapshotArchiveNotArchivedError,
     SnapshotArchiveNotVerifiedError,
     archive_rollback_snapshot,
@@ -20,6 +22,85 @@ from services.pitr.rollback_snapshot_archive import (
 
 _FAKE_PIN_TOKEN = str(42)
 _REOBSERVED_PIN_TOKEN = str(43)
+
+
+def _archive_record() -> RollbackSnapshotArchive:
+    return RollbackSnapshotArchive(
+        schema_version=1,
+        table="agent_state_backfill_snapshot",
+        object_name="rollback-snapshots/object.enc",
+        pin_token=_FAKE_PIN_TOKEN,
+        size=1,
+        checksum_algo=CRC32C,
+        checksum_value="AAAAAA==",
+        metadata=(("key", "value"),),
+        source_sha256="0" * 64,
+        source_size=1,
+        archived_at="2026-09-25T00:00:00+00:00",
+    )
+
+
+def test_archive_json_roundtrip_preserves_canonical_bytes_and_optional_null() -> None:
+    record = _archive_record()
+    payload = record.to_json()
+    assert payload == (
+        '{"archived_at":"2026-09-25T00:00:00+00:00","checksum_algo":"crc32c",'
+        '"checksum_value":"AAAAAA==","metadata":[["key","value"]],'
+        '"object_name":"rollback-snapshots/object.enc","pin_token":"42",'
+        '"schema_version":1,"size":1,"source_sha256":"' + "0" * 64 + '",'
+        '"source_size":1,"table":"agent_state_backfill_snapshot","verified_at":null}'
+    )
+    assert RollbackSnapshotArchive.from_json(payload) == record
+
+
+def test_archive_json_rejects_non_object() -> None:
+    with pytest.raises(TypeError, match=r"^rollback snapshot archive must be an object$"):
+        RollbackSnapshotArchive.from_json("[]")
+
+
+@pytest.mark.parametrize(
+    ("changes", "removed", "error_type", "message"),
+    [
+        (
+            {"schema_version": True},
+            None,
+            TypeError,
+            "rollback snapshot archive field 'schema_version' must be an integer",
+        ),
+        (
+            {"table": None},
+            None,
+            TypeError,
+            "rollback snapshot archive field 'table' must be a string",
+        ),
+        (
+            {"verified_at": False},
+            None,
+            TypeError,
+            "rollback snapshot archive field 'verified_at' must be a string or null",
+        ),
+        ({"metadata": {}}, None, TypeError, "rollback snapshot archive metadata is invalid"),
+        (
+            {"metadata": [["key", 1]]},
+            None,
+            TypeError,
+            "rollback snapshot archive metadata entry is invalid",
+        ),
+        ({"extra": 1}, None, ValueError, "rollback snapshot archive fields do not match schema"),
+        ({}, "size", ValueError, "rollback snapshot archive fields do not match schema"),
+    ],
+)
+def test_archive_json_preserves_first_field_error(
+    changes: dict[str, object], removed: str | None, error_type: type[Exception], message: str
+) -> None:
+    raw = json.loads(_archive_record().to_json())
+    raw.update(changes)
+    if removed is not None:
+        raw.pop(removed)
+    with pytest.raises(error_type) as error:
+        RollbackSnapshotArchive.from_json(json.dumps(raw))
+    assert type(error.value) is error_type
+    assert str(error.value) == message
 
 
 class _Store:

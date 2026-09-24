@@ -20,6 +20,7 @@ from services.pitr.object_store import ObjectStore, RemoteObjectAck
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from shared import db
+from shared.api_contracts import strict_decode
 from shared.pg_tools import pg_tool, throwaway_postgres
 from shared.private_storage import write_private_bytes
 from shared.proc import run_bounded
@@ -85,11 +86,15 @@ class RollbackSnapshotArchive:
     @classmethod
     def from_json(cls, value: str) -> RollbackSnapshotArchive:
         parsed: object = json.loads(value)
-        if not isinstance(parsed, dict):
-            raise TypeError("rollback snapshot archive must be an object")
-        raw = cast(dict[str, object], parsed)
-        if set(raw) != set(cls.__dataclass_fields__):
-            raise ValueError("rollback snapshot archive fields do not match schema")
+        raw = strict_decode.object_fields(
+            parsed, error_type=TypeError, message="rollback snapshot archive must be an object"
+        )
+        strict_decode.exact_fields(
+            raw,
+            cls.__dataclass_fields__,
+            error_type=ValueError,
+            message="rollback snapshot archive fields do not match schema",
+        )
         return cls(
             schema_version=_record_int(raw, "schema_version"),
             table=_record_string(raw, "table"),
@@ -347,24 +352,30 @@ def _parse_timestamp(value: str) -> None:
 
 
 def _record_string(raw: Mapping[str, object], name: str) -> str:
-    value = raw[name]
-    if not isinstance(value, str):
-        raise TypeError(f"rollback snapshot archive field {name!r} must be a string")
-    return value
+    return strict_decode.strict_string(
+        raw,
+        name,
+        error_type=TypeError,
+        message_template="rollback snapshot archive field {name!r} must be a string",
+    )
 
 
 def _record_optional_string(raw: Mapping[str, object], name: str) -> str | None:
-    value = raw[name]
-    if value is not None and not isinstance(value, str):
-        raise TypeError(f"rollback snapshot archive field {name!r} must be a string or null")
-    return value
+    return strict_decode.optional_string(
+        raw,
+        name,
+        error_type=TypeError,
+        message_template="rollback snapshot archive field {name!r} must be a string or null",
+    )
 
 
 def _record_int(raw: Mapping[str, object], name: str) -> int:
-    value = raw[name]
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise TypeError(f"rollback snapshot archive field {name!r} must be an integer")
-    return value
+    return strict_decode.strict_int(
+        raw,
+        name,
+        error_type=TypeError,
+        message_template="rollback snapshot archive field {name!r} must be an integer",
+    )
 
 
 def _record_metadata(raw: Mapping[str, object]) -> tuple[tuple[str, str], ...]:

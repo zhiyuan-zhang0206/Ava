@@ -48,6 +48,14 @@ class TestScreenCaptureStatus:
         }
         assert ScreenCaptureStatus.from_json(status.to_json()) == status
 
+    def test_json_bytes_and_non_object_decode(self):
+        status = ScreenCaptureStatus(ScreenCaptureState.NO_GRANT, "permission missing")
+        assert status.to_json().encode() == (
+            b'{"state": "no_grant", "diagnostic": "permission missing"}'
+        )
+        with pytest.raises(TypeError):
+            ScreenCaptureStatus.from_json("[]")
+
     def test_from_file_returns_none_when_absent(self, tmp_path: Path):
         assert ScreenCaptureStatus.from_file(tmp_path / "nonexistent.json") is None
 
