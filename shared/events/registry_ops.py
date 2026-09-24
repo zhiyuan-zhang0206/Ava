@@ -4,6 +4,7 @@ from shared.events.payloads import (
     IdleWake,
     LlmRetry,
     PauseLifecycleWait,
+    PauseOrphanClaimSettled,
     SilentIdle,
     UpdateStragglerReaped,
     UpdateStragglerReapSettled,
@@ -59,6 +60,12 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "pause_lifecycle_wait",
         "preparation bounded-waited in-flight work it did not author",
         payload=PauseLifecycleWait,
+        tier="anomaly",
+    ),
+    "pause_orphan_claim_settled": _telemetry(
+        "pause_orphan_claim_settled",
+        "preparation settled an ordinary claim without a live runtime",
+        payload=PauseOrphanClaimSettled,
         tier="anomaly",
     ),
     # straggler reap (task #4016): the drain truncates + releases an un-landed

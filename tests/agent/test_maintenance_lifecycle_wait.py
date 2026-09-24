@@ -4,8 +4,8 @@ Three states, per the acceptance criteria: work that resolves during the wait
 lets preparation proceed; one that outlives the bound aborts with the wait
 result in the message and an ``exceeded`` event; and a collision-free
 preparation is the unchanged pre-#3591 path. Class separation (maintenance-
-authored commands refuse without waiting; ordinary lifecycle commands and
-claimed ordinary work on a parked agent wait) and the clean retry boundary (a
+authored commands refuse without waiting; ordinary lifecycle commands wait;
+orphaned ordinary claims settle) and the clean retry boundary (a
 collision freezes nothing) are asserted alongside.
 """
 
@@ -22,6 +22,7 @@ from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
 from ops import agent_pause
 from ops.agent_pause_probe import HostIdentity
 from shared import maintenance, maintenance_cohort, pause_owner, telemetry
+from shared.config import settings
 from shared.db import insert_inbound_message
 from shared.machine import machine_name
 from shared.maintenance_state import MaintenanceHold
@@ -123,6 +124,8 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
 ) -> None:
     owner = uuid4()
     agent = await _live_member(db_conn, aops_pool, owner)
+    chat = insert_inbound_message(db_conn, agent, "in flight", "user")
+    _claim(db_conn, chat)
     command = insert_inbound_message(db_conn, agent, "", "agent:6090", kind="terminate")
     db_conn.commit()
     _as_live_host(monkeypatch, owner)
@@ -154,6 +157,9 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
     assert attributes["outcome"] == "resolved"
     assert attributes["agents"] == [agent]
     assert 0 < attributes["waited_s"] < 5.0
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (chat,)
+    ).fetchone() == ("claimed",)
 
 
 async def test_prepare_aborts_when_collision_outlives_the_bound(
@@ -241,30 +247,44 @@ def test_parked_agent_lifecycle_command_is_waitable(
     assert raised.value.agent_ids == (agent,)
 
 
-def test_parked_claimed_ordinary_work_is_waitable(
+@pytest.mark.parametrize("age_s,expected", [(10, "pending"), (601, "done")])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_parked_claimed_ordinary_work_settles(
     db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    age_s: int,
+    expected: str,
+    legacy: bool,
 ) -> None:
     agent = _agent(db_conn)
     message = insert_inbound_message(db_conn, agent, "hello", "user")
     _claim(db_conn, message)
+    db_conn.execute(
+        "UPDATE inbound_messages SET created_at=now()-make_interval(secs => %s), "
+        "claimed_at=CASE WHEN %s THEN NULL ELSE now()-make_interval(secs => %s) END "
+        "WHERE id=%s",
+        (age_s, legacy, age_s, message),
+    )
     db_conn.commit()
+    monkeypatch.setattr(settings.daemon, "delivery_watchdog_stale_claimed_threshold_seconds", 600)
+    events = _events(monkeypatch)
     pause_owner.begin_maintenance("move", WHEN)
 
-    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as raised:
-        maintenance_cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
-        )
-    assert raised.value.waitable
-    assert raised.value.agent_ids == (agent,)
-    assert "unresolved claimed work" in str(raised.value)
+    hold = maintenance_cohort.prepare(
+        db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+    )
+    assert hold.phase == "draining" and hold.parked == (agent,) and hold.commands == {}
+    assert db_conn.execute(
+        "SELECT status,applied_at FROM inbound_messages WHERE id=%s", (message,)
+    ).fetchone() == (expected, None)
+    assert len(events) == 1
+    assert events[0]["event_name"] == "pause_orphan_claim_settled"
+    attributes = events[0]["attributes"]
+    assert attributes["agent"] == agent and attributes["message_id"] == message
+    assert attributes["outcome"] == expected and attributes["age_s"] >= age_s
 
-    # The collision ran before the capture: the retry starts from the clean
-    # preparing boundary, not from a partial cohort.
-    hold = maintenance.require_operation("move", WHEN).maintenance
-    assert hold is not None and hold.phase == "preparing" and hold.commands == {}
 
-
-def test_parked_claimed_work_resolving_during_wait_prepares(
+def test_parked_claimed_work_prepares_without_wait(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -273,40 +293,29 @@ def test_parked_claimed_work_resolving_during_wait_prepares(
     _claim(db_conn, message)
     db_conn.commit()
     _as_live_host(monkeypatch, uuid4())
-    monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 5.0)
-    monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 0.0)
     events = _events(monkeypatch)
 
-    real_prepare = maintenance_cohort.prepare
-
-    def resolving_prepare(*args: Any, **kwargs: Any) -> maintenance_cohort.MaintenanceHold:
-        try:
-            return real_prepare(*args, **kwargs)
-        except maintenance_cohort.LifecycleCollisionError:
-            db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (message,))
-            db_conn.commit()
-            raise
-
-    monkeypatch.setattr(maintenance_cohort, "prepare", resolving_prepare)
     agent_pause._prepare("move", WHEN)
 
     hold = agent_pause._hold("move", WHEN)
     assert hold.phase == "draining"
     assert set(hold.commands) == set()
     assert hold.parked == (agent,)
-    assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
-    attributes = events[0]["attributes"]
-    assert attributes["outcome"] == "resolved"
-    assert attributes["agents"] == [agent]
-    assert 0 < attributes["waited_s"] < 5.0
+    assert [event["event_name"] for event in events] == ["pause_orphan_claim_settled"]
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (message,)
+    ).fetchone() == ("pending",)
 
 
-def test_parked_claimed_work_outliving_the_bound_aborts(
+@pytest.mark.parametrize("kind", ["restart", "terminate"])
+def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
+    kind: str,
 ) -> None:
     agent = _agent(db_conn)
-    message = insert_inbound_message(db_conn, agent, "hello", "user")
+    message = insert_inbound_message(db_conn, agent, "", "user", kind=kind)
     _claim(db_conn, message)
     db_conn.commit()
     _as_live_host(monkeypatch, uuid4())
@@ -317,7 +326,7 @@ def test_parked_claimed_work_outliving_the_bound_aborts(
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
         agent_pause._prepare("move", WHEN)
     assert not isinstance(raised.value, maintenance_cohort.LifecycleCollisionError)
-    assert "unresolved claimed work" in str(raised.value)
+    assert "unfinished lifecycle command" in str(raised.value)
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
     hold = agent_pause._hold("move", WHEN)
@@ -325,6 +334,58 @@ def test_parked_claimed_work_outliving_the_bound_aborts(
     assert [event["attributes"]["outcome"] for event in events] == ["exceeded"]
     assert events[0]["attributes"]["agents"] == [agent]
     assert events[0]["attributes"]["waited_s"] > 0
+
+
+def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = _agent(db_conn)
+    ordinary = insert_inbound_message(db_conn, agent, "orphan", "user")
+    authored = insert_inbound_message(
+        db_conn, agent, "maintenance", "system:maintenance", payload={"maintenance": {}}
+    )
+    _claim(db_conn, ordinary)
+    _claim(db_conn, authored)
+    db_conn.commit()
+    _as_live_host(monkeypatch, uuid4())
+    events = _events(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="refusing without a wait"):
+        agent_pause._prepare("move", WHEN)
+    assert db_conn.execute(
+        "SELECT id,status FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent,)
+    ).fetchall() == [(ordinary, "claimed"), (authored, "claimed")]
+    assert [event["event_name"] for event in events] == ["pause_lifecycle_wait"]
+    assert events[0]["attributes"]["outcome"] == "refused"
+    hold = agent_pause._hold("move", WHEN)
+    assert hold.phase == "preparing" and hold.parked == ()
+
+
+def test_orphan_cas_miss_accepts_concurrent_settlement(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = _agent(db_conn)
+    message = insert_inbound_message(db_conn, agent, "orphan", "user")
+    _claim(db_conn, message)
+    db_conn.commit()
+    read_claims = maintenance_cohort.orphaned_claims
+
+    def already_settled(conn: psycopg.Connection[Any], **kwargs: Any) -> Any:
+        rows = read_claims(conn, **kwargs)
+        conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (message,))
+        return rows
+
+    monkeypatch.setattr(maintenance_cohort, "orphaned_claims", already_settled)
+    events = _events(monkeypatch)
+    pause_owner.begin_maintenance("move", WHEN)
+    hold = maintenance_cohort.prepare(
+        db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+    )
+    assert hold.phase == "draining" and hold.parked == (agent,)
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (message,)
+    ).fetchone() == ("done",)
+    assert events == []
 
 
 def test_parked_maintenance_command_refuses_without_wait(

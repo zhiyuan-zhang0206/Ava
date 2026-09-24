@@ -256,6 +256,28 @@ def _record_health_baseline(*, target_sha: str | None) -> None:
         print(f"⚠ pre-rollout health baseline failed: {reason}", file=sys.stderr)
 
 
+def _report_pause_orphans() -> None:
+    """Warn about runtime-less claimants without gating or mutating the rollout."""
+    try:
+        from shared import maintenance_cohort
+        from shared.db import connect
+
+        with connect() as conn, conn.transaction():
+            conn.execute("SET TRANSACTION READ ONLY")
+            conn.execute("SET LOCAL statement_timeout='5s'")
+            rows = maintenance_cohort.orphaned_claims(conn)
+        if rows:
+            examples = ", ".join(f"{row.agent_id}:{row.message_id}" for row in rows[:10])
+            suffix = ", ..." if len(rows) > 10 else ""
+            print(
+                f"pause-prepare orphans: {len(rows)} claimed ordinary row(s) on "
+                f"runtime-less agents ({examples}{suffix})"
+            )
+    except Exception as exc:  # fail-fast-ok: warn-only preflight must never abort a rollout
+        reason = " ".join(f"{type(exc).__name__}: {exc}".splitlines())
+        print(f"pause-prepare orphan scan unavailable: {reason}", file=sys.stderr)
+
+
 def _persist_cluster_pin(target_sha: str, *, origin: str, advance_known_good: bool = False) -> None:
     """Record `target_sha` as the cluster's standing pin (`cluster_target_sha`)
     once the gateway's local update reaches it.

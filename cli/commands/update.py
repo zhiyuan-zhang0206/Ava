@@ -142,6 +142,7 @@ from cli.commands._update_orchestration import (
     _persist_cluster_pin,
     _phase_b_targets,
     _record_health_baseline,
+    _report_pause_orphans,
 )
 from cli.commands._update_orchestration import (
     _resolve_fanout_targets as _resolve_fanout_targets,
@@ -510,6 +511,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         _begin_update_record(target_sha, origin=origin, rollout_log=rollout_log)
         # S2: record the pre-rollout health baseline at the head of the rollout log.
         _record_health_baseline(target_sha=target_sha)
+        _report_pause_orphans()
 
     # A stale stopped marker is reconciled for safety, but never cleared until
     # after a commit decision: prepare itself must not mutate rollout state.
