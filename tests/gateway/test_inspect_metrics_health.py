@@ -1,6 +1,6 @@
 """Coverage-note routing for the inspector metrics read model (task #3869).
 
-Expected limits (historical coverage, compact boundary, legacy archive
+Expected limits (historical coverage, legacy archive
 precision) log — cooldown-deduped — and never open an instance. An unexpected
 limit (``missing_turn_durations`` on a window inside the collection era) opens
 one alerts-store episode through the standard writers; both its edges derive
