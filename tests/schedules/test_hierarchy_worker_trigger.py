@@ -4,9 +4,10 @@ The event trigger is the worker's primary path: each compact boundary
 enqueues its own build job (`shared/agents/history/checkpoint_cleanup.py`),
 and `runner.run_tick` consumes — claim, drain, done. These pin the consuming
 side: the tick's drain/scan cadence (the moved `run_tick` tests), the
-claim-time semantics (silent baseline for a never-tracked agent, the
-first-build backfill), the master switch, and the §4 guardrails (the 24h
-budget breaker, the halt marker, the done-time signals on the child's side).
+first-sight semantics (the silent-baseline retirement in both orderings, the
+first-build backfill, the marker guards), the master switch, and the §4
+guardrails (the 24h budget breaker, the halt marker, the done-time signals on
+the child's side).
 The scan's enqueue decisions and the child-side outcome live in
 `tests/services/test_hierarchy_worker.py`; the enqueue SQL itself in
 `tests/test_checkpoint_cleanup.py`.
@@ -21,7 +22,7 @@ import pytest
 
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import runner
-from services.hierarchy_worker.scan import ScanOutcome, scan
+from services.hierarchy_worker.scan import ScanOutcome, _has_clean_baseline, first_build, scan
 from shared.agents.history.hierarchy.pipeline import MaterializedTree
 from shared.config import settings
 from shared.events.contract import telemetry_events
@@ -249,6 +250,57 @@ def test_claim_leaves_include_tail_false_after_a_build(db_conn: psycopg.Connecti
     assert claimed is not None and claimed.id == job_id and claimed.include_tail is False
 
 
+def test_first_sight_retires_the_job_the_same_way_in_both_orderings(
+    db_conn: psycopg.Connection,
+) -> None:
+    """F1 (review #3242): a first-sight agent's live pending job is retired
+    with the silent-baseline marker whether the reconcile scan runs first (its
+    baseline pass retires it in the same transaction) or the claim does (the
+    fallback covers the window before the scan) — nothing builds for
+    pre-existing history in either ordering."""
+    scan_first, claim_first = 880_110, 880_111
+
+    _boundary(db_conn, scan_first, 1)
+    scan_job = _pending_job(db_conn, scan_first, cid(1))
+    assert scan(db_conn).baselined == 1
+    assert runner.claim_next(db_conn) is None  # retired in the scan's pass
+    row = db_conn.execute(
+        "SELECT status, error FROM hierarchy_jobs WHERE id = %s", (scan_job,)
+    ).fetchone()
+    assert row is not None and row[0] == "done" and "silent baseline" in str(row[1])
+
+    _boundary(db_conn, claim_first, 1)
+    claim_job = _pending_job(db_conn, claim_first, cid(1))
+    assert runner.claim_next(db_conn) is None  # retired by the claim's fallback
+    row = db_conn.execute(
+        "SELECT status, error FROM hierarchy_jobs WHERE id = %s", (claim_job,)
+    ).fetchone()
+    assert row is not None and row[0] == "done" and "silent baseline" in str(row[1])
+
+
+def test_marker_rows_are_not_builds_for_first_build_or_tail(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The `error IS NULL` guards (task #4674): a marker row never counts as
+    a completed build — the agent stays in first-build mode (the claim keeps
+    backfilling include_tail) and the tail channel stays locked behind a clean
+    baseline (review #3242 nit 1)."""
+    agent_id = 880_112
+    _state(db_conn, agent_id, cid(1))
+    db_conn.execute(
+        "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail,"
+        " failed, skipped, error) VALUES (%s, 'compact', %s, 'done', false, 0, 0, %s)",
+        (agent_id, cid(1), "silent baseline: pre-existing history is not built (task #3704)"),
+    )
+    db_conn.commit()
+
+    assert first_build(db_conn, agent_id) is True
+    assert _has_clean_baseline(db_conn, agent_id) is False
+    job_id = _pending_job(db_conn, agent_id, cid(1))
+    claimed = runner.claim_next(db_conn)
+    assert claimed is not None and claimed.id == job_id and claimed.include_tail is True
+
+
 # ---- §4: the 24h budget breaker ----
 
 
@@ -278,6 +330,18 @@ def test_regen_budget_trips_on_the_edge_and_stops_claiming(
     # The edge: a second reading under the unreset trip emits nothing new.
     assert runner._regen_budget_check(db_conn) is True
     assert len([e for e in emitted if e[0] == "hierarchy_regen_budget_tripped"]) == 1
+
+
+def test_budget_at_exactly_the_budget_does_not_trip(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Equal-to-budget is not a crossing (task #4674 §4, review #3242 nit 3):
+    the trip is strict `>`."""
+    monkeypatch.setattr(settings.daemon, "hierarchy_regen_daily_budget_nodes", 4)
+    _hot_row(db_conn, 880_115, 4)
+
+    assert runner._regen_budget_check(db_conn) is False
+    assert db_conn.execute("SELECT count(*) FROM hierarchy_worker_breaker").fetchone() == (0,)
 
 
 def test_run_tick_stops_while_the_breaker_is_tripped(monkeypatch: pytest.MonkeyPatch) -> None:

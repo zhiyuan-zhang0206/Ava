@@ -36,7 +36,7 @@ from pathlib import Path
 import psycopg
 from psycopg import Connection
 
-from services.hierarchy_worker.scan import KIND_COMPACT, first_build, scan
+from services.hierarchy_worker.scan import KIND_COMPACT, SILENT_BASELINE_MARKER, first_build, scan
 from shared import telemetry
 from shared.config import settings
 from shared.db import connect
@@ -159,16 +159,21 @@ def _baseline_untracked(conn: Connection, job_id: int, agent_id: int, boundary: 
     `done` with the marker text — a done row carrying `error` is never counted
     as a build (`scan.first_build` / `scan._has_clean_baseline`).
     """
-    conn.execute(
-        "INSERT INTO hierarchy_worker_state (agent_id, last_processed_boundary)"
-        " VALUES (%s, %s) ON CONFLICT (agent_id) DO NOTHING",
-        (agent_id, boundary),
-    )
-    conn.execute(
-        "UPDATE hierarchy_jobs SET status = 'done', finished_at = now(), error = %s"
-        " WHERE id = %s AND status = 'running'",
-        ("silent baseline: pre-existing history is not built (task #3704)", job_id),
-    )
+    # One transaction: the state row and the retirement land together — a
+    # crash between them would leave a tracked agent whose claimed job the
+    # stale sweep later recovers into a retry that builds pre-existing
+    # history as a first build (review #3242 nit 4).
+    with conn.transaction():
+        conn.execute(
+            "INSERT INTO hierarchy_worker_state (agent_id, last_processed_boundary)"
+            " VALUES (%s, %s) ON CONFLICT (agent_id) DO NOTHING",
+            (agent_id, boundary),
+        )
+        conn.execute(
+            "UPDATE hierarchy_jobs SET status = 'done', finished_at = now(), error = %s"
+            " WHERE id = %s AND status = 'running'",
+            (SILENT_BASELINE_MARKER, job_id),
+        )
     logger.info(
         "hierarchy job {job} baselined silently for agent {agent} (boundary {boundary})",
         job=job_id,
@@ -179,7 +184,9 @@ def _baseline_untracked(conn: Connection, job_id: int, agent_id: int, boundary: 
 
 def claim_next(conn: Connection) -> ClaimedJob | None:
     """Claim the oldest pending job, atomically; never-seen compact jobs are
-    silent-baselined instead of built (task #4674).
+    silent-baselined instead of built (task #4674) — the scan's first-sight
+    pass normally retires those first, so this claim-side branch covers the
+    window before a scan has run.
 
     The event trigger enqueues a compact job for every boundary with
     `include_tail=false` — it cannot know whether the agent is still in
@@ -192,23 +199,30 @@ def claim_next(conn: Connection) -> ClaimedJob | None:
     passing do not stop the drain.
     """
     while True:
-        row = conn.execute(
-            "UPDATE hierarchy_jobs SET status = 'running', started_at = now()"
-            " WHERE id = (SELECT id FROM hierarchy_jobs WHERE status = 'pending'"
-            "             ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)"
-            " RETURNING id, agent_id, include_tail, kind, trigger_boundary"
-        ).fetchone()
-        if row is None:
-            return None
-        job_id, agent_id = int(row[0]), int(row[1])
-        include_tail, kind, boundary = bool(row[2]), str(row[3]), str(row[4])
-        if kind == KIND_COMPACT and not _tracked(conn, agent_id):
-            _baseline_untracked(conn, job_id, agent_id, boundary)
-            continue
-        if not include_tail and first_build(conn, agent_id):
-            conn.execute("UPDATE hierarchy_jobs SET include_tail = true WHERE id = %s", (job_id,))
-            include_tail = True
-        return ClaimedJob(id=job_id, agent_id=agent_id, include_tail=include_tail)
+        # The claim and its decision commit together: a crash must never leave
+        # a first-sight job marked running without its retirement — the stale
+        # sweep would recover it into a retry that builds pre-existing history
+        # as a first build (review #3242 F1/nit 4).
+        with conn.transaction():
+            row = conn.execute(
+                "UPDATE hierarchy_jobs SET status = 'running', started_at = now()"
+                " WHERE id = (SELECT id FROM hierarchy_jobs WHERE status = 'pending'"
+                "             ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)"
+                " RETURNING id, agent_id, include_tail, kind, trigger_boundary"
+            ).fetchone()
+            if row is None:
+                return None
+            job_id, agent_id = int(row[0]), int(row[1])
+            include_tail, kind, boundary = bool(row[2]), str(row[3]), str(row[4])
+            if kind == KIND_COMPACT and not _tracked(conn, agent_id):
+                _baseline_untracked(conn, job_id, agent_id, boundary)
+                continue
+            if not include_tail and first_build(conn, agent_id):
+                conn.execute(
+                    "UPDATE hierarchy_jobs SET include_tail = true WHERE id = %s", (job_id,)
+                )
+                include_tail = True
+            return ClaimedJob(id=job_id, agent_id=agent_id, include_tail=include_tail)
 
 
 def run_child(job: ClaimedJob) -> None:

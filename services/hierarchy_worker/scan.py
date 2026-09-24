@@ -39,6 +39,13 @@ from shared.log import logger
 KIND_COMPACT = "compact"
 KIND_TAIL = "tail"
 
+# The marker a first-sight retirement writes onto the retired job row (task
+# #4674): a `done` row carrying `error` is never a build (`first_build` /
+# `_has_clean_baseline` guard on it), so pre-existing history stays unbuilt.
+# Both first-sight paths write it — the scan's baseline pass and the
+# claim-side fallback (`runner._baseline_untracked`).
+SILENT_BASELINE_MARKER = "silent baseline: pre-existing history is not built (task #3704)"
+
 # 100ns ticks between the UUID epoch (1582-10-15) and the Unix epoch — the
 # fixed offset decoding a UUIDv6 timestamp back to wall time.
 _UUID_V6_EPOCH_TICKS = 0x1B21DD213814000
@@ -154,22 +161,44 @@ def _recover_stale(conn: Connection) -> int:
 
 
 def _baseline_new(conn: Connection, boundaries: dict[int, str], state: dict[int, str]) -> int:
-    """Insert the silent baseline for agents seen for the first time."""
+    """Insert the silent baseline for agents seen for the first time.
+
+    The same pass retires a first-sight agent's live pending job with the
+    silent-baseline marker (task #4674, review #3242 F1): the event trigger
+    may have enqueued one for this very boundary, and a claim running after
+    this scan — with the agent now tracked — would otherwise treat it as a
+    first build and materialize pre-existing history. Both orderings now
+    decide the same: nothing builds on first sight, whichever path retires
+    the job first (the claim's own fallback covers the window before this
+    scan has run).
+    """
     new = [
         (agent_id, boundaries[agent_id]) for agent_id in sorted(boundaries) if agent_id not in state
     ]
     if not new:
         return 0
-    with conn.cursor() as cur:
-        cur.executemany(
-            "INSERT INTO hierarchy_worker_state (agent_id, last_processed_boundary)"
-            " VALUES (%s, %s)"
-            " ON CONFLICT (agent_id) DO NOTHING",
-            new,
-        )
+    retired = 0
+    for agent_id, boundary in new:
+        # One transaction per agent: a crash between the two writes must not
+        # leave a tracked agent with a live first-sight job — the very
+        # ordering this retirement exists to prevent.
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO hierarchy_worker_state (agent_id, last_processed_boundary)"
+                " VALUES (%s, %s)"
+                " ON CONFLICT (agent_id) DO NOTHING",
+                (agent_id, boundary),
+            )
+            retired += conn.execute(
+                "UPDATE hierarchy_jobs SET status = 'done', finished_at = now(), error = %s"
+                " WHERE agent_id = %s AND kind = %s AND status = 'pending'",
+                (SILENT_BASELINE_MARKER, agent_id, KIND_COMPACT),
+            ).rowcount
     logger.info(
-        "hierarchy scan: baselined {count} agent(s) silently (no build for pre-existing history)",
+        "hierarchy scan: baselined {count} agent(s) silently (no build for"
+        " pre-existing history); {retired} first-sight job(s) retired",
         count=len(new),
+        retired=retired,
     )
     return len(new)
 

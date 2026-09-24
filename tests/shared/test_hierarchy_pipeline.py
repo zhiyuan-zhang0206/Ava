@@ -680,3 +680,25 @@ def test_regen_cap_halts_between_chunks_and_marks_the_stop(
     assert tree.halted is True
     assert tree.generated == 4
     assert tree.skipped == 2  # one L1 group + the L2 node never attempted
+
+
+def test_regen_cap_boundary_equality_stops_at_the_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap check is `>=` at the chunk boundary (task #4674, review #3242
+    nit 2): a cap equal to one chunk's worth stops exactly there — the next
+    chunk never starts."""
+    msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(100)]
+
+    def fake_loader(agent_id: int) -> list[BaseMessage]:
+        return list(msgs)
+
+    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+
+    fake = FakeLLM(_fitting_responder)
+    tree = build_agent_tree(7, llm=fake, model=MODEL, max_concurrent=1, max_generated=4)
+
+    assert len(fake.calls) == 4  # exactly one chunk; 4 >= 4 stops the second
+    assert tree.halted is True
+    assert tree.generated == 4
+    assert tree.skipped == 2
