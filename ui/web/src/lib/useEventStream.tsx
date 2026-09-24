@@ -1,9 +1,8 @@
 "use client";
 
-// One page-wide basic-event stream and one selected-agent detail stream.
-// Providers share their connections with all consumers. Selection changes
-// replace the detail connection; inactive agents never remain subscribed.
-// Hidden pages suspend both streams and reconcile authoritative reads on open.
+// Profile-shared basic, detail, and alert streams use one visible leader's
+// EventSources. Providers retain their per-page fold and subscriber contracts.
+// Hidden pages leave the transport and reconcile authoritative reads on open.
 // Alerts have a separate domain provider. Frames may contain a single event or
 // a batch; batch consumers fold one frame in one state update.
 
@@ -13,6 +12,7 @@ import { API_BASE, api } from "./api";
 import { notifySessionInvalid, useAuth } from "./auth-context";
 import { useFoldOwner } from "./fold/owner";
 import { useDocumentVisible } from "./use-document-visible";
+import { sharedSseSupported, sharedSseTransport, type SseChannel } from "./sse-share";
 import { useStore } from "./store";
 import type { SystemEvent } from "./types";
 
@@ -67,78 +67,63 @@ interface EventStreamContextValue {
   ) => () => void;
 }
 
-/**
- * Shared connection machinery for both Providers. Holds one EventSource for
- * `url` and fans frames out to `subscribersRef`; `url === null` means "no
- * target" (e.g. no active agent selected) — close any open connection and
- * don't reopen. `onOpenChange(true|false)` mirrors the OPEN state out (the
- * global Provider renders an e2e-ready marker from it; the all-events
- * Provider passes a noop). Re-runs when `url` changes or `reconnectNonce`
- * bumps (watchdog / cluster-update reconnect lever).
- */
+/** Fan one shared or legacy SSE channel into the unchanged subscriber API.
+ * `onOpenChange` drives the global Provider's e2e-ready marker. */
 function useSseConnection(
   url: string | null,
+  channel: SseChannel,
+  activeId: number | null,
+  isVisible: boolean,
   subscribersRef: React.RefObject<Set<Subscriber>>,
   onOpenChange: (open: boolean) => void,
 ): void {
   const { status: authStatus } = useAuth();
-  // reconnectNonce: bumping it (from the watchdog below, or from the
-  // cluster-update-done detector in use-cluster-health) re-runs this
-  // effect — cleanup closes the stale EventSource, the re-run opens a
-  // fresh one (whose onopen fires onConnectionEvent({type:"open"}),
-  // which useAgentsCacheSync already turns into an agents refetch to reconcile).
+  // A cluster-update reconnect bump re-runs this effect; the leader replaces
+  // its source and the subsequent open reconciles missed events.
   const reconnectNonce = useStore((s) => s.reconnectNonce);
   const bumpReconnect = useStore((s) => s.bumpReconnect);
-  // Local retry lever for connect-failure backoff. Kept separate from the global
-  // reconnectNonce so one connection retrying does not re-key the other Provider's
-  // EventSource. Consecutive-failure count (for the backoff delay) lives in a ref
-  // so it survives the effect re-runs a retry triggers; it resets to 0 on open.
+  // Legacy-only CLOSED retry, separate from the global reconnect lever.
   const [retryNonce, setRetryNonce] = useState(0);
   const failCountRef = useRef(0);
+  const lastReconnectNonce = useRef(reconnectNonce);
+  const shared = sharedSseSupported();
 
   useEffect(() => {
-    if (url === null || authStatus !== "authenticated") {
+    if (authStatus !== "authenticated" || !isVisible || (!shared && url === null)) {
       // Not authenticated: keep the connection closed. EventSource cannot set an
       // Authorization header, so an unauthenticated SSE GET 401s at the gateway —
       // opening it would just feed the retry storm (Task #1635). When auth flips
       // to "authenticated" (login), this effect re-runs and opens fresh.
+      lastReconnectNonce.current = reconnectNonce;
       onOpenChange(false);
       return;
     }
-    // The gateway requires auth (session cookie or Bearer token). EventSource
-    // cannot set an Authorization header, so it relies on the session cookie —
-    // but a cross-origin EventSource (frontend :3000 -> gateway :8000) only
-    // sends cookies when opened with `withCredentials`. Without it the SSE GET
-    // arrives uncredentialed, the auth middleware 401s it, and live updates
-    // never connect. Mirror the `credentials: "include"` the fetch wrapper in
-    // api.ts uses; the gateway answers the credentialed CORS request with
-    // `Access-Control-Allow-Origin: <origin>` + `Allow-Credentials: true`.
+    // EventSource needs withCredentials for the cross-origin session cookie.
     // Consecutive parse failures within one connection: the backend
     // validates every frame (pydantic rejects raw control characters), so
     // repeated parse errors mean the transport is corrupting frames — count
     // and force a reconnect at 3 (Task #951).
     let parseFailures = 0;
     let disposed = false;
-    const es = new EventSource(url, { withCredentials: true });
+    const transport = shared ? sharedSseTransport() : null;
+    let es: EventSource | null = null;
+    if (!transport) {
+      if (url === null) throw new Error("legacy SSE URL missing");
+      es = new EventSource(url, { withCredentials: true });
+    }
 
-    // Half-dead-connection watchdog. Any frame (open / business event /
-    // heartbeat) is liveness and resets it. If it ever fires, the socket
-    // is wedged at the OPEN level (onerror never told us): tell subscribers
-    // we're reconnecting (banner shows) and force a clean reopen.
+    // Any frame, including a heartbeat, resets the half-dead watchdog.
     let watchdog: ReturnType<typeof setTimeout> | null = null;
     const armWatchdog = () => {
       if (watchdog !== null) clearTimeout(watchdog);
       watchdog = setTimeout(() => {
         for (const sub of subscribersRef.current) sub.conn({ type: "reconnecting" });
-        bumpReconnect();
+        if (transport) transport.restart(channel);
+        else bumpReconnect();
       }, WATCHDOG_MS);
     };
 
-    // Capped-backoff reopen after a dead-end CLOSED error whose session probe is
-    // valid (below). Single-flight: one pending timer at a time — a second CLOSED
-    // before it fires is ignored, so a burst never becomes a reconnect storm.
-    // Bumping retryNonce re-runs this effect; cleanup closes the stale
-    // (already-CLOSED) EventSource and a fresh one opens.
+    // Legacy dead-end CLOSED errors use a single-flight capped retry.
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleReopen = () => {
       if (retryTimer !== null) return;
@@ -150,14 +135,14 @@ function useSseConnection(
       }, delay);
     };
 
-    es.onopen = () => {
+    const handleOpen = () => {
       if (disposed) return;
       failCountRef.current = 0;
       onOpenChange(true);
       armWatchdog();
       for (const sub of subscribersRef.current) sub.conn({ type: "open" });
     };
-    es.onmessage = (e) => {
+    const handleFrame = (raw: string) => {
       if (disposed) return;
       // Any frame = the connection is alive — reset the watchdog before
       // anything else (heartbeat counts too).
@@ -165,16 +150,8 @@ function useSseConnection(
       // e.data is spec'd as string, but browser implementations (Blob
       // mode / unusual toString) sometimes drift; defensive cast
       // prevents a String() throw from drowning the catch.
-      const raw = typeof e.data === "string" ? e.data : "[non-string SSE payload]";
 
-      // Parse ONLY inside the try. The subscriber fan-out lives OUTSIDE it:
-      // a subscriber throwing used to be caught here, miscounted as a parse
-      // failure (3 of those force a reconnect, Task #951) and cut the rest
-      // of the batch short — one buggy hook could kill the stream for every
-      // subscriber. A corrupt frame is a transport problem; a throwing
-      // subscriber is a code problem, isolated per-subscriber below.
-      // (No initializer: the catch below returns, so on the fan-out path
-      // events is always assigned by the try.)
+      // Parse here; subscriber exceptions must not count as corrupt frames.
       let events: SystemEvent[] | null;
       try {
         const parsed = JSON.parse(raw) as unknown;
@@ -208,14 +185,15 @@ function useSseConnection(
         for (const sub of subscribersRef.current) {
           sub.conn({ type: "parse-failed", raw, error: err });
         }
-        // Repeated unparseable frames = corrupt transport (the backend
-        // validates every event before sending — pydantic rejects raw
-        // control characters, Task #951). Force a reconnect at 3 instead
-        // of soldiering on with a half-open stream that keeps delivering
-        // garbage.
+        // Three corrupt frames force a backoff reopen (Task #951).
         parseFailures += 1;
         if (parseFailures >= 3) {
           parseFailures = 0;
+          if (transport) {
+            if (transport.isLeader()) transport.restart(channel, true);
+            return;
+          }
+          if (es === null) throw new Error("legacy EventSource unavailable", { cause: err });
           es.close();
           // Capped backoff, same as a dead-end CLOSED — an immediate reopen
           // against a source that keeps sending corrupt frames reconnects
@@ -225,11 +203,15 @@ function useSseConnection(
         return;
       }
 
-      // Fan-out (outside the try, per-subscriber isolated): one subscriber's
-      // bug must not starve the others of this frame or of future frames.
-      // Batch subscribers receive the whole frame in one call; the rest get
-      // the per-event contract. A throwing subscriber drops the remainder of
-      // THIS frame for itself only (its own bug) — never for anyone else.
+      // The leader relays the union detail feed. Preserve each tab's old
+      // selected-agent stream contract before any subscriber sees a frame.
+      if (transport && channel === "systemAll") {
+        events = activeId === null ? [] : events.filter((event) =>
+          event.agent_id === 0 || event.agent_id === activeId);
+        if (events.length === 0) return;
+      }
+
+      // Isolate subscriber failures; batch subscribers receive one call per frame.
       for (const sub of subscribersRef.current) {
         try {
           if (sub.systemBatch) {
@@ -244,6 +226,36 @@ function useSseConnection(
         }
       }
     };
+    if (transport) {
+      const unsubscribe = transport.subscribe(channel, {
+        onFrame: handleFrame,
+        onState: (state) => {
+          if (disposed) return;
+          if (state === "open") {
+            handleOpen();
+          } else {
+            if (state === "closed") {
+              if (watchdog !== null) clearTimeout(watchdog);
+              watchdog = null;
+            }
+            for (const sub of subscribersRef.current) sub.conn({ type: state });
+          }
+        },
+      }, activeId);
+      if (lastReconnectNonce.current !== reconnectNonce) transport.restart(channel);
+      lastReconnectNonce.current = reconnectNonce;
+      return () => {
+        disposed = true;
+        if (watchdog !== null) clearTimeout(watchdog);
+        unsubscribe();
+      };
+    }
+
+    if (es === null) throw new Error("legacy EventSource unavailable");
+    es.onopen = handleOpen;
+    es.onmessage = (event) => handleFrame(
+      typeof event.data === "string" ? event.data : "[non-string SSE payload]",
+    );
     es.onerror = () => {
       if (disposed) return;
       // Explicit tri-state dispatch (CONNECTING/OPEN/CLOSED), no
@@ -301,7 +313,8 @@ function useSseConnection(
     // url + authStatus + reconnectNonce + retryNonce are the levers (retryNonce is
     // the local connect-failure backoff). subscribersRef / onOpenChange /
     // bumpReconnect are stable identities included only to satisfy the lint.
-  }, [url, authStatus, reconnectNonce, retryNonce, bumpReconnect, subscribersRef, onOpenChange]);
+  }, [url, channel, activeId, isVisible, shared, authStatus, reconnectNonce, retryNonce,
+    bumpReconnect, subscribersRef, onOpenChange]);
 }
 
 /** Mint a stable `subscribe(onSystem, onConn)` over a subscriber Set. */
@@ -347,10 +360,9 @@ function useSubscribeEffect(
 const EventStreamContext = createContext<EventStreamContextValue | null>(null);
 
 /**
- * Provider for the global `/api/system` broadcast. One EventSource serves
- * all subscribers; it never closes on agent switch (the broadcast is
- * agent-agnostic) but does close while the tab is hidden (see
- * useDocumentVisible). Renders an `sse-ready` marker once OPEN — e2e tests
+ * Provider for the global `/api/system` broadcast. The profile leader's
+ * EventSource serves all visible pages; this page leaves while hidden.
+ * Renders an `sse-ready` marker once OPEN — e2e tests
  * (`page.wait_for_selector('[data-testid="sse-ready"]')`) gate on it before
  * interacting, so SSE-driven UI isn't raced.
  */
@@ -367,6 +379,9 @@ export function EventStreamProvider({
 
   useSseConnection(
     isVisible ? `${API_BASE}/api/system` : null,
+    "system",
+    null,
+    isVisible,
     subscribersRef,
     setSseOpen,
   );
@@ -438,7 +453,7 @@ export function AgentEventStreamProvider({ children }: { children: React.ReactNo
   const url = isVisible && activeId !== null
     ? `${API_BASE}/api/system/all?agents=${activeId}`
     : null;
-  useSseConnection(url, subscribersRef, NOOP_OPEN_CHANGE);
+  useSseConnection(url, "systemAll", activeId, isVisible, subscribersRef, NOOP_OPEN_CHANGE);
   const subscribe = useSubscribe(subscribersRef);
 
   return (
