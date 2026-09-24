@@ -138,6 +138,8 @@ export function TurnBlock({
   turnActive,
   isStuck,
   children,
+  timelineSource = "canonical",
+  displayRank,
 }: {
   // The turn's first member item_id, stamped as data-item-id so the load-older
   // scroll anchor has a stable node even when the topmost content is a collapsed
@@ -161,6 +163,8 @@ export function TurnBlock({
   isStuck?: boolean;
   // The inner rows — passed only when expanded (null when collapsed).
   children?: ReactNode;
+  timelineSource?: "buffer" | "canonical";
+  displayRank?: number;
 }) {
   // Live clock: while a block of this turn is streaming, tick every
   // LIVE_CLOCK_INTERVAL_MS so the displayed elapsed time advances in real
@@ -252,6 +256,8 @@ export function TurnBlock({
     <div
       ref={rootRef}
       data-item-id={id}
+      data-timeline-source={timelineSource}
+      data-display-rank={displayRank}
       data-turn-id={id}
       data-turn-expanded={expanded}
       data-turn-member-ids={memberIds.join(" ")}

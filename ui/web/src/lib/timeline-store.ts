@@ -10,6 +10,12 @@
 import { create } from "zustand";
 
 import {
+  announceBeforeCompactDisplayChange,
+  canonicalCoversBuffer,
+  captureCompactTransition,
+  type CompactTransitionBuffer,
+} from "./compact-transition";
+import {
   foldEvent,
   mergeSnapshotWithStreaming,
   sortByItemId,
@@ -38,6 +44,12 @@ export interface LiveCompact {
 
 export interface TimelineState {
   items: BackendTimelineItem[];
+  /** Old displayed rows while canonical checkpoint pages re-key them. */
+  compactBuffer: CompactTransitionBuffer | null;
+  /** Invalidates late page owners on hide, reconnect, switch, and a newer compact. */
+  compactEpoch: number;
+  /** The user's automatic post-compact page budget; zero skips buffering. */
+  compactHistoryPages: number;
   streamingCode: boolean;
   turnActive: boolean;
   connectionState: ConnectionState;
@@ -106,6 +118,9 @@ export interface TimelineState {
   /** Bump `scrollToBottomRequest` — called on send (the switch bump happens
    * inside `switchThread`). */
   requestScrollToBottom: () => void;
+  setCompactHistoryPages: (pages: number) => void;
+  invalidateCompactEpoch: () => void;
+  finishCompactTransition: (threadId: number, epoch: number) => void;
 
   /** SSE business-event handler — single entry point, replaces scattered setState calls */
   processSseEvent: (ev: SystemEvent) => void;
@@ -172,6 +187,24 @@ const COMPACT_ENVELOPE_KINDS: ReadonlySet<string> = new Set([
   "inbound_compact_request",
   "inbound_compact_summary",
 ]);
+
+function announceCompactDisplayChange(
+  state: TimelineState,
+  nextBuffer: CompactTransitionBuffer | null,
+  rankShift = 0,
+): void {
+  if (
+    rankShift === 0 &&
+    state.compactBuffer?.epoch === nextBuffer?.epoch &&
+    state.compactBuffer?.rows === nextBuffer?.rows
+  ) return;
+  if (!state.compactBuffer && !nextBuffer) return; // retention 0 keeps its immediate swap
+  announceBeforeCompactDisplayChange({
+    items: state.items,
+    buffer: state.compactBuffer,
+    rankShift,
+  });
+}
 
 /** Detect an unseen compact envelope by its stable rendered identity.
  * This is not a directional checkpoint revision; the ordering redesign must
@@ -274,8 +307,13 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
         crossedUnseenCompact(state.items, snapItems);
       if (state.resetPending || crossedCompact) {
         if (snapItems.length === 0) return {};
+        const epoch = state.compactEpoch + 1;
         return {
           items: snapItems,
+          compactEpoch: epoch,
+          compactBuffer: state.compactHistoryPages === 0
+            ? null
+            : captureCompactTransition(state.items, state.compactBuffer, ev.agent_id, epoch, false),
           streamingIds: new Set(),
           resetPending: false,
           compactReplaceSeq: state.compactReplaceSeq + 1,
@@ -315,6 +353,9 @@ function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineS
 
 export const useTimelineStore = create<TimelineState>()((set, get) => ({
   items: [],
+  compactBuffer: null,
+  compactEpoch: 0,
+  compactHistoryPages: 1,
   streamingCode: false,
   turnActive: false,
   connectionState: "open",
@@ -335,13 +376,36 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   scrollToBottomRequest: 0,
 
   requestScrollToBottom: () => set((s) => ({ scrollToBottomRequest: s.scrollToBottomRequest + 1 })),
+  setCompactHistoryPages: (pages) => set((s) => {
+    const compactBuffer = pages === 0 ? null : s.compactBuffer;
+    announceCompactDisplayChange(s, compactBuffer);
+    return { compactHistoryPages: pages, compactBuffer };
+  }),
+  invalidateCompactEpoch: () => set((s) => {
+    const compactBuffer = s.compactBuffer
+      ? { ...s.compactBuffer, epoch: s.compactEpoch + 1 }
+      : null;
+    announceCompactDisplayChange(s, compactBuffer);
+    return { compactEpoch: s.compactEpoch + 1, compactBuffer };
+  }),
+  finishCompactTransition: (threadId, epoch) => set((s) => {
+    if (s.compactBuffer?.threadId !== threadId || s.compactBuffer.epoch !== epoch) return {};
+    announceCompactDisplayChange(s, null);
+    return { compactBuffer: null };
+  }),
 
   processSseEvent: (ev) => {
     // agent_spawned / agent_updated belong to sidebar state (TanStack
     // Query cache), not the timeline. The root fold (the single
     // cache writer) handles them; the timeline store ignores them outright.
     if (ev.role === "agent_spawned" || ev.role === "agent_updated") return;
-    set((s) => applySseEvent(s, ev));
+    set((s) => {
+      const patch = applySseEvent(s, ev);
+      if (patch.compactReplaceSeq !== undefined) {
+        announceCompactDisplayChange(s, patch.compactBuffer ?? null, patch.compactReplaceSeq - s.compactReplaceSeq);
+      }
+      return patch;
+    });
   },
 
   processSseEventBatch: (events) => {
@@ -357,6 +421,12 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       working = { ...working, ...patch };
     }
     if (!changed) return;
+    if (working.compactReplaceSeq !== get().compactReplaceSeq) {
+      announceCompactDisplayChange(
+        get(), working.compactBuffer,
+        working.compactReplaceSeq - get().compactReplaceSeq,
+      );
+    }
     // One set() per frame: every event's fold already applied to `working`;
     // `merged` carries the cumulative patch. Synchronous — no other set()
     // can interleave between get() above and this commit.
@@ -386,14 +456,22 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       // Reconnected; clear the interrupted flag — the previously
       // partial items will keep appending via deltas, so the "interrupted"
       // hint no longer applies.
-      set((s) => ({
-        items: s.items.some((it) => it.interrupted)
-          ? s.items.map((it) => (it.interrupted ? { ...it, interrupted: false } : it))
-          : s.items,
-        // Reopening requests a fresh snapshot and releases the compact guard.
-        // The existing wire contract cannot prove its commit order.
-        resetPending: false,
-      }));
+      set((s) => {
+        const compactBuffer = s.compactBuffer
+          ? { ...s.compactBuffer, epoch: s.compactEpoch + 1 }
+          : null;
+        announceCompactDisplayChange(s, compactBuffer);
+        return {
+          items: s.items.some((it) => it.interrupted)
+            ? s.items.map((it) => (it.interrupted ? { ...it, interrupted: false } : it))
+            : s.items,
+          // Reopening requests a fresh snapshot and releases the compact guard.
+          // The existing wire contract cannot prove its commit order.
+          resetPending: false,
+          compactEpoch: s.compactBuffer ? s.compactEpoch + 1 : s.compactEpoch,
+          compactBuffer,
+        };
+      });
     }
   },
 
@@ -412,10 +490,23 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         msg_count,
         s.streamingIds,
       );
+      const epoch = crossedCompact ? s.compactEpoch + 1 : s.compactEpoch;
+      const pendingBuffer = crossedCompact && s.compactHistoryPages !== 0 && s.activeThreadId !== null
+        ? captureCompactTransition(s.items, s.compactBuffer, s.activeThreadId, epoch, true)
+        : s.compactBuffer && !crossedCompact
+          ? { ...s.compactBuffer, tailReady: true }
+          : null;
+      const compactBuffer = pendingBuffer &&
+        (canonicalCoversBuffer(pendingBuffer, merged) || !hasMoreOlder)
+          ? null
+          : pendingBuffer;
+      announceCompactDisplayChange(s, compactBuffer, crossedCompact ? 1 : 0);
       return {
         // committed ids drop out of streamingIds; still-streaming ones stay
         streamingIds: new Set([...s.streamingIds].filter((id) => !snapshotIds.has(id))),
         items: merged,
+        compactEpoch: epoch,
+        compactBuffer,
         hasMoreOlder,
         resetPending: crossedCompact ? false : s.resetPending,
         // Reconnect can discover the rewrite without any compact SSE event.
@@ -431,6 +522,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     set((s) => ({
       activeThreadId: agentId,
       items: cached ?? [],
+      compactBuffer: null,
+      compactEpoch: s.compactEpoch + 1,
       streamingIds: new Set(),
       streamingCode: false,
       turnActive: false,
@@ -469,11 +562,18 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         // version mix — an older gateway does not recognize the re-attached
         // head notes as crossing material). Stop paging instead of looping
         // on the same cursor forever.
-        return { hasMoreOlder: false, loadingOlder: false };
+        announceCompactDisplayChange(s, null);
+        return { hasMoreOlder: false, loadingOlder: false, compactBuffer: null };
       }
       const merged = fresh.length ? sortByItemId([...fresh, ...s.items]) : s.items;
+      const compactBuffer = s.compactBuffer &&
+        (canonicalCoversBuffer(s.compactBuffer, merged) || !hasMoreOlder)
+          ? null
+          : s.compactBuffer;
+      announceCompactDisplayChange(s, compactBuffer);
       return {
         items: merged,
+        compactBuffer,
         hasMoreOlder,
         loadingOlder: false,
       };
