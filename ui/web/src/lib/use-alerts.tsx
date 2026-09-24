@@ -11,8 +11,8 @@
 // The initial GET /api/alerts is the fetch fallback for rows
 // ingested before the subscription opened.
 //
-// Machinery mirrors the useEventStream provider (watchdog + closed-backoff
-// reopen + heartbeat skip), scoped down to the one alert shape: frames that
+// The connection lifecycle shares timers and auth probing with useEventStream;
+// alert frame handling remains scoped to the one alert shape: frames that
 // fail to parse are dropped, a wedged socket reopens, a CLOSED stream
 // with a valid session reconnects with capped backoff, and an expired session
 // stays closed. Hidden pages close the stream and reconcile their active reads on return.
@@ -32,6 +32,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { API_BASE, api } from "./api";
 import { notifySessionInvalid, useAuth } from "./auth-context";
+import { createSseLifecycle } from "@/lib/sse-lifecycle";
 import { sharedSseSupported, sharedSseTransport } from "./sse-share";
 import type { Alert, AlertsResponse } from "./types";
 import { useDocumentVisible } from "./use-document-visible";
@@ -133,28 +134,22 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     }
 
     let parseFailures = 0;
-    let disposed = false;
-    let watchdog: ReturnType<typeof setTimeout> | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     const transport = shared ? sharedSseTransport() : null;
-
-    const armWatchdog = () => {
-      if (watchdog !== null) clearTimeout(watchdog);
-      watchdog = setTimeout(() => {
+    const lifecycle = createSseLifecycle({
+      failCount: failCountRef,
+      watchdogMs: WATCHDOG_MS,
+      reconnectBaseMs: RECONNECT_BASE_MS,
+      reconnectMaxMs: RECONNECT_MAX_MS,
+      onWatchdog: () => {
         if (transport) transport.restart("alerts");
         else bumpReconnect();
-      }, WATCHDOG_MS);
-    };
-
-    const scheduleReopen = () => {
-      if (retryTimer !== null) return;
-      const delay = Math.min(RECONNECT_BASE_MS * 2 ** failCountRef.current, RECONNECT_MAX_MS);
-      failCountRef.current += 1;
-      retryTimer = setTimeout(() => {
-        retryTimer = null;
-        setRetryNonce((n) => n + 1);
-      }, delay);
-    };
+      },
+      onRetry: () => setRetryNonce((n) => n + 1),
+      onClosed: () => undefined,
+      onConnecting: () => undefined,
+      checkAuth: () => api.checkAuth(),
+      onInvalidSession: notifySessionInvalid,
+    });
 
     const foldFrame = (raw: string) => {
       let parsed: unknown;
@@ -166,7 +161,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
           parseFailures = 0;
           if (transport) {
             if (transport.isLeader()) transport.restart("alerts", true);
-          } else scheduleReopen();
+          } else lifecycle.scheduleReopen();
         }
         return;
       }
@@ -180,17 +175,17 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     };
 
     const handleOpen = () => {
-      if (disposed) return;
-      failCountRef.current = 0;
+      if (lifecycle.isDisposed()) return;
+      lifecycle.resetBackoff();
       // Alerts have their own stream and staleTime: Infinity, so this provider
       // owns the precise reconnect repair for frames missed while disconnected.
       // Only active readers refetch; inactive history caches are marked stale.
       void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY });
-      armWatchdog();
+      lifecycle.armWatchdog();
     };
     const handleFrame = (raw: string) => {
-      if (disposed) return;
-      armWatchdog();
+      if (lifecycle.isDisposed()) return;
+      lifecycle.armWatchdog();
       if (!raw) return;
       foldFrame(raw);
     };
@@ -198,19 +193,17 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
       const unsubscribe = transport.subscribe("alerts", {
         onFrame: handleFrame,
         onState: (state) => {
-          if (disposed) return;
+          if (lifecycle.isDisposed()) return;
           if (state === "open") handleOpen();
           else if (state === "closed") {
-            if (watchdog !== null) clearTimeout(watchdog);
-            watchdog = null;
+            lifecycle.clearWatchdog();
           }
         },
       });
       if (lastReconnectNonce.current !== reconnectNonce) transport.restart("alerts");
       lastReconnectNonce.current = reconnectNonce;
       return () => {
-        disposed = true;
-        if (watchdog !== null) clearTimeout(watchdog);
+        lifecycle.dispose();
         unsubscribe();
       };
     }
@@ -218,42 +211,10 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     const es = new EventSource(`${API_BASE}/api/alerts/stream`, { withCredentials: true });
     es.onopen = handleOpen;
     es.onmessage = (event) => handleFrame(typeof event.data === "string" ? event.data : "");
-    es.onerror = () => {
-      if (disposed) return;
-      switch (es.readyState) {
-        case EventSource.CLOSED:
-          // CLOSED hides the HTTP status; probe the session instead of blind-retrying
-          // (Task #1635): an expired session must stop retrying, flip the auth context
-          // (AuthGuard → /login) and stay closed until login re-runs this effect.
-          void api
-            .checkAuth()
-            .then((res) => {
-              if (disposed) return;
-              if (!res.authenticated) {
-                notifySessionInvalid();
-                return;
-              }
-              scheduleReopen();
-            })
-            .catch(() => {
-              if (disposed) return;
-              scheduleReopen(); // probe failed = gateway unreachable = transient
-            });
-          return;
-        case EventSource.CONNECTING:
-          // The browser is already auto-retrying — don't double up.
-          return;
-        case EventSource.OPEN:
-          return; // transient fault absorbed by the browser
-        default:
-          throw new Error(`unknown EventSource readyState: ${es.readyState}`);
-      }
-    };
+    es.onerror = () => lifecycle.handleLegacyError(es);
 
     return () => {
-      disposed = true;
-      if (watchdog !== null) clearTimeout(watchdog);
-      if (retryTimer !== null) clearTimeout(retryTimer);
+      lifecycle.dispose();
       es.close();
     };
     // reconnectNonce + retryNonce are the reopen levers; isVisible gates the
