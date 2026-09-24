@@ -35,6 +35,9 @@ function resetStore(): void {
   useTimelineStore.setState({
     activeThreadId: 42, // 42 so isEventForThread does not block agent_id=42 SSE events
     items: [],
+    compactBuffer: null,
+    compactEpoch: 0,
+    compactHistoryPages: 1,
     streamingIds: new Set(),
     streamingCode: false,
     turnActive: false,
@@ -54,6 +57,97 @@ function resetStore(): void {
 
 beforeEach(() => {
   resetStore();
+});
+
+describe("compact transition buffer", () => {
+  const oldReply = () => item({ item_id: "90.0", payload: "old reply" });
+  const current = () => item({ item_id: "1.0", payload: "new reply" });
+  const historical = () => item({ item_id: "s1.boundary.89.0", payload: "old reply" });
+
+  function startCompact(oldItems: BackendTimelineItem[] = [oldReply()]): void {
+    useTimelineStore.getState().switchThread(42, oldItems, true);
+    useTimelineStore.getState().processSseEvent({ role: "compact_done", agent_id: 42 });
+    useTimelineStore.getState().processSseEvent({
+      role: "timeline_snapshot", agent_id: 42, msg_count: 2, items: [current()],
+    });
+  }
+
+  it("keeps old rows through the SSE swap and releases with the covering page in one update", () => {
+    startCompact();
+    expect(useTimelineStore.getState().items.map((row) => row.item_id)).toEqual(["1.0"]);
+    expect(useTimelineStore.getState().compactBuffer?.rows.map((row) => row.item.item_id)).toEqual(["90.0"]);
+    useTimelineStore.getState().reloadSnapshot([current()], 2, true);
+    const transitions: { ids: string[]; buffered: boolean }[] = [];
+    const unsubscribe = useTimelineStore.subscribe((s) => transitions.push({
+      ids: s.items.map((row) => row.item_id), buffered: s.compactBuffer !== null,
+    }));
+    useTimelineStore.getState().prependOlder([historical()], false);
+    unsubscribe();
+    expect(transitions).toEqual([{ ids: ["s1.boundary.89.0", "1.0"], buffered: false }]);
+  });
+
+  it("excludes partial and re-attached head context from coverage", () => {
+    startCompact([
+      item({ item_id: "0.0", kind: "system_prompt" }),
+      item({ item_id: "1.0", kind: "system_marker", source: "memory" }),
+      oldReply(),
+      item({ item_id: "91.0", partial: true }),
+    ]);
+    expect(useTimelineStore.getState().compactBuffer?.oldestRealByRank.get(1)).toBe("90.0");
+    useTimelineStore.getState().reloadSnapshot([current()], 2, true);
+    useTimelineStore.getState().prependOlder([item({ item_id: "s1.boundary.90.0" })], true);
+    expect(useTimelineStore.getState().compactBuffer).not.toBeNull();
+    useTimelineStore.getState().prependOlder([historical()], true);
+    expect(useTimelineStore.getState().compactBuffer).toBeNull();
+  });
+
+  it("buffers the crossed-compact REST swap and skips the buffer at retention zero", () => {
+    useTimelineStore.getState().switchThread(42, [oldReply()], true);
+    useTimelineStore.getState().reloadSnapshot([
+      item({ item_id: "0.0", kind: "system_prompt" }),
+      item({ item_id: "1.0", kind: "inbound_compact_request" }),
+      current(),
+    ], 3, true);
+    expect(useTimelineStore.getState().compactBuffer?.rows[0].item.payload).toBe("old reply");
+    useTimelineStore.getState().setCompactHistoryPages(0);
+    expect(useTimelineStore.getState().compactBuffer).toBeNull();
+    startCompact();
+    expect(useTimelineStore.getState().compactBuffer).toBeNull();
+  });
+
+  it("releases uncovered rows when the existing finite page budget settles", () => {
+    startCompact([item({ item_id: "80.0" }), oldReply()]);
+    const epoch = useTimelineStore.getState().compactEpoch;
+    useTimelineStore.getState().reloadSnapshot([current()], 2, true);
+    useTimelineStore.getState().prependOlder([historical()], true);
+    expect(useTimelineStore.getState().compactBuffer).not.toBeNull();
+    useTimelineStore.getState().finishCompactTransition(42, epoch);
+    expect(useTimelineStore.getState().compactBuffer).toBeNull();
+    expect(useTimelineStore.getState().items.map((row) => row.item_id)).toEqual([
+      "s1.boundary.89.0", "1.0",
+    ]);
+  });
+
+  it("invalidates stale owners on hide, reconnect, newer compact, and switch", () => {
+    startCompact();
+    const first = useTimelineStore.getState().compactEpoch;
+    useTimelineStore.getState().invalidateCompactEpoch(); // visibility hide
+    expect(useTimelineStore.getState().compactEpoch).toBe(first + 1);
+    expect(useTimelineStore.getState().compactBuffer?.epoch).toBe(first + 1);
+    useTimelineStore.getState().processConnectionEvent({ type: "open" });
+    expect(useTimelineStore.getState().compactEpoch).toBe(first + 2);
+    useTimelineStore.getState().finishCompactTransition(42, first);
+    expect(useTimelineStore.getState().compactBuffer).not.toBeNull();
+    useTimelineStore.getState().processSseEvent({ role: "compact_done", agent_id: 42 });
+    useTimelineStore.getState().processSseEvent({
+      role: "timeline_snapshot", agent_id: 42, msg_count: 2, items: [current()],
+    });
+    expect(useTimelineStore.getState().compactEpoch).toBe(first + 3);
+    expect(useTimelineStore.getState().compactBuffer?.rows.map((row) => row.rank)).toEqual([2, 1]);
+    useTimelineStore.getState().switchThread(7, [], false);
+    expect(useTimelineStore.getState().compactBuffer).toBeNull();
+    expect(useTimelineStore.getState().compactEpoch).toBe(first + 4);
+  });
 });
 
 afterEach(() => {

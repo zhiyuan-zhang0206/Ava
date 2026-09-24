@@ -308,7 +308,7 @@ function HomeContent({
   // switchThread (in the same set() that swaps in the new thread's items),
   // so there is no parent-side switch effect here.
 
-  const { items, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading } =
+  const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading } =
     useTimeline(activeId, showError);
   const { contextTokens, maxContextTokens, softCompactTokens, hardCompactTokens, contextPending } = useTokenUsage(
     activeId,
@@ -419,6 +419,7 @@ function HomeContent({
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
           <TimelineView
             items={items}
+            compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={bfcacheId}
             streamingCode={streamingCode}

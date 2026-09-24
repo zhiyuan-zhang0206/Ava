@@ -37,8 +37,13 @@ export function useCompactHistoryRetention(options: {
   loadingOlder: boolean;
   /** Current item count — window growth re-invokes a blocked attempt. */
   itemCount: number;
+  compactEpoch: number;
+  compactTailReady: boolean;
 }): void {
-  const { agentId, isVisible, loadOlderSegment, hasMoreOlder, loadingOlder, itemCount } = options;
+  const {
+    agentId, isVisible, loadOlderSegment, hasMoreOlder, loadingOlder, itemCount,
+    compactEpoch, compactTailReady,
+  } = options;
   const compactReplaceSeq = useTimelineStore((s) => s.compactReplaceSeq);
   const compactReplaceAgent = useTimelineStore((s) => s.compactReplaceAgent);
 
@@ -51,8 +56,11 @@ export function useCompactHistoryRetention(options: {
     Number.isInteger(configuredCompactSessions) && configuredCompactSessions >= -1
       ? configuredCompactSessions
       : 1;
+  useLayoutEffect(() => {
+    useTimelineStore.getState().setCompactHistoryPages(compactHistorySessions);
+  }, [compactHistorySessions]);
 
-  const retentionRef = useRef<{ thread: number; remaining: number; attempts: number } | null>(
+  const retentionRef = useRef<{ thread: number; epoch: number; remaining: number; attempts: number } | null>(
     null,
   );
   const retentionInFlightRef = useRef<{ pending: object } | null>(null);
@@ -64,8 +72,9 @@ export function useCompactHistoryRetention(options: {
     ownerRef.current = owner;
     retentionInFlightRef.current = null;
     if (retentionRef.current?.thread !== agentId) retentionRef.current = null;
+    else retentionRef.current.epoch = compactEpoch;
     return () => { ownerRef.current = null; };
-  }, [agentId, isVisible]);
+  }, [agentId, isVisible, compactEpoch]);
   const lastRetentionSeqRef = useRef(useTimelineStore.getState().compactReplaceSeq);
   const runRetention = useCallback(() => {
     const pending = retentionRef.current;
@@ -76,8 +85,16 @@ export function useCompactHistoryRetention(options: {
       return;
     }
     const st = useTimelineStore.getState();
-    if (st.activeThreadId !== agentId) return;
-    if (!st.hasMoreOlder || st.loadingOlder) return; // wait for a loadable window
+    if (st.activeThreadId !== agentId || st.compactEpoch !== pending.epoch) return;
+    if (!st.hasMoreOlder) {
+      // False before the tail GET is unready; false after it is terminal.
+      if (compactTailReady) {
+        retentionRef.current = null;
+        useTimelineStore.getState().finishCompactTransition(agentId, pending.epoch);
+      }
+      return;
+    }
+    if (st.loadingOlder) return;
     const run = { pending };
     retentionInFlightRef.current = run;
     void (async () => {
@@ -95,6 +112,7 @@ export function useCompactHistoryRetention(options: {
           }
           if (result === "exhausted") {
             retentionRef.current = null;
+            useTimelineStore.getState().finishCompactTransition(agentId, pending.epoch);
             return;
           }
           current.attempts = 0;
@@ -105,18 +123,26 @@ export function useCompactHistoryRetention(options: {
             continue;
           }
           current.remaining -= 1;
-          if (current.remaining <= 0) retentionRef.current = null;
+          if (current.remaining <= 0) {
+            retentionRef.current = null;
+            useTimelineStore.getState().finishCompactTransition(agentId, pending.epoch);
+          }
         }
       } finally {
         if (retentionInFlightRef.current === run) retentionInFlightRef.current = null;
       }
     })();
-  }, [agentId, isVisible, loadOlderSegment]);
+  }, [agentId, isVisible, loadOlderSegment, compactTailReady]);
   useEffect(() => {
     if (compactReplaceSeq === lastRetentionSeqRef.current) return;
     lastRetentionSeqRef.current = compactReplaceSeq;
     if (agentId == null || compactReplaceAgent !== agentId || compactHistorySessions === 0) return;
-    retentionRef.current = { thread: agentId, remaining: compactHistorySessions, attempts: 0 };
+    retentionRef.current = {
+      thread: agentId,
+      epoch: useTimelineStore.getState().compactEpoch,
+      remaining: compactHistorySessions,
+      attempts: 0,
+    };
     runRetention();
   }, [compactReplaceSeq, compactReplaceAgent, agentId, compactHistorySessions, runRetention]);
   // Retry a pending retention as the post-replace window settles: the GET
@@ -124,5 +150,5 @@ export function useCompactHistoryRetention(options: {
   // can make a previously-blocked attempt loadable.
   useEffect(() => {
     runRetention();
-  }, [hasMoreOlder, loadingOlder, itemCount, runRetention]);
+  }, [hasMoreOlder, loadingOlder, itemCount, compactTailReady, compactEpoch, runRetention]);
 }
