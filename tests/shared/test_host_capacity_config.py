@@ -52,6 +52,18 @@ def test_db_recovery_defaults_bounds_and_metadata(
     }
 
 
+@pytest.mark.parametrize("prolonged_seconds", [600.0, 601.0])
+def test_db_recovery_prolonged_warning_must_precede_budget(prolonged_seconds: float) -> None:
+    with pytest.raises(
+        ValidationError,
+        match="host_db_recovery_prolonged_seconds must be below host_db_recovery_budget_seconds",
+    ):
+        DaemonSettings(
+            AVA_HOST_DB_RECOVERY_PROLONGED_SECONDS=prolonged_seconds,
+            AVA_HOST_DB_RECOVERY_BUDGET_SECONDS=600.0,
+        )
+
+
 @pytest.mark.parametrize("limit", [0, 1, 1000])
 def test_admission_does_not_resize_database_pools(limit: int) -> None:
     config = DaemonSettings(
