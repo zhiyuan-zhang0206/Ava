@@ -12,9 +12,9 @@ imports this facade back:
 - `ops/cluster_status.py` — this host's `ClusterStatus` snapshot.
 - `ops/cluster_deploy.py` — the rollout preflight and the three detached-session
   triggers, with in-flight refusal and stall reaping.
-- `ops/updater_entries.py` — the detached retained-image entry spawns (the
-  restricted hop and the normal-continuation steps), split out of
-  `cluster_deploy.py` at the file-size budget.
+- `ops/ops_bootstrap_hop.py` — the restricted-hop handler and the detached
+  retained-image entry spawns (the restricted hop and the normal-continuation
+  steps), the spawns split out of `cluster_deploy.py` at the file-size budget.
 
 **These five modules reach the state-touching names they share through the module
 that OWNS them** — `shared.cluster.session_name(...)`,
@@ -156,6 +156,12 @@ from ops.cluster_status import (
 from ops.cluster_status import (
     status_snapshot as status_snapshot,
 )
+from ops.ops_bootstrap_hop import (
+    spawn_bootstrap_hop as spawn_bootstrap_hop,
+)
+from ops.ops_bootstrap_hop import (
+    spawn_normal_continue as spawn_normal_continue,
+)
 from ops.rpc_schemas import SessionInfo as SessionInfo
 from ops.update_check import (
     UpdateCheck as UpdateCheck,
@@ -165,12 +171,6 @@ from ops.update_check import (
 )
 from ops.update_check import (
     update_check as update_check,
-)
-from ops.updater_entries import (
-    spawn_bootstrap_hop as spawn_bootstrap_hop,
-)
-from ops.updater_entries import (
-    spawn_normal_continue as spawn_normal_continue,
 )
 from ops.updater_reap import (
     _UPDATER_STALL_TIMEOUT_S as _UPDATER_STALL_TIMEOUT_S,

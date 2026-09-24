@@ -311,6 +311,40 @@ def collect_and_adopt(collector: CollectorInput) -> int:
     return 0
 
 
+def _validated_observation_read(
+    observation: dict[str, object],
+    *,
+    expected: ExpectedUnitWriters,
+    operation: RolloutIdentity,
+    challenge: UUID,
+    valid_until: datetime,
+) -> UnitObservationRead:
+    """Re-derive the observer read's wire shape and sealed-window placement.
+
+    The first face of ``accept_unit``: the served observation must parse as
+    its schema, describe the restricted pre-publication observer, echo this
+    challenge and this unit's inventory, and sit inside the sealed window
+    (``acquired_at <= observed_at < valid_until``). Anything else refuses.
+    """
+    try:
+        read = UnitObservationRead.model_validate_json(json.dumps(observation))
+    except ValueError as exc:
+        raise CollectorRefusal("the observer read is not its wire shape") from exc
+    if read.mode != "bootstrap_observation":
+        raise CollectorRefusal("the observer read belongs to another mode")
+    if read.full_ready is not False:
+        raise CollectorRefusal("the observer is not the restricted pre-publication observer")
+    if read.closure != "unknown":
+        raise CollectorRefusal("the observer claimed a closure it cannot own")
+    if read.challenge != challenge:
+        raise CollectorRefusal("the observer read echoes another challenge")
+    if read.unit != expected.unit():
+        raise CollectorRefusal("the observer read describes another unit inventory")
+    if not operation.acquired_at <= read.observed_at < valid_until:
+        raise CollectorRefusal("the observation is outside the sealed window")
+    return read
+
+
 def accept_unit(  # noqa: PLR0915 — one ordered evidence re-derivation; every check is one refusal.
     unit: CollectorUnitInput,
     expected: ExpectedUnitWriters,
@@ -334,22 +368,13 @@ def accept_unit(  # noqa: PLR0915 — one ordered evidence re-derivation; every 
     journaled launcher terminals. Anything unknown, drifted or malformed
     raises `CollectorRefusal`.
     """
-    try:
-        read = UnitObservationRead.model_validate_json(json.dumps(observation))
-    except ValueError as exc:
-        raise CollectorRefusal("the observer read is not its wire shape") from exc
-    if read.mode != "bootstrap_observation":
-        raise CollectorRefusal("the observer read belongs to another mode")
-    if read.full_ready is not False:
-        raise CollectorRefusal("the observer is not the restricted pre-publication observer")
-    if read.closure != "unknown":
-        raise CollectorRefusal("the observer claimed a closure it cannot own")
-    if read.challenge != challenge:
-        raise CollectorRefusal("the observer read echoes another challenge")
-    if read.unit != expected.unit():
-        raise CollectorRefusal("the observer read describes another unit inventory")
-    if not operation.acquired_at <= read.observed_at < valid_until:
-        raise CollectorRefusal("the observation is outside the sealed window")
+    read = _validated_observation_read(
+        observation,
+        expected=expected,
+        operation=operation,
+        challenge=challenge,
+        valid_until=valid_until,
+    )
     runtime = read.runtime
     if (
         runtime.home != expected.home

@@ -787,7 +787,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         hosts_to_resume = phase_b.hosts_to_resume
         failing_step = phase_b.failing_step or failing_step
         publication_refused = publication_refused or phase_b.publication_refused
-        tails_pending = tails_pending or phase_b.tails_pending
+        tails_pending = tails_pending | phase_b.tails_pending
         return finish(rc)
     finally:
         finish(1)

@@ -17,6 +17,7 @@ envelope becomes clearable there and is disposed on the way out.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import hashlib
 import os
@@ -45,6 +46,7 @@ from shared.host_deploy_state import release_updater_lock, try_acquire_updater_l
 from shared.managed_writer_observation import ExpectedProcess, observe_process
 from shared.runtime_release import ReleaseRejectedError
 from shared.session_record import SessionRecord
+from shared.updater_recovery import BootstrapRecoveryJournal
 from shared.verified_file import regular_bytes
 
 
@@ -71,6 +73,41 @@ def _handoff_owner_is_dead_lineage(
     return session == session_name("updater") or (
         session.startswith("direct-updater:pid")
         and session.removeprefix("direct-updater:pid").isdigit()
+    )
+
+
+def _bootstrap_handoff_matches(
+    journal: BootstrapRecoveryJournal,
+    bootstrap_request: BootstrapHopRequest,
+    bootstrap_path: Path,
+    *,
+    request: NormalReleaseRequest,
+    home: Path,
+    path: Path,
+) -> bool:
+    """Whether the retained candidate-ready journal names this exact bootstrap handoff.
+
+    The standalone drive's second face: the journal's hop-request digest, the
+    sealed request's normal projection and predecessor, the candidate context,
+    and the three journaled context digests must all recompute against the
+    bytes this unit retains. ``for_commit`` does not change it -- both
+    variants re-derive identically here.
+    """
+    return (
+        journal.request_digest == hashlib.sha256(regular_bytes(bootstrap_path)).hexdigest()
+        and bootstrap_request.normal_release_path == str(path)
+        and bootstrap_request.predecessor == request.predecessor
+        and bootstrap_request.candidate_context == request.context_path
+        and journal.inventory_digest
+        == hashlib.sha256(
+            regular_bytes(_private_reference(bootstrap_request.inventory_receipt, home))
+        ).hexdigest()
+        and journal.candidate_context_digest
+        == hashlib.sha256(regular_bytes(Path(request.context_path))).hexdigest()
+        and journal.recovery_context_digest
+        == hashlib.sha256(
+            regular_bytes(_private_reference(bootstrap_request.recovery_context, home))
+        ).hexdigest()
     )
 
 
@@ -112,21 +149,8 @@ def prepare_normal_release(path: Path, *, for_commit: bool = False) -> PreparedN
     journal = _candidate_ready_recovery(handoff.generation)
     bootstrap_path = _private_reference(journal.request, home)
     bootstrap_request = BootstrapHopRequest.model_validate_json(regular_bytes(bootstrap_path))
-    if (
-        journal.request_digest != hashlib.sha256(regular_bytes(bootstrap_path)).hexdigest()
-        or bootstrap_request.normal_release_path != str(path)
-        or bootstrap_request.predecessor != request.predecessor
-        or bootstrap_request.candidate_context != request.context_path
-        or journal.inventory_digest
-        != hashlib.sha256(
-            regular_bytes(_private_reference(bootstrap_request.inventory_receipt, home))
-        ).hexdigest()
-        or journal.candidate_context_digest
-        != hashlib.sha256(regular_bytes(Path(request.context_path))).hexdigest()
-        or journal.recovery_context_digest
-        != hashlib.sha256(
-            regular_bytes(_private_reference(bootstrap_request.recovery_context, home))
-        ).hexdigest()
+    if not _bootstrap_handoff_matches(
+        journal, bootstrap_request, bootstrap_path, request=request, home=home, path=path
     ):
         raise ReleaseRejectedError("normal continuation has no exact completed bootstrap handoff")
     services: tuple[PreparedService, ...] = ()
@@ -228,3 +252,45 @@ def run_normal_commit(path: Path) -> int:
     plan = prepare_normal_release(path, for_commit=True)
     _reclaim_generation_and_enter(plan, commit_normal_release_after_publication)
     return 0
+
+
+_SOURCE_UPDATE_FLAG_FIELDS = (
+    "bootstrap_hop",
+    "target_sha",
+    "restart_only",
+    "force_reap",
+    "handoff_generation",
+    "post_checkout",
+    "from_sha",
+)
+"""The source/bootstrap update flags the standalone normal entries refuse.
+
+``run_normal_entry`` is the detached updater's routing face for
+``--normal-release`` / ``--normal-commit``: a mixed argv (any of these flags,
+the other normal entry, or a non-smooth drain policy) is a parser error, so a
+normal continuation can never silently degrade into a source rollout.
+"""
+
+
+def run_normal_entry(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Route the detached updater's standalone normal entries to their rc.
+
+    ``--normal-release`` (the drive / death-recovery continuation) and
+    ``--normal-commit`` (the per-unit commit tail after the publication
+    commit) are the two internal normal entries; each refuses the other and
+    every source/bootstrap update flag on the same invocation.
+    """
+    if args.normal_release is not None:
+        if _foreign_flags_set(args, counterpart="normal_commit"):
+            parser.error("--normal-release cannot use source/bootstrap update flags")
+        return run_normal_release(args.normal_release)
+    if _foreign_flags_set(args, counterpart="normal_release"):
+        parser.error("--normal-commit cannot use source/bootstrap update flags")
+    return run_normal_commit(args.normal_commit)
+
+
+def _foreign_flags_set(args: argparse.Namespace, *, counterpart: str) -> bool:
+    """Whether the invocation carries any flag foreign to the dispatched entry."""
+    return args.mode != "smooth" or any(
+        getattr(args, field) for field in (*_SOURCE_UPDATE_FLAG_FIELDS, counterpart)
+    )

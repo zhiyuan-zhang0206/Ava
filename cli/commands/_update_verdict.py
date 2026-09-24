@@ -136,7 +136,7 @@ def _phase_b_and_commit(
         # recovery, never an ad-hoc compensating resume.
         with _stage_telemetry("managed_writer_hop"):
             hop_rc, hop_outcome, hop_hosts, hop_failing = phase_b_hops(phase_input.hop_plans)
-            if hop_outcome is not RolloutOutcome.CLEAN or hop_rc != 0:
+            if (hop_outcome, hop_rc) != (RolloutOutcome.CLEAN, 0):
                 return PhaseBVerdict(
                     rc=hop_rc,
                     outcome=hop_outcome,

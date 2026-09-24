@@ -1375,14 +1375,12 @@ async def aredis_inbound_listener():
 
 @pytest.fixture(autouse=True)
 def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Spawn with prompt path runs generate_label_async in gateway BackgroundTasks,
-    internally calls build_chat_model which really hits the DeepSeek API — any test not explicitly
-    covered would pollute network + slow down + unstable. autouse stub makes build_chat_model return a
-    fake that raises RuntimeError; if a test actually triggers the spawn-with-prompt BackgroundTask, it just writes
-    the error into loguru (label stays NULL, doesn't affect spawn behavior itself).
-
-    Cases that explicitly want to test label auto-generation (`tests/gateway/test_labels.py`) themselves
-    monkeypatch.setattr and write a new fake LLM, overriding this default.
+    """Spawn with prompt runs `generate_label_async` in gateway BackgroundTasks, which
+    calls `build_chat_model` and really hits the DeepSeek API — polluting network,
+    slowing the suite, making it unstable. The autouse stub returns a fake that
+    raises RuntimeError; a triggered BackgroundTask just writes the error into
+    loguru (label stays NULL, spawn unaffected). `tests/gateway/test_labels.py`
+    monkeypatches a new fake LLM, overriding this default.
     """
 
     def _fake_factory(_model: str, **_: object) -> object:
@@ -1394,12 +1392,8 @@ def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return _RaiseLLM()
 
-    # Need to stub both positions:
-    # - gateway.labels: historical location (re-export stub, no longer directly import build_chat_model)
-    # - services.labeler.labeler: where generate_label_async actually resides
-    # ImportError/AttributeError suppress modules not imported or attributes missing.
-    with contextlib.suppress(ImportError, AttributeError):
-        monkeypatch.setattr("ops.labels.build_chat_model", _fake_factory)
+    # `services.labeler.labeler` is where `generate_label_async` actually resides;
+    # ImportError/AttributeError suppress a module or attribute that is not importable.
     with contextlib.suppress(ImportError, AttributeError):
         monkeypatch.setattr("services.labeler.labeler.build_chat_model", _fake_factory)
 

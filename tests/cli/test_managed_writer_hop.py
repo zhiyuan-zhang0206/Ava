@@ -14,10 +14,12 @@ then fall into the shared collect/commit window (task #4129 I5).
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
 import textwrap
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -25,8 +27,11 @@ from uuid import UUID
 
 import pytest
 
+from cli.commands import _managed_writer_mode as mode_mod
+from cli.commands._managed_writer_collector import CollectorRefusal
 from cli.commands._managed_writer_hop import (
     CollectorInput,
+    CollectorUnitInput,
     HopUnitPlan,
     ManagedWriterPhaseInput,
     dispatch_bootstrap_hops,
@@ -34,9 +39,27 @@ from cli.commands._managed_writer_hop import (
 )
 from cli.commands._update_recover import RolloutOutcome
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
-from ops.rpc_bootstrap_hop import BootstrapHopResult
+from ops.ops_bootstrap_hop import BootstrapHopResult
 from ops.rpc_prepare_dispatch import ProjectionFile, prepared_hop_name
-from shared.managed_writer_barrier import RolloutIdentity
+from shared import rollout_telemetry
+from shared.managed_writer_barrier import ManagedUnit, RolloutIdentity
+from tests.cli.test_managed_writer_collector import (
+    RECEIPT_DIGEST,
+    _accept,
+    _expected,
+    _journal_dict,
+    _ledger_dict,
+    _observation_dict,
+    _unit_input,
+    _World,
+    _world,
+)
+from tests.cli.test_managed_writer_mode import (
+    _phase_input,
+    _ready_guards,
+    _run_inner,
+    _stub_orchestration_to_phase_b,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -47,6 +70,16 @@ _MUST_BE_LAZY = ("shared.session_backend", "shared.session_record")
 
 ARTIFACT = "a" * 64
 CONTENT = '{"fixture":1}\n'
+
+
+@pytest.fixture(autouse=True)
+def _fresh_mode_decision() -> Iterator[None]:
+    """The mode decision is cached per process; the rollout-level pin starts fresh."""
+    mode_mod._reset_for_tests()
+    rollout_telemetry.deactivate()
+    yield
+    mode_mod._reset_for_tests()
+    rollout_telemetry.deactivate()
 
 
 def _plan(machine: str = "runner-a", home: str = "/ava-a") -> HopUnitPlan:
@@ -505,3 +538,132 @@ def test_verdict_tails_failure_keeps_the_commit_paid(
     assert run.drove == [run.phase_input]
     assert run.committed == [None], "the commit was paid before the tails ran"
     assert run.tailed == [run.phase_input]
+
+
+# ── the active rollout through the hop branch (integration) ──────────────────
+
+
+def test_active_rollout_runs_the_hop_phase_instead_of_the_legacy_poll(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The phase input returned by the begin reaches the closing section: the hop
+    gate replaces the Phase-B poll -- never joins it -- and its CLEAN continuation
+    hands the same phase input to the collection (task #4129 I4/I5, channels C+D);
+    the channel-E steps then run through the real wiring, silently zero on this
+    fixture's empty continue roster (task #4129 I6)."""
+    from cli.commands import _managed_writer_collector as collector_mod
+    from cli.commands import _update_verdict as verdict_mod
+    from cli.commands import update as _up
+
+    _ready_guards(monkeypatch)
+    phase_input = _phase_input()
+    _stub_orchestration_to_phase_b(monkeypatch, phase_input=phase_input)
+    seen: list[list[HopUnitPlan]] = []
+
+    def _hop(
+        plans: list[HopUnitPlan],
+    ) -> tuple[int, _up.RolloutOutcome, list[tuple[str, str | None]], str | None]:
+        seen.append(list(plans))
+        return 0, _up.RolloutOutcome.CLEAN, [], None
+
+    monkeypatch.setattr(verdict_mod, "phase_b_hops", _hop)
+    waited: list[object] = []
+
+    def _wait(collector: object) -> str | None:
+        waited.append(collector)
+        return None
+
+    monkeypatch.setattr(collector_mod, "wait_for_candidate_ready", _wait)
+    legacy: list[None] = []
+    monkeypatch.setattr(
+        _up,
+        "_phase_b_outcome",
+        lambda *_a, **_k: legacy.append(None) or (0, _up.RolloutOutcome.CLEAN, [], None),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    collected: list[object] = []
+    monkeypatch.setattr(
+        _up,
+        "_collect_managed_writer_publication",
+        lambda window_input: collected.append(window_input) or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_up, "_commit_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert _run_inner() == 0
+    assert seen == [list(phase_input.hop_plans)]
+    assert waited == [phase_input.collector], "the CLEAN gate waits on the same collector"
+    assert collected == [phase_input], "the window collects through the same phase input"
+    assert legacy == [], "the hop branch replaces the Phase-B poll"
+    out = capsys.readouterr().out
+    assert "stage=managed_writer_continue" in out, "the drive position ran through the wiring"
+    assert "stage=managed_writer_tails" in out, "the tails position ran through the wiring"
+
+
+# ── the acceptance battery: positive closure + the sealed request's projection ─
+
+
+def test_accept_derives_the_positive_closure() -> None:
+    world = _world()
+
+    closure = _accept(world)
+
+    assert closure.outcome == "old_writers_absent_relaunchers_fenced"
+    assert closure.unit == ManagedUnit(
+        machine="runner-a", home="/ava-a", inventory_digest=RECEIPT_DIGEST
+    )
+    assert closure.boot_id is not None
+
+
+NORMAL_BYTES = b'{"fixture":"normal-release"}\n'
+
+
+def _hop_request_bytes(normal_path: str | None) -> bytes:
+    body = json.dumps(
+        {
+            "candidate_context": "/ava-a/run/candidate.json",
+            "recovery_context": "/ava-a/run/recovery.json",
+            "inventory_receipt": "/ava-a/run/release-inventory.json",
+            "predecessor": {"pid": 111, "create_time": 1700000000.0},
+            "normal_release_path": normal_path,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return (body + "\n").encode()
+
+
+def _normal_pair_world(unit: CollectorUnitInput, *, planned: bool) -> _World:
+    expected = _expected()
+    return _World(
+        unit,
+        expected,
+        _observation_dict(expected),
+        _ledger_dict(unit, _journal_dict(unit, planned=planned)),
+    )
+
+
+def test_accept_checks_the_normal_plan_against_the_sealed_dispatch() -> None:
+    """I6: the journal's one-bit claim and the sealed bytes must agree, both ways."""
+    unit = _unit_input(normal_request=NORMAL_BYTES)
+    world = _normal_pair_world(unit, planned=False)
+
+    with pytest.raises(CollectorRefusal, match="normal plan does not match the sealed dispatch"):
+        _accept(world)
+
+
+def test_accept_refuses_a_request_that_does_not_name_its_normal_projection() -> None:
+    unit = _unit_input(normal_request=NORMAL_BYTES, request=_hop_request_bytes(None))
+    world = _normal_pair_world(unit, planned=True)
+
+    with pytest.raises(CollectorRefusal, match="does not name its normal projection"):
+        _accept(world)
+
+
+def test_accept_takes_the_sealed_normal_pairing() -> None:
+    name = prepared_hop_name("normal-request", NORMAL_BYTES)
+    unit = _unit_input(
+        normal_request=NORMAL_BYTES, request=_hop_request_bytes(f"/ava-a/run/{name}")
+    )
+    world = _normal_pair_world(unit, planned=True)
+
+    closure = _accept(world)
+    assert closure.unit.home == "/ava-a"

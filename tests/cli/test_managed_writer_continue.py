@@ -1,4 +1,4 @@
-"""`cli.commands._managed_writer_continue` -- the continuation phase (task #4129, channel E).
+"""The continuation phase, folded into `cli.commands._managed_writer_hop` (task #4129, channel E).
 
 Pins both coordinator steps: the drive fan-out + readback wait, and the
 commit-tail fan-out + committed-slot wait. The unit answers are stubbed at the
@@ -11,6 +11,8 @@ failure, and both deadline details -- is exercised without a live fleet.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -18,21 +20,56 @@ from uuid import UUID
 
 import pytest
 
-from cli.commands import _managed_writer_continue as continue_mod
+from cli.commands import _managed_writer_hop as continue_mod
+from cli.commands import _managed_writer_mode as mode_mod
+from cli.commands._managed_writer_dispatch import assemble_phase_inputs
 from cli.commands._managed_writer_hop import (
     CollectorInput,
     ContinueUnitInput,
     ManagedWriterPhaseInput,
 )
+from cli.commands._update_bootstrap import BootstrapHopRequest
+from cli.commands._update_normal_release import NormalReleaseRequest
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
-from ops.rpc_normal_continue import NormalContinueResult
+from ops.ops_normal_continue import NormalContinueResult
+from ops.rpc_prepare_dispatch import prepared_hop_name
+from shared import rollout_telemetry
 from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity
+from tests.cli.test_managed_writer_dispatch import (
+    CANDIDATE_DIGEST,
+    SCHEMA,
+    VALID_UNTIL,
+    _hop_world,
+    _published,
+)
+from tests.cli.test_managed_writer_mode import (
+    _CHECKED,
+    _WIRING,
+    _capture_events,
+    _clear_guard,
+    _disable,
+    _enable,
+    _ready_guards,
+)
+from tests.cli.test_managed_writer_mode import (
+    _phase_input as _mode_phase_input,
+)
 
 ARTIFACT = "a" * 64
 OPERATION = RolloutIdentity(
     holder="gateway:pid1", acquired_at=datetime(2026, 9, 20, tzinfo=UTC), target_sha="0" * 40
 )
 CHALLENGE = UUID(int=3)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_mode_state() -> Iterator[None]:
+    """The mode decision is cached per process; each moved wiring pin starts fresh."""
+    mode_mod._reset_for_tests()
+    rollout_telemetry.deactivate()
+    yield
+    mode_mod._reset_for_tests()
+    rollout_telemetry.deactivate()
 
 
 def _unit(machine: str = "runner-a", home: str = "/ava-a") -> ContinueUnitInput:
@@ -548,3 +585,146 @@ def test_an_empty_roster_is_a_silent_zero(
     assert continue_mod.commit_tails(phase_input) == 0
     assert calls == []
     assert capsys.readouterr() == ("", "")
+
+
+# ── the phase-input assembly's normal projection + continuation roster ───────
+
+
+def test_assemble_phase_inputs_binds_the_normal_projection_and_continuation_roster() -> None:
+    """The sealed request names the normal projection, and the continuation
+    roster carries the same content-named entry per unit in plan order."""
+    facts, targets, operation = _hop_world(now=datetime(2026, 9, 20, tzinfo=UTC))
+    facts = [replace(facts[0], previous_selector='{"selector":1}\n'), facts[1]]
+    challenge = UUID(int=11)
+
+    phase_input = assemble_phase_inputs(
+        facts,
+        targets,
+        operation=operation,
+        valid_until=VALID_UNTIL,
+        challenge=challenge,
+        schema_digest=SCHEMA,
+        candidate_digest=CANDIDATE_DIGEST,
+    )
+
+    plan = next(iter(phase_input.hop_plans))
+    candidate_projection, request_projection, normal_projection = plan.projections
+    assert plan.request_path == f"/ava-a/run/{request_projection.name}"
+    assert normal_projection.name == prepared_hop_name("normal-request", normal_projection.content)
+    request = BootstrapHopRequest.model_validate_json(request_projection.content)
+    assert request.normal_release_path == f"/ava-a/run/{normal_projection.name}"
+    normal = NormalReleaseRequest.model_validate_json(normal_projection.content)
+    assert normal.context_path == f"/ava-a/run/{candidate_projection.name}"
+    assert normal.unit == _published("runner-a", "/ava-a")
+    assert normal.previous_selector == facts[0].previous_selector
+    assert normal.predecessor == facts[0].hop_material.predecessor
+
+    unit = phase_input.collector.units[0]
+    assert unit.normal_request == normal_projection.content.encode("ascii")
+
+    continuation = phase_input.continue_units
+    assert [item.machine for item in continuation] == ["runner-a", "runner-b"]
+    assert continuation[0].request_path == f"/ava-a/run/{normal_projection.name}"
+    assert (continuation[0].home, continuation[0].ops_url, continuation[0].artifact_digest) == (
+        "/ava-a",
+        None,
+        ARTIFACT,
+    )
+
+
+# ── the channel-E continuation wiring (task #4129 I6) ────────────────────────
+
+
+@pytest.mark.parametrize("state", ["off", "blocked", "none"])
+def test_continue_steps_skip_without_an_active_decision(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], state: str
+) -> None:
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _capture_events(monkeypatch)
+    if state == "off":
+        _disable(monkeypatch)
+        mode_mod.decide_managed_writer_mode()
+    elif state == "blocked":
+        _enable(monkeypatch)
+        _clear_guard(monkeypatch, _CHECKED)
+        _clear_guard(monkeypatch, _WIRING)
+        mode_mod.decide_managed_writer_mode()
+
+    assert wiring._drive_managed_writer_continuation(None) == 0
+    assert wiring._commit_managed_writer_tails(None) == 0
+    captured = capsys.readouterr()
+    assert "managed_writer_continue" not in captured.out
+    assert "managed_writer_tails" not in captured.out
+    if state == "none":
+        # A call outside the rollout's read point is beaconed, never silent.
+        assert "no mode decision recorded" in captured.err
+    else:
+        assert captured.err == ""
+
+
+def test_continue_steps_beacon_without_the_phase_input_under_active(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Reaching the channel-E positions without the begin chain's phase input is
+    the shape the collection position refuses first; if one is reached anyway it
+    skips with a visible beacon rather than refuse, and the commit seat's own
+    all-unit gate still fail-closes."""
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+
+    assert wiring._drive_managed_writer_continuation(None) == 0
+    err = capsys.readouterr().err
+    assert "managed-writer continue" in err
+    assert "without the begin position's phase input" in err
+
+    assert wiring._commit_managed_writer_tails(None) == 0
+    err = capsys.readouterr().err
+    assert "managed-writer tails" in err
+    assert "without the begin position's phase input" in err
+
+
+def test_continue_step_passes_the_refusal_through(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands import _managed_writer_hop as continue_mod
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+    phase_input = _mode_phase_input()
+    seen: list[ManagedWriterPhaseInput | None] = []
+
+    def drive(window_input: ManagedWriterPhaseInput | None) -> int:
+        seen.append(window_input)
+        return 1
+
+    monkeypatch.setattr(continue_mod, "drive_continuation", drive)
+
+    assert wiring._drive_managed_writer_continuation(phase_input) == 1
+    assert seen == [phase_input]
+    assert "stage=managed_writer_continue" in capsys.readouterr().out
+
+
+def test_tails_step_passes_the_refusal_through(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.commands import _managed_writer_hop as continue_mod
+    from cli.commands import _managed_writer_wiring as wiring
+
+    _ready_guards(monkeypatch)
+    mode_mod.decide_managed_writer_mode()
+    phase_input = _mode_phase_input()
+    seen: list[ManagedWriterPhaseInput | None] = []
+
+    def tails(window_input: ManagedWriterPhaseInput | None) -> int:
+        seen.append(window_input)
+        return 1
+
+    monkeypatch.setattr(continue_mod, "commit_tails", tails)
+
+    assert wiring._commit_managed_writer_tails(phase_input) == 1
+    assert seen == [phase_input]
+    assert "stage=managed_writer_tails" in capsys.readouterr().out

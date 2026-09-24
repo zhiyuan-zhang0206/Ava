@@ -270,7 +270,7 @@ def _drive_managed_writer_continuation(phase_input: ManagedWriterPhaseInput | No
             file=sys.stderr,
         )
         return 0
-    from cli.commands._managed_writer_continue import drive_continuation
+    from cli.commands._managed_writer_hop import drive_continuation
 
     # The stage is entered only under the active decision: an off/blocked
     # rollout's log must not grow a managed-writer stage it never ran.
@@ -312,7 +312,7 @@ def _commit_managed_writer_tails(phase_input: ManagedWriterPhaseInput | None) ->
             file=sys.stderr,
         )
         return 0
-    from cli.commands._managed_writer_continue import commit_tails
+    from cli.commands._managed_writer_hop import commit_tails
 
     # The stage is entered only under the active decision: an off/blocked
     # rollout's log must not grow a managed-writer stage it never ran.

@@ -436,6 +436,45 @@ def _record_outcome(
         )
 
 
+def _aftermath_banner(
+    outcome: RolloutOutcome,
+    *,
+    publication_refused: bool,
+    tails_pending: bool,
+    unreached: list[str],
+    local_launch_failures: list[str],
+) -> str:
+    """The residual-state banner for a rollout that did not finish clean.
+
+    Keyed on `outcome` because the two cases need opposite instructions: an
+    ABORTED rollout is retried once its cause is fixed, while an INCOMPLETE
+    one has already migrated and advanced the pin -- re-running `ava cluster
+    update` into it is the 2026-07-29 collision, and the correct move is to
+    wait out (or look at) the hosts the settle hold names.
+
+    INCOMPLETE has four shapes, so the banner distinguishes them: hosts that
+    never came back, a local service session that never launched, a retained
+    managed-writer publication failure, and the commit-tail failure whose
+    publication commit IS paid. Naming the wrong one sends the operator to
+    the wrong machine -- or to the wrong command.
+    """
+    if outcome is not RolloutOutcome.INCOMPLETE:
+        return "ROLLOUT ABORTED — cluster residual state + recovery"
+    if publication_refused:
+        return (
+            "ROLLOUT INCOMPLETE — the code landed, but the managed-writer "
+            "activation did not publish"
+        )
+    if tails_pending:
+        return (
+            "ROLLOUT INCOMPLETE — the publication is committed; some units' "
+            "commit tails did not complete"
+        )
+    if unreached or not local_launch_failures:
+        return "ROLLOUT INCOMPLETE — the gateway landed; some agent-runners did not"
+    return "ROLLOUT INCOMPLETE — the code landed; a service on this host did not come up"
+
+
 def _print_rollout_aftermath(
     *,
     reached: list[str],
@@ -451,36 +490,18 @@ def _print_rollout_aftermath(
     traceback: which resumes are confirmed vs unconfirmed, whether the pin advanced, and
     the exact recovery commands. stderr (the rollout log's error stream).
 
-    The banner is keyed on `outcome` because the two cases need opposite instructions:
-    an ABORTED rollout is retried once its cause is fixed, while an INCOMPLETE one has
-    already migrated and advanced the pin — re-running `ava cluster update` into it is the
-    2026-07-29 collision, and the correct move is to wait out (or look at) the hosts
-    the settle hold names.
-
-    INCOMPLETE now has four shapes, so the banner distinguishes them: hosts that never
-    came back, a local service session that never launched, a managed-writer
-    publication failure (a failed candidate-ready wait, or a
-    collection/continuation/commit refusal) whose durable journal was retained,
-    and the commit-tail failure whose publication commit IS paid. Naming the
-    wrong one sends the operator to the wrong machine — or to the wrong command.
+    Banner selection lives in `_aftermath_banner`; the block below names the
+    residual detail: which resumes are confirmed vs unconfirmed, whether the
+    pin advanced, and the exact recovery commands.
     """
     rule = "=" * 64
-    if outcome is not RolloutOutcome.INCOMPLETE:
-        banner = "ROLLOUT ABORTED — cluster residual state + recovery"
-    elif publication_refused:
-        banner = (
-            "ROLLOUT INCOMPLETE — the code landed, but the managed-writer "
-            "activation did not publish"
-        )
-    elif tails_pending:
-        banner = (
-            "ROLLOUT INCOMPLETE — the publication is committed; some units' "
-            "commit tails did not complete"
-        )
-    elif unreached or not local_launch_failures:
-        banner = "ROLLOUT INCOMPLETE — the gateway landed; some agent-runners did not"
-    else:
-        banner = "ROLLOUT INCOMPLETE — the code landed; a service on this host did not come up"
+    banner = _aftermath_banner(
+        outcome,
+        publication_refused=publication_refused,
+        tails_pending=tails_pending,
+        unreached=unreached,
+        local_launch_failures=local_launch_failures,
+    )
     out = ["", rule, banner, rule]
     # Local sessions first: unlike the host rows below, this one names a service
     # process that does not exist on the host printing the block, and it is the

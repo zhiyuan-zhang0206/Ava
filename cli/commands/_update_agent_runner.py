@@ -739,38 +739,10 @@ def main(argv: list[str] | None = None) -> int:
         help="revision to restore if the checked-out tree fails migration-layout validation",
     )
     args = parser.parse_args(argv)
-    if args.normal_release is not None:
-        if (
-            args.normal_commit
-            or args.bootstrap_hop
-            or args.target_sha
-            or args.restart_only
-            or args.force_reap
-            or args.handoff_generation
-            or args.post_checkout
-            or args.from_sha
-            or args.mode != "smooth"
-        ):
-            parser.error("--normal-release cannot use source/bootstrap update flags")
-        from cli.commands._update_normal_release_standalone import run_normal_release
+    if args.normal_release is not None or args.normal_commit is not None:
+        from cli.commands._update_normal_release_standalone import run_normal_entry
 
-        return run_normal_release(args.normal_release)
-    if args.normal_commit is not None:
-        if (
-            args.normal_release
-            or args.bootstrap_hop
-            or args.target_sha
-            or args.restart_only
-            or args.force_reap
-            or args.handoff_generation
-            or args.post_checkout
-            or args.from_sha
-            or args.mode != "smooth"
-        ):
-            parser.error("--normal-commit cannot use source/bootstrap update flags")
-        from cli.commands._update_normal_release_standalone import run_normal_commit
-
-        return run_normal_commit(args.normal_commit)
+        return run_normal_entry(args, parser)
     if args.target_sha is not None:
         from shared.git_sha import require_full_sha
 

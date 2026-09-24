@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import threading
+from types import ModuleType
 from typing import Any
 
 from psycopg_pool import ConnectionPool
+from pydantic import BaseModel
 
 from ops import (
     ops_bootstrap_hop,
@@ -26,8 +28,8 @@ from ops import (
     ops_prepare_facts,
     ops_uploads,
 )
-from ops.rpc_bootstrap_hop import BootstrapHopPayload, BootstrapRecoveryReadPayload
-from ops.rpc_normal_continue import NormalContinuePayload
+from ops.ops_bootstrap_hop import BootstrapHopPayload, BootstrapRecoveryReadPayload
+from ops.ops_normal_continue import NormalContinuePayload
 from ops.rpc_prepare_dispatch import PrepareDispatchPayload
 from ops.rpc_prepare_facts import PrepareFactsPayload
 from ops.rpc_schemas import (
@@ -58,6 +60,26 @@ from ops.rpc_schemas import (
 #
 # Same-process only; the cross-process race is closed by `runtime_config`'s own lock.
 _state_write_lock = threading.Lock()
+
+
+# The request-shaped channel arms (C: bootstrap hop, E: normal continue) share
+# one treatment: the request crosses as JSON text, the handler re-checks it as
+# canonical private unit state, and the detached child re-verifies every binding
+# from the request bytes instead of trusting the wire payload.
+#
+# The table holds the owning module and the handler's name, never the function
+# object: the same rule the `ops/cluster.py` facade states out loud -- a direct
+# reference (like a from-import) is resolved from where the *reader* was
+# defined, so a test that patches `ops_bootstrap_hop.cluster_bootstrap_hop_op`
+# must be able to reach the call. Resolve through the module at call time.
+_CHANNEL_REQUEST_STEPS: dict[str, tuple[type[BaseModel], ModuleType, str]] = {
+    "cluster_bootstrap_hop": (BootstrapHopPayload, ops_bootstrap_hop, "cluster_bootstrap_hop_op"),
+    "cluster_normal_continue": (
+        NormalContinuePayload,
+        ops_normal_continue,
+        "cluster_normal_continue_op",
+    ),
+}
 
 
 def dispatch_sync(
@@ -136,15 +158,16 @@ def dispatch_sync(
             return "completed", ops_prepare_dispatch.cluster_prepare_dispatch_op(pd).model_dump(
                 mode="json"
             )
-        case "cluster_bootstrap_hop":
-            # Channel C: the request path crosses as JSON text; the handler
+        case "cluster_bootstrap_hop" | "cluster_normal_continue":
+            # Channels C/E: the request path crosses as JSON text; the handler
             # re-checks it as canonical private unit state and starts the
-            # detached hop session -- the payload is a request, and the child
-            # re-verifies every binding from the request bytes itself.
-            bh = BootstrapHopPayload.model_validate_json(json.dumps(payload))
-            return "completed", ops_bootstrap_hop.cluster_bootstrap_hop_op(bh).model_dump(
-                mode="json"
-            )
+            # detached hop/continuation session -- the payload is a request,
+            # and the child re-verifies every binding from the request bytes
+            # itself.
+            payload_cls, op_module, op_name = _CHANNEL_REQUEST_STEPS[kind]
+            request = payload_cls.model_validate_json(json.dumps(payload))
+            handler = getattr(op_module, op_name)
+            return "completed", handler(request).model_dump(mode="json")
         case "cluster_bootstrap_recovery_read":
             # Channel C's read-only face: the unit reports its own
             # bootstrap-recovery journal slot -- the exact pre-stop abort's
@@ -152,15 +175,6 @@ def dispatch_sync(
             # nothing, stops nothing.
             rr = BootstrapRecoveryReadPayload.model_validate(payload)
             return "completed", ops_bootstrap_hop.cluster_bootstrap_recovery_read_op(rr).model_dump(
-                mode="json"
-            )
-        case "cluster_normal_continue":
-            # Channel E: the request path crosses as JSON text; the handler
-            # re-checks it as canonical private unit state and starts the
-            # detached continuation session -- the payload is a request, and
-            # the child re-derives every binding from the request bytes itself.
-            nc = NormalContinuePayload.model_validate_json(json.dumps(payload))
-            return "completed", ops_normal_continue.cluster_normal_continue_op(nc).model_dump(
                 mode="json"
             )
         case "cluster_resume":
