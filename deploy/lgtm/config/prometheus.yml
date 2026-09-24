@@ -16,11 +16,18 @@ global:
   evaluation_interval: 15s
 
 # Companion setting for the OTLP receiver: pushed samples can arrive out of
-# order (collector retries after a backend outage replay queued batches), and
-# without a window Prometheus drops them silently.
+# order when a machine's collector replays its frozen queue after a link outage
+# or sleep, keeping event timestamps (oldest first). A window that is too small
+# rejects those replays as "too old sample"; the OTLP write path fails the whole
+# batch (HTTP 400), rolling back fresh samples batched alongside them.
+# Task #4650: 43 batches / 27,154 points dropped 2026-09-20..23; worst
+# observed lateness ~2h15m. 6h keeps ~2.7x margin over that case. The window
+# is bounded because late samples stay in the TSDB head (memory). Episodes
+# beyond it surface through `ava-ops-prom-too-old-samples`.
+# Rationale and acceptance runbook: deploy/lgtm/README.md.
 storage:
   tsdb:
-    out_of_order_time_window: 30m
+    out_of_order_time_window: 6h
 
 scrape_configs:
   - job_name: prometheus

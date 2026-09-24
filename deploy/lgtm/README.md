@@ -145,6 +145,79 @@ targets; converge warns on a listen/read mismatch. Local health probes instead
 use the native bind settings and bypass HTTP proxy variables. A remote HTTPS
 query URL is never interpreted as a local bind address or port.
 
+## OTLP late-sample window (out-of-order intake)
+
+Each machine pushes metrics to Prometheus through an OTel Collector. During a
+sleep or link outage, a collector's in-memory queue freezes; on recovery it
+replays oldest first with the original event timestamps. Samples arriving
+later than Prometheus's `storage.tsdb.out_of_order_time_window` are rejected as
+"too old sample". The OTLP write path can then return HTTP 400 for the whole
+batch and roll back fresh samples batched alongside the late ones. In task
+#4650, this caused 40-60s gaps in other machines' infrastructure series.
+
+From 2026-09-20..23, 43 batches containing 27,154 metric points were dropped,
+and `prometheus_tsdb_too_old_samples_total` rose by 2,321. The worst observed
+lateness was ~2h15m. The window is raised from 30m to 6h, ~2.7x that observed
+delay. A larger window holds out-of-order samples in the TSDB head longer and
+costs memory, so a delay beyond 6h should be investigated before increasing
+it again. This is an operations setting in both
+`deploy/lgtm/native/config/prometheus.yml` and
+`deploy/lgtm/config/prometheus.yml`, not a framework constant.
+
+The `ava-ops-prom-too-old-samples` rule fires on any increase in the counter
+over 10m. That counter covers both the whole-batch HTTP 400 path and a silent
+partial-drop path with no HTTP 400 or collector log line. Once the 6h window
+covers the known replay pattern, the rule should remain silent; a firing
+instance reports a new, longer-delay episode.
+
+The new window takes effect on the next converge and Prometheus restart. A
+live deployment still showing 30m before that rollout is expected. To roll
+back, revert the change, render the configs again, and restart Prometheus.
+
+### Acceptance after rollout
+
+First, after converge and restart, read back the rendered native config and
+confirm `out_of_order_time_window: 6h`:
+
+```bash
+grep 'out_of_order_time_window: 6h' "$AVA_HOME/lgtm/native/config/prometheus.yml"
+```
+
+Then confirm the running Prometheus loaded the same value from its status API:
+
+```bash
+curl -fsS http://127.0.0.1:9090/api/v1/status/config |
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["yaml"])' |
+  grep -F 'out_of_order_time_window: 6h'
+```
+
+The checked-in container rollback config carries the same setting. After the
+next collector recovery event, verify all of the following:
+
+1. The recovering collector's `otlphttp/prometheus` exporter has no new
+   `Dropping data` log entry.
+2. `prometheus_tsdb_too_old_samples_total` has zero increase across the event
+   window. For a one-hour query window on the LGTM host:
+
+   ```bash
+   curl -s http://127.0.0.1:9090/api/v1/query \
+     --data-urlencode 'query=increase(prometheus_tsdb_too_old_samples_total[1h])'
+   ```
+
+3. Other machines in the same batch, such as the company-air/company-mini
+   infrastructure series, have no 40-60s collateral gap.
+
+Acceptance is volume-based, not calendar-based: it completes once at least
+10 recovery events and at least 27,154 replayed metric points have passed
+through the widened window with no too-old rejection — the scale of the
+pre-fix evidence (10 drop events, 27,154 points, ~3 events/day,
+2026-09-20..23). Track each event's replay volume as the
+`prometheus_tsdb_head_out_of_order_samples_appended_total` delta at its
+recovery boundary. Reaching both volumes ends the observation; there is no
+minimum calendar time, and a short observation is not by itself
+insufficient. If an event still drops samples, compare its lateness with
+the window before changing anything.
+
 ## Start, stop, and rollback
 
 ```bash
