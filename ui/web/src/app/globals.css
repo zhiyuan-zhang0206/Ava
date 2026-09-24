@@ -303,3 +303,8 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 80px;
 }
+
+/* The mounted virtual window is small enough to measure real row heights. */
+.timeline-virtual .timeline-item {
+  content-visibility: visible;
+}
