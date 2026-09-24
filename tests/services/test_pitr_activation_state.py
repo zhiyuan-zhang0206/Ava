@@ -99,6 +99,12 @@ def test_activation_record_rejects_unknown_fields(tmp_path: Path) -> None:
         load_record(tmp_path)
 
 
+def test_activation_json_rejects_non_object_with_original_error() -> None:
+    with pytest.raises(TypeError) as error:
+        ActivationRecord.from_json("[]")
+    assert str(error.value) == "PITR activation record fields differ"
+
+
 @pytest.mark.parametrize("missing", tuple(ActivationRecord.__dataclass_fields__))
 def test_activation_record_v3_rejects_every_single_missing_field(missing: str) -> None:
     """The durable v3 record is closed-schema even when the missing value was null."""

@@ -17,6 +17,7 @@ from services.pitr.activation_evidence import (
     validate_wal_remote_evidence,
 )
 from services.pitr.base_manifest import CandidateManifest
+from shared.api_contracts import strict_decode
 from shared.private_storage import ensure_private_dir
 
 ActivationPhase = Literal[
@@ -37,6 +38,10 @@ ActivationPhase = Literal[
 ]
 
 _SCHEMA_VERSION = 4
+_FIELDS_ERROR = "PITR activation record fields differ"
+_STRING_FIELD_ERROR = "PITR activation {name} must be a string"
+_OPTIONAL_STRING_FIELD_ERROR = "PITR activation {name} must be a string or null"
+_INTEGER_FIELD_ERROR = "PITR activation {name} must be an integer"
 _V2_FIELDS = {
     "schema_version",
     "operation_id",
@@ -204,9 +209,8 @@ class ActivationRecord:
     @classmethod
     def from_json(cls, payload: str) -> ActivationRecord:
         raw_value: object = json.loads(payload)
-        if not isinstance(raw_value, dict):
-            raise TypeError("PITR activation record fields differ")
-        raw = cls._upgrade_schema(cast(dict[str, object], raw_value))
+        fields = strict_decode.object_fields(raw_value, error_type=TypeError, message=_FIELDS_ERROR)
+        raw = cls._upgrade_schema(fields)
         record = cls._from_fields(raw)
         # Keep validation order: corrupt records can violate several invariants.
         record._validate_schema_and_timestamps()
@@ -263,45 +267,43 @@ class ActivationRecord:
 
     @classmethod
     def _from_fields(cls, raw: dict[str, object]) -> ActivationRecord:
-        if set(raw) != set(cls.__dataclass_fields__):
-            raise ValueError("PITR activation record fields differ")
+        strict_decode.exact_fields(
+            raw, cls.__dataclass_fields__, error_type=ValueError, message=_FIELDS_ERROR
+        )
         phase = raw["phase"]
         if not isinstance(phase, str) or phase not in _PHASES:
             raise ValueError("unknown PITR activation phase")
 
         def string(name: str) -> str:
-            value = raw[name]
-            if not isinstance(value, str):
-                raise TypeError(f"PITR activation {name} must be a string")
-            return value
+            return strict_decode.strict_string(
+                raw, name, error_type=TypeError, message_template=_STRING_FIELD_ERROR
+            )
 
         def opt_string(name: str) -> str | None:
-            value = raw[name]
-            if value is not None and not isinstance(value, str):
-                raise ValueError(f"PITR activation {name} must be a string or null")
-            return value
+            return strict_decode.optional_string(
+                raw, name, error_type=ValueError, message_template=_OPTIONAL_STRING_FIELD_ERROR
+            )
 
         def string_map(name: str) -> dict[str, str] | None:
-            value = raw[name]
-            if value is None:
-                return None
-            if not isinstance(value, dict):
-                raise TypeError(f"PITR activation {name} must be an object or null")
-            items = cast(dict[object, object], value)
-            if not all(
-                isinstance(key, str) and isinstance(item, str) for key, item in items.items()
-            ):
-                raise ValueError(f"PITR activation {name} must contain string pairs")
+            value = strict_decode.string_map(
+                raw,
+                name,
+                object_error_type=TypeError,
+                object_message_template="PITR activation {name} must be an object or null",
+                pairs_error_type=ValueError,
+                pairs_message_template="PITR activation {name} must contain string pairs",
+            )
             if (
-                name in _EVIDENCE_KEYS
-                and frozenset(cast(dict[str, str], value)) != _EVIDENCE_KEYS[name]
+                value is not None
+                and name in _EVIDENCE_KEYS
+                and frozenset(value) != _EVIDENCE_KEYS[name]
             ):
                 raise ValueError(f"PITR activation {name} fields differ")
-            return cast(dict[str, str], value)
+            return value
 
-        schema_version = raw["schema_version"]
-        if not isinstance(schema_version, int) or isinstance(schema_version, bool):
-            raise TypeError("PITR activation schema_version must be an integer")
+        schema_version = strict_decode.strict_int(
+            raw, "schema_version", error_type=TypeError, message_template=_INTEGER_FIELD_ERROR
+        )
         return cls(
             schema_version=schema_version,
             operation_id=string("operation_id"),

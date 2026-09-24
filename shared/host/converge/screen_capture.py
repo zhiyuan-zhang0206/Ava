@@ -16,11 +16,11 @@ layer, which is the one allowed to reach the SDK.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from shared.host.converge import _status_file
 from shared.paths import ava_home
 
 _STATUS_FILE = "screen_capture_status.json"
@@ -61,24 +61,19 @@ class ScreenCaptureStatus:
         return _HEADLINES[self.state]
 
     def to_json(self) -> str:
-        return json.dumps({"state": self.state.value, "diagnostic": self.diagnostic})
+        return _status_file.to_json(self.state.value, self.diagnostic)
 
     @classmethod
     def from_json(cls, text: str) -> ScreenCaptureStatus:
-        data = json.loads(text)
-        return cls(state=ScreenCaptureState(data["state"]), diagnostic=data["diagnostic"])
+        return _status_file.from_json(
+            text,
+            ScreenCaptureState,
+            lambda state, diagnostic: cls(state=state, diagnostic=diagnostic),
+        )
 
     @classmethod
     def from_file(cls, path: Path) -> ScreenCaptureStatus | None:
-        if not path.exists():
-            return None
-        try:
-            return cls.from_json(path.read_text())
-        except Exception:
-            # Unreadable covers a truncated write and a file left by a build that
-            # wrote a different shape; either way the next converge rewrites it,
-            # so treating it as "nothing to report" loses at most one pass.
-            return None
+        return _status_file.from_file(path, cls.from_json)
 
 
 def status_file_path() -> Path:
@@ -88,7 +83,7 @@ def status_file_path() -> Path:
 
 def write_status(status: ScreenCaptureStatus) -> None:
     """Write the screen capture status to the well-known file under ``$AVA_HOME``."""
-    status_file_path().write_text(status.to_json())
+    _status_file.write_status(status_file_path(), status.to_json())
 
 
 def read_status() -> ScreenCaptureStatus | None:

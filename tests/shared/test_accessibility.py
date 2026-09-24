@@ -46,6 +46,14 @@ class TestAccessibilityStatus:
         }
         assert AccessibilityStatus.from_json(status.to_json()) == status
 
+    def test_json_bytes_and_non_object_decode(self):
+        status = AccessibilityStatus(AccessibilityState.NOT_GRANTED, "permission missing")
+        assert status.to_json().encode() == (
+            b'{"state": "not_granted", "diagnostic": "permission missing"}'
+        )
+        with pytest.raises(TypeError):
+            AccessibilityStatus.from_json("[]")
+
     def test_from_file_returns_none_when_absent(self, tmp_path: Path):
         assert AccessibilityStatus.from_file(tmp_path / "nonexistent.json") is None
 
