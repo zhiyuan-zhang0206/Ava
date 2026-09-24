@@ -2,7 +2,8 @@
 
 All session records are retained, including disabled and no-longer-declared
 services. OS registrations are collected separately from the desired roster.
-Machine-level registrations and this home's keeper are classified and recorded;
+Machine-level registrations, this home's keeper, and other installed unit homes
+are classified and recorded;
 unknown ownership and unsupported platforms refuse before a receipt is written.
 """
 
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import plistlib
 import sys
@@ -65,12 +67,62 @@ def _sessions(home: Path) -> tuple[ExpectedSession, ...]:
     return tuple(result)
 
 
-def _registration_role(environment: object, home: Path) -> Literal["unit", "machine", "keeper"]:
+def _canonical_owned_directory(path: Path) -> bool:
+    return path.resolve(strict=True) == path and path.is_dir() and path.stat().st_uid == os.getuid()
+
+
+def _homes_overlap(path: Path, home: Path) -> bool:
+    # Path.resolve preserves spelling on case-insensitive filesystems. Compare
+    # filesystem identity along both ancestor chains, not only lexical paths.
+    return any(path.samefile(parent) for parent in (home, *home.parents)) or any(
+        home.samefile(parent) for parent in path.parents
+    )
+
+
+def _is_other_unit_home(value: object, home: Path) -> bool:
+    """Positive independent installed ownership; aliases and overlapping homes refuse."""
+    if not isinstance(value, str) or not value:
+        return False
+    path = Path(value)
+    if not path.is_absolute() or str(path) != value or ".." in path.parts:
+        return False
+    try:
+        if not _canonical_owned_directory(path) or _homes_overlap(path, home):
+            return False
+        return bool(_regular_bytes(path / "machine_name").decode("utf-8").strip())
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def _keeper_role(socket: object, home: Path) -> Literal["keeper", "other-unit"]:
+    if not isinstance(socket, str):
+        raise ReleaseRejectedError("permissions helper registration socket is malformed")
+    path = PurePosixPath(socket)
+    if not path.is_absolute() or ".." in path.parts or str(path) != socket:
+        raise ReleaseRejectedError("permissions helper registration socket is malformed")
+    if socket.startswith(f"{home}/run/permissions-helper."):
+        return "keeper"
+    if (
+        path.parent.name == "run"
+        and path.name.startswith("permissions-helper.")
+        and path.name.endswith(".sock")
+        and _is_other_unit_home(str(path.parent.parent), home)
+        and _canonical_owned_directory(Path(path.parent))
+    ):
+        return "other-unit"
+    raise ReleaseRejectedError("permissions helper registration belongs to another home")
+
+
+def _registration_role(
+    environment: object,
+    home: Path,
+) -> Literal["unit", "machine", "keeper", "other-unit"]:
     """Classify one com.ava.* registration from its declared environment.
 
     Exactly one declaration decides the role: this home's AVA_HOME for a unit
     launcher, AVA_JOB_SCOPE=machine for a machine-level registration, or this
-    home's own AVA_PERMISSIONS_HELPER_SOCKET for the keeper. Conflicting and
+    home's AVA_PERMISSIONS_HELPER_SOCKET for a keeper. Another installed home's
+    declaration is an explicit exclusion. Conflicting and
     unknown declarations refuse; unknown ownership never passes silently.
     """
     if not isinstance(environment, dict):
@@ -86,18 +138,11 @@ def _registration_role(environment: object, home: Path) -> Literal["unit", "mach
             raise ReleaseRejectedError("launchd registration declares an unknown job scope")
         return "machine"
     if keeper_socket is not None:
-        if (
-            not isinstance(keeper_socket, str)
-            or not PurePosixPath(keeper_socket).is_absolute()
-            or ".." in PurePosixPath(keeper_socket).parts
-            or str(PurePosixPath(keeper_socket)) != keeper_socket
-        ):
-            raise ReleaseRejectedError("permissions helper registration socket is malformed")
-        if not keeper_socket.startswith(f"{home}/run/permissions-helper."):
-            raise ReleaseRejectedError("permissions helper registration belongs to another home")
-        return "keeper"
+        return _keeper_role(keeper_socket, home)
     if declared_home == str(home):
         return "unit"
+    if _is_other_unit_home(declared_home, home):
+        return "other-unit"
     raise ReleaseRejectedError("Ava launchd registration has unknown or other unit home")
 
 
@@ -107,9 +152,9 @@ def _launchd(
     """Classify every com.ava.* registration in this user's LaunchAgents directory.
 
     Only a registration declaring this exact home is a unit launcher. Machine
-    scope and this home's keeper are recorded as explicit receipt exclusions;
-    any other declaration refuses. Every loaded com.ava.* label must resolve to
-    a classified definition. A *.plist without a readable label is not a
+    scope, this home's keeper, and positively identified other unit homes
+    are recorded as explicit receipt exclusions; unknown declarations refuse.
+    Every loaded com.ava.* label must resolve to a classified definition. A *.plist without a readable label is not a
     registration: it is skipped unless its filename claims the com.ava.*
     namespace, which refuses.
     """

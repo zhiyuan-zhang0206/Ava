@@ -34,9 +34,14 @@ permissions-helper keeper is recognized by `AVA_PERMISSIONS_HELPER_SOCKET`
 under `<home>/run/permissions-helper.`. A classified registration that is not
 the unit's launcher is recorded in the receipt as an excluded entry (label,
 definition digest, classification) and never enters the launcher set; the
-loaded-label check counts it. Any other registration (no declaration, another
-home, a foreign or malformed helper socket, conflicting declarations, or an
-unknown scope value) refuses the whole inventory. The shared
+loaded-label check counts it. A different home is excluded as `other-unit` only
+when its declaration resolves to an independent canonical, existing same-user
+directory with a nonempty regular `machine_name` installation marker. Its keeper
+requires the exact `<other-home>/run/permissions-helper.*.sock` shape. Aliases,
+overlapping homes, missing installation markers, unknown ownership, conflicting
+declarations, malformed helper sockets and unknown scopes refuse the inventory.
+The exact definition digest remains part of each exclusion, so later
+revalidation detects changed declarations. The shared
 `PreparationReceipt` consumer model carries the recorded exclusions as a
 required member; a receipt that omits the field refuses.
 
