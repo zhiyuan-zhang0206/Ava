@@ -29,6 +29,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from services.computer.protocol import Response
+from shared.config import settings
 from shared.paths import computer_mcp_socket
 
 # A single snapshot result (PNG metadata) is small, but keep the same generous
@@ -53,6 +54,10 @@ def _agent_id() -> int | None:
         return None
 
 
+class _NotDeliveredError(Exception):
+    """The socket failed during write/drain before the daemon received the request."""
+
+
 class _Link:
     """One Unix-socket connection to the daemon, serializing request/response."""
 
@@ -66,19 +71,33 @@ class _Link:
         async with self._lock:
             self._id += 1
             payload = {"id": self._id, **payload, "agent_id": _agent_id()}
-            self._writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode())
-            await self._writer.drain()
-            line = await self._reader.readline()
-            if not line:
-                raise ConnectionError("computer MCP daemon closed the connection")
-            resp: Response = json.loads(line)
-            if resp.get("id") != self._id:
-                raise RuntimeError(
-                    f"computer MCP daemon response id {resp.get('id')} != request {self._id}"
-                )
-            if resp["ok"] is False:
-                raise RuntimeError(resp.get("error", "computer MCP daemon error"))
-            return resp["result"]
+            encoded = (json.dumps(payload, ensure_ascii=False) + "\n").encode()
+
+            async def _roundtrip() -> Any:
+                try:
+                    self._writer.write(encoded)
+                    await self._writer.drain()
+                except TimeoutError:
+                    # A stalled drain can leave the payload in flight.
+                    raise
+                except (ConnectionError, OSError) as e:
+                    raise _NotDeliveredError from e
+
+                line = await self._reader.readline()
+                if not line:
+                    raise ConnectionError("computer MCP daemon closed the connection")
+                resp: Response = json.loads(line)
+                if resp.get("id") != self._id:
+                    raise RuntimeError(
+                        f"computer MCP daemon response id {resp.get('id')} != request {self._id}"
+                    )
+                if resp["ok"] is False:
+                    raise RuntimeError(resp.get("error", "computer MCP daemon error"))
+                return resp["result"]
+
+            return await asyncio.wait_for(
+                _roundtrip(), timeout=settings.sandbox.mcp_connect_timeout_seconds
+            )
 
     def close(self) -> None:
         with suppress(Exception):
@@ -86,12 +105,11 @@ class _Link:
 
 
 class _ReconnectingLink:
-    """Wraps _Link with automatic reconnect on transport errors.
+    """Retry connect and pre-delivery failures, then reconnect on the next call.
 
     When the shared daemon restarts (cluster update, watchdog respawn), the
-    existing socket connection dies; reconnect transparently instead of
-    surfacing a transport error. A call already delivered but unanswered is
-    never retried — the action may have run on the desktop."""
+    existing socket connection dies. A call already delivered but unanswered
+    surfaces an error without retry — the action may have run on the desktop."""
 
     def __init__(self) -> None:
         self._link: _Link | None = None
@@ -104,18 +122,27 @@ class _ReconnectingLink:
     async def request(self, payload: dict[str, Any]) -> Any:
         async with self._lock:
             for attempt in range(6):
-                try:
-                    if self._link is None:
+                if self._link is None:
+                    try:
                         self._link = await self._connect_once()
+                    except Exception:
+                        # No request was written on this attempt.
+                        if attempt == 5:
+                            raise
+                        await asyncio.sleep(0.5 * (2**attempt))
+                        continue
+                try:
                     return await self._link.request(payload)
-                except ConnectionError:
+                except _NotDeliveredError:
+                    self._link.close()
                     self._link = None
                     if attempt == 5:
                         raise
                     await asyncio.sleep(0.5 * (2**attempt))
-                except (json.JSONDecodeError, RuntimeError):
-                    # Delivered, response unknown or desynced: do NOT retry —
-                    # the action may have executed. Reconnect for next time.
+                except Exception:
+                    # The response is unknown or invalid after delivery. The
+                    # action may have executed, so only the next call reconnects.
+                    self._link.close()
                     self._link = None
                     raise
             raise RuntimeError("unreachable")
