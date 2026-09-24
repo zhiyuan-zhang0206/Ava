@@ -328,6 +328,41 @@ def test_json_query_includes_trunk_checks(
     assert json.loads(capsys.readouterr().out)["trunk_checks"] == [queue_check]
 
 
+def test_query_once_not_ready_is_not_green(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = ci_utils.CIResult(
+        verdict=ci_utils.CIStatus.NOT_READY, core_skipped=["backend shard (1/16)"]
+    )
+
+    def _result(_: str | int, *, repo: str | None = None) -> Any:
+        return result
+
+    monkeypatch.setattr(ci_utils, "check_ci", _result)
+    assert ci_utils._query_once("42", "owner/repo", as_json=False) == 1
+    printed = capsys.readouterr().out
+    assert "NOT READY" in printed and "draft gating" in printed
+
+
+def test_json_query_includes_draft_fields(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = ci_utils.CIResult(
+        verdict=ci_utils.CIStatus.NOT_READY,
+        is_draft=True,
+        core_skipped=["backend shard (1/16)"],
+    )
+
+    def _result(_: str | int, *, repo: str | None = None) -> Any:
+        return result
+
+    monkeypatch.setattr(ci_utils, "check_ci", _result)
+    assert ci_utils._query_once("42", "owner/repo", as_json=True) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["is_draft"] is True
+    assert payload["core_skipped"] == ["backend shard (1/16)"]
+
+
 def test_trunk_flow_refuses_to_submit_without_qa_approved_label(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
