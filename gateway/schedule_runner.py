@@ -33,6 +33,7 @@ it. A deliberate kill (SIGTERM/SIGHUP) writes nothing and is not counted a crash
 from __future__ import annotations
 
 import os
+import selectors
 import shlex
 import subprocess
 import sys
@@ -41,6 +42,7 @@ import time
 import traceback
 from contextlib import suppress
 from pathlib import Path
+from types import FrameType
 
 from loguru import logger
 
@@ -63,7 +65,9 @@ _STALL_CHECK_INTERVAL_S = settings.gateway.schedule_stall_check_interval_seconds
 # Frames that legitimately park the main thread for unbounded time — a
 # resident schedule's whole reason for existing is a long sleep between fire
 # windows. The DEEPEST frame decides: a sleep on top of the stack means the
-# script is deliberately parked, not stalled.
+# script is deliberately parked, not stalled. Child waits also park in
+# subprocess's blocking waitpid or the selector wait immediately inside
+# _communicate. Spawn, argument conversion, and stdin.flush stay guarded.
 _PARK_FRAME_NAMES = frozenset({"sleep", "wait", "wait_for", "run_forever", "acquire"})
 
 
@@ -219,6 +223,22 @@ def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
     os._exit(1)  # hard exit — the schedule manager owns the restart
 
 
+def _is_parked_frame(frame: FrameType) -> bool:
+    """Recognize sleep-family parks and the actual subprocess wait operations."""
+    if frame.f_code.co_name in _PARK_FRAME_NAMES:
+        return True
+    signature = (frame.f_code.co_filename, frame.f_code.co_name)
+    if signature == (subprocess.__file__, "_wait"):
+        return True
+    if signature != (selectors.__file__, "select"):
+        return False
+    parent = frame.f_back
+    return parent is not None and (
+        parent.f_code.co_filename,
+        parent.f_code.co_name,
+    ) == (subprocess.__file__, "_communicate")
+
+
 def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     """Watch the main thread for a stall and hard-exit when one is found.
 
@@ -233,7 +253,19 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     path (backoff + breaker) relaunches the schedule instead of leaving a
     zombie that never fires. The deepest frame being a park frame
     (``time.sleep`` / ``Event.wait`` / ...) is the legitimate idle of a
-    resident schedule and is ignored.
+    resident schedule and is ignored. A deepest ``_wait`` frame in subprocess
+    (the blocking waitpid), or ``select`` in selectors immediately called by
+    subprocess's ``_communicate``, also marks a legitimate child wait, bounded
+    by the caller's ``timeout=``. Spawn, argument conversion, and the initial
+    ``stdin.flush`` remain guarded because that timeout does not cover them.
+    A wait WITHOUT ``timeout=`` is an accepted boundary:
+    frame identity cannot signal a missing timeout, and adding a ceiling
+    would impose a new behavioral limit requiring a separate ruling.
+
+    On 2026-09-25 a long daily scan's child wait outlasted this guard's budget,
+    causing a false stall verdict and an orphaned scan. Its deepest frame was
+    ``selectors.select``, so checking its immediate caller preserves stall
+    detection for HTTP/DB waits and argument callbacks using select too.
     """
     main_thread_id = threading.get_ident()
     stop = threading.Event()
@@ -247,7 +279,7 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
                 frame = sys._current_frames().get(main_thread_id)
                 if frame is None:
                     continue
-                if frame.f_code.co_name in _PARK_FRAME_NAMES:
+                if _is_parked_frame(frame):
                     last_sig = None
                     stalled_since = None
                     continue
@@ -361,9 +393,9 @@ def run(schedule_id: int) -> int:
             return 0
         # A non-.py command runs as a child process — the stall guard's main-
         # thread frame watch cannot see inside it, and the runner parked in
-        # subprocess.run would read as a legitimate park anyway ("wait" is a
-        # park frame). Bound it with the same stall timeout instead: a command
-        # that has not finished within the budget is hung, not long-running —
+        # subprocess.run would read as a legitimate park anyway (a subprocess
+        # frame marks a child wait). Bound it with the same stall timeout: a
+        # command that has not finished within the budget is hung, not long-running —
         # without a bound, a never-exiting command would sit forever with no
         # last_error and no breaker fire, silently eating every future fire
         # window (2026-08-08 audit, P2-2 — the .py branch got its stall guard
