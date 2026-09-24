@@ -562,6 +562,67 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
         time.sleep = _real_sleep
 
 
+@pytest.mark.parametrize("capture_output", [True, False], ids=["captured", "uncaptured"])
+def test_stall_guard_ignores_a_live_child_wait(
+    monkeypatch: pytest.MonkeyPatch, capture_output: bool
+) -> None:
+    """A child wait may outlast the stall budget; its caller owns the timeout."""
+    import subprocess
+
+    import gateway.schedule_runner as sr
+
+    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
+    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
+    fired: list[str] = []
+
+    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
+        fired.append(msg)
+
+    monkeypatch.setattr(sr, "_stall_action", record_stall)
+
+    stop = sr._start_stall_guard(1, None)
+    try:
+        subprocess.run(
+            [sys.executable, "-c", "import time; time.sleep(0.5)"],
+            capture_output=capture_output,
+            timeout=2,
+            check=True,
+        )
+        assert fired == []
+    finally:
+        stop.set()
+
+
+def test_stall_guard_fires_on_select_outside_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The select frame used by child waits must still expose socket wedges."""
+    import selectors
+    import socket
+
+    import gateway.schedule_runner as sr
+
+    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
+    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
+    fired: list[str] = []
+
+    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
+        fired.append(msg)
+
+    monkeypatch.setattr(sr, "_stall_action", record_stall)
+
+    reader, writer = socket.socketpair()
+    with reader, writer, selectors.DefaultSelector() as selector:
+        selector.register(reader, selectors.EVENT_READ)
+        stop = sr._start_stall_guard(1, None)
+        try:
+            selector.select(timeout=0.5)
+            assert fired, "stall guard ignored a socket wait outside subprocess"
+            assert "select" in fired[0]
+        finally:
+            stop.set()
+
+
 def test_run_hung_subprocess_times_out_and_records_error(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

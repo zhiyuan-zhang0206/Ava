@@ -63,7 +63,8 @@ _STALL_CHECK_INTERVAL_S = settings.gateway.schedule_stall_check_interval_seconds
 # Frames that legitimately park the main thread for unbounded time — a
 # resident schedule's whole reason for existing is a long sleep between fire
 # windows. The DEEPEST frame decides: a sleep on top of the stack means the
-# script is deliberately parked, not stalled.
+# script is deliberately parked, not stalled. Child waits are also parks,
+# recognized by subprocess module membership anywhere in the frame chain.
 _PARK_FRAME_NAMES = frozenset({"sleep", "wait", "wait_for", "run_forever", "acquire"})
 
 
@@ -233,7 +234,12 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     path (backoff + breaker) relaunches the schedule instead of leaving a
     zombie that never fires. The deepest frame being a park frame
     (``time.sleep`` / ``Event.wait`` / ...) is the legitimate idle of a
-    resident schedule and is ignored.
+    resident schedule and is ignored. A frame from the subprocess module
+    anywhere in the stack also marks a legitimate child wait; the caller
+    owns its timeout. On 2026-09-25 a long daily scan's child wait outlasted
+    this guard's budget, causing a false stall verdict and an orphaned scan.
+    Its deepest frame was ``selectors.select``, so recognizing the subprocess
+    ancestor preserves stall detection for HTTP/DB waits using select too.
     """
     main_thread_id = threading.get_ident()
     stop = threading.Event()
@@ -247,7 +253,12 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
                 frame = sys._current_frames().get(main_thread_id)
                 if frame is None:
                     continue
-                if frame.f_code.co_name in _PARK_FRAME_NAMES:
+                subprocess_frame = frame
+                while subprocess_frame is not None:
+                    if subprocess_frame.f_code.co_filename == subprocess.__file__:
+                        break
+                    subprocess_frame = subprocess_frame.f_back
+                if frame.f_code.co_name in _PARK_FRAME_NAMES or subprocess_frame is not None:
                     last_sig = None
                     stalled_since = None
                     continue
@@ -361,9 +372,9 @@ def run(schedule_id: int) -> int:
             return 0
         # A non-.py command runs as a child process — the stall guard's main-
         # thread frame watch cannot see inside it, and the runner parked in
-        # subprocess.run would read as a legitimate park anyway ("wait" is a
-        # park frame). Bound it with the same stall timeout instead: a command
-        # that has not finished within the budget is hung, not long-running —
+        # subprocess.run would read as a legitimate park anyway (a subprocess
+        # frame marks a child wait). Bound it with the same stall timeout: a
+        # command that has not finished within the budget is hung, not long-running —
         # without a bound, a never-exiting command would sit forever with no
         # last_error and no breaker fire, silently eating every future fire
         # window (2026-08-08 audit, P2-2 — the .py branch got its stall guard
