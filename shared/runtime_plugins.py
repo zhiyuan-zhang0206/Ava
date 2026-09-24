@@ -9,7 +9,7 @@ from __future__ import annotations
 import importlib.metadata
 from pathlib import Path
 
-from shared import skill_names
+from shared.packages.skills import skill_names
 from shared.plugin_manifest import check_host_engine, load_manifest, range_allows
 from shared.runtime_release import ReleaseRejectedError
 

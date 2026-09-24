@@ -24,7 +24,7 @@ scanner would skip-warn past forever.
 
 Every package installed through here is third-party content by construction
 (repo- and plugin-owned skills reach the load dir via converge, not this path),
-so it is put through `shared.skill_scan` before the first byte is copied. A
+so it is put through `shared.packages.skills.skill_scan` before the first byte is copied. A
 critical finding refuses the whole install; `accept_risk=True` is the human
 override, and it records what was accepted on the registry row.
 """
@@ -36,8 +36,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from shared import skill_scan
 from shared.install_registry import IGNORED_NAMES, tree_hash
+from shared.packages.skills import skill_scan
 
 _COLLECTION_ROOTS = ("skills", ".claude/skills", ".agents/skills", ".ava/skills")
 
@@ -87,8 +87,8 @@ def _package_at(d: Path) -> SkillPackage | None:
         SkillPackageError: `d/SKILL.md` exists but does not parse / is missing a
             required field.
     """
-    from shared.skill_index import SkillFormatError
-    from shared.skill_index import parse_skill_frontmatter as _parse_frontmatter
+    from shared.packages.skills.skill_index import SkillFormatError
+    from shared.packages.skills.skill_index import parse_skill_frontmatter as _parse_frontmatter
 
     skill_md = d / "SKILL.md"
     if not skill_md.is_file():

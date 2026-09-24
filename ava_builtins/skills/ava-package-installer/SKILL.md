@@ -35,7 +35,7 @@ That column is the whole confirm rule:
 
 ### The install gate, and why `--accept-risk` is not yours to pass
 
-Every install here is scanned first (`shared/skill_scan.py`). A **critical**
+Every install here is scanned first (`shared/packages/skills/skill_scan.py`). A **critical**
 finding — a download-piped-straight-into-a-shell bootstrap, an obfuscated
 payload, a credential store read paired with an outbound POST, instructions
 written to make you work behind your user's back — **refuses the install**,

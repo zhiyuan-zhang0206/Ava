@@ -102,7 +102,7 @@ def _skill_name_at(pkg_dir: Path) -> str | None:
     Raises:
         SkillFormatError: SKILL.md is present but unparseable.
     """
-    from shared.skill_index import parse_skill_frontmatter as _parse_frontmatter
+    from shared.packages.skills.skill_index import parse_skill_frontmatter as _parse_frontmatter
 
     skill_md = pkg_dir / "SKILL.md"
     if not skill_md.is_file():
@@ -257,7 +257,7 @@ def cmd_plugins_install(
         if gate_refuses(pkg_dir, command="plugins install"):
             return 1
 
-        from shared.skill_index import SkillFormatError
+        from shared.packages.skills.skill_index import SkillFormatError
 
         try:
             name = _skill_name_at(pkg_dir)
