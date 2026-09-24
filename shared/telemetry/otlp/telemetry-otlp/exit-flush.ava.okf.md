@@ -35,7 +35,7 @@ shutdown call.
 - A process that exits before provider bring-up (task #4314 triage:
   lifetimes under ~0.5 s) never builds providers; its records stay
   mirror-only by design (accepted, task #4320).
-- `services/agent_ops/daemon.py:_hard_exit` skips every atexit handler
+- `shared/daemon_shutdown.py:hard_exit` skips every atexit handler
   including this drain (`os._exit`); the queued batch is deliberately not
   flushed — hard-exit semantics win (accepted, task #4320).
 - Exit-time completion of a deferred hold is `shutdown()`'s `finalize()`

@@ -13,19 +13,18 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
-import os
 import signal
 import sys
 from contextlib import suppress
-from typing import Any, NoReturn
+from typing import Any
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.im_bridge.daemon")
@@ -240,37 +239,6 @@ def _gate_httpx_info_logs() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def _hard_exit(code: int) -> NoReturn:
-    """End the process now, skipping interpreter teardown. Never returns.
-
-    Teardown is exactly what a stop signal must not wait on. ``asyncio.run``
-    closes its runner in a ``finally``: cancel-drain, then
-    ``shutdown_default_executor`` behind CPython's ``THREAD_JOIN_TIMEOUT`` cap
-    of 300 s — the stop flow's entire budget (``PAUSE_TIMEOUT_SECONDS``) — and
-    a worker still in flight after that cap keeps interpreter teardown waiting
-    with no bound at all (measured: a ``shutdown(wait=False)`` worker is still
-    joined at exit; only ``os._exit`` escapes). This daemon hands real work to
-    the default executor: the Feishu adapter and the notice bridge wrap
-    blocking client calls in ``asyncio.to_thread``, and a stop window can land
-    with one mid-flight. Nothing after ``run()`` needs those workers — ``run``'s
-    finally stops the adapters and health server and closes the DB pool, and
-    the drain above already ran it — so none of that wait buys anything. Logs
-    are flushed first: they are the one thing a skipped teardown would lose.
-    Same shape as services/agent_ops/daemon.py and
-    services/pitr/uploader_daemon.py.
-    """
-    with contextlib.suppress(Exception):
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-    with contextlib.suppress(Exception):
-        logging.shutdown()
-    for stream in (sys.stdout, sys.stderr):
-        with contextlib.suppress(Exception):
-            stream.flush()
-    os._exit(code)
-
-
 def main() -> None:
     init_gateway_process("im_bridge")
     _gate_httpx_info_logs()
@@ -292,12 +260,7 @@ def main() -> None:
         # tasks explicitly: `run`'s finally still stops the adapters, the
         # liveness/notice tasks and the health server, and closes the DB pool.
         # The executor is deliberately NOT drained.
-        loop = runner.get_loop()
-        tasks = asyncio.all_tasks(loop)
-        for task in tasks:
-            task.cancel()
-        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-        failures = [result for result in results if isinstance(result, Exception)]
+        failures = cancel_and_drain(runner)
         if failures:
             _log.error("[im_bridge] async shutdown failed: %r", failures)
             code = 1

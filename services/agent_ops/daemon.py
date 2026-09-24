@@ -40,15 +40,13 @@ if __name__ == "__main__" and any(
 
 
 import asyncio
-import contextlib
 import functools
 import json
 import logging
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import Any, NoReturn
+from typing import Any
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -93,7 +91,8 @@ from services.agent_ops.dispatch_sync import dispatch_sync
 from shared.agents import AvaAgentError
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
 from shared.machine import machine_name
@@ -651,28 +650,6 @@ def _shutdown_op_pool() -> None:
         _op_executor = None
 
 
-def _hard_exit(code: int) -> NoReturn:
-    """Exit after async service cleanup, without joining stuck worker threads.
-    ``main`` cancels and awaits loop tasks before reaching this point. Skipping
-    interpreter teardown avoids its unbounded default/op-executor joins; logs
-    are flushed explicitly because their atexit cleanup is also skipped.
-    ``os._exit`` also skips the emitter's exit drain
-    (``shared.telemetry._drain_on_exit``): the telemetry batch still queued
-    at this point is deliberately NOT flushed — hard-exit semantics win on
-    this path (accepted in the #4314 triage, task #4320).
-    """
-    with contextlib.suppress(Exception):
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-    with contextlib.suppress(Exception):
-        logging.shutdown()
-    for stream in (sys.stdout, sys.stderr):
-        with contextlib.suppress(Exception):
-            stream.flush()
-    os._exit(code)
-
-
 def main() -> None:
     # Task #3621: ops is on the full-validation whitelist — build the eager
     # config chain at the entry, before serving.
@@ -689,12 +666,7 @@ def main() -> None:
         runner.run(_main())
     except KeyboardInterrupt:
         _log.info("[ops] interrupted, shutting down")
-        loop = runner.get_loop()
-        tasks = asyncio.all_tasks(loop)
-        for task in tasks:
-            task.cancel()
-        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-        failures = [result for result in results if isinstance(result, Exception)]
+        failures = cancel_and_drain(runner)
         if failures:
             _log.error("[ops] async shutdown failed: %r", failures)
             code = 1
