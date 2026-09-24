@@ -1,44 +1,14 @@
 """Unified event emitter — the single entry point for every event in every process.
 
-Mental model (event-system design doc §1/§2): Ava has one event stream. An
-event is a named log record (OTel LogRecord semantics: events = logs with
-names, `event.name`); audit, telemetry and log are all events in that stream,
-sharing one schema (the `Event` record) and one correlation key (`trace_id`). This
-module is the only writer of the stream.
+One event stream serves audit, telemetry, and log records under one schema and
+one correlation key (`trace_id`). This module is its only writer.
 
-Pipeline (Layer 1): a bounded queue + drain thread per process. Every `emit()`
-enqueues one event; the drain thread writes batches (default 100/batch, 0.5 s
-interval) to independent sinks:
+Pipeline (Layer 1): a bounded queue and drain thread batch every event into
+local JSONL mirrors, best-effort compact metrics, and OTLP logs/metrics. Live
+event reads use Loki/Prometheus; the retired Postgres archive is never revived.
 
-1. append the batch to the local JSONL mirrors under `logs_dir()` — the full
-   event stream for 7 days, a filtered ledger-rollup source for 90 days by
-   default, and a filtered lineage copy for 365 days (the permanently retained
-   class's second, independent failure domain) — then
-2. project compact typed measurements to Postgres (`shared.observed_metrics`),
-   best-effort and idempotent; no event or checkpoint bodies are stored — then
-3. export the batch to the OTLP backend (`shared.telemetry.otlp.telemetry_otlp`) — events ->
-   OTLP logs (Loki), telemetry numeric payloads -> OTLP metrics (Prometheus) —
-   when `AVA_TELEMETRY_OTLP_ENABLED` is on (default). Fully failure-isolated:
-   the OTLP side sheds instead of blocking; see telemetry_otlp's docstring
-   for the contract.
-
-The Postgres `events` archive has been retired; this pipeline never restores
-event bodies there. Live event reads use Loki/Prometheus. JSONL holds local
-debugging and replay sources; the filtered lineage mirror retains its longer
-history independently of metric projection.
-
-Backpressure: bounded queues shed on overload, producing immediate local error
-logs and loss metrics, plus structured summaries bypassing the saturated queue.
-
-`trace_id` / `span_id` are captured from the active OTel span at *enqueue* time
-(the drain thread runs outside the span context), so every event emitted inside
-`turn_span()` — llm_usage, turn_end, exec, sdk_call, business events — auto-
-carries its turn's trace id with no per-callsite plumbing. Events emitted
-outside any span (gateway/daemon paths) get NULL.
-
-`machine` and `cluster` are required dimensions, bound at process start (see
-`init_telemetry`); processes that never init fall back to the hostname and
-home-derived cluster label so a row is never written without either.
+Backpressure sheds non-audit records under overload. Trace ids are captured at
+enqueue, and machine and cluster dimensions are always populated.
 
 Emit is best-effort and never raises: a broken sink must not crash the caller
 (JSONL mirror + loguru file sinks are the durable backfill for everything
@@ -73,15 +43,21 @@ from shared.events.contract import category_for_kind as registry_category
 from shared.observability import cluster_label
 from shared.paths import logs_dir
 from shared.telemetry.emitter_sync import synchronize
+from shared.telemetry.serialization import event_line, event_line_digest, event_payload
 
 __all__ = [
     "Category",
     "Event",
     "category_for_kind",
     "emit",
+    "emit_prepared",
     "event_id",
+    "event_line",
+    "event_line_digest",
+    "event_payload",
     "flush",
     "init_telemetry",
+    "prepare_event",
     "stop",
 ]
 
@@ -182,22 +158,8 @@ class Event:
 
 def event_row(event: Event) -> dict[str, Any]:
     """Canonical mirror row and stable identity shared by metric projection."""
-    body = {
-        "ts": event.ts.isoformat(),
-        "trace_id": event.trace_id,
-        "span_id": event.span_id,
-        "agent_id": event.agent_id,
-        "machine": event.machine,
-        "cluster": event.cluster,
-        "process": event.process,
-        "category": event.category,
-        "event_name": event.event_name,
-        "level": event.level,
-        "source": event.source,
-        "target_agent_id": event.target_agent_id,
-        "attributes": event.attributes,
-    }
-    body_str = json.dumps(body, default=str, separators=(",", ":"), ensure_ascii=False)
+    body = event_payload(event)
+    body_str = event_line(event)
     ts_ns = int(event.ts.timestamp() * 1_000_000_000)
     return {**body, "id": event_id(body_str, ts_ns)}
 
@@ -707,6 +669,37 @@ def emit(
     stamps local zone — normalized here) and replayed/migrated rows; a
     DB-derived timestamp would silently mix two clocks (W7 rewired the last
     DB-clock writers, heartbeat + delivery watchdog, onto this path)."""
+    event = prepare_event(
+        category,
+        event_name,
+        level=level,
+        agent_id=agent_id,
+        source=source,
+        target_agent_id=target_agent_id,
+        attributes=attributes,
+        ts=ts,
+    )
+    emit_prepared(event)
+
+
+def prepare_event(
+    category: Category,
+    event_name: str,
+    *,
+    level: Level = "info",
+    agent_id: int | None = None,
+    source: str = "system",
+    target_agent_id: int | None = None,
+    attributes: dict[str, Any] | None = None,
+    ts: datetime | None = None,
+) -> Event:
+    """Construct one Event without enqueueing it.
+
+    Transactional producers stage this exact immutable object before their
+    database commit, then call :func:`emit_prepared` only after commit.  That
+    preserves one canonical byte representation across their manifest receipt
+    and the eventually exported telemetry line.
+    """
     spec = EVENTS.get(event_name)
     if spec is None:
         raise ValueError(
@@ -719,28 +712,36 @@ def emit(
             f"emit() category={category!r} contradicts the registry for "
             f"event_name={event_name!r} (declared {spec.category!r})"
         )
+    trace_id, span_id = _capture_trace_ids()
+    return Event(
+        ts=_as_utc(ts),
+        trace_id=trace_id,
+        span_id=span_id,
+        agent_id=agent_id if agent_id is not None else _ambient_agent_id(),
+        machine=_state["machine"] or _resolve_machine(),
+        cluster=_state["cluster"] or cluster_label(),
+        process=_state["process"],
+        category=category,
+        event_name=event_name,
+        level=level,
+        source=source,
+        target_agent_id=target_agent_id,
+        attributes=dict(attributes or {}),
+    )
+
+
+def emit_prepared(event: Event) -> None:
+    """Enqueue an already constructed event without changing its identity."""
     with contextlib.suppress(Exception):
+        # The external-controller recorder is deliberately at the producer
+        # seam, before this bounded queue can shed the event.  Its import stays
+        # lazy to preserve telemetry's standalone startup path.
+        from shared.agents.impersonation_manifest import capture_local_event
+
+        event = capture_local_event(event)
         pipeline = _ensure_pipeline()
-        if pipeline is None:
-            return
-        trace_id, span_id = _capture_trace_ids()
-        pipeline.enqueue(
-            Event(
-                ts=_as_utc(ts),
-                trace_id=trace_id,
-                span_id=span_id,
-                agent_id=agent_id if agent_id is not None else _ambient_agent_id(),
-                machine=_state["machine"] or _resolve_machine(),
-                cluster=_state["cluster"] or cluster_label(),
-                process=_state["process"],
-                category=category,
-                event_name=event_name,
-                level=level,
-                source=source,
-                target_agent_id=target_agent_id,
-                attributes=dict(attributes or {}),
-            )
-        )
+        if pipeline is not None:
+            pipeline.enqueue(event)
 
 
 def flush() -> None:

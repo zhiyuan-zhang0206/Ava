@@ -1,11 +1,4 @@
-"""Tests for the OTLP export backend (`shared.telemetry.otlp.telemetry_otlp`).
-
-Pins the write-side contract of the OTel+Tempo+Loki+Prometheus stack: the three-signal
-mapping (events -> OTLP logs, telemetry numeric payloads -> OTLP metrics, traces shipped
-separately), the AVA_TELEMETRY_OTLP_ENABLED flag, and the failure isolation that keeps a
-broken OTLP side from ever touching the PG write. Mapping tests use in-memory providers;
-the pipeline tests run the real emitter and assert both copies land.
-"""
+"""OTLP event, metric, and failure-isolation contracts."""
 
 from __future__ import annotations
 
@@ -130,16 +123,13 @@ def test_log_mapping_full_record_shape(otlp_backend) -> None:
     JSON body in the mirror shape, and trace/span ids as the correlation
     fields."""
     backend, log_exporter, _ = otlp_backend
-    backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
-        [
-            _event(
-                event_name="exec",
-                category="log",
-                level="warning",
-                attributes={"body": "print(1)", "ok": False},
-            )
-        ]
+    event = _event(
+        event_name="exec",
+        category="log",
+        level="warning",
+        attributes={"body": "print(1)", "ok": False},
     )
+    backend.export_batch([event])  # pyright: ignore[reportUnknownMemberType]
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
 
     records = log_exporter.get_finished_logs()  # pyright: ignore[reportUnknownMemberType]
@@ -159,10 +149,15 @@ def test_log_mapping_full_record_shape(otlp_backend) -> None:
     assert attrs["source"] == "test"
     assert attrs["agent_id"] == _AGENT
     body = json.loads(r.log_record.body)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    _assert_canonical_log_body(r, event)
     assert body["event_name"] == "exec"
     assert body["cluster"] == ".ava-test"
     assert body["attributes"] == {"body": "print(1)", "ok": False}
     assert body["ts"] == "2026-08-11T12:00:00+00:00"
+
+
+def _assert_canonical_log_body(record: Any, event: Event) -> None:
+    assert record.log_record.body == telemetry.event_line(event)
 
 
 def test_flush_groups_each_event_name_under_its_matching_resource(otlp_backend) -> None:
