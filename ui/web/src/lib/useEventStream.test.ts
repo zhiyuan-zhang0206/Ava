@@ -441,6 +441,25 @@ describe("EventStreamProvider connect-failure backoff retry", () => {
     vi.useRealTimers();
   });
 
+  it("three malformed frames close the old source before the backoff retry", async () => {
+    renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
+    await waitForInstance();
+    const first = expectInstance();
+
+    vi.useFakeTimers();
+    act(() => {
+      first.fireOpen();
+      first.fireMessage("{");
+      first.fireMessage("{");
+      first.fireMessage("{");
+    });
+    expect(first.readyState).toBe(MockEventSource.CLOSED);
+    act(() => { vi.advanceTimersByTime(999); });
+    expect(expectInstance()).toBe(first);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(expectInstance()).not.toBe(first);
+  });
+
   it("dead-end CLOSED error schedules a backoff reopen (a fresh EventSource after the delay)", async () => {
     // A transient non-2xx response (503 during a rollout pause or 500) makes the
     // browser give up for good: readyState CLOSED, no auto-retry. 401/403 stop

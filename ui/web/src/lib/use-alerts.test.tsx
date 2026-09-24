@@ -132,6 +132,15 @@ class MockEventSource {
     this.readyState = state;
     this.onerror?.(new Event("error"));
   }
+
+  fireOpen(): void {
+    this.readyState = MockEventSource.OPEN;
+    this.onopen?.(new Event("open"));
+  }
+
+  fireMessage(data: string): void {
+    this.onmessage?.(new MessageEvent("message", { data }));
+  }
 }
 
 let lastInstance: MockEventSource | null = null;
@@ -347,6 +356,59 @@ describe("AlertsProvider connection auth gating", () => {
       vi.advanceTimersByTime(1);
     });
     expect(expectInstance()).not.toBe(second);
+  });
+
+  it("a heartbeat moves the 45s watchdog deadline", async () => {
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    await waitForInstance();
+    const first = expectInstance();
+
+    vi.useFakeTimers();
+    act(() => {
+      first.fireOpen();
+      vi.advanceTimersByTime(30_000);
+      first.fireMessage(JSON.stringify({ role: "heartbeat" }));
+      vi.advanceTimersByTime(44_999);
+    });
+    expect(expectInstance()).toBe(first);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(expectInstance()).not.toBe(first);
+  });
+
+  it("three malformed frames schedule a retry without closing the old source", async () => {
+    const { result } = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+    await waitFor(() => expect(result.current).toBe("authenticated"));
+    await waitForInstance();
+    const first = expectInstance();
+
+    vi.useFakeTimers();
+    act(() => {
+      first.fireOpen();
+      first.fireMessage("{");
+      first.fireMessage("{");
+      first.fireMessage("{");
+    });
+    expect(first.readyState).toBe(MockEventSource.OPEN);
+    act(() => { vi.advanceTimersByTime(999); });
+    expect(expectInstance()).toBe(first);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(expectInstance()).not.toBe(first);
+    expect(first.readyState).toBe(MockEventSource.CLOSED);
+  });
+
+  it("unmount cancels a pending CLOSED retry", async () => {
+    const mounted = renderHook(() => useAuth().status, { wrapper: alertsWrapper() });
+    await waitFor(() => expect(mounted.result.current).toBe("authenticated"));
+    await waitForInstance();
+    const first = expectInstance();
+
+    vi.useFakeTimers();
+    act(() => first.fireErrorWithReadyState(MockEventSource.CLOSED));
+    await act(async () => await Promise.resolve());
+    mounted.unmount();
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(expectInstance()).toBe(first);
   });
 });
 
