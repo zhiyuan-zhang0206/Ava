@@ -1,18 +1,18 @@
-"""Sealed normal candidate planning with the checked chain behind the gate.
+"""Sealed normal candidate planning with the checked activation chain.
 
 The planner binds the existing per-unit updater, bootstrap evidence, publication
-plan and service identities. Behind the activation gate sits the checked chain
-(``_drive_checked_normal_release``): one stage machine over
-waiting -> selected -> bootstrap_stopped -> starting -> observed -> committed.
-Every entry — fresh continuation, resumed continuation, standalone recovery —
-runs the same reconciliation: each stage first adjudicates its retained
-evidence, skips what is already proved, and performs only the missing effect
-under fresh authority (idempotent re-entry; design #4117 §5). Service starts go
-through the gated spawn (per-session gate + pre-exec birth receipt) and are
-cross-checked against their exact session record; a spawn whose outcome cannot
-be proven refuses and retains its evidence. ``execute_normal_release`` still
-refuses before any effect until the flip ceremony removes the fence (§7.1); ship
-scripts and tests drive the chain directly until then.
+plan and service identities. ``execute_normal_release`` is the activation entry
+and drives the checked chain (``_drive_checked_normal_release``): one stage
+machine over waiting -> selected -> bootstrap_stopped -> starting -> observed
+-> committed. Every entry — fresh continuation, resumed continuation, standalone
+recovery — runs the same reconciliation: each stage first adjudicates its
+retained evidence, skips what is already proved, and performs only the missing
+effect under fresh authority (idempotent re-entry; design #4117 §5). Service
+starts go through the gated spawn (per-session gate + pre-exec birth receipt)
+and are cross-checked against their exact session record; a spawn whose outcome
+cannot be proven refuses and retains its evidence. The flip that removed the
+activation fence (design §7.1) declared ``CHECKED_ACTIVATION_READY`` at module
+level; the managed-writer mode gate consumes that declaration fail-closed.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Never
 from uuid import uuid4
 
 import psycopg
@@ -82,6 +81,12 @@ from shared.updater_recovery import (
 )
 from shared.verified_file import regular_bytes
 
+# The flip declaration (design §7.1, task #4117 S5): lands in the same change
+# that removes the activation fence. ``cli.commands._managed_writer_mode`` reads
+# this attribute and enters only on an exactly-True value — absent or non-True
+# refuses fail-closed; revert = the same diff reversed.
+CHECKED_ACTIVATION_READY = True
+
 
 class NormalReleaseRequest(EvidenceModel):
     context_path: str
@@ -99,13 +104,6 @@ class PreparedNormalRelease:
     services: tuple[PreparedService, ...]
     bootstrap: SessionRecord
     resume_generation: str
-
-
-def require_checked_normal_activation() -> Never:
-    """Refuse effects until exact spawn receipts and stage recovery are implemented."""
-    raise ReleaseRejectedError(
-        "normal activation requires checked crash recovery and exact spawn receipts"
-    )
 
 
 def _prepared_recovery(context: PreparedObservation) -> PreparedObservationRecovery:
@@ -217,7 +215,7 @@ def _candidate_ready_recovery(generation: str) -> BootstrapRecoveryJournal:
 
 def continue_after_bootstrap(
     hop: PreparedBootstrapHop, plan: PreparedNormalRelease, generation: str
-) -> Never:
+) -> int:
     """Validate retained identity, then enter the checked activation entry.
 
     ``prepare_after_bootstrap`` ran before the hop stopped A, so its retained
@@ -680,12 +678,13 @@ def commit_normal_release_after_publication(
     return _completed_readback(journal)
 
 
-def execute_normal_release(_plan: PreparedNormalRelease, _generation: str) -> Never:
-    """The checked activation entry: refuses until the recovery prerequisites flip.
+def execute_normal_release(plan: PreparedNormalRelease, generation: str) -> int:
+    """The checked activation entry: drives the checked chain to completion.
 
-    The checked chain sits immediately past the gate; removing
-    ``require_checked_normal_activation`` (design §7.1) is the flip, performed
-    as its own ceremony with the module-level readiness declaration.
+    The activation fence (design §7.1) was removed by the flip that declared
+    ``CHECKED_ACTIVATION_READY`` in this module; every entry now reconciles and
+    performs only the missing effects under fresh authority. Completion reports
+    the process code ``0`` (the pre-fence contract).
     """
-    require_checked_normal_activation()
-    return _drive_checked_normal_release(_plan, _generation)
+    _drive_checked_normal_release(plan, generation)
+    return 0

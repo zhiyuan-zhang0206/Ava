@@ -1,18 +1,19 @@
 ---
 type: doc
 title: Pending normal release planning
-description: Pre-stop normal plan validation with activation deliberately disabled.
+description: Pre-stop normal plan validation with the checked activation chain.
 ---
 
 # Pending normal release planning
 
-The normal release module builds and validates a sealed per-unit plan; it does
-not activate that plan. The checked chain (`_drive_checked_normal_release`) is
-wired immediately behind the activation gate: journal-staged migration receipt,
-selector CAS, bootstrap stop by exact retained identity, pinned-order gated
-service starts with exact spawn receipts, and the unit readback. The gate
-refuses first, so no production path reaches the chain until checked recovery
-and exact spawn receipts replace it. A bootstrap request may reference a private
+The normal release module builds and validates a sealed per-unit plan; the
+checked activation entry (`execute_normal_release`) drives the checked chain
+(`_drive_checked_normal_release`): journal-staged migration receipt, selector
+CAS, bootstrap stop by exact retained identity, pinned-order gated service
+starts with exact spawn receipts, and the unit readback. The flip (task #4117
+S5) removed the activation fence and declared `CHECKED_ACTIVATION_READY` at
+module level; the managed-writer mode gate consumes that declaration
+fail-closed. A bootstrap request may reference a private
 normal request before its first stop, and standalone preparation
 (`_update_normal_release_standalone.py`) can consume an existing candidate-ready
 bootstrap handoff from a deep-crash state: a bootstrap that is already stopped
@@ -25,15 +26,13 @@ preparation receipt and pending all-unit plan. Unsupported readiness transports
 refuse during preparation while bootstrap still serves. Source update flags and
 git/uv/converge fallbacks are unavailable in this mode.
 
-Every execution entry point fails before updater ownership, selector writes,
-bootstrap stop or service spawn. The standalone entry's ownership re-take
-(host mutex, `resume_bootstrap` only after exact owner death, CAS-guarded
-`clear`) is retained behind that fence, so the flip needs no further entry
-work. Activation remains disabled until each durable phase has checked forward
-or reverse recovery and service start returns an exact PID/birth spawn receipt
-that closes the post-fork/pre-SessionRecord ambiguity. The preparation models
-and identity adapters are retained as inputs to that future recovery-aware
-activation path.
+Every execution entry point runs the same reconciliation under fresh
+authority: each stage adjudicates its retained evidence first and performs only
+the missing effect. The standalone entry takes host mutual exclusion, re-claims
+the exact generation (`resume_bootstrap` only after exact owner death), and
+CAS-guards its `clear`. Each durable phase has checked forward or reverse
+recovery, and service start returns an exact PID/birth spawn receipt that
+closes the post-fork/pre-SessionRecord ambiguity.
 
 The versioned bootstrap envelope records whether a normal continuation was
 planned before any normal write. Planned-but-absent, malformed, or unfinished
@@ -69,10 +68,10 @@ gaps, not claims awaiting CI.
 
 Tests cover exact selector serialization, separate receipt/inventory digests,
 unsupported or mutable commands, CLI source isolation, pinned service order,
-retained unfinished recovery, strict journal transitions, the pre-effect
-activation fence, and the late-stage standalone preparation (stopped
-bootstrap, advanced selector, dead lineage owners) with its claim order — the
-claim test runs the real handoff writer. The chain's stage order, refusal
-propagation, gate-before-seat posture, and the continuation/standalone routing
-are pinned. Actual normal full-roster cold launch and the complete
+retained unfinished recovery, strict journal transitions, the flip's
+module-level readiness declaration, and the late-stage standalone preparation
+(stopped bootstrap, advanced selector, dead lineage owners) with its claim
+order — the claim test runs the real handoff writer. The chain's stage order,
+refusal propagation, activation-entry order, and the continuation/standalone
+routing are pinned. Actual normal full-roster cold launch and the complete
 distributed transition remain required evidence.
