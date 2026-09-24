@@ -76,9 +76,31 @@ def _write_relay_stub(path: Path, *, agent_id: int, session_id: int, token: str)
             stream.write(
                 f"SID={session_id}\nAGENT={agent_id}\nAVA_IMPERSONATION_RELAY_TOKEN={token}\n"
             )
+    except BaseException:
+        if fd != -1:
+            os.close(fd)
+            fd = -1
+        path.unlink(missing_ok=True)
+        raise
     finally:
         if fd != -1:
             os.close(fd)
+
+
+def _reject_used_resident_relay() -> None:
+    """A Claude session's wrapper can consume only one scoped credential stub."""
+    # env-ok: per-session relay stub handoff, not cluster configuration
+    stub_path = os.environ.get("AVA_IMPERSONATION_RELAY_STUB")
+    if not stub_path:
+        return
+    stub = Path(stub_path)
+    consumed = Path(f"{stub_path.removesuffix('.env')}.pid")
+    if stub.exists() or consumed.exists():
+        raise ValueError(
+            "this Claude takeover session has already assigned its one resident relay; "
+            "finish or cancel it, then use a fresh Claude takeover session in a "
+            "separate workspace to request another agent"
+        )
 
 
 def _print_claude_relay_instructions(response: dict[str, Any], *, agent_id: int) -> None:
@@ -191,6 +213,7 @@ def _dispatch(args: argparse.Namespace) -> int:
     if command == "request":
         from cli.commands.codex_app_server import require_control_endpoint
 
+        _reject_used_resident_relay()
         endpoint = args.relay_codex_remote
         if args.relay_provider == "codex":
             endpoint = require_control_endpoint(endpoint)
