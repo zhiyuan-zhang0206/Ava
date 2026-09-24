@@ -14,6 +14,8 @@ new private output directory. It does not change the source checkout, prepare
 a complete runtime, select a release, stop services, or access the database.
 Build tools are explicit existing paths. The build is offline; missing cached
 backend dependencies refuse before maintenance can begin.
+Callers using a non-default tool cache supply `--cache-dir` explicitly, including
+the CI setup action; the build does not inherit ambient tool configuration.
 
 Git runs with an explicit environment. A private bare object view excludes
 mutable source-repository attributes, config, replacement refs, and inherited

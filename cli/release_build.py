@@ -195,7 +195,13 @@ def _verify_wheel(wheel: Path, identity: dict[str, object], migrations: dict[str
 
 
 def build_application(
-    repo: Path, commit: str, destination: Path, *, uv: Path, python: Path
+    repo: Path,
+    commit: str,
+    destination: Path,
+    *,
+    uv: Path,
+    python: Path,
+    cache_dir: Path | None = None,
 ) -> ApplicationBuild:
     """Build offline from immutable Git input; no checkout, service, or DB writes.
 
@@ -213,6 +219,8 @@ def build_application(
     for tool in (uv, python):
         if not tool.is_absolute() or not tool.is_file():
             raise ReleaseRejectedError("build tools must be explicit existing absolute files")
+    if cache_dir is not None and (not cache_dir.is_absolute() or not cache_dir.is_dir()):
+        raise ReleaseRejectedError("build cache must be an explicit existing absolute directory")
     identity = _archive(repo, commit, destination)
     source = destination / "source"
     # Snapshot SQL before the backend runs; comparing to its mutable source
@@ -222,6 +230,7 @@ def build_application(
     result = run_bounded(
         [
             str(uv),
+            *(["--cache-dir", str(cache_dir)] if cache_dir is not None else []),
             "--offline",
             "build",
             "--wheel",
@@ -267,8 +276,16 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--uv", type=Path, required=True)
     parser.add_argument("--python", type=Path, required=True)
+    parser.add_argument("--cache-dir", type=Path)
     args = parser.parse_args()
-    result = build_application(args.repo, args.commit, args.output, uv=args.uv, python=args.python)
+    result = build_application(
+        args.repo,
+        args.commit,
+        args.output,
+        uv=args.uv,
+        python=args.python,
+        cache_dir=args.cache_dir,
+    )
     print(json.dumps({"wheel": str(result.wheel), "wheel_digest": result.wheel_digest}))
 
 
