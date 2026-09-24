@@ -24,7 +24,18 @@ from shared import (
     start_serving,
     ui_update_state,
 )
+from shared import updater_handoff as handoff
 from shared.sessions.pty import allocation_freeze
+from tests.shared.test_updater_handoff import (
+    _isolated as _isolated,
+)
+from tests.shared.test_updater_handoff import (
+    _isolated_attempts as _isolated_attempts,
+)
+from tests.shared.test_updater_handoff import (
+    _retained_bootstrap,
+    _write_normal_through,
+)
 
 
 def _marker_write(case: str, path: Path) -> None:
@@ -351,3 +362,16 @@ def test_atomic_pointer_replacement_restores_read_only_mode(tmp_path: Path) -> N
 
     assert path.read_text() == "new"
     assert stat.S_IMODE(path.stat().st_mode) == 0o444
+
+
+# ── the #4117 S5 flip: INJ-14 half-completed unlink (relocated under the 800-line ceiling) ──
+
+
+def test_clear_completes_across_a_half_completed_unlink() -> None:
+    """INJ-14: a crash between the two unlinks must not strand the state file."""
+    _retained_bootstrap("candidate_ready", normal_release_planned=True)
+    _write_normal_through("committed")
+    handoff.bootstrap_state_path().unlink()
+    assert handoff.clear("bootstrap")
+    assert not handoff.state_path().exists()
+    assert not handoff.clear("bootstrap")

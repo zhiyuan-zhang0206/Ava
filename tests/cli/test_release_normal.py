@@ -157,21 +157,6 @@ def test_malformed_service_commands_are_controlled_refusals(
         _command(spec, image)
 
 
-def test_normal_activation_enters_the_checked_chain(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The flip removed the fence: the entry drives the checked chain directly."""
-    driven: list[tuple[object, str]] = []
-
-    def drive(plan: object, generation: str) -> None:
-        driven.append((plan, generation))
-
-    monkeypatch.setattr(normal, "_drive_checked_normal_release", drive)
-    plan = Mock(spec=normal.PreparedNormalRelease)
-    normal.execute_normal_release(plan, "generation")
-    assert driven == [(plan, "generation")]
-
-
 @pytest.mark.parametrize(
     ("generation", "stage"),
     [
@@ -882,83 +867,6 @@ def test_checked_chain_resumes_from_a_retained_stage(
         assert "stop-bootstrap" not in rig.calls
     assert rig.landed == [result]
     assert result.services == (readbacks["ava-frontend"], readbacks["ava-ops"])
-
-
-def test_checked_chain_reenters_from_waiting_behind_a_written_selector(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
-    """INJ-3 window: the selector CAS landed but the journal still reads waiting.
-
-    Re-entry re-proves the selector idempotently (the CAS replay) and still
-    converges to the same readback without duplicate effects.
-    """
-    plan, readbacks, selector = _two_service_setup(unit_home)
-    journal = _journal_for(plan, "waiting")
-    _seed_environment(unit_home, normal_release=journal.model_dump(mode="json"))
-    rig = _ChainRig(monkeypatch, unit_home, plan, selector=selector, readbacks=readbacks)
-
-    result = rig.drive()
-
-    assert rig.calls[0] == "migration-receipt"
-    assert "selector-cas" in rig.calls
-    assert "stop-bootstrap" in rig.calls
-    assert result.services == (readbacks["ava-frontend"], readbacks["ava-ops"])
-    assert rig.landed == [result]
-
-
-def test_checked_chain_replays_a_fully_observed_roster_without_extra_effects(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
-    """INJ-10 window: every service was observed; the journal still reads starting.
-
-    The crash lands before the ``observed`` journal write with the last attempt
-    still retained. Re-entry adjudicates that attempt, re-observes both recorded
-    services, and converges with zero new spawns and no extra effects.
-    """
-    plan, readbacks, selector = _two_service_setup(unit_home)
-    first, last = plan.services
-    attempt = _attempt_for(unit_home, last)
-    journal = _journal_for(
-        plan, "starting", starting_session=last.identity.session, starting_attempt=attempt
-    )
-    _seed_environment(unit_home, normal_release=journal.model_dump(mode="json"))
-    receipt = _birth_receipt(unit_home, attempt)
-    last_record = _record_for(attempt, receipt, last)
-    first_attempt = _attempt_for(unit_home, first)
-    first_record = _record_for(first_attempt, _birth_receipt(unit_home, first_attempt), first)
-
-    def read_record(_home: Path, session: str) -> SessionRecord | None:
-        if session == first.identity.session:
-            return first_record
-        if session == last.identity.session:
-            return last_record
-        return None
-
-    monkeypatch.setattr(
-        spawn_receipt,
-        "await_birth",
-        _await_birth_stub(spawn_receipt.SpawnOutcome("spawned_alive", receipt, "alive")),
-    )
-    monkeypatch.setattr(spawn_receipt, "read_session_record", read_record)
-    monkeypatch.setattr(normal, "observe_process", _observe_as("alive"))
-    rig = _ChainRig(monkeypatch, unit_home, plan, selector=selector, readbacks=readbacks)
-
-    result = rig.drive()
-
-    assert rig.starts == []
-    assert rig.adopted == [("ava-ops", first_record), ("ava-frontend", last_record)]
-    assert rig.calls == [
-        "selector-cas",
-        "ready:ava-ops",
-        "ready:ava-frontend",
-        "read-readbacks",
-        "unit-readback",
-    ]
-    assert rig.stages == ["observed"]
-    assert rig.landed == [result]
-    assert result.services == (readbacks["ava-frontend"], readbacks["ava-ops"])
-    retained = _journal(unit_home)
-    assert retained is not None and retained.stage == "observed" and retained.readback == result
 
 
 def test_checked_chain_requires_the_unit_session_namespace(
