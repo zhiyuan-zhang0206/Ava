@@ -8,13 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from shared import os_cron
 from shared import os_packages as job
 
 
 @pytest.fixture(autouse=True)
 def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from shared import os_cron
-
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(os_cron, "_home_slug", lambda: "ava-deadbeef")
     monkeypatch.setattr(os_cron, "ava_binary_path", lambda: "/work tree/.venv/bin/ava")
@@ -53,7 +52,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
         calls.append(argv)
         return _ok()
 
-    monkeypatch.setattr(job.subprocess, "run", run)
+    monkeypatch.setattr(os_cron.subprocess, "run", run)
 
     assert job._register_macos() == 0
     plist = job._launchd_plist_path("ava-deadbeef")
@@ -74,23 +73,115 @@ def test_linux_registration_replaces_only_this_clusters_line(
     def which(_name: str) -> str:
         return "/usr/bin/crontab"
 
-    monkeypatch.setattr(job.shutil, "which", which)
+    monkeypatch.setattr(os_cron.shutil, "which", which)
 
     def run(argv: list[str], **kwargs: object) -> types.SimpleNamespace:
         if argv == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=0, stdout=f"{other}\n{old}\n", stderr="")
+            return types.SimpleNamespace(
+                returncode=0, stdout=f"{other}\n\n{old}\n{old}\n", stderr=""
+            )
         written["body"] = str(kwargs["input"])
         return _ok()
 
-    monkeypatch.setattr(job.subprocess, "run", run)
+    monkeypatch.setattr(os_cron.subprocess, "run", run)
 
     assert job._register_linux() == 0
     assert other in written["body"]
+    assert f"{other}\n\n" in written["body"]
     assert old not in written["body"]
     assert written["body"].count("# ava-packages-refresh.ava-deadbeef") == 1
     assert "*/15 * * * *" in written["body"]
     assert "packages refresh --from-job" in written["body"]
     assert str(tmp_path / ".ava" / "logs" / "packages-refresh.log") in written["body"]
+
+
+def test_linux_crontab_failures_and_empty_table(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def missing(_name: str) -> None:
+        return None
+
+    def available(_name: str) -> str:
+        return "/usr/bin/crontab"
+
+    monkeypatch.setattr(os_cron.shutil, "which", missing)
+    assert job._register_linux() == 1
+    assert (
+        "packages refresh: crontab not installed; the recurring refresh pass cannot be registered"
+        in capsys.readouterr().err
+    )
+
+    monkeypatch.setattr(os_cron.shutil, "which", available)
+    writes: list[str] = []
+    read = types.SimpleNamespace(returncode=1, stdout="stale", stderr="permission denied")
+    write_failure = False
+
+    def run(argv: list[str], **kwargs: object) -> types.SimpleNamespace:
+        if argv == ["crontab", "-l"]:
+            return read
+        if write_failure:
+            return types.SimpleNamespace(returncode=1, stderr="write denied")
+        writes.append(str(kwargs["input"]))
+        read.stdout = str(kwargs["input"])
+        return _ok()
+
+    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    assert job._register_linux() == 1
+    assert writes == []
+    assert "skipping packages-refresh registration to avoid clobbering" in capsys.readouterr().err
+
+    read.stderr = "no crontab for user"
+    assert job._register_linux() == 0
+    assert (
+        len(writes),
+        writes[0].startswith("*/15 * * * * "),
+        writes[0].endswith("# ava-packages-refresh.ava-deadbeef\n"),
+        writes[0].count("\n"),
+    ) == (1, True, True, 1)
+
+    read.returncode = 0
+    assert (
+        job._unregister_linux("ava-deadbeef"),
+        writes[-1],
+        job._unregister_linux("ava-deadbeef"),
+        len(writes),
+    ) == (0, "\n", 0, 2)
+
+    read.stdout = writes[0]
+    write_failure = True
+    assert job._register_linux() == 1
+    assert "crontab update failed: write denied" in capsys.readouterr().err
+    assert job._unregister_linux("ava-deadbeef") == 1
+    assert len(writes) == 2
+
+
+def test_macos_bootstrap_failure_and_repeated_unregister(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    errors: list[tuple[object, ...]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> types.SimpleNamespace:
+        calls.append(argv)
+        return types.SimpleNamespace(returncode=1 if argv[1] == "bootstrap" else 0, stderr="denied")
+
+    def record_error(*args: object) -> None:
+        errors.append(args)
+
+    monkeypatch.setattr(os_cron.subprocess, "run", run)
+    monkeypatch.setattr(job.logger, "error", record_error)
+    assert job._register_macos() == 1
+    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+    assert errors == [
+        ("launchctl bootstrap failed for {}: {}", job._label("ava-deadbeef"), "denied")
+    ]
+
+    plist = job._launchd_plist_path("ava-deadbeef")
+    assert plist.exists()
+    assert job._unregister_macos("ava-deadbeef") == 0
+    assert job._unregister_macos("ava-deadbeef") == 0
+    assert not plist.exists()
+    assert [call[1] for call in calls] == ["bootout", "bootstrap", "bootout", "bootout"]
 
 
 def test_windows_registration_uses_a_minute_task(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,8 +205,6 @@ def test_windows_registration_reports_a_failure_reason(monkeypatch: pytest.Monke
 
 
 def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import os_cron
-
     skipped: list[str] = []
     monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: False)
     monkeypatch.setattr(os_cron, "skip_os_job", skipped.append)
@@ -129,7 +218,6 @@ def test_register_is_gated_by_os_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_register_is_skipped_when_refresh_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import os_cron
     from shared.config import settings
 
     monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: True)
@@ -143,7 +231,6 @@ def test_register_is_skipped_when_refresh_disabled(monkeypatch: pytest.MonkeyPat
 
 
 def test_register_dispatches_to_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import os_cron
     from shared.config import settings
 
     calls: list[str] = []
