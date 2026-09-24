@@ -129,7 +129,9 @@ export interface StickyController {
    * DOM, not the event). Upward movement accumulates into a run; a run of
    * more than one bottom zone releases following — regardless of how small
    * the individual events were or how many pins interrupted it. */
-  handleScroll(view: ScrollSnapshot): void;
+  /** Classifies scroll movement for history paging. Layout clamps and our
+   * own pin echoes return none, so they cannot grant upward intent. */
+  handleScroll(view: ScrollSnapshot): "up" | "down" | "none";
   /** Feed every wheel event here. An upward notch outside the bottom zone
    * (measured against both the current and last-known bottom) is an early
    * "stop following" signal (a notch can arrive before the position
@@ -203,6 +205,9 @@ export function createStickyController(
   // every scroll event, and moved ahead by a pin so the pin's own echo
   // reads as zero user movement.
   let prevScrollTop = 0;
+  // A shrinking layout can clamp scrollTop upward without user motion, even
+  // when the reader is parked mid-history and the bottom witness is absent.
+  let prevScrollHeight = 0;
   // A touch drag is in progress (touchstart seen, no touchend yet). While
   // true the user's finger owns the scroll position: handleLayoutChange
   // must not ask for a pin (#1016 — see the interface docs).
@@ -265,8 +270,12 @@ export function createStickyController(
       const zone = bottomZone(view.clientHeight, thresholds);
       const atBottom = isAtBottom(view, thresholds);
       const movedUp = prevScrollTop - view.scrollTop;
+      let direction: "up" | "down" | "none" = "none";
 
-      if (sticky && lastBottomScrollHeight !== null &&
+      if (view.scrollHeight < prevScrollHeight) {
+        // Browser clamp from content collapse; do not grant paging intent.
+        if (sticky) lastBottomScrollHeight = view.scrollHeight;
+      } else if (sticky && lastBottomScrollHeight !== null &&
           view.scrollHeight < lastBottomScrollHeight) {
         // Content shrunk since the last pin (e.g. async syntax
         // highlighting collapsed a code block). The browser likely
@@ -282,6 +291,7 @@ export function createStickyController(
           upwardRun = 0;
           reconcileAtBottom(view);
         } else {
+          direction = "up";
           // Upward movement, however small the single event: accumulate
           // into the run. A run of a full bottom zone is a deliberate
           // departure even when no single event passed any per-event bar
@@ -298,6 +308,7 @@ export function createStickyController(
           // old-bottom zone: keep state.
         }
       } else if (movedUp < -WHEEL_NOISE_PX) {
+        direction = "down";
         // Deliberate downward movement: a fresh run starts; landing back
         // inside the zone re-sticks (the manual return path).
         upwardRun = 0;
@@ -314,7 +325,9 @@ export function createStickyController(
       // Downward must not unstick: the button's smooth ride and a user
       // scrolling back toward the bottom both pass through here.
       prevScrollTop = view.scrollTop;
+      prevScrollHeight = view.scrollHeight;
       prevNearBottom = atBottom;
+      return direction;
     },
 
     handleWheel(deltaY, view) {
@@ -394,6 +407,7 @@ export function createStickyController(
       stick(view);
       if (freshRun) upwardRun = 0;
       prevScrollTop = view.scrollTop;
+      prevScrollHeight = view.scrollHeight;
       prevNearBottom = true;
     },
 
@@ -403,6 +417,7 @@ export function createStickyController(
       else unstick();
       upwardRun = 0;
       prevScrollTop = view.scrollTop;
+      prevScrollHeight = view.scrollHeight;
       prevNearBottom = atBottom;
     },
   };
