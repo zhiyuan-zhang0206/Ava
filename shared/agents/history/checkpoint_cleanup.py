@@ -55,6 +55,8 @@ from typing import NamedTuple
 
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
+from shared import telemetry
+from shared.config import settings
 from shared.db_transaction import async_write_transaction, write_transaction
 from shared.log import logger
 
@@ -234,6 +236,51 @@ SELECT
 """
 
 
+# Stamp the thread's newest checkpoint as a compaction boundary; the RETURNING
+# names exactly the stamped boundary so the caller can enqueue the worker's
+# build job for it (task #4674).
+_MARK_BOUNDARY_SQL = (
+    "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
+    " WHERE thread_id = %s AND checkpoint_ns = %s"
+    "   AND checkpoint_id = ("
+    "       SELECT checkpoint_id FROM checkpoints"
+    "       WHERE thread_id = %s AND checkpoint_ns = %s"
+    "       ORDER BY checkpoint_id DESC LIMIT 1)"
+    " RETURNING checkpoint_id"
+)
+
+# The worker's build-job insert (task #4674): one pending compact job per new
+# boundary, deduped by the live partial unique index (one pending/running job
+# per agent and kind); `include_tail` is decided at claim time by the runner.
+_ENQUEUE_COMPACT_JOB_SQL = (
+    "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail)"
+    " VALUES (%s, 'compact', %s, 'pending', false)"
+    " ON CONFLICT (agent_id, kind) WHERE status IN ('pending', 'running') DO NOTHING"
+)
+
+
+def _compact_agent_id(thread_id: str) -> int | None:
+    """The agent id a compact-boundary thread denotes; None for foreign threads.
+
+    Agent threads are `str(agent.id)`; a thread that is not plain ASCII digits
+    belongs to foreign tooling and must not enqueue build jobs (the same rule
+    the worker's scan applies in SQL).
+    """
+    return int(thread_id) if thread_id.isascii() and thread_id.isdigit() else None
+
+
+def _enqueue_failed(agent_id: int, exc: Exception) -> None:
+    """The enqueue-failure observability half — itself best-effort, never raises."""
+    try:
+        telemetry.emit(
+            "telemetry",
+            "hierarchy_enqueue_failed",
+            attributes={"agent_id": agent_id, "error": f"{type(exc).__name__}: {exc}"},
+        )
+    except Exception:
+        logger.warning("hierarchy enqueue-failure event could not be emitted", exc_info=True)
+
+
 async def mark_compact_boundary(
     pool: AsyncConnectionPool,
     thread_id: str,
@@ -249,17 +296,41 @@ async def mark_compact_boundary(
     the agent-side compact paths right before the keep=1 trim; failure-tolerant
     callers, since a missed stamp only loses segment traceability, never
     recoverability (the summary survives regardless).
+
+    It then best-effort enqueues the worker's build job for that boundary
+    (task #4674): a missed enqueue degrades to the worker's 10-minute
+    reconcile scan, never to a lost compact round.
     """
     async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(
-            "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
-            " WHERE thread_id = %s AND checkpoint_ns = %s"
-            "   AND checkpoint_id = ("
-            "       SELECT checkpoint_id FROM checkpoints"
-            "       WHERE thread_id = %s AND checkpoint_ns = %s"
-            "       ORDER BY checkpoint_id DESC LIMIT 1)",
-            (thread_id, checkpoint_ns, thread_id, checkpoint_ns),
+        await cur.execute(_MARK_BOUNDARY_SQL, (thread_id, checkpoint_ns, thread_id, checkpoint_ns))
+        row = await cur.fetchone()
+    await _enqueue_compact_job(pool, thread_id, row[0] if row is not None else None)
+
+
+async def _enqueue_compact_job(
+    pool: AsyncConnectionPool, thread_id: str, boundary: str | None
+) -> None:
+    """Best-effort build-job enqueue for a fresh compact boundary (task #4674).
+
+    Never raises and never blocks the compact round: any failure is a warning
+    plus the `hierarchy_enqueue_failed` event. Idempotent via the live partial
+    unique index; a pending job superseded by a newer boundary is merged by
+    the run's own advance target.
+    """
+    agent_id = _compact_agent_id(thread_id)
+    if agent_id is None or boundary is None or not settings.daemon.hierarchy_worker_enabled:
+        return
+    try:
+        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+            await cur.execute(_ENQUEUE_COMPACT_JOB_SQL, (agent_id, boundary))
+    except Exception as exc:
+        logger.warning(
+            "hierarchy enqueue failed for agent {agent} (boundary {boundary}): {error!r}",
+            agent=agent_id,
+            boundary=boundary,
+            error=exc,
         )
+        _enqueue_failed(agent_id, exc)
 
 
 def mark_compact_boundary_sync(
@@ -270,15 +341,27 @@ def mark_compact_boundary_sync(
 ) -> None:
     """Synchronous twin of `mark_compact_boundary` (gateway-side maintenance)."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('compact_boundary', true)"
-            " WHERE thread_id = %s AND checkpoint_ns = %s"
-            "   AND checkpoint_id = ("
-            "       SELECT checkpoint_id FROM checkpoints"
-            "       WHERE thread_id = %s AND checkpoint_ns = %s"
-            "       ORDER BY checkpoint_id DESC LIMIT 1)",
-            (thread_id, checkpoint_ns, thread_id, checkpoint_ns),
+        cur.execute(_MARK_BOUNDARY_SQL, (thread_id, checkpoint_ns, thread_id, checkpoint_ns))
+        row = cur.fetchone()
+    _enqueue_compact_job_sync(pool, thread_id, row[0] if row is not None else None)
+
+
+def _enqueue_compact_job_sync(pool: ConnectionPool, thread_id: str, boundary: str | None) -> None:
+    """Best-effort twin of `_enqueue_compact_job` over the sync pool."""
+    agent_id = _compact_agent_id(thread_id)
+    if agent_id is None or boundary is None or not settings.daemon.hierarchy_worker_enabled:
+        return
+    try:
+        with write_transaction(pool) as conn, conn.cursor() as cur:
+            cur.execute(_ENQUEUE_COMPACT_JOB_SQL, (agent_id, boundary))
+    except Exception as exc:
+        logger.warning(
+            "hierarchy enqueue failed for agent {agent} (boundary {boundary}): {error!r}",
+            agent=agent_id,
+            boundary=boundary,
+            error=exc,
         )
+        _enqueue_failed(agent_id, exc)
 
 
 async def count_checkpoints(

@@ -85,6 +85,10 @@ class _LastJob:
     failed: int
     skipped: int
     finished_at: datetime
+    # The guardrail marker (task #4674): a `done` row's error text means the
+    # attempt was cut (regen halt) or was a claim-time silent baseline — never
+    # a plain budget truncation, so it must not take the continuation fast path.
+    error: str | None = None
 
 
 def _clean(last: _LastJob) -> bool:
@@ -93,8 +97,13 @@ def _clean(last: _LastJob) -> bool:
 
 
 def _pure_continuation(last: _LastJob) -> bool:
-    """A budget-truncated attempt with no failures: the drain continues it."""
-    return last.status == "done" and last.failed == 0 and last.skipped > 0
+    """A budget-truncated attempt with no failures: the drain continues it.
+
+    A `done` row carrying `error` is a guardrail cut (regen halt), not a
+    plain truncation — it waits out the backoff like any non-clean attempt
+    (the halt's contract: a runaway wave must not hot-loop, task #4674).
+    """
+    return last.status == "done" and last.failed == 0 and last.skipped > 0 and last.error is None
 
 
 def scan(conn: Connection) -> ScanOutcome:
@@ -182,7 +191,7 @@ def _consider(conn: Connection, agent_id: int, latest: str, last_processed: str)
         )
         if datetime.now(UTC) - last.finished_at < timedelta(seconds=delay_s):
             return 0
-    include_tail = _first_build(conn, agent_id)
+    include_tail = first_build(conn, agent_id)
     cursor = conn.execute(
         "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail)"
         " VALUES (%s, %s, %s, 'pending', %s)"
@@ -285,13 +294,16 @@ def _has_clean_baseline(conn: Connection, agent_id: int) -> bool:
 
     The tail channel continues an established baseline; an agent with no
     successful build yet waits for its first compact-driven one (that first
-    build already seals its tail).
+    build already seals its tail). A `done` row carrying `error` is a
+    claim-time silent baseline or guardrail cut, never a build (task #4674) —
+    sealing a tail over one would fabricate coverage out of nothing.
     """
     row = conn.execute(
         "SELECT EXISTS ("
         "  SELECT 1 FROM hierarchy_jobs"
         "  WHERE agent_id = %s AND kind = %s AND status = 'done'"
         "    AND coalesce(failed, 0) = 0 AND coalesce(skipped, 0) = 0"
+        "    AND error IS NULL"
         ")",
         (agent_id, KIND_COMPACT),
     ).fetchone()
@@ -341,14 +353,20 @@ def _last_finished(conn: Connection, agent_id: int, kind: str) -> _LastJob | Non
     kind-scoped — tail and compact decisions must not perturb each other)."""
     row = conn.execute(
         "SELECT status, coalesce(failed, 0), coalesce(skipped, 0),"
-        "       coalesce(finished_at, started_at, created_at)"
+        "       coalesce(finished_at, started_at, created_at), error"
         " FROM hierarchy_jobs WHERE agent_id = %s AND kind = %s AND status IN ('done', 'failed')"
         " ORDER BY id DESC LIMIT 1",
         (agent_id, kind),
     ).fetchone()
     if row is None:
         return None
-    return _LastJob(status=str(row[0]), failed=int(row[1]), skipped=int(row[2]), finished_at=row[3])
+    return _LastJob(
+        status=str(row[0]),
+        failed=int(row[1]),
+        skipped=int(row[2]),
+        finished_at=row[3],
+        error=str(row[4]) if row[4] is not None else None,
+    )
 
 
 def _nonclean_streak(conn: Connection, agent_id: int, kind: str) -> int:
@@ -367,18 +385,21 @@ def _nonclean_streak(conn: Connection, agent_id: int, kind: str) -> int:
     return max(streak, 1)
 
 
-def _first_build(conn: Connection, agent_id: int) -> bool:
+def first_build(conn: Connection, agent_id: int) -> bool:
     """Whether this agent has never had a fully successful build.
 
     The first build is the full-retention-window one (review 3187: one-time
     and bounded), sealed through the tail — the same semantics as the manual
     first run; every later compact-driven pass leaves the tail pending.
+    A `done` row carrying `error` is not a build (claim-time silent baseline
+    or guardrail cut, task #4674), so it does not clear the first-build mode.
     """
     row = conn.execute(
         "SELECT NOT EXISTS ("
         "  SELECT 1 FROM hierarchy_jobs"
         "  WHERE agent_id = %s AND status = 'done'"
         "    AND coalesce(failed, 0) = 0 AND coalesce(skipped, 0) = 0"
+        "    AND error IS NULL"
         ")",
         (agent_id,),
     ).fetchone()

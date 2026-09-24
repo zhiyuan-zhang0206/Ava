@@ -4,12 +4,16 @@ Modules:
 - `scan`: one scan pass — read every thread's newest compact boundary,
   baseline new agents (silent: no build for pre-existing history), decide
   which agents need a job (behind, or their last attempt was not clean),
-  enqueue idempotently, and park stale `running` rows a dead process left.
+  enqueue idempotently (the reconcile pass behind the compact-boundary event
+  trigger, task #4674), and park stale `running` rows a dead process left.
   A second, opt-in channel (`hierarchy_tail_seal_enabled`, task #3981 C)
   enqueues `tail` jobs for idle agents with an established baseline.
-- `runner`: the resident loop the schedule hosts — scan, claim one job, run
-  it as a child process under a hard deadline, repeat (serial by
-  construction; drains back-to-back, sleeping only when nothing is due).
+- `runner`: the resident loop the schedule hosts — claim one due job, run
+  it as a child process under a hard deadline, and drain back-to-back (serial
+  by construction). The queue is fed by the compact-boundary event trigger
+  (task #4674): each boundary enqueues its own job, the reconcile scan runs
+  behind it on `hierarchy_fallback_scan_seconds`, and a tripped 24h
+  regeneration budget stops claiming until an operator resets the breaker.
 - `execute` / `job`: the child side of one build — `job` is the
   `python -m services.hierarchy_worker.job --job-id N` entry point (it boots
   the child's process sinks, name `hierarchy-worker`, so the generation's

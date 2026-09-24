@@ -232,3 +232,132 @@ class HierarchyWorkerFields:
             "scope": "cluster-pinned",
         },
     )
+
+    hierarchy_worker_enabled: bool = Field(
+        default=False,
+        alias="AVA_HIERARCHY_WORKER_ENABLED",
+        description=(
+            "Master switch for the event-driven build trigger (task #4674). "
+            "Off ships the new shape dark: the compact-boundary enqueue and "
+            "the worker's tick both no-op, so nothing builds until alignment "
+            "with the user turns it on (the schedule's enabled flag stays the "
+            "operational layer beneath this code gate)."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_fallback_scan_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        alias="AVA_HIERARCHY_FALLBACK_SCAN_SECONDS",
+        description=(
+            "Period (seconds) of the reconcile scan behind the event trigger "
+            "(task #4674): the old full scan still runs this often to repair "
+            "lost events, retry non-clean attempts once their backoff has "
+            "elapsed, and drain budget continuations. The worker's first tick "
+            "after a process start always scans. 10min: retry pacing is "
+            "already bounded by the 30min backoff base, and a scan is two "
+            "aggregated queries, so a tighter cadence would buy nothing."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_regen_alert_nodes_per_job: int = Field(
+        default=150,
+        ge=1,
+        alias="AVA_HIERARCHY_REGEN_ALERT_NODES_PER_JOB",
+        description=(
+            "Alert threshold on one job's generated node count (task #4674 "
+            "guardrail — observability only, never blocking). A normal "
+            "compact-driven job generates single digits to low tens; the "
+            "2026-09-24 incident (a reader fix invalidated every input hash) "
+            "generated 500-1200 per job. First builds and tail seals are "
+            "exempt: their full-retention window legitimately reaches ~900 "
+            "one time, and tail work is small by construction."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_regen_halt_nodes_per_job: int = Field(
+        default=400,
+        ge=1,
+        alias="AVA_HIERARCHY_REGEN_HALT_NODES_PER_JOB",
+        description=(
+            "Mid-run stop: once a job's generated count reaches this, the "
+            "remaining nodes are left unattempted (skipped) and the job ends "
+            "with a halt marker, so its continuation waits out the retry "
+            "backoff instead of hot-looping (task #4674 guardrail). 400 = "
+            "~8x the normal compact job, below the incident's 500-1200 floor; "
+            "first builds and tail seals are exempt (the measured worst "
+            "first build is ~900)."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_regen_daily_budget_nodes: int = Field(
+        default=5000,
+        ge=1,
+        alias="AVA_HIERARCHY_REGEN_DAILY_BUDGET_NODES",
+        description=(
+            "Fleet-wide 24h rolling budget on generated nodes; crossing it "
+            "trips the persistent breaker (hierarchy_worker_breaker) and the "
+            "worker stops claiming until an operator explicitly resets it "
+            "with a note (task #4674 guardrail). 5000 sits well above normal "
+            "steady-state days and well below what a hash-invalidation wave "
+            "across the fleet reaches in hours (8-10x for every tracked "
+            "agent)."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_regen_min_reuse_ratio: float = Field(
+        default=0.5,
+        gt=0,
+        lt=1,
+        alias="AVA_HIERARCHY_REGEN_MIN_REUSE_RATIO",
+        description=(
+            "Alert threshold on one job's reused/(reused+generated) ratio "
+            "(task #4674 guardrail — observability only): a fully re-cutting "
+            "run on an established tree reuses almost nothing while a fresh "
+            "slice legitimately does too, so the alert is only meaningful "
+            "alongside the size threshold; first builds and tail seals are "
+            "exempt."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

@@ -504,6 +504,57 @@ class HostDispatcherScanFailed(TypedDict):
     backoff_s: float
 
 
+class HierarchyEnqueueFailed(TypedDict):
+    """`hierarchy_enqueue_failed` payload — the compact-boundary build enqueue
+    did not land (task #4674). The enqueue is best-effort by design: the
+    compact round proceeds and the reconcile scan backstops, so this event is
+    the observability signal that the event trigger is degraded."""
+
+    agent_id: int
+    error: str
+
+
+class HierarchyRegenAlert(TypedDict):
+    """`hierarchy_regen_alert` payload — one build job generated more nodes
+    than the alert threshold (task #4674 guardrail; non-blocking)."""
+
+    agent_id: int
+    job_id: int
+    generated: int
+    threshold: int
+
+
+class HierarchyRegenHalt(TypedDict):
+    """`hierarchy_regen_halt` payload — generation stopped mid-run at the halt
+    threshold; the remainder is skipped and the continuation waits out the
+    retry backoff (task #4674 guardrail)."""
+
+    agent_id: int
+    job_id: int
+    generated: int
+    threshold: int
+
+
+class HierarchyRegenBudgetTripped(TypedDict):
+    """`hierarchy_regen_budget_tripped` payload — the fleet's 24h generated
+    total crossed the daily budget and the worker stopped claiming until an
+    operator resets the breaker with a note (task #4674 guardrail)."""
+
+    window_nodes: int
+    budget_nodes: int
+
+
+class HierarchyRegenLowReuse(TypedDict):
+    """`hierarchy_regen_low_reuse` payload — one build job reused almost none
+    of an established tree's texts, the shape of a full re-cut (task #4674
+    guardrail)."""
+
+    agent_id: int
+    job_id: int
+    generated: int
+    reused: int
+
+
 @dataclass(frozen=True)
 class EventSpec:
     """One declared event: name x category x payload x destination.

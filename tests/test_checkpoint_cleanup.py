@@ -32,6 +32,7 @@ from shared.agents.history.checkpoint_cleanup import (
     mark_compact_boundary,
     trim_checkpoints,
 )
+from shared.config import settings
 
 
 def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
@@ -354,6 +355,44 @@ async def test_mark_compact_boundary_stamps_newest(aops_pool: AsyncConnectionPoo
         rows = await cur.fetchall()
     stamped = [r[0] for r in rows if (r[1] or {}).get("compact_boundary")]
     assert stamped == [ids[-1]]  # exactly the newest, stamped once
+
+
+async def test_mark_compact_boundary_enqueues_one_live_build_job(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stamp best-effort enqueues the worker's build job (task #4674): one
+    pending `compact` job at the stamped boundary, live-deduped by the partial
+    unique index — a second boundary adds no row while one is live."""
+    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
+    ids = await _put_turns(aops_pool, "1", 4)
+    await mark_compact_boundary(aops_pool, "1")
+    await mark_compact_boundary(aops_pool, "1")
+
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT agent_id, kind, trigger_boundary, status, include_tail"
+            " FROM hierarchy_jobs WHERE agent_id = 1"
+        )
+        assert await cur.fetchall() == [(1, "compact", ids[-1], "pending", False)]
+
+
+async def test_enqueue_stays_silent_off_or_for_foreign_threads(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The enqueue is gated twice (task #4674): the shipped-dark switch and the
+    thread-id rule — foreign threads and a disabled trigger write nothing."""
+    assert settings.daemon.hierarchy_worker_enabled is False  # shipped dark
+    await _put_turns(aops_pool, "1", 4)
+    await mark_compact_boundary(aops_pool, "1")
+    await mark_compact_boundary(aops_pool, "1")
+
+    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
+    await _put_turns(aops_pool, "qa-3f", 1)
+    await mark_compact_boundary(aops_pool, "qa-3f")
+
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT count(*) FROM hierarchy_jobs")
+        assert await cur.fetchone() == (0,)
 
 
 async def test_trim_keeps_compaction_boundary(aops_pool: AsyncConnectionPool) -> None:

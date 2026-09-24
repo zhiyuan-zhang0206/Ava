@@ -216,9 +216,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # (task #4015: debt_sweep_daily) raises it to 209; the CI-run observability
     # trio (task #4014: ci_runs_daily / ci_workflow_window / ci_runs_run) raises
     # it to 212; persistent Loki write-path throttling raises it to 213;
-    # schema_mismatch_blocked (task #4618) raises it to 214.
+    # schema_mismatch_blocked (task #4618) raises it to 214; the hierarchy
+    # trigger + guardrail quintet (task #4674: hierarchy_enqueue_failed /
+    # hierarchy_regen_alert / hierarchy_regen_halt / hierarchy_regen_low_reuse /
+    # hierarchy_regen_budget_tripped) raises it to 219.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 214
+    assert len(_TELEMETRY_KINDS) == 219
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

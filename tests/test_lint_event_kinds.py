@@ -122,6 +122,13 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # The stats-dashboard stale-serving fallback (task #3973): same shape,
         # behind gateway/routers/_stats_dashboard.py's emitter.
         "stats_dashboard_stale",  # gateway/routers/_stats_dashboard.py:_emit_stale (positional emit)
+        # The hierarchy worker's trigger + guardrails (task #4674): positional
+        # emits behind helpers, invisible to the literal scanner.
+        "hierarchy_enqueue_failed",  # shared/agents/history/checkpoint_cleanup.py:_enqueue_failed
+        "hierarchy_regen_alert",  # services/hierarchy_worker/execute.py:_try_emit
+        "hierarchy_regen_halt",  # services/hierarchy_worker/execute.py:_try_emit
+        "hierarchy_regen_low_reuse",  # services/hierarchy_worker/execute.py:_try_emit
+        "hierarchy_regen_budget_tripped",  # services/hierarchy_worker/runner.py:_regen_budget_check
         # Legacy bracketed name: the pre-W8-rename value, still a migrate_events.py
         # mapping target and present in existing DB rows. New code must not emit it;
         # the registration survives only to backfill the metric.

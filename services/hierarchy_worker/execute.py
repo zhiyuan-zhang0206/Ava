@@ -29,6 +29,7 @@ import traceback
 
 from agent.llm import execute_code
 from services.hierarchy_worker.scan import KIND_COMPACT, KIND_TAIL
+from shared import telemetry
 from shared.agent_snapshot import agent_effective_model
 from shared.agents.history.checkpoint import (
     latest_checkpoint_id,
@@ -98,6 +99,11 @@ def execute_job(job_id: int) -> int:
         # provider sockets do not linger (task #3915). Built inside the try so
         # a construction failure still records on the job row.
         llm = build_generation_llm(model)
+        # The regen halt (task #4674): a cumulative node cap on ordinary
+        # compact-driven builds. First builds and tail seals are exempt —
+        # their full windows are legitimately large (a measured worst first
+        # build: ~900 nodes) and one-time by construction.
+        halt_nodes = None if include_tail else settings.daemon.hierarchy_regen_halt_nodes_per_job
         try:
             tree = build_agent_tree(
                 agent_id,
@@ -108,11 +114,40 @@ def execute_job(job_id: int) -> int:
                 max_concurrent=settings.daemon.hierarchy_generation_concurrency,
                 deadline=deadline,
                 tools=[execute_code],
+                max_generated=halt_nodes,
             )
         finally:
             close_chat_model(llm)
         written = write_tree(agent_id, tree.nodes, model=model)
-        _record_done(job_id, agent_id, tree, written, model, advance_target, kind, tail_seal_target)
+        error: str | None = None
+        if tree.halted:
+            error = (
+                f"regen halt: generated {tree.generated} reached"
+                f" hierarchy_regen_halt_nodes_per_job="
+                f"{settings.daemon.hierarchy_regen_halt_nodes_per_job}; remainder skipped"
+            )
+            _try_emit(
+                "hierarchy_regen_halt",
+                {
+                    "agent_id": agent_id,
+                    "job_id": job_id,
+                    "generated": tree.generated,
+                    "threshold": settings.daemon.hierarchy_regen_halt_nodes_per_job,
+                },
+            )
+        if not include_tail:
+            _regen_signals(agent_id, job_id, tree)
+        _record_done(
+            job_id,
+            agent_id,
+            tree,
+            written,
+            model,
+            advance_target,
+            kind,
+            tail_seal_target,
+            error=error,
+        )
         logger.info(
             "hierarchy job {job} done: agent {agent} batches={batches} nodes={nodes}"
             " generated={generated} reused={reused} failed={failed} skipped={skipped}"
@@ -154,21 +189,27 @@ def _record_done(
     advance_target: str | None,
     kind: str,
     tail_seal_target: str | None,
+    error: str | None = None,
 ) -> None:
     """Write the attempt's outcome; bookkeeping advances only when clean.
 
     A `compact` run moves the scan cursor; a `tail` run records its sealed
     stretch on `last_tail_seal_cp_id` instead (both guarded monotone, and
-    both only when the run skipped nothing).
+    both only when the run skipped nothing). `error` carries the guardrail
+    marker (task #4674): a regen-halt row stays `done`, but the non-null
+    error keeps it from ever counting as a build (`scan.first_build` /
+    `scan._has_clean_baseline` guard on it), so the continuation backs off
+    instead of hot-looping.
     """
     with write_transaction() as conn:
         conn.execute(
-            "UPDATE hierarchy_jobs SET status = 'done', finished_at = now(),"
+            "UPDATE hierarchy_jobs SET status = 'done', finished_at = now(), error = %s,"
             " model = %s, engine_version = %s, prompt_version = %s,"
             " stretches = %s, nodes = %s, generated = %s, reused = %s, failed = %s,"
             " skipped = %s, src_tokens = %s, out_tokens = %s"
             " WHERE id = %s AND status = 'running'",
             (
+                error,
                 model,
                 ENGINE_VERSION,
                 PROMPT_VERSION,
@@ -212,4 +253,49 @@ def _record_failed(job_id: int, error: str) -> None:
             "UPDATE hierarchy_jobs SET status = 'failed', finished_at = now(), error = %s"
             " WHERE id = %s AND status = 'running'",
             (error, job_id),
+        )
+
+
+def _regen_signals(agent_id: int, job_id: int, tree: MaterializedTree) -> None:
+    """The done-time guardrail signals for an ordinary compact-driven build.
+
+    Both are observability-only (task #4674 §4). The size threshold is
+    self-explanatory; the reuse ratio is only meaningful next to it — a fresh
+    slice legitimately reuses little, while a fully re-cutting run on an
+    established tree reuses almost nothing (the ratio's exact trigger face is
+    pending calibration before the enablement switch opens).
+    """
+    alert_at = settings.daemon.hierarchy_regen_alert_nodes_per_job
+    if tree.generated > alert_at:
+        _try_emit(
+            "hierarchy_regen_alert",
+            {
+                "agent_id": agent_id,
+                "job_id": job_id,
+                "generated": tree.generated,
+                "threshold": alert_at,
+            },
+        )
+    ratio = settings.daemon.hierarchy_regen_min_reuse_ratio
+    total = tree.reused + tree.generated
+    if tree.generated and total and tree.reused / total < ratio:
+        _try_emit(
+            "hierarchy_regen_low_reuse",
+            {
+                "agent_id": agent_id,
+                "job_id": job_id,
+                "generated": tree.generated,
+                "reused": tree.reused,
+            },
+        )
+
+
+def _try_emit(kind: str, attributes: dict[str, object]) -> None:
+    """Emit a guardrail event best-effort: these observe a completed build,
+    so an emission failure must never corrupt the job's own record."""
+    try:
+        telemetry.emit("telemetry", kind, attributes=attributes)
+    except Exception:
+        logger.warning(
+            "hierarchy guardrail event {kind} could not be emitted", kind=kind, exc_info=True
         )

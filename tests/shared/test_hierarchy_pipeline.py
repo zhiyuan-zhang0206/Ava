@@ -657,3 +657,26 @@ def test_generation_is_newest_first_within_a_level() -> None:
         assert match is not None
         spans.append((int(match.group(1)), int(match.group(2))))
     assert spans == [(16, 19), (12, 15), (8, 11), (4, 7), (0, 3)]
+
+
+def test_regen_cap_halts_between_chunks_and_marks_the_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regen halt (task #4674): the cumulative cap stops generation between
+    chunks — the chunk in flight completes, nothing after it starts, and the
+    remainder (here: a level-1 group and the whole level 2) lands in `skipped`
+    with the stop attributed to the cap, not the deadline (`halted`)."""
+    msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(100)]
+
+    def fake_loader(agent_id: int) -> list[BaseMessage]:
+        return list(msgs)
+
+    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+
+    fake = FakeLLM(_fitting_responder)
+    tree = build_agent_tree(7, llm=fake, model=MODEL, max_concurrent=1, max_generated=2)
+
+    assert len(fake.calls) == 4  # one full chunk, then the boundary stop
+    assert tree.halted is True
+    assert tree.generated == 4
+    assert tree.skipped == 2  # one L1 group + the L2 node never attempted
