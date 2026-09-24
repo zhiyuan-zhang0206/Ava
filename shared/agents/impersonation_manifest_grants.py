@@ -50,6 +50,7 @@ def grant_manifest_runner_access(conn: psycopg.Connection, runner_role: str) -> 
         "public.close_impersonation_event_manifest_admission(uuid)",
         "public.admit_impersonation_event_certifier(uuid,text)",
         "public.seal_impersonation_event_participant(uuid,text,text,text,bigint,text)",
+        "public.lock_impersonation_event_participant(uuid,text)",
         "public.freeze_impersonation_event_manifest(uuid,text,bigint,timestamp with time zone)",
         "public.record_impersonation_event_retention_loss(uuid,timestamp with time zone)",
         "public.record_impersonation_event_integrity_alert(uuid)",
