@@ -223,46 +223,96 @@ def test_default_controllers_declare_the_timeout_contract() -> None:
     assert all(isinstance(controller, Controller) for controller in build_controllers())
 
 
-# ─── a blocked round is never silent ──────────────────────────────────────────
+# ─── a block's start, heartbeats and end are never silent ─────────────────────
 #
 # A skipped round and an all-green round used to look identical in the log, so a
 # Windows runner's 3h07m reconcile gap (2026-07-28 22:04 -> 2026-07-29 01:11, blocked
 # every minute by "Schema ahead of code") could only be found by counting
-# `_run_check` lines per hour. These pin the line that makes it readable directly.
+# `_run_check` lines per hour. These pin the first-round line and the cadence-bound
+# heartbeats that make a gap readable directly — without one line per round.
 
 
-async def test_blocked_round_logs_dimension_scope_and_streak(
+async def test_blocked_streak_logs_the_first_round_immediately(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """The first blocked round is not silent — it names the dimension, the scope and
+    the streak start. Repeats are cadence-bound (see the next test), never per-round."""
     mgr = ControllerManager([_FakeController("schema", BlockScope.DB_DEPENDENT, [])])
     with caplog.at_level(logging.WARNING, logger="ops.manager"):
         await mgr.reconcile("agent-runner")
         await mgr.reconcile("agent-runner")
 
     lines = [r.getMessage() for r in caplog.records]
-    assert len(lines) == 2, "every blocked round logs, not just the first"
+    assert len(lines) == 1, "start line only; the second round sits inside the cadence"
     assert "blocked by schema" in lines[0] and "db-dependent" in lines[0]
     assert "roster NOT fully reconciled" in lines[0]
     assert "1 consecutive round(s)" in lines[0]
-    assert "2 consecutive round(s)" in lines[1]
-    assert all(r.levelno == logging.WARNING for r in caplog.records)
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
 
 
-async def test_blocked_streak_escalates_to_error_at_the_alarm_bound(
+async def test_blocked_streak_repeats_on_the_alarm_cadence(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Past the bound the same situation is no longer a routine rollout window, so it
-    stops whispering the same WARNING forever."""
-    mgr = ControllerManager([_FakeController("pause", BlockScope.ALL, [])])
+    """Heartbeats ride the alarm bound itself (ten rounds ≈ ten minutes) and carry
+    the running streak count, so a long block stays countable without one line per
+    round (2026-09-24: a fleet-wide freeze pause made per-round repeats ~79% of the
+    24h error bucket)."""
+    mgr = ControllerManager([_FakeController("schema", BlockScope.ALL, [])])
+    bound = manager._BLOCKED_ROUND_ALARM_ROUNDS
     with caplog.at_level(logging.WARNING, logger="ops.manager"):
-        for _ in range(manager._BLOCKED_ROUND_ALARM_ROUNDS):
+        for _ in range(2 * bound):
             await mgr.reconcile("gateway")
 
+    lines = [r.getMessage() for r in caplog.records]
+    assert len(lines) == 3, "one start line + two cadence heartbeats"
+    assert "1 consecutive round(s)" in lines[0]
+    assert f"{bound} consecutive round(s)" in lines[1]
+    assert f"{2 * bound} consecutive round(s)" in lines[2]
+    assert [r.levelno for r in caplog.records] == [
+        logging.WARNING,
+        logging.ERROR,
+        logging.ERROR,
+    ]
+
+
+async def test_no_error_before_the_alarm_bound(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The escalation lands exactly at the bound — the rounds before it stay WARNING
+    (and only the first of them logs)."""
+    mgr = ControllerManager([_FakeController("schema", BlockScope.ALL, [])])
+    bound = manager._BLOCKED_ROUND_ALARM_ROUNDS
+    with caplog.at_level(logging.WARNING, logger="ops.manager"):
+        for _ in range(bound - 1):
+            await mgr.reconcile("gateway")
+        assert [r.levelno for r in caplog.records] == [logging.WARNING]
+        await mgr.reconcile("gateway")
+
     levels = [r.levelno for r in caplog.records]
-    assert levels[: manager._BLOCKED_ROUND_ALARM_ROUNDS - 1] == [logging.WARNING] * (
-        manager._BLOCKED_ROUND_ALARM_ROUNDS - 1
-    )
-    assert levels[-1] == logging.ERROR
+    assert levels == [logging.WARNING, logging.ERROR]
+    assert f"{bound} consecutive round(s)" in caplog.records[-1].getMessage()
+
+
+async def test_pause_block_streak_never_escalates_to_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A paused host is an expected state whose pathology is bounded elsewhere
+    (stalled_rollout ahead of pause; the unowned-pause release; the OS hold watchdog):
+    its streak must not manufacture ERROR/WARNING events. First round WARNING, later
+    heartbeats INFO — the 2026-09-24 freeze put ~2.8k pause-blocked error lines into
+    the 24h error bucket."""
+    mgr = ControllerManager([_FakeController("pause", BlockScope.ALL, [])])
+    bound = manager._BLOCKED_ROUND_ALARM_ROUNDS
+    with caplog.at_level(logging.INFO, logger="ops.manager"):
+        for _ in range(2 * bound):
+            await mgr.reconcile("gateway")
+
+    assert [r.levelno for r in caplog.records] == [
+        logging.WARNING,
+        logging.INFO,
+        logging.INFO,
+    ]
+    assert f"{2 * bound} consecutive round(s)" in caplog.records[-1].getMessage()
 
 
 async def test_clearing_a_streak_is_logged_and_resets(caplog: pytest.LogCaptureFixture) -> None:
