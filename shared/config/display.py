@@ -377,7 +377,7 @@ class DisplaySettings(EnvSettings):
         alias="AVA_STATS_DASHBOARD_CACHE_TTL_S",
         description=(
             "Fresh lifetime in seconds of each stats-dashboard whole response. "
-            "60s absorbs every other sidebar poll. 0 disables fresh cache hits."
+            "The default 60s absorbs every other sidebar poll. 0 disables fresh cache hits."
         ),
         json_schema_extra={
             "restart_required": "gateway",

@@ -52,7 +52,7 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
 
 @pytest.fixture(autouse=True)
 def clear_llm_usage_sums_cache() -> None:
-    """Keep every FakeLoki test isolated from the route's 60-second cache."""
+    """Keep every FakeLoki test isolated from the route's configurable cache."""
     _stats_dashboard.cache_clear()
 
 
