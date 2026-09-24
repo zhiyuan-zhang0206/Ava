@@ -10,6 +10,21 @@ def test_default_admission_does_not_limit_waiting_agents() -> None:
     assert DaemonSettings.model_fields["host_max_concurrent_turns"].default == 0
 
 
+def test_recovery_wake_batch_default_bounds_and_metadata() -> None:
+    field = DaemonSettings.model_fields["host_recovery_wake_batch"]
+    assert field.default == 4
+    assert DaemonSettings(AVA_HOST_RECOVERY_WAKE_BATCH=1).host_recovery_wake_batch == 1
+    with pytest.raises(ValidationError):
+        DaemonSettings(AVA_HOST_RECOVERY_WAKE_BATCH=0)
+    assert field.json_schema_extra == {
+        "capability": "agent-runner",
+        "restart_required": "agent",
+        "writable": True,
+        "sensitive": False,
+        "scope": "cluster-pinned",
+    }
+
+
 @pytest.mark.parametrize("limit", [0, 1, 1000])
 def test_admission_does_not_resize_database_pools(limit: int) -> None:
     config = DaemonSettings(

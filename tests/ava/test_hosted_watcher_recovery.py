@@ -48,6 +48,20 @@ async def _settled(scheduler: TurnScheduler) -> None:
             await asyncio.sleep(0.01)
 
 
+async def _scan(host: AgentHost, scheduler: TurnScheduler, agent_id: int) -> None:
+    assert scheduler.active_agents == frozenset()
+    assert await host.pending_inbound_wakes(30) == [
+        PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
+    ]
+    await InboundWakeDispatcher(
+        "redis://unused",
+        scheduler,
+        pending_scan=host.pending_inbound_wakes,
+        stale_after_s=30,
+        recovery_wake_batch=1,
+    ).scan_once()
+
+
 @pytest.fixture
 async def cold_host(
     _agent_row: int,
@@ -133,7 +147,8 @@ async def test_idle_empty_inbox_boot_reconciles_missing_watcher(
     _missing(agent_id, kind)
     assert sessions.list() == {}
     assert await host.pending_inbound_wakes(30) == []
-    await _schedule_watcher_recovery(host, scheduler)
+    await _schedule_watcher_recovery(host)
+    await _scan(host, scheduler, agent_id)
     await _settled(scheduler)
     rows = watcher_rows(agent_id)
     original = next(row for row in rows if row["session_id"] == 424242)
@@ -163,7 +178,8 @@ async def test_cold_host_preserves_live_watcher_after_pause(
     )
     before = watcher_rows(agent_id)
     assert session_id in sessions.list()
-    await _schedule_watcher_recovery(host, scheduler)
+    await _schedule_watcher_recovery(host)
+    await _scan(host, scheduler, agent_id)
     await _settled(scheduler)
     host.drop_agent(agent_id)
     await host.run_turn(agent_id)
@@ -187,14 +203,12 @@ async def test_failed_watcher_recovery_retries_cached_runtime_without_inbound(
         return cron(*args, **kwargs)
 
     monkeypatch.setattr(_watcher_reconcile, "cron", fail_once)
-    await _schedule_watcher_recovery(host, scheduler)
+    await _schedule_watcher_recovery(host)
+    await _scan(host, scheduler, agent_id)
     await _settled(scheduler)
     assert sessions.list() == {}
     assert watcher_rows(agent_id)[0]["status"] == "running"
-    pending = await host.pending_inbound_wakes(30)
-    assert [wake.agent_id for wake in pending] == [agent_id]
-    for wake in pending:
-        scheduler.wake(wake.agent_id)
+    await _scan(host, scheduler, agent_id)
     await _settled(scheduler)
     assert attempts == 2
     assert host.stats.cache_misses == 1
@@ -219,7 +233,7 @@ async def test_held_start_then_resume_restores_parked_watcher(
     pause_owner.change_maintenance(
         "watcher-test", at, initial.maintenance, MaintenanceHold("starting", parked=(agent_id,))
     )
-    await _schedule_watcher_recovery(host, scheduler)
+    await _schedule_watcher_recovery(host)
     await _settled(scheduler)
     assert host.stats.cache_misses == 0
     assert sessions.list() == {}
