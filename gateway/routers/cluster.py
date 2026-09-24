@@ -522,6 +522,7 @@ def get_cluster_admin_events(
         items=[
             AgentEventRow(
                 id=row["id"],
+                line_sha256=row["line_sha256"],
                 ts=row["ts"],
                 agent_id=row["agent_id"],
                 level=row["level"],

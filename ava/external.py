@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import sys
 from contextlib import ExitStack, suppress
-from threading import Lock
+from threading import Lock, Timer
 from types import TracebackType
 from typing import Any, Self
+from uuid import uuid4
 
 from shared import impersonation as control
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
@@ -70,6 +71,7 @@ class Attachment:
         self.lease_id = lease_id
         self._closed = False
         self._stack = ExitStack()
+        self._manifest_participant: Any = None
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
         self._prior_state = ava.state
@@ -98,6 +100,7 @@ class Attachment:
             for encoded in lease["plugin_delta"][applied:]:
                 apply_plugin_delta(state, decode_plugin_delta(encoded))
             self._validate()
+            self._open_manifest_participant()
             ava.state, ava.state_update = state, {}
         except BaseException:
             self._detach()
@@ -142,9 +145,62 @@ class Attachment:
             self.flush()
         finally:
             try:
-                _deliver_telemetry_before_detach()
+                # Receipt closure precedes the best-effort delivery flush: the
+                # receipt is the emitted-event census, while sync only reduces
+                # ordinary observation latency and cannot certify arrival.
+                self._seal_manifest_participant()
             finally:
-                self._detach()
+                try:
+                    _deliver_telemetry_before_detach()
+                finally:
+                    self._detach()
+
+    def _open_manifest_participant(self) -> None:
+        """Register this controller before it can emit a protocol-v1 event."""
+        from shared.agents.impersonation_manifest import (
+            LocalParticipant,
+            bind_local_participant,
+            is_protocol_v1,
+            open_local_participant,
+        )
+
+        if not is_protocol_v1(self._lease()):
+            return
+        source_key = f"attachment:{process_metadata()['pid']}:{uuid4().hex}"
+        if open_local_participant(self.lease_id, agent_id=self.agent_id, source_key=source_key):
+            participant = LocalParticipant(
+                lease_id=self.lease_id,
+                agent_id=self.agent_id,
+                session_id=self.session_id,
+                source_key=source_key,
+            )
+            bind_local_participant(participant)
+            self._manifest_participant = participant
+
+    def _seal_manifest_participant(self) -> None:
+        """Seal the durable receipt in every attachment close path."""
+        if self._manifest_participant is None:
+            return
+        from shared.agents.impersonation_manifest import (
+            alert_if_participant_still_open,
+            seal_local_participant,
+        )
+        from shared.config import settings
+
+        # This timer is deliberately diagnostic-only. A live SDK finally may
+        # outlast the detach wait and seal later; only a real capture failure
+        # can mark its receipt failed.
+        timer = Timer(
+            settings.general.impersonation_event_manifest_seal_wait_seconds,
+            alert_if_participant_still_open,
+            args=(self._manifest_participant,),
+        )
+        timer.daemon = True
+        timer.start()
+        try:
+            seal_local_participant(self._manifest_participant)
+        finally:
+            timer.cancel()
 
     def _detach(self) -> None:
         """Restore local bindings without reading or writing the lease."""
@@ -156,6 +212,11 @@ class Attachment:
         _active_attachment = None
         self._closed = True
         try:
+            if self._manifest_participant is not None:
+                from shared.agents.impersonation_manifest import unbind_local_participant
+
+                unbind_local_participant(self._manifest_participant)
+                self._manifest_participant = None
             _boot._external_identity = None
             _boot._external_agent_id = None
             ava.state, ava.state_update = self._prior_state, self._prior_update

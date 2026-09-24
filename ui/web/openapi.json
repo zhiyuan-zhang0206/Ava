@@ -5163,6 +5163,22 @@
             }
           },
           {
+            "name": "impersonation_session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Impersonation Session"
+            }
+          },
+          {
             "name": "machine",
             "in": "query",
             "required": false,
@@ -5845,6 +5861,52 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/alerts/impersonation-event-retention": {
+      "get": {
+        "summary": "List Impersonation Event Retention",
+        "description": "Operator panel rows for frozen manifests that crossed Loki retention.\n\nThe query is machine-scoped because the runner that owns the manifest\ndetects its retention floor. The normal alerts list already exposes the\naccompanying alert; this endpoint supplies the lease/floor/missing-count\nevidence needed to investigate it without permitting a local mirror to\nclear the condition.",
+        "operationId": "list_impersonation_event_retention_api_alerts_impersonation_event_retention_get",
+        "parameters": [
+          {
+            "name": "machine",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Machine"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImpersonationRetentionLossRow"
+                  },
+                  "title": "Response List Impersonation Event Retention Api Alerts Impersonation Event Retention Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -7243,6 +7305,10 @@
             "type": "integer",
             "title": "Id"
           },
+          "line_sha256": {
+            "type": "string",
+            "title": "Line Sha256"
+          },
           "ts": {
             "type": "string",
             "format": "date-time",
@@ -7276,6 +7342,7 @@
         "type": "object",
         "required": [
           "id",
+          "line_sha256",
           "ts",
           "agent_id",
           "level",
@@ -9911,6 +9978,10 @@
             "type": "integer",
             "title": "Id"
           },
+          "line_sha256": {
+            "type": "string",
+            "title": "Line Sha256"
+          },
           "ts": {
             "type": "string",
             "format": "date-time",
@@ -10003,6 +10074,7 @@
         "type": "object",
         "required": [
           "id",
+          "line_sha256",
           "ts",
           "trace_id",
           "span_id",
@@ -10521,6 +10593,60 @@
         ],
         "title": "ImpersonationMetadata",
         "description": "Declared identity and observed process facts on a rendered message."
+      },
+      "ImpersonationRetentionLossRow": {
+        "properties": {
+          "lease_id": {
+            "type": "string",
+            "title": "Lease Id"
+          },
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "session_id": {
+            "type": "integer",
+            "title": "Session Id"
+          },
+          "envelope_floor_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Envelope Floor At"
+          },
+          "retention_horizon_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Horizon At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "missing_item_count": {
+            "type": "integer",
+            "title": "Missing Item Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lease_id",
+          "agent_id",
+          "session_id",
+          "envelope_floor_at",
+          "retention_horizon_at",
+          "created_at",
+          "missing_item_count"
+        ],
+        "title": "ImpersonationRetentionLossRow",
+        "description": "One incomplete manifest whose required Loki envelope has expired."
       },
       "InspectMetricsMetadata": {
         "properties": {

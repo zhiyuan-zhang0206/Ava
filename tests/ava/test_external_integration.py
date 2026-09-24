@@ -17,6 +17,7 @@ from agent import state as state_module
 from ava import _boot, external
 from ava._external_state import decode_plugin_delta, load_snapshot
 from shared import impersonation as leases
+from shared import impersonation_history as history
 from shared.caller_identity import CallerIdentity
 from shared.config import settings
 from shared.db import create_agent
@@ -174,6 +175,97 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
         "external_agent:codex:test",
     )
     assert handoff[3]["caller_identity"] == caller.model_dump()
+
+
+def test_v1_attachment_send_message_certifies_from_the_central_receipt(
+    gateway_unit: TestClient,
+    native_checkpoint: tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]],
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Attachment-owned ``ava.agents.send_message`` completes only on exact replay."""
+    import httpx
+
+    from ava import _impersonation_events as reader
+    from services.agent_host.impersonation_events import reconcile_one
+
+    owner, _ = native_checkpoint
+    monkeypatch.setattr(settings.general, "impersonation_event_manifest_enabled", True)
+    monkeypatch.setattr(
+        settings.general,
+        "impersonation_event_manifest_certification_secret",
+        "attachment-manifest-certification-secret-000001",
+    )
+    monkeypatch.setattr("ava._gateway_transport._client", gateway_unit)
+    peer_id = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,lease_expires_at) "
+        "VALUES(%s,'idling',%s,clock_timestamp()+interval '10 minutes')",
+        (peer_id, machine_name()),
+    )
+    db_conn.commit()
+    lease = leases.request(
+        owner.agent_id,
+        caller=CallerIdentity(kind="external_agent", subject="codex"),
+        process_metadata=recorded_tree(),
+        relay_provider="codex",
+        relay_thread_id=str(uuid4()),
+        automatic=True,
+        name="attachment-manifest",
+        executor_name="codex",
+    )
+    leases.accept(lease["id"], owner.agent_id, owner, "Send through the attachment")
+    leases.activate(lease["id"], owner)
+    monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
+    with external.attach(lease["id"]):
+        ava.agents.send_message(peer_id, "Manifest-backed attachment send")
+    leases.release(lease["id"], attested_caller(lease), "Sent the peer update")
+
+    expected = db_conn.execute(
+        "SELECT event_key,line_sha256,event_kind,event_at FROM "
+        "agent_impersonation_event_participant_items WHERE lease_id=%s UNION ALL "
+        "SELECT event_key,line_sha256,event_kind,event_at FROM "
+        "agent_impersonation_event_expected_items WHERE lease_id=%s ORDER BY event_kind",
+        (lease["id"], lease["id"]),
+    ).fetchall()
+    # The attachment-local SDK meter may be disabled by the surrounding
+    # process profile, but the borrowed inter-agent send is always a central
+    # audit receipt and must remain certifiable with the full observed union.
+    assert any(row[2] == "api_event" for row in expected)
+
+    def get(_path: str, *, params: dict[str, Any]) -> httpx.Response:
+        wanted_kind = "sdk_call" if params.get("event_name") == "sdk_call" else "api_event"
+        items: list[dict[str, Any]] = []
+        for key, digest, kind, event_at in expected:
+            if kind != wanted_kind:
+                continue
+            is_sdk = kind == "sdk_call"
+            items.append(
+                {
+                    "id": key.removeprefix("event:"),
+                    "line_sha256": digest,
+                    "event_name": "sdk_call" if is_sdk else "send_message",
+                    "category": "sdk" if is_sdk else "audit",
+                    "ts": event_at.isoformat(),
+                    "agent_id": owner.agent_id if is_sdk else peer_id,
+                    "source": "self" if is_sdk else f"agent:{owner.agent_id}",
+                    "attributes": {
+                        "impersonation_session": f"{owner.agent_id}:0",
+                        **({"fn": "ava.agents.send_message", "duration": 0.0} if is_sdk else {}),
+                    },
+                }
+            )
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", "http://manifest.test/api/events"),
+            json={"items": items, "meta": {"has_more": False}},
+        )
+
+    monkeypatch.setattr(reader, "_get", get)
+    reconcile_one()
+    certified = history.resolve(owner.agent_id, 0)
+    assert certified["events_completed_at"] is not None
+    assert certified["event_delivery_pending_reason"] is None
 
 
 @pytest.mark.parametrize("store", ["personal", "shared"])
