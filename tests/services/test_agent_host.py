@@ -137,10 +137,10 @@ class _FakePool:
 
 
 class _PendingScanCursor:
-    def __init__(self, rows: list[tuple[int, bool]]) -> None:
+    def __init__(self, rows: list[tuple[int, bool, bool]]) -> None:
         self._rows = rows
 
-    async def fetchall(self) -> list[tuple[int, bool]]:
+    async def fetchall(self) -> list[tuple[int, bool, bool]]:
         return self._rows
 
 
@@ -157,7 +157,7 @@ class _PendingScanConn:
 class _PendingScanPool:
     """One host backstop query with captured SQL and returned candidates."""
 
-    def __init__(self, rows: list[tuple[int, bool]]) -> None:
+    def __init__(self, rows: list[tuple[int, bool, bool]]) -> None:
         self.rows = rows
         self.sql = ""
         self.params: tuple[object, ...] = ()
@@ -422,7 +422,7 @@ class TestPendingInboundBackstop:
         """The hosted dispatcher scans only this machine's runnable rows. A
         fresh pending inbound wakes its agent; database timestamps identify backlog, while current turn progress must
         independently authorize cancellation."""
-        pool = _PendingScanPool([(17, True), (23, False)])
+        pool = _PendingScanPool([(17, True, False), (23, False, True)])
         host = AgentHost(
             pool=pool,  # pyright: ignore[reportArgumentType]
             checkpointer=object(),  # pyright: ignore[reportArgumentType]
@@ -432,9 +432,9 @@ class TestPendingInboundBackstop:
 
         candidates = await host.pending_inbound_wakes(180.0)
 
-        assert [(candidate.agent_id, candidate.stale) for candidate in candidates] == [
-            (17, True),
-            (23, False),
+        assert [(c.agent_id, c.stale, c.recovery) for c in candidates] == [
+            (17, True, False),
+            (23, False, True),
         ]
         assert pool.params == (
             180.0,
@@ -460,7 +460,7 @@ class TestPendingInboundBackstop:
             def connection(self) -> object:
                 raise AssertionError("pending scan borrowed from the turn pool")
 
-        control_pool = _PendingScanPool([(17, True)])
+        control_pool = _PendingScanPool([(17, True, False)])
         host = AgentHost(
             pool=cast(AsyncConnectionPool[Any], _ForbiddenTurnPool()),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),

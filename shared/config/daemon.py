@@ -38,6 +38,20 @@ class DaemonSettings(
         },
     )
 
+    host_recovery_wake_batch: int = Field(
+        default=4,
+        ge=1,
+        alias="AVA_HOST_RECOVERY_WAKE_BATCH",
+        description="Hosted agent-runner: maximum new recovery-class turn starts per host per pending-scan cycle. This paces the post-wave boot recovery herd (task #4652), which can flip the fleet to running simultaneously and contend on database and runtime builds. Lower values give a gentler but longer drain; higher values approach the old herd. Ordinary message delivery is never delayed by this cap.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     host_admission_wait_alert_seconds: float = Field(
         default=2400.0,
         gt=0,

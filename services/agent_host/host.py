@@ -80,6 +80,7 @@ from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase, recover_database
 from services.agent_host.dispatcher import PendingInboundWake
 from services.agent_host.force_termination import force_termination_outcome, force_termination_stop
+from services.agent_host.pending_wakes import scan_rows
 from services.agent_host.runtime import (
     HostStats,
     TurnOutcome,
@@ -147,6 +148,7 @@ class AgentHost:
         # pay a cold build, which is the opposite of what a cache is for.
         self._in_flight: set[int] = set()
         self._watcher_recovery_pending: set[int] = set()
+        self._settled_reap_pending: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
         self.stats = HostStats()
@@ -161,6 +163,9 @@ class AgentHost:
         """
         from shared.turn_identity import HostedTurnResources, bind_hosted_resources
 
+        # A settled reap asks for one admission attempt, even if the row then
+        # proves unrunnable or another wake reached it first.
+        self._settled_reap_pending.discard(agent_id)
         resources = HostedTurnResources()
         with bind_hosted_resources(resources):
             # Keep the child's Context so its config fingerprint can be copied
@@ -549,6 +554,10 @@ class AgentHost:
         self._watcher_recovery_pending.update(agents)
         return agents
 
+    def arm_settled_reaps(self, agents: list[int]) -> None:
+        """Deliver each boot-settled reap once through the paced scan."""
+        self._settled_reap_pending.update(agents)
+
     async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
         """Find queued work and expired predecessors missed by Redis wakes.
 
@@ -563,72 +572,15 @@ class AgentHost:
         """
         held_wakes = maintenance_receipts.pending_wakes(self._maintenance_failed)
         if held_wakes is not None:
+            # The drain's held re-drive is update machinery, never the paced
+            # cohort: its pace belongs to the drain windows (task #4652).
             return held_wakes
-        async with self._control_pool.connection() as conn:
-            rows = await (
-                await conn.execute(
-                    "SELECT m.id, "
-                    "  (m.last_active_at IS NULL "
-                    "   OR m.last_active_at < now() - make_interval(secs => %s)) "
-                    "  AND EXISTS ("
-                    "    SELECT 1 FROM inbound_messages stale "
-                    "    WHERE stale.agent_id = m.id AND stale.status = 'pending' "
-                    "      AND stale.created_at < now() - make_interval(secs => %s)"
-                    "  ) "
-                    "FROM agents_meta m "
-                    "WHERE ((("
-                    "    m.status = 'idling' "
-                    "    OR (m.status='running' AND m.runtime_owner IS DISTINCT FROM %s "
-                    "        AND EXISTS (SELECT 1 FROM agent_impersonations takeover "
-                    "          WHERE takeover.agent_id=m.id AND takeover.status IN "
-                    "          ('requested','accepted','active'))) "
-                    "    OR (m.status='terminated' AND m.runtime_kind='hosted' "
-                    "        AND m.runtime_owner=%s AND EXISTS ("
-                    "          SELECT 1 FROM inbound_messages force "
-                    "          WHERE force.id=m.lifecycle_command_id AND force.agent_id=m.id "
-                    "          AND force.target_generation=m.runtime_generation "
-                    "          AND force.target_owner=m.runtime_owner AND force.kind='terminate' "
-                    "          AND force.status='claimed' AND force.applied_at IS NOT NULL "
-                    "          AND force.observed_at IS NULL)) "
-                    "    OR (m.status = 'running' "
-                    "        AND (m.last_active_at IS NULL "
-                    "             OR m.last_active_at < now() - make_interval(secs => %s)) "
-                    "        AND EXISTS ("
-                    "          SELECT 1 FROM inbound_messages stale2 "
-                    "          WHERE stale2.agent_id = m.id AND stale2.status = 'pending' "
-                    "            AND stale2.created_at < now() - make_interval(secs => %s)"
-                    "        )"
-                    "    )"
-                    "  ) "
-                    "  AND (m.lifecycle_command_id IS NOT NULL OR EXISTS ("
-                    "    SELECT 1 FROM inbound_messages pending "
-                    "    WHERE pending.agent_id = m.id AND pending.status = 'pending'"
-                    "  ) OR EXISTS (SELECT 1 FROM agent_impersonations lease "
-                    "    WHERE lease.agent_id=m.id AND (lease.status IN "
-                    "    ('requested','accepted','active') OR lease.delta_version>lease.applied_version "
-                    "    OR (lease.automatic AND lease.handoff_applied_at IS NULL))))) "
-                    "  OR (m.status IN ('running','idling') AND m.runtime_kind='hosted' "
-                    "      AND m.runtime_owner IS NOT NULL AND m.last_turn_fatal_at IS NULL "
-                    "      AND m.runtime_owner IS DISTINCT FROM %s "
-                    "      AND (m.lease_expires_at IS NULL OR m.lease_expires_at<=now()))) "
-                    "  AND m.machine = %s ",
-                    (
-                        stale_after_s,
-                        stale_after_s,
-                        self._owner,
-                        self._owner,
-                        stale_after_s,
-                        stale_after_s,
-                        self._owner,
-                        self._machine,
-                    ),
-                )
-            ).fetchall()
-        wakes = [PendingInboundWake(agent_id=row[0], stale=row[1]) for row in rows]
+        rows = await scan_rows(self._control_pool, self._owner, self._machine, stale_after_s)
+        wakes = [PendingInboundWake(agent_id=row[0], stale=row[1], recovery=row[2]) for row in rows]
         pending = {wake.agent_id for wake in wakes}
         wakes.extend(
-            PendingInboundWake(agent_id=agent_id, stale=False)
-            for agent_id in self._watcher_recovery_pending - pending
+            PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
+            for agent_id in (self._watcher_recovery_pending | self._settled_reap_pending) - pending
         )
         return wakes
 
