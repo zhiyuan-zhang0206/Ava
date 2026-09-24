@@ -103,6 +103,12 @@ def test_frontend_only_takes_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """frontend-only change → _run_frontend_only_update; Phase A / quiesce /
     local update never run."""
     called: list[str] = []
+    # This unit owns path classification, not preflight recovery. Pin matching
+    # source/running bookmarks and a clear schema result so parallel DB state
+    # cannot convert its frontend-only case into a full rollout.
+    monkeypatch.setattr("shared.source_integrity.get", lambda: "same")
+    monkeypatch.setattr("shared.running_sha.get", lambda: "same")
+    monkeypatch.setattr("ops.controllers.schema_mismatch.detect", lambda: None)
     monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["ui/web/src/app/page.tsx"])
     monkeypatch.setattr(
         _cli,
