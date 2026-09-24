@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from itertools import count
-from threading import Event, Timer
+from threading import Event, Thread, Timer
 from typing import Annotated, Any
 
 import pytest
@@ -367,6 +367,71 @@ def test_repeated_close_cannot_release_another_attachment(
         assert ava.self.AGENT_ID == 405
         with pytest.raises(RuntimeError, match="already has an external attachment"):
             external.attach("lease")
+
+
+def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Close fences a new SDK call before its gateway effect, not only at detach."""
+    from shared.agents import impersonation_manifest as manifest
+
+    attachment = external.attach("lease")
+    participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "post-close-sdk")
+    manifest.bind_local_participant(participant)
+    attachment._manifest_participant = participant
+    delivered: list[tuple[int, str]] = []
+
+    def record_send(agent_id: int, *, content: str, source: str) -> None:
+        del source
+        delivered.append((agent_id, content))
+
+    def new_call_during_close() -> None:
+        with pytest.raises(RuntimeError, match="closing"):
+            ava.agents.send_message(99, "must not reach gateway")
+
+    monkeypatch.setattr(ava.agents._client, "send_message", record_send)
+    monkeypatch.setattr(attachment, "_seal_manifest_participant", lambda: None)
+    monkeypatch.setattr(attachment, "flush", new_call_during_close)
+    attachment.close()
+    assert delivered == []
+
+
+def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An SDK call already inside its metering admission finishes its gateway effect."""
+    from shared.agents import impersonation_manifest as manifest
+
+    attachment = external.attach("lease")
+    participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "pre-close-sdk")
+    manifest.bind_local_participant(participant)
+    attachment._manifest_participant = participant
+    entered, release = Event(), Event()
+    delivered: list[tuple[int, str]] = []
+
+    def held_send(agent_id: int, *, content: str, source: str) -> None:
+        del source
+        entered.set()
+        assert release.wait(2), "close did not release the pre-close SDK call"
+        delivered.append((agent_id, content))
+
+    monkeypatch.setattr(ava.agents._client, "send_message", held_send)
+    monkeypatch.setattr(attachment, "_seal_manifest_participant", lambda: None)
+
+    def skip_seal(_participant: manifest.LocalParticipant) -> None:
+        return None
+
+    monkeypatch.setattr(manifest, "seal_local_participant", skip_seal)
+    worker = Thread(target=lambda: ava.agents.send_message(99, "already admitted"))
+    worker.start()
+    assert entered.wait(2), "SDK call did not reach its gateway boundary"
+    attachment.close()
+    release.set()
+    worker.join(2)
+    assert not worker.is_alive()
+    assert delivered == [(99, "already admitted")]
 
 
 def test_close_delivers_telemetry_when_plugin_flush_fails(

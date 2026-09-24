@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import ExitStack, suppress
-from threading import Lock, Timer
+from threading import Lock, Timer, local
 from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
@@ -27,6 +27,12 @@ __all_for_ava__ = ["attach", "Attachment"]
 
 _attachment_lock = Lock()
 _active_attachment: Attachment | None = None
+_close_flush_permission = local()
+
+
+def _close_flush_permitted() -> bool:
+    """Whether this synchronous close operation may finish its own flush."""
+    return bool(getattr(_close_flush_permission, "allowed", False))
 
 
 def _deliver_telemetry_before_detach() -> None:
@@ -70,6 +76,7 @@ class Attachment:
             raise RuntimeError("a native agent runtime cannot attach an external controller")
         self.lease_id = lease_id
         self._closed = False
+        self._closing = False
         self._stack = ExitStack()
         self._manifest_participant: Any = None
         if not _attachment_lock.acquire(blocking=False):
@@ -112,9 +119,14 @@ class Attachment:
             raise RuntimeError(f"external SDK must run on agent machine {lease['machine']!r}")
         return lease
 
-    def _validate(self) -> int:
+    def _validate(self, *, allow_closing: bool = False) -> int:
         if self._closed:
             raise RuntimeError("external attachment is closed")
+        if self._closing and not allow_closing:
+            from shared.agents.impersonation_manifest import local_sdk_call_was_admitted
+
+            if not local_sdk_call_was_admitted():
+                raise RuntimeError("external attachment is closing")
         lease = self._lease()
         if lease["delta_version"] != self._version:
             raise RuntimeError(
@@ -124,9 +136,13 @@ class Attachment:
 
     def flush(self) -> None:
         """Durably stage this attachment's new plugin delta; never renew the lease."""
+        self._flush(allow_closing=_close_flush_permitted())
+
+    def _flush(self, *, allow_closing: bool) -> None:
+        """Stage plugin state; attachment close alone may finish this operation."""
         import ava
 
-        self._validate()
+        self._validate(allow_closing=allow_closing)
         if not isinstance(ava.state_update, dict):
             raise TypeError("external plugin state update must be a dict")
         if ava.state_update:
@@ -139,10 +155,16 @@ class Attachment:
 
     def close(self) -> None:
         """Flush plugin changes and remove the borrowed identity even if flushing fails."""
-        if self._closed:
+        if self._closed or self._closing:
             return
         try:
-            self.flush()
+            self._begin_manifest_participant_close()
+            was_permitted = _close_flush_permitted()
+            _close_flush_permission.allowed = True
+            try:
+                self.flush()
+            finally:
+                _close_flush_permission.allowed = was_permitted
         finally:
             try:
                 # Receipt closure precedes the best-effort delivery flush: the
@@ -212,6 +234,21 @@ class Attachment:
                 alert_if_participant_still_open(self._manifest_participant)
         finally:
             timer.cancel()
+
+    def _begin_manifest_participant_close(self) -> None:
+        """Atomically start close and fence new SDK admission."""
+        if self._manifest_participant is None:
+            self._closing = True
+            return
+        from shared.agents.impersonation_manifest import begin_local_participant_close
+
+        # The gate lock makes setting `_closing` and closing admission one
+        # linearization point. A call admitted before it may drain; one that
+        # starts after it has no admission and `_validate` rejects it.
+        begin_local_participant_close(
+            self._manifest_participant,
+            lambda: setattr(self, "_closing", True),
+        )
 
     def _detach(self) -> None:
         """Restore local bindings without reading or writing the lease."""

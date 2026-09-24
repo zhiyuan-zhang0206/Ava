@@ -10,7 +10,7 @@ durable handoff ledger.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar  # noqa: TID251 -- SDK async finally needs task-local admission
 from dataclasses import dataclass, field, replace
@@ -67,9 +67,19 @@ class _CaptureGate:
             self.in_flight += 1
         return _CaptureAdmission(self)
 
-    def close_and_wait(self, timeout: float) -> bool:
+    def close_admission(self) -> None:
         with self.condition:
             self.admission_closed = True
+
+    def begin_close(self, mark_closing: Callable[[], None]) -> None:
+        """Atomically mark attachment close and reject later SDK admissions."""
+        with self.condition:
+            mark_closing()
+            self.admission_closed = True
+
+    def close_and_wait(self, timeout: float) -> bool:
+        self.close_admission()
+        with self.condition:
             self.condition.wait_for(lambda: self.in_flight == 0, timeout=timeout)
             return self.in_flight == 0
 
@@ -206,6 +216,21 @@ def admitted_local_sdk_call() -> Generator[None, None, None]:
         _sdk_capture_admission.reset(token)
         if admission is not None:
             admission.release()
+
+
+def local_sdk_call_was_admitted() -> bool:
+    """Whether this SDK call crossed the manifest gate before close started."""
+    return _sdk_capture_admission.get() is not None
+
+
+def begin_local_participant_close(
+    participant: LocalParticipant, mark_closing: Callable[[], None]
+) -> None:
+    """Atomically begin attachment close and fence new local SDK admissions."""
+    gate = _capture_gate(participant)
+    if gate is None:
+        raise RuntimeError("Missing local impersonation event capture gate")
+    gate.begin_close(mark_closing)
 
 
 def close_local_participant_admission(participant: LocalParticipant, *, timeout: float) -> bool:
