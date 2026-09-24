@@ -539,6 +539,7 @@ async def run() -> None:
                 pending_scan=host.pending_inbound_wakes,
                 stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
                 recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
+                recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
                 scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
                 subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
             ).run()

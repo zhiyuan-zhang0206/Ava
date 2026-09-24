@@ -38,6 +38,12 @@ class _IdleScheduler:
     def wake(self, agent_id: int) -> None:
         raise AssertionError("no pending wake expected in this test")
 
+    def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
+        return None
+
+    def reaped_successor(self, agent_id: int) -> asyncio.Task[None] | None:
+        return None
+
     async def cancel_agent(self, agent_id: int) -> bool:
         raise AssertionError("no active turn expected in this test")
 
