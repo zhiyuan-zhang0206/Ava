@@ -85,7 +85,7 @@ def consume_recorded_events(session: dict[str, Any], *, page_budget: int = 4) ->
             (
                 event
                 for event in page["items"]
-                if event_belongs_to_agent(event, session["agent_id"])
+                if _event_belongs_to_lease(event, session, protocol_v1=protocol_v1)
             ),
         )
         if not page["meta"]["has_more"]:
@@ -134,7 +134,22 @@ def _replay_start(lease: dict[str, Any], *, protocol_v1: bool) -> Any:
 def _session_filter(session: dict[str, Any], *, protocol_v1: bool) -> dict[str, str]:
     if not protocol_v1:
         return {}
-    return {"impersonation_session": f"{session['agent_id']}:{session['session_id']}"}
+    return {"impersonation_session": _session_tag(session)}
+
+
+def _event_belongs_to_lease(
+    event: dict[str, Any], session: dict[str, Any], *, protocol_v1: bool
+) -> bool:
+    """Keep replay attribution explicit even if an upstream page is overbroad."""
+    if not event_belongs_to_agent(event, session["agent_id"]):
+        return False
+    return not protocol_v1 or event["attributes"].get("impersonation_session") == _session_tag(
+        session
+    )
+
+
+def _session_tag(session: dict[str, Any]) -> str:
+    return f"{session['agent_id']}:{session['session_id']}"
 
 
 def _certify_if_complete(
@@ -228,6 +243,8 @@ def _read_indexed_event_family(
             response.raise_for_status()
             page: dict[str, Any] = response.json()
             for event in page["items"]:
+                if event["attributes"].get("impersonation_session") != session:
+                    continue
                 event_kind = "sdk_call" if event["event_name"] == "sdk_call" else "api_event"
                 if event_kind != kind:
                     raise RuntimeError("Tagged event reader returned an unexpected event family")

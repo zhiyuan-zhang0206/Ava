@@ -448,6 +448,7 @@ def test_extra_before_final_read_refuses_and_late_extra_alerts_without_demoting(
         "line_sha256": "b" * 64,
         "event_name": "send_message",
         "category": "audit",
+        "attributes": {"impersonation_session": f"{owner.agent_id}:0"},
     }
     visible = [extra]
 

@@ -9,9 +9,11 @@ from threading import Thread
 from typing import Any
 from uuid import uuid4
 
+import httpx
 import psycopg
 import pytest
 
+from ava import _impersonation_events as reader
 from cli.commands import _release_services as release_services
 from ops.spec import ServiceSpec
 from shared import impersonation as leases
@@ -21,6 +23,7 @@ from shared.agents.impersonation_manifest import (
     bind_local_participant,
     capture_local_event,
     certify,
+    close_local_participant_admission,
     open_local_participant,
     seal_local_participant,
     stage_central_expected_event,
@@ -91,6 +94,127 @@ def _eligible_sdk_event(agent_id: int, *, marker: str) -> Event:
         target_agent_id=None,
         attributes={"fn": marker, "duration": 0.1},
     )
+
+
+def _supervisor_sdk_events(agent_id: int) -> list[dict[str, Any]]:
+    """The untagged same-agent rows observed in the #4668 session-7 smoke."""
+    return [
+        {
+            "id": 11986666203222120154,
+            "ts": "2026-09-24T04:40:28.243000+00:00",
+            "agent_id": agent_id,
+            "source": f"agent:{agent_id}",
+            "event_name": "sdk_call",
+            "category": "telemetry",
+            "attributes": {"fn": "ava.agents.get_status", "sample_rate": 1, "duration": 0.0},
+        },
+        {
+            "id": 2134537340000307691,
+            "ts": "2026-09-24T04:41:28.490000+00:00",
+            "agent_id": agent_id,
+            "source": f"agent:{agent_id}",
+            "event_name": "sdk_call",
+            "category": "telemetry",
+            "attributes": {"fn": "ava.agents.get_status", "sample_rate": 1, "duration": 0.0},
+        },
+    ]
+
+
+def test_v1_reader_excludes_same_agent_supervisor_sdk_events_from_receipt(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    v1_lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#4668: untagged supervisor calls never become the borrowed lease's SDK facts."""
+    supervisor_events = _supervisor_sdk_events(owner.agent_id)
+    reads: list[dict[str, Any]] = []
+
+    def get(path: str, *, params: dict[str, Any]) -> httpx.Response:
+        assert path == "/api/events"
+        reads.append(params)
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", "http://manifest.test/api/events"),
+            json={
+                "items": supervisor_events if params.get("event_name") == "sdk_call" else [],
+                "meta": {"has_more": False},
+            },
+        )
+
+    leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "Executor finished")
+    monkeypatch.setattr(reader, "_get", get)
+    reader.consume_recorded_events(history.resolve(owner.agent_id, 0))
+
+    assert all(request["impersonation_session"] == f"{owner.agent_id}:0" for request in reads)
+    assert not [
+        entry
+        for entry in history.entries(str(v1_lease["id"]), db_conn)
+        if entry["kind"] == "sdk_call"
+    ]
+    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is not None
+
+
+def test_v1_reader_keeps_tagged_expected_send_and_excludes_same_agent_audit(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    v1_lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tagged central send survives replay while an untagged audit peer does not."""
+    target_id = create_agent(db_conn)
+    tagged = stage_central_expected_event(
+        db_conn,
+        _central_send_event(owner.agent_id, target_id),
+        origin_kind="lease-attribution-send",
+        origin_id=1,
+    )
+    db_conn.commit()
+    expected = db_conn.execute(
+        "SELECT event_key,line_sha256,event_at FROM agent_impersonation_event_expected_items "
+        "WHERE lease_id=%s",
+        (v1_lease["id"],),
+    ).fetchone()
+    assert expected is not None
+    event_key, digest, event_at = expected
+    session_tag = f"{owner.agent_id}:0"
+    assert tagged.attributes["impersonation_session"] == session_tag
+    expected_send = {
+        "id": event_key.removeprefix("event:"),
+        "line_sha256": digest,
+        "ts": event_at.isoformat(),
+        "agent_id": target_id,
+        "source": f"agent:{owner.agent_id}",
+        "event_name": "send_message",
+        "category": "audit",
+        "attributes": {"impersonation_session": session_tag},
+    }
+    supervisor_audit = {
+        **_supervisor_sdk_events(owner.agent_id)[0],
+        "event_name": "agent_status",
+        "category": "audit",
+    }
+
+    def get(path: str, *, params: dict[str, Any]) -> httpx.Response:
+        assert path == "/api/events"
+        items = [] if params.get("event_name") == "sdk_call" else [expected_send, supervisor_audit]
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", "http://manifest.test/api/events"),
+            json={"items": items, "meta": {"has_more": False}},
+        )
+
+    leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "Sent an update")
+    monkeypatch.setattr(reader, "_get", get)
+    reader.consume_recorded_events(history.resolve(owner.agent_id, 0))
+
+    consumed = [
+        entry["payload"]["id"]
+        for entry in history.entries(str(v1_lease["id"]), db_conn)
+        if entry["kind"] == "api_event"
+    ]
+    assert consumed == [expected_send["id"]]
+    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is not None
 
 
 def test_finalizer_proof_is_private_in_root_tree_and_release_metadata(
@@ -202,6 +326,35 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
         "WHERE lease_id=%s AND source_key=%s",
         (participant.lease_id, participant.source_key),
     ).fetchone() == ("sdk_call",)
+
+
+def test_closed_direct_audit_capture_refuses_and_vetoes_manifest_certification(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, v1_lease: dict[str, Any]
+) -> None:
+    """A post-close direct audit event cannot escape untagged from a live attachment."""
+    participant = LocalParticipant(str(v1_lease["id"]), owner.agent_id, 0, "closed-direct-audit")
+    assert open_local_participant(
+        participant.lease_id, agent_id=owner.agent_id, source_key=participant.source_key
+    )
+    bind_local_participant(participant)
+    try:
+        assert close_local_participant_admission(participant, timeout=0)
+        with pytest.raises(RuntimeError, match="Impersonation event capture is closed"):
+            capture_local_event(_central_send_event(owner.agent_id, owner.agent_id))
+        assert db_conn.execute(
+            "SELECT state FROM agent_impersonation_event_participants WHERE lease_id=%s "
+            "AND source_key=%s",
+            (participant.lease_id, participant.source_key),
+        ).fetchone() == ("failed",)
+        with pytest.raises(
+            RuntimeError, match="Failed local impersonation event receipt cannot seal"
+        ):
+            seal_local_participant(participant)
+        with pytest.raises(leases.ImpersonationError, match="Cannot release until every"):
+            leases.release(participant.lease_id, attested_caller(v1_lease), "Direct audit refused")
+    finally:
+        unbind_local_participant(participant)
+    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is None
 
 
 def test_transient_capture_failure_stays_sticky_until_the_failed_receipt_persists(
