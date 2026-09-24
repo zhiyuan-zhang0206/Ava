@@ -18,7 +18,7 @@
 //    secondary items are always groupable so the first streaming chunk
 //    immediately lands inside a work block (no bare-then-wrap layout shift).
 
-import { type SdkCall } from "@/lib/item-summary";
+import { orderSdkCalls, type SdkCall } from "@/lib/item-summary";
 import type { BackendTimelineItem } from "@/lib/types";
 import enMessages from "../../../messages/en.json";
 
@@ -142,9 +142,10 @@ export interface TurnSummary {
   readonly thinkingMs: number;
   readonly codeMs: number;
   readonly execMs: number;
-  // SDK calls aggregated across the turn's `agent_code` items, by method name,
-  // descending by count. Read directly off each item's backend-populated
-  // `sdk_calls` — the call tally recorded by the run that executed the code
+  // SDK calls aggregated across the turn's `agent_code` items, grouped by
+  // namespace alphabetically, then descending by count and method name. Read
+  // directly off each item's backend-populated `sdk_calls` — the call tally
+  // recorded by the run that executed the code
   // and projected onto the item. This aggregation renders ONLY recorded
   // calls: `it.sdk_calls` present (even `[]`) is trusted as-is; absent (no
   // committed field yet, e.g. streaming) contributes nothing. No text
@@ -238,9 +239,9 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       systemNotes += 1;
     }
   }
-  const sdkCalls = [...sdkCounts.entries()]
-    .map(([method, count]) => ({ method, count }))
-    .sort((a, b) => b.count - a.count || a.method.localeCompare(b.method));
+  const sdkCalls = orderSdkCalls(
+    [...sdkCounts.entries()].map(([method, count]) => ({ method, count })),
+  );
   // Agent-work duration: sum of each work block's backend-measured time
   // (thinkingMs + codeMs + execMs), not wall-clock between items.
   // This naturally excludes system notes and restart markers — their

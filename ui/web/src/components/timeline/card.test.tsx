@@ -404,6 +404,23 @@ describe("CardHeader", () => {
     expect(container.textContent).toContain("shell.run");
   });
 
+  it("agent_code header keeps SDK chips in namespace and count order", () => {
+    const cItem = item("agent_code", {
+      sdk_calls: [
+        { method: "shell.run", count: 10 },
+        { method: "files.write", count: 1 },
+        { method: "agents.spawn", count: 1 },
+        { method: "files.read", count: 2 },
+      ],
+    });
+    const { container } = renderWithQuery(
+      <CardHeader item={cItem} config={messageCardConfig(cItem)!} expanded={false} onToggle={noop} />,
+    );
+    const methods = Array.from(container.querySelectorAll('span[class="text-foreground/80"]'))
+      .map((chip) => chip.textContent);
+    expect(methods).toEqual(["agents.spawn", "files.read", "files.write", "shell.run"]);
+  });
+
   // Regression (symptom 1): the live "Writing code for Xs" clock. The reducer
   // keeps codeStartedAt on the streaming agent_code item (timeline.ts
   // code_start); the header must tick a live label off it.
