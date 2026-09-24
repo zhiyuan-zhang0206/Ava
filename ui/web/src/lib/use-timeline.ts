@@ -17,6 +17,7 @@ import { inspectLiveQueryKey } from "./inspector-queries";
 import { errMsg } from "./errors";
 import { noteTurnStart } from "./interaction-timing";
 import { useTimelineStore } from "./timeline-store";
+import type { CompactTransitionBuffer } from "./compact-transition";
 import { CONVERSATION_RETENTION_MS } from "./switch-budget";
 import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "./timeline";
 import { useCompactHistoryRetention, type OlderSegmentLoadResult } from "./use-compact-history-retention";
@@ -48,6 +49,7 @@ export type ConnectionState = Exclude<ConnectionEvent["type"], "parse-failed">;
 
 export interface UseTimelineResult {
   items: BackendTimelineItem[];
+  compactBuffer: CompactTransitionBuffer | null;
   /** Whether the last agent_code is streaming — used by PythonCode for the blinking cursor */
   streamingCode: boolean;
   /** SSE connection state — when agentId=null, keeps the initial value (no subscription, no banner). */
@@ -114,12 +116,15 @@ export function useTimeline(
     if (!isVisible && agentId !== null) {
       olderRequest.current?.abort();
       useTimelineStore.setState({ loadingOlder: false });
+      useTimelineStore.getState().invalidateCompactEpoch();
     }
     return () => { olderRequest.current?.abort(); };
   }, [agentId, isVisible]);
 
   // -- Subscribe to timeline state from the Zustand store --
   const items = useTimelineStore((s) => s.items);
+  const compactBuffer = useTimelineStore((s) => s.compactBuffer);
+  const compactEpoch = useTimelineStore((s) => s.compactEpoch);
   const streamingCode = useTimelineStore((s) => s.streamingCode);
   const connectionState = useTimelineStore((s) => s.connectionState);
   const turnActive = useTimelineStore((s) => s.turnActive);
@@ -277,7 +282,11 @@ export function useTimeline(
     (ev: ConnectionEvent) => {
       switch (ev.type) {
         case "open":
+          if (useTimelineStore.getState().compactBuffer) olderRequest.current?.abort();
           processConnectionEvent({ type: "open" });
+          if (olderRequest.current?.signal.aborted) {
+            useTimelineStore.setState({ loadingOlder: false });
+          }
           seenParseErrors.current.clear();
           // Opening during an initial/ongoing read cannot trust that read
           // to cover the subscription gap; require a trailing read — the
@@ -324,6 +333,7 @@ export function useTimeline(
     if (agentId == null || !isVisible) return "aborted";
     const st = useTimelineStore.getState();
     if (st.activeThreadId !== agentId) return "aborted";
+    const ownerEpoch = st.compactEpoch;
     if (!st.hasMoreOlder || st.loadingOlder) return "unready";
     // Current standing context is never a cursor: the re-attached prompt, the
     // standing head notes (exec timeout / timezone / cluster memory / agent id
@@ -370,13 +380,21 @@ export function useTimeline(
       const page = await api.getTimeline(agentId, { before: oldest.item_id, limit, signal: controller.signal });
       // Agent switch mid-flight: drop the result so it can't contaminate
       // the now-active thread (switchThread already cleared loadingOlder).
-      if (controller.signal.aborted || useTimelineStore.getState().activeThreadId !== agentId) return "aborted";
+      if (
+        controller.signal.aborted ||
+        useTimelineStore.getState().activeThreadId !== agentId ||
+        useTimelineStore.getState().compactEpoch !== ownerEpoch
+      ) return "aborted";
       prependOlder(page.items, page.has_more);
       // Bump the counter so the next scroll-up doubles the window.
       useTimelineStore.getState().incrementOlderFetchCount();
       return useTimelineStore.getState().hasMoreOlder ? "loaded" : "exhausted";
     } catch (e: unknown) {
-      if (controller.signal.aborted) return "aborted";
+      if (
+        controller.signal.aborted ||
+        useTimelineStore.getState().activeThreadId !== agentId ||
+        useTimelineStore.getState().compactEpoch !== ownerEpoch
+      ) return "aborted";
       useTimelineStore.setState({ loadingOlder: false });
       showError(`Failed to load older messages: ${errMsg(e)}`);
       return "failed";
@@ -396,10 +414,13 @@ export function useTimeline(
     hasMoreOlder,
     loadingOlder,
     itemCount: items.length,
+    compactEpoch,
+    compactTailReady: compactBuffer?.tailReady ?? false,
   });
 
   return {
     items,
+    compactBuffer,
     streamingCode,
     connectionState,
     turnActive,
