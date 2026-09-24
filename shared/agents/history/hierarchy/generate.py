@@ -18,6 +18,14 @@ error and retried on a later pass. This mirrors the pilot's bisect-to-singles
 behavior (`ava.understand` failed whole-batch, so the pilot split batches on
 failure to isolate the cause) with the isolation built in.
 
+Request shape (task #4674): when the caller supplies a request prefix and the
+agent's tool schema, the call is agent-shaped — the agent's own leading
+messages (byte-identical, so the provider serves the prefix from its cache)
+plus one trailing message carrying the node material, the prompt, and a
+text-only clause; a tool-call response is answered with a ToolMessage error
+and re-invoked up to `GenParams.tool_rounds` rounds. Bare requests (no
+prefix/tools) keep the material-only shape.
+
 Calibration provenance for every constant here: the v0.3 demo's machine check
 (task #3704; 72 nodes, 0 over budget across 3 levels).
 """
@@ -25,6 +33,7 @@ Calibration provenance for every constant here: the v0.3 demo's machine check
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
@@ -35,7 +44,7 @@ from loguru import logger
 from shared.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
 from shared.agents.history.hierarchy.seal import narrative_budget_tok
 from shared.agents.history.hierarchy.tokens import count_tokens
-from shared.lm._call import invoke_text
+from shared.lm._call import extract_text, invoke_response, invoke_text
 
 # The node kinds `build_prompt` serves: a leaf's input is rendered source
 # blocks, an upper node's input is its children's texts.
@@ -104,8 +113,10 @@ class GenParams:
     """Generation calibration (defaults = the v0.3 contract, task #3704).
 
     These are engine-calibration constants with written reasons, the same
-    shape as `seal.SealParams`; deployment policy (which model) lives in
-    config (`settings.lm.hierarchy_model`).
+    shape as `seal.SealParams`; which model a run uses is resolved per target
+    agent (`shared.agent_snapshot.agent_effective_model` — overlay preferred,
+    fleet default else), with `settings.lm.hierarchy_model` as the last-resort
+    fallback.
     """
 
     # Ask under the budget so an ordinary response lands inside the hard
@@ -125,6 +136,12 @@ class GenParams:
     compress_attempts: int = 2
     # Second compression attempt asks a tighter target (pilot calibration).
     compress_retry_scale: float = 0.85
+    # Bounded tool-call refusal rounds for the agent-shaped request (task
+    # #4674): the request carries the real tool schema, so a response may call
+    # the tool instead of writing text; each such response is refused with an
+    # error result and re-invoked, and exhausting the rounds fails the node
+    # (retried on a later pass) — never an unbounded loop.
+    tool_rounds: int = 3
     # The demo's effective reasoning level (its "low" clamps onto "high" for
     # deepseek); the deepseek registry default ("max") is the agent-brain
     # level and far more than a summarizer needs.
@@ -141,14 +158,39 @@ DEFAULT_MAX_CONCURRENT = 12
 # default for the SDK invoke paths.
 DEFAULT_RETRY_ATTEMPTS = 1
 
+# The clause appended at the tail of the agent-shaped request (task #4674).
+# The request carries the real tool schema for cache parity with the agent's
+# own calls, so the instruction must forbid the tool call explicitly — the
+# same framing as the compaction instruction ("anything other than text is
+# discarded"). English per the repo rule (no raw CJK in code); the summary
+# itself is Chinese because the prompts ask for it.
+_TEXT_ONLY_CLAUSE = (
+    "Reply with plain text only — do not call any tool; anything other than text is discarded."
+)
+
+# The refusal handed back when a response does carry tool calls: tools cannot
+# run on this call, and the only correct continuation is the text answer.
+_TOOL_REFUSAL = (
+    "Error: tools are unavailable in this call. Retry by writing the requested "
+    "summary as plain text — no tool calls."
+)
+
 
 @dataclass(frozen=True)
 class GenRequest:
-    """One node to generate: its stable id, kind, and input material."""
+    """One node to generate: stable id, kind, material, and the request prefix.
+
+    `prefix` (task #4674) is the agent's own leading messages up to the node's
+    span start — SystemMessage snapshot plus prior conversation, byte-identical
+    to what the agent sends — so the generation request rides the provider's
+    prefix cache; empty means the material-only request (defensive fallback
+    for histories without a SystemMessage head).
+    """
 
     nid: str
     kind: str  # leaf | node
     input_text: str
+    prefix: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -241,6 +283,7 @@ def generate_nodes(
     params: GenParams | None = None,
     max_concurrent: int = DEFAULT_MAX_CONCURRENT,
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    tools: Sequence[Any] | None = None,
 ) -> list[GenResult]:
     """Generate every request's text, concurrently; order preserved.
 
@@ -251,6 +294,14 @@ def generate_nodes(
     failure (provider error after retries, or budget unfittable) is returned
     as that node's `error`, never raised — the caller retries those nodes on
     a later pass.
+
+    `tools` is the agent's tool schema list (`[execute_code]`), passed by the
+    worker / manual-build callers. With `tools` and a request `prefix` the
+    call is agent-shaped (#4674): the prefix rides at the head unchanged, the
+    material + prompt + text-only clause at the tail, and the tool schema
+    stays bound so the leading bytes match the agent's own requests; a
+    tool-call response is refused and re-invoked up to `params.tool_rounds`.
+    Without them the material-only request is sent.
 
     Raises:
         ValueError: duplicate nids, unknown kind, or a non-positive
@@ -284,6 +335,7 @@ def generate_nodes(
             provider=provider,
             params=p,
             retry_attempts=retry_attempts,
+            tools=tools,
         )
         with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
             results = list(pool.map(worker, requests))
@@ -314,6 +366,7 @@ def _generate_one(
     provider: str | None,
     params: GenParams,
     retry_attempts: int,
+    tools: Sequence[Any] | None = None,
 ) -> GenResult:
     """Generate one node's text; failures become `GenResult.error`."""
     src_tok = count_tokens(req.input_text)
@@ -327,15 +380,16 @@ def _generate_one(
         )
     prompt = build_prompt(req.kind, src_tok, params)
     try:
-        text = invoke_text(
+        text = _invoke_node(
             llm,
-            [{"type": "text", "text": req.input_text}, {"type": "text", "text": prompt}],
+            req,
+            prompt,
+            tools=tools,
             desc=f"{model}, node {req.nid}",
-            error_type=GenerateError,
-            retry_attempts=retry_attempts,
-            provider=provider,
             model=model,
-            usage_source="hierarchy.generate",
+            provider=provider,
+            retry_attempts=retry_attempts,
+            params=params,
         )
         text = clean_text(text)
         out_tok = count_tokens(text)
@@ -371,6 +425,88 @@ def _generate_one(
         )
     except GenerateError as e:
         return GenResult(nid=req.nid, src_tok=src_tok, budget_tok=budget, error=str(e))
+
+
+def _invoke_node(
+    llm: Any,
+    req: GenRequest,
+    prompt: str,
+    *,
+    tools: Sequence[Any] | None,
+    desc: str,
+    model: str,
+    provider: str | None,
+    retry_attempts: int,
+    params: GenParams,
+) -> str:
+    """One node's model call — agent-shaped when prefix and tools are present.
+
+    Agent-shaped (#4674): the request is `[*prefix, HumanMessage(material +
+    prompt + text-only clause)]` through `llm.bind_tools(tools)` — the same
+    leading bytes and tool schema the agent itself sends, so the provider
+    serves the prefix from cache. A response carrying tool calls is refused
+    with a ToolMessage error and re-invoked, up to `params.tool_rounds`
+    refusal rounds; past that the node fails (never an unbounded loop).
+    Without a prefix or tools the material-only request is sent.
+    """
+    if tools is None or not req.prefix:
+        return invoke_text(
+            llm,
+            [{"type": "text", "text": req.input_text}, {"type": "text", "text": prompt}],
+            desc=desc,
+            error_type=GenerateError,
+            retry_attempts=retry_attempts,
+            provider=provider,
+            model=model,
+            usage_source="hierarchy.generate",
+        )
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    bound = llm.bind_tools(list(tools))
+    messages: list[Any] = [
+        *req.prefix,
+        HumanMessage(
+            content=[
+                {"type": "text", "text": req.input_text},
+                {"type": "text", "text": prompt},
+                {"type": "text", "text": _TEXT_ONLY_CLAUSE},
+            ]
+        ),
+    ]
+    limit = max(0, params.tool_rounds)
+    rounds = 0
+    while True:
+        response = invoke_response(
+            bound,
+            messages,
+            desc=desc,
+            error_type=GenerateError,
+            retry_attempts=retry_attempts,
+            provider=provider,
+            model=model,
+            usage_source="hierarchy.generate",
+        )
+        tool_calls = list(getattr(response, "tool_calls", None) or [])
+        if not tool_calls:
+            text = extract_text(response)
+            if text:
+                return text
+            raise GenerateError(
+                f"Model ({desc}) returned empty response (possible safety block). "
+                f"response_metadata: {getattr(response, 'response_metadata', None)!r}"
+            )
+        if rounds >= limit:
+            names = ", ".join(str(tc.get("name")) for tc in tool_calls)
+            raise GenerateError(
+                f"Model ({desc}) kept calling tools after {limit} refusal round(s) "
+                f"({names}) — tools are unavailable in this call"
+            )
+        rounds += 1
+        messages.append(response)
+        messages.extend(
+            ToolMessage(content=_TOOL_REFUSAL, tool_call_id=str(tc.get("id") or ""))
+            for tc in tool_calls
+        )
 
 
 def _compress_toward_budget(

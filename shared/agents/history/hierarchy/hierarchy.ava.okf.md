@@ -37,7 +37,12 @@ merge are the layers built on top.
   skipped) assembled per block, with head+tail truncation for oversized bodies.
 - `generate.py` — node-text generation: prompt with the node's character ask,
   bounded parallel fan-out with per-node isolation, over-budget compression,
-  `input_hash`/`text_hash` identity helpers.
+  `input_hash`/`text_hash` identity helpers. With a caller-supplied prefix and
+  tool schema the request is **agent-shaped** (task #4674): the agent's own
+  leading messages (byte-identical, provider-side prefix-cache hits) plus a
+  trailing material + prompt + text-only message, tools bound for schema
+  parity; a tool-call response is refused with a `ToolMessage` error and
+  re-invoked up to `GenParams.tool_rounds` rounds.
 - `pipeline.py` — assembly: items to blocks to units to trigger batches to the
   seal cascade, then `materialize` walks levels bottom-up (leaves render
   blocks, upper nodes reduce children texts, aliases copy their child) using
@@ -110,8 +115,10 @@ in `hierarchy_jobs` + `hierarchy_worker_state`.
   drains immediately.
 - **Knobs** (`settings.daemon.hierarchy_*`, each with its written reason):
   job budget, hard deadline, retry base/cap, generation concurrency, and the
-  child-kill / stale-row graces; the generation model is
-  `settings.lm.hierarchy_model`.
+  child-kill / stale-row graces; the generation model is the target agent's
+  own effective model (`shared.agent_snapshot.agent_effective_model` — overlay
+  preferred, fleet default else), with `settings.lm.hierarchy_model` as the
+  last-resort fallback.
 - **Cost observability**: each job row records the run's scope (stretches,
   nodes generated/reused/failed/skipped) and its token sums; the LLM usage
   ledger (`usage_source='hierarchy.generate'`) is the authoritative per-call

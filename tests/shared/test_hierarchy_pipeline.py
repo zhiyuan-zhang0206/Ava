@@ -16,8 +16,16 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.agents.history.hierarchy import pipeline as pipeline_module
 from shared.agents.history.hierarchy.blocks import fold_blocks
 from shared.agents.history.hierarchy.generate import input_hash, text_hash
@@ -71,7 +79,12 @@ class FakeLLM:
     def __init__(self, responder: Callable[[list[BaseMessage]], str | Exception]) -> None:
         self.responder = responder
         self.calls: list[list[BaseMessage]] = []
+        self.bound_tools: list[list[Any]] = []
         self._lock = threading.Lock()
+
+    def bind_tools(self, tools: list[Any]) -> FakeLLM:
+        self.bound_tools.append(list(tools))
+        return self
 
     def invoke(self, messages: list[BaseMessage]) -> AIMessage:
         with self._lock:
@@ -85,6 +98,15 @@ class FakeLLM:
 
 def call_material(call: list[BaseMessage]) -> str:
     content = call[0].content
+    assert isinstance(content, list)
+    return str(cast("dict[str, Any]", content[0])["text"])
+
+
+def call_tail_material(call: list[BaseMessage]) -> str:
+    """The request's material — the trailing message's first text part
+    (#4674): a material-only call carries it as its single message, an
+    agent-shaped call (prefix in front) as its last."""
+    content = call[-1].content
     assert isinstance(content, list)
     return str(cast("dict[str, Any]", content[0])["text"])
 
@@ -162,6 +184,119 @@ def test_materialize_generates_a_leaf_group() -> None:
     assert material.startswith("# node L1#1 - 6 source blocks")
     assert "### block 0 (messages i0-i0" in material
     assert node.input_hash == input_hash("leaf", material)
+
+
+def test_requests_carry_the_agent_prefix_when_tools_are_supplied() -> None:
+    # msgs[0] is the agent's SystemMessage snapshot; the request prefix is
+    # everything before the leaf's span (task #4674) — here just the system
+    # message — and the tail carries the material + prompt + text-only clause.
+    system = SystemMessage(content="SP")
+    msgs: list[BaseMessage] = [system, *(inbound(f"m{i}") for i in range(6))]
+    sealed, table = _six_block_tree(msgs)
+    fake = FakeLLM(lambda _m: "summary text")
+    tool = object()
+    tree = materialize(msgs, sealed, table, llm=fake, model=MODEL, retry_attempts=0, tools=[tool])
+    assert tree.nodes
+    assert fake.bound_tools == [[tool]]
+    (call,) = fake.calls
+    assert call[0] is system  # the agent's own head, byte-identical
+    assert len(call) == 2  # prefix + one trailing request message
+    tail = call[-1]
+    assert isinstance(tail.content, list)
+    parts = [str(cast("dict[str, Any]", part)["text"]) for part in cast("list[Any]", tail.content)]
+    assert parts[0].startswith("# node L1#1")
+    assert "plain text only" in parts[2]
+
+
+def test_materialize_without_tools_keeps_the_material_only_request() -> None:
+    system = SystemMessage(content="SP")
+    msgs: list[BaseMessage] = [system, *(inbound(f"m{i}") for i in range(6))]
+    sealed, table = _six_block_tree(msgs)
+    fake = FakeLLM(lambda _m: "summary text")
+    materialize(msgs, sealed, table, llm=fake, model=MODEL, retry_attempts=0)
+    assert fake.bound_tools == []
+    (call,) = fake.calls
+    assert len(call) == 1  # the legacy single-message request
+
+
+def test_tools_without_a_system_head_warn_and_stay_material_only(
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """The defensive path (task #4674): with tools but no SystemMessage head
+    there is no prefix to ride, so the run warns once and sends the
+    material-only request — the tool schema is never bound."""
+    msgs: list[BaseMessage] = [inbound(f"m{i}") for i in range(6)]
+    sealed, table = _six_block_tree(msgs)
+    fake = FakeLLM(lambda _m: "summary text")
+    tool = object()
+    tree = materialize(msgs, sealed, table, llm=fake, model=MODEL, retry_attempts=0, tools=[tool])
+    assert tree.errors == () and tree.nodes
+    assert any("no SystemMessage head" in str(r["message"]) for r in loguru_records)
+    assert fake.bound_tools == []
+    (call,) = fake.calls
+    assert len(call) == 1  # the legacy single-message shape
+
+
+def test_rebuilt_prefix_is_byte_identical_to_the_agent_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A4 acceptance (task #4674): the worker rebuilds its prefix from the
+    checkpoint store, never from the agent's live objects — the rebuilt head
+    must still be byte-identical to the agent's own request head.
+
+    The sample carries the real message shapes (a SystemMessage snapshot, an
+    assistant tool call with its ToolMessage result, a compact boundary, a
+    tail stretch). The loader hands the build the store's view: one
+    `JsonPlusSerializer` round trip — the checkpoint serde — over the live
+    list. Each generation call the fake captures is then serialized through
+    that same serde next to the agent-side head (`live[:cut]`) and compared
+    byte for byte; the provider call itself is out of scope offline, so this
+    locks the whole local chain up to the wire boundary.
+    """
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "execute_code",
+                "args": {"code": "print(1)"},
+                "id": "tc1",
+                "type": "tool_call",
+            }
+        ],
+        additional_kwargs={"ava_created_at": T0},
+    )
+    live: list[BaseMessage] = [
+        SystemMessage(content="SP"),
+        inbound("m0"),
+        tool_call,
+        exec_out("tool output"),
+        *(inbound(f"step {i}") for i in range(30)),
+        compact(),
+        *(inbound(f"tail {i}") for i in range(10)),
+    ]
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    restored = serde.loads_typed(serde.dumps_typed(live))
+
+    def fake_loader(agent_id: int) -> list[BaseMessage]:
+        return list(restored)
+
+    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+
+    tool = object()
+    fake = FakeLLM(_fitting_responder)
+    tree = build_agent_tree(7, llm=fake, model=MODEL, tools=[tool])
+
+    assert tree.errors == ()
+    assert fake.bound_tools and all(bound == [tool] for bound in fake.bound_tools)
+    spans = {node.nid: node.span for node in tree.nodes}
+    cuts: set[int] = set()
+    for call in fake.calls:
+        # The material header ("# node L1#k ...") names the node this call built.
+        cut = spans[call_tail_material(call).split()[2]][0]
+        cuts.add(cut)
+        assert serde.dumps_typed(list(call[:-1])) == serde.dumps_typed(list(live[:cut]))
+    assert min(cuts) == 1  # the first stretch rides behind just the system head
+    assert max(cuts) > 10  # and a later stretch behind a multi-message head
 
 
 def test_materialize_reuses_known_input_hash_without_a_call() -> None:
@@ -281,7 +416,7 @@ def test_input_hash_is_deterministic_and_kind_sensitive() -> None:
 
 def _fitting_responder(call: list[BaseMessage]) -> str:
     """Deterministic text sized under the call's own budget (structure only)."""
-    budget = narrative_budget_tok(count_tokens(call_material(call)))
+    budget = narrative_budget_tok(count_tokens(call_tail_material(call)))
     text = "\u5b57" * max(budget // 2, 1)
     while text and count_tokens(text) > budget:
         text = text[:-1]
