@@ -1,7 +1,8 @@
-"""Historical delta walks retain their seed when the target crosses a SQL page."""
+"""Historical delta walks retain their seed and report interrupted read spans."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, cast
 from uuid import uuid4
 
@@ -9,7 +10,7 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.base import CheckpointMetadata, DeltaChannelHistory
+from langgraph.checkpoint.base import CheckpointMetadata, CheckpointTuple, DeltaChannelHistory
 from langgraph.checkpoint.base.id import uuid6
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -18,6 +19,7 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 
 from shared import checkpoint_postgres_walks
 from shared.agents.history.checkpoint import load_checkpoint_messages_segment
+from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.config import settings
 
 
@@ -157,3 +159,101 @@ def test_walk_patch_rejects_foreign_replacement(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(BasePostgresSaver, "_try_advance_walks", staticmethod(lambda: None))
     with pytest.raises(RuntimeError, match="replaced outside Ava"):
         checkpoint_postgres_walks.install_checkpoint_postgres_walk_patch()
+
+
+# Delta read compatibility failures during the PostgreSQL history walk.
+
+
+def _config() -> RunnableConfig:
+    return {
+        "configurable": {
+            "thread_id": "thread-a",
+            "checkpoint_id": "checkpoint-a",
+            "checkpoint_ns": "",
+        }
+    }
+
+
+def _failing_saver() -> AsyncPostgresSaver:
+    saver = AsyncPostgresSaver(cast(Any, object()))
+
+    async def raw_tuple(config: RunnableConfig) -> CheckpointTuple:
+        return CheckpointTuple(
+            config,
+            cast(
+                Any,
+                {"id": "checkpoint-a", "channel_values": {}, "channel_versions": {"messages": "v"}},
+            ),
+            cast(Any, {"counters_since_delta_snapshot": {"messages": 1}}),
+            None,
+            [],
+        )
+
+    saver.aget_tuple = raw_tuple  # type: ignore[method-assign]
+    wrap_saver_reads_with_delta_reconstruction(saver)
+    return saver
+
+
+async def test_delta_read_timeout_emits_partial_span(loguru_records: list[Any]) -> None:
+    saver = _failing_saver()
+
+    async def timed_out(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
+        raise TimeoutError("history timed out")
+
+    saver.aget_delta_channel_history = timed_out  # type: ignore[method-assign]
+    with pytest.raises(TimeoutError, match="history timed out"):
+        await saver.aget_tuple(_config())
+    spans = [
+        record["extra"]
+        for record in loguru_records
+        if record["extra"].get("event") == "delta_read_compat"
+    ]
+    assert len(spans) == 1
+    assert spans[0]["outcome"] == "error"
+    assert spans[0]["failed_phase"] == "history_read"
+    assert spans[0]["error_type"] == "TimeoutError"
+    assert spans[0]["elapsed_ms"] >= spans[0]["history_read_ms"] >= 0
+    assert spans[0]["message_count"] is None
+    assert spans[0]["cache_hit"] is None
+
+
+async def test_delta_read_decode_error_emits_partial_span(loguru_records: list[Any]) -> None:
+    saver = _failing_saver()
+
+    async def bad_history(*, config: RunnableConfig, channels: Sequence[str]) -> Any:
+        return saver._build_delta_channels_writes_history(  # type: ignore[attr-defined]
+            channels=["messages"],
+            chain_by_ch={"messages": ["checkpoint-a"]},
+            seed_ver_by_ch={},
+            seed_inline_by_ch={},
+            stage2_rows=[
+                {
+                    "channel": "messages",
+                    "_kind": "w",
+                    "checkpoint_id": "checkpoint-a",
+                    "type": "msgpack",
+                    "blob": b"\xc1",
+                    "task_id": "task",
+                    "idx": 0,
+                }
+            ],
+        )
+
+    saver.aget_delta_channel_history = bad_history  # type: ignore[method-assign]
+    with pytest.raises(ValueError):
+        await saver.aget_tuple(_config())
+    spans = [
+        record["extra"]
+        for record in loguru_records
+        if record["extra"].get("event") == "delta_read_compat"
+    ]
+    assert len(spans) == 1
+    assert spans[0]["outcome"] == "error"
+    assert spans[0]["failed_phase"] == "decode"
+    assert spans[0]["error_type"] == "ValueError"
+    assert spans[0]["stage2_rows"] == 1
+    assert spans[0]["stage2_blob_bytes"] == 1
+    assert spans[0]["decode_ms"] >= 0
+    assert spans[0]["history_build_ms"] >= spans[0]["decode_ms"]
+    assert spans[0]["message_count"] is None
+    assert spans[0]["cache_hit"] is None

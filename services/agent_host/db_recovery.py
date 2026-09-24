@@ -18,6 +18,10 @@ from agent.startup import (
     _repair_dangling_tool_use_at_startup,
 )
 from services.agent_host.recovery_interrupt import RecoveryInterrupt
+from shared.agents.history.delta_read_compat import (
+    RecoveryReconstructionScope,
+    recovery_reconstruction_scope,
+)
 from shared.config import settings
 from shared.db_transaction import async_write_transaction
 from shared.deploy_timing import AGENT_LEASE_TTL_S
@@ -144,6 +148,37 @@ async def _run_bounded_stage(
     )
 
 
+async def _flush_if_needed(
+    waiting: DatabaseWait,
+    checkpointer: AsyncPostgresSaver,
+    reconstruction: RecoveryReconstructionScope | None,
+    agent_id: int,
+    attempt: int,
+    flushed_generation: int | None,
+) -> int | None:
+    """Reuse a completed flush only while a wrapped saver's state is unchanged."""
+    if reconstruction is not None and flushed_generation == reconstruction.generation:
+        logger.info(
+            "host checkpoint recovery stage complete",
+            agent_id=agent_id,
+            attempt=attempt,
+            phase="checkpoint_flush",
+            duration_ms=0.0,
+            outcome="already_flushed",
+        )
+        return reconstruction.generation
+    if reconstruction is not None:
+        reconstruction.invalidate()
+    await _run_bounded_stage(
+        waiting,
+        lambda: flush_checkpoint(checkpointer, agent_id),
+        phase="checkpoint_flush",
+        agent_id=agent_id,
+        attempt=attempt,
+    )
+    return reconstruction.generation if reconstruction is not None else None
+
+
 async def recover_database(
     *,
     pool: AsyncConnectionPool,
@@ -175,8 +210,12 @@ async def recover_database(
     last_error_type: str | None = None
     last_sqlstate: str | None = None
     prolonged = False
+    flushed_generation: int | None = None
     logger.warning("host turn waiting for checkpoint recovery", agent_id=incarnation.agent_id)
-    with database_wait(incarnation) as waiting:
+    with (
+        recovery_reconstruction_scope(checkpointer, str(incarnation.agent_id)) as reconstruction,
+        database_wait(incarnation) as waiting,
+    ):
         while True:
             started = time.monotonic()
             total_elapsed = started - recovery_started
@@ -211,12 +250,13 @@ async def recover_database(
                 # Retained N-step writes are still this task's work. Persist them
                 # before deciding which claimed messages reached the checkpoint.
                 phase = "checkpoint_flush"
-                await _run_bounded_stage(
+                flushed_generation = await _flush_if_needed(
                     waiting,
-                    lambda: flush_checkpoint(checkpointer, incarnation.agent_id),
-                    phase=phase,
-                    agent_id=incarnation.agent_id,
-                    attempt=attempt,
+                    checkpointer,
+                    reconstruction,
+                    incarnation.agent_id,
+                    attempt,
+                    flushed_generation,
                 )
                 phase = "inbound_reconciliation"
                 await _run_bounded_stage(

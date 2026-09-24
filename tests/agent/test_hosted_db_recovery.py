@@ -701,3 +701,64 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
         c.args[0] != "host checkpoint recovery prolonged" for c in log.warning.call_args_list
     )
     log.error.assert_not_called()
+
+
+@pytest.mark.parametrize("write_before_retry", [False, True])
+async def test_recovery_reuses_unchanged_checkpoint_across_retry(
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    write_before_retry: bool,
+) -> None:
+    incarnation = await _admit(aops_pool)
+
+    async def never(_state: states.AgentState) -> dict[str, Any]:
+        raise AssertionError("recovery cannot invoke agent work")
+
+    graph, saver = await _graph(aops_pool, incarnation.agent_id, never)
+    config: RunnableConfig = {"configurable": {"thread_id": str(incarnation.agent_id)}}
+    await graph.aupdate_state(
+        config, {"messages": [HumanMessage(content="Another message")]}, as_node="work"
+    )
+    raw = await AsyncPostgresSaver.aget_tuple(saver, config)
+    assert raw is not None
+    assert "messages" not in raw.checkpoint["channel_values"]
+
+    history = saver.aget_delta_channel_history
+    walks = 0
+    flushes = 0
+    repairs = 0
+
+    async def counted_history(*, config: RunnableConfig, channels: Any) -> Any:
+        nonlocal walks
+        walks += 1
+        return await history(config=config, channels=channels)
+
+    async def counted_flush(_saver: AsyncPostgresSaver, _agent: int) -> None:
+        nonlocal flushes
+        flushes += 1
+
+    async def flaky_repair(_graph: Any, _agent: int) -> None:
+        nonlocal repairs
+        repairs += 1
+        await graph.aget_state(config)
+        if repairs == 1:
+            if write_before_retry:
+                await graph.aupdate_state(
+                    config,
+                    {"messages": [HumanMessage(content="State changed in repair")]},
+                    as_node="work",
+                )
+            raise PoolTimeout("retry after a completed read")
+
+    monkeypatch.setattr(saver, "aget_delta_channel_history", counted_history)
+    monkeypatch.setattr(db_recovery, "flush_checkpoint", counted_flush)
+    monkeypatch.setattr(db_recovery, "_repair_dangling_tool_use_at_startup", flaky_repair)
+    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
+        await db_recovery.recover_database(
+            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+        )
+    assert repairs == 2
+    assert flushes == (2 if write_before_retry else 1)
+    assert walks == (2 if write_before_retry else 1)
+    await saver.aget_tuple(config)
+    assert walks == (3 if write_before_retry else 2)
