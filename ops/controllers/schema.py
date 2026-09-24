@@ -20,7 +20,7 @@ update-trigger cooldown lives in ``update_trigger`` so it is the same cooldown t
 pin controller honors, and a rejected gateway trigger falls back to the same local
 spawn the pin controller uses.
 
-**The heal is rate-limited, the finding is not.** Only the code-behind-DB arm
+**Heal attempts have a persistent backoff.** Only the code-behind-DB arm
 *retries an action*, and it is the one that hammered: a Windows runner fired ~85
 failed ``ava cluster update`` triggers in a 3h07m window because the only limiter in the way
 was ``update_trigger``'s 120s process cooldown, which by construction cannot bound
@@ -29,7 +29,7 @@ so a heal that fails and restarts nothing simply re-arms nothing. The persistent
 ``_heal_record`` backoff (the pin controller's pattern) is what bounds the spawn →
 restart → spawn cycle. Every other arm merely *declines to act* and gets no backoff:
 one is already inside the cooldown, one is waiting on the gateway to migrate, one is
-"the DB is unreachable, state unknown". Rate-limiting a path that spawns nothing
+"the DB is unreachable, state unknown". Backing off a path that spawns nothing
 would buy nothing and cost a reader's understanding.
 
 Backing the heal off does NOT quieten the alarm: a backed-off round still reports
@@ -44,6 +44,9 @@ then the pin controller moves it back: a livelock. This arm refuses the local
 spawn and points to the gateway's pin-aware full rollout. The mismatch also
 rides the status projection and error event, so an online ops daemon cannot
 hide a DB-scoped service hold (issue #1074).
+Its full ERROR diagnostic logs on the first round and every ten blocked rounds,
+carrying the running count. A changed pin or drift starts a new streak; convergence
+clears it. Every round still reports the same block scope and detail.
 """
 
 from __future__ import annotations
@@ -73,6 +76,12 @@ _log = logging.getLogger("ops.controllers.schema")
 # not sit behind the schema all day. At the watchdog's 60s round it turns the observed
 # ~85 triggers per 3 hours into ~6.
 _SCHEMA_HEAL_BACKOFF_S = 1800.0
+
+# Match ops.manager._BLOCKED_ROUND_ALARM_ROUNDS without importing the manager:
+# immediate diagnosis, then a heartbeat every ten rounds for an unchanged drift.
+_PIN_BLOCKED_REPEAT_ROUNDS = 10
+_pin_blocked_drift: tuple[str, str] | None = None
+_pin_blocked_streak = 0
 
 
 def _schema_heal_attempt_path() -> Path:
@@ -117,6 +126,29 @@ def _drift_signature(exc: Exception) -> str:
     itself changes, which is exactly the equality ``_heal_record.in_backoff`` needs.
     """
     return f"{type(exc).__name__}: {exc}"
+
+
+def _log_pin_blocked(exc: Exception, pin: str) -> None:
+    """Keep the full remedy visible at a bounded cadence for this process's drift."""
+    global _pin_blocked_drift, _pin_blocked_streak  # noqa: PLW0603 — process-local cadence
+    drift = (pin, _drift_signature(exc))
+    if drift != _pin_blocked_drift:
+        _pin_blocked_drift = drift
+        _pin_blocked_streak = 0
+    _pin_blocked_streak += 1
+    if _pin_blocked_streak == 1 or _pin_blocked_streak % _PIN_BLOCKED_REPEAT_ROUNDS == 0:
+        _log.error(
+            "[ops.schema] %s; and this checkout IS the cluster pin %s, so the PIN is "
+            "what lacks these migrations. A host-local update would move HEAD forward and the "
+            "pin controller would force it straight back — nothing advances the pin, "
+            "because advancing it is a step of a SUCCESSFUL update. NOT spawning a "
+            "host-local heal: run pin-aware `ava cluster update` on the gateway "
+            "to advance the pin and all runners together; do not roll back "
+            "applied migrations automatically. %d consecutive round(s)",
+            exc,
+            pin,
+            _pin_blocked_streak,
+        )
 
 
 def _deploy_already_running() -> tuple[BlockScope, str] | None:
@@ -262,6 +294,7 @@ def schema_reconcile() -> tuple[BlockScope, str | None]:
       (a flapping DB would then reset the backoff every other round, restoring the
       hot loop through the one arm that knows the least).
     """
+    global _pin_blocked_drift, _pin_blocked_streak  # noqa: PLW0603 — process-local cadence
     try:
         with shared.db.connect(autocommit=True) as conn:
             check_schema_version(conn)
@@ -276,17 +309,7 @@ def schema_reconcile() -> tuple[BlockScope, str | None]:
         # different verdict about the same drift, and the backoff would otherwise let
         # one heal per half hour keep flapping the checkout.
         if (pin := pin_is_the_blocker()) is not None:
-            _log.error(
-                "[ops.schema] %s; and this checkout IS the cluster pin %s, so the PIN is "
-                "what lacks these migrations. A host-local update would move HEAD forward and the "
-                "pin controller would force it straight back — nothing advances the pin, "
-                "because advancing it is a step of a SUCCESSFUL update. NOT spawning a "
-                "host-local heal: run pin-aware `ava cluster update` on the gateway "
-                "to advance the pin and all runners together; do not roll back "
-                "applied migrations automatically.",
-                exc,
-                pin,
-            )
+            _log_pin_blocked(exc, pin)
             return BlockScope.DB_DEPENDENT, f"the cluster pin {pin[:7]} is behind the DB schema"
         # Checked AFTER the pin-is-the-blocker escalation, deliberately. Both return
         # without spawning, so the order only decides which reason the operator gets —
@@ -354,6 +377,8 @@ def schema_reconcile() -> tuple[BlockScope, str | None]:
     # Converged: the backoff must not outlive the drift it was arming against, so drop
     # the record here — this is the ONE reading that proves a heal is no longer needed.
     _heal_record.clear(_schema_heal_attempt_path())
+    _pin_blocked_drift = None
+    _pin_blocked_streak = 0
     return BlockScope.NONE, None
 
 

@@ -73,6 +73,8 @@ def _pin_is_not_the_blocker(monkeypatch: pytest.MonkeyPatch) -> None:
     ordinary self-heal path. The escalation that fires when it IS the pin has its own
     section at the bottom of this file."""
     monkeypatch.setattr(schema, "pin_is_the_blocker", lambda: None)
+    monkeypatch.setattr(schema, "_pin_blocked_drift", None)
+    monkeypatch.setattr(schema, "_pin_blocked_streak", 0)
 
 
 @pytest.fixture(autouse=True)
@@ -606,6 +608,61 @@ def test_the_escalation_is_not_merely_a_backoff(monkeypatch: pytest.MonkeyPatch)
         update_trigger.reset_cooldown()
         assert schema.schema_reconcile()[0] is BlockScope.DB_DEPENDENT
     assert spawn_calls == []
+
+
+def test_pin_blocker_log_cadence(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Bound repeated diagnostics without hiding a new drift or losing the hold."""
+    spawn_calls: list[bool] = []
+    _code_behind(monkeypatch, spawn_calls)
+    monkeypatch.setattr(schema, "pin_is_the_blocker", lambda: "1a90f95d33a145d1")
+    with caplog.at_level(logging.ERROR, logger="ops.controllers.schema"):
+        for round_number in range(1, 21):
+            blocks, detail = schema.schema_reconcile()
+            assert blocks is BlockScope.DB_DEPENDENT
+            assert detail == "the cluster pin 1a90f95 is behind the DB schema"
+            if round_number in (1, 10, 20):
+                assert caplog.records[-1].message.endswith(f"{round_number} consecutive round(s)")
+
+        assert len(caplog.records) == 3, "first round + two ten-round heartbeats"
+        assert all(r.levelno == logging.ERROR for r in caplog.records)
+        assert all("this checkout IS the cluster pin" in r.message for r in caplog.records)
+    assert spawn_calls == [], "quiet rounds still refuse the host-local heal"
+
+
+@pytest.mark.parametrize("reset", ["drift", "pin", "convergence"])
+def test_pin_blocker_log_streak_resets(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, reset: str
+) -> None:
+    """New drift and convergence must not inherit a previous streak's quiet interval."""
+    spawn_calls: list[bool] = []
+    _code_behind(monkeypatch, spawn_calls)
+    monkeypatch.setattr(schema, "pin_is_the_blocker", lambda: "1a90f95d33a145d1")
+    with caplog.at_level(logging.ERROR, logger="ops.controllers.schema"):
+        for _ in range(2):
+            assert _scope() is BlockScope.DB_DEPENDENT
+        caplog.clear()
+
+        if reset == "drift":
+
+            def _changed(_conn: object) -> None:
+                raise CodeBehindSchema("DB has 6 migration(s) this checkout lacks")
+
+            monkeypatch.setattr(schema, "check_schema_version", _changed)
+        elif reset == "pin":
+            monkeypatch.setattr(schema, "pin_is_the_blocker", lambda: "2b90f95d33a145d1")
+        else:
+            monkeypatch.setattr(schema, "check_schema_version", lambda _conn: None)  # pyright: ignore[reportUnknownArgumentType]
+            assert schema.schema_reconcile() == (BlockScope.NONE, None)
+            _code_behind(monkeypatch, spawn_calls)
+
+        assert _scope() is BlockScope.DB_DEPENDENT
+        assert len(caplog.records) == 1, "the new streak logs immediately"
+        assert caplog.records[0].message.endswith("1 consecutive round(s)")
+        assert _scope() is BlockScope.DB_DEPENDENT
+        assert len(caplog.records) == 1, "the new streak gets its own quiet interval"
+    assert spawn_calls == [], "quiet rounds still refuse the host-local heal"
 
 
 def test_still_heals_when_head_is_not_the_pin(monkeypatch: pytest.MonkeyPatch) -> None:
