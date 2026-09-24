@@ -95,6 +95,7 @@ import {
 import type { BackendTimelineItem } from "@/lib/types";
 import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline-store";
+import type { CompactTransitionBuffer } from "@/lib/compact-transition";
 import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 import { useTimelineColors } from "@/lib/use-timeline-colors";
@@ -102,13 +103,16 @@ import { useTimelineColors } from "@/lib/use-timeline-colors";
 import { ConnectionNotice } from "@/components/connection-notice";
 import { CompactingBlock } from "./compacting-block";
 import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
-import { classifyItem, groupIntoTurns, type TimelineGroup } from "./runs";
+import { classifyItem } from "./runs";
+import { groupTimelineSegments } from "./segments";
+import { useCompactTransitionAnchor } from "./use-compact-transition-anchor";
 import { CompactHistoryDivider, LoadOlderSpinner, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
 
 interface Props {
   items: BackendTimelineItem[];
+  compactBuffer?: CompactTransitionBuffer | null;
   /** Identity of the timeline thread / active agent. A change means a new
    *  conversation is displayed, so all per-item and per-turn pins are dropped. */
   threadKey?: string;
@@ -146,76 +150,9 @@ interface Props {
   maxWidthCss?: string;
 }
 
-interface RenderGroup {
-  readonly group: TimelineGroup;
-  readonly indexOffset: number;
-  readonly dividerRank: number | null;
-}
-
-function segmentKey(item: BackendTimelineItem): string {
-  const parts = parseItemIdParts(item.item_id);
-  return parts && parts.rank > 0
-    ? `${parts.rank}:${parts.checkpointId ?? ""}`
-    : "current";
-}
-
-/** Keep collapsible runs inside one compact segment without changing items. */
-function groupTimelineSegments(items: readonly BackendTimelineItem[]): RenderGroup[] {
-  const result: RenderGroup[] = [];
-  let start = 0;
-  while (start < items.length) {
-    const key = segmentKey(items[start]);
-    const rank = parseItemIdParts(items[start].item_id)?.rank ?? 0;
-    let end = start + 1;
-    while (end < items.length && segmentKey(items[end]) === key) end += 1;
-    const segment = items.slice(start, end);
-    const summaryIndex = rank > 0
-      ? segment.findIndex((item) => item.kind === "inbound_compact_summary")
-      : -1;
-    const prefixGroups = summaryIndex > 0
-      ? groupIntoTurns(segment.slice(0, summaryIndex), {
-          collapseTurns: true,
-          liveIndex: null,
-        })
-      : [];
-    const summaryGroups = summaryIndex >= 0
-      ? groupIntoTurns(segment.slice(summaryIndex, summaryIndex + 1), {
-          collapseTurns: true,
-          liveIndex: null,
-        })
-      : [];
-    const rawStart = summaryIndex >= 0 ? summaryIndex + 1 : 0;
-    const rawGroups = groupIntoTurns(segment.slice(rawStart), {
-      collapseTurns: true,
-      liveIndex: null,
-    });
-    for (const group of prefixGroups) {
-      result.push({ group, indexOffset: start, dividerRank: null });
-    }
-    for (const group of summaryGroups) {
-      result.push({ group, indexOffset: start + summaryIndex, dividerRank: null });
-    }
-    rawGroups.forEach((group, groupIndex) => {
-      let divider: number | null = null;
-      if (rank > 0 && groupIndex === 0) {
-        // The scroll-back rule: a historical segment's raw items follow its
-        // compact summary — mark where that summary ends.
-        divider = rank;
-      } else if (rank === 0 && groupIndex === 0 && result.length > 0) {
-        // The current segment's first group follows retained history — mark
-        // the compact boundary between the previous session and the new
-        // post-compact block (task #3698; user ruling 2026-09-17).
-        divider = 0;
-      }
-      result.push({ group, indexOffset: start + rawStart, dividerRank: divider });
-    });
-    start = end;
-  }
-  return result;
-}
-
 export function TimelineView({
-  items,
+  items: canonicalItems,
+  compactBuffer = null,
   threadKey,
   scrollMemoryKey,
   streamingCode = false,
@@ -229,6 +166,20 @@ export function TimelineView({
   maxWidthCss,
 }: Props) {
   const t = useTranslations("timeline");
+  const bufferedItems = useMemo(
+    () => compactBuffer?.rows.map((row) => row.item) ?? [],
+    [compactBuffer],
+  );
+  const currentItems = useMemo(
+    () => compactBuffer
+      ? canonicalItems.filter((item) => (parseItemIdParts(item.item_id)?.rank ?? 0) === 0)
+      : canonicalItems,
+    [canonicalItems, compactBuffer],
+  );
+  const items = useMemo(
+    () => compactBuffer ? [...bufferedItems, ...currentItems] : canonicalItems,
+    [compactBuffer, bufferedItems, currentItems, canonicalItems],
+  );
   // Auto-scroll to bottom — sticky-bottom mode:
   // - default sticks to the bottom; while sticky, any content growth pulls
   //   the viewport down **in the same frame the growth lays out** (the
@@ -348,6 +299,12 @@ export function TimelineView({
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
   );
+  useCompactTransitionAnchor({
+    controller,
+    viewportRef,
+    prependAnchorRef: pendingAnchorRef,
+    compactBuffer,
+  });
 
   // Announce only changes to the turn boundary. Streaming chunks change
   // `items`, never `turnActive`, so they do not generate screen-reader noise.
@@ -961,7 +918,16 @@ export function TimelineView({
   // how an individual item renders — it only decides whether the item sits under
   // a run header. All memo-stability inputs (config via the WeakMap cache, the
   // stable toggleExpanded) are captured here.
-  const renderRow = (item: BackendTimelineItem, index: number, forceExpand?: boolean) => {
+  const renderRow = (
+    item: BackendTimelineItem,
+    index: number,
+    source: "buffer" | "canonical",
+    rank: number,
+    forceExpand?: boolean,
+  ) => {
+    const renderKey = source === "buffer"
+      ? `buffer:${compactBuffer?.epoch}:${rank}:${item.item_id}`
+      : `canonical:${item.item_id}`;
     const config = cardConfigFor(item, timelineColors);
     const streaming =
       streamingCode && index === items.length - 1 && item.kind === "agent_code";
@@ -970,7 +936,9 @@ export function TimelineView({
     if (config === null) {
       return (
         <TimelineRow
-          key={item.item_id}
+          key={renderKey}
+          timelineSource={source}
+          displayRank={rank}
           item={item}
           config={null}
           streaming={streaming}
@@ -1009,7 +977,9 @@ export function TimelineView({
     const isForkRow = index === lastAgentChatIdx;
     return (
       <TimelineRow
-        key={item.item_id}
+        key={renderKey}
+        timelineSource={source}
+        displayRank={rank}
         item={item}
         config={config}
         streaming={streaming}
@@ -1039,7 +1009,22 @@ export function TimelineView({
   // shift). Primary/bare items break turns by classifyItem returning non-secondary.
   // Scroll/pull indicators and expansion pins do not change the document.
   // Reuse its grouping until a snapshot, history page, or live item changes it.
-  const groups = useMemo(() => groupTimelineSegments(items), [items]);
+  const groups = useMemo(() => {
+    if (!compactBuffer) {
+      return groupTimelineSegments(canonicalItems).map((entry) => ({ ...entry, source: "canonical" as const }));
+    }
+    const buffered = groupTimelineSegments(
+      bufferedItems,
+      (_item, index) => compactBuffer.rows[index].rank,
+    ).map((entry) => ({ ...entry, source: "buffer" as const }));
+    const current = groupTimelineSegments(currentItems, undefined, buffered.length > 0)
+      .map((entry) => ({
+        ...entry,
+        indexOffset: entry.indexOffset + bufferedItems.length,
+        source: "canonical" as const,
+      }));
+    return [...buffered, ...current];
+  }, [canonicalItems, compactBuffer, bufferedItems, currentItems]);
 
   const handleScrollToBottom = useCallback(() => {
     const viewport =
@@ -1107,7 +1092,7 @@ export function TimelineView({
               group.kind === "single" ? group.item.item_id : group.items[0].item_id;
             const renderedGroup = (() => {
               if (group.kind === "single") {
-                return renderRow(group.item, entry.indexOffset + group.index);
+                return renderRow(group.item, entry.indexOffset + group.index, entry.source, entry.rank);
               }
               // Every secondary run (even a single item) becomes a collapsible work
               // block. The last turn auto-expands while the agent is active so the
@@ -1134,12 +1119,16 @@ export function TimelineView({
                   onToggle={() => toggleTurn(turnId, runExpanded)}
                   turnActive={turnActive && isLastTurn}
                   isStuck={activeStuckHeaderId === turnId}
+                  timelineSource={entry.source}
+                  displayRank={entry.rank}
                 >
                   {runExpanded
                     ? group.items.map((it, i) =>
                         renderRow(
                           it,
                           entry.indexOffset + group.startIndex + i,
+                          entry.source,
+                          entry.rank,
                           runExpanded,
                         ),
                       )
@@ -1148,7 +1137,7 @@ export function TimelineView({
               );
             })();
             return (
-              <Fragment key={`segment-group:${groupKey}`}>
+              <Fragment key={`${entry.source}:${entry.source === "buffer" ? compactBuffer?.epoch : ""}:${entry.rank}:${groupKey}`}>
                 {entry.dividerRank === null ? null : (
                   <CompactHistoryDivider rank={entry.dividerRank} />
                 )}

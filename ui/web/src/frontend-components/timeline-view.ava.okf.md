@@ -8,7 +8,7 @@ tags:
 
 # Timeline View
 
-`components/timeline/` renders the BackendTimelineItem list (chat / code / output / reasoning / system marker) and is the only item-list surface of a thread. Directory: `index`, `card`, `item`, `buttons`, `markers`, `timestamp`, `reasoning-clock`, `runs` (categorization / grouping), `run-block`.
+`components/timeline/` renders the BackendTimelineItem list (chat / code / output / reasoning / system marker) and is the only item-list surface of a thread. Directory: `index`, `segments` (compact grouping), `use-compact-transition-anchor` (reading position), `card`, `item`, `buttons`, `markers`, `timestamp`, `reasoning-clock`, `runs` (turn grouping), `run-block`.
 
 ## Streaming rows
 
@@ -17,6 +17,22 @@ During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/C
 ## Segments and dividers
 
 Historical ranks group separately; localized dividers never enter items or anchor counts — the rank-0 dashed divider labels the live boundary into the current post-compact segment ("Context compacted", task #3698), while the other historical ranks carry the scroll-back label (original history before compact); the rule carries long dashes at a 1:1 ratio and a demoted tone, and a plain label carries no arrow glyph (user feedback 2026-09-17, task #3870). The dividers are pure labels — no load-earlier control exists (paging is driven by reaching the top; task #4186).
+
+During a compact transition, the view renders buffered old groups above the
+new rank-0 window with provisional historical ranks and a dashed live boundary.
+Buffered and canonical React keys occupy separate namespaces; canonical history
+already covered by the buffer stays hidden until a single store update replaces
+the buffer with the re-keyed rows. A pre-commit notification captures the topmost visible
+real row before that transition commit, and a layout effect maps its message/block
+coordinate to the new rank and adjusts scroll position before paint. Historical
+pages omit the former system prompt, so former current-segment message indexes
+shift down by one; older historical indexes keep their coordinates. Newly keyed
+rows above and inside the viewport are materialized before measuring, avoiding
+`content-visibility` height estimates that would move the reading position. The anchor
+uses the reader's latest position if they scroll during paging; sticky-bottom
+readers continue following the tail. If a finite page budget excludes the
+anchor, the nearest surviving row is used. The ordinary prepend anchor remains
+responsible for non-compact scroll-up pages.
 
 ## Cross-compact paging
 

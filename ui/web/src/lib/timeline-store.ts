@@ -10,11 +10,16 @@
 import { create } from "zustand";
 
 import {
-  foldEvent,
+  announceBeforeCompactDisplayChange,
+  canonicalCoversBuffer,
+  captureCompactTransition,
+  type CompactTransitionBuffer,
+} from "./compact-transition";
+import {
   mergeSnapshotWithStreaming,
   sortByItemId,
 } from "./fold/timeline";
-import { isEventForThread } from "./timeline";
+import { applySseEvent, crossedUnseenCompact, retireLiveCompact } from "./timeline-store-events";
 import type { BackendTimelineItem, SystemEvent } from "./types";
 import type { ConnectionState } from "./use-timeline";
 
@@ -38,6 +43,12 @@ export interface LiveCompact {
 
 export interface TimelineState {
   items: BackendTimelineItem[];
+  /** Old displayed rows while canonical checkpoint pages re-key them. */
+  compactBuffer: CompactTransitionBuffer | null;
+  /** Invalidates late page owners on hide, reconnect, switch, and a newer compact. */
+  compactEpoch: number;
+  /** The user's automatic post-compact page budget; zero skips buffering. */
+  compactHistoryPages: number;
   streamingCode: boolean;
   turnActive: boolean;
   connectionState: ConnectionState;
@@ -106,6 +117,9 @@ export interface TimelineState {
   /** Bump `scrollToBottomRequest` — called on send (the switch bump happens
    * inside `switchThread`). */
   requestScrollToBottom: () => void;
+  setCompactHistoryPages: (pages: number) => void;
+  invalidateCompactEpoch: () => void;
+  finishCompactTransition: (threadId: number, epoch: number) => void;
 
   /** SSE business-event handler — single entry point, replaces scattered setState calls */
   processSseEvent: (ev: SystemEvent) => void;
@@ -163,158 +177,29 @@ export interface TimelineState {
 // Active history remains fully pageable. Switching releases the loaded view;
 // it does not delete durable history or retain inactive live buckets.
 
-/**
- * The timeline kinds that mark a history rewrite — the compact envelope rows
- * (`inbound_compact_request` = UI-triggered force compact,
- * `inbound_compact_summary` = agent-initiated `ava.self.compact`).
- */
-const COMPACT_ENVELOPE_KINDS: ReadonlySet<string> = new Set([
-  "inbound_compact_request",
-  "inbound_compact_summary",
-]);
-
-/** Detect an unseen compact envelope by its stable rendered identity.
- * This is not a directional checkpoint revision; the ordering redesign must
- * replace it before arbitrary delayed same-agent reads can be proven safe. */
-function crossedUnseenCompact(
-  local: BackendTimelineItem[],
-  incoming: BackendTimelineItem[],
-): boolean {
-  return incoming.some((env) => {
-    if (!COMPACT_ENVELOPE_KINDS.has(env.kind)) return false;
-    const localEnv = local.find((it) => it.item_id === env.item_id);
-    if (localEnv === undefined) return true;
-    return localEnv.kind !== env.kind || localEnv.created_at !== env.created_at;
+function announceCompactDisplayChange(
+  state: TimelineState,
+  nextBuffer: CompactTransitionBuffer | null,
+  rankShift = 0,
+): void {
+  if (
+    rankShift === 0 &&
+    state.compactBuffer?.epoch === nextBuffer?.epoch &&
+    state.compactBuffer?.rows === nextBuffer?.rows
+  ) return;
+  if (!state.compactBuffer && !nextBuffer) return; // retention 0 keeps its immediate swap
+  announceBeforeCompactDisplayChange({
+    items: state.items,
+    buffer: state.compactBuffer,
+    rankShift,
   });
-}
-
-/**
- * Retire the live compact whose summary item just landed in `items` — the
- * item is the durable view the ticking block hands over to. Returns the same
- * reference while nothing matches, so per-field selectors stay quiet.
- */
-function retireLiveCompact(
-  live: LiveCompact | null,
-  items: readonly BackendTimelineItem[],
-): LiveCompact | null {
-  if (live === null) return live;
-  return items.some((it) => it.compact_id === live.compactId) ? null : live;
-}
-
-/**
- * The per-event reducer shared by `processSseEvent` and
- * `processSseEventBatch` — one event, one state, one partial to merge
- * ({} = nothing changed). Pure: both entry points route through it, so the
- * batch path can never diverge from the per-event path.
- */
-function applySseEvent(state: TimelineState, ev: SystemEvent): Partial<TimelineState> {
-  // Only selected-agent token events write the context bar. Selection resets
-  // these fields; useTokenUsage supplies the newly selected HTTP snapshot.
-  // agent_id=0 system resets follow the shared event-routing rule.
-  if (ev.role === "token_usage") {
-    return isEventForThread(ev, state.activeThreadId)
-      ? { tokenUsage: ev.input_tokens, reasoningTokens: ev.reasoning_tokens ?? 0 }
-      : {};
-  }
-
-  // ACTIVE thread (or agent_id=0 system signal): fold into the top-level
-  // fields. This is the rendered thread, so its updates drive the UI.
-  if (isEventForThread(ev, state.activeThreadId)) {
-    if (ev.role === "compact_started") {
-      // A new run supersedes any previous entry; the stale run's terminal,
-      // if it still arrives, is dropped by the compact_id pairing below.
-      return {
-        liveCompact: {
-          compactId: ev.compact_id,
-          startedAt: ev.started_at,
-          mode: ev.mode,
-          status: null,
-          finishedAt: null,
-        },
-      };
-    }
-    if (ev.role === "compact_finished") {
-      // Pair by compact_id — a terminal for a superseded run is stale and
-      // dropped. An entry-less terminal (start lost in an SSE gap) still
-      // records the outcome so the block can show it briefly.
-      if (state.liveCompact !== null && state.liveCompact.compactId !== ev.compact_id) {
-        return {};
-      }
-      return {
-        liveCompact: {
-          compactId: ev.compact_id,
-          startedAt: state.liveCompact?.startedAt ?? null,
-          mode: state.liveCompact?.mode ?? null,
-          status: ev.status,
-          finishedAt: ev.finished_at,
-        },
-      };
-    }
-    // Keep the visible content until the compact replacement arrives.
-    if (ev.role === "compact_done") {
-      return {
-        streamingIds: new Set(),
-        // Old foldEvent treated compact_done as a code-end (streamingCode
-        // false, turnActive untouched); preserve that flag behavior.
-        streamingCode: false,
-        loadingOlder: false,
-        olderFetchCount: 0,
-        resetPending: true,
-      };
-    }
-    // The first nonempty compact snapshot replaces the selected segment.
-    if (ev.role === "timeline_snapshot") {
-      const snapItems = ev.items as unknown as BackendTimelineItem[];
-      // A full-window snapshot (0.0 present) whose compact envelope the local
-      // items never folded is the post-compact history a missed compact_done
-      // should have armed the window for (SSE gap) — replace wholesale so the
-      // compacted-away items cannot resurrect, same as the reset window.
-      const crossedCompact =
-        snapItems.some((it) => it.item_id === "0.0") &&
-        crossedUnseenCompact(state.items, snapItems);
-      if (state.resetPending || crossedCompact) {
-        if (snapItems.length === 0) return {};
-        return {
-          items: snapItems,
-          streamingIds: new Set(),
-          resetPending: false,
-          compactReplaceSeq: state.compactReplaceSeq + 1,
-          compactReplaceAgent: ev.agent_id,
-          hasMoreOlder: state.hasMoreOlder,
-          liveCompact: retireLiveCompact(state.liveCompact, snapItems),
-        };
-      }
-    }
-    const next = foldEvent(
-      {
-        items: state.items,
-        streamingIds: state.streamingIds,
-        streamingCode: state.streamingCode,
-        turnActive: state.turnActive,
-        hasMoreOlder: state.hasMoreOlder,
-        olderFetchCount: state.olderFetchCount,
-        // The selected thread owns the compact reset window.
-        resetPending: state.resetPending,
-      },
-      ev,
-    );
-    // Unchanged fields keep their references (foldEvent carries them via
-    // ...t / no-op reducers), so per-field Zustand selectors short-circuit.
-    return {
-      items: next.items,
-      streamingIds: next.streamingIds,
-      streamingCode: next.streamingCode,
-      turnActive: next.turnActive,
-      hasMoreOlder: next.hasMoreOlder,
-      liveCompact: retireLiveCompact(state.liveCompact, next.items),
-    };
-  }
-
-  return {};
 }
 
 export const useTimelineStore = create<TimelineState>()((set, get) => ({
   items: [],
+  compactBuffer: null,
+  compactEpoch: 0,
+  compactHistoryPages: 1,
   streamingCode: false,
   turnActive: false,
   connectionState: "open",
@@ -335,13 +220,36 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   scrollToBottomRequest: 0,
 
   requestScrollToBottom: () => set((s) => ({ scrollToBottomRequest: s.scrollToBottomRequest + 1 })),
+  setCompactHistoryPages: (pages) => set((s) => {
+    const compactBuffer = pages === 0 ? null : s.compactBuffer;
+    announceCompactDisplayChange(s, compactBuffer);
+    return { compactHistoryPages: pages, compactBuffer };
+  }),
+  invalidateCompactEpoch: () => set((s) => {
+    const compactBuffer = s.compactBuffer
+      ? { ...s.compactBuffer, epoch: s.compactEpoch + 1 }
+      : null;
+    announceCompactDisplayChange(s, compactBuffer);
+    return { compactEpoch: s.compactEpoch + 1, compactBuffer };
+  }),
+  finishCompactTransition: (threadId, epoch) => set((s) => {
+    if (s.compactBuffer?.threadId !== threadId || s.compactBuffer.epoch !== epoch) return {};
+    announceCompactDisplayChange(s, null);
+    return { compactBuffer: null };
+  }),
 
   processSseEvent: (ev) => {
     // agent_spawned / agent_updated belong to sidebar state (TanStack
     // Query cache), not the timeline. The root fold (the single
     // cache writer) handles them; the timeline store ignores them outright.
     if (ev.role === "agent_spawned" || ev.role === "agent_updated") return;
-    set((s) => applySseEvent(s, ev));
+    set((s) => {
+      const patch = applySseEvent(s, ev);
+      if (patch.compactReplaceSeq !== undefined) {
+        announceCompactDisplayChange(s, patch.compactBuffer ?? null, patch.compactReplaceSeq - s.compactReplaceSeq);
+      }
+      return patch;
+    });
   },
 
   processSseEventBatch: (events) => {
@@ -357,6 +265,12 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       working = { ...working, ...patch };
     }
     if (!changed) return;
+    if (working.compactReplaceSeq !== get().compactReplaceSeq) {
+      announceCompactDisplayChange(
+        get(), working.compactBuffer,
+        working.compactReplaceSeq - get().compactReplaceSeq,
+      );
+    }
     // One set() per frame: every event's fold already applied to `working`;
     // `merged` carries the cumulative patch. Synchronous — no other set()
     // can interleave between get() above and this commit.
@@ -386,14 +300,22 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       // Reconnected; clear the interrupted flag — the previously
       // partial items will keep appending via deltas, so the "interrupted"
       // hint no longer applies.
-      set((s) => ({
-        items: s.items.some((it) => it.interrupted)
-          ? s.items.map((it) => (it.interrupted ? { ...it, interrupted: false } : it))
-          : s.items,
-        // Reopening requests a fresh snapshot and releases the compact guard.
-        // The existing wire contract cannot prove its commit order.
-        resetPending: false,
-      }));
+      set((s) => {
+        const compactBuffer = s.compactBuffer
+          ? { ...s.compactBuffer, epoch: s.compactEpoch + 1 }
+          : null;
+        announceCompactDisplayChange(s, compactBuffer);
+        return {
+          items: s.items.some((it) => it.interrupted)
+            ? s.items.map((it) => (it.interrupted ? { ...it, interrupted: false } : it))
+            : s.items,
+          // Reopening requests a fresh snapshot and releases the compact guard.
+          // The existing wire contract cannot prove its commit order.
+          resetPending: false,
+          compactEpoch: s.compactBuffer ? s.compactEpoch + 1 : s.compactEpoch,
+          compactBuffer,
+        };
+      });
     }
   },
 
@@ -412,10 +334,23 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         msg_count,
         s.streamingIds,
       );
+      const epoch = crossedCompact ? s.compactEpoch + 1 : s.compactEpoch;
+      const pendingBuffer = crossedCompact && s.compactHistoryPages !== 0 && s.activeThreadId !== null
+        ? captureCompactTransition(s.items, s.compactBuffer, s.activeThreadId, epoch, true)
+        : s.compactBuffer && !crossedCompact
+          ? { ...s.compactBuffer, tailReady: true }
+          : null;
+      const compactBuffer = pendingBuffer &&
+        (canonicalCoversBuffer(pendingBuffer, merged) || !hasMoreOlder)
+          ? null
+          : pendingBuffer;
+      announceCompactDisplayChange(s, compactBuffer, crossedCompact ? 1 : 0);
       return {
         // committed ids drop out of streamingIds; still-streaming ones stay
         streamingIds: new Set([...s.streamingIds].filter((id) => !snapshotIds.has(id))),
         items: merged,
+        compactEpoch: epoch,
+        compactBuffer,
         hasMoreOlder,
         resetPending: crossedCompact ? false : s.resetPending,
         // Reconnect can discover the rewrite without any compact SSE event.
@@ -431,6 +366,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     set((s) => ({
       activeThreadId: agentId,
       items: cached ?? [],
+      compactBuffer: null,
+      compactEpoch: s.compactEpoch + 1,
       streamingIds: new Set(),
       streamingCode: false,
       turnActive: false,
@@ -469,11 +406,18 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         // version mix — an older gateway does not recognize the re-attached
         // head notes as crossing material). Stop paging instead of looping
         // on the same cursor forever.
-        return { hasMoreOlder: false, loadingOlder: false };
+        announceCompactDisplayChange(s, null);
+        return { hasMoreOlder: false, loadingOlder: false, compactBuffer: null };
       }
       const merged = fresh.length ? sortByItemId([...fresh, ...s.items]) : s.items;
+      const compactBuffer = s.compactBuffer &&
+        (canonicalCoversBuffer(s.compactBuffer, merged) || !hasMoreOlder)
+          ? null
+          : s.compactBuffer;
+      announceCompactDisplayChange(s, compactBuffer);
       return {
         items: merged,
+        compactBuffer,
         hasMoreOlder,
         loadingOlder: false,
       };

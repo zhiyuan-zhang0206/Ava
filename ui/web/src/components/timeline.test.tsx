@@ -12,6 +12,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/types";
+import type { CompactTransitionBuffer } from "@/lib/compact-transition";
 
 vi.mock("./markdown", () => ({
   ChatMarkdown: ({ content }: { content: string }) => (
@@ -223,6 +224,39 @@ describe("timeline document work", () => {
 });
 
 describe("compact history segment dividers", () => {
+  it("shows buffered history with provisional dividers and masks canonical duplicates", () => {
+    const oldSummary = makeItem({ item_id: "s1.previous.1.0", kind: "inbound_compact_summary", payload: "old summary" });
+    const oldest = makeItem({ item_id: "s1.previous.2.0", kind: "agent_chat", payload: "oldest reply" });
+    const newSummary = makeItem({ item_id: "1.0", kind: "inbound_compact_summary", payload: "recent summary" });
+    const recent = makeItem({ item_id: "2.0", kind: "agent_chat", payload: "recent reply" });
+    const compactBuffer: CompactTransitionBuffer = {
+      threadId: 42,
+      epoch: 3,
+      rows: [
+        { item: oldSummary, rank: 2, needsCanonicalRow: false },
+        { item: oldest, rank: 2, needsCanonicalRow: true },
+        { item: newSummary, rank: 1, needsCanonicalRow: false },
+        { item: recent, rank: 1, needsCanonicalRow: true },
+      ],
+      oldestRealByRank: new Map([[2, oldest.item_id], [1, recent.item_id]]),
+      tailReady: false,
+    };
+    const { container } = render(<TimelineView
+      items={[
+        makeItem({ item_id: "s2.previous.2.0", kind: "agent_chat", payload: "oldest reply" }),
+        makeItem({ item_id: "s1.current.2.0", kind: "agent_chat", payload: "recent reply" }),
+        makeItem({ item_id: "1.0", kind: "agent_chat", payload: "new current" }),
+      ]}
+      compactBuffer={compactBuffer}
+    />);
+    expect(screen.getAllByTestId("compact-history-divider").map((el) => el.dataset.segmentRank))
+      .toEqual(["2", "1", "0"]);
+    expect(screen.getAllByText("oldest reply")).toHaveLength(1);
+    expect(screen.getAllByText("recent reply")).toHaveLength(1);
+    expect(container.querySelectorAll('[data-timeline-source="buffer"][data-display-rank="1"]')).not.toHaveLength(0);
+    expect(container.querySelectorAll('[data-timeline-source="canonical"][data-item-id="1.0"]')).not.toHaveLength(0);
+  });
+
   it("renders one localized divider between each compact summary and its raw history", () => {
     const items = [
       makeItem({
