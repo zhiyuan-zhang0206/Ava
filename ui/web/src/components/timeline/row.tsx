@@ -59,6 +59,8 @@ export const TimelineRow = memo(function TimelineRow({
   onToggle,
   onFork,
   forkPending,
+  timelineSource = "canonical",
+  displayRank,
 }: {
   item: BackendTimelineItem;
   config: CardConfig | null;
@@ -75,6 +77,8 @@ export const TimelineRow = memo(function TimelineRow({
   onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
   onFork: (() => void) | null;
   forkPending: boolean;
+  timelineSource?: "buffer" | "canonical";
+  displayRank?: number;
 }) {
   // Bound toggle for the header. Created inside the memoized row, so it stays
   // stable across the PARENT's re-renders (the row re-renders only when its own
@@ -86,7 +90,7 @@ export const TimelineRow = memo(function TimelineRow({
 
   if (config === null) {
     return (
-      <div data-item-id={item.item_id} aria-live="off" className="timeline-item">
+      <div data-item-id={item.item_id} data-timeline-source={timelineSource} data-display-rank={displayRank} aria-live="off" className="timeline-item">
         <ItemErrorBoundary resetKey={item.payload}>
           <ItemView item={item} streaming={streaming} />
         </ItemErrorBoundary>
@@ -127,6 +131,8 @@ export const TimelineRow = memo(function TimelineRow({
     // the pin, so a collapsed row drops out of the scan by itself.
     <div
       data-item-id={item.item_id}
+      data-timeline-source={timelineSource}
+      data-display-rank={displayRank}
       data-card-sticky={sticky}
       data-turn-child={nestedSticky ? "true" : undefined}
       aria-live="off"
