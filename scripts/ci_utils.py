@@ -1,25 +1,21 @@
 #!/usr/bin/env python3
 """CI check utilities — reusable, correct logic for GitHub CI status polling.
+Use this from watcher scripts or agent code instead of writing ad-hoc conclusion checks.  The core
+function `check_ci()` returns a structured result that cannot be misinterpreted.
 
-Use this from watcher scripts or agent code instead of writing ad-hoc
-conclusion checks.  The core function `check_ci()` returns a structured
-result that cannot be misinterpreted.
+Detects merge conflicts — when a PR has conflicts, CI runs are blocked and the script reports
+MERGE_CONFLICT instead of hanging on PENDING.
 
-Detects merge conflicts — when a PR has conflicts, CI runs are blocked
-and the script reports MERGE_CONFLICT instead of hanging on PENDING.
-
-Distinguishes "Actions never scheduled" (NO_WORKFLOW_RUNS — not green, stop and
-investigate) from "Actions is scheduled but has not attached a check yet"
-(PENDING — keep waiting). The rollup alone cannot tell them apart: for the first
-seconds after a push both look like a rollup carrying no workflow checks, and
-that window is exactly when a poll right after pushing lands. The same gap
-affects rollups that DO carry workflow checks: in a multi-workflow repo some
-checks attach and pass long before the main run is scheduled, so every green
-verdict is gated on a runs-API probe for still-incomplete runs
-(2026-09-10 early-green window). One residual gap in that distinction is noted
-at the NO_WORKFLOW_RUNS assignment in `check_ci`: a run that has not registered
-yet is invisible to the probe, so seconds after a head change a healthy PR can
-still read as NO_WORKFLOW_RUNS once — corroborate before acting on it.
+Distinguishes "Actions never scheduled" (NO_WORKFLOW_RUNS — not green, stop and investigate) from
+"Actions is scheduled but has not attached a check yet" (PENDING — keep waiting). The rollup alone
+cannot tell them apart: for the first seconds after a push both look like a rollup carrying no
+workflow checks, and that window is exactly when a poll right after pushing lands. The same gap
+affects rollups that DO carry workflow checks: in a multi-workflow repo some checks attach and pass
+long before the main run is scheduled, so every green verdict is gated on a runs-API probe for
+still-incomplete runs (2026-09-10 early-green window). One residual gap in that distinction is
+noted at the NO_WORKFLOW_RUNS assignment in `check_ci`: a run that has not registered yet is
+invisible to the probe, so seconds after a head change a healthy PR can still read as
+NO_WORKFLOW_RUNS once — corroborate before acting on it.
 
 The green verdict carries the mirror of that window: a rollup can carry only
 second-scale checks (GitHub Apps and small proof workflows) attached and
@@ -27,9 +23,16 @@ passed while the main workflow's run has not registered yet, and the
 incomplete-runs probe sees nothing to hold the verdict back (2026-09-21, PR
 #3137: "CI all green (3 checks passed)" ~3s after the push; 18 checks were
 running seconds later). Every green verdict therefore also confirms the main
-CI workflow has a completed run for the head (`MAIN_CI_WORKFLOW_NAME`); until
+CI workflow has a completed, non-skipped run for the head (`MAIN_CI_WORKFLOW_NAME`); until
 it does the verdict is PENDING and `--wait` keeps polling. A passing check-set
 far smaller than the suite's is the tell to corroborate by hand.
+
+A draft PR's suite is gate-skipped: the shards stay in the rollup as SKIPPED (their check names keep
+the unexpanded `${{ matrix.group }}` form) and the CI run completes with conclusion `skipped`. A
+rollup of skips is not a green signal: a draft PR whose attached core shard checks are all SKIPPED
+is NOT_READY (one-shot and `--wait` exit 1), and a fully-skipped run never counts as the main run
+having been seen. Skips a PR's own classification produced (docs-only) stay green — the run that
+decided them completed normally (2026-09-24, task #4673).
 
 Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> [--repo owner/repo] [--json]
@@ -39,31 +42,25 @@ Usage as CLI:
     .venv/bin/python scripts/ci_utils.py <PR_NUMBER> --diagnose [--repo owner/repo] [--json]
     .venv/bin/python scripts/ci_utils.py --ci-usage [--ci-usage-days N] [--json]
 
-    Default: query once and exit (PENDING prints and exits 0 — a one-shot
-    probe, not a poller). `--wait`: poll until the verdict settles, then exit
-    with the monitor contract — 0 green, 1 not green (or timed out), 3
-    persistent gh/network errors, 4 Trunk queue submission failed.
-    `--merge` implies `--wait`
-    and submits the PR to Trunk once green. `--force` (with --wait/--merge) is
-    the operator escape hatch: after the named GitHub-limbo runs (queued, zero
-    jobs, aged >= 10 min — task #3275) have been inspected, it concludes green
-    when they are the ONLY obstacle; noisy by design, never a blanket bypass.
-    `--require-fresh-base` turns the
-    advisory base-staleness warning (main advanced past the PR's base) into a
-    refusal, so the operator rebases instead of paying an in-queue re-test. `--queue` (or `CI_QUEUE`) selects
-    the Trunk queue; `--priority` maps the submission priority, which requires
-    `TRUNK_API_TOKEN`. `--evict` cancels a submitted PR from the queue and
-    `--queue-status` prints the queue state with its enqueued PRs. Trunk's
-    public API has no reorder or priority-update operation — priority is fixed
-    at submit time and queue order follows it — so mid-queue reshuffles cannot
-    be scripted (verified against Trunk's API spec, 2026-09-06). Trunk refuses
-    submission unless the PR has the
-    `qa-approved` label, and `.trunk/trunk.yaml` requires its
-    `qa-approved-gate` status. Submission waits at least five minutes after a
-    head update. The all-green predicate excludes the "Trunk Merge Queue"
-    queue-state check and "qa-approved-gate". This is the canonical CI watcher: launch it with
-    ava.shell.run_background, and the completion notice delivers the exit code
-    + verdict to the agent automatically.
+    Default: query once and exit (PENDING prints and exits 0; draft-gated NOT_READY exits 1).
+    `--wait`: poll until the verdict settles, then exit with the monitor contract — 0 green, 1 not
+    green (or timed out), 3 persistent gh/network errors, 4 Trunk queue submission failed.
+    `--merge` implies `--wait` and submits the PR to Trunk once green. `--force` (with
+    --wait/--merge) is the operator escape hatch: after the named GitHub-limbo runs (queued, zero
+    jobs, aged >= 10 min — task #3275) have been inspected, it concludes green when they are the
+    ONLY obstacle; noisy by design, never a blanket bypass. `--require-fresh-base` turns the
+    advisory base-staleness warning (main advanced past the PR's base) into a refusal, so the
+    operator rebases instead of paying an in-queue re-test. `--queue` (or `CI_QUEUE`) selects the
+    Trunk queue; `--priority` maps the submission priority, which requires `TRUNK_API_TOKEN`.
+    `--evict` cancels a submitted PR from the queue and `--queue-status` prints the queue state
+    with its enqueued PRs. Trunk's public API has no reorder or priority-update operation —
+    priority is fixed at submit time and queue order follows it — so mid-queue reshuffles cannot be
+    scripted (verified against Trunk's API spec, 2026-09-06). Trunk refuses submission unless the
+    PR has the `qa-approved` label, and `.trunk/trunk.yaml` requires its `qa-approved-gate` status.
+    Submission waits at least five minutes after a head update. The all-green predicate excludes
+    the "Trunk Merge Queue" queue-state check and "qa-approved-gate". This is the canonical CI
+    watcher: launch it with ava.shell.run_background, and the completion notice delivers the exit
+    code + verdict to the agent automatically.
 """
 
 from __future__ import annotations
@@ -100,6 +97,7 @@ class CIStatus(Enum):
     ALL_PASSED = "all_passed"  # every COMPLETED check is SUCCESS / SKIPPED / NEUTRAL
     FAILED = "failed"  # at least one COMPLETED check has a failing conclusion
     PENDING = "pending"  # some checks are still QUEUED / IN_PROGRESS / PENDING
+    NOT_READY = "not_ready"  # draft PR: gate-skipped suite; one-shot and --wait exit 1
     MERGE_CONFLICT = "merge_conflict"  # PR has merge conflicts — CI blocked
     NO_CHECKS = "no_checks"  # rollup empty AND no run scheduled for the head
     NO_WORKFLOW_RUNS = "no_workflow_runs"  # checks exist, but Actions produced none
@@ -153,11 +151,10 @@ def _derive_repo() -> str:
 DEFAULT_REPO = _derive_repo()
 POLL_INTERVAL = 30  # seconds between polls
 MAX_CONSECUTIVE_ERRORS = 3
-# A run still `queued` with ZERO jobs this long after it was created is GitHub
-# limbo: the scheduler never materialized its jobs, and every cleanup API
-# refuses it (cancel -> 409 "not been queued yet", rerun -> 403 "already
-# running", DELETE -> 403; task #3275, 2026-09-13). Legitimate queue lag is
-# seconds to minutes; this bound keeps a busy scheduler from reading as stuck.
+# A run still `queued` with ZERO jobs this long after it was created is GitHub limbo: the scheduler
+# never materialized its jobs, and every cleanup API refuses it (cancel -> 409 "not been queued
+# yet", rerun -> 403 "already running", DELETE -> 403; task #3275, 2026-09-13). Legitimate queue
+# lag is seconds to minutes; this bound keeps a busy scheduler from reading as stuck.
 _LIMBO_AGE_SECONDS = 600.0
 QUEUE_COOLDOWN_SECONDS = 300
 RETRY_BACKOFF_SECONDS = 300
@@ -240,9 +237,8 @@ class CIResult:
     # Trunk's queue-state check is likewise not a CI result and must not turn
     # an otherwise green PR into a perpetual PENDING verdict.
     trunk_checks: list[dict] = field(default_factory=list)
-    # The QA gate and evidence evaluator are required by Trunk and checked before
-    # its submission, not by this CI verdict. Keep them separate so they cannot
-    # enter the verdict buckets.
+    # The QA gate and evidence evaluator are required by Trunk and checked before its submission,
+    # not by this CI verdict. Keep them separate so they cannot enter the verdict buckets.
     gate_checks: list[dict] = field(default_factory=list)
     # Runs stuck in GitHub limbo (task #3275): `queued`, zero jobs, aged past
     # `_LIMBO_AGE_SECONDS`. Detail on a PENDING verdict — never a basis for
@@ -250,6 +246,8 @@ class CIResult:
     limbo: list[LimboRun] = field(default_factory=list)
     mergeable: str = ""  # MERGEABLE / CONFLICTING / UNKNOWN
     error_detail: str = ""
+    is_draft: bool = False  # PR draft state at this poll
+    core_skipped: list[str] = field(default_factory=list)  # gate-skipped core check names
 
     def summary(self) -> str:
         """One-line human-readable summary."""
@@ -260,12 +258,16 @@ class CIResult:
         if self.verdict == CIStatus.FAILED:
             names = [c["name"] for c in self.failed]
             return f"CI FAILED: {', '.join(names)}"
+        if self.verdict == CIStatus.NOT_READY:
+            return f"CI NOT READY: draft PR — {_core_skip_note(self.core_skipped)}; not green — mark the PR ready for review to run CI"
         if self.verdict == CIStatus.PENDING:
             core = (
                 f"CI pending: {len(self.pending)} still running ({', '.join(self.pending[:3])}...)"
                 if len(self.pending) > 3
                 else f"CI pending: {', '.join(self.pending)}"
             )
+            if self.core_skipped:
+                core += f" — {_core_skip_note(self.core_skipped)}"
             if self.limbo:
                 stuck = ", ".join(
                     f"{r['name']} (#{r['id']}, {r['age_s'] // 60}m)" for r in self.limbo[:3]
@@ -286,10 +288,8 @@ class CIResult:
 
 def _repo_has_workflows() -> bool:
     """True when this checkout defines GitHub Actions workflows.
-
-    Bounds the NO_WORKFLOW_RUNS guard to repos where workflow checks are
-    actually expected — a repo with no workflows at all is legitimately green on
-    app checks alone.
+    Bounds the NO_WORKFLOW_RUNS guard to repos where workflow checks are actually expected — a
+    repo with no workflows at all is legitimately green on app checks alone.
     """
     wf_dir = Path(__file__).resolve().parent.parent / ".github" / "workflows"
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
@@ -298,26 +298,55 @@ def _repo_has_workflows() -> bool:
 TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
 QA_APPROVED_GATE_CHECK_NAME = "qa-approved-gate"
 QA_EVIDENCE_CHECK_NAME = "evaluate-qa-evidence"
-# Both are QA evidence produced by the qa-approved-gate workflow and enforced by
-# the queue before submission — never CI conclusions, so they never enter the
-# verdict buckets.
+# Both are QA evidence produced by the qa-approved-gate workflow and enforced by the queue before
+# submission — never CI conclusions, so they never enter the verdict buckets.
 QA_GATE_CHECK_NAMES = frozenset({QA_APPROVED_GATE_CHECK_NAME, QA_EVIDENCE_CHECK_NAME})
 
-# The repo's main CI workflow (`.github/workflows/ci.yml`, `name: CI`) — the
-# suite a green verdict must be able to say was seen for the head. A check-set
-# made only of second-scale checks is not that evidence: see
-# `_main_workflow_run_completed` and the green path in `check_ci`.
+# The repo's main CI workflow (`.github/workflows/ci.yml`, `name: CI`) — the suite a green verdict
+# must be able to say was seen for the head. A check-set made only of second-scale checks is not
+# that evidence: see `_main_workflow_run_completed` and the green path in `check_ci`.
 MAIN_CI_WORKFLOW_NAME = "CI"
+# Draft gating can skip shards before matrix expansion, leaving `${{ matrix.group }}` in names.
+CORE_SUITE_CHECK_PREFIXES = ("backend shard (", "e2e shard (")
+
+
+def _core_suite_skipped(checks: list[dict]) -> list[str] | None:
+    """Names of the core suite checks when every attached core check is SKIPPED."""
+    core = [c for c in checks if str(c.get("name", "")).startswith(CORE_SUITE_CHECK_PREFIXES)]
+    if not core or any(
+        c.get("status") != "COMPLETED" or c.get("conclusion") != "SKIPPED" for c in core
+    ):
+        return None
+    return [c["name"] for c in core]
+
+
+def _draft_gate_skipped(result: CIResult, core_skipped: list[str] | None) -> bool:
+    """True when a draft PR's core suite is entirely gate-skipped (not green)."""
+    return result.is_draft and core_skipped is not None
+
+
+def _core_skip_note(names: list[str]) -> str:
+    """One clause naming the gate-skipped core jobs (shared by summaries/timeouts)."""
+    shown = ", ".join(names[:3])
+    extra = f" (+{len(names) - 3} more)" if len(names) > 3 else ""
+    return f"core CI jobs are skipped by draft gating ({shown}{extra}); the suite has not run for this head"
+
+
+def _pending_reason(result: CIResult) -> str:
+    """The --wait deadline reason; names the gate-skip when the core suite is skipped."""
+    return (
+        f"CI still pending — {_core_skip_note(result.core_skipped)}"
+        if result.core_skipped
+        else "CI still pending"
+    )
 
 
 def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
     """Keep the newest COMPLETED check run per name.
-
-    GitHub lists every check run on a commit, but branch protection and the
-    required-status UI treat same-named runs as ONE logical check whose state
-    is the newest COMPLETED run's. A stale CANCELLED run on the same SHA must
-    not poison the verdict when a later run of the same name succeeded — the
-    QA evaluator's cancel-in-progress concurrency produces exactly this shape
+    GitHub lists every check run on a commit, but branch protection and the required-status UI
+    treat same-named runs as ONE logical check whose state is the newest COMPLETED run's. A stale
+    CANCELLED run on the same SHA must not poison the verdict when a later run of the same name
+    succeeded — the QA evaluator's cancel-in-progress concurrency produces exactly this shape
     (2026-09-04: two CANCELLED evaluate-qa-evidence runs froze #1636).
 
     Commit statuses are exempt: GitHub already deduplicates StatusContext by
@@ -352,22 +381,19 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     """Sort each rollup check into completed / passed / failed / pending on
     `result`, and record which of them a workflow produced.
 
-    Only COMPLETED checks are judged: a QUEUED / IN_PROGRESS one is pending, and
-    so is a COMPLETED one whose conclusion is unrecognized — guessing there is
-    how a false "all green" gets reported.
+    Only COMPLETED checks are judged: a QUEUED / IN_PROGRESS one is pending, and so is a COMPLETED
+    one whose conclusion is unrecognized — guessing there is how a false "all green" gets reported.
 
-    Trunk checks report queue state rather than CI results, while the
-    `qa-approved-gate` and `evaluate-qa-evidence` checks are required by Trunk
-    and checked before submission. All are routed to dedicated buckets so they
-    never enter the verdict fields.
+    Trunk checks report queue state rather than CI results, while the `qa-approved-gate` and
+    `evaluate-qa-evidence` checks are required by Trunk and checked before submission. All are
+    routed to dedicated buckets so they never enter the verdict fields.
     """
     for c in checks:
         if c.get("__typename") == "StatusContext":
-            # Commit statuses (qa_gate.py publishes qa-approved-gate this way)
-            # have `context` + `state`, not `name` + `status` + `conclusion`.
-            # Without this branch they read as a nameless "?" entry with a
-            # null status — an eternal PENDING that froze every --wait watcher
-            # (2026-09-04: five PRs stalled with all real checks green).
+            # Commit statuses (qa_gate.py publishes qa-approved-gate this way) have `context` +
+            # `state`, not `name` + `status` + `conclusion`. Without this branch they read as a
+            # nameless "?" entry with a null status — an eternal PENDING that froze every --wait
+            # watcher (2026-09-04: five PRs stalled with all real checks green).
             context = c.get("context", "?")
             state = c.get("state", "")
             if context in QA_GATE_CHECK_NAMES:
@@ -393,10 +419,9 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
             result.gate_checks.append(c)
             continue
 
-        # A check produced by a workflow run carries the workflow's name; checks
-        # posted by a GitHub App (GitGuardian, coverage bots) leave it empty.
-        # This is what tells "the suite ran and passed" apart from "the suite
-        # never started and an app happened to report".
+        # A check produced by a workflow run carries the workflow's name; checks posted by a GitHub
+        # App (GitGuardian, coverage bots) leave it empty. This is what tells "the suite ran and
+        # passed" apart from "the suite never started and an app happened to report".
         if c.get("workflowName"):
             result.workflow_checks.append(name)
 
@@ -417,33 +442,28 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None
     """Names of workflow runs for `head_sha` that are scheduled but have not
     attached a check to the commit yet.
 
-    `statusCheckRollup` cannot tell "Actions will never produce a check" from
-    "Actions has not produced one *yet*": between a push and the first check-run
-    appearing, both look like a rollup with no workflow checks in it. That gap is
-    seconds wide and lands exactly on the first poll after a push, which is when
-    an agent is most likely to be watching — and NO_WORKFLOW_RUNS reads as "stop,
-    investigate".
+    `statusCheckRollup` cannot tell "Actions will never produce a check" from "Actions has not
+    produced one *yet*": between a push and the first check-run appearing, both look like a rollup
+    with no workflow checks in it. That gap is seconds wide and lands exactly on the first poll
+    after a push, which is when an agent is most likely to be watching — and NO_WORKFLOW_RUNS reads
+    as "stop, investigate".
 
-    The runs API answers what the rollup cannot: a run in `queued` /
-    `in_progress` / `requested` / `waiting` for this sha means checks are coming.
-    An empty list means nothing is scheduled, which is the real failure the
-    NO_WORKFLOW_RUNS guard exists for — as far as the API can see: a run that has
-    not registered yet is invisible here, and registration lags a head change
-    (seconds; longer when the queue is busy). The residual window and how callers
-    should corroborate are documented at the NO_WORKFLOW_RUNS assignment in
-    `check_ci`.
+    The runs API answers what the rollup cannot: a run in `queued` / `in_progress` / `requested` /
+    `waiting` for this sha means checks are coming. An empty list means nothing is scheduled, which
+    is the real failure the NO_WORKFLOW_RUNS guard exists for — as far as the API can see: a run
+    that has not registered yet is invisible here, and registration lags a head change (seconds;
+    longer when the queue is busy). The residual window and how callers should corroborate are
+    documented at the NO_WORKFLOW_RUNS assignment in `check_ci`.
 
-    `check_ci` probes this before every would-be-green verdict — not only when
-    the rollup has no workflow checks — because a rollup with part of the suite
-    attached and green is otherwise indistinguishable from a finished suite
-    (2026-09-10: MonsoraV2 #774 reported ALL_PASSED while its main run sat
-    queued). The empty-rollup branch probes it too: with no check attached yet,
-    a run in flight is the only evidence that checks are coming at all.
+    `check_ci` probes this before every would-be-green verdict — not only when the rollup has no
+    workflow checks — because a rollup with part of the suite attached and green is otherwise
+    indistinguishable from a finished suite (2026-09-10: MonsoraV2 #774 reported ALL_PASSED while
+    its main run sat queued). The empty-rollup branch probes it too: with no check attached yet, a
+    run in flight is the only evidence that checks are coming at all.
 
-    On any error this returns None — distinct from [] ("nothing is
-    scheduled"), because an unanswerable probe must never read as green. The
-    no-workflow-checks caller keeps its not-green NO_WORKFLOW_RUNS verdict
-    either way; the all-passed caller reports ERROR (unknown) rather than
+    On any error this returns None — distinct from [] ("nothing is scheduled"), because an
+    unanswerable probe must never read as green. The no-workflow-checks caller keeps its not-green
+    NO_WORKFLOW_RUNS verdict either way; the all-passed caller reports ERROR (unknown) rather than
     guessing that nothing is coming.
     """
     r = subprocess.run(  # noqa: S603
@@ -470,25 +490,22 @@ def _runs_not_yet_reporting(head_sha: str, repo: str | None) -> list[str] | None
 
 
 def _main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None:
-    """Whether the main CI workflow has a COMPLETED run for `head_sha`.
-
-    The incomplete-runs probe cannot prove the suite was ever seen: seconds
-    after a head change the rollup can carry a few second-scale checks — GitHub
-    Apps and small proof workflows, all passing — while the main workflow's run
-    has not registered yet and is therefore invisible to the runs API
-    (2026-09-21, PR #3137: `--wait` read "CI all green (3 checks passed)" ~3s
-    after the push; 18 checks were running seconds later). A green verdict needs
-    positive evidence the main run exists for this head. Asking for a COMPLETED
-    run keeps this probe race-free against the incomplete-runs probe: a run that
-    registers between the two probes is still running, so the next poll reads it
+    """Whether the main CI workflow has a completed, non-skipped run for `head_sha`.
+    The incomplete-runs probe cannot prove the suite was ever seen: seconds after a head change
+    the rollup can carry a few second-scale checks — GitHub Apps and small proof workflows, all
+    passing — while the main workflow's run has not registered yet and is therefore invisible to
+    the runs API (2026-09-21, PR #3137: `--wait` read "CI all green (3 checks passed)" ~3s after
+    the push; 18 checks were running seconds later). A green verdict needs positive evidence the
+    main run actually ran for this head: a fully-skipped run is gated out, not evidence the suite
+    was seen. Asking for a COMPLETED run keeps this probe race-free against the incomplete-runs
+    probe: a run that registers between the two probes is still running, so the next poll reads it
     as PENDING rather than green.
 
-    A passing check-set far smaller than the repo's suite is the tell to
-    corroborate by hand (`gh run list --commit <head-sha>`) before trusting a
-    green verdict from an unwatched context.
+    A passing check-set far smaller than the repo's suite is the tell to corroborate by hand (`gh
+    run list --commit <head-sha>`) before trusting a green verdict from an unwatched context.
 
-    None means the probe could not answer (missing evidence, never "no run"):
-    the all-green caller reports ERROR (unknown) rather than guess green.
+    None means the probe could not answer (missing evidence, never "no run"): the all-green caller
+    reports ERROR (unknown) rather than guess green.
     """
     owner = repo if repo else "{owner}/{repo}"
     r = subprocess.run(  # noqa: S603
@@ -497,7 +514,7 @@ def _main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None
             "api",
             f"repos/{owner}/actions/runs?head_sha={head_sha}&status=completed&per_page=100",
             "--jq",
-            f'[.workflow_runs[] | select(.name == "{MAIN_CI_WORKFLOW_NAME}")] | length',
+            f'[.workflow_runs[] | select(.name == "{MAIN_CI_WORKFLOW_NAME}" and .conclusion != "skipped")] | length',
         ],
         capture_output=True,
         text=True,
@@ -514,13 +531,11 @@ def _main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None
 
 def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
     """Runs for `head_sha` that look permanently stuck in GitHub limbo.
-
-    The class (task #3275, 2026-09-13): `queued`, ZERO jobs ever created, and
-    past `_LIMBO_AGE_SECONDS`. Such a run stays in every non-completed answer
-    forever, so without this probe it holds an all-green rollup PENDING until
-    the caller's timeout -- silently. None means the probe could not answer
-    (missing evidence, never "no limbo"); a candidate whose job count cannot
-    be read is skipped, not assumed stuck.
+    The class (task #3275, 2026-09-13): `queued`, ZERO jobs ever created, and past
+    `_LIMBO_AGE_SECONDS`. Such a run stays in every non-completed answer forever, so without this
+    probe it holds an all-green rollup PENDING until the caller's timeout -- silently. None means
+    the probe could not answer (missing evidence, never "no limbo"); a candidate whose job count
+    cannot be read is skipped, not assumed stuck.
     """
     owner = repo if repo else "{owner}/{repo}"
     r = subprocess.run(  # noqa: S603
@@ -577,12 +592,10 @@ def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
 
 def _only_limbo_blocks(result: CIResult) -> bool:
     """Whether confirmed GitHub-limbo runs are the ONLY obstacle to green.
-
-    Tied to the runs the limbo probe itself named: every pending entry must be
-    one of them -- same count, so a same-named fresh run cannot ride along --
-    and nothing may sit in any other non-passing bucket. Anything short of
-    that is a real pending state and `--force` must not touch it (#2873:
-    missing evidence is not green; this is an explicit, named exception).
+    Tied to the runs the limbo probe itself named: every pending entry must be one of them -- same
+    count, so a same-named fresh run cannot ride along -- and nothing may sit in any other
+    non-passing bucket. Anything short of that is a real pending state and `--force` must not touch
+    it (#2873: missing evidence is not green; this is an explicit, named exception).
     """
     if not result.limbo or result.failed:
         return False
@@ -592,19 +605,16 @@ def _only_limbo_blocks(result: CIResult) -> bool:
 
 def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> None:
     """Resolve an empty `statusCheckRollup` into a verdict on `result`.
+    The rollup alone cannot tell "Actions has not attached the first check of a run yet" from
+    "nothing was scheduled for this head". The first is the state of every PR in the seconds after
+    a push — exactly when an agent launches a watcher — and reading it as settled ends the watch
+    before the suite has begun (2026-09-12: PR #2249 read NO_CHECKS 2s after the push; 16 checks
+    were running 10s later). The runs API answers it: a run still scheduled for the head means
+    checks are coming (PENDING); only a confirmed-empty answer is NO_CHECKS.
 
-    The rollup alone cannot tell "Actions has not attached the first check of a
-    run yet" from "nothing was scheduled for this head". The first is the state
-    of every PR in the seconds after a push — exactly when an agent launches a
-    watcher — and reading it as settled ends the watch before the suite has
-    begun (2026-09-12: PR #2249 read NO_CHECKS 2s after the push; 16 checks were
-    running 10s later). The runs API answers it: a run still scheduled for the
-    head means checks are coming (PENDING); only a confirmed-empty answer is
-    NO_CHECKS.
-
-    An unanswerable probe (None) is ERROR, not NO_CHECKS — the same asymmetry
-    the all-green path encodes: a gh / network failure must not produce the very
-    settled NO_CHECKS the probe exists to rule out.
+    An unanswerable probe (None) is ERROR, not NO_CHECKS — the same asymmetry the all-green path
+    encodes: a gh / network failure must not produce the very settled NO_CHECKS the probe exists to
+    rule out.
     """
     scheduled = _runs_not_yet_reporting(head_sha, repo)
     if scheduled is None:
@@ -620,31 +630,45 @@ def _empty_rollup_verdict(result: CIResult, head_sha: str, repo: str | None) -> 
         result.verdict = CIStatus.NO_CHECKS
 
 
-def check_ci(  # noqa: PLR0915 — one ordered verdict ladder; every probe feeds the guard below it.
-    pr_number: str | int, *, repo: str | None = None
-) -> CIResult:
+def _merge_conflict_result(data: dict, result: CIResult) -> CIResult:
+    """Keep the conflict verdict's check detail without entering CI evaluation."""
+    result.verdict = CIStatus.MERGE_CONFLICT
+    checks = data.get("statusCheckRollup", [])
+    result.checks = checks
+    for c in checks:
+        name = c.get("name", "?")
+        if name in QA_GATE_CHECK_NAMES:
+            result.gate_checks.append(c)
+            continue
+        status = c.get("status", "")
+        if status == "COMPLETED":
+            result.completed.append(name)
+        else:
+            result.pending.append(name)
+    return result
+
+
+def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     """Poll one PR's CI status and mergeability via `gh pr view --json`.
+    Returns a CIResult with a clear verdict — no ambiguous exit codes that agents misinterpret.
 
-    Returns a CIResult with a clear verdict — no ambiguous exit codes
-    that agents misinterpret.
+    Merge conflict detection: queries ``mergeable`` alongside ``statusCheckRollup``.  When
+    mergeable == "CONFLICTING" the verdict is MERGE_CONFLICT — CI runs are blocked until the
+    conflict is resolved, so there is no point waiting.
 
-    Merge conflict detection: queries ``mergeable`` alongside
-    ``statusCheckRollup``.  When mergeable == "CONFLICTING" the verdict
-    is MERGE_CONFLICT — CI runs are blocked until the conflict is
-    resolved, so there is no point waiting.
+    An empty rollup is probed against the runs API before it is called settled: a run still queued
+    / in progress for this head means checks are coming (PENDING), a confirmed-empty answer is
+    NO_CHECKS, and an unanswerable probe is ERROR — never a settled NO_CHECKS.
 
-    An empty rollup is probed against the runs API before it is called
-    settled: a run still queued / in progress for this head means checks are
-    coming (PENDING), a confirmed-empty answer is NO_CHECKS, and an
-    unanswerable probe is ERROR — never a settled NO_CHECKS.
+    Before a green verdict, a second probe confirms the main CI workflow has a completed,
+    non-skipped run for this head — a check-set built from second-scale checks alone is not
+    evidence the suite ran (2026-09-21, PR #3137).
 
-    Before a green verdict, a second probe confirms the main CI workflow has a
-    completed run for this head — a check-set built from second-scale checks alone
-    is not evidence the suite ran (2026-09-21, PR #3137).
+    A draft PR whose core shard checks are all gate-skipped is NOT_READY before the green path:
+    draft gating skipped the suite, so there is no CI evidence either way.
 
-    The key rule: only COMPLETED checks are evaluated.  Checks that are
-    QUEUED / IN_PROGRESS / PENDING are correctly identified as such and
-    do NOT trigger a FAILED verdict.
+    The key rule: only COMPLETED checks are evaluated.  Checks that are QUEUED / IN_PROGRESS /
+    PENDING are correctly identified as such and do NOT trigger a FAILED verdict.
     """
     pr_num = str(pr_number)
     result = CIResult(verdict=CIStatus.ERROR)
@@ -659,7 +683,7 @@ def check_ci(  # noqa: PLR0915 — one ordered verdict ladder; every probe feeds
             pr_num,
             *(("--repo", repo) if repo else ()),
             "--json",
-            "mergeable,statusCheckRollup,headRefOid",
+            "mergeable,statusCheckRollup,headRefOid,isDraft",
         ],
         capture_output=True,
         text=True,
@@ -677,22 +701,9 @@ def check_ci(  # noqa: PLR0915 — one ordered verdict ladder; every probe feeds
 
     # --- Merge conflict detection ---
     result.mergeable = data.get("mergeable", "UNKNOWN")
+    result.is_draft = bool(data.get("isDraft", False))
     if result.mergeable in CONFLICTING:
-        result.verdict = CIStatus.MERGE_CONFLICT
-        # Still populate checks for visibility
-        checks = data.get("statusCheckRollup", [])
-        result.checks = checks
-        for c in checks:
-            name = c.get("name", "?")
-            if name in QA_GATE_CHECK_NAMES:
-                result.gate_checks.append(c)
-                continue
-            status = c.get("status", "")
-            if status == "COMPLETED":
-                result.completed.append(name)
-            else:
-                result.pending.append(name)
-        return result
+        return _merge_conflict_result(data, result)
 
     # --- CI check evaluation ---
     checks = _latest_completed_per_name(data.get("statusCheckRollup", []))
@@ -705,75 +716,71 @@ def check_ci(  # noqa: PLR0915 — one ordered verdict ladder; every probe feeds
         _empty_rollup_verdict(result, data.get("headRefOid", ""), repo)
         return result
 
+    core_skipped = _core_suite_skipped(checks)
+    result.core_skipped = core_skipped or []
     _partition_checks(checks, result)
 
     # Determine verdict
     if result.failed:
         result.verdict = CIStatus.FAILED
+    elif _draft_gate_skipped(result, core_skipped):
+        result.verdict = CIStatus.NOT_READY
     elif result.pending:
         result.verdict = CIStatus.PENDING
     else:
-        # Every check attached so far has passed. Attached, though, is not the
-        # same as finished: a run that is queued / in progress has attached
-        # nothing to this commit yet, so a rollup carrying part of the suite —
-        # all green — is indistinguishable from a finished suite. Multi-workflow
-        # repos on self-hosted runners sit in that window routinely (2026-09-10,
-        # MonsoraV2 #774: ALL_PASSED in ~2s while ci.yml run 34487002348 was
-        # still queued), and a green verdict there ends the watch early. Ask the
-        # runs API once, before any green verdict, whether more is coming.
+        # Every check attached so far has passed. Attached, though, is not the same as finished: a
+        # run that is queued / in progress has attached nothing to this commit yet, so a rollup
+        # carrying part of the suite — all green — is indistinguishable from a finished suite.
+        # Multi-workflow repos on self-hosted runners sit in that window routinely (2026-09-10,
+        # MonsoraV2 #774: ALL_PASSED in ~2s while ci.yml run 34487002348 was still queued), and a
+        # green verdict there ends the watch early. Ask the runs API once, before any green
+        # verdict, whether more is coming.
         scheduled = _runs_not_yet_reporting(data.get("headRefOid", ""), repo)
         if scheduled:
             result.pending.extend(scheduled)
             result.verdict = CIStatus.PENDING
             result.limbo = _limbo_runs(data.get("headRefOid", ""), repo) or []
         elif not result.workflow_checks and _repo_has_workflows():
-            # Nothing from a workflow is attached — and nothing is confirmed
-            # scheduled (an unanswerable probe, None, reads the same here) —
-            # while this checkout does define workflows: the suite did not run.
-            # Reporting ALL_PASSED here is how a broken `runs-on` — 2026-07-28,
-            # hosted runners a private repo could not schedule — reads as green:
-            # the only check left standing was a GitHub App's, and it passed.
+            # Nothing from a workflow is attached — and nothing is confirmed scheduled (an
+            # unanswerable probe, None, reads the same here) — while this checkout does define
+            # workflows: the suite did not run. Reporting ALL_PASSED here is how a broken `runs-on`
+            # — 2026-07-28, hosted runners a private repo could not schedule — reads as green: the
+            # only check left standing was a GitHub App's, and it passed.
             #
-            # Residual false positive (2026-09-12, task #3160): in the window
-            # right after a head change (force-push or push), an app check has
-            # attached while the new run has not *registered* yet — invisible to
-            # the runs probe, so a healthy PR can read as this verdict once
-            # (2026-08-02 #1216; 2026-09-12: queue lag of minutes observed — the
-            # attached app check is the tell). It is not proof the suite will not
-            # run: corroborate head-precisely — `gh run list --commit <head-sha>`
-            # (add `--repo <owner/repo>` when cwd is not the checkout) — a
-            # queued / in_progress run there means it is coming. `--branch` is not
-            # an equivalent check: it also lists the runs of the head this one
-            # replaced, and a force-push leaves those completed, which reads as
-            # either answer. The genuine #885 shape stays distinguishable by
-            # re-checking after a pause; read later in a watch, on a settled
-            # head, this verdict means what it says.
+            # Residual false positive (2026-09-12, task #3160): in the window right after a head
+            # change (force-push or push), an app check has attached while the new run has not
+            # *registered* yet — invisible to the runs probe, so a healthy PR can read as this
+            # verdict once (2026-08-02 #1216; 2026-09-12: queue lag of minutes observed — the
+            # attached app check is the tell). It is not proof the suite will not run: corroborate
+            # head-precisely — `gh run list --commit <head-sha>` (add `--repo <owner/repo>` when
+            # cwd is not the checkout) — a queued / in_progress run there means it is coming.
+            # `--branch` is not an equivalent check: it also lists the runs of the head this one
+            # replaced, and a force-push leaves those completed, which reads as either answer. The
+            # genuine #885 shape stays distinguishable by re-checking after a pause; read later in
+            # a watch, on a settled head, this verdict means what it says.
             result.verdict = CIStatus.NO_WORKFLOW_RUNS
         elif scheduled is None:
-            # The attached checks all passed, but the probe could not answer
-            # whether more runs are still queued. Unanswerable is not "nothing
-            # scheduled": report ERROR (unknown) — --wait prints it and exits 3
-            # if it persists — rather than guess green, and rather than a
-            # PENDING that would claim checks are pending when none are.
+            # The attached checks all passed, but the probe could not answer whether more runs are
+            # still queued. Unanswerable is not "nothing scheduled": report ERROR (unknown) —
+            # --wait prints it and exits 3 if it persists — rather than guess green, and rather
+            # than a PENDING that would claim checks are pending when none are.
             result.verdict = CIStatus.ERROR
             result.error_detail = (
                 "runs API probe failed: cannot confirm no workflow run is still "
                 "queued for this head"
             )
         else:
-            # Nothing is still running — but that only rules out runs that HAVE
-            # registered. Registration lags a head change, and in that window a
-            # rollup of second-scale checks (GitHub Apps, small proof workflows)
-            # all passing is indistinguishable from a finished suite: the
-            # incomplete-runs probe above sees nothing to wait for, so green
-            # here would end a watch before the suite began (2026-09-21, PR
-            # #3137: "CI all green (3 checks passed)" ~3s after the push; 18
-            # checks were running seconds later). A green verdict therefore also
-            # confirms the main CI workflow has been SEEN for this head — a
-            # completed run of MAIN_CI_WORKFLOW_NAME — and a check-set far
-            # smaller than the repo's suite is the tell to corroborate by hand.
-            # Scoped by _repo_has_workflows(): a checkout with no workflows is
-            # legitimately green on app checks alone.
+            # Nothing is still running — but that only rules out runs that HAVE registered.
+            # Registration lags a head change, and in that window a rollup of second-scale checks
+            # (GitHub Apps, small proof workflows) all passing is indistinguishable from a finished
+            # suite: the incomplete-runs probe above sees nothing to wait for, so green here would
+            # end a watch before the suite began (2026-09-21, PR #3137: "CI all green (3 checks
+            # passed)" ~3s after the push; 18 checks were running seconds later). A green verdict
+            # therefore also confirms the main CI workflow has been SEEN for this head — a
+            # completed, non-skipped run of MAIN_CI_WORKFLOW_NAME — and a check-set far smaller
+            # than the repo's suite is the tell to corroborate by hand. Scoped by
+            # _repo_has_workflows(): a checkout with no workflows is legitimately green on app
+            # checks alone.
             #
             # Not seen -> PENDING with the run name in `pending`: --wait keeps
             # polling (bounded by --timeout), and the one-shot keeps its legacy
@@ -807,8 +814,8 @@ def check_ci(  # noqa: PLR0915 — one ordered verdict ladder; every probe feeds
 
 def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
     """One-shot probe: print the current verdict and exit (legacy contract —
-    PENDING / NO_CHECKS / ERROR exit 0, FAILED / MERGE_CONFLICT /
-    NO_WORKFLOW_RUNS exit 1)."""
+    PENDING / NO_CHECKS / ERROR exit 0; FAILED / MERGE_CONFLICT /
+    NO_WORKFLOW_RUNS / draft-gated NOT_READY exit 1)."""
     result = check_ci(pr, repo=repo)
 
     if as_json:
@@ -825,6 +832,8 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
                     "workflow_checks": result.workflow_checks,
                     "trunk_checks": result.trunk_checks,
                     "gate_checks": result.gate_checks,
+                    "is_draft": result.is_draft,
+                    "core_skipped": result.core_skipped,
                     "error_detail": result.error_detail,
                     "terminal": result.verdict.is_terminal,
                 },
@@ -838,7 +847,8 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
         0
         if result.verdict is CIStatus.ALL_PASSED
         else 1
-        if result.verdict in (CIStatus.FAILED, CIStatus.MERGE_CONFLICT, CIStatus.NO_WORKFLOW_RUNS)
+        if result.verdict
+        in (CIStatus.FAILED, CIStatus.MERGE_CONFLICT, CIStatus.NO_WORKFLOW_RUNS, CIStatus.NOT_READY)
         else 0
     )
 
@@ -904,13 +914,11 @@ def _is_sha(value: str) -> bool:
 
 def _base_freshness(pr: str, repo: str) -> tuple[tuple[str, str] | None, bool]:
     """Return ((base_sha, main_sha) when stale else None, unreadable).
-
-    The PR's `baseRefOid` is the base-branch SHA GitHub last evaluated the PR
-    against. When current main is ahead of it, the queue's predictive branch
-    will include commits this PR's green CI never saw, so Trunk re-tests the
-    tree against the newer base — the extra in-queue round task #2496 (A1)
-    wants operators warned about. Advisory only: any read error or non-SHA
-    output sets `unreadable` and never blocks submission.
+    The PR's `baseRefOid` is the base-branch SHA GitHub last evaluated the PR against. When
+    current main is ahead of it, the queue's predictive branch will include commits this PR's green
+    CI never saw, so Trunk re-tests the tree against the newer base — the extra in-queue round task
+    #2496 (A1) wants operators warned about. Advisory only: any read error or non-SHA output sets
+    `unreadable` and never blocks submission.
     """
     result = subprocess.run(  # noqa: S603
         ["gh", "pr", "view", pr, "--repo", repo, "--json", "baseRefOid", "--jq", ".baseRefOid"],
@@ -1016,10 +1024,9 @@ def _submit_trunk(pr: str, repo: str, priority: str, *, token: str) -> int:
 
 def _trunk_cancel(pr: str, repo: str, *, token: str) -> int:
     """Evict a PR from the Trunk queue; 0 cancelled, 1 not in queue, 4 error.
-
-    Trunk exposes `cancelPullRequest` (verified live: 200 on success, HTTP
-    404 when the PR is not in the queue). There is no reorder endpoint — a
-    mid-queue reshuffle cannot be scripted, only cancel and re-submit.
+    Trunk exposes `cancelPullRequest` (verified live: 200 on success, HTTP 404 when the PR is not
+    in the queue). There is no reorder endpoint — a mid-queue reshuffle cannot be scripted, only
+    cancel and re-submit.
     """
     payload = _trunk_pr_payload(pr, repo)
     _, error = _trunk_post("cancelPullRequest", payload, token)
@@ -1043,11 +1050,9 @@ def _trunk_cancel(pr: str, repo: str, *, token: str) -> int:
 
 def _trunk_queue_status(repo: str, *, token: str, as_json: bool) -> int:
     """Print the Trunk queue state and enqueued PRs; 0 ok, 3 API error.
-
-    `--json` prints the raw `getQueue` response (queue config plus
-    `enqueuedPullRequests`, each carrying state / priority / sha). States are
-    lowercase as returned: queued / pending / testing / merged / failed /
-    cancelled.
+    `--json` prints the raw `getQueue` response (queue config plus `enqueuedPullRequests`, each
+    carrying state / priority / sha). States are lowercase as returned: queued / pending / testing
+    / merged / failed / cancelled.
     """
     payload = _trunk_target_payload(repo)
     data, error = _trunk_post("getQueue", payload, token)
@@ -1081,10 +1086,8 @@ def _trunk_operator_command(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> int | None:
     """Dispatch --queue-status / --evict when set; None when neither is.
-
-    Both touch the live Trunk queue and need TRUNK_API_TOKEN (exit 3 when
-    unset). Usage errors go through parser.error, which exits 2, matching the
-    rest of the CLI's contract.
+    Both touch the live Trunk queue and need TRUNK_API_TOKEN (exit 3 when unset). Usage errors go
+    through parser.error, which exits 2, matching the rest of the CLI's contract.
     """
     if not (args.queue_status or args.evict):
         return None
@@ -1163,10 +1166,9 @@ def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentPar
 
 def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
     """Dispatch --ci-usage when set; None when not set.
-
-    Reads the repo ledger (scripts/ci_usage/ledger.jsonl, produced by
-    scripts/ci_accounting.py --append-ledger) and prints per-agent rollups —
-    the read side of the CI cost attribution pipeline (task #2575).
+    Reads the repo ledger (scripts/ci_usage/ledger.jsonl, produced by scripts/ci_accounting.py
+    --append-ledger) and prints per-agent rollups — the read side of the CI cost attribution
+    pipeline (task #2575).
     """
     if not args.ci_usage:
         return None
@@ -1281,10 +1283,8 @@ def _failed_test_names(log: str) -> list[str]:
 
 def _quarantined_tests(repo: str, *, token: str | None) -> list[dict[str, object]]:
     """Trunk's quarantined (flaky/broken) tests; empty when unavailable.
-
-    The lookup needs TRUNK_API_TOKEN and the Flaky Tests upload wiring (PR
-    #1626); without either, the diagnosis cannot vouch for flakiness and
-    says so instead of guessing.
+    The lookup needs TRUNK_API_TOKEN and the Flaky Tests upload wiring (PR #1626); without either,
+    the diagnosis cannot vouch for flakiness and says so instead of guessing.
     """
     if not token:
         return []
@@ -1379,11 +1379,9 @@ def _synthetic_test_prs(pr: str, repo: str) -> list[dict[str, object]]:
 
 def _diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
     """Collect the PR's failure evidence and classify it (task #2572).
-
-    Diagnosis only — no repair action is taken here; the operator executes
-    the suggested action. Evidence sources: the PR's check rollup + job log
-    tails, Trunk's queue state + flaky DB, and the synthetic trunk-merge
-    test PRs.
+    Diagnosis only — no repair action is taken here; the operator executes the suggested action.
+    Evidence sources: the PR's check rollup + job log tails, Trunk's queue state + flaky DB, and
+    the synthetic trunk-merge test PRs.
     """
     diag: dict[str, Any] = {
         "pr": pr,
@@ -1560,11 +1558,9 @@ def _watch_trunk_enqueue(
     token: str,
 ) -> int:
     """Poll Trunk's submitted-PR state until it merges, fails, or times out.
-
-    Terminal states: "merged", "failed", "cancelled". Everything else —
-    including "pending" (waiting for a batch), "not_ready" (required statuses
-    not yet green), and "testing" (merge-tree test run in progress, observed
-    live 2026-09-03) — is non-terminal: keep polling.
+    Terminal states: "merged", "failed", "cancelled". Everything else — including "pending"
+    (waiting for a batch), "not_ready" (required statuses not yet green), and "testing" (merge-tree
+    test run in progress, observed live 2026-09-03) — is non-terminal: keep polling.
     """
     payload = _trunk_pr_payload(pr, repo)
     consecutive_errors = 0
@@ -1693,10 +1689,8 @@ def _trunk_merge_flow(
 
 def _report_limbo(result: CIResult, reported: tuple[int, ...] | None) -> tuple[int, ...] | None:
     """Name GitHub-limbo runs loudly on first sight (and on any change).
-
-    Never silent (task #3275): this is the state that used to eat a --wait
-    budget invisibly. Returns the new reported-state key so a repeat poll
-    does not spam the same notice.
+    Never silent (task #3275): this is the state that used to eat a --wait budget invisibly.
+    Returns the new reported-state key so a repeat poll does not spam the same notice.
     """
     if not result.limbo:
         return reported
@@ -1746,15 +1740,13 @@ def _wait_for_verdict(
     force: bool = False,
 ) -> int:
     """Poll check_ci until the verdict settles, then report and exit.
+    Never loops silently: a persistent gh/network failure exits 3 after MAX_CONSECUTIVE_ERRORS
+    attempts with the error printed — the silent infinite loop this was built to eliminate
+    (2026-08-02, PR #1243).
 
-    Never loops silently: a persistent gh/network failure exits 3 after
-    MAX_CONSECUTIVE_ERRORS attempts with the error printed — the silent
-    infinite loop this was built to eliminate (2026-08-02, PR #1243).
-
-    GitHub-limbo runs (task #3275) are named loudly as soon as they are seen
-    and again at the deadline; `force` is the operator escape hatch — it
-    concludes green anyway, but only when the named limbo runs are the sole
-    obstacle (`_only_limbo_blocks`).
+    GitHub-limbo runs (task #3275) are named loudly as soon as they are seen and again at the
+    deadline; `force` is the operator escape hatch — it concludes green anyway, but only when the
+    named limbo runs are the sole obstacle (`_only_limbo_blocks`).
     """
     consecutive_errors = 0
     no_checks_reported = False
@@ -1770,17 +1762,16 @@ def _wait_for_verdict(
         if verdict is CIStatus.PENDING and not forced_green:
             consecutive_errors = 0
             limbo_reported = _report_limbo(result, limbo_reported)
-            if _deadline_hit(deadline, pr, timeout):
+            if _deadline_hit(deadline, pr, timeout, what=_pending_reason(result)):
                 _limbo_timeout_note(pr, result)
                 return 1
             time.sleep(every)
             continue
 
         if verdict is CIStatus.NO_CHECKS:
-            # Just-pushed window: the rollup can be empty for a few seconds
-            # after a push before Actions attaches its first check. Wait
-            # quietly; --timeout bounds the wait. (NO_WORKFLOW_RUNS, by
-            # contrast, means Actions confirmed it never scheduled — that is
+            # Just-pushed window: the rollup can be empty for a few seconds after a push before
+            # Actions attaches its first check. Wait quietly; --timeout bounds the wait.
+            # (NO_WORKFLOW_RUNS, by contrast, means Actions confirmed it never scheduled — that is
             # a verdict below, not a wait.)
             if not no_checks_reported:
                 print("[ci] no checks yet — waiting", file=sys.stderr, flush=True)
@@ -1812,7 +1803,7 @@ def _wait_for_verdict(
             time.sleep(every)
             continue
 
-        # Settled verdict — FAILED / MERGE_CONFLICT / NO_WORKFLOW_RUNS / ALL_PASSED
+        # Settled verdict — FAILED / NOT_READY / MERGE_CONFLICT / NO_WORKFLOW_RUNS / ALL_PASSED
         if verdict is CIStatus.ALL_PASSED or forced_green:
             if forced_green:
                 names = ", ".join(f"{r['name']} (#{r['id']})" for r in result.limbo)

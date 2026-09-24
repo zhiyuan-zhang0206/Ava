@@ -33,7 +33,7 @@ The full linter inventory — what each one enforces and where it runs: [[script
 
 ### CI / Release / Migration
 - `qa_gate.py` + `qa_receipt.py` — evaluates exact-head QA evidence from GitHub; synthetic queue exemptions require verified Trunk identity, same-repository draft targeting main, and a complete normal or `-bisection` test ref (see [receipt contract](../conventions/qa-approval-receipt.md))
-- `ci_utils.py` — polls PR CI status + merge conflict detection; separates workflow-produced checks from GitHub App ones so a suite that never ran cannot read as green (`NO_WORKFLOW_RUNS`), and submits green, labeled PRs through Trunk with a head-update cooldown, one retry, and terminal-state polling
+- `ci_utils.py` — polls PR CI status + conflicts; separates workflow checks from GitHub App ones so a suite that never ran cannot read as green (`NO_WORKFLOW_RUNS`) and a draft PR's gate-skipped suite reports `NOT_READY`; submits green, labeled PRs through Trunk with a cooldown, one retry, and terminal-state polling
 - `coverage_gates.py` — backend CI coverage gates: the combined 85% line-rate over the core domains (agent/ava/cli/gateway/shared/ui) plus per-risk-domain minimum line floors for ops/services/ava_builtins, read from the combined shard `coverage.json`
 - `audit_branch_protection.py` — read-only comparison of live GitHub branch protection / workflow activation against the required checks declared in `.trunk/trunk.yaml`; exit status distinguishes verified drift from an API/tool failure
 - `build_app_update_manifest.py` — turns signed Tauri desktop archives into the app's static `latest.json`; unsigned release runs get an empty platform map

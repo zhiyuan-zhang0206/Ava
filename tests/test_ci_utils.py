@@ -1,10 +1,9 @@
 """Tests for scripts/ci_utils.py — the tool AGENTS.md gates merges on.
 
-The verdict this file cares most about is the one that was wrong on 2026-07-28:
-when Actions cannot schedule (#885 switched to hosted runners a private repo has
-no minutes for), every workflow check vanishes from the rollup, the only check
-left is a GitHub App's, it passes, and `check_ci` reported "CI all green (1
-checks passed)" on a pull request that ran nothing.
+The verdict this file cares most about was wrong on 2026-07-28: when Actions cannot schedule (#885
+switched to hosted runners a private repo has no minutes for), every workflow check vanishes from
+the rollup. The only check left is a GitHub App's; it passes, and `check_ci` reported "CI all green
+(1 checks passed)" on a pull request that ran nothing.
 """
 
 from __future__ import annotations
@@ -27,9 +26,8 @@ _MOD_NAME = "ci_utils_under_test"
 _spec = importlib.util.spec_from_file_location(_MOD_NAME, _MOD_PATH)
 assert _spec and _spec.loader
 ci_utils = importlib.util.module_from_spec(_spec)
-# Register before exec: @dataclass resolves its own module out of sys.modules
-# while the class body is being processed, and fails on a module that is not
-# there yet.
+# Register before exec: @dataclass resolves its own module out of sys.modules while the class body
+# is processed, and fails on a module that is not there yet.
 sys.modules[_MOD_NAME] = ci_utils
 _spec.loader.exec_module(ci_utils)
 
@@ -106,13 +104,10 @@ def _labels_runner(labels: list[str], calls: list[list[str]]):
 def gh(monkeypatch: pytest.MonkeyPatch):
     """Stub the `gh` subprocess, dispatching on the subcommand.
 
-    `check_ci` makes three different calls — `gh pr view` for the rollup, `gh
-    api .../actions/runs` for what Actions has scheduled, and the completed
-    main-workflow probe — and they must not be answered with the same payload.
-    Telling "no workflow ever ran" from "the workflow has not attached a check
-    yet" is exactly what the scheduled-runs call is for. `scheduled` is the
-    names of runs the API reports as not yet completed; `main_completed`
-    defaults to True for the completed main-workflow probe.
+    `check_ci` makes three calls: `gh pr view` for the rollup, `gh api .../actions/runs` for what
+    Actions scheduled, and the completed main-workflow probe. They need different payloads. The
+    scheduled-runs call distinguishes "no workflow ever ran" from "the workflow has not attached a
+    check yet". `scheduled` names runs not yet completed; `main_completed` defaults to True.
     """
 
     def _install(
@@ -121,9 +116,15 @@ def gh(monkeypatch: pytest.MonkeyPatch):
         *,
         scheduled: list[str] | None = None,
         main_completed: bool = True,
+        is_draft: bool = False,
     ) -> None:
         rollup = json.dumps(
-            {"mergeable": mergeable, "statusCheckRollup": checks, "headRefOid": "deadbeef"}
+            {
+                "mergeable": mergeable,
+                "statusCheckRollup": checks,
+                "headRefOid": "deadbeef",
+                "isDraft": is_draft,
+            }
         )
         runs = json.dumps(scheduled or [])
 
@@ -170,7 +171,7 @@ def has_workflows(monkeypatch: pytest.MonkeyPatch):
 
 def test_app_check_alone_is_not_green(gh: Any, has_workflows: Any) -> None:
     """The 2026-07-28 shape: Actions never ran, an app check passed."""
-    gh([_APP_CHECK])
+    gh([_APP_CHECK], scheduled=[])
     has_workflows(True)
     r = ci_utils.check_ci("886")
     assert r.verdict is CIStatus.NO_WORKFLOW_RUNS
@@ -256,65 +257,45 @@ def test_merge_conflict_keeps_qa_approved_gate_out_of_completed(
     assert r.gate_checks == [gate, evidence]
 
 
-def test_status_context_gate_success_is_not_a_pending_check(gh: Any, has_workflows: Any) -> None:
-    """qa_gate.py publishes the receipt as a commit STATUS (StatusContext):
-    it carries context+state, no name/status/conclusion. It must land in
-    gate_checks, never read as a nameless "?" pending entry (2026-09-04:
-    five green PRs froze on exactly that phantom)."""
+@pytest.mark.parametrize(
+    ("context", "state", "verdict", "bucket", "expected"),
+    [
+        ("qa-approved-gate", "SUCCESS", CIStatus.ALL_PASSED, "gate_checks", "gate"),
+        ("coverage/deploy", "SUCCESS", CIStatus.ALL_PASSED, "passed", "coverage/deploy"),
+        ("coverage/deploy", "FAILURE", CIStatus.FAILED, "failed", "failure"),
+        ("coverage/deploy", "PENDING", CIStatus.PENDING, "pending", "coverage/deploy"),
+    ],
+)
+def test_status_context_bucketing(
+    gh: Any,
+    has_workflows: Any,
+    context: str,
+    state: str,
+    verdict: CIStatus,
+    bucket: str,
+    expected: str,
+) -> None:
+    """Commit statuses have context+state, not check-run keys; the QA receipt
+    must not become a phantom '?' pending check (2026-09-04: five PRs froze)."""
     status_ctx = {
         "__typename": "StatusContext",
-        "context": "qa-approved-gate",
-        "state": "SUCCESS",
+        "context": context,
+        "state": state,
         "targetUrl": "",
     }
     gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
     has_workflows(True)
-    r = ci_utils.check_ci("1")
-    assert r.verdict is CIStatus.ALL_PASSED
-    assert r.gate_checks == [status_ctx]
-    assert "?" not in r.pending
-
-
-def test_status_context_other_context_success_counts_as_passed(gh: Any, has_workflows: Any) -> None:
-    status_ctx = {
-        "__typename": "StatusContext",
-        "context": "coverage/deploy",
-        "state": "SUCCESS",
-        "targetUrl": "",
-    }
-    gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
-    has_workflows(True)
-    r = ci_utils.check_ci("1")
-    assert r.verdict is CIStatus.ALL_PASSED
-    assert "coverage/deploy" in r.passed
-
-
-def test_status_context_failure_counts_as_failed(gh: Any, has_workflows: Any) -> None:
-    status_ctx = {
-        "__typename": "StatusContext",
-        "context": "coverage/deploy",
-        "state": "FAILURE",
-        "targetUrl": "",
-    }
-    gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
-    has_workflows(True)
-    r = ci_utils.check_ci("1")
-    assert r.verdict is CIStatus.FAILED
-    assert {"name": "coverage/deploy", "conclusion": "FAILURE"} in r.failed
-
-
-def test_status_context_pending_state_is_pending(gh: Any, has_workflows: Any) -> None:
-    status_ctx = {
-        "__typename": "StatusContext",
-        "context": "coverage/deploy",
-        "state": "PENDING",
-        "targetUrl": "",
-    }
-    gh([_check("backend (pytest + pyright)", "SUCCESS"), status_ctx])
-    has_workflows(True)
-    r = ci_utils.check_ci("1")
-    assert r.verdict is CIStatus.PENDING
-    assert r.pending == ["coverage/deploy"]
+    result = ci_utils.check_ci("1")
+    assert result.verdict is verdict
+    if bucket == "gate_checks":
+        assert result.gate_checks == [status_ctx]
+        assert "?" not in result.pending
+    elif bucket == "failed":
+        assert {"name": context, "conclusion": state} in result.failed
+    elif bucket == "pending":
+        assert result.pending == [context]
+    else:
+        assert expected in result.passed
 
 
 def test_stale_cancelled_run_loses_to_newer_success_of_same_name(
@@ -388,7 +369,6 @@ def test_empty_rollup_with_a_queued_run_is_pending_not_no_checks(gh: Any) -> Non
     gh([], scheduled=["CI"])
 
     r = ci_utils.check_ci("2249")
-
     assert r.verdict is CIStatus.PENDING
     assert r.pending == ["CI"]
 
@@ -402,7 +382,6 @@ def test_empty_rollup_with_an_unanswerable_probe_is_error(
     monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: None)
 
     r = ci_utils.check_ci("2249")
-
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -428,11 +407,10 @@ def test_this_repo_has_workflows() -> None:
 
 
 # --- the false negative: scheduled but not yet reporting ---
-# The mirror of the regression above. Between a push and the first check-run
-# appearing on the commit, the rollup looks exactly like "Actions never ran" —
-# and that window lands on the first poll after a push, which is when an agent
-# is most likely to be watching. Reporting DID NOT RUN there sends it off to
-# investigate a CI that is simply still starting.
+# The mirror of the regression above. Between a push and the first check-run appearing on the
+# commit, the rollup looks exactly like "Actions never ran" — and that window lands on the first
+# poll after a push, which is when an agent is most likely to be watching. Reporting DID NOT RUN
+# there sends it off to investigate a CI that is simply still starting.
 
 
 def test_queued_run_with_no_check_yet_is_pending_not_did_not_run(
@@ -442,21 +420,9 @@ def test_queued_run_with_no_check_yet_is_pending_not_did_not_run(
     has_workflows(True)
 
     r = ci_utils.check_ci("901")
-
     assert r.verdict == CIStatus.PENDING
     assert "CI" in r.pending
     assert "DID NOT RUN" not in r.summary()
-
-
-def test_nothing_scheduled_is_still_did_not_run(gh: Any, has_workflows: Any) -> None:
-    """The guard must keep working: an app check alone, and nothing queued to
-    explain it, is the shape that shipped a PR having run no tests."""
-    gh([_APP_CHECK], scheduled=[])
-    has_workflows(True)
-
-    r = ci_utils.check_ci("886")
-
-    assert r.verdict == CIStatus.NO_WORKFLOW_RUNS
 
 
 def test_partial_suite_green_with_a_run_still_queued_is_pending(
@@ -478,10 +444,19 @@ def test_partial_suite_green_with_a_run_still_queued_is_pending(
     has_workflows(True)
 
     r = ci_utils.check_ci("774")
-
     assert r.verdict is CIStatus.PENDING
     assert "CI" in r.pending
     assert "guardrails (impacted)" in r.passed
+    gh(
+        [
+            _check("guardrails (impacted)", "SUCCESS"),
+            _check("e2e (smoke)", "SUCCESS"),
+            _check("contracts", "SUCCESS"),
+        ],
+        scheduled=[],
+        main_completed=True,
+    )
+    assert ci_utils.check_ci("775").verdict is CIStatus.ALL_PASSED
 
 
 def test_partial_suite_green_with_an_unanswerable_probe_is_error(
@@ -501,27 +476,8 @@ def test_partial_suite_green_with_an_unanswerable_probe_is_error(
     monkeypatch.setattr(ci_utils, "_runs_not_yet_reporting", lambda *_a, **_k: None)
 
     r = ci_utils.check_ci("776")
-
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
-
-
-def test_partial_suite_green_with_nothing_scheduled_is_green(gh: Any, has_workflows: Any) -> None:
-    """The mirror of the early-green window: the same partially attached rollup,
-    but the runs API reports nothing left to come — the suite is done, and the
-    verdict is green and the main run is seen."""
-    gh(
-        [
-            _check("guardrails (impacted)", "SUCCESS"),
-            _check("e2e (smoke)", "SUCCESS"),
-            _check("contracts", "SUCCESS"),
-        ],
-        scheduled=[],
-        main_completed=True,
-    )
-    has_workflows(True)
-
-    assert ci_utils.check_ci("775").verdict is CIStatus.ALL_PASSED
 
 
 def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workflows: Any) -> None:
@@ -536,29 +492,11 @@ def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workf
     gh(checks, scheduled=[], main_completed=False)
 
     r = ci_utils.check_ci("3137")
-
     assert r.verdict is CIStatus.PENDING
     assert ci_utils.MAIN_CI_WORKFLOW_NAME in r.pending
     assert "all green" not in r.summary()
     assert "pending" in r.summary().lower()
-
     gh(checks, scheduled=[], main_completed=True)
-
-    assert ci_utils.check_ci("3137").verdict is CIStatus.ALL_PASSED
-
-
-def test_main_run_seen_with_all_checks_passed_is_green(gh: Any, has_workflows: Any) -> None:
-    """Positive path of the gate: nothing is running and the main run is seen."""
-    gh(
-        [
-            _check("backend", "SUCCESS"),
-            _check("docs", "SKIPPED"),
-        ],
-        scheduled=[],
-        main_completed=True,
-    )
-    has_workflows(True)
-
     assert ci_utils.check_ci("3137").verdict is CIStatus.ALL_PASSED
 
 
@@ -571,7 +509,6 @@ def test_main_workflow_probe_failure_is_error(
     monkeypatch.setattr(ci_utils, "_main_workflow_run_completed", lambda *_a, **_k: None)
 
     r = ci_utils.check_ci("3137")
-
     assert r.verdict is CIStatus.ERROR
     assert "probe" in r.error_detail
 
@@ -592,15 +529,74 @@ def test_main_workflow_probe_reads_completed_runs_of_the_main_workflow(
         return _R()
 
     monkeypatch.setattr(ci_utils.subprocess, "run", _run)
-
     assert ci_utils._main_workflow_run_completed("abc123", None) is True
     joined = " ".join(seen["cmd"])
     assert "head_sha=abc123" in joined
     assert "status=completed" in joined
-    assert f'select(.name == "{ci_utils.MAIN_CI_WORKFLOW_NAME}")' in joined
-
+    assert 'select(.name == "CI" and .conclusion != "skipped")' in joined
     _R.stdout = "0"
     assert ci_utils._main_workflow_run_completed("abc123", None) is False
+
+
+def _core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
+    return [
+        _APP_CHECK,
+        _check("classify change", classify),
+        _check("backend shard (${{ matrix.group }}/16)", conclusion),
+        _check("e2e shard (${{ matrix.group }}/4)", conclusion),
+        _check("backend selected subset", "SKIPPED"),
+        _check("CI summary", "SKIPPED"),
+    ]
+
+
+def test_draft_pr_with_skipped_core_suite_is_not_ready(gh: Any, has_workflows: Any) -> None:
+    gh(_core_rollup("SKIPPED"), is_draft=True, scheduled=[], main_completed=True)
+    has_workflows(True)
+    result = ci_utils.check_ci("3313")
+    assert result.verdict is CIStatus.NOT_READY
+    assert "NOT READY" in result.summary() and "draft" in result.summary()
+    assert "all green" not in result.summary()
+    assert result.core_skipped == [c["name"] for c in _core_rollup("SKIPPED")[2:4]]
+
+
+def test_draft_pr_whose_core_suite_ran_stays_green(gh: Any, has_workflows: Any) -> None:
+    gh(_core_rollup("SUCCESS"), is_draft=True, main_completed=True)
+    has_workflows(True)
+    assert ci_utils.check_ci("3313").verdict is CIStatus.ALL_PASSED
+
+
+def test_ready_transition_with_draft_skipped_core_is_pending(gh: Any, has_workflows: Any) -> None:
+    gh(_core_rollup("SKIPPED"), is_draft=False, scheduled=[], main_completed=False)
+    has_workflows(True)
+    result = ci_utils.check_ci("3313")
+    assert result.verdict is CIStatus.PENDING
+    assert ci_utils.MAIN_CI_WORKFLOW_NAME in result.pending
+    assert "skipped by draft gating" in result.summary()
+    assert result.core_skipped and "all green" not in result.summary()
+
+
+def test_path_filtered_core_skip_with_a_ran_main_run_stays_green(
+    gh: Any, has_workflows: Any
+) -> None:
+    checks = [
+        *_core_rollup("SKIPPED", classify="SUCCESS"),
+        _check("repo language (no raw CJK)", "SUCCESS"),
+    ]
+    gh(checks, is_draft=False, main_completed=True)
+    has_workflows(True)
+    assert ci_utils.check_ci("2505").verdict is CIStatus.ALL_PASSED
+
+
+def test_core_suite_skipped_reads_only_the_shard_families() -> None:
+    skipped = _core_rollup("SKIPPED")
+    names = [c["name"] for c in skipped[2:4]]
+    assert ci_utils._core_suite_skipped([]) is None
+    assert ci_utils._core_suite_skipped([_APP_CHECK]) is None
+    assert ci_utils._core_suite_skipped([_check("backend selected subset", "SKIPPED")]) is None
+    assert ci_utils._core_suite_skipped(skipped) == names
+    assert (
+        ci_utils._core_suite_skipped([*skipped, _check("backend shard (1/16)", "SUCCESS")]) is None
+    )
 
 
 def test_main_workflow_probe_returns_none_when_unanswerable(
@@ -614,9 +610,7 @@ def test_main_workflow_probe_returns_none_when_unanswerable(
         stderr = "boom"
 
     monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
-
     assert ci_utils._main_workflow_run_completed("abc123", None) is None
-
     _R.returncode = 0
     _R.stdout = "not a number"
     assert ci_utils._main_workflow_run_completed("abc123", None) is None
@@ -652,62 +646,42 @@ def test_runs_probe_reads_only_incomplete_runs(monkeypatch: pytest.MonkeyPatch) 
         return _R()
 
     monkeypatch.setattr(ci_utils.subprocess, "run", _run)
-
     assert ci_utils._runs_not_yet_reporting("abc123", None) == ["CI"]
     joined = " ".join(seen["cmd"])
     assert "head_sha=abc123" in joined
     assert 'select(.status != "completed")' in joined
 
 
-def test_runs_probe_returns_none_on_gh_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("returncode, stdout", [(1, ""), (0, "not json")])
+def test_runs_probe_returns_none_on_bad_response(
+    monkeypatch: pytest.MonkeyPatch, returncode: int, stdout: str
+) -> None:
     """A failed query is None (unanswerable), not [] (nothing scheduled) — the
     distinction is what keeps an unanswerable probe from reading as green."""
-
-    class _R:
-        returncode = 1
-        stdout = ""
-        stderr = "boom"
-
-    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
-
-    assert ci_utils._runs_not_yet_reporting("abc123", None) is None
-
-
-def test_runs_probe_returns_none_on_unparseable_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _R:
-        returncode = 0
-        stdout = "not json"
-        stderr = ""
-
-    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: _R())
-
+    response = subprocess.CompletedProcess([], returncode, stdout, "boom")
+    monkeypatch.setattr(ci_utils.subprocess, "run", lambda *_a, **_k: response)
     assert ci_utils._runs_not_yet_reporting("abc123", None) is None
 
 
 _QA_APPROVED_GATE_FAILURE = _check("qa-approved-gate", "FAILURE", workflow="QA approved gate")
 
 
-def test_qa_approved_gate_failure_is_excluded_from_ci_verdict(gh: Any, has_workflows: Any) -> None:
-    """The QA label gate is enforced by the queue, not the CI verdict."""
-    gh([_check("backend (pytest + pyright)", "SUCCESS"), _QA_APPROVED_GATE_FAILURE])
+@pytest.mark.parametrize(
+    "gate",
+    [
+        _QA_APPROVED_GATE_FAILURE,
+        _check("evaluate-qa-evidence", "FAILURE", workflow="QA approved gate"),
+    ],
+)
+def test_qa_failure_is_excluded_from_ci_verdict(gh: Any, has_workflows: Any, gate: dict) -> None:
+    """The queue enforces both QA checks outside the CI verdict."""
+    gh([_check("backend (pytest + pyright)", "SUCCESS"), gate])
     has_workflows(True)
     r = ci_utils.check_ci("57")
     assert r.verdict is CIStatus.ALL_PASSED
-    assert "qa-approved-gate" not in r.failed
-    assert "qa-approved-gate" not in r.workflow_checks
-    assert r.gate_checks == [_QA_APPROVED_GATE_FAILURE]
-
-
-def test_qa_evidence_failure_is_excluded_from_ci_verdict(gh: Any, has_workflows: Any) -> None:
-    """The QA evidence evaluator is enforced by the queue, not the CI verdict."""
-    evidence = _check("evaluate-qa-evidence", "FAILURE", workflow="QA approved gate")
-    gh([_check("backend (pytest + pyright)", "SUCCESS"), evidence])
-    has_workflows(True)
-    r = ci_utils.check_ci("57")
-    assert r.verdict is CIStatus.ALL_PASSED
-    assert "evaluate-qa-evidence" not in r.failed
-    assert "evaluate-qa-evidence" not in r.workflow_checks
-    assert r.gate_checks == [evidence]
+    assert all(f["name"] != gate["name"] for f in r.failed)
+    assert gate["name"] not in r.workflow_checks
+    assert r.gate_checks == [gate]
 
 
 def _completed(stdout: str = "", returncode: int = 0) -> Any:
@@ -788,6 +762,8 @@ def poll(monkeypatch: pytest.MonkeyPatch):
                 )
             if v is CIStatus.ERROR:
                 return ci_utils.CIResult(verdict=v, error_detail="gh CLI error: boom")
+            if v is CIStatus.NOT_READY:
+                return ci_utils.CIResult(verdict=v, core_skipped=["backend shard (1/16)"])
             return ci_utils.CIResult(verdict=v)
 
         monkeypatch.setattr(ci_utils, "check_ci", fake_check)
@@ -803,12 +779,18 @@ def test_wait_all_passed_exits_zero(no_sleep, poll, capsys) -> None:
 
 @pytest.mark.parametrize(
     "verdict",
-    [CIStatus.FAILED, CIStatus.MERGE_CONFLICT, CIStatus.NO_WORKFLOW_RUNS],
+    [CIStatus.FAILED, CIStatus.MERGE_CONFLICT, CIStatus.NO_WORKFLOW_RUNS, CIStatus.NOT_READY],
 )
 def test_wait_not_green_exits_one(no_sleep, poll, capsys, verdict) -> None:
     poll(verdict)
     assert ci_utils.main(["1243", "--wait"]) == 1
     assert "NOT green" in capsys.readouterr().err
+
+
+def test_wait_not_ready_names_draft_gating(no_sleep, poll, capsys) -> None:
+    poll(CIStatus.NOT_READY)
+    assert ci_utils.main(["1243", "--wait"]) == 1
+    assert "draft gating" in capsys.readouterr().err
 
 
 def test_wait_failed_lists_failed_checks(no_sleep, poll, capsys) -> None:
@@ -965,6 +947,13 @@ def test_one_shot_behavior_unchanged(gh: Any, has_workflows: Any, capsys) -> Non
     assert "pending" in out.out.lower()
 
 
+def test_one_shot_not_ready_exits_one(gh: Any, has_workflows: Any, capsys) -> None:
+    gh(_core_rollup("SKIPPED"), is_draft=True, main_completed=True)
+    has_workflows(True)
+    assert ci_utils.main(["1243"]) == 1
+    assert "NOT READY" in capsys.readouterr().out
+
+
 # --- is_terminal: watchers must never guess verdict strings -------------------
 # 2026-08-03: a watcher hard-coded ("success", "failure", "merged") — none of
 # which exist — and spun silently forever while CI went green. `is_terminal`
@@ -976,6 +965,7 @@ def test_one_shot_behavior_unchanged(gh: Any, has_workflows: Any, capsys) -> Non
     [
         CIStatus.ALL_PASSED,
         CIStatus.FAILED,
+        CIStatus.NOT_READY,
         CIStatus.MERGE_CONFLICT,
         CIStatus.NO_CHECKS,
         CIStatus.NO_WORKFLOW_RUNS,
@@ -1000,6 +990,17 @@ def test_json_probe_carries_terminal_flag(gh: Any, has_workflows: Any, capsys) -
     assert payload["verdict"] == "all_passed"
     assert payload["terminal"] is True
     assert payload["gate_checks"] == []
+
+
+def test_json_probe_reports_draft_and_core_skipped(gh: Any, has_workflows: Any, capsys) -> None:
+    gh(_core_rollup("SKIPPED"), is_draft=True, main_completed=True)
+    has_workflows(True)
+    assert ci_utils.main(["1243", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["verdict"] == "not_ready"
+    assert payload["terminal"] is True
+    assert payload["is_draft"] is True
+    assert payload["core_skipped"]
 
 
 def test_json_probe_pending_is_not_terminal(gh: Any, has_workflows: Any, capsys) -> None:
@@ -1358,8 +1359,8 @@ def _diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
 def _diag_runs(run_id: int = 10) -> str:
     """Real-shaped REST runs payload with one CI run (issue #1945).
 
-    The run carries `status: completed` — the field `ci_job_rerun` reads to
-    decide whether a re-run is admissible (task #3764)."""
+    The run carries `status: completed`, which `ci_job_rerun` reads to decide whether a re-run is
+    admissible (task #3764)."""
     return json.dumps(
         {
             "total_count": 1,
@@ -1704,10 +1705,9 @@ def test_ci_usage_exclusive_and_no_pr() -> None:
         ci_utils.main(["--ci-usage", "--wait"])
 
 
-# --- GitHub-limbo runs (task #3275, 2026-09-13): `queued` with zero jobs,
-# aged past `_LIMBO_AGE_SECONDS`, and no GitHub API can clean them up --
-# cancel -> 409, rerun -> 403, DELETE -> 403. They used to hold an all-green
-# rollup PENDING until a --wait budget silently ran out. ---
+# --- GitHub-limbo runs (task #3275, 2026-09-13): `queued` with zero jobs, aged past
+# `_LIMBO_AGE_SECONDS`; no GitHub API can clean them up (cancel -> 409, rerun -> 403, DELETE -> 403).
+# They held all-green rollups PENDING until a --wait budget silently ran out. ---
 
 
 class _ProbeResponse:
