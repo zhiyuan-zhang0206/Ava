@@ -190,6 +190,7 @@ def test_db_scoped_block_holds_back_exactly_the_dbs_users(monkeypatch: pytest.Mo
     kept = {c.name for c in wd._checks_for_round("agent-runner", BlockScope.DB_DEPENDENT)}
     assert kept == {
         "brew-pin",
+        "prod-venv",
         "permissions-helper",
         "browser-reach",
         "browser",
@@ -208,6 +209,7 @@ def test_db_scoped_block_keeps_db_free_pseudo_checks_and_drops_pg_backup(
     kept = {c.name for c in wd._checks_for_round("gateway", BlockScope.DB_DEPENDENT)}
     assert "redis-acl" in kept
     assert "brew-pin" in kept
+    assert "prod-venv" in kept
     assert "pg-backup" not in kept
 
 

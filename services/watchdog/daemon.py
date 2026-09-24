@@ -74,7 +74,7 @@ from ops.manager import ControllerManager
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 # The statically imported healthchecks are the ones with NO ServiceSpec in
-# build_services(): brew-pin asserts host package policy, redis/pgbouncer are
+# build_services(): brew-pin/prod-venv assert host package health, redis/pgbouncer are
 # native per-cluster processes, permissions-helper is a launchd-owned app, and
 # the LGTM stack is native launchd jobs (deploy/lgtm), so they are not part of the
 # build_services-derived roster.
@@ -86,6 +86,7 @@ from services.healthchecks.browser_reach import main as browser_reach_healthchec
 from services.healthchecks.lgtm import main as lgtm_healthcheck
 from services.healthchecks.permissions_helper import main as permissions_helper_healthcheck
 from services.healthchecks.pgbouncer import main as pgbouncer_healthcheck
+from services.healthchecks.prod_venv import main as prod_venv_healthcheck
 from services.healthchecks.redis_acl import main as redis_acl_healthcheck
 from shared import telemetry
 from shared.config import settings
@@ -216,7 +217,7 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
     60s; the durable operator surface is `ava status`), so a revive can never
     crash-loop a service `ava start` chose not to launch.
 
-    Six pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
+    Eight pseudo-checks have NO ServiceSpec (they are not session-backed services) and are
     added by hand — so they state their own
     ``requires_db`` right here, the same fact the other entries carry from their spec:
     - redis-acl FIRST — repairs the per-cluster redis ACL user; every daemon below
@@ -235,6 +236,9 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
       Homebrew pin set on any macOS unit. It is warning-only and host-local, so
       neither role ownership nor database availability should suppress it
       (``requires_db=False``).
+    - prod-venv on BOTH capabilities — detects production virtualenv dependency
+      and import failures on POSIX. Read-only and report-only; no repair or
+      respawn, and no database dependency (``requires_db=False``).
     - permissions-helper on the AGENT-RUNNER capability when enabled — probes the
       launchd-owned helper's real protocol and repairs one persistent failure
       episode. It needs no Postgres (``requires_db=False``).
@@ -242,6 +246,8 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
       a canary fetch through the shared Chrome contrasted with the same-process
       host read; report-only after a consecutive-failure threshold, never a
       respawn (``requires_db=False``).
+    - lgtm on the GATEWAY capability and station-capable AGENT-RUNNER hosts —
+      keeps the native observability backends alive (``requires_db=False``).
     - station-probe on the GATEWAY capability — the remote observatory
       station's health (WP4, task #1946). Probe-only: never restarts anything,
       alerts fail-open. ``requires_db=True`` because it resolves the station's
@@ -274,6 +280,7 @@ def _checks_for_capability(role: MachineRole) -> list[_Check]:
             checks.append(_Check("redis-acl", redis_acl_healthcheck, requires_db=False))
             checks.append(_Check("pgbouncer", pgbouncer_healthcheck, requires_db=False))
     checks.append(_Check("brew-pin", brew_pin_healthcheck, requires_db=False))
+    checks.append(_Check("prod-venv", prod_venv_healthcheck, requires_db=False))
     if role == "agent-runner" and settings.services.permissions_helper_enabled:
         checks.append(
             _Check(
