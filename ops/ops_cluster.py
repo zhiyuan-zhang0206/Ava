@@ -47,7 +47,7 @@ from shared.cluster_lock import (
     release_update_lock,
 )
 from shared.config.turn_view import resolve_agent_config_pins
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.host_deploy_state import updater_lease_live
 from shared.log import logger
 from shared.machine import machine_name

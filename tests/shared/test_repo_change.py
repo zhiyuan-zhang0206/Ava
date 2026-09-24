@@ -1,6 +1,6 @@
 import pytest
 
-from shared.repo_change import classify_change, is_doc_path
+from shared.deploy.git.repo_change import classify_change, is_doc_path
 
 
 @pytest.mark.parametrize(

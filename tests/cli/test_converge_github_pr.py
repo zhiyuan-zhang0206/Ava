@@ -12,14 +12,14 @@ def _ctx(home: Path) -> cv.ConvergeCtx:
 
 
 def test_passes_when_pr_capable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import shared.github_pr as gp
+    import shared.deploy.git.github_pr as gp
 
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: None)
     cv._ensure_github_pr(_ctx(tmp_path))  # no raise
 
 
 def test_raises_when_pr_blocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import shared.github_pr as gp
+    import shared.deploy.git.github_pr as gp
 
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: "gh CLI not installed")
     with pytest.raises(RuntimeError, match="gh CLI not installed"):
@@ -28,7 +28,7 @@ def test_raises_when_pr_blocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
 def test_skips_on_single_box(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A single box (also carries gateway) consolidates memory locally — skip the gate."""
-    import shared.github_pr as gp
+    import shared.deploy.git.github_pr as gp
 
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: "gh CLI not installed")
     ctx = cv.ConvergeCtx(
@@ -39,7 +39,7 @@ def test_skips_on_single_box(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
 def test_skips_when_opt_out(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """AVA_REQUIRE_GITHUB_PR=false opts a split runner out of the gate."""
-    import shared.github_pr as gp
+    import shared.deploy.git.github_pr as gp
     from shared.config import settings
 
     monkeypatch.setattr(gp, "github_pr_blocker", lambda: "gh CLI not installed")

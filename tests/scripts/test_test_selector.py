@@ -159,7 +159,7 @@ def test_tree_scan_pins_cover_the_real_repo_lint_family_and_are_never_stale() ->
 @pytest.mark.parametrize(
     ("changed_path", "reason"),
     [
-        ("shared/repo_change.py", "forced-root:shared/"),
+        ("shared/deploy/git/repo_change.py", "forced-root:shared/"),
         ("pyproject.toml", "test-configuration"),
         (".test_durations", "test-configuration"),
         ("tests/e2e/test_browser.py", "e2e"),

@@ -47,7 +47,7 @@ population was red on tests/test_lint_event_kinds.py). Name a new scan test
 `test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
 tests/scripts/test_test_selector.py guards completeness and staleness.
 
-The documentation predicate reuses shared.repo_change.is_doc_path. Files under
+The documentation predicate reuses shared.deploy.git.repo_change.is_doc_path. Files under
 scripts/, schedules/, and tests/ are deliberately not treated as documentation
 by the selector even when their name ends in Markdown: operational schedule and
 test changes must remain conservative.

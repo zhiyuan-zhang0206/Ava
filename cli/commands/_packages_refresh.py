@@ -42,7 +42,7 @@ from loguru import logger
 from cli.commands._converge_skills import _Source, iter_sources
 from shared import host_version, install_registry, paths, plugin_manifest
 from shared.config import settings
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.os_cron import os_jobs_enabled
 from shared.packages.skills import skill_scan
 from shared.packages.skills.skill_names import match_key

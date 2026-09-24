@@ -507,7 +507,7 @@ is enabled, see below), a **probe of the configured cross-machine transfer backe
 (`AVA_CROSS_MACHINE_TRANSFER_BACKEND`, `drive` by default), and **the ability to open
 and merge pull requests on the memory pool repo** (the nightly memory consolidation
 runs `gh` + `git push` on each machine; the gate `_ensure_github_pr` →
-`shared/github_pr.py:github_pr_blocker` fails loud unless `gh` is installed,
+`shared/deploy/git/github_pr.py:github_pr_blocker` fails loud unless `gh` is installed,
 authenticated, and has write access to the pool repo). The transfer probe + GitHub-PR
 gate are **split-deployment-only**: both are auto-skipped when this unit also carries
 `gateway` (a single box has no peer to hand files to and consolidates memory locally);

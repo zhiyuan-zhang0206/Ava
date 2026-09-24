@@ -47,8 +47,8 @@ from cli.commands.status import _update_in_flight
 from shared.cluster import _port_free
 from shared.cluster_drift import prod_source_pin_relation
 from shared.config import settings
+from shared.deploy.git.gitenv import git_env
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
-from shared.gitenv import git_env
 from shared.port_preflight import expected_cluster_ports
 from shared.proc import run_bounded
 

@@ -240,7 +240,7 @@ async def post_cluster_update(
     caller waits for paused=false then retries).
     """
     if target_sha is not None:
-        from shared.git_sha import require_full_sha
+        from shared.deploy.git.git_sha import require_full_sha
 
         try:
             require_full_sha(target_sha, entry="target_sha")

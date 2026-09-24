@@ -14,7 +14,7 @@
 # for e2e (browser dir cached; system deps installed per run).
 #
 # CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
-# diff through shared/repo_change.py — the same classifier `ava cluster update`
+# diff through shared/deploy/git/repo_change.py — the same classifier `ava cluster update`
 # uses for selective restart — and suites skip when their side is untouched:
 # docs-only skips everything, frontend-only skips the backend suite,
 # backend-only skips the frontend suite. e2e runs whenever EITHER side changed
@@ -92,7 +92,7 @@ concurrency:
 
 jobs:
   classify:
-    # Which sides does this diff touch? Imports shared/repo_change.py directly
+    # Which sides does this diff touch? Imports shared/deploy/git/repo_change.py directly
     # (stdlib-only — no venv) over the PR's changed paths. push/dispatch
     # events always report both sides changed: main must always verify fully.
     name: classify change
@@ -126,7 +126,7 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, ".")
-          from shared.repo_change import classify_change
+          from shared.deploy.git.repo_change import classify_change
 
           paths = Path("/tmp/changed.txt").read_text().splitlines()
           frontend, backend = classify_change(paths)

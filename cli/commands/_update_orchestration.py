@@ -31,7 +31,7 @@ from pathlib import Path
 
 from cli.commands._update_git import GitPullFailed
 from shared.api_contracts.status import MachineStatus
-from shared.repo_change import classify_change as _classify_change
+from shared.deploy.git.repo_change import classify_change as _classify_change
 
 
 @dataclass(frozen=True)

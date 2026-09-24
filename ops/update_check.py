@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from ops.cluster_deploy import _REPO_ROOT
 from shared.config import settings
-from shared.repo_change import classify_change
+from shared.deploy.git.repo_change import classify_change
 from shared.running_sha import get as _get_running_sha
 from shared.source_integrity import get as _get_installed_sha
 from shared.source_integrity import installed_sha_needs_replay as _installed_sha_needs_replay

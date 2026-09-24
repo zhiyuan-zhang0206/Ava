@@ -14,7 +14,7 @@ import sys
 
 def _target_sha_arg(value: str) -> str:
     """Refuse anything but a full commit id at the CLI boundary (issue #2343)."""
-    from shared.git_sha import require_full_sha
+    from shared.deploy.git.git_sha import require_full_sha
 
     try:
         return require_full_sha(value, entry="--target-sha")

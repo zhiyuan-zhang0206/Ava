@@ -1,4 +1,4 @@
-"""shared.github_pr: derive the memory repo slug + gate on gh PR capability.
+"""shared.deploy.git.github_pr: derive the memory repo slug + gate on gh PR capability.
 
 `memory_repo_slug()` reads the remote URL through `shared.memory_repo.memory_remote`,
 which `github_pr` re-imports into its own namespace; tests patch
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import pytest
 
-import shared.github_pr as gp
+import shared.deploy.git.github_pr as gp
 
 # ── memory_repo_slug ──────────────────────────────────────────────────────
 
