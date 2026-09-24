@@ -346,6 +346,7 @@ class TurnScheduler:
             await self._await_unwind(tasks)
         self._tasks.clear()
         self._pending.clear()
+        self._reaped_successors.clear()
 
     async def _await_unwind(self, tasks: dict[int, asyncio.Task[None]]) -> None:
         """Wait out the cancellations and name whatever is still running.
@@ -685,10 +686,11 @@ class InboundWakeDispatcher:
 
     def _release_recovery_slot(self, agent_id: int, task: asyncio.Task[None]) -> None:
         """Only a pre-start reaper replacement inherits this scan wake's slot.
-        Same-agent direct/pub-sub successors during cancellation do not."""
-        if self._recovery_in_flight.get(agent_id) is not task:
+        Scan reconciliation defers release until that reaper runs."""
+        if self._recovery_in_flight.get(agent_id) is not task or not task.done():
             return
-        if not task.done():
+        if task.cancelled() and self._scheduler.task_for(agent_id) is task:
+            # The queued pre-start reaper owns this slot's transfer or release.
             return
         successor = self._scheduler.task_for(agent_id) if task.cancelled() else None
         if (
@@ -742,8 +744,7 @@ class InboundWakeDispatcher:
                 and (age := turn_progress_age_s(candidate.agent_id)) is not None
                 and age >= self._stale_after_s
             ):
-                # The captured task's done-state, not registry membership,
-                # proves unwind when a pre-start reap replaces it.
+                # Only the captured task's done state proves unwind across a pre-start reap.
                 unwound = await self._scheduler.cancel_agent(candidate.agent_id)
                 if not unwound:
                     raise HostRestartRequiredError(

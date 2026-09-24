@@ -403,15 +403,19 @@ class TestHostedWakePacing:
 
     async def test_prestart_reap_transfers_recovery_slot_until_replacement_finishes(self) -> None:
         entered: list[int] = []
-        release = {agent_id: asyncio.Event() for agent_id in (1, 2)}
+        release = asyncio.Event()
 
         async def run_turn(agent_id: int) -> None:
             entered.append(agent_id)
-            await release[agent_id].wait()
+            await release.wait()
 
         pending = [dispatcher.PendingInboundWake(1, False, True)]
+        observed: list[bool] = []
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            if pending[0].agent_id == 2 and scheduler.task_for(1) is original:
+                observed.append(original.done() and scheduler.reaped_successor(1) is None)
+                assert set(disp._recovery_in_flight) == {1}
             return pending
 
         scheduler = TurnScheduler(run_turn)
@@ -420,33 +424,29 @@ class TestHostedWakePacing:
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
-            recovery_wake_batch=2,
             recovery_wake_inflight=1,
         )
         try:
             await disp.scan_once()
             original = disp._recovery_in_flight[1]
-            assert not original.done()
-            assert await scheduler.cancel_agent(1) is True
-            await asyncio.sleep(0)
-            successor = scheduler.task_for(1)
-            assert successor is not None and successor is not original and not successor.done()
-            assert disp._recovery_in_flight[1] is successor
             pending[:] = [dispatcher.PendingInboundWake(2, False, True)]
+            racing_scan = asyncio.create_task(disp.scan_once())
+            assert await scheduler.cancel_agent(1) is True
+            await racing_scan
+            assert observed == [True] and scheduler.task_for(2) is None
+            successor = scheduler.task_for(1)
+            assert successor is scheduler.reaped_successor(1) is disp._recovery_in_flight[1]
             await disp.scan_once()
             await poll_until_async(lambda: entered == [1], timeout=3)
-            assert scheduler.active_agents == {1}
-            assert len(disp._recovery_in_flight) == 1
-            release[1].set()
+            assert scheduler.task_for(2) is None and disp._recovery_in_flight == {1: successor}
+            release.set()
             await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
             await disp.scan_once()
-            await poll_until_async(lambda: entered == [1, 2], timeout=3)
             assert set(disp._recovery_in_flight) == {2}
-            release[2].set()
+            await poll_until_async(lambda: entered == [1, 2], timeout=3)
             await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
         finally:
-            for event in release.values():
-                event.set()
+            release.set()
             await scheduler.aclose()
 
     async def test_recovery_slot_released_before_ordinary_work_successor_finishes(self) -> None:

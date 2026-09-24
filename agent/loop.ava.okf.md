@@ -22,6 +22,8 @@ that recovery turn's own task ends. Only a replacement started by the pre-start
 reaper from the same unconsumed wake inherits its slot. Other same-agent
 successors, including a direct wake that starts during cancellation unwind,
 run without occupying that slot.
+Scan reconciliation waits for a queued pre-start reap to settle before releasing
+its slot.
 
 `AgentHost._invoke_until_done()` invokes the same checkpoint thread until idle
 or a native lifecycle command ends the turn. Each invocation has its own trace.
