@@ -129,6 +129,7 @@ def get_agent_events(
     return [
         AgentEventRow(
             id=row["id"],
+            line_sha256=row["line_sha256"],
             ts=row["ts"],
             agent_id=row["agent_id"],
             level=row["level"],

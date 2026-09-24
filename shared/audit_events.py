@@ -98,17 +98,42 @@ def insert_event_log(
             Left untyped here on purpose; see the module docstring's payload
             tiering rule for when an event's payload gets a model instead.
     """
+    telemetry.emit_prepared(
+        prepare_event_log(
+            event_type=event_type,
+            agent_id=agent_id,
+            source=source,
+            target_agent_id=target_agent_id,
+            payload=payload,
+        )
+    )
+
+
+def prepare_event_log(
+    *,
+    event_type: str,
+    agent_id: int | None,
+    source: str,
+    target_agent_id: int | None = None,
+    payload: dict[str, Any] | None = None,
+) -> telemetry.Event:
+    """Construct an audit event for a caller-owned database transaction.
+
+    Central manifest producers pass this exact event to their ledger before
+    committing, then enqueue the returned tagged instance with
+    :func:`telemetry.emit_prepared`. Ordinary audit roots retain the convenient
+    immediate :func:`insert_event_log` wrapper above.
+    """
     from shared.caller_identity import caller_payload
 
-    payload = caller_payload(source, payload)
-    telemetry.emit(
+    return telemetry.prepare_event(
         "audit",
         event_type,
         level="info",
         agent_id=agent_id,
         source=source,
         target_agent_id=target_agent_id,
-        attributes=payload,
+        attributes=caller_payload(source, payload),
     )
 
 

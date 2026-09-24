@@ -28,6 +28,7 @@ from ops.spec import ServiceSpec, services_for_capabilities_annotated
 from services.agent_ops.bootstrap import PreparedObservation
 from shared import spawn_receipt
 from shared.config import settings
+from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
 from shared.machine import machine_role
 from shared.managed_writer_activation import (
     NormalServiceReadback,
@@ -128,11 +129,16 @@ def _command(  # noqa: PLR0915 — one ordered fail-closed command admission bou
                 "normal service readiness must use its explicit loopback port"
             )
     public.update(_service_extra_env(spec))
-    # Database credentials are forwarded privately, not hashed into the public command plan.
+    # Credentials are forwarded privately, not hashed into the public command plan.
+    # The certification proof is private for the same reason: the release receipt
+    # is an operational artifact, not an agent-host capability channel.
+    private_environment = {"AVA_DB_URL", MANIFEST_CERTIFICATION_SECRET_ENV}
     command_view = {
         "argv": tokens,
         "cwd": str(image.cwd),
-        "public_environment": {key: value for key, value in public.items() if key != "AVA_DB_URL"},
+        "public_environment": {
+            key: value for key, value in public.items() if key not in private_environment
+        },
     }
     command_digest = hashlib.sha256(json.dumps(command_view, sort_keys=True).encode()).hexdigest()
     environment = forward_env_dict()
