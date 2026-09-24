@@ -230,3 +230,113 @@ def test_ava_named_file_without_a_readable_label_refuses(launch_agents: Path) ->
     (launch_agents / "com.ava.array.plist").write_bytes(plistlib.dumps(["not", "a", "dict"]))
     with pytest.raises(ReleaseRejectedError, match="has no label"):
         inventory._launchd(HOME)
+
+
+def test_neighboring_unit_and_keeper_are_explicit_exclusions(
+    launch_agents: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = launch_agents.parents[1] / "own-unit"
+    home.mkdir()
+    other = launch_agents.parents[1] / "other-unit"
+    other.mkdir()
+    (other / "machine_name").write_text("other-machine\n")
+    (other / "run").mkdir()
+    own = "com.ava.this.probe"
+    neighbor = "com.ava.other.probe"
+    keeper = "com.ava.permissions-helper.other"
+    own_digest = _job(launch_agents, own, {"AVA_HOME": str(home)})
+    neighbor_digest = _job(launch_agents, neighbor, {"AVA_HOME": str(other)})
+    keeper_digest = _job(
+        launch_agents,
+        keeper,
+        {"AVA_PERMISSIONS_HELPER_SOCKET": f"{other}/run/permissions-helper.1234.sock"},
+    )
+    _loaded(monkeypatch, {own, neighbor, keeper})
+    launchers, excluded = inventory._launchd(home)
+    assert launchers == (ExpectedLauncher(kind="launchd", name=own, definition_digest=own_digest),)
+    assert [(item.label, item.definition_digest, item.classification) for item in excluded] == [
+        (neighbor, neighbor_digest, "other-unit"),
+        (keeper, keeper_digest, "other-unit"),
+    ]
+    # Consumer round-trip keeps the exclusion proof, rather than dropping it.
+    assert ExcludedRegistration.model_validate_json(excluded[0].model_dump_json()) == excluded[0]
+
+
+@pytest.mark.parametrize("shape", ["alias", "uninstalled", "relative", "ancestor", "descendant"])
+def test_other_unit_exclusion_requires_independent_canonical_installed_home(
+    launch_agents: Path,
+    shape: str,
+) -> None:
+    root = launch_agents.parents[1]
+    own = root / "own"
+    own.mkdir()
+    foreign = root / "other"
+    foreign.mkdir()
+    (foreign / "machine_name").write_text("other-machine\n")
+    value = str(foreign)
+    if shape == "alias":
+        alias = root / "alias"
+        alias.symlink_to(foreign, target_is_directory=True)
+        value = str(alias)
+    elif shape == "uninstalled":
+        (foreign / "machine_name").unlink()
+    elif shape == "relative":
+        value = "other"
+    elif shape == "ancestor":
+        (root / "machine_name").write_text("ancestor\n")
+        value = str(root)
+    elif shape == "descendant":
+        nested = own / "child"
+        nested.mkdir()
+        (nested / "machine_name").write_text("descendant\n")
+        value = str(nested)
+    _job(launch_agents, "com.ava.other.probe", {"AVA_HOME": value})
+    with pytest.raises(ReleaseRejectedError, match="unknown or other unit home"):
+        inventory._launchd(own)
+
+
+@pytest.mark.parametrize("relationship", ["same", "ancestor", "descendant"])
+def test_case_alias_cannot_exclude_this_units_own_launcher(
+    launch_agents: Path, relationship: str
+) -> None:
+    root = launch_agents.parents[1] / "CaseSensitiveName"
+    root.mkdir()
+    home = root / "OwnUnit"
+    home.mkdir()
+    (root / "machine_name").write_text("ancestor\n")
+    (home / "machine_name").write_text("own\n")
+    nested = home / "Nested"
+    nested.mkdir()
+    (nested / "machine_name").write_text("nested\n")
+    aliases = {
+        "same": root / "ownunit",
+        "ancestor": root.with_name("casesensitivename"),
+        "descendant": root / "ownunit" / "Nested",
+    }
+    alias = aliases[relationship]
+    if not alias.exists():
+        pytest.skip("filesystem distinguishes letter case")
+    _job(launch_agents, "com.ava.alias.probe", {"AVA_HOME": str(alias)})
+    with pytest.raises(ReleaseRejectedError, match="unknown or other unit home"):
+        inventory._launchd(home)
+
+
+def test_other_keeper_cannot_reach_this_home_through_an_aliased_run_directory(
+    launch_agents: Path,
+) -> None:
+    root = launch_agents.parents[1]
+    own, other = root / "own", root / "other"
+    own.mkdir()
+    other.mkdir()
+    (own / "run").mkdir()
+    (other / "machine_name").write_text("other\n")
+    (other / "run").symlink_to(own / "run", target_is_directory=True)
+    _job(
+        launch_agents,
+        "com.ava.other.keeper",
+        {
+            "AVA_PERMISSIONS_HELPER_SOCKET": f"{other}/run/permissions-helper.123.sock",
+        },
+    )
+    with pytest.raises(ReleaseRejectedError, match="belongs to another home"):
+        inventory._launchd(own)
