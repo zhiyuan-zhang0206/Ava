@@ -1,14 +1,12 @@
 diff --git a/ui/web/src/components/timeline/index.tsx b/ui/web/src/components/timeline/index.tsx
 --- a/ui/web/src/components/timeline/index.tsx
 +++ b/ui/web/src/components/timeline/index.tsx
-@@ -1134,6 +1134,7 @@
-     (total, entry) => total + (entry.virtualRows?.length ?? 1), 0,
-   );
-   const virtualEnabled = renderedRows > 100;
+@@ -1131,4 +1131,5 @@
+   const renderedRows = groupEntries.reduce((total, entry) => total + (entry.virtualRows?.length ?? 1), 0);
+   const virtualEnabled = renderedRows > activationRows;
 +  const benchmarkRowSpacers = true;
    const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, virtualRows }) => ({
        key: virtualKey,
-       rank: entry.rank,
 @@ -1233,12 +1234,15 @@
            {/* Rows and history dividers opt out individually so streaming and
                prepends stay quiet without changing the direct-child timeline
