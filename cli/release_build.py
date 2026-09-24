@@ -26,6 +26,9 @@ from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_s
 from shared.verified_file import regular_bytes
 
 _IDENTITY_MEMBER = "shared/release-build.json"
+_APPLICATION_MEMBER_PATTERN = re.compile(
+    r"venv/(?:lib/python[0-9]+\.[0-9]+|Lib)/site-packages/shared/release-build\.json"
+)
 
 
 class ApplicationIdentity(EvidenceModel):
@@ -45,6 +48,22 @@ class ApplicationIdentity(EvidenceModel):
         return self
 
 
+def _identity_members(files: dict[str, str], platform: str) -> list[str]:
+    """Admit one install and its exact Linux lib64 materialization, if present."""
+    members = sorted(name for name in files if name.endswith("/" + _IDENTITY_MEMBER))
+    primary = [name for name in members if _APPLICATION_MEMBER_PATTERN.fullmatch(name)]
+    if len(primary) != 1:
+        raise ReleaseRejectedError("verified image requires one installed application identity")
+    allowed = {primary[0]}
+    if platform.startswith("Linux-") and primary[0].startswith("venv/lib/"):
+        # Runtime preparation replaces stdlib venv's lib64 -> lib symlink with
+        # a private directory copy. Both physical copies must agree below.
+        allowed.add(primary[0].replace("venv/lib/", "venv/lib64/", 1))
+    if not set(members) <= allowed:
+        raise ReleaseRejectedError("verified image has an unexpected application identity copy")
+    return members
+
+
 def read_application_identity(image: VerifiedRelease, commit: str) -> ApplicationIdentity:
     """Bind an already verified generation to its prepared target commit.
 
@@ -57,13 +76,14 @@ def read_application_identity(image: VerifiedRelease, commit: str) -> Applicatio
     if hashlib.sha256(encoded_manifest).hexdigest() != image.manifest_digest:
         raise ReleaseRejectedError("application identity manifest changed")
     manifest = json.loads(encoded_manifest)
-    members = [name for name in manifest["files"] if name.endswith("/" + _IDENTITY_MEMBER)]
-    if len(members) != 1 or not members[0].startswith("venv/"):
-        raise ReleaseRejectedError("verified image requires one installed application identity")
-    member = image.root / members[0]
-    encoded = regular_bytes(member)
-    if hashlib.sha256(encoded).hexdigest() != manifest["files"][members[0]]:
-        raise ReleaseRejectedError("application identity differs from verified inventory")
+    members = _identity_members(manifest["files"], manifest["platform"])
+    copies = [regular_bytes(image.root / name) for name in members]
+    for name, encoded in zip(members, copies, strict=True):
+        if hashlib.sha256(encoded).hexdigest() != manifest["files"][name]:
+            raise ReleaseRejectedError("application identity differs from verified inventory")
+    encoded = copies[0]
+    if any(copy != encoded for copy in copies[1:]):
+        raise ReleaseRejectedError("installed application identity copies disagree")
     identity = ApplicationIdentity.model_validate_json(encoded)
     if identity.source_commit != commit or identity.schema_digest != manifest["schema_digest"]:
         raise ReleaseRejectedError("application identity differs from target commit or schema")

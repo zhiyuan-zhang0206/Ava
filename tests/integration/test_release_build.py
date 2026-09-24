@@ -6,12 +6,14 @@ import json
 import subprocess
 import sys
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 # ruff: noqa: S603 -- fixed Git argv operate only on the generated fixture repository.
 from cli import release_build as build
+from shared.runtime_prepare import _materialize_venv_links
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
 
 
@@ -155,7 +157,13 @@ def identity_image(tmp_path: Path) -> tuple[VerifiedRelease, Path]:
     member.write_bytes(encoded)
     manifest = root / "manifest.json"
     manifest.write_text(
-        json.dumps({"schema_digest": "d" * 64, "files": {relative: file_sha256(member)}})
+        json.dumps(
+            {
+                "platform": "Linux-fixture",
+                "schema_digest": "d" * 64,
+                "files": {relative: file_sha256(member)},
+            }
+        )
     )
     image = VerifiedRelease(
         "e" * 64, file_sha256(manifest), root, root / "venv/bin/python", root / "venv"
@@ -183,6 +191,59 @@ def test_modified_manifest_cannot_bless_another_identity(
     path = image.root / "manifest.json"
     path.write_text(path.read_text() + "\n")
     with pytest.raises(ReleaseRejectedError, match="manifest changed"):
+        build.read_application_identity(image, "a" * 40)
+
+
+def _mirrored_identity(image: VerifiedRelease, member: Path) -> tuple[VerifiedRelease, Path]:
+    (image.root / "venv/lib64").symlink_to("lib", target_is_directory=True)
+    _materialize_venv_links(image.root / "venv")
+    mirror = image.root / str(member.relative_to(image.root)).replace("venv/lib/", "venv/lib64/", 1)
+    path = image.root / "manifest.json"
+    manifest = json.loads(path.read_bytes())
+    manifest["files"][mirror.relative_to(image.root).as_posix()] = file_sha256(mirror)
+    path.write_text(json.dumps(manifest))
+    return replace(image, manifest_digest=file_sha256(path)), mirror
+
+
+def test_materialized_linux_lib64_keeps_one_application_identity(
+    identity_image: tuple[VerifiedRelease, Path],
+) -> None:
+    image, member = identity_image
+    image, mirror = _mirrored_identity(image, member)
+    assert not (image.root / "venv/lib64").is_symlink()
+    assert mirror.read_bytes() == member.read_bytes()
+    assert build.read_application_identity(image, "a" * 40).source_commit == "a" * 40
+
+
+@pytest.mark.parametrize(
+    "defect", ["changed", "conflicting", "foreign", "non-linux", "missing-primary"]
+)
+def test_identity_mirror_never_hides_drift_or_another_install(
+    identity_image: tuple[VerifiedRelease, Path], defect: str
+) -> None:
+    image, member = identity_image
+    image, mirror = _mirrored_identity(image, member)
+    path = image.root / "manifest.json"
+    manifest = json.loads(path.read_bytes())
+    if defect in {"changed", "conflicting"}:
+        mirror.write_bytes(
+            mirror.read_bytes().replace(b'"source_commit":"a', b'"source_commit":"b')
+        )
+        if defect == "conflicting":
+            manifest["files"][mirror.relative_to(image.root).as_posix()] = file_sha256(mirror)
+    elif defect == "foreign":
+        foreign = image.root / "venv/another-install/shared/release-build.json"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_bytes(member.read_bytes())
+        manifest["files"][foreign.relative_to(image.root).as_posix()] = file_sha256(foreign)
+    elif defect == "non-linux":
+        manifest["platform"] = "Darwin-fixture"
+    else:
+        del manifest["files"][member.relative_to(image.root).as_posix()]
+        member.unlink()
+    path.write_text(json.dumps(manifest))
+    image = replace(image, manifest_digest=file_sha256(path))
+    with pytest.raises(ReleaseRejectedError, match=r"identity|inventory"):
         build.read_application_identity(image, "a" * 40)
 
 

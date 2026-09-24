@@ -30,6 +30,10 @@ remain available for diagnosis and cannot be reused. `read_application_identity`
 requires an already verified runtime and rechecks the embedded member against
 that manifest and the expected target. Complete manifests have an explicit
 32 MiB read budget; ordinary unit receipts retain their smaller default budget.
+The sole installed identity may have an exact Linux `venv/lib64` mirror because
+runtime preparation materializes the venv's internal symlink. Both files must
+match their manifest hashes and each other byte for byte. Extra installations,
+a mirror without its primary, and conflicting identity bytes refuse.
 
 `python -m cli.release_build --repo PATH --commit SHA --output NEW_DIRECTORY
 --uv ABSOLUTE_UV --python ABSOLUTE_PYTHON` is the preparation entry. It supplies
