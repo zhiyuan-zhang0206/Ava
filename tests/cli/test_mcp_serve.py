@@ -151,7 +151,14 @@ async def test_descriptions_are_english_and_flag_the_destructive_tool() -> None:
     tools = {t.name: (t.description or "") for t in await mcp_server.build_server().list_tools()}
     assert all(t for t in tools.values()), "every tool needs a description"
     assert not [n for n, d in tools.items() if _CJK.search(d)]
-    assert "DESTRUCTIVE" in tools["terminate_agent"]
+    terminate_description = " ".join(tools["terminate_agent"].split())
+    assert "DESTRUCTIVE" in terminate_description
+    assert "requests interruption" in terminate_description
+    assert (
+        "an `enqueued` result means accepted, not that the agent or its owned work has exited"
+        in terminate_description
+    )
+    assert "Use force only when a clean stop cannot progress" in terminate_description
 
 
 # ─── each tool proxies to its gateway route ───────────────────────────────
