@@ -280,12 +280,13 @@ class HierarchyWorkerFields:
         alias="AVA_HIERARCHY_REGEN_ALERT_NODES_PER_JOB",
         description=(
             "Alert threshold on one job's generated node count (task #4674 "
-            "guardrail — observability only, never blocking). A normal "
-            "compact-driven job generates single digits to low tens; the "
-            "2026-09-24 incident (a reader fix invalidated every input hash) "
-            "generated 500-1200 per job. First builds and tail seals are "
-            "exempt: their full-retention window legitimately reaches ~900 "
-            "one time, and tail work is small by construction."
+            "guardrail — observability only, never blocking). Calibrated "
+            "2026-09-24 against the fleet: ordinary compact-driven jobs "
+            "(n=814) run p50=12 / p95=21 / max=34, and every value observed "
+            "above 150 belonged to the exempt face (a first build); the "
+            "incident (a reader fix invalidated every input hash) generated "
+            "500-1200 per job. 150 = ~4.4x the observed normal max, with "
+            "zero non-exempt hits."
         ),
         json_schema_extra={
             "capability": "gateway",
@@ -304,10 +305,12 @@ class HierarchyWorkerFields:
             "Mid-run stop: once a job's generated count reaches this, the "
             "remaining nodes are left unattempted (skipped) and the job ends "
             "with a halt marker, so its continuation waits out the retry "
-            "backoff instead of hot-looping (task #4674 guardrail). 400 = "
-            "~8x the normal compact job, below the incident's 500-1200 floor; "
-            "first builds and tail seals are exempt (the measured worst "
-            "first build is ~900)."
+            "backoff instead of hot-looping (task #4674 guardrail). "
+            "Calibrated 2026-09-24: 400 = ~12x the observed normal max (34, "
+            "n=814) and sits low inside the incident's 500-1200 band, so a "
+            "re-cut wave is cut within its first minutes; first builds and "
+            "tail seals are exempt (measured worst: 1370, the 9/17 wave; "
+            "1109 on 9/21)."
         ),
         json_schema_extra={
             "capability": "gateway",
@@ -319,17 +322,19 @@ class HierarchyWorkerFields:
     )
 
     hierarchy_regen_daily_budget_nodes: int = Field(
-        default=5000,
+        default=12000,
         ge=1,
         alias="AVA_HIERARCHY_REGEN_DAILY_BUDGET_NODES",
         description=(
             "Fleet-wide 24h rolling budget on generated nodes; crossing it "
             "trips the persistent breaker (hierarchy_worker_breaker) and the "
             "worker stops claiming until an operator explicitly resets it "
-            "with a note (task #4674 guardrail). 5000 sits well above normal "
-            "steady-state days and well below what a hash-invalidation wave "
-            "across the fleet reaches in hours (8-10x for every tracked "
-            "agent)."
+            "with a note (task #4674 guardrail). Calibrated 2026-09-24: "
+            "normal days run 3424-6256 (9/18-9/22 — a 5000 budget would "
+            "have false-tripped three of them), so 12000 = ~2x the observed "
+            "peak; a full-fleet re-cut is >=35559 (80 agent trees, max "
+            "single tree 3169), so the breaker fires about a third of the "
+            "way in, and the incident's 5.5k/h build rate crosses it in ~2h."
         ),
         json_schema_extra={
             "capability": "gateway",
@@ -347,11 +352,13 @@ class HierarchyWorkerFields:
         alias="AVA_HIERARCHY_REGEN_MIN_REUSE_RATIO",
         description=(
             "Alert threshold on one job's reused/(reused+generated) ratio "
-            "(task #4674 guardrail — observability only): a fully re-cutting "
-            "run on an established tree reuses almost nothing while a fresh "
-            "slice legitimately does too, so the alert is only meaningful "
-            "alongside the size threshold; first builds and tail seals are "
-            "exempt."
+            "(task #4674 guardrail — observability only). Its face is paired "
+            "with the size threshold (`generated > "
+            "hierarchy_regen_alert_nodes_per_job` as well): calibrated "
+            "2026-09-24, the unpaired ratio fires on 111/814 normal jobs "
+            "(all fresh slices under 50 nodes), while the pair fires 0/814 "
+            "normally and 15/24 on the incident's big items. First builds "
+            "and tail seals are exempt."
         ),
         json_schema_extra={
             "capability": "gateway",

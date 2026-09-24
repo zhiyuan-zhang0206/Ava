@@ -259,11 +259,12 @@ def _record_failed(job_id: int, error: str) -> None:
 def _regen_signals(agent_id: int, job_id: int, tree: MaterializedTree) -> None:
     """The done-time guardrail signals for an ordinary compact-driven build.
 
-    Both are observability-only (task #4674 §4). The size threshold is
-    self-explanatory; the reuse ratio is only meaningful next to it — a fresh
-    slice legitimately reuses little, while a fully re-cutting run on an
-    established tree reuses almost nothing (the ratio's exact trigger face is
-    pending calibration before the enablement switch opens).
+    Both are observability-only (task #4674 §4). The reuse ratio is only
+    meaningful next to the size threshold — a fresh slice legitimately reuses
+    little — so its face is paired with it (`generated > alert_at` as well):
+    calibrated 2026-09-24, the unpaired ratio fires on 111/814 normal jobs
+    (all tiny fresh slices) while the pair fires 0/814 normally and 15/24 on
+    the incident's big items.
     """
     alert_at = settings.daemon.hierarchy_regen_alert_nodes_per_job
     if tree.generated > alert_at:
@@ -278,7 +279,7 @@ def _regen_signals(agent_id: int, job_id: int, tree: MaterializedTree) -> None:
         )
     ratio = settings.daemon.hierarchy_regen_min_reuse_ratio
     total = tree.reused + tree.generated
-    if tree.generated and total and tree.reused / total < ratio:
+    if tree.generated > alert_at and tree.reused / total < ratio:
         _try_emit(
             "hierarchy_regen_low_reuse",
             {

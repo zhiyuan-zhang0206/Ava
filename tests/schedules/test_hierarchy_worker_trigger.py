@@ -418,9 +418,10 @@ def test_halted_build_records_the_marker_and_emits_the_signals(
 def test_regen_signals_fire_only_past_their_thresholds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The done-time signals (task #4674 §4): the size alert fires past the
-    alert threshold, the low-reuse alert when an established tree is cut
-    without reusing it; an ordinary small high-reuse run emits nothing."""
+    """The done-time signals (task #4674 §4, calibrated 2026-09-24): the size
+    alert fires past its threshold and the low-reuse alert's face is paired
+    with it — a big low-reuse cut fires both, a small low-reuse slice (the
+    normal-noise shape) fires neither, and an ordinary run emits nothing."""
     monkeypatch.setattr(settings.daemon, "hierarchy_regen_alert_nodes_per_job", 3)
     monkeypatch.setattr(settings.daemon, "hierarchy_regen_min_reuse_ratio", 0.5)
     emitted: list[tuple[str, dict[str, object]]] = []
@@ -432,10 +433,15 @@ def test_regen_signals_fire_only_past_their_thresholds(
     assert emitted[0][1] == {"agent_id": 7, "job_id": 9, "generated": 4, "threshold": 3}
 
     emitted.clear()
+    small = MaterializedTree(nodes=(), errors=(), pending={}, max_level=1, generated=3, reused=0)
+    execute_module._regen_signals(7, 10, small)
+    assert emitted == []  # below the size gate: the reuse face never fires alone
+
+    emitted.clear()
     ordinary = MaterializedTree(
         nodes=(), errors=(), pending={}, max_level=1, generated=2, reused=50
     )
-    execute_module._regen_signals(7, 10, ordinary)
+    execute_module._regen_signals(7, 11, ordinary)
     assert emitted == []
 
 
