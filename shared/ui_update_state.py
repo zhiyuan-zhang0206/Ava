@@ -25,7 +25,6 @@ import json
 import logging
 import os
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -35,6 +34,7 @@ from pathlib import Path
 from typing import Literal, Never, cast
 
 import shared.paths
+from shared.atomic_io import fsync_parent, write_text_atomic
 from shared.platform import LockTimeoutError, file_lock
 
 SCHEMA_VERSION = 2
@@ -271,26 +271,16 @@ def _payload(
 def _fsync_parent(path: Path) -> None:
     if os.name == "nt":
         return
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    fsync_parent(path)
 
 
 def _write_atomic(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=".deploy-state-", suffix=".tmp")
-    tmp = Path(raw_tmp)
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(payload, f, separators=(",", ":"), sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)  # noqa: PTH105 — explicit atomic replace injection seam
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_text_atomic(
+        path,
+        json.dumps(payload, separators=(",", ":"), sort_keys=True),
+        prefix=".deploy-state-",
+    )
     try:
         _fsync_parent(path)
     except OSError:

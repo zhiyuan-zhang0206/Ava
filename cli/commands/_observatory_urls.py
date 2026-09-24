@@ -11,12 +11,11 @@ one home shared by the native renderer and the collector.
 
 from __future__ import annotations
 
-import os
 import sys
-import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+from shared.atomic_io import write_text_atomic
 from shared.config import settings
 
 
@@ -170,13 +169,4 @@ def _atomic_write(path: Path, content: str) -> None:
     would provision a half file. The temp file is written fully before the
     rename publishes it.
     """
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_text_atomic(path, content, encoding="utf-8", suffix="")

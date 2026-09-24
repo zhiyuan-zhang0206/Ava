@@ -22,7 +22,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -32,6 +31,7 @@ from typing import cast
 from psycopg_pool import ConnectionPool
 
 from ops.cluster_status import _AGENT_SHELL_RE
+from shared.atomic_io import write_text_atomic
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.inbound_provenance import InboundProvenance
@@ -130,23 +130,12 @@ def _record_path(notice: ClosureNotice) -> Path:
 def _write_atomic(notice: ClosureNotice) -> None:
     path = _record_path(notice)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(notice.as_dict(), stream, separators=(",", ":"), sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        Path(raw_tmp).replace(path)
-        if os.name != "nt":
-            fd_dir = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(fd_dir)
-            finally:
-                os.close(fd_dir)
-    except BaseException:
-        with suppress(OSError):
-            Path(raw_tmp).unlink()
-        raise
+    write_text_atomic(
+        path,
+        json.dumps(notice.as_dict(), separators=(",", ":"), sort_keys=True),
+        sync_parent=os.name != "nt",
+        suppress_cleanup_error=True,
+    )
 
 
 def _text(raw: dict[str, object], key: str) -> str | None:

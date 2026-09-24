@@ -16,8 +16,8 @@ same scoped webhook authentication as alert ingestion: the configured alert
 webhook token, the cluster bearer, or tokenless loopback trust. The gateway
 records the credential result as inbound provenance; payload fields can never
 assert it. Producers obtain `author_agent_id` from the exact
-`Co-authored-by: Ava #<id>` commit trailer using `shared/git_identity.py`; the
-gateway does not read a Git host.
+`Co-authored-by: Ava #<id>` commit trailer at their own boundary; the gateway
+does not read a Git host.
 
 ## Durable routing
 

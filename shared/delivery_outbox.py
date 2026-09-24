@@ -56,7 +56,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 import threading
 import time
 import uuid
@@ -67,6 +66,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
 from shared import completion_notices
+from shared.atomic_io import write_text_atomic
 from shared.delivery_outbox_types import FlushReport
 from shared.log import logger
 from shared.paths import ava_home
@@ -278,23 +278,12 @@ def _write_atomic(path: Path, entry: OutboxEntry) -> None:
     """Write one entry durably (tmp + fsync + replace), mirroring the
     pty-close-notices journal discipline."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(entry.as_dict(), stream, separators=(",", ":"), sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        Path(raw_tmp).replace(path)
-        if os.name != "nt":
-            fd_dir = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(fd_dir)
-            finally:
-                os.close(fd_dir)
-    except BaseException:
-        with suppress(OSError):
-            Path(raw_tmp).unlink()
-        raise
+    write_text_atomic(
+        path,
+        json.dumps(entry.as_dict(), separators=(",", ":"), sort_keys=True),
+        sync_parent=os.name != "nt",
+        suppress_cleanup_error=True,
+    )
 
 
 def _read(path: Path) -> OutboxEntry | None:
