@@ -115,3 +115,13 @@ it("shows a just-fetched observation whose server stamp leads the client clock",
   expect(await screen.findByText("Host admission observed; first turn completion is not confirmed"))
     .toBeTruthy();
 });
+
+it("hides an observation stamped beyond the future-skew allowance", async () => {
+  getAgent.mockResolvedValue({ ...agent, availability: {
+    reason: "admitted",
+    observed_at: new Date(Date.now() + 6_000).toISOString(),
+  } });
+  show();
+  await waitFor(() => expect(getAgent).toHaveBeenCalled());
+  expect(screen.queryByRole("status")).toBeNull();
+});

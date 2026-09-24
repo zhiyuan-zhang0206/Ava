@@ -11,12 +11,9 @@ import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import { FLEX } from "@/lib/layout";
 import type { AgentRow } from "@/lib/types";
 
-/** `observed_at` is stamped server-side when the read is evaluated — always a
- *  beat after the client clock snapshot the freshness gate compares against —
- *  so the gate tolerates this much future skew. Without it a just-fetched
- *  observation reads as future-dated and the strip hides until the next tick.
- *  Measured lead ≈0.25s; 5s leaves margin for a slow availability probe. A
- *  protocol tolerance, not a user-facing window. */
+// KEEP (task #3696 exception inventory): protocol tolerance — observed_at is
+// stamped server-side after the client clock snapshot; 5s covers the measured
+// 0.25s lead plus a slow-probe margin.
 const FUTURE_SKEW_MS = 5_000;
 
 /** Selected-agent observation; the roster's SSE refresh does not track host probes. */
@@ -27,17 +24,27 @@ export function AgentAvailability({ agent }: { agent: AgentRow }) {
   const [retryError, setRetryError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    // KEEP (task #3696 exception inventory): expiry re-render cadence — the gate
+    // reads the live clock; the tick only bounds how long a stale observation can
+    // outlive its window.
     const timer = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(timer);
   }, []);
   const { data } = useQuery({
     queryKey: ["agent-availability", agent.agent_id],
     queryFn: ({ signal }) => api.getAgent(agent.agent_id, signal),
+    // KEEP (task #3696 exception inventory): detail refresh cadence — host-probe
+    // changes emit no lifecycle events, so this poll is the strip's only
+    // freshness source.
     refetchInterval: 15_000,
   });
   const current = data ?? agent;
   const availability = current.availability;
   const observedAt = Date.parse(availability?.observed_at ?? "");
+  // KEEP (task #3696 exception inventory): freshness window — with the refresh
+  // stopped, an older observation no longer stands for a current verdict; two
+  // minutes matches the read model's probe freshness span (PROBE_FRESH_FOR,
+  // shared/agent_observation.py).
   const fresh = Number.isFinite(observedAt)
     && observedAt <= now + FUTURE_SKEW_MS && now - observedAt <= 120_000;
   const launchFailed = availability?.reason.startsWith("launch_") ?? false;
