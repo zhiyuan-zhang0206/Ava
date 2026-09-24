@@ -64,8 +64,8 @@ its ``ava cluster update`` trigger kept failing — and it took a forensic recon
 WAS the only evidence. The first blocked round now logs immediately — which dimension
 blocked, how wide, and how many consecutive rounds — and the streak repeats on the
 ``_BLOCKED_ROUND_ALARM_ROUNDS`` cadence (ten rounds ≈ ten minutes) with the running
-count, so a gap stays readable without one line per round (a fleet-wide freeze pause
-once made per-round repeats ~2.8k lines, 79% of a 24h error bucket). Past the bound
+count, so a gap stays readable without one line per round (a pin/schema drift window
+once made per-round repeats ~2.9k lines, 79% of a 24h error bucket). Past the bound
 the level is ERROR, and the round that finally clears a streak says so too. This is
 the alarm only, and it stays an alarm: bounding the
 underlying *heal* (the ~85 failed ``ava cluster update`` triggers of that window) belongs to

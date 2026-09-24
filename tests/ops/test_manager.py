@@ -255,7 +255,7 @@ async def test_blocked_streak_repeats_on_the_alarm_cadence(
 ) -> None:
     """Heartbeats ride the alarm bound itself (ten rounds ≈ ten minutes) and carry
     the running streak count, so a long block stays countable without one line per
-    round (2026-09-24: a fleet-wide freeze pause made per-round repeats ~79% of the
+    round (2026-09-23/24: a pin/schema drift window made per-round repeats ~79% of the
     24h error bucket)."""
     mgr = ControllerManager([_FakeController("schema", BlockScope.ALL, [])])
     bound = manager._BLOCKED_ROUND_ALARM_ROUNDS
@@ -299,8 +299,8 @@ async def test_pause_block_streak_never_escalates_to_error(
     """A paused host is an expected state whose pathology is bounded elsewhere
     (stalled_rollout ahead of pause; the unowned-pause release; the OS hold watchdog):
     its streak must not manufacture ERROR/WARNING events. First round WARNING, later
-    heartbeats INFO — the 2026-09-24 freeze put ~2.8k pause-blocked error lines into
-    the 24h error bucket."""
+    heartbeats INFO — an expected dimension must stay out of the error bucket by
+    construction (the 2026-09-23/24 drift window's ~2.9k repeats were schema-dominated)."""
     mgr = ControllerManager([_FakeController("pause", BlockScope.ALL, [])])
     bound = manager._BLOCKED_ROUND_ALARM_ROUNDS
     with caplog.at_level(logging.INFO, logger="ops.manager"):
