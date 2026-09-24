@@ -41,6 +41,17 @@ function paragraphChildren(markdown: string): PhrasingContent[] {
 }
 
 describe("remarkCjkLinkBoundary", () => {
+  it("splits a literal link inside nested phrasing", () => {
+    const children = paragraphChildren("*https://ip.sb\u4e2d\u6587*");
+
+    expect(children).toMatchObject([
+      {
+        type: "emphasis",
+        children: [link("https://ip.sb"), text("\u4e2d\u6587")],
+      },
+    ]);
+  });
+
   it.each<{
     name: string;
     markdown: string;
