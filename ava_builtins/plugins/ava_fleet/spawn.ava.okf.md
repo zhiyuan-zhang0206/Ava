@@ -39,8 +39,8 @@ Terminates an agent.
 
 - Default: agent exits after completing the current turn
 - `message`: retain a final message for the next resurrection without another response
-- `force=True`: immediately kill the process
-- Result: reads as the acceptance status string (`enqueued` / `already_terminated`) and carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first), or None
+- `force=True`: request interruption when a clean stop cannot progress
+- Result: reads as the acceptance status string (`enqueued` / `already_terminated`); `enqueued` confirms acceptance, not exit or completion of owned work. It carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first), or None
 
 ### `ava.agents.restart(agent_id: int) -> RestartResult`
 

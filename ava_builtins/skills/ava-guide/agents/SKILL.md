@@ -14,8 +14,9 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
 
 - `spawn` — start a brand-new agent.
 - `fork_from` — copy another agent's conversation state into a new one.
-- `terminate` — end it (default: finish current turn first; `force=True` kills
-  the process immediately).
+- `terminate` — end it (default: finish current turn first; `force=True` requests
+  interruption when a clean stop cannot progress; `enqueued` confirms
+  acceptance, not exit or completion of owned work).
 - `restart` — finish current turn, then restart as a fresh process under the
   same `agent_id`.
 - `resurrect` — wake a `terminated` agent with its full conversation state

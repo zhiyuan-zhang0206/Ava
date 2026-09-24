@@ -166,8 +166,8 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
         init = _initialize(client, token)
         assert init[0]["result"]["protocolVersion"]
         messages = _post(client, token, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-    tools = {t["name"] for t in messages[0]["result"]["tools"]}
-    assert tools == {
+    tools = {t["name"]: t for t in messages[0]["result"]["tools"]}
+    assert set(tools) == {
         "list_agents",
         "get_agent",
         "spawn_agent",
@@ -176,6 +176,13 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
         "terminate_agent",
         "cluster_status",
     }
+    terminate_description = " ".join(tools["terminate_agent"]["description"].split())
+    assert "requests interruption" in terminate_description
+    assert (
+        "an `enqueued` result means accepted, not that the agent or its owned work has exited"
+        in terminate_description
+    )
+    assert "Use force only when a clean stop cannot progress" in terminate_description
 
 
 def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -> None:

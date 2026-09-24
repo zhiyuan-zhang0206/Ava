@@ -38,8 +38,9 @@ Overview of the Agent subsystem.
     `kind='restart_completed'`; when restarted from idle, only commit the marker, no need to wake the model.
   - **fork** — new agent + inherit state of a checkpoint (including history), deliver `kind='fork'` identity marker
     correcting "who I am".
-  - **terminate / force-kill** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)
-    or a four-step kill ladder when stuck (`force=true`, not available on `ava.self.terminate()`). With `final` the
+  - **terminate / force** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)
+    or request interruption of the active hosted turn when stuck (`force=true`, not available on `ava.self.terminate()`);
+    `enqueued` confirms acceptance, not exit or completion of owned work. With `final` the
     termination also closes the agent for good: never auto-resurrected, its claimed terminate exempt from the
     claim-time newer-work veto, and the response carries the resulting closure state (`closed`). Only an explicit
     resurrect reopens it.
