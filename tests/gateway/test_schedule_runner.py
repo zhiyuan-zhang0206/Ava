@@ -623,6 +623,93 @@ def test_stall_guard_fires_on_select_outside_subprocess(
             stop.set()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="preexec_fn requires POSIX")
+def test_stall_guard_fires_during_subprocess_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The caller's timeout does not bound Popen's wait for child startup."""
+    import subprocess
+    import time
+
+    import gateway.schedule_runner as sr
+
+    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
+    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
+    fired: list[str] = []
+
+    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
+        fired.append(msg)
+
+    def slow_spawn() -> None:
+        time.sleep(0.5)
+
+    monkeypatch.setattr(sr, "_stall_action", record_stall)
+    sr._patch_park_detection()
+    stop = sr._start_stall_guard(1, None)
+    try:
+        subprocess.run(
+            [sys.executable, "-c", "pass"],
+            capture_output=True,
+            timeout=0.2,
+            preexec_fn=slow_spawn,
+            check=True,
+        )
+        assert fired, "stall guard ignored subprocess spawn"
+        assert "_execute_child" in fired[0]
+    finally:
+        stop.set()
+        sr._restore_park_detection()
+
+
+def test_stall_guard_fires_during_subprocess_argument_conversion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocking PathLike callback is not part of the bounded child wait."""
+    import os
+    import socket
+    import subprocess
+    import threading
+
+    import gateway.schedule_runner as sr
+
+    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
+    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
+    fired: list[str] = []
+
+    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
+        fired.append(msg)
+
+    monkeypatch.setattr(sr, "_stall_action", record_stall)
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        reader.settimeout(2)
+
+        class SlowExecutable(os.PathLike[str]):
+            def __fspath__(self) -> str:
+                reader.recv(1)
+                return sys.executable
+
+        # EOF releases every conversion of the same argument, not just the first.
+        wake = threading.Timer(0.5, writer.close)
+        sr._patch_park_detection()
+        stop = sr._start_stall_guard(1, None)
+        wake.start()
+        try:
+            subprocess.run(  # noqa: S603 - test PathLike always resolves to sys.executable
+                [SlowExecutable(), "-c", "pass"],
+                capture_output=True,
+                timeout=0.2,
+                check=True,
+            )
+            assert fired, "stall guard ignored subprocess argument conversion"
+            assert "__fspath__" in fired[0]
+        finally:
+            stop.set()
+            sr._restore_park_detection()
+            wake.cancel()
+            wake.join()
+
+
 def test_run_hung_subprocess_times_out_and_records_error(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
