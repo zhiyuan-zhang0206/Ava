@@ -60,6 +60,7 @@ on:
       - 'scripts/verify_runtime_wheel.py'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.python-version'
       - '.github/workflows/runtime-prepare.yml'
 permissions:
   contents: read
@@ -76,8 +77,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
-        with:
-          python-version: '3.12'
+      - name: Select the pinned managed interpreter for every Python stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cat .python-version)
+          uv python install "$version"
+          echo "UV_PYTHON=$(uv python find --managed-python "$version")" >> "$GITHUB_ENV"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version-file: scripts/runtime-node-version
@@ -164,7 +170,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv python install 3.12
           # The proof retires the checkout, including .venv. Resolve its base
           # interpreter outside that tree, using the same Python as validation.
           proof_python=$(uv run --locked --no-dev python -c 'import pathlib, sys; p = pathlib.Path(sys.executable).resolve(strict=True); assert not p.is_relative_to(pathlib.Path.cwd()); print(p)')
