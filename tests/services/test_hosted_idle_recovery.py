@@ -1,5 +1,6 @@
-"""A successor recovers quiet idle ownership through normal admission and claim."""
+"""Hosted idle recovery and reaper successor marker lifecycle."""
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -18,6 +19,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._claim import claim_node
 from agent.state import BaseAgentState
+from services.agent_host import dispatcher
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -154,3 +156,105 @@ async def test_maintenance_hold_does_not_adopt_a_quiet_foreign_owner(
     pause_owner.begin_maintenance("test-idle-recovery", datetime.now(UTC))
     assert await host.pending_inbound_wakes(60) == []
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
+
+
+class TestReapedSuccessorMarker:
+    @pytest.mark.parametrize("outcome", ["return", "error", "cancel"])
+    async def test_reaped_successor_marker_clears_when_task_finishes(self, outcome: str) -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def run_turn(_agent_id: int) -> None:
+            entered.set()
+            await release.wait()
+            if outcome == "error":
+                raise ValueError("turn failed")
+
+        scheduler = TurnScheduler(run_turn)
+        try:
+            original = scheduler.wake(1)
+            assert original is not None
+            original.cancel()  # Reap before the first pump runs.
+            await poll_until_async(lambda: scheduler.reaped_successor(1) is not None, timeout=3)
+            successor = scheduler.reaped_successor(1)
+            assert successor is not None
+            await asyncio.wait_for(entered.wait(), 3)
+            assert scheduler.reaped_successor(1) is successor
+            if outcome == "cancel":
+                successor.cancel()
+            else:
+                release.set()
+            await poll_until_async(
+                lambda: successor.done() and scheduler.reaped_successor(1) is None, timeout=3
+            )
+        finally:
+            release.set()
+            await scheduler.aclose()
+
+    async def test_old_successor_cleanup_preserves_new_reaper_marker(self) -> None:
+        release = asyncio.Event()
+
+        async def run_turn(_agent_id: int) -> None:
+            await release.wait()
+
+        async def pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return [dispatcher.PendingInboundWake(1, False, True)]
+
+        scheduler = TurnScheduler(run_turn)
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=pending, stale_after_s=180.0
+        )
+        try:
+            await disp.scan_once()
+            original = disp._recovery_in_flight[1]
+            original.cancel()
+            await asyncio.sleep(0)  # Run the cancelled original.
+            await asyncio.sleep(0)  # Run its reaper, before the replacement starts.
+            old_successor = scheduler.reaped_successor(1)
+            assert old_successor is not None
+            assert disp._recovery_in_flight[1] is old_successor
+            old_successor.cancel()  # Reap again before this pump starts.
+            await poll_until_async(
+                lambda: scheduler.reaped_successor(1) is not old_successor, timeout=3
+            )
+            new_successor = scheduler.reaped_successor(1)
+            assert new_successor is not None
+            assert scheduler.task_for(1) is new_successor
+            await asyncio.sleep(0)  # Let its recovery-slot callback finish.
+            assert scheduler.reaped_successor(1) is new_successor
+            assert disp._recovery_in_flight[1] is new_successor
+            release.set()
+            await poll_until_async(
+                lambda: (
+                    new_successor.done()
+                    and scheduler.reaped_successor(1) is None
+                    and disp._recovery_in_flight == {}
+                ),
+                timeout=3,
+            )
+        finally:
+            release.set()
+            await scheduler.aclose()
+
+    async def test_late_original_release_skips_completed_reaper_successor(self) -> None:
+        async def run_turn(_agent_id: int) -> None:
+            return
+
+        scheduler = TurnScheduler(run_turn)
+        disp = InboundWakeDispatcher("redis://unused", scheduler)
+        try:
+            original = scheduler.wake(1)
+            assert original is not None
+            disp._recovery_in_flight[1] = original
+            original.cancel()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            successor = scheduler.reaped_successor(1)
+            assert successor is not None
+            await poll_until_async(
+                lambda: successor.done() and scheduler.reaped_successor(1) is None, timeout=3
+            )
+            disp._release_recovery_slot(1, original)
+            assert disp._recovery_in_flight == {}
+        finally:
+            await scheduler.aclose()
