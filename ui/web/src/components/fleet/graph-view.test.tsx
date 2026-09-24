@@ -272,6 +272,7 @@ describe("GraphView", () => {
     await waitFor(() => {
       const t = zoomLayer.getAttribute("transform")!;
       expect(t).not.toBe("translate(0,0) scale(1)");
+      expect((zoomLayer as SVGGElement).style.transition).toBe("transform 0.4s ease");
     });
 
     // Reset returns to the fit-to-content identity transform.
@@ -293,7 +294,17 @@ describe("GraphView", () => {
     Object.defineProperty(svg, "createSVGPoint", {
       value: () => ({ x: 0, y: 0, matrixTransform: () => ({ x: 200, y: 200 }) }),
     });
-    for (let i = 0; i < 12; i += 1) {
+    fireEvent.wheel(svg, { deltaY: -100, clientX: 200, clientY: 200 });
+    await waitFor(() => {
+      const match = zoomLayer.getAttribute("transform")?.match(/translate\(([^,]+),([^)]+)\) scale\(([^)]+)\)/);
+      expect(match).toBeTruthy();
+      const scale = 2 ** 0.2;
+      expect(Number(match![1])).toBeCloseTo(200 * (1 - scale));
+      expect(Number(match![2])).toBeCloseTo(200 * (1 - scale));
+      expect(Number(match![3])).toBeCloseTo(scale);
+      expect((zoomLayer as SVGGElement).style.transition).toBe("none");
+    });
+    for (let i = 1; i < 12; i += 1) {
       fireEvent.wheel(svg, { deltaY: -100, clientX: 200, clientY: 200 });
     }
 
