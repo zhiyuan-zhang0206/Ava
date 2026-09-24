@@ -83,30 +83,24 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(e2e_env: E2EEnv) -> No
     assert card["open_impersonation_session_id"] == session_id
 
     row = page.locator("li.group.relative").filter(has_text=f"#{agent_id}").first
-    action = page.get_by_text("End external takeover session")
+    action = row.get_by_role("button", name="End external takeover session")
 
-    def menu_ready() -> tuple[bool, object]:
-        row.click(button="right")
-        visible = action.is_visible()
-        if not visible:
-            page.keyboard.press("Escape")
+    def control_ready() -> tuple[bool, object]:
+        visible = action.is_visible() and row.get_by_text("Takeover open").is_visible()
         return visible, {
             "row": row.inner_text(),
-            "menu": page.locator('[role="menu"]').all_inner_texts(),
         }
 
-    poll_until(menu_ready, timeout=15.0, interval=0.5, what="open session appears in sidebar menu")
+    poll_until(control_ready, timeout=15.0, interval=0.5, what="open session appears in sidebar")
     page.once("dialog", lambda dialog: dialog.accept())
     action.click()
     page.get_by_text("Takeover session ended").wait_for(timeout=10_000)
 
-    def menu_cleared() -> tuple[bool, object]:
-        row.click(button="right")
+    def control_cleared() -> tuple[bool, object]:
         visible = action.is_visible()
-        page.keyboard.press("Escape")
         return not visible, {"end_action_visible": visible}
 
-    poll_until(menu_cleared, timeout=10.0, interval=0.5, what="closed session leaves sidebar menu")
+    poll_until(control_cleared, timeout=10.0, interval=0.5, what="closed session leaves sidebar")
 
     def resumed() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn:

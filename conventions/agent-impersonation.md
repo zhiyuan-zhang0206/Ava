@@ -195,10 +195,11 @@ including timestamps, renewals, ACKs and message bodies; exports can be rebuilt.
 SDK statistics come from the existing event collector. This feature consumes
 those facts and does not change collection or sampling.
 
-An operator can end an open external session from the agent sidebar. The
-action closes the session shown in the menu, records `expired` with a
-`force-expired: ` reason and the caller in permanent lifecycle history, and
-wakes the native agent. For a live non-automatic session it also queues a
+An operator can end an open external session from the visible agent sidebar
+row button or its context menu. The action closes the session shown in the
+row, records `expired` with a `force-expired: ` reason and the caller in
+permanent lifecycle history, and wakes the native agent. For a live
+non-automatic session it also queues a
 plain-language note that starts a resumed turn. The action does not stop the
 external executor process. If the native runtime itself is wedged, terminating
 the agent is the stronger fallback: the termination trigger revokes the session,

@@ -11,7 +11,7 @@ vi.mock("./api", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
   api: {
     getAgentRoster: vi.fn(), getAgent: vi.fn(), listAgents: vi.fn(), spawnAgent: vi.fn(),
-    terminateAgent: vi.fn(), restartAgent: vi.fn(), resurrectAgent: vi.fn(), compact: vi.fn(),
+    terminateAgent: vi.fn(), forceExpireImpersonation: vi.fn(), restartAgent: vi.fn(), resurrectAgent: vi.fn(), compact: vi.fn(),
   },
 }));
 function row(agent_id: number, status: AgentRow["status"] = "idling"): AgentRow {
@@ -342,6 +342,32 @@ describe("useAgents.terminate", () => {
     expect(api.terminateAgent).toHaveBeenCalledWith(1, false);
     // Cache is updated by the AgentUpdated SSE event, not by an
     // invalidateQueries call — proving "no polling, no optimistic writes".
+  });
+
+  it("force-expire reports the endpoint outcome for the observed session", async () => {
+    vi.mocked(api.forceExpireImpersonation)
+      .mockResolvedValueOnce({ session_id: 7, status: "expired" })
+      .mockResolvedValueOnce({ session_id: 7, status: "not_open" });
+    const { result } = renderHook(() => useAgents(noop), { wrapper });
+    await waitFor(() => expect(result.current.agents).toEqual(MOCK_AGENTS));
+
+    await act(async () => { await result.current.forceExpire(1, 7); });
+    expect(api.forceExpireImpersonation).toHaveBeenCalledWith(1, 7);
+    expect(useStore.getState().toast).toBe("Takeover session ended");
+
+    await act(async () => { await result.current.forceExpire(1, 7); });
+    expect(useStore.getState().toast).toBe("That takeover session is no longer open.");
+  });
+
+  it("force-expire failure reaches the visible error surface without a success toast", async () => {
+    const showError = vi.fn();
+    vi.mocked(api.forceExpireImpersonation).mockRejectedValue(new Error("backend boom"));
+    const { result } = renderHook(() => useAgents(showError), { wrapper });
+    await waitFor(() => expect(result.current.agents).toEqual(MOCK_AGENTS));
+
+    await act(async () => { await result.current.forceExpire(1, 7); });
+    expect(useStore.getState().toast).toBeNull();
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining("Could not end takeover session: backend boom"));
   });
 
   it("force → calls api.terminateAgent(id, true) and reports acceptance", async () => {
