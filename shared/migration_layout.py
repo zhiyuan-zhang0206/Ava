@@ -294,6 +294,12 @@ def required_migration_set_at_ref(ref: str, *, repo_root: Path | None = None) ->
             f"{result.stderr.strip() or 'git ls-tree failed'}"
         )
     names = [entry.rsplit("/", 1)[-1] for entry in result.stdout.split("\0") if entry.strip()]
+    return required_migration_set_from_names(names)
+
+
+def required_migration_set_from_names(names: Iterable[str]) -> set[str]:
+    """Derive the required set from one already captured source inventory."""
+    names = tuple(names)
     validate_migration_layout(names)
     return {_BASELINE_NAME} | {
         stem for name in names if (stem := _migration_stem(name)) is not None
