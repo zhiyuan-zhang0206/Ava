@@ -55,7 +55,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 | Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit guards), `enabled`, schema `version` field as a migration anchor | `shared/install_registry.py` |
 | Explicit update verbs | `ava skill update [name...] [--force]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name> [--force]`, `ava mcp upgrade` — all with the R5 conflict contract and staged/atomic replacement | `cli/commands/skill.py`, `plugins.py`, `mcp.py` |
 | Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `_converge_skills.py`, `plugins.py`, `shared/plugins_config.py` |
-| Supply-chain gate | `shared/skill_scan.py` on every ingest (critical → refuse, `--accept-risk` recorded, trust never auto-promoted) | `shared/skill_scan.py`, `shared/install_registry.py` |
+| Supply-chain gate | `shared/packages/skills/skill_scan.py` on every ingest (critical → refuse, `--accept-risk` recorded, trust never auto-promoted) | `shared/packages/skills/skill_scan.py`, `shared/install_registry.py` |
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `shared/plugin_manifest.py`, `conventions/plugin-spec-v2.md` |
 | Per-machine OS jobs | launchd / crontab / schtasks registrars, idempotent, converge-registered (health probe, watchdog, autostart, logs), test switch `AVA_OS_JOBS_ENABLED=false` | `shared/os_*.py`, `cli/commands/_converge_os_jobs.py` |
 | Cluster extension registry (S2, in progress) | `extensions` / `extension_blobs` tables; install writes row+blob; converge/boot materialize; adoption sweep; content-addressed by tree hash; trust rises only | `shared/extension_registry.py`, `shared/extension_materialize.py` |
@@ -205,7 +205,7 @@ for each due package (auto|notify), oldest-check-first, bounded (budget: e.g. 60
                git:  acquire_source(source, ref) (existing code path)
         gates (any failure -> keep disk as-is, record the outcome, backoff; never a forced overwrite):
             - trees non-empty, expected entry exists (SKILL.md / plugin.py | .claude-plugin/plugin.json)
-            - supply-chain scan (shared/skill_scan.py) — critical finding refuses; NO auto --accept-risk
+            - supply-chain scan (shared/packages/skills/skill_scan.py) — critical finding refuses; NO auto --accept-risk
             - plugin manifest validation (existing code)
             - version gate (§5.5): engines.ava must include this host's version — else record
               blocked_version, keep the current content, retry after the host moves

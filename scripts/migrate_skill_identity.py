@@ -51,9 +51,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-# shared.skill_names is importable standalone (no heavy deps).
+# shared.packages.skills.skill_names is importable standalone (no heavy deps).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared.skill_names import display_name, match_key
+from shared.packages.skills.skill_names import display_name, match_key
 
 try:
     from shared.install_registry import Registry, registry_lock

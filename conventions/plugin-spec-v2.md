@@ -113,7 +113,7 @@ Example (the shape `ava_code` would declare):
 
 | Field | Meaning | Closes |
 |---|---|---|
-| `name` | Unique identity; dash/underscore-folded to the directory name (registry already folds via `shared.skill_names.match_key`) | duplicate rows / name collisions |
+| `name` | Unique identity; dash/underscore-folded to the directory name (registry already folds via `shared.packages.skills.skill_names.match_key`) | duplicate rows / name collisions |
 | `version` (semver) | Package version; recorded beside `installed_hash` as `installed_version` when the registry schema v2 fields land (S3) | no version awareness (A1) |
 | `engines.ava` (semver range) | Host compatibility interval (npm `engines` / VS Code `engines.vscode` shape); compared against the **derived host version** (`YYYY.M.D` from the checkout's commit date — [`host-versioning.md`](host-versioning.md)), checked at install/upgrade, at content-channel refresh landing, and at load. Required **unless** `requires_commit` is present | framework evolution silently breaking plugins (A3) |
 | `requires_commit` (commit SHA) | The host must *contain* this commit (`git merge-base --is-ancestor`) — the exactness layer beside the date axis, for content that needs a fresh kernel capability. Same enforcement points as `engines.ava` | content riding ahead of the code it needs, without a bump discipline |

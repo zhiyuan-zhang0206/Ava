@@ -54,7 +54,7 @@ from shared.install_registry import (
     TrustTier,
     tree_hash,
 )
-from shared.skill_names import SkillIdentity, match_key
+from shared.packages.skills.skill_names import SkillIdentity, match_key
 
 # A git worktree checkout's sources are branch work-in-progress. converge and
 # `ava skill update` take their sources from the checkout the CLI runs from

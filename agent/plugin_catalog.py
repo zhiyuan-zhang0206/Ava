@@ -36,7 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from shared import plugin_contributions, plugins_config, skill_names
+from shared import plugin_contributions, plugins_config
+from shared.packages.skills import skill_names
 from shared.plugin_contributions import Contribution
 from shared.plugin_manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
 

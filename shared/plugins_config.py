@@ -26,7 +26,8 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ValidationError
 
-from shared import paths, skill_names
+from shared import paths
+from shared.packages.skills import skill_names
 from shared.plugin_config_registry import merge_disk_image_schema
 
 

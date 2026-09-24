@@ -30,7 +30,7 @@ installed_at, updated_at, trust, scanned_at, accepted_findings, update}`
   `cli/commands/_converge_skills.py`; `shared/install_registry.py:tree_hash()` recomputes
   the hash to surface a `modified_locally` drift flag
 - `trust` / `scanned_at` / `accepted_findings` — the content trust tier, when
-  `shared/skill_scan.py` last read the package, and the rule ids a human waived
+  `shared/packages/skills/skill_scan.py` last read the package, and the rule ids a human waived
   with `--accept-risk` (see below)
 - `update` — the per-package content-channel policy + bookkeeping (schema v2,
   tasks #2915 / #3267): `mode` (`auto` / `notify` / `off`), `interval_seconds`,
@@ -119,7 +119,7 @@ Nothing is sandboxed, so the trust decision is made before the copy. Every
 package entering from outside the checkout — `ava skill install`, both branches
 of `ava plugins install`, and `ava skill register` (a hand-copied dir reaches
 the same load dir, so it meets the same gate) — is read file by file by
-`shared/skill_scan.py`, including inside base64 / hex / percent-encoded blobs,
+`shared/packages/skills/skill_scan.py`, including inside base64 / hex / percent-encoded blobs,
 decoded recursively before matching. A **critical** finding refuses the install
 with a file/line report and writes nothing; `--accept-risk` overrides and
 records the waived rule ids. **Notice** findings never block — they are what a

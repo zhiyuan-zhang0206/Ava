@@ -29,7 +29,7 @@
 >
 > **Not built** — everything structural: the sandboxed deprivileged reader, egress
 > allowlisting, privilege separation. (On-install skill scanning **is** built —
-> `shared/skill_scan.py` refuses a third-party skill package carrying critical
+> `shared/packages/skills/skill_scan.py` refuses a third-party skill package carrying critical
 > supply-chain patterns; see
 > [`skill-supply-chain-trust.md`](skill-supply-chain-trust.md).) Those remain
 > deferred for the reasons this doc lays out, and they are the ones that would

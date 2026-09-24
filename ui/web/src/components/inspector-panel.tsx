@@ -617,7 +617,7 @@ function ShellRow({
 // these in the underscore Python projection (ava_code_worktree); the UI
 // renders the canonical dash spelling (ava-code-worktree) — the same rule the
 // `# Capabilities` index and the skills panel follow
-// (shared.skill_names.display_name).
+// (shared.packages.skills.skill_names.display_name).
 const SKILL_LIST_KEYS = new Set([
   "skills_to_inject_into_system_prompt",
   "skills_to_expand_at_start",
