@@ -11,16 +11,44 @@ in both directions.
 
 from __future__ import annotations
 
+import os
 import subprocess
-from datetime import UTC, datetime
+import time
+from collections.abc import Callable
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
 from cli.commands import _update_agent_runner as runner_mod
+from cli.commands import _update_normal_release as normal
 from cli.commands import _update_stop_recovery as stop_recovery
+from cli.commands._release_services import PreparedService
+from shared import spawn_receipt
+from shared.managed_writer_activation import UnitActivationReadback
+from shared.managed_writer_observation import ExpectedProcess, ProcessVerdict
+from shared.managed_writer_publication import NormalService
+from shared.runtime_release import ReleaseRejectedError
+from tests.cli.test_release_normal import (
+    GENERATION,
+    _attempt_for,
+    _context,
+    _journal,
+    _journal_for,
+    _prepared_plan,
+    _seed_environment,
+    _selector_readback,
+    _service_readback,
+    _two_service_setup,
+)
+from tests.cli.test_release_normal import (
+    unit_home as unit_home,
+)
 
 _EPISODE = ("update:holder", datetime(2026, 9, 21, 5, 0, tzinfo=UTC))
 _OTHER_EPISODE = ("someone-else", datetime(2026, 9, 21, 5, 1, tzinfo=UTC))
@@ -406,3 +434,213 @@ def test_the_leg_leaves_a_successful_stop_alone(
     )
     assert rc == 0
     assert events == ["capture", "stop"]
+
+
+# ── the #4132 R2 pins: per-stage challenge-expiry refusals (relocated from test_release_normal.py under the 800-line ceiling) ──
+
+
+# --- checked chain: fresh-budget expiry at every stage point ------------------
+
+
+def _must_not_connect(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("an expired budget must refuse before any connection")
+
+
+def _expiry_at_entry(
+    monkeypatch: pytest.MonkeyPatch, home: Path
+) -> tuple[str, Callable[[], None], Callable[[], None]]:
+    _seed_environment(home)
+    context = _context(home, uuid4(), datetime.now(UTC) + timedelta(seconds=1))
+    plan = _prepared_plan(home, (), context=context)
+    monkeypatch.setattr(normal.psycopg, "connect", _must_not_connect)
+
+    def act() -> None:
+        normal._drive_checked_normal_release(plan, GENERATION)
+
+    def zero_effects() -> None:
+        assert _journal(home) is None
+
+    return "no connection budget for its effects", act, zero_effects
+
+
+def _expiry_at_pre_stop(
+    monkeypatch: pytest.MonkeyPatch, home: Path
+) -> tuple[str, Callable[[], None], Callable[[], None]]:
+    _seed_environment(home)
+    context = _context(home, uuid4(), datetime.now(UTC) + timedelta(seconds=1))
+    # The pre-stop preflight validates the full candidate unit plan before its
+    # budget check, so the service must carry its retained-image paths.
+    release = home / "releases" / ("a" * 64)
+    service = PreparedService(
+        identity=NormalService(
+            session="ava-ops",
+            module="services.agent_ops.daemon",
+            executable=str(release / "python"),
+            entrypoint=str(release / "ops.py"),
+            command_digest="d" * 64,
+        ),
+        spec=Mock(),
+        argv=("/image/python", "-m", "services.agent_ops.daemon"),
+        cwd=release,
+        environment={},
+    )
+    plan = _prepared_plan(home, (service,), context=context)
+    monkeypatch.setattr(normal.psycopg, "connect", _must_not_connect)
+
+    def act() -> None:
+        normal._preflight_pending_plan(plan)
+
+    def zero_effects() -> None:
+        assert _journal(home) is None
+
+    return "no pre-stop connection budget", act, zero_effects
+
+
+def _expiry_at_stop_wait(
+    monkeypatch: pytest.MonkeyPatch, home: Path
+) -> tuple[str, Callable[[], None], Callable[[], None]]:
+    _seed_environment(home)
+    plan, _, _ = _two_service_setup(home)
+    expired = replace(
+        plan,
+        context=_context(
+            home, plan.context.challenge.challenge, datetime.now(UTC) - timedelta(seconds=1)
+        ),
+    )
+    process = ExpectedProcess(
+        pid=plan.bootstrap.pid,
+        create_time=plan.bootstrap.create_time,
+        starttime=plan.bootstrap.starttime,
+    )
+    observed: list[ExpectedProcess] = []
+
+    def observing(candidate: ExpectedProcess) -> ProcessVerdict:
+        observed.append(candidate)
+        return "alive"
+
+    monkeypatch.setattr(normal, "observe_process", observing)
+
+    def act() -> None:
+        normal._wait_bootstrap_stopped(expired, process)
+
+    def zero_effects() -> None:
+        # An expired challenge leaves no wait at all: the bound collapsed to
+        # zero, so the process is never observed.
+        assert observed == []
+        assert _journal(home) is None
+        assert not (home / "run" / "updater-spawn").exists()
+
+    return "did not stop within its recovery budget", act, zero_effects
+
+
+def _expiry_at_spawn_wait(
+    monkeypatch: pytest.MonkeyPatch, home: Path
+) -> tuple[str, Callable[[], None], Callable[[], None]]:
+    plan, _, _ = _two_service_setup(home)
+    prepared = plan.services[0]
+    expired = replace(
+        plan,
+        context=_context(
+            home, plan.context.challenge.challenge, datetime.now(UTC) - timedelta(seconds=1)
+        ),
+    )
+    attempt = _attempt_for(home, prepared)
+    journal = _journal_for(
+        expired, "starting", starting_session=prepared.identity.session, starting_attempt=attempt
+    )
+    _seed_environment(home, normal_release=journal.model_dump(mode="json"))
+    # Hold the session gate: the child may still be pre-birth, so only the
+    # challenge-derived budget can end the wait — never a "not spawned" guess.
+    fd = spawn_receipt.take_session_lock(
+        spawn_receipt.session_lock_path(home, GENERATION, prepared.identity.session)
+    )
+    real_await = spawn_receipt.await_birth
+    deadlines: list[float] = []
+
+    def observed_await(
+        receipt_file: Path,
+        expectation: spawn_receipt.SpawnExpectation,
+        lock_path: Path,
+        *,
+        deadline: float,
+        poll_s: float | None = None,
+    ) -> spawn_receipt.SpawnOutcome:
+        deadlines.append(deadline)
+        return real_await(receipt_file, expectation, lock_path, deadline=deadline, poll_s=poll_s)
+
+    monkeypatch.setattr(spawn_receipt, "await_birth", observed_await)
+    started: list[float] = []
+
+    def act() -> None:
+        started.append(time.monotonic())
+        try:
+            normal._adjudicate_slot_attempt(expired, GENERATION, journal)
+        finally:
+            os.close(fd)
+
+    def zero_effects() -> None:
+        # The bound is the challenge remainder, never a constant cap: an
+        # expired challenge collapses the budget to zero before the wait.
+        assert deadlines and started
+        assert deadlines[0] <= started[0] + 0.1
+        retained = _journal(home)
+        assert retained is not None and retained.stage == "starting"
+        assert retained.starting_attempt is not None
+        assert retained.starting_attempt.nonce == attempt.nonce
+
+    return "in-flight normal attempt is ambiguous", act, zero_effects
+
+
+def _expiry_at_commit(
+    monkeypatch: pytest.MonkeyPatch, home: Path
+) -> tuple[str, Callable[[], None], Callable[[], None]]:
+    context = _context(home, uuid4(), datetime.now(UTC) + timedelta(seconds=1))
+    plan = _prepared_plan(home, (), context=context)
+    observed_at = datetime.now(UTC)
+    readback = UnitActivationReadback(
+        selector=_selector_readback(plan.request.unit, context.challenge.challenge, observed_at),
+        services=(_service_readback("ava-ops", context.challenge.challenge, observed_at),),
+    )
+    journal = _journal_for(plan, "observed", readback=readback)
+    _seed_environment(home, normal_release=journal.model_dump(mode="json"))
+    monkeypatch.setattr(normal.psycopg, "connect", _must_not_connect)
+
+    def act() -> None:
+        normal.commit_normal_release_after_publication(plan, GENERATION)
+
+    def zero_effects() -> None:
+        retained = _journal(home)
+        assert retained is not None and retained.stage == "observed"
+
+    return "commit has no connection budget", act, zero_effects
+
+
+_ExpiryStageCase = Callable[
+    [pytest.MonkeyPatch, Path], tuple[str, Callable[[], None], Callable[[], None]]
+]
+
+_EXPIRY_STAGE_CASES: dict[str, _ExpiryStageCase] = {
+    "entry": _expiry_at_entry,
+    "pre-stop": _expiry_at_pre_stop,
+    "stop-wait": _expiry_at_stop_wait,
+    "spawn-wait": _expiry_at_spawn_wait,
+    "commit": _expiry_at_commit,
+}
+
+
+@pytest.mark.parametrize("stage", list(_EXPIRY_STAGE_CASES))
+def test_checked_chain_refuses_at_every_stage_once_the_challenge_expires(
+    monkeypatch: pytest.MonkeyPatch, unit_home: Path, stage: str
+) -> None:
+    """N5 per-stage granularity: every budget point refuses with zero effects.
+
+    The checked chain carries five fresh-budget points (entry, pre-stop,
+    stop-wait, spawn-wait, commit). With the challenge expired at any of them
+    the stage refuses without a database connection and without writing
+    recovery evidence — expiry is a refusal everywhere, recovery included
+    (design #4117 §5; N5 ruling).
+    """
+    match, act, zero_effects = _EXPIRY_STAGE_CASES[stage](monkeypatch, unit_home)
+    with pytest.raises(ReleaseRejectedError, match=match):
+        act()
+    zero_effects()
