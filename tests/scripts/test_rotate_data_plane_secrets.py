@@ -27,6 +27,7 @@ def _state(scope: str = "both") -> rotate.RotationState:
     return rotate.RotationState(
         scope=scope,
         identity="ava_main",
+        redis_user="ava_main",
         old_db_admin_password=_OLD_DB,
         new_db_admin_password=_NEW_DB,
         old_redis_admin_password=_OLD_REDIS_ADMIN,
@@ -436,3 +437,82 @@ def test_main_refuses_remote_managed_data_plane(
     err = capsys.readouterr().err
     assert "remote-managed" in err
     assert "rotates credentials at the provider" in err
+
+
+def test_redis_faces_use_the_url_derived_redis_user_not_the_db_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The Redis ACL probes and the ACL write must dial as the cluster's own
+    redis_url user: it can legitimately differ from the Postgres identity
+    (2026-09-24 gateway preflight — probes written as the db identity cannot
+    authenticate, and an ACL write under it would provision the wrong user)."""
+    _patch_gateway_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        settings.data_plane, "redis_url", "redis://ava:old-redis-runtime@127.0.0.1:16380/0"
+    )
+    (tmp_path / ".env").write_text(
+        "AVA_DB_ADMIN_PASSWORD=old-db\n"
+        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
+        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
+        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
+    )
+    state = rotate.build_state()
+    assert state.identity == "ava_main"
+    assert state.redis_identity == "ava"
+
+    redis_probes: list[tuple[str, str]] = []
+    acl_users: list[str] = []
+
+    def _redis_probe(_host: str, _port: int, password: str, *, username: str) -> bool:
+        redis_probes.append((username, password))
+        return True
+
+    def _pg_probe(*_args: object, **_kwargs: object) -> bool:
+        return True
+
+    def _ensure_runner_role(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def _working_redis_admin_password(_state: rotate.RotationState) -> str:
+        return "old-redis-admin"
+
+    def _ensure_cluster_redis_acl(user: str, **_kwargs: object) -> None:
+        acl_users.append(user)
+
+    monkeypatch.setattr(rotate, "_redis_probe", _redis_probe)
+    monkeypatch.setattr(rotate, "_pg_probe", _pg_probe)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(rotate, "ensure_runner_role", _ensure_runner_role)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
+    monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
+
+    # preflight re-probes the OLD runtime password as the redis_url user.
+    assert rotate.preflight(state) is True
+    assert redis_probes == [("default", "old-redis-admin"), ("ava", "old-redis-runtime")]
+
+    # verify re-probes the NEW runtime password the same way.
+    redis_probes.clear()
+    rotate.verify(state)
+    assert [username for username, _ in redis_probes] == ["default", "ava"]
+    assert redis_probes[1][1] == state.redis_password
+
+    # the ACL write provisions the redis_url user, not the db identity.
+    rotate.apply_runner(state)
+    assert acl_users == ["ava"]
+
+
+def test_old_journal_without_redis_user_falls_back_to_identity(tmp_path: Path) -> None:
+    """A rotation journal written before the redis_user field existed resumes
+    with the db identity as the Redis user — the behavior it ran with."""
+    import json
+    from dataclasses import asdict
+
+    state = _state()
+    data = asdict(state)
+    del data["redis_user"]
+    path = tmp_path / "data-plane-old-redis-user.json"
+    path.write_text(json.dumps(data))
+
+    loaded = rotate.RotationState.load(path)
+
+    assert loaded.redis_user == ""
+    assert loaded.redis_identity == loaded.identity

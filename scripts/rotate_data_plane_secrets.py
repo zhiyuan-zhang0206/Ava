@@ -36,6 +36,7 @@ from shared.cluster import (
     record_pgbouncer_port,
     record_postgres_port,
     record_redis_port,
+    redis_identity,
 )
 from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.config import settings
@@ -77,6 +78,11 @@ class RotationState:
     # journal written before these fields existed resumes unchanged.
     pg_host: str = "127.0.0.1"
     redis_host: str = "127.0.0.1"
+    # The Redis ACL user the runtime dials as, read from this cluster's own
+    # redis_url — it can differ from the Postgres identity. Defaulted blank so a
+    # journal written before this field existed resumes as the db identity (the
+    # behavior those journals ran with).
+    redis_user: str = ""
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     phase: str = "minted"
 
@@ -117,6 +123,12 @@ class RotationState:
     @property
     def runner_db_password(self) -> str:
         return self.new_runner_db_password if self.rotates_runner else self.old_runner_db_password
+
+    @property
+    def redis_identity(self) -> str:
+        """The Redis ACL user the runtime dials as; a journal written before the
+        field existed resumes as the db identity — the behavior it ran with."""
+        return self.redis_user or self.identity
 
     @property
     def redis_password(self) -> str:
@@ -175,6 +187,7 @@ def build_state(scope: str = "both") -> RotationState:
         redis_port=record_redis_port(record),
         pg_host=url_host(settings.data_plane.db_url),
         redis_host=url_host(settings.data_plane.redis_url),
+        redis_user=redis_identity(),
         pgbouncer_enabled=settings.data_plane.pgbouncer_enabled,
         pgbouncer_port=record_pgbouncer_port(record),
     )
@@ -253,7 +266,7 @@ def preflight(state: RotationState) -> bool:
                         state.redis_host,
                         state.redis_port,
                         state.old_redis_password,
-                        username=state.identity,
+                        username=state.redis_identity,
                     ),
                 ),
             ]
@@ -333,7 +346,7 @@ def apply_runner(state: RotationState) -> None:
     )
     admin_password = _working_redis_admin_password(state)
     ensure_cluster_redis_acl(
-        state.identity,
+        state.redis_identity,
         redis_admin_url=(f"redis://default:{admin_password}@{state.redis_host}:{state.redis_port}"),
         runtime_password=state.new_redis_password,
         channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
@@ -382,7 +395,7 @@ def verify(state: RotationState) -> None:
                         state.redis_host,
                         state.redis_port,
                         state.redis_password,
-                        username=state.identity,
+                        username=state.redis_identity,
                     ),
                 ),
             ]
@@ -433,6 +446,7 @@ def _run_phase(state: RotationState, phase: str, fn: Callable[[RotationState], N
 def print_plan(state: RotationState, *, dry_run: bool) -> None:
     print(f"scope:             {state.scope}")
     print(f"identity:          {state.identity!r}")
+    print(f"redis user:        {state.redis_identity!r}")
     print(f"postgres port:     {state.pg_port}")
     print(f"redis port:        {state.redis_port}")
     print(f"mode:              {'DRY RUN (read-only)' if dry_run else 'EXECUTE'}")
