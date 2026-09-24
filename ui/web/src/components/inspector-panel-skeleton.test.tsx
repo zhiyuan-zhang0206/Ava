@@ -34,6 +34,7 @@ describe("InspectorPanelSkeleton", () => {
     expect(screen.getByLabelText("Cost loading")).toBeTruthy();
     expect(screen.getByLabelText("Activity loading")).toBeTruthy();
     expect(container.querySelector(".animate-pulse")).toBeTruthy();
+    expect(aside.querySelector('[data-slot="scroll-area"] [data-slot="scroll-area-viewport"]')).toBeTruthy();
   });
 
   it("renders full-screen overlay container on mobile", () => {

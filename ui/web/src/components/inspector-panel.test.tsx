@@ -1174,6 +1174,22 @@ describe("InspectorPanel desktop", () => {
     isLargeMock.mockReturnValue(true);
   });
 
+  it("uses the shared scroll surface and resets its viewport on agent switch", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container, rerender } = rtlRender(
+      <QueryClientProvider client={qc}><InspectorPanel agentId={1} /></QueryClientProvider>,
+    );
+    const surface = container.querySelector('[data-slot="scroll-area"]');
+    const viewport = surface?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]');
+    expect(surface).toBeTruthy();
+    expect(viewport).toBeTruthy();
+    viewport!.scrollTop = 120;
+    rerender(
+      <QueryClientProvider client={qc}><InspectorPanel agentId={2} /></QueryClientProvider>,
+    );
+    expect(viewport!.scrollTop).toBe(0);
+  });
+
   it("fills its resizable side panel without an overlay or backdrop", async () => {
     getAgentInspectStatistics.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
