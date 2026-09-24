@@ -1,0 +1,39 @@
+diff --git a/ui/web/src/components/timeline/index.tsx b/ui/web/src/components/timeline/index.tsx
+--- a/ui/web/src/components/timeline/index.tsx
++++ b/ui/web/src/components/timeline/index.tsx
+@@ -1134,6 +1134,7 @@
+     (total, entry) => total + (entry.virtualRows?.length ?? 1), 0,
+   );
+   const virtualEnabled = renderedRows > 100;
++  const benchmarkRowSpacers = true;
+   const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, virtualRows }) => ({
+       key: virtualKey,
+       rank: entry.rank,
+@@ -1233,12 +1234,15 @@
+           {/* Rows and history dividers opt out individually so streaming and
+               prepends stay quiet without changing the direct-child timeline
+               structure used by scroll anchoring and compact-history dividers. */}
+-          {virtualEnabled && virtualRange.before > 0 ? (
++          {virtualEnabled && !benchmarkRowSpacers && virtualRange.before > 0 ? (
+             <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
+           ) : null}
+-          {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ entry, virtualKey, runExpanded, virtualRows }, offset) => {
++          {groupEntries.map(({ entry, virtualKey, runExpanded, virtualRows }, offset) => {
++            if (benchmarkRowSpacers && virtualEnabled && (offset < virtualRange.start || offset >= virtualRange.end)) {
++              return <div key={virtualKey} data-timeline-spacer="row" style={{ height: virtualGroups[offset].estimatedHeight }} aria-hidden="true" />;
++            }
+             const group = entry.group;
+-            const groupIndex = virtualRange.start + offset;
++            const groupIndex = benchmarkRowSpacers ? offset : virtualRange.start + offset;
+             const renderedGroup = (() => {
+               if (group.kind === "single") {
+                 return renderRow(group.item, entry.indexOffset + group.index, entry.source, entry.rank);
+@@ -1295,7 +1299,7 @@
+               </div>
+             );
+           })}
+-          {virtualEnabled && virtualRange.after > 0 ? (
++          {virtualEnabled && !benchmarkRowSpacers && virtualRange.after > 0 ? (
+             <div data-timeline-spacer="after" style={{ height: virtualRange.after }} aria-hidden="true" />
+           ) : null}
+           <CompactingBlock />

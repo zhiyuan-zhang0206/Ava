@@ -118,6 +118,7 @@ vi.mock("@/lib/use-user-settings", () => ({
 import { TimelineView } from "./timeline";
 import { ItemView, streamingParseIntervalMs } from "./timeline/item";
 import { LIFECYCLE_TAGS, MEMORY_SOURCES, NOTE_SOURCES } from "./timeline/markers";
+import { resolveSavedTimelineAnchor } from "./timeline/use-timeline-window";
 
 afterEach(() => {
   cleanup();
@@ -295,7 +296,7 @@ describe("compact history segment dividers", () => {
 
     const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");
     expect(timelineColumn).not.toBeNull();
-    const renderedOrder = Array.from(timelineColumn?.children ?? [])
+    const renderedOrder = Array.from(timelineColumn?.querySelectorAll(":scope > [data-virtual-group] > *") ?? [])
       .filter(
         (node) =>
           node.hasAttribute("data-item-id") ||
@@ -327,7 +328,7 @@ describe("compact history segment dividers", () => {
 
     const { container } = render(<TimelineView items={items} />);
     const timelineColumn = container.querySelector("[data-slot='scroll-area-viewport'] > div");
-    const renderedOrder = Array.from(timelineColumn?.children ?? [])
+    const renderedOrder = Array.from(timelineColumn?.querySelectorAll(":scope > [data-virtual-group] > *") ?? [])
       .filter(
         (node) =>
           node.hasAttribute("data-item-id") ||
@@ -1451,6 +1452,223 @@ describe("load-older spinner (pinned top overlay)", () => {
 });
 
 // ---------------------------------------------------------------------------
+describe("deep history DOM window", () => {
+  it("keeps keyboard focus in the log when a focused card leaves the window", () => {
+    const items = Array.from({ length: 1200 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    render(<TimelineView items={items} threadKey="focus-window" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const content = viewport.querySelector<HTMLElement>('[role="log"]')!;
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return { top: 0, bottom: 600, height: 600 } as DOMRect;
+      const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
+      const id = group?.querySelector<HTMLElement>(".timeline-item")?.dataset.itemId;
+      const top = id ? 52 + (Number.parseInt(id) - 1) * 92 - viewport.scrollTop : 0;
+      return { top, bottom: top + 80, height: 80 } as DOMRect;
+    });
+    const button = viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="1200.0"] button')!;
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    act(() => { viewport.scrollTop = 0; fireEvent.scroll(viewport); });
+    expect(document.activeElement).toBe(content);
+    vi.restoreAllMocks();
+  });
+
+  it("restores a child through a collapsed turn and rejects the same ID in another rank", () => {
+    const viewport = document.createElement("div");
+    const turn = document.createElement("div");
+    turn.dataset.turnExpanded = "false";
+    turn.dataset.turnMemberIds = "3.0 4.0";
+    turn.dataset.itemId = "3.0";
+    turn.dataset.displayRank = "0";
+    viewport.append(turn);
+    const saved = { itemId: "4.0", rank: 0, viewportTop: -120 };
+    const child = makeItem({ item_id: "4.0", kind: "agent_reasoning", payload: "child" });
+    const collapsed = resolveSavedTimelineAnchor(viewport, saved, null, [child]);
+    expect(collapsed.node).toBe(turn);
+    expect(collapsed.present).toBe(true);
+    expect(collapsed.viewportTop).toBe(52);
+
+    turn.dataset.displayRank = "2";
+    const buffer: CompactTransitionBuffer = {
+      threadId: 1, epoch: 1, rows: [{ item: child, rank: 2, needsCanonicalRow: true }],
+      oldestRealByRank: new Map([[2, "4.0"]]), tailReady: true,
+    };
+    const absent = resolveSavedTimelineAnchor(viewport, { ...saved, rank: 1 }, buffer, [child]);
+    expect(absent.node).toBeNull();
+    expect(absent.present).toBe(false);
+  });
+
+  it("does not transfer an old thread's reading pin onto identical IDs in a new thread", () => {
+    const items = Array.from({ length: 1200 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    const { rerender } = render(<TimelineView items={items} threadKey="old-thread" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { value: 120_000, configurable: true });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return { top: 0, bottom: 600, height: 600 } as DOMRect;
+      const row = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
+      const id = row?.querySelector<HTMLElement>(".timeline-item")?.dataset.itemId;
+      const top = id ? 52 + (Number.parseInt(id) - 1) * 92 - viewport.scrollTop : 0;
+      return { top, bottom: top + 80, height: 80 } as DOMRect;
+    });
+    act(() => {
+      viewport.scrollTop = 40_000;
+      fireEvent.scroll(viewport);
+    });
+    expect(viewport.querySelectorAll(".timeline-item").length).toBeGreaterThan(0);
+    act(() => {
+      useTimelineStore.getState().requestScrollToBottom();
+      rerender(<TimelineView items={items} threadKey="new-thread" />);
+    });
+    expect(viewport.scrollTop).toBe(120_000);
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the exact reading row while crossing 100 to 101 variable-height rows", () => {
+    const items = Array.from({ length: 101 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    const { rerender } = render(<TimelineView items={items.slice(0, 100)} threadKey="threshold" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const content = viewport.querySelector<HTMLElement>('[role="log"]')!;
+    const box = (top: number, height = 0) => ({
+      top, bottom: top + height, left: 0, right: 0, width: 0, height,
+      x: 0, y: top, toJSON: () => ({}),
+    });
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return box(0, 600);
+      const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
+      if (!group) return box(0);
+      let top = 52;
+      for (const sibling of content.children) {
+        if (sibling === group) break;
+        if (sibling.hasAttribute("data-virtual-group")) top += 172;
+        if (sibling.hasAttribute("data-timeline-spacer")) top += Number.parseFloat((sibling as HTMLElement).style.height) + 12;
+      }
+      return box(top - viewport.scrollTop, 160);
+    });
+    act(() => {
+      viewport.scrollTop = 52 + 50 * 172 - 100;
+      fireEvent.scroll(viewport);
+    });
+    const before = viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="51.0"]')!;
+    const top = before.getBoundingClientRect().top;
+    rerender(<TimelineView items={items} threadKey="threshold" />);
+    const after = viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="51.0"]');
+    expect(after).not.toBeNull();
+    expect(Math.abs(after!.getBoundingClientRect().top - top)).toBeLessThan(3);
+    expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(80);
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the reader when a buffered row grows after layout", () => {
+    const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      readonly record: (typeof observers)[number];
+      constructor(callback: ResizeObserverCallback) {
+        this.record = { callback, targets: new Set() };
+        observers.push(this.record);
+      }
+      observe(target: Element) { this.record.targets.add(target); }
+      disconnect() { this.record.targets.clear(); }
+    });
+    const items = Array.from({ length: 300 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    render(<TimelineView items={items} threadKey="large-row" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const content = viewport.querySelector<HTMLElement>('[role="log"]')!;
+    let tallHeight = 80;
+    const box = (top: number, height = 0) => ({
+      top, bottom: top + height, left: 0, right: 0, width: 0, height,
+      x: 0, y: top, toJSON: () => ({}),
+    });
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return box(0, 600);
+      const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
+      if (!group) return box(0);
+      const heightOf = (node: Element) => node.querySelector('[data-item-id="50.0"]') ? tallHeight : 80;
+      let top = 52;
+      for (const sibling of content.children) {
+        if (sibling === group) break;
+        if (sibling.hasAttribute("data-virtual-group")) top += heightOf(sibling) + 12;
+        if (sibling.hasAttribute("data-timeline-spacer")) top += Number.parseFloat((sibling as HTMLElement).style.height) + 12;
+      }
+      return box(top - viewport.scrollTop, heightOf(group));
+    });
+    act(() => {
+      viewport.scrollTop = 52 + 53 * 92 - 100;
+      fireEvent.scroll(viewport);
+    });
+    const anchor = viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="54.0"]');
+    const tall = viewport.querySelector<HTMLElement>('[data-virtual-group]:has([data-item-id="50.0"])');
+    expect(anchor).not.toBeNull();
+    expect(tall).not.toBeNull();
+    const top = anchor!.getBoundingClientRect().top;
+    tallHeight = 90_000;
+    const observer = observers.findLast(({ targets }) => targets.has(tall!));
+    expect(observer).toBeDefined();
+    act(() => observer!.callback([{
+      target: tall!, borderBoxSize: [{ blockSize: tallHeight }],
+    } as unknown as ResizeObserverEntry], {} as ResizeObserver));
+    const after = viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="54.0"]');
+    expect(after).not.toBeNull();
+    expect(Math.abs(after!.getBoundingClientRect().top - top)).toBeLessThan(3);
+    expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(80);
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("mounts only the viewport and nearby rows while retaining the full scroll space", async () => {
+    const items = Array.from({ length: 1200 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`,
+      kind: "agent_chat",
+      payload: `Reply ${index + 1}`,
+    }));
+    render(<TimelineView items={items} threadKey="deep-history" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    Object.defineProperty(viewport, "clientHeight", { value: 720, configurable: true });
+    act(() => {
+      viewport.scrollTop = 48_000;
+      fireEvent.scroll(viewport);
+    });
+    await waitFor(() => {
+      expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
+      expect(viewport.querySelector('[data-timeline-spacer="before"]')).not.toBeNull();
+      expect(viewport.querySelector('[data-timeline-spacer="after"]')).not.toBeNull();
+    });
+  });
+
+  it("windows the children of one long expanded work block", async () => {
+    const items = Array.from({ length: 600 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`,
+      kind: "agent_reasoning",
+      payload: `Thought ${index + 1}`,
+    }));
+    render(<TimelineView items={items} threadKey="deep-run" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    expect(viewport.querySelectorAll('[data-turn-expanded="true"]').length).toBe(1);
+    expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
+    expect(viewport.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
+    Object.defineProperty(viewport, "clientHeight", { value: 720, configurable: true });
+    act(() => {
+      viewport.scrollTop = 20_000;
+      fireEvent.scroll(viewport);
+    });
+    await waitFor(() => {
+      expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
+      expect(viewport.querySelector('[data-timeline-spacer="turn-after"]')).not.toBeNull();
+    });
+  });
+});
+
 // Load-older prepend anchor — bug regression (#659 + #817): the system prompt
 // "0.0" is permanently attached at the front of every window (#1214), so the
 // old "prepend landed" signal (items[0].item_id changed) never fired: items[0]
@@ -4214,7 +4432,8 @@ describe("bounded timeline history (#4702)", () => {
     act(() => { viewport.dispatchEvent(new Event("scroll")); });
     act(() => useTimelineStore.getState().prependOlder(rows(1, 200), true));
     expect(useTimelineStore.getState().items).toHaveLength(210);
-    expect(container.querySelectorAll(".timeline-item").length).toBeGreaterThan(200);
+    expect(container.querySelectorAll(".timeline-item").length).toBeLessThan(80);
+    expect(container.querySelector("[data-timeline-spacer]")).not.toBeNull();
     viewport.scrollTop = 600;
     act(() => { viewport.dispatchEvent(new Event("scroll")); });
     expect(useTimelineStore.getState().items).toHaveLength(200);

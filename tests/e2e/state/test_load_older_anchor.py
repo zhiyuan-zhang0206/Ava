@@ -48,7 +48,7 @@ _SAMPLER_JS = """
       if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) { anchorId = n.dataset.itemId; anchorTop = r.top; break; }
     }
     if (window.__tl.samples.length > 20000) return;
-    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: items.length, anchorId, anchorTop });
+    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop });
   };
   let raf = 0;
   const loop = () => { sample('raf'); raf = requestAnimationFrame(loop); };
@@ -56,7 +56,7 @@ _SAMPLER_JS = """
   window.__tl.stop = () => cancelAnimationFrame(raf);
   vp.addEventListener('scroll', () => sample('scroll'), { passive: true });
   sample('init');
-  return {ok: true, n: vp.querySelectorAll('[data-item-id]').length, sh: vp.scrollHeight};
+  return {ok: true, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), sh: vp.scrollHeight};
 }
 """
 
@@ -110,7 +110,9 @@ def _wait_landing(
     deadline = time.monotonic() + 30.0
     n = before_n
     while time.monotonic() < deadline:
-        n = page.evaluate("window.__tl.vp.querySelectorAll('[data-item-id]').length")
+        n = page.evaluate(
+            "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
+        )
         if n > before_n:
             return n  # the older window landed
         page.wait_for_timeout(200)
@@ -148,7 +150,9 @@ def _run_rounds(
         page.evaluate("window.__tl.vp.scrollTop = 240")
         page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
         page.wait_for_timeout(200)
-        before_n = page.evaluate("window.__tl.vp.querySelectorAll('[data-item-id]').length")
+        before_n = page.evaluate(
+            "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
+        )
         sample_start = page.evaluate("window.__tl.samples.length")
         page.evaluate("window.__tl.vp.scrollTop = 0")
         page.evaluate("window.__tl.vp.dispatchEvent(new Event('scroll'))")
@@ -156,7 +160,9 @@ def _run_rounds(
         deadline = time.monotonic() + 30.0
         n = before_n
         while time.monotonic() < deadline:
-            n = page.evaluate("window.__tl.vp.querySelectorAll('[data-item-id]').length")
+            n = page.evaluate(
+                "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
+            )
             if n > before_n:
                 break
             page.wait_for_timeout(200)
@@ -225,10 +231,8 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
         ),
     )
 
-    # The paging precondition below counts mounted [data-item-id] nodes; the
-    # default details level "none" (user ruling 2026-09-17) collapses runs,
-    # unmounting their members. Pin the expanded rendering the scenario
-    # expects.
+    # Pin expanded rendering so the sampler can observe the exact child card
+    # the reader sees inside a work block.
     pin_expand_runs_all(e2e_env.gateway_url)
 
     page.goto(e2e_env.agent_url)
@@ -268,7 +272,9 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     n = 0
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
-        n = page.evaluate("document.querySelectorAll('[data-item-id]').length")
+        n = page.evaluate(
+            "Number(document.querySelector('[role=log]')?.dataset.timelineItemCount ?? 0)"
+        )
         if n > 50:
             break
         page.wait_for_timeout(300)
