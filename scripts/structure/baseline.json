@@ -221,8 +221,6 @@
     "cli/commands/_update_agent_runner.py::_run_agent_runner_self_update": 39,
     "cli/commands/_update_agent_runner.py::_run_agent_runner_self_update_inner": 27,
     "cli/commands/_update_agent_runner.py::main": 18,
-    "cli/commands/_update_bootstrap.py::prepare_bootstrap_hop": 28,
-    "cli/commands/_update_bootstrap.py::probe_bootstrap": 21,
     "cli/commands/_update_cohort.py::report_lines": 22,
     "cli/commands/_update_local.py::_run_gateway_local_update": 25,
     "cli/commands/_update_normal_release_standalone.py::prepare_normal_release": 19,

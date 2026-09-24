@@ -75,3 +75,14 @@ so they carry no hardcoded path or port and work whether or not the cluster has
 a secret. `validate.sh` returns once the task is delivered; the agent writes its
 report to `$AVA_HOME/preview-validation-report.md` — outside the checkout, so a
 validation run can never dirty the git tree — and notifies when it is done.
+
+## Mac updater definition proof
+
+From the candidate worktree, explicitly select an installed non-production home
+and run `python -m scripts.preview.prove_mac_bootstrap_jobs` with that home's
+`AVA_HOME` (and `AVA_HOME_OVERRIDE=1` only for this cross-checkout preview proof).
+The script creates unique unloaded `/usr/bin/true` definitions, crashes its own
+child after one atomic custody move, and restores from serialized originals.
+It never loads or signals a job. Its `result.json` under the chosen home's run
+directory names the proved cases and explicitly excludes complete image-hop
+proof. Existing loaded job definitions remain outside this primitive's authority.

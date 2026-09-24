@@ -30,6 +30,14 @@ from cli.commands._release_inventory import (
     revalidate_bootstrap_inventory,
     revalidate_prepared_inventory,
 )
+from cli.commands._update_bootstrap import native
+from cli.commands._update_bootstrap.admission import (
+    retained_handoff,
+    single_session,
+    verify_pair,
+    verify_retained_contexts,
+)
+from cli.commands._update_bootstrap.readback import verify_image_binding, verify_runtime_binding
 from services.agent_ops.bootstrap import (
     BootstrapRuntimeIdentity,
     ObserverProjection,
@@ -50,7 +58,6 @@ from shared.native_job_observation import read_crontab
 from shared.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
-    file_sha256,
     verify_release,
 )
 from shared.session_backend import get_backend
@@ -63,6 +70,7 @@ from shared.updater_recovery import (
 )
 from shared.updater_recovery import (
     BootstrapRecoveryStage,
+    LaunchdRecovery,
 )
 
 
@@ -90,6 +98,7 @@ class PreparedBootstrapHop:
     journal: BootstrapJournal | None = None
     validation_seconds: float = 0.0
     predecessor_handoff: updater_handoff.UpdaterHandoffSnapshot | None = None
+    launchd: tuple[LaunchdRecovery, ...] = ()
 
 
 def _private_reference(text: str, home: Path) -> Path:
@@ -154,30 +163,8 @@ def probe_bootstrap(
     # invocation-local result while challenging the running process, not a
     # process-global cache or a new traversal inside the readiness deadline.
     image = verified_image if verified_image is not None else _verify_image(context)
-    expected_root = Path(context.expected.home) / "releases" / context.expected.artifact_digest
-    if (
-        image.root != expected_root
-        or image.root.resolve(strict=True) != expected_root
-        or image.digest != context.expected.artifact_digest
-        or image.manifest_digest != context.expected.manifest_digest
-        or file_sha256(image.root / "manifest.json") != image.manifest_digest
-    ):
-        raise ReleaseRejectedError("bootstrap image differs from the verified invocation")
-    if (
-        raw["mode"] != "bootstrap_observation"
-        or raw["full_ready"] is not False
-        or raw["challenge"] != str(context.challenge.challenge)
-        or raw["unit"] != context.expected.unit().model_dump(mode="json")
-        or not isinstance(raw["observer_instance"], str)
-        or not raw["observer_instance"]
-        or identity.home != context.expected.home
-        or identity.artifact_digest != context.expected.artifact_digest
-        or identity.manifest_digest != context.expected.manifest_digest
-        or not Path(identity.module).is_relative_to(image.root / "venv")
-        or Path(identity.module).resolve(strict=True) != Path(identity.module)
-        or observe_process(identity.process) != "alive"
-    ):
-        raise ReleaseRejectedError("bootstrap endpoint returned another runtime identity")
+    verify_image_binding(context, image)
+    verify_runtime_binding(context, image, raw, identity)
     record = json.loads(_regular_bytes(Path(identity.home) / "run/sessions/ava-ops.json"))
     recorded = ExpectedProcess.model_validate_json(
         json.dumps(
@@ -197,7 +184,7 @@ def probe_bootstrap(
 def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: PLR0915 — ordered read-only admission before any updater effect.
     """Validate image, unit, full receipt and live A before updater/service writes."""
     validation_started = time.monotonic()
-    if sys.platform != "linux":
+    if sys.platform not in {"linux", "darwin"}:
         raise ReleaseRejectedError("restricted updater hop has no native proof on this platform")
     request = BootstrapHopRequest.model_validate_json(_regular_bytes(request_path))
     # A live/unknown predecessor is already disqualifying. Refuse before the
@@ -211,13 +198,7 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
     recovery_path = _private_reference(request.recovery_context, home)
     receipt = _private_reference(request.inventory_receipt, home)
     recovery = read_prepared_context(recovery_path)
-    if (
-        recovery.operation != candidate.operation
-        or recovery.expected.machine != candidate.expected.machine
-        or recovery.expected.home != candidate.expected.home
-        or recovery.expected.artifact_digest == candidate.expected.artifact_digest
-    ):
-        raise ReleaseRejectedError("bootstrap A/B images do not share the exact operation/unit")
+    verify_pair(candidate, recovery)
     image = _verify_image(candidate)
     recovery_image = _verify_image(recovery)
     if not Path(__file__).resolve().is_relative_to(image.root / "venv"):
@@ -232,23 +213,8 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
     validate_operation(candidate, projection)
     validate_operation(recovery, projection)
     resume_generation, journal = _read_recovery(request_path, receipt)
-    predecessor: updater_handoff.UpdaterHandoffSnapshot | None = None
-    if journal is None:
-        predecessor = updater_handoff.read()
-        if (
-            predecessor.status != "running"
-            or predecessor.owner_pid != request.predecessor.pid
-            or predecessor.owner_create_time != request.predecessor.create_time
-            or updater_handoff.owner_is_live(predecessor)
-        ):
-            raise ReleaseRejectedError("existing updater handoff does not prove predecessor exit")
-    if journal is not None and (
-        journal.candidate_context_digest
-        != hashlib.sha256(_regular_bytes(candidate_path)).hexdigest()
-        or journal.recovery_context_digest
-        != hashlib.sha256(_regular_bytes(recovery_path)).hexdigest()
-    ):
-        raise ReleaseRejectedError("bootstrap recovery contexts changed")
+    predecessor = retained_handoff(request.predecessor, journal)
+    verify_retained_contexts(candidate_path, recovery_path, journal)
     if journal is None:
         # prepare_threshold=None: never prepare statements on the pooled front door.
         with psycopg.connect(
@@ -283,11 +249,7 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
                 current_session=current_session,
                 schema_digest=candidate.schema_digest,
             )
-    if expected != candidate.expected or len(expected.sessions) != 1:
-        raise ReleaseRejectedError("restricted hop cannot stop ordinary or additional sessions")
-    session = expected.sessions[0]
-    if session.name != "ava-ops" or expected.processes != (session.process,):
-        raise ReleaseRejectedError("restricted hop requires one exact existing ops session")
+    session = single_session(expected, candidate)
     wanted = bootstrap_command(recovery_image, recovery_path)
     if journal is None:
         if observe_process(session.process) != "alive":
@@ -302,6 +264,7 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
             raise ReleaseRejectedError("ops session record differs from the live restricted image")
     if candidate_path == recovery_path:
         raise ReleaseRejectedError("candidate and recovery contexts must remain separate")
+    launchd = native.prepare_launchd(expected, wanted, candidate.challenge.valid_until, journal)
     return PreparedBootstrapHop(
         request_path,
         request,
@@ -315,6 +278,7 @@ def prepare_bootstrap_hop(request_path: Path) -> PreparedBootstrapHop:  # noqa: 
         journal,
         time.monotonic() - validation_started,
         predecessor,
+        launchd,
     )
 
 
@@ -379,15 +343,14 @@ def _launcher_terminals(
 ) -> tuple[LauncherTerminal, ...]:
     """The hop ledger's launcher fence facts for one journal write.
 
-    ``cron_quiesced`` is written only after ``_replace_cron`` read the exact
-    quiesced table back, so that write is where every inventoried launcher
-    becomes journaled as positively removed; the earlier ``prepared`` write
-    carries nothing, and every later write carries the previous journal's
-    terminals unchanged.
+    Native quiesce is journaled only after every inventoried launcher has
+    matching removal evidence: an exact cron table or unloaded launchd
+    definitions held in private custody. The earlier ``prepared`` write
+    carries nothing; later writes retain these terminals unchanged.
     """
     if stage == "prepared":
         return ()
-    if stage == "cron_quiesced":
+    if stage in {"cron_quiesced", "launchers_quiesced"}:
         return tuple(
             LauncherTerminal(label=item.name, kind="removed")
             for item in plan.candidate.expected.launchers
@@ -437,6 +400,7 @@ def _journal(
             "stage": stage,
             # Only the validated secret-free restricted-A command shape reaches here.
             "cron": cron.decode("utf-8"),
+            "launchd": plan.launchd,
             "phases": (*previous, phase),
             "launcher_terminals": _launcher_terminals(plan, stage, earlier),
         }
@@ -640,11 +604,7 @@ def _restore_a(
     if observe_process(process) == "exited":
         _start_observer(plan, plan.recovery_image, plan.request.recovery_context)
     _await_observer(plan, "A")
-    current = read_crontab(plan.candidate.challenge.valid_until)
-    if current == quiesced:
-        _replace_cron(quiesced, original, plan)
-    elif current != original:
-        raise ReleaseRejectedError("cron changed; recovery will not overwrite another writer")
+    _restore_launchers(plan, original, quiesced)
     _journal(plan, generation, "recovered", original)
 
 
@@ -656,8 +616,7 @@ def _resume_hop(
     process, kind = _recorded_observer(plan)
     if kind == "B" and observe_process(process) == "alive":
         _await_observer(plan, "B")
-        if read_crontab(plan.candidate.challenge.valid_until) != quiesced:
-            raise ReleaseRejectedError("candidate has an unquiesced or changed relauncher")
+        _verify_native_quiesced(plan, quiesced)
         _journal(plan, generation, "candidate_ready", original)
         return 3  # Bootstrap-only: deliberately not the normal updater success code.
     if plan.journal.stage == "candidate_starting" and process == plan.old_session.process:
@@ -683,7 +642,7 @@ def execute_bootstrap_hop(plan: PreparedBootstrapHop, generation: str) -> int:
 def _execute_bootstrap_hop(plan: PreparedBootstrapHop, generation: str) -> int:
     """Prepared restricted A -> B only; never marks the unit normally ready."""
     validate_operation(plan.candidate, plan.projection)
-    original_cron, quiesced_cron = _cron_tables(plan)
+    original_cron, quiesced_cron = (b"", b"") if plan.launchd else _cron_tables(plan)
     if plan.journal is not None:
         return _resume_hop(plan, generation, original_cron, quiesced_cron)
     remaining = (plan.candidate.challenge.valid_until - datetime.now(UTC)).total_seconds()
@@ -691,8 +650,16 @@ def _execute_bootstrap_hop(plan: PreparedBootstrapHop, generation: str) -> int:
         raise ReleaseRejectedError("remaining challenge cannot cover observed cold validation cost")
     _journal(plan, generation, "prepared", original_cron)
     try:
-        _replace_cron(original_cron, quiesced_cron, plan)
-        _journal(plan, generation, "cron_quiesced", original_cron)
+        if plan.launchd:
+            native.quiesce_launchd(
+                plan.launchd,
+                plan.candidate.challenge.valid_until,
+                lambda: validate_operation(plan.candidate, plan.projection),
+            )
+            _journal(plan, generation, "launchers_quiesced", original_cron)
+        else:
+            _replace_cron(original_cron, quiesced_cron, plan)
+            _journal(plan, generation, "cron_quiesced", original_cron)
         validate_operation(plan.candidate, plan.projection)
         _stop_old_observer(plan)
         _journal(plan, generation, "old_stopped", original_cron)
@@ -729,7 +696,28 @@ def _execute_bootstrap_hop(plan: PreparedBootstrapHop, generation: str) -> int:
 
 
 def _verify_quiesced(plan: PreparedBootstrapHop, quiesced_cron: bytes) -> None:
-    if read_crontab(plan.candidate.challenge.valid_until) != quiesced_cron:
-        raise ReleaseRejectedError("native launcher reappeared during candidate boot")
+    _verify_native_quiesced(plan, quiesced_cron)
     if observe_process(plan.old_session.process) != "exited":
         raise ReleaseRejectedError("old restricted writer exit is no longer proved")
+
+
+def _verify_native_quiesced(plan: PreparedBootstrapHop, cron: bytes) -> None:
+    if plan.launchd:
+        native.verify_quiesced(plan.launchd, plan.candidate.challenge.valid_until)
+    elif read_crontab(plan.candidate.challenge.valid_until) != cron:
+        raise ReleaseRejectedError("native launcher reappeared during candidate boot")
+
+
+def _restore_launchers(plan: PreparedBootstrapHop, original: bytes, quiesced: bytes) -> None:
+    if plan.launchd:
+        native.restore_launchd(
+            plan.launchd,
+            plan.candidate.challenge.valid_until,
+            lambda: validate_operation(plan.recovery, plan.projection),
+        )
+        return
+    current = read_crontab(plan.candidate.challenge.valid_until)
+    if current == quiesced:
+        _replace_cron(quiesced, original, plan)
+    elif current != original:
+        raise ReleaseRejectedError("cron changed; recovery will not overwrite another writer")

@@ -397,7 +397,7 @@ def revalidate_bootstrap_inventory(
     legitimate recovery. All other facts still come from the real producer and
     must remain exact. The changing session is supplied only after its native
     record, command, process identity, and verified A/B image have been checked;
-    the launcher set may only remain exact or become empty. The caller later
+    every remaining launcher must exactly match its prepared entry. The caller later
     compares the raw launcher table with the journaled original/quiesced bytes.
     """
     if path.parent != home / "run" or path.resolve(strict=True) != path:
@@ -432,7 +432,7 @@ def revalidate_bootstrap_inventory(
         current_session.name != "ava-ops"
         or current_expected.sessions != (current_session,)
         or current_expected.processes != (current_session.process,)
-        or current_expected.launchers not in (prepared_expected.launchers, ())
+        or any(item not in prepared_expected.launchers for item in current_expected.launchers)
         or current_expected.model_copy(update={"sessions": (), "processes": (), "launchers": ()})
         != prepared_expected.model_copy(update={"sessions": (), "processes": (), "launchers": ()})
     ):

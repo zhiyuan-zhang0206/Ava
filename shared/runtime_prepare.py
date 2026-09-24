@@ -129,6 +129,44 @@ def _materialize_venv_links(root: Path) -> None:
             shutil.copy2(resolved, path)
 
 
+def _retain_venv_python_library(root: Path, python_files: dict[str, str]) -> None:
+    """Keep a copied Mac executable's relative libpython dependency in its venv."""
+    if platform.system() != "Darwin":
+        return
+    library = json.loads(
+        _run(
+            [
+                str(root / "python/bin/python3"),
+                "-I",
+                "-B",
+                "-c",
+                "import json,sysconfig;print(json.dumps(sysconfig.get_config_var('LDLIBRARY')))",
+            ],
+            root,
+        )
+    )
+    if library is None or (isinstance(library, str) and not library.endswith(".dylib")):
+        return
+    if not isinstance(library, str) or Path(library).name != library:
+        raise ReleaseRejectedError("retained Python library name is invalid")
+    expected = python_files[f"lib/{library}"]
+    target = root / "venv/lib" / library
+    shutil.copy2(root / "python/lib" / library, target)
+    if file_sha256(target) != expected:
+        raise ReleaseRejectedError("venv Python library differs from trusted input inventory")
+
+
+def _create_private_venv(root: Path, python_files: dict[str, str]) -> Path:
+    """Create a venv whose executable and loader inputs belong to the generation."""
+    python = root / "python/bin/python3"
+    _run(
+        [str(python), "-I", "-B", "-m", "venv", "--copies", "--without-pip", str(root / "venv")],
+        root,
+    )
+    _retain_venv_python_library(root, python_files)
+    return root / "venv/bin/python"
+
+
 def loaded_native_images(root: Path) -> list[str]:
     """Prove declared capabilities and record their actual loaded native images.
 
@@ -432,12 +470,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     _copy_assets(inputs, root, frontend_files, otel_files, plugin_files)
     _retain_startup_wheel(wheels, root)
     _copy_verified_python(source, root / "python", python_files)
-    python = root / "python/bin/python3"
-    _run(
-        [str(python), "-I", "-B", "-m", "venv", "--copies", "--without-pip", str(root / "venv")],
-        root,
-    )
-    interpreter = root / "venv/bin/python"
+    interpreter = _create_private_venv(root, python_files)
     for args in (
         ["--require-hashes", "-r", str(inputs.requirements.resolve())],
         ["--no-deps", str(wheel)],

@@ -25,8 +25,12 @@ the candidate's loaded code, both sealed images, canonical registered unit and
 live deployment operation, coherent explicit child projection, full inventory
 and the predecessor's PID/birth against the existing updater handoff record.
 Only an already-running restricted A native exec session and exact inventoried
-Linux cron commands are admitted. Ordinary/source A, another live updater,
+Linux cron commands are admitted. On Mac, only positively unloaded, exact
+restricted-bootstrap definitions are admitted: a loaded label does not bind
+launchd's effective argv to the file on disk. Loaded legacy jobs require a
+separately reviewed first-cutover retirement. Ordinary/source A, another live updater,
 additional sessions, unknown jobs and unsupported platforms refuse before stop.
+The external ops entry remains Linux-only until complete Mac image-hop proof.
 
 The updater atomically replaces that exact dead predecessor marker with its own
 running generation. A separate bounded, versioned recovery envelope journals
@@ -57,8 +61,9 @@ Every resume re-runs the native inventory producer and requires all prepared
 service-roster, unit, and receipt facts to remain exact. Only the sole `ava-ops`
 process may differ, and only after its record, command, process identity, and
 verified A/B image are checked. Its launcher set may remain exact or be empty
-after accounted quiesce; the raw table must still equal the journaled original
-or its exact restricted-entry removal before any restore. Candidate startup failure compensates to the
+after accounted quiesce, including an exact subset after partial Mac removal.
+The Linux raw table must still equal the journaled original or its exact
+restricted-entry removal before any restore. Candidate startup failure compensates to the
 verified restricted A and restores
 only the unchanged original cron definition. Dead updater recovery reclaims the
 same generation and observes actual A/B state. A malformed envelope is retained
@@ -80,7 +85,28 @@ and fork-before-record ambiguity. This is not mixed-version compatibility proof.
 The first production source-to-image transition still requires a genuinely
 bootable normal-service LKG, actual old imported orchestrator handoff, all
 registered unit/writer/job closure, all-unit coordination and checked reverse
-recovery. Windows full image closure and macOS native quiesce are unsupported
+recovery. Windows full image closure and complete Mac image-hop admission remain unproven
 here. Protocol-v1 admission remains separate. A retained source path/argv,
 bootstrap health response, expired operation, or local normal start does not
 satisfy any of those remaining gates.
+
+## Mac definition custody
+
+The internal hop stores bounded exact originals and unique custody paths in its
+private recovery journal before any removal. Both original bytes and custody
+paths are immutable across journal transitions. Positive native absence is
+required before moving a definition; unknown or loaded state never authorizes
+a signal. The updater atomically moves each definition into its owner-controlled
+same-filesystem run directory, syncs both directories, and verifies the actual
+moved inode. Concurrent foreign bytes are preserved and put back without
+clobbering a newly created public file; any ambiguity retains evidence and
+refuses. Restore links verified custody into an absent public name, verifies
+the exact original and unloaded state, then removes only the private custody
+name. Missing original plus missing custody is not successful quiescence.
+
+`scripts/preview/prove_mac_bootstrap_jobs.py` is an explicit operator proof in
+an installed non-production home. It uses two unique unloaded `/usr/bin/true`
+definitions, kills its own child after the first durable move, reloads private
+serialized originals, restores them, and repeats the round trip. It neither
+loads nor signals jobs. This is native file/custody evidence, not real A/B image,
+old-orchestrator, all-unit, or ordinary-service recovery proof.

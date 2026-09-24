@@ -23,6 +23,12 @@ Python launches use isolated mode and disable bytecode writes. Failure preserves
 the serving pointer and retains the failed generation for operator inspection;
 it is never silently reused or deleted.
 
+For a dynamically linked managed Mac Python, a copied venv executable resolves
+`libpython` beside that venv. Preparation retains the declared dylib in the
+venv's own `lib/` and verifies it against the trusted interpreter inventory
+before invoking the venv. The final loaded-image proof still checks actual dyld
+resolution; no loader environment override or external library path is added.
+
 Kernel and OS system libraries are explicit trusted platform prerequisites.
 Loaded application dependencies must resolve inside the generation; Homebrew or
 other mutable dependency paths are rejected. The receipt declares loaded-image
