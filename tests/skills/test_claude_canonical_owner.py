@@ -75,7 +75,7 @@ def test_launch_command_unsets_api_key_and_skips_permission_prompts(tmp_path: Pa
 
     assert command.startswith(f"cd {record.key.workspace} && ")
     assert "unset ANTHROPIC_API_KEY && " in command
-    assert command.endswith("exec claude --dangerously-skip-permissions")
+    assert command.endswith('exec "$claude_bin" --dangerously-skip-permissions || exit $?')
     assert "AVA_CALLER_IDENTITY" not in command
 
 
@@ -103,7 +103,7 @@ def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) ->
     assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in resident
     assert "AVA_IMPERSONATION_RELAY_PY=" in resident
     assert resident.endswith(
-        f"exec claude --dangerously-skip-permissions --plugin-dir {plugin.as_posix()}"
+        f'exec "$claude_bin" --dangerously-skip-permissions --plugin-dir {plugin.as_posix()} || exit $?'
     )
     assert "AVA_IMPERSONATION_RELAY_STUB" not in manual
     assert "--plugin-dir" not in manual
@@ -116,6 +116,68 @@ def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) ->
     )
     assert "Immediately start the Claude Monitor relay" in fallback
     assert "do not arm a Monitor watch" in resident_message
+
+
+def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    active = _owner(tmp_path)
+    launching = replace(active, status="launching", session_id=None, session_name=None)
+    sent: list[str] = []
+    killed: list[int] = []
+    terminated: list[str] = []
+
+    def _kill(sid: int) -> None:
+        killed.append(sid)
+
+    def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionClaim:
+        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+
+    def _pretrust(_workspace: Path) -> None:
+        return None
+
+    def _new(**_kwargs: object) -> int:
+        return 7
+
+    def _send(_sid: int, text: str) -> None:
+        sent.append(text)
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return (
+            "error: claude executable not found in PATH or $HOME/.local/bin/claude\n"
+            + "bash prompt $ " * 10
+        )
+
+    def _publish(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
+        return active
+
+    def _terminate(_key: object, generation: str, *, reason: str) -> bool:
+        assert reason == "launch-failed"
+        terminated.append(generation)
+        return True
+
+    def _receipt(_sid: int, _rebuild: Callable[[], str]) -> None:
+        pytest.fail("bootstrap sent")
+
+    monkeypatch.setattr(spawn_claude, "_claim_canonical", _claim)
+    monkeypatch.setattr(spawn_claude, "_pretrust", _pretrust)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "new", _new)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(spawn_claude.coding_session_owner, "publish_active", _publish)
+    monkeypatch.setattr(spawn_claude.coding_session_owner, "terminate_generation", _terminate)
+    monkeypatch.setattr(spawn_claude, "_verify_start_receipt", _receipt)
+
+    with pytest.raises(RuntimeError, match="claude executable not found"):
+        spawn_claude._run_takeover_launch(
+            Path(active.key.workspace), "Fix login", "brief", 3600, None, relay_resident=False
+        )
+
+    assert len(sent) == 1
+    assert killed == [7]
+    assert terminated == [launching.generation]
 
 
 def test_takeover_launch_inlines_brief_without_files_or_supervisor(
