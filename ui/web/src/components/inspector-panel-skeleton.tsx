@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 
 import { useBreakpoint } from "@/lib/breakpoint";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   BAR_DIVIDER_CLASS,
   BAR_HEIGHT_CLASS,
@@ -84,13 +85,15 @@ export function InspectorPanelSkeleton() {
         <div className="h-4 w-12 animate-pulse rounded bg-muted-foreground/10" />
       </header>
 
-      <div className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>
-        <div className="space-y-4">
-          <LiveSectionsSkeleton />
-          <WindowedSectionsSkeleton />
-          <div className="h-3 w-28 animate-pulse rounded bg-muted-foreground/10" />
+      <ScrollArea className={cn("text-xs", MIN_H_0, FLEX_1)}>
+        <div className="px-4 py-3">
+          <div className="space-y-4">
+            <LiveSectionsSkeleton />
+            <WindowedSectionsSkeleton />
+            <div className="h-3 w-28 animate-pulse rounded bg-muted-foreground/10" />
+          </div>
         </div>
-      </div>
+      </ScrollArea>
     </>
   );
 

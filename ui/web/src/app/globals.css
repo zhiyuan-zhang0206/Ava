@@ -233,8 +233,8 @@
      tiled-backing-store repaint bug — regions revealed mid-scroll are left
      unpainted (the content blanks to white). Force block layout. !important
      is required to beat the element's inline style. Our ScrollAreas
-     (timeline, agent-sidebar) are vertical-only and each item manages its
-     own horizontal overflow (code/tables use overflow-x-auto), so they do
+     (timeline, agent-sidebar, inspector) are vertical-only and their content
+     handles its own width (code/tables use overflow-x-auto), so they do
      not depend on Radix's table-box horizontal-scrollbar sizing. */
   [data-slot="scroll-area-viewport"] > div {
     display: block !important;
