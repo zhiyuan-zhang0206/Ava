@@ -371,6 +371,41 @@ class DisplaySettings(EnvSettings):
         },
     )
 
+    stats_dashboard_cache_ttl_s: float = Field(
+        default=60.0,
+        ge=0,
+        alias="AVA_STATS_DASHBOARD_CACHE_TTL_S",
+        description=(
+            "Fresh lifetime in seconds of each stats-dashboard whole response. "
+            "The default 60s absorbs every other sidebar poll. 0 disables fresh cache hits."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    stats_dashboard_swr_max_s: float = Field(
+        default=300.0,
+        ge=0,
+        alias="AVA_STATS_DASHBOARD_SWR_MAX_S",
+        description=(
+            "Maximum age in seconds of an expired stats-dashboard response served "
+            "immediately while one background refresh runs per window. Measured "
+            "since the last successful recompute, not since TTL expiry. Past this "
+            "cap the request waits for a recompute; its failure fallback remains "
+            "bounded by stats_dashboard_stale_max_s. 0 disables background refresh."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     stats_dashboard_stale_max_s: float = Field(
         default=600.0,
         ge=0,

@@ -21,6 +21,7 @@ from typing import Annotated, Any
 import httpx
 from fastapi import APIRouter, Query, Request
 from psycopg import Cursor
+from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from gateway import loki_events, loki_query_budget
@@ -102,6 +103,20 @@ def get_stats_dashboard(
     cached = _stats_dashboard.cache_get(hours)
     if cached is not None:
         return cached
+    pool = request.app.state.db_pool
+    try:
+        return _stats_dashboard.refresh_or_serve(
+            hours, lambda: _compute_stats_dashboard(pool, hours)
+        )
+    except loki_query_budget.LokiQueryBudgetError:
+        # Preserve the admission handler's machine-readable reason.
+        raise
+    except httpx.HTTPError as exc:
+        raise_backend_unavailable(exc)
+
+
+def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours) -> StatsDashboard:
+    """Assemble a successful payload through the shared Loki query budget."""
     cluster = cluster_label()
 
     # The turn / W/E stats read Loki (task #1197): the PG `events` table was
@@ -109,105 +124,92 @@ def get_stats_dashboard(
     # Do not hold a pooled DB connection while these network queries wait.
     now = datetime.now(UTC)
     window_start = now - applied_window(hours)[1]
-    try:
-        # Settled UTC days avoid full-window Loki scans. The global newest
-        # ledger day is reread live while retained, so a late write into that
-        # closed day is neither missed nor double counted. Both small DB reads
-        # finish before any query waits for the shared Loki budget.
-        ledger, tail_spans = _stats_dashboard.ledger_token_plan(
-            request.app.state.db_pool, window_start=window_start, now=now
-        )
+    # Settled UTC days avoid full-window Loki scans. The global newest
+    # ledger day is reread live while retained, so a late write into that
+    # closed day is neither missed nor double counted. Both small DB reads
+    # finish before any query waits for the shared Loki budget.
+    ledger, tail_spans = _stats_dashboard.ledger_token_plan(
+        pool, window_start=window_start, now=now
+    )
 
-        # Cost snapshots are usage-time values; do not apply today's model
-        # registry prices to historical token counts at read time.
-        tail_sums = {
-            field: sum(
-                loki_events.attribute_aggregate(
-                    field=field,
-                    agg="sum",
-                    event_names=["llm_usage"],
-                    categories=["telemetry"],
-                    cluster=cluster,
-                    from_=tail_start,
-                    to=tail_end,
-                    timeout_s=8.0,
-                )
-                for tail_start, tail_end in tail_spans
+    # Cost snapshots are usage-time values; do not apply today's model
+    # registry prices to historical token counts at read time.
+    tail_sums = {
+        field: sum(
+            loki_events.attribute_aggregate(
+                field=field,
+                agg="sum",
+                event_names=["llm_usage"],
+                categories=["telemetry"],
+                cluster=cluster,
+                from_=tail_start,
+                to=tail_end,
+                timeout_s=8.0,
             )
-            for field in ("in_total", "out_total", "cache_read", "cost_usd")
-        }
-        in_total = ledger.tokens_in + round(tail_sums["in_total"])
-        out_total = ledger.tokens_out + round(tail_sums["out_total"])
-        cache_read = ledger.tokens_cached + round(tail_sums["cache_read"])
-        window_cost_usd = ledger.cost_usd + tail_sums["cost_usd"]
-        cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
-
-        # Twelve-hour shards halve fan-out; every interactive query has an 8-second timeout.
-        turn_end_sum = sum(
-            _loki_shards.query_loki_shards(
-                window_start,
-                now,
-                lambda shard_start, shard_end: loki_events.attribute_aggregate(
-                    field="duration_seconds",
-                    agg="sum",
-                    event_names=["turn_end"],
-                    attribute_filters={"ok": "true"},
-                    cluster=cluster,
-                    from_=shard_start,
-                    to=shard_end,
-                    timeout_s=8.0,
-                ),
-                shard_width=timedelta(hours=12),
-            )
+            for tail_start, tail_end in tail_spans
         )
-        turn_end_count = sum(
-            _loki_shards.query_loki_shards(
-                window_start,
-                now,
-                lambda shard_start, shard_end: loki_events.count_events(
-                    event_names=["turn_end"],
-                    attribute_filters={"ok": "true"},
-                    cluster=cluster,
-                    from_=shard_start,
-                    to=shard_end,
-                    timeout_s=8.0,
-                ),
-                shard_width=timedelta(hours=12),
-            )
-        )
-        avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
+        for field in ("in_total", "out_total", "cache_read", "cost_usd")
+    }
+    in_total = ledger.tokens_in + round(tail_sums["in_total"])
+    out_total = ledger.tokens_out + round(tail_sums["out_total"])
+    cache_read = ledger.tokens_cached + round(tail_sums["cache_read"])
+    window_cost_usd = ledger.cost_usd + tail_sums["cost_usd"]
+    cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
 
-        # Per-class counts over the selected window (12h shards), split by
-        # the daemon's class arithmetic (resolution.level_splits) (task #1935).
-        from services.events_maintenance import resolution as _resolution
-
-        class_counts: dict[Any, int] = {}
-        for shard_counts in _loki_shards.query_loki_shards(
+    # Twelve-hour shards halve fan-out; every interactive query has an 8-second timeout.
+    turn_end_sum = sum(
+        _loki_shards.query_loki_shards(
             window_start,
             now,
-            lambda shard_start, shard_end: loki_events.count_event_classes(
+            lambda shard_start, shard_end: loki_events.attribute_aggregate(
+                field="duration_seconds",
+                agg="sum",
+                event_names=["turn_end"],
+                attribute_filters={"ok": "true"},
+                cluster=cluster,
                 from_=shard_start,
                 to=shard_end,
-                cluster=cluster,
                 timeout_s=8.0,
             ),
             shard_width=timedelta(hours=12),
-        ):
-            for event_class, count in shard_counts.items():
-                class_counts[event_class] = class_counts.get(event_class, 0) + count
-    except loki_query_budget.LokiQueryBudgetError:
-        stale = _stats_dashboard.serve_stale(hours, reason="loki_budget")
-        if stale is not None:
-            return stale
-        # Preserve the process-wide admission handler's machine-readable reason.
-        raise
-    except httpx.HTTPError as exc:
-        stale = _stats_dashboard.serve_stale(hours, reason="loki_failed")
-        if stale is not None:
-            return stale
-        raise_backend_unavailable(exc)
+        )
+    )
+    turn_end_count = sum(
+        _loki_shards.query_loki_shards(
+            window_start,
+            now,
+            lambda shard_start, shard_end: loki_events.count_events(
+                event_names=["turn_end"],
+                attribute_filters={"ok": "true"},
+                cluster=cluster,
+                from_=shard_start,
+                to=shard_end,
+                timeout_s=8.0,
+            ),
+            shard_width=timedelta(hours=12),
+        )
+    )
+    avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
 
-    with request.app.state.db_pool.connection() as conn:
+    # Per-class counts over the selected window (12h shards), split by
+    # the daemon's class arithmetic (resolution.level_splits) (task #1935).
+    from services.events_maintenance import resolution as _resolution
+
+    class_counts: dict[Any, int] = {}
+    for shard_counts in _loki_shards.query_loki_shards(
+        window_start,
+        now,
+        lambda shard_start, shard_end: loki_events.count_event_classes(
+            from_=shard_start,
+            to=shard_end,
+            cluster=cluster,
+            timeout_s=8.0,
+        ),
+        shard_width=timedelta(hours=12),
+    ):
+        for event_class, count in shard_counts.items():
+            class_counts[event_class] = class_counts.get(event_class, 0) + count
+    with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
             live_count = int(cur.fetchone()[0])
@@ -226,7 +228,7 @@ def get_stats_dashboard(
     warning = splits.get("warning", _resolution.LevelSplit(0, 0, 0))
     error = splits.get("error", _resolution.LevelSplit(0, 0, 0))
 
-    response = StatsDashboard(
+    return StatsDashboard(
         live_count=live_count,
         window_hours=hours,
         applied_window_hours=applied_window(hours)[0],
@@ -245,11 +247,9 @@ def get_stats_dashboard(
         errors_dismissed=error.dismissed,
         errors_net=error.net,
         total_events=total_events,
-        plugin_stats=_stats_dashboard.plugin_stat_rows(request.app.state.db_pool),
+        plugin_stats=_stats_dashboard.plugin_stat_rows(pool),
         as_of=datetime.now(UTC),
     )
-    _stats_dashboard.cache_put(hours, response)
-    return response
 
 
 def _get_services_status() -> ServicesStatus:

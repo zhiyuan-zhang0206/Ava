@@ -52,7 +52,7 @@ def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
 
 @pytest.fixture(autouse=True)
 def clear_llm_usage_sums_cache() -> None:
-    """Keep every FakeLoki test isolated from the route's 60-second cache."""
+    """Keep every FakeLoki test isolated from the route's configurable cache."""
     _stats_dashboard.cache_clear()
 
 
@@ -77,6 +77,7 @@ class _CacheClock:
 @pytest.fixture
 def cache_clock(monkeypatch: pytest.MonkeyPatch) -> _CacheClock:
     clock = _CacheClock()
+    monkeypatch.setattr(settings.display, "stats_dashboard_swr_max_s", 0.0)
     monkeypatch.setattr(_stats_dashboard, "_monotonic", clock)
     return clock
 
@@ -803,7 +804,7 @@ def test_dashboard_caches_llm_usage_sums_per_window(
     db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The 30s sidebar poll reuses only its matching window's four Loki sums."""
-    assert _stats_dashboard._CACHE_TTL_S == 60.0
+    assert settings.display.stats_dashboard_cache_ttl_s == 60.0
     fake_loki.add(
         event="llm_usage",
         payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
@@ -1028,9 +1029,6 @@ def test_dashboard_plugin_stats_is_empty_without_writers() -> None:
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["plugin_stats"] == []
-
-
-# ── stale serving (task #3973) ─────────────────────────────────────────────
 
 
 def test_dashboard_fresh_response_carries_freshness_fields(
