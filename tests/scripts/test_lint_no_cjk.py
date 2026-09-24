@@ -68,7 +68,7 @@ def test_fullwidth_punctuation_fails(repo: Path) -> None:
 
 
 def test_binary_file_skipped(repo: Path) -> None:
-    _write(repo, "assets/logo.png", "\x00\x01\x02binary")
+    _write(repo, "assets/logo.png", "\x00\x01\x02\u4e2d\u6587")
     assert gate._scan_file("assets/logo.png") == []
 
 

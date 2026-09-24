@@ -11,10 +11,11 @@ tags:
 
 ## The linters
 
-Code and document structure guards, mostly invoked by `.pre-commit-config.yaml` and CI:
+Code and document guards, mostly invoked by `.pre-commit-config.yaml` and CI:
 - `lint_ava_okf.py` — OKF format validation (frontmatter / size / wikilink)
-- `lint_python_lock.py` — wraps packaged `shared/python_lock.py`: `uv.lock` requires PyPI registry and `files.pythonhosted.org` distribution URLs; regional mirrors stay host-local. Pre-commit + always-on `repo-language` CI; no project dependencies needed.
-- `lint_no_tailnet.py` — bans 100.64.0.0/10 host literals repo-wide; allows CIDR notation, `decisions/`, and `# tailnet-ip-ok:` boundary tests. Pre-commit `lint-no-tailnet` + always-on `repo-language` CI (2026-08-03/04 Gateway-URL and 2026-08-20 public-repo rulings).
+- `lint_python_lock.py` — wraps `shared/python_lock.py`: `uv.lock` needs PyPI registry and `files.pythonhosted.org` URLs; mirrors stay local. Pre-commit + `repo-language` CI; no project deps.
+- `lint_no_tailnet.py` — bans 100.64.0.0/10 host literals; allows CIDR, frozen `decisions/`, and `# tailnet-ip-ok:` test lines. Pre-commit + `repo-language` CI (2026-08-03/04 Gateway-URL, 2026-08-20 public-repo rulings).
+- `structure/lint_common.py` — tracked files, target resolution, UTF-8 reads, and `file:line` output for `lint_no_cjk.py` and `lint_no_tailnet.py`.
 - `lint_fail_fast.py`, `lint_no_emoji.py`, `lint_no_os_environ.py`, `lint_no_script_sibling_imports.py` — Python conventions; the last requires script-mode sibling imports to restore their directory to sys.path under PYTHONSAFEPATH=1 (2026-08-23 `daily_scan.py` crash).
 - `lint_code_structure.py` + `structure/quality_budget.py` — 800-line/20-entry caps and function CC ≥15 / nesting >5 violations (packages/tests/scripts). `structure/baseline.json` freezes `directories`, `files`, `complexity`, `nesting`; its base-ref guard allows shrinkage, same-file function rename pairing, and git-detected file renames (migrate keys with the move). CC 10–14 warns per file; `--complexity-warnings-full` unfolds all warning counts.
 - `lint_termination_source.py` — every `UPDATE agents_meta SET status='terminated'` must stamp `termination_source` in the same statement (AST catches bind parameters too). A NULL source is permanently unresurrectable and strands queued work.
