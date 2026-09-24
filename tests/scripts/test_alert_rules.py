@@ -20,6 +20,7 @@ R14-R16 are the collector delivery layer: current queue pressure, NEW enqueue
 failures in a bounded window, and a recently-seen machine whose collector stopped
 reporting. They use the collector's own Prometheus endpoint, scraped by that
 same sidecar and relayed with the infrastructure pipeline.
+R24 reads the receiving Prometheus's own too-old-samples counter.
 """
 
 from __future__ import annotations
@@ -38,13 +39,7 @@ from shared.telemetry.otlp.telemetry_otlp_metrics import _strip_unit_suffix, _un
 
 _RULES = (
     Path(__file__).resolve().parent.parent.parent
-    / "deploy"
-    / "lgtm"
-    / "config"
-    / "grafana"
-    / "provisioning"
-    / "alerting"
-    / "rules.yml"
+    / "deploy/lgtm/config/grafana/provisioning/alerting/rules.yml"
 )
 
 _EXPECTED_UIDS = {
@@ -87,6 +82,8 @@ _EXPECTED_UIDS = {
     "ava-ops-otelcol-queue-pressure",
     "ava-ops-otelcol-enqueue-failures",
     "ava-ops-otelcol-host-silent",
+    # Prometheus OTLP receiver loss (task #4650; focused test in tests/cli/test_lgtm_native.py)
+    "ava-ops-prom-too-old-samples",
     # memory-search growth layer (task #2088/#2090) — OTLP gauge mirror
     "ava-ops-memory-search-rows-warning",
     "ava-ops-memory-search-rows-critical",
@@ -120,7 +117,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [30, 10]
+    assert [len(group["rules"]) for group in groups] == [31, 10]
     return groups
 
 

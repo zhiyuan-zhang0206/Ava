@@ -9,7 +9,8 @@ rule, and the watchdog-tick staleness rule query **Prometheus** (the
 `ava_llm_usage_latency_milliseconds` histogram,
 `ava_gateway_latency_count_total` heartbeat,
 `ava_watchdog_tick_last_tick_timestamp_seconds` gauge, and R18 turn-duration
-histogram). The retired Postgres events read path (#1197) is gone — nothing
+histogram); R24 queries Prometheus's own too-old-samples counter. The retired
+Postgres events read path (#1197) is gone — nothing
 queries the `ops` datasource from these rules.
 
 Datasources are provisioned beside this file (`datasources.yml`, uids
@@ -43,11 +44,11 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (40)
+## Rules (41)
 
-The rules are split between `ava-ops` (30 rules, evaluated every minute:
+The rules are split between `ava-ops` (31 rules, evaluated every minute:
 R1-R6, the watchdog-tick and gateway-metrics silence rules, the checkpoint
-guards, R8-R12, and R14-R16) and
+guards, R8-R12, R14-R16, and R24) and
 `ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
 fast-route tiers, R18, and R19's two slow-route tiers, plus the PITR-storage / Tempo-backend / LLM-rate-limit checks). Each rule retains its
 own `for` window.
@@ -138,6 +139,17 @@ alerting until the process restarts — it resolves after a clean 5-minute
 window. The silence query's 5-minute absence window is already its
 debounce, hence no second `for` delay. Its 24-hour historical machine set expires
 retired machines naturally; the fleet heartbeat owns permanent membership.
+
+Prometheus receiver loss — the receiver's own counter records samples older
+than its out-of-order intake window:
+
+| uid | Metric | Condition | `for` | Severity |
+|-----|--------|-----------|-------|----------|
+| `ava-ops-prom-too-old-samples` | too-old OTLP samples dropped | `increase(prometheus_tsdb_too_old_samples_total[10m]) > 0` | 0m | warning |
+
+The counter covers both whole-batch HTTP 400 loss and silent partial drops;
+collector logs alone miss the latter. The window rationale and acceptance
+runbook are in the [LGTM README](../../../../README.md#otlp-late-sample-window-out-of-order-intake).
 
 Storage and store growth — absolute-size gauges from the OTLP metric mirror
 (`ava_checkpoint_table_sizes` / `ava_memory_search_stats` /

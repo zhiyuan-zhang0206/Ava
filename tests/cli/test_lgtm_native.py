@@ -316,6 +316,31 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
     assert grafana_job["metrics_path"] == "/grafana/metrics"
 
 
+def test_lgtm_prometheus_copies_keep_the_late_sample_window() -> None:
+    for relative in ("native/config/prometheus.yml", "config/prometheus.yml"):
+        config = yaml.safe_load((_repo() / "deploy/lgtm" / relative).read_text(encoding="utf-8"))
+        assert config["storage"]["tsdb"]["out_of_order_time_window"] == "6h"
+
+
+def test_prometheus_too_old_samples_rule_uses_window_delta_in_fast_group() -> None:
+    """R24 (task #4650) — focused coverage lives here because
+    tests/scripts/test_alert_rules.py is structure-budget frozen."""
+    rules = yaml.safe_load(
+        (_repo() / "deploy/lgtm/config/grafana/provisioning/alerting/rules.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    group = next(g for g in rules["groups"] if g["name"] == "ava-ops")
+    rule = next(r for r in group["rules"] if r["uid"] == "ava-ops-prom-too-old-samples")
+    expr = next(d["model"]["expr"] for d in rule["data"] if d.get("datasourceUid") == "prometheus")
+    assert "prometheus_tsdb_too_old_samples_total" in expr
+    assert "increase(" in expr
+    assert "[10m]" in expr
+    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
+    assert threshold["model"]["conditions"][0]["evaluator"] == {"type": "gt", "params": [0]}
+    assert rule["for"] == "0m"
+
+
 def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -345,6 +370,7 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     prometheus = yaml.safe_load(
         (_native_dir(home) / "config/prometheus.yml").read_text(encoding="utf-8")
     )
+    assert prometheus["storage"]["tsdb"]["out_of_order_time_window"] == "6h"
     targets = {
         job["job_name"]: job["static_configs"][0]["targets"] for job in prometheus["scrape_configs"]
     }
