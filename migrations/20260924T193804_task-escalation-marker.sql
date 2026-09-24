@@ -1,0 +1,17 @@
+-- Delegator-escalation marker for the task-maintenance daemon (task #4748):
+-- stamped when the delegator escalation digest is delivered, so the delegation
+-- leg reports an unresponsive owner at most once per overdue window. A
+-- fire-and-forget inbound digest has no other persistent marker, and reminder
+-- delivery is backoff-gated (up to 24h), which parked reminder_count at the
+-- threshold while every 5-min sweep re-sent the same digest.
+--
+--   stamp — daemon, task_maintenance/daemon.py::_deliver_message: the same
+--     transaction as the digest insert, so message and marker commit together
+--     and a failed delivery is retried by the next sweep;
+--   clear — both update() paths (task_registry.update / gateway PATCH):
+--     reset with last_reminded_at / reminder_count, re-arming the task's next
+--     overdue window.
+--
+-- NULL for rows that never escalated; always NULL on the user leg (its
+-- idempotency marker is the open notice itself).
+ALTER TABLE agent_tasks ADD COLUMN escalated_at TIMESTAMPTZ;

@@ -354,25 +354,23 @@ def test_update_resets_reminder_count(db_conn: psycopg.Connection, root_task_id:
     ava._boot._agent_id = agent_id
     try:
         task = task_registry.create("title", "detail", parent=root_task_id)
-        # Simulate some prior reminders
+        # Simulate some prior reminders and an escalation
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agent_tasks SET reminder_count = 3, last_reminded_at = now() WHERE id = %s",
+                "UPDATE agent_tasks SET reminder_count = 3, last_reminded_at = now(), "
+                "escalated_at = now() WHERE id = %s",
                 (task.id,),
             )
         db_conn.commit()
-        # An update resets the counters
+        # An update resets the counters and the escalation marker
         task_registry.update(task.id, results="progress")
         with db_conn.cursor() as cur:
             cur.execute(
-                "SELECT reminder_count, last_reminded_at FROM agent_tasks WHERE id = %s",
+                "SELECT reminder_count, last_reminded_at, escalated_at FROM agent_tasks WHERE id = %s",
                 (task.id,),
             )
             row = cur.fetchone()
-            assert row is not None
-            reminder_count, last_reminded_at = row
-        assert reminder_count == 0
-        assert last_reminded_at is None
+        assert row == (0, None, None)
     finally:
         ava._boot._agent_id = original
 
@@ -577,18 +575,19 @@ def test_log_resets_reminder_count(db_conn: psycopg.Connection, root_task_id: in
         task = task_registry.create("title", "detail", parent=root_task_id)
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agent_tasks SET reminder_count = 3, last_reminded_at = now() WHERE id = %s",
+                "UPDATE agent_tasks SET reminder_count = 3, last_reminded_at = now(), "
+                "escalated_at = now() WHERE id = %s",
                 (task.id,),
             )
         db_conn.commit()
         task_registry.log(task.id, "note")
         with db_conn.cursor() as cur:
             cur.execute(
-                "SELECT reminder_count, last_reminded_at FROM agent_tasks WHERE id = %s",
+                "SELECT reminder_count, last_reminded_at, escalated_at FROM agent_tasks WHERE id = %s",
                 (task.id,),
             )
             row = cur.fetchone()
-        assert row == (0, None)
+        assert row == (0, None, None)
     finally:
         ava._boot._agent_id = original
 

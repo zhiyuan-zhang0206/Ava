@@ -271,8 +271,11 @@ def _patch_task_blocking(
         )
     # Reset the reminder counters on any update — a fresh overdue window starts
     # from this update, so any previous reminder is stale (same rule as the SDK).
+    # The delegator escalation marker is part of the bookkeeping: clearing it
+    # lets the fresh window escalate on its own.
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
+    sets.append("escalated_at = NULL")
 
     with write_transaction(pool) as conn, conn.cursor() as cur:
         # The system root task is immutable (the task-tree anchor / default

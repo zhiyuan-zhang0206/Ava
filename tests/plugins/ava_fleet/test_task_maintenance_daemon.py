@@ -50,7 +50,7 @@ def deliver(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     responsibility — digest recipients, content, and counter updates."""
     calls: list[tuple[int, str]] = []
 
-    def _fake(pool_: ConnectionPool, agent_id: int, message: str) -> None:
+    def _fake(pool_: ConnectionPool, agent_id: int, message: str, **_kwargs: object) -> None:
         calls.append((agent_id, message))
 
     monkeypatch.setattr(daemon, "_deliver_message", _fake)
@@ -641,11 +641,11 @@ class TestEscalate:
         assert _run_escalate(pool, 3) == 0
         assert deliver == []
 
-    def test_above_threshold_only_escalates_once(
+    def test_above_threshold_escalates_once_per_window(
         self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
     ) -> None:
-        """reminder_count=5 > threshold=3: escalates only on the exact threshold
-        match (reminder_count==3), not on higher values."""
+        """reminder_count=5 > threshold=3 with no marker: still one digest —
+        the user leg's >= rule, not the old exact equality."""
         parent_owner = _make_agent(db_conn)
         parent = _make_task(db_conn, owner=parent_owner, remind_interval_seconds=None)
         owner = _make_agent(db_conn)
@@ -657,8 +657,8 @@ class TestEscalate:
             updated_s_ago=7200,
             reminder_count=5,
         )
-        assert _run_escalate(pool, 3) == 0
-        assert deliver == []
+        assert _run_escalate(pool, 3) == 1
+        assert len(deliver) == 1
 
     def test_no_parent_no_escalation(
         self, pool: ConnectionPool, db_conn: psycopg.Connection, deliver: list[tuple[int, str]]
