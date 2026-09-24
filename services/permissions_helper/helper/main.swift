@@ -262,7 +262,7 @@ func spawnDetachedChild(
     // and the root keeper spawns from a GCD worker thread, where libdispatch
     // blocks most signals including SIGTERM — without this reset a
     // keeper-spawned ava-root never sees SIGTERM (empirically confirmed
-    // 2026-09-12; same fix family as shared/pty_sessions/launch.py's SIG_DFL
+    // 2026-09-12; same fix family as shared/sessions/pty/launch.py's SIG_DFL
     // reset before spawning a shell).
     let spawnFlags = Int16(
         POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF

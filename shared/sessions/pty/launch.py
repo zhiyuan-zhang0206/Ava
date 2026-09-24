@@ -33,13 +33,13 @@ import psutil
 from shared.log import logger
 from shared.platform import LockTimeoutError, file_lock
 from shared.proc_tree import stable_create_time
-from shared.pty_sessions._paths import (
+from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.sessions.pty._paths import (
     DEFAULT_COLS,
     DEFAULT_ROWS,
     records_lock_path,
     write_record,
 )
-from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # Sentinel for a child whose create_time could not be read (died at spawn —
 # the pid is at its most reusable moment): can never match a reused pid.
@@ -53,7 +53,7 @@ def _host() -> Any:
     top-level import back would be a cycle; at call time host.py is fully
     loaded and the attribute lookup is safe.
     """
-    from shared.pty_sessions import host
+    from shared.sessions.pty import host
 
     return host
 

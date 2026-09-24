@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`shared/session_backend.py` is the interface every long-running named session goes through. It unifies three platform supervisors behind one protocol: **posixproc** (`shared/posixproc.py`, POSIX native), the **per-session pty hosts** (`shared/pty_sessions/`), and **winproc** (`shared/winproc.py`, Windows). The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to — asked by liveness-from-freshness consumers such as `ops.cluster_deploy._reap_stalled_updater`). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
+`shared/session_backend.py` is the interface every long-running named session goes through. It unifies three platform supervisors behind one protocol: **posixproc** (`shared/posixproc.py`, POSIX native), the **per-session pty hosts** (`shared/sessions/pty/`), and **winproc** (`shared/winproc.py`, Windows). The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to — asked by liveness-from-freshness consumers such as `ops.cluster_deploy._reap_stalled_updater`). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
 
 Three entry points, three session classes:
 
@@ -31,7 +31,7 @@ Three entry points, three session classes:
 ### Backends
 
 - **PosixProcSessionBackend** — the native supervisor for services: double-fork reparent to init, `SessionRecord` + logs under `$AVA_HOME/run/sessions/` / `$AVA_HOME/logs/`. No PTY is allocated, so the per-box PTY ceiling (`kern.tty.ptmx_max`) does not bound service count.
-- **PtySessionBackend** — agent shells / watchers. Each mutating op is a `python -m shared.pty_sessions.cli` subprocess whose exit code maps to the interface shape; enumeration and bulk launch timestamps use one in-process record scan, with individual record reads as the I/O-failure fallback. Env rides a 0600 file, the launch command rides base64 (never argv), and the session's host submits it only once the login shell's prompt is ready. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the host. See [[shared/pty_sessions/pty_sessions.ava.okf.md|pty sessions]].
+- **PtySessionBackend** — agent shells / watchers. Each mutating op is a `python -m shared.sessions.pty.cli` subprocess whose exit code maps to the interface shape; enumeration and bulk launch timestamps use one in-process record scan, with individual record reads as the I/O-failure fallback. Env rides a 0600 file, the launch command rides base64 (never argv), and the session's host submits it only once the login shell's prompt is ready. `login_shell=False` raises `NotImplementedError` (interactive login shells only); the kill timeout is owned by the host. See [[shared/sessions/pty/pty_sessions.ava.okf.md|pty sessions]].
 - **WinprocSessionBackend** — new Windows sessions use a private hidden console, explicit log handles and `control_mode=private-console-v1` in their record. `shared/windows_console_signal.py` runs once via an absolute loaded-package path under isolated Python; it verifies exact PID/birth, record provenance and console members before a console-scoped Ctrl-Break. It never changes the daemon's console. Legacy/unknown records refuse graceful delivery; a successful send is OS acceptance, not proof of exit. Force cleanup preserves other session boundaries (`winproc._spared_pids`). Actual admitted agent PID remains separate from a verified venv redirector's native control PID.
   Cross-session control (issue #1930) and the helper's Job containment are in
   [[cross-session-control.ava.okf.md|cross-session control]].
@@ -49,7 +49,7 @@ and OFF_BOX_UNREACHABLE attribution (issue #949):
 
 - `shared/session_backend.py:get_backend()` / `get_shell_backend()` / `native_proc()` — the three dispatch points
 - `shared/posixproc.py` / `shared/winproc.py` — the native supervisors (agent processes + services)
-- `shared/pty_sessions/` — the per-session pty hosts (host + CLI + screen) for agent shells
+- `shared/sessions/pty/` — the per-session pty hosts (host + CLI + screen) for agent shells
 - `shared/session_record.py:SessionRecord` — single shape for persisted background session records (`.read()`/`.write()`)
 - `shared/session_env.py` — env forwarding + the envfile format shared by both POSIX backends
 

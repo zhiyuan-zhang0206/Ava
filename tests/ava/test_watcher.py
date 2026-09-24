@@ -320,7 +320,7 @@ def test_watcher_child_dies_when_pty_host_dies(_agent_row: int, tmp_path: pathli
         child = psutil.Process(child_pid)
         shell = psutil.Process(child.ppid())
         host = psutil.Process(shell.ppid())
-        assert "shared.pty_sessions.host" in " ".join(host.cmdline())
+        assert "shared.sessions.pty.host" in " ".join(host.cmdline())
 
         os.kill(host.pid, signal.SIGKILL)
 

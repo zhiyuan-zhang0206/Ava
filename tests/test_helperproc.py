@@ -299,7 +299,7 @@ def test_pty_host_uses_direct_helper_child_when_enabled(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from shared import session_backend
-    from shared.pty_sessions import cli
+    from shared.sessions.pty import cli
 
     calls: list[dict[str, object]] = []
 
@@ -341,7 +341,7 @@ def test_pty_host_uses_direct_helper_child_when_enabled(
     assert call["argv"] == [
         sys.executable,
         "-m",
-        "shared.pty_sessions.host",
+        "shared.sessions.pty.host",
         "ava-shell",
         str(unit_home),
         str(envfile),

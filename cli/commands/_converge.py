@@ -257,7 +257,7 @@ def _ensure_github_pr(ctx: ConvergeCtx) -> None:
 #   per-capability split). The two replacements are in `build_services()` so they
 #   land in `current` and are NOT reaped; only the retired single name is.
 # - `pty-supervisor` -> nothing (2026-08-13 per-session pty hosts): agent
-#   shells run in their own detached host processes now (shared/pty_sessions);
+#   shells run in their own detached host processes now (shared/sessions/pty);
 #   the supervisor daemon is gone. Reaping the old service session kills the
 #   shells of that final pre-host era — the one transition where they were
 #   still its children.

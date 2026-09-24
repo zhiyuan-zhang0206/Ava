@@ -15,6 +15,33 @@ def test_old_references_reports_dotted_parent_import_and_slash_lines() -> None:
     assert gate._old_references("pkg_old.mod_name", text) == [1, 2, 3]
 
 
+def test_mask_history_reads_blanks_quoted_and_bare_operands() -> None:
+    old_path = "shared/" + "pty_sessions"
+    text = (
+        f'git show "$SHA:{old_path}/cli.py" > shared/sessions/pty/cli.py\n'
+        f"git show bd6b15ed0:{old_path}/host.py > shared/sessions/pty/host.py\n"
+    )
+
+    masked = gate._mask_history_reads(text)
+
+    assert len(masked) == len(text)
+    assert masked.count("\n") == text.count("\n")
+    assert old_path not in masked
+    assert masked.count(" > shared/sessions/pty/") == 2
+
+
+def test_old_references_ignores_git_show_history_reads_but_reports_old_destination() -> None:
+    old_path = "shared/" + "pty_sessions/cli.py"
+    old_module = "shared." + "pty_sessions.cli"
+    quoted = f'git show "abc:{old_path}" > shared/sessions/pty/cli.py'
+    bare = f"git show bd6b15ed0:{old_path} > shared/sessions/pty/cli.py"
+    old_destination = f'git show "abc:{old_path}" > {old_path}'
+
+    assert gate._old_references(old_module, quoted) == []
+    assert gate._old_references(old_module, bare) == []
+    assert gate._old_references(old_module, old_destination) == [1]
+
+
 @pytest.mark.parametrize(
     "text",
     [

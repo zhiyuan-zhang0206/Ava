@@ -8,7 +8,7 @@ Windows — a named, detached process tracked by a small on-disk record — so t
 POSIX agent-launch path is fully native. Daemons run here too (services
 need no PTY, and the per-box PTY ceiling then stops bounding service count);
 only the agents' own persistent shells live elsewhere, each in its own
-detached pty host (`shared/pty_sessions`), which keeps the long-lived
+detached pty host (`shared/sessions/pty`), which keeps the long-lived
 interactive pane.
 
 The surface mirrors `shared.winproc` one-to-one so `ops.agent_launch` and the

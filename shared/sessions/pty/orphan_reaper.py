@@ -24,13 +24,13 @@ import psutil
 
 from shared.log import logger
 from shared.proc_tree import stable_create_time
-from shared.pty_sessions._paths import (
+from shared.session_record import pid_starttime_ticks
+from shared.sessions.pty._paths import (
     host_identity,
     host_starttime,
     record_path,
     socket_path,
 )
-from shared.session_record import pid_starttime_ticks
 
 # Record-owner identity tolerance, module-scoped to the reaper (the same value
 # cli.py uses for its own record checks; deliberately not shared to keep this
@@ -44,7 +44,7 @@ _RECORD_OWNER_TOLERANCE_S = 2.0
 # ordering relation with any registered clock).
 _ORPHAN_HOST_STARTUP_LEEWAY_S = 5.0
 _ORPHAN_HOST_KILL_WAIT_S = 3.0
-_PTY_HOST_MODULE = "shared.pty_sessions.host"
+_PTY_HOST_MODULE = "shared.sessions.pty.host"
 
 
 def _host_is_live(proc: psutil.Process) -> bool:

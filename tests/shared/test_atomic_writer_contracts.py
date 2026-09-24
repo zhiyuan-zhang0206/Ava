@@ -24,7 +24,7 @@ from shared import (
     start_serving,
     ui_update_state,
 )
-from shared.pty_sessions import allocation_freeze
+from shared.sessions.pty import allocation_freeze
 
 
 def _marker_write(case: str, path: Path) -> None:

@@ -31,7 +31,7 @@ Each service declares which machine capabilities it runs on (`ServiceSpec.capabi
 
 ## Core Responsibilities
 - **Independent deployment**: each daemon starts via `.venv/bin/python -m services.<name>.daemon`, fully decoupled
-- **session management**: the unified backend tracks one session per service. POSIX normally uses `shared/posixproc.py`; on macOS, enabling the default-off `AVA_PERMISSIONS_HELPER_SPAWN` alongside the helper routes services and pty hosts into direct helper children, with disk records as lifecycle truth. Agent shells/watchers remain [[shared/pty_sessions/pty_sessions.ava.okf.md|pty sessions]]; the helper itself remains launchd-owned
+- **session management**: the unified backend tracks one session per service. POSIX normally uses `shared/posixproc.py`; on macOS, enabling the default-off `AVA_PERMISSIONS_HELPER_SPAWN` alongside the helper routes services and pty hosts into direct helper children, with disk records as lifecycle truth. Agent shells/watchers remain [[shared/sessions/pty/pty_sessions.ava.okf.md|pty sessions]]; the helper itself remains launchd-owned
 - **watchdog keep-alive + self-healing**: runs the corresponding healthcheck every 60s, restarts on death; additionally runs five reconcile controllers in order (`ops/manager.py:build_controllers`): updater (reaps hung ava-updater sessions, agent-runner only) → pause (stranded-pause recovery, 120s timeout) → schema (schema version) → pin (cluster pin; agent-runner self-heals, gateway only alerts) → code
 - **Distributed by capability**: intersection of `ServiceSpec.capabilities` with the local machine's `machine_role()` determines which services run—gateway and agent-runner each run a different subset, each with its own watchdog instance
 

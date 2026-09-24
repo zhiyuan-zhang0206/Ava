@@ -389,7 +389,7 @@ def test_pty_session_records_do_not_refuse() -> None:
     architecture made legal (pinned here so a future sweep cannot regress it).
     """
     from shared.proc import hosting_supervised_session
-    from shared.pty_sessions._paths import write_record
+    from shared.sessions.pty._paths import write_record
 
     pty_ns = run_dir() / "pty"
     pty_ns.mkdir(parents=True, exist_ok=True)

@@ -63,7 +63,7 @@ predecessor can never unlink a successor's socket.
 
 ## Key dependencies
 
-- [[shared/pty_sessions/pty_sessions.ava.okf.md]] — full-name PTY liveness and
+- [[shared/sessions/pty/pty_sessions.ava.okf.md]] — full-name PTY liveness and
   termination used by exact generation cleanup
 - [[ava_builtins/skills/orchestration/ava-use-claude-code-and-codex.ava.okf.md]]
   — Codex launcher and supervisor that consume this owner contract

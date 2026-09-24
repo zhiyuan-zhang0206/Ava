@@ -227,7 +227,7 @@ def test_schedule_launch(
     launches = [
         a
         for a in captured_argv
-        if a[:3] == [sys.executable, "-m", "shared.pty_sessions.cli"]
+        if a[:3] == [sys.executable, "-m", "shared.sessions.pty.cli"]
         and len(a) >= 5
         and a[4] == "new"
     ]
@@ -275,7 +275,7 @@ def test_agent_shell_session(
     monkeypatch.setattr(sessions, "_record_ttl", _noop_record_ttl)
     sessions._create_session("probe", ttl=120)
     launches = [
-        a for a in captured_argv if a[:3] == [sys.executable, "-m", "shared.pty_sessions.cli"]
+        a for a in captured_argv if a[:3] == [sys.executable, "-m", "shared.sessions.pty.cli"]
     ]
     assert launches, f"no pty CLI launch; saw {captured_argv!r}"
     argv = launches[-1]

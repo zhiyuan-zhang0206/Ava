@@ -77,8 +77,8 @@ def test_real_service_pause_preserves_unselected_orchestration_and_pty(
     terminal = PtySessionBackend()
     name = "ava-agent-987-shell-1"
     assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
-    from shared.pty_sessions._paths import record_path
     from shared.session_record import SessionRecord
+    from shared.sessions.pty._paths import record_path
 
     record = SessionRecord.read(record_path(name))
     assert record is not None

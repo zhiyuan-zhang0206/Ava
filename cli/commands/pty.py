@@ -6,7 +6,7 @@ import sys
 from typing import TextIO
 
 from shared.platform import LockTimeoutError
-from shared.pty_sessions import allocation_freeze
+from shared.sessions.pty import allocation_freeze
 
 
 def _print_freeze(

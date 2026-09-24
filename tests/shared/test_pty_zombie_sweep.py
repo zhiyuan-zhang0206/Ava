@@ -7,9 +7,9 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-from shared.pty_sessions import cli
-from shared.pty_sessions._paths import record_path, socket_path, transcript_path
 from shared.session_record import SessionRecord
+from shared.sessions.pty import cli
+from shared.sessions.pty._paths import record_path, socket_path, transcript_path
 
 
 def _mock_process(create_time: float) -> Mock:
@@ -68,8 +68,8 @@ def test_sweep_defers_while_record_lock_is_held(
     another holder owns the pty record lock — it skips (the dead record
     survives one scan), and the next scan sweeps it once the lock is free."""
     from shared.platform import file_lock
-    from shared.pty_sessions import records as records_module
-    from shared.pty_sessions._paths import records_lock_path
+    from shared.sessions.pty import records as records_module
+    from shared.sessions.pty._paths import records_lock_path
 
     name = "ava-test-locked-sweep"
     record = SessionRecord(
@@ -115,8 +115,8 @@ def test_sweep_cannot_unlink_a_record_written_under_the_lock(  # noqa: PLR0915 -
     import threading
 
     from shared.platform import file_lock
-    from shared.pty_sessions import records as records_module
-    from shared.pty_sessions._paths import records_lock_path, write_record
+    from shared.sessions.pty import records as records_module
+    from shared.sessions.pty._paths import records_lock_path, write_record
 
     name = "ava-test-sweep-race"
     old_pid, fresh_pid = 1001, 1002
@@ -218,8 +218,8 @@ def test_bring_up_defers_while_record_lock_is_held(
     it refuses with the failure exit code and never runs any bind/write work
     outside the lock."""
     from shared.platform import file_lock
-    from shared.pty_sessions import launch as launch_module
-    from shared.pty_sessions._paths import records_lock_path
+    from shared.sessions.pty import launch as launch_module
+    from shared.sessions.pty._paths import records_lock_path
 
     entered: list[object] = []
 

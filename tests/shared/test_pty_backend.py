@@ -1,5 +1,5 @@
 """Tests for ``shared.session_backend.PtySessionBackend`` — the PTY backend
-that talks to the per-session-host CLI (``shared.pty_sessions.cli``).
+that talks to the per-session-host CLI (``shared.sessions.pty.cli``).
 
 Most tests drive the backend through a fake ``subprocess.run`` — the same
 monkeypatch shape ``test_session_backend.py`` uses for the shell backend. The
@@ -11,7 +11,7 @@ The enumeration ops (``list_sessions`` / ``session_started_ats`` /
 ``session_started_at``) spawn nothing at all: they read the session records
 in-process (task #1200 — the CLI subprocess cost dominated the status
 snapshot on slow hosts), so their tests fake the record scan
-(``shared.pty_sessions.cli.live_sessions``) and assert the mapping.
+(``shared.sessions.pty.cli.live_sessions``) and assert the mapping.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from shared.session_backend import (
 )
 
 # The exact CLI invocation shape the backend must produce (W1a contract):
-CLI_PREFIX = [sys.executable, "-m", "shared.pty_sessions.cli"]
+CLI_PREFIX = [sys.executable, "-m", "shared.sessions.pty.cli"]
 
 
 class _FakeCompletedProcess:
@@ -311,7 +311,7 @@ def test_list_sessions(monkeypatch: pytest.MonkeyPatch):
         seen.append(prefix)
         return _fake_records(["ava-agent-1-shell-2", "ava-agent-1-shell-1", "other"])
 
-    monkeypatch.setattr("shared.pty_sessions.cli.live_sessions", _fake_live)
+    monkeypatch.setattr("shared.sessions.pty.cli.live_sessions", _fake_live)
     assert _backend().list_sessions() == [
         "ava-agent-1-shell-1",
         "ava-agent-1-shell-2",
@@ -328,7 +328,7 @@ def test_list_sessions_with_prefix(monkeypatch: pytest.MonkeyPatch):
         seen.append(prefix)
         return _fake_records(["ava-agent-1-shell-1"])
 
-    monkeypatch.setattr("shared.pty_sessions.cli.live_sessions", _fake_live)
+    monkeypatch.setattr("shared.sessions.pty.cli.live_sessions", _fake_live)
     assert _backend().list_sessions(prefix="ava-agent-1") == ["ava-agent-1-shell-1"]
     assert seen == ["ava-agent-1"]
 
@@ -345,7 +345,7 @@ def test_started_ats_maps_absent_sessions_to_none(monkeypatch: pytest.MonkeyPatc
         calls += 1
         return _fake_records(["ava-agent-1-shell-1"])
 
-    monkeypatch.setattr("shared.pty_sessions.cli.live_sessions", _fake_live)
+    monkeypatch.setattr("shared.sessions.pty.cli.live_sessions", _fake_live)
     epochs = _backend().session_started_ats(["ava-agent-1-shell-1", "ava-agent-1-shell-9"])
     assert epochs["ava-agent-1-shell-1"] == 100.0
     assert epochs["ava-agent-1-shell-9"] is None
@@ -367,7 +367,7 @@ def test_started_ats_falls_back_when_record_scan_fails(monkeypatch: pytest.Monke
         single_reads.append(name)
         return 100.0 if name == names[0] else None
 
-    monkeypatch.setattr("shared.pty_sessions.cli.live_sessions", _failed_scan)
+    monkeypatch.setattr("shared.sessions.pty.cli.live_sessions", _failed_scan)
     monkeypatch.setattr(backend, "session_started_at", _single_read)
 
     assert backend.session_started_ats(names) == {names[0]: 100.0, names[1]: None}

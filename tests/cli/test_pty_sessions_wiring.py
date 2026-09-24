@@ -15,7 +15,7 @@ from cli.commands._converge import _RENAMED_AWAY_SERVICES
 
 def test_roster_carries_no_pty_service() -> None:
     """No ServiceSpec hosts agent shells: sessions live in per-session
-    detached hosts (shared/pty_sessions), so the roster — the single source
+    detached hosts (shared/sessions/pty), so the roster — the single source
     every stop/start/watchdog scope derives from — must not name one. This is
     the structural fix for rollouts killing every shell (2026-08-12): a
     service that does not exist cannot be stopped, respawned, or force-killed

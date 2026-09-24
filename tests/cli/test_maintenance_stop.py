@@ -353,15 +353,15 @@ def test_persistent_terminals_refuse_before_signalling(
 def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
     home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.pty_sessions import cli as pty
-    from shared.pty_sessions._paths import host_identity
+    from shared.sessions.pty import cli as pty
+    from shared.sessions.pty._paths import host_identity
 
     name = "ava-agent-123-shell-1"
     monkeypatch.setattr(stop, "get_shell_backend", PtySessionBackend)
     envfile = pty.write_env_file({})
     try:
         created = subprocess.run(  # noqa: S603 — test-owned home and repository module
-            [sys.executable, "-m", "shared.pty_sessions.cli", name, "new", str(home), str(envfile)],
+            [sys.executable, "-m", "shared.sessions.pty.cli", name, "new", str(home), str(envfile)],
             env={**os.environ, "AVA_HOME": str(home), "AVA_HOME_OVERRIDE": "1", "HOME": str(home)},
             capture_output=True,
             text=True,
@@ -651,7 +651,7 @@ def test_real_postgres_fast_stop_disconnects_open_client(
 
 
 def test_live_pty_host_with_dead_shell_blocks_stop(home: Path, launch: Launcher) -> None:
-    from shared.pty_sessions._paths import write_record
+    from shared.sessions.pty._paths import write_record
 
     proc = launch("temporary-host", _IGNORE)
     (home / "run/sessions/temporary-host.json").unlink()

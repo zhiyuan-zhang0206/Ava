@@ -1,7 +1,7 @@
 """Shared fixtures for PTY-backed SDK tests (`ava.shell`, `ava.watcher`).
 
 Sessions are pty sessions, each carried by its own detached host process
-(`shared.pty_sessions`) under the tmp test home; the `_pty_sessions_env`
+(`shared.sessions.pty`) under the tmp test home; the `_pty_sessions_env`
 fixture pins the env hosts need and sweeps leaked sessions at session end.
 Parallel xdist workers each use a reserved high-range fake agent-id
 (`_TEST_AGENT_BASE`) for isolation; tests clean up only their own
@@ -95,7 +95,7 @@ def _pty_sessions_env() -> Iterator[None]:
     """End-of-session sweep for pty-backed tests.
 
     There is no supervisor daemon to bootstrap (each `new` spawns the
-    session's own detached host, shared/pty_sessions; the hosts inherit the
+    session's own detached host, shared/sessions/pty; the hosts inherit the
     root conftest's `AVA_CONFIG_FETCH=skip` pin from this process's env). The
     one job left is teardown: kill every session still alive under the tmp
     test home — hosts are detached to init, so a leaked one would survive
@@ -103,7 +103,7 @@ def _pty_sessions_env() -> Iterator[None]:
     class, now per session instead of per supervisor).
     """
     yield
-    from shared.pty_sessions import cli as pty_cli
+    from shared.sessions.pty import cli as pty_cli
 
     for name in list(pty_cli.live_sessions()):
         try:
