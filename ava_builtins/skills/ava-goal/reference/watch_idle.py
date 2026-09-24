@@ -78,14 +78,14 @@ def _notify(target_id: int) -> None:
     raise SystemExit(2)
 
 
-def watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:
+def _watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:
     """Fallback: poll the agents table until the target idles, then remind once.
 
     Used when the event stream is unavailable, when the target may ALREADY be
     idle before the watcher starts, or when a pubsub read died mid-watch. A
     transient DB error only skips one round; the 6h `ava.watcher.launch`
     timeout remains the outer safety bound, so a broken DB also wakes the
-    supervisor eventually (via the watcher's own exit).
+    launching agent eventually (via the watcher's own exit).
     """
     import psycopg
 
@@ -111,15 +111,17 @@ def watch(target_id: int) -> None:
     """Block until `target_id` next goes idle, remind once, then return.
 
     One-shot by design: after it reminds you, this watcher exits. If the target
-    is not done yet, launch a fresh goal-watch watcher to wait for its next
-    idle. Launch the watcher BEFORE the target starts working -- an idle
-    transition that happens before the subscription is established is missed
-    (the poll fallback below covers the already-idle case).
+    is not done yet, launch a fresh watcher to wait for its next idle. Launch
+    the watcher BEFORE the target starts working -- an idle transition that
+    happens before the subscription is established is missed (the poll fallback
+    covers the already-idle case).
     """
     client = redis.Redis.from_url(
         settings.data_plane.redis_url,
         decode_responses=True,
-        socket_timeout=None,  # redis-py 8 defaults 5s -- kills long pubsub reads
+        # redis-py 8 defaults to 5s, which kills a quiet pubsub.listen() read.
+        # Observed 2026-08-13: the watcher died mid-watch before target idle.
+        socket_timeout=None,
     )
     pubsub = client.pubsub()
     pubsub.subscribe(settings.data_plane.events_channel)
@@ -143,8 +145,8 @@ def watch(target_id: int) -> None:
     ):
         # The stream died mid-watch (redis restart, socket timeout, ...). The
         # target may idle -- or already have -- while we are blind: poll the
-        # table so the goal loop does not stall silently.
-        watch_via_poll(target_id)
+        # table so the launching agent does not stall silently.
+        _watch_via_poll(target_id)
 
 
 if __name__ == "__main__":
