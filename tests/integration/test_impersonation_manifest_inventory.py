@@ -21,7 +21,7 @@ _INVENTORY: dict[str, str] = {
     "agent/_runloop.py:354": "ineligible",
     "agent/corpse_reap.py:127": "ineligible",
     "agent/corpse_reap.py:216": "ineligible",
-    "agent/hooks/compact.py:544": "ineligible",
+    "agent/hooks/compact.py:587": "ineligible",
     "agent/hosted_ownership.py:536": "ineligible",
     "agent/hosted_ownership.py:561": "ineligible",
     "agent/hosted_ownership.py:614": "ineligible",
