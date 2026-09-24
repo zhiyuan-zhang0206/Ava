@@ -1,7 +1,6 @@
 """Lease expiration without deleting permanent history on the existing gateway TTL reaper."""
 
 import shlex
-import sys
 from typing import Literal
 
 from psycopg.types.json import Jsonb
@@ -11,6 +10,7 @@ from shared._impersonation_store import expire, lock_lease
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
+from shared.machines import machine_home
 
 # One reaper pass handles at most this many leases per list — expired-lease
 # reconciliation and the approaching-expiry reminder scan each take one page.
@@ -129,7 +129,8 @@ def remind_expiring_impersonations(
     reminded_agents: list[int] = []
     with write_transaction(pool) as conn:
         candidates = conn.execute(
-            "SELECT l.id, l.agent_id, l.expires_at, l.session_id FROM agent_impersonations l "
+            "SELECT l.id, l.agent_id, l.expires_at, l.session_id, l.machine "
+            "FROM agent_impersonations l "
             "WHERE l.status='active' "
             "AND l.expires_at<=clock_timestamp()+make_interval(secs=>%s) "
             "AND NOT EXISTS (SELECT 1 FROM inbound_messages r "
@@ -139,8 +140,7 @@ def remind_expiring_impersonations(
             "ORDER BY l.agent_id LIMIT %s",
             (window_seconds, _PASS_BATCH),
         ).fetchall()
-        prefix = [sys.executable, "-m", "cli", "impersonate"]
-        for lease_id, agent_id, expires_at, session_id in candidates:
+        for lease_id, agent_id, expires_at, session_id, machine in candidates:
             lease = lock_lease(conn, str(lease_id))
             if lease["status"] != "active" or lease["expires_at"] != expires_at:
                 continue
@@ -153,12 +153,20 @@ def remind_expiring_impersonations(
                 is not None
             ):
                 continue
+            home = machine_home(conn, machine)
+            python = f"{home}/source/.venv/bin/python" if home else "~/.ava/source/.venv/bin/python"
+            prefix = [python, "-m", "cli", "impersonate"]
             renew = shlex.join(
                 [*prefix, "renew", str(session_id), "--agent", str(agent_id), "--ttl", "3600"]
             )
             release = shlex.join(
                 [*prefix, "release", str(session_id), "--agent", str(agent_id), "--summary", "..."]
             )
+            if home is None:
+                # shlex quotes '~'; leave this fixed prefix unquoted for shell expansion.
+                quoted_fallback = shlex.quote(python)
+                renew = renew.replace(quoted_fallback, python, 1)
+                release = release.replace(quoted_fallback, python, 1)
             content = (
                 f"Ava impersonation session {session_id} for agent {agent_id} expires at "
                 f"{expires_at:%Y-%m-%d %H:%M UTC}. Renew it to keep working, or "

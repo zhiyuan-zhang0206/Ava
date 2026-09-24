@@ -62,6 +62,7 @@ __all__ = [
     "list_stopped_agent_runners",
     "lookup",
     "lookup_role",
+    "machine_home",
     "pause",
     "register_self",
     "resume",
@@ -525,6 +526,16 @@ def lookup_role(name: str) -> list[str]:
             f"misspelled); see ava.agents.list_machines() for the valid names."
         )
     return row[0]
+
+
+def machine_home(conn: psycopg.Connection, name: str) -> str | None:
+    """Return the preferred registered unit home for a machine, if any."""
+    row = conn.execute(
+        "SELECT home FROM machine_units WHERE machine_name=%s "
+        "ORDER BY (stopped_at IS NULL) DESC, up_since_at DESC, home LIMIT 1",
+        (name,),
+    ).fetchone()
+    return row[0] if row is not None else None
 
 
 def list_all() -> list[tuple[str, str | None]]:
