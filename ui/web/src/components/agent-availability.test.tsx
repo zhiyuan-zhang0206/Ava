@@ -105,3 +105,13 @@ it("hides the strip for a fresh unknown observation", () => {
   expect(screen.queryByText("Start availability unknown")).toBeNull();
   expect(screen.queryByRole("link", { name: "Machine diagnostics" })).toBeNull();
 });
+
+it("shows a just-fetched observation whose server stamp leads the client clock", async () => {
+  getAgent.mockResolvedValue({ ...agent, availability: {
+    reason: "admitted",
+    observed_at: new Date(Date.now() + 2_000).toISOString(),
+  } });
+  show();
+  expect(await screen.findByText("Host admission observed; first turn completion is not confirmed"))
+    .toBeTruthy();
+});

@@ -11,6 +11,14 @@ import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import { FLEX } from "@/lib/layout";
 import type { AgentRow } from "@/lib/types";
 
+/** `observed_at` is stamped server-side when the read is evaluated — always a
+ *  beat after the client clock snapshot the freshness gate compares against —
+ *  so the gate tolerates this much future skew. Without it a just-fetched
+ *  observation reads as future-dated and the strip hides until the next tick.
+ *  Measured lead ≈0.25s; 5s leaves margin for a slow availability probe. A
+ *  protocol tolerance, not a user-facing window. */
+const FUTURE_SKEW_MS = 5_000;
+
 /** Selected-agent observation; the roster's SSE refresh does not track host probes. */
 export function AgentAvailability({ agent }: { agent: AgentRow }) {
   const t = useTranslations("agentAvailability");
@@ -31,7 +39,7 @@ export function AgentAvailability({ agent }: { agent: AgentRow }) {
   const availability = current.availability;
   const observedAt = Date.parse(availability?.observed_at ?? "");
   const fresh = Number.isFinite(observedAt)
-    && observedAt <= now && now - observedAt <= 120_000;
+    && observedAt <= now + FUTURE_SKEW_MS && now - observedAt <= 120_000;
   const launchFailed = availability?.reason.startsWith("launch_") ?? false;
   const reason = fresh || launchFailed ? availability?.reason ?? "unknown" : "unknown";
   if (reason === "unknown") return null;
