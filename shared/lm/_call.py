@@ -4,9 +4,11 @@
 used to carry their own copy of "build the chat model, invoke it on a
 HumanMessage, flatten the response, reject an empty answer with the right
 error type". This module is that tail in one place: `extract_text` (pure
-flattening), `invoke_text` (invoke + flatten + empty-check, wrapped in the
-caller's error type), and `answer_text` (build at a reasoning effort, then
-invoke) for the prompt-vs-material shape both entry points use.
+flattening), `invoke_response` (invoke with the shared retry discipline,
+returning the raw response — the hierarchy generation path needs it
+unflattened, task #4674), `invoke_text` (invoke + flatten + empty-check,
+wrapped in the caller's error type), and `answer_text` (build at a reasoning
+effort, then invoke) for the prompt-vs-material shape both entry points use.
 """
 
 from __future__ import annotations
@@ -56,6 +58,105 @@ def extract_text(response: Any) -> str:
     return str(content)
 
 
+def invoke_response(
+    runnable: Any,
+    messages: list[Any],
+    *,
+    desc: str,
+    error_type: type[Exception],
+    retry_attempts: int = 0,
+    retry_delay_seconds: float = 2.0,
+    retry_max_delay_seconds: float = 30.0,
+    provider: str | None = None,
+    model: str | None = None,
+    usage_source: str | None = None,
+) -> Any:
+    """Invoke `runnable` on an already-built message list; return the response.
+
+    The middle of `invoke_text`, split out for callers that need the raw
+    response rather than flattened text — the hierarchy generation path sends
+    an agent-shaped request through a tool-bound runnable, where a tool-call
+    response is a legal intermediate state (task #4674), not an empty answer.
+
+    `retry_attempts` bounds retries of TRANSIENT/UNKNOWN provider failures
+    (rate limit, 5xx, connection/timeout — the same classes the agent's LLM
+    node retries via its LangGraph RetryPolicy). PERMANENT failures (400/401/
+    402/403/404/422) are deterministic and never retried. A timeout on the
+    wall-clock budget is the caller's concern (ava.understand / ava.web.fetch
+    bound the whole call at the batch layer); this function retries the
+    provider error classes that a retry can actually flip.
+
+    Retry spacing is exponential backoff with jitter: the base
+    `retry_delay_seconds` doubles per attempt (`2 → 4 → 8 → …`) capped at
+    `retry_max_delay_seconds`, plus a per-process deterministic phase and
+    random ±1s (`shared/resilience.jittered`) so neither parallel
+    workers nor separate fleet processes re-hit the provider in lockstep
+    (thundering herd). When the provider's error carries a `Retry-After`
+    header (or `retry-after-ms`) asking for longer than the backoff would
+    wait, the header wins (capped at 120s) — mirroring what the provider
+    SDKs do internally, but at this layer so a header longer than the SDK's
+    60s cap is still respected. The provider SDKs already retry 429/5xx up
+    to twice before this loop sees an exception, so this is the second-order
+    retry.
+
+    `provider` is the `shared/lm/factory.py` provider key (`deepseek` /
+    `claude` / …) for the outbound concurrency limiter
+    (`shared/lm/_concurrency.py`, no cap unless configured); `None` skips
+    the limiter. A successful invoke logs its
+    `llm_usage` row (with `usage_source` as the discriminator) before
+    returning; a failed one raises `error_type` with the reason. Empty-response
+    rejection stays with the callers — they differ on what empty means.
+    """
+    from shared.lm.errors import ErrorClass, emit_provider_error
+
+    retry_attempts = max(0, retry_attempts)  # a negative budget must not empty the loop
+    retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
+    response: Any | None = None
+    latency_ms: float | None = None
+    for attempt in range(retry_attempts + 1):
+        try:
+            with _limiter_sync(provider):
+                started = time.monotonic()
+                response = runnable.invoke(messages)
+            latency_ms = (time.monotonic() - started) * 1_000
+            break
+        except Exception as e:
+            resolved_model = model or getattr(runnable, "model_name", None)
+            event_model = resolved_model if isinstance(resolved_model, str) else "unknown"
+            classification = emit_provider_error(e, model=event_model, fatal=False)
+            retryable = classification.error_class in (ErrorClass.TRANSIENT, ErrorClass.UNKNOWN)
+            if attempt < retry_attempts and retryable:
+                delay = min(retry_delay_seconds * (2**attempt), retry_max_delay_seconds)
+                retry_after = extract_retry_after(e)
+                if retry_after is not None:
+                    delay = max(delay, retry_after)
+                # Per-process deterministic phase + random ±1s (R2-D
+                # jittered) — de-phases retry waves across the fleet.
+                time.sleep(jittered(delay))
+                continue
+            raise error_type(
+                f"Model call ({desc}) failed after {attempt + 1} attempt(s): {type(e).__name__}: {e}"
+            ) from e
+
+    # Unreachable through the loop: every failed attempt raises inside it. The
+    # explicit check is for the type checker (response is only assigned on the
+    # success path).
+    if response is None:
+        raise error_type(f"Model call ({desc}) failed: no attempt produced a response")
+    resolved_model = model or getattr(runnable, "model_name", None)
+    if isinstance(resolved_model, str) and resolved_model:
+        from shared.lm.usage import log_usage_from_message
+
+        log_usage_from_message(
+            response,
+            model=resolved_model,
+            usage_kind="chat",
+            latency_ms=latency_ms,
+            source=usage_source,
+        )
+    return response
+
+
 def invoke_text(
     llm: Any,
     content: list[Any],
@@ -74,83 +175,24 @@ def invoke_text(
     `desc` labels failure messages (e.g. `deepseek-flash, text`, or
     `deepseek-flash for <url>` on the fetch path). A failed invoke or an
     empty (safety-blocked) response raises `error_type` with the reason.
-
-    `retry_attempts` bounds retries of TRANSIENT/UNKNOWN provider failures
-    (rate limit, 5xx, connection/timeout — the same classes the agent's LLM
-    node retries via its LangGraph RetryPolicy). PERMANENT failures (400/401/
-    402/403/404/422) are deterministic and never retried. A timeout on the
-    wall-clock budget is the caller's concern (ava.understand / ava.web.fetch
-    bound the whole call at the batch layer); this function retries the
-    provider error classes that a retry can actually flip.
-
-    Retry spacing is exponential backoff with jitter: the base
-    `retry_delay_seconds` doubles per attempt (`2 → 4 → 8 → …`) capped at
-    `retry_max_delay_seconds`, plus a per-process deterministic phase and
-    random ±1s (R2-D `shared/resilience.jittered`) so neither parallel
-    workers nor separate fleet processes re-hit the provider in lockstep
-    (thundering herd). When
-    the provider's error carries a `Retry-After` header (or `retry-after-ms`)
-    asking for longer than the backoff would wait, the header wins (capped at
-    120s) — mirroring what the provider SDKs do internally, but at this layer
-    so a header longer than the SDK's 60s cap is still respected. The
-    provider SDKs already retry 429/5xx up to twice before this loop sees an
-    exception, so this is the second-order retry.
-
-    `provider` is the `shared/lm/factory.py` provider key (`deepseek` /
-    `claude` / …) for the outbound concurrency limiter
-    (`shared/lm/_concurrency.py`, no cap unless configured); `None` skips
-    the limiter entirely. `usage_source`, when supplied, is persisted with
-    the completed `llm_usage` event as an auxiliary-path discriminator.
+    Retry classes/spacing, the outbound limiter, and the `llm_usage` row are
+    `invoke_response`'s contract — this wrapper only builds the single
+    HumanMessage and rejects an empty answer.
     """
     from langchain_core.messages import HumanMessage
 
-    from shared.lm.errors import ErrorClass, emit_provider_error
-
-    retry_attempts = max(0, retry_attempts)  # a negative budget must not empty the loop
-    retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
-    response: Any | None = None
-    latency_ms: float | None = None
-    for attempt in range(retry_attempts + 1):
-        try:
-            with _limiter_sync(provider):
-                started = time.monotonic()
-                response = llm.invoke([HumanMessage(content=content)])
-            latency_ms = (time.monotonic() - started) * 1_000
-            break
-        except Exception as e:
-            resolved_model = model or getattr(llm, "model_name", None)
-            event_model = resolved_model if isinstance(resolved_model, str) else "unknown"
-            classification = emit_provider_error(e, model=event_model, fatal=False)
-            retryable = classification.error_class in (ErrorClass.TRANSIENT, ErrorClass.UNKNOWN)
-            if attempt < retry_attempts and retryable:
-                delay = min(retry_delay_seconds * (2**attempt), retry_max_delay_seconds)
-                retry_after = extract_retry_after(e)
-                if retry_after is not None:
-                    delay = max(delay, retry_after)
-                # Per-process deterministic phase + random ±1s (R2-D
-                # jittered) — de-phases retry waves across the fleet.
-                time.sleep(jittered(delay))
-                continue
-            raise error_type(
-                f"Model call ({desc}) failed after {attempt + 1} attempt(s): {type(e).__name__}: {e}"
-            ) from e
-
-    # Unreachable: every failed attempt raises inside the loop. The explicit
-    # check is for the type checker (response is only assigned on the success
-    # path).
-    if response is None:
-        raise error_type(f"Model call ({desc}) failed: no attempt produced a response")
-    resolved_model = model or getattr(llm, "model_name", None)
-    if isinstance(resolved_model, str) and resolved_model:
-        from shared.lm.usage import log_usage_from_message
-
-        log_usage_from_message(
-            response,
-            model=resolved_model,
-            usage_kind="chat",
-            latency_ms=latency_ms,
-            source=usage_source,
-        )
+    response = invoke_response(
+        llm,
+        [HumanMessage(content=content)],
+        desc=desc,
+        error_type=error_type,
+        retry_attempts=retry_attempts,
+        retry_delay_seconds=retry_delay_seconds,
+        retry_max_delay_seconds=retry_max_delay_seconds,
+        provider=provider,
+        model=model,
+        usage_source=usage_source,
+    )
     text = extract_text(response)
     if not text:
         raise error_type(
