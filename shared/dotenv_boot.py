@@ -384,6 +384,47 @@ def _is_launcher_redis_url(value: str | None) -> bool:
         return False
 
 
+def watcher_runner_env() -> dict[str, str]:
+    """Return the launcher's validated data-plane URLs for a watcher session.
+
+    The PTY host inherits the launcher's ambient env, but a watcher must not
+    rely on that inheritance for its runner credentials. Only an anchored
+    agent launch tree may explicitly forward them. A profile-less process on
+    the secured default-home gateway can carry the owner URL after config
+    import; refuse that launch before it creates a doomed watcher session.
+    """
+    db_url = os.environ.get("AVA_DB_URL")
+    redis_url = os.environ.get("AVA_REDIS_URL")
+    if (
+        db_url
+        and redis_url
+        and _is_launcher_runner_projection(db_url)
+        and _is_launcher_redis_url(redis_url)
+    ):
+        try:
+            db_host = urlsplit(db_url).hostname
+            redis_user = urlsplit(redis_url).username
+        except ValueError:
+            db_host = None
+            redis_user = None
+        if db_host and (
+            not os.environ.get("AVA_CLUSTER_SECRET") or redis_user not in (None, "default")
+        ):
+            return {"AVA_DB_URL": db_url, "AVA_REDIS_URL": redis_url}
+
+    if _HOME.resolve() == (Path.home() / ".ava").resolve() and os.environ.get("AVA_CLUSTER_SECRET"):
+        from shared.bootstrap import config_source_is_local
+
+        if config_source_is_local():
+            raise RuntimeError(
+                "watcher launch needs an agent-profile process with an ava_runner "
+                "AVA_DB_URL and runner AVA_REDIS_URL; this secured default home "
+                "cannot supply a validated runner projection. Launch the "
+                "watcher from an agent-profile process."
+            )
+    return {}
+
+
 def _enforce_cluster_env_authority() -> None:
     """Force this unit's derived env keys from its own `.env`, overriding a
     polluted parent environment.

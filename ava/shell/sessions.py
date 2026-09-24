@@ -219,6 +219,7 @@ def _create_session(
     cwd: str | None = None,
     ttl: float,
     system: bool = False,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     # Allocate the next session id and create the shell session. `name` becomes
     # a `-<name>` suffix on the session identifier (None = unnamed). `cwd` sets
@@ -246,15 +247,12 @@ def _create_session(
     ttl = _validate_ttl(ttl, system=system)
     session_id = _next_session_index_from_db()
     full = f"{_shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
-    # Forward this agent process's AVA_* env onto the session. The detached
-    # per-session host starts outside the agent process tree, so the explicit
-    # handoff keeps its shell or watcher bound to the same cluster as the agent.
-    # The agent's own env is authoritative because the gateway forwarded the
-    # correct cluster into it at spawn.
+    # Pass the session allowlist to the backend. On POSIX the detached PTY host
+    # also inherits the launcher's ambient env before overlaying this dict;
+    # watcher-only runner credentials arrive through `env_overrides`, while
+    # generic shell sessions keep the ordinary projection.
     #
-    # It rides a 0600 envfile the backend writes, NOT argv: the env carries the
-    # agent's provider keys and data-plane URLs, and argv is world-readable
-    # through `ps` (issue #974).
+    # The override rides the backend's 0600 envfile, not argv (issue #974).
     backend = get_shell_backend()
     if cwd is None:
         agent_id = ava._boot.agent_id()
@@ -268,11 +266,14 @@ def _create_session(
     # numeric handle must remain stale instead of naming a later session.
     session_cwd = Path(cwd)
     activate_venv = _cwd_is_inside_checkout(session_cwd.resolve(), repo_root().resolve())
+    session_env = forward_env_dict(activate_venv=activate_venv)
+    if env_overrides:
+        session_env.update(env_overrides)
     ok = backend.new_session(
         full,
         "",
         session_cwd,
-        env=forward_env_dict(activate_venv=activate_venv),
+        env=session_env,
     )
     if not ok:
         raise RuntimeError(f"failed to create session {full!r}")

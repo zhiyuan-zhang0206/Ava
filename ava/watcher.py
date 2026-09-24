@@ -15,6 +15,7 @@ import ava._watcher_reconcile as _reconcile
 from ava._sdk_validation import coerce_str
 from ava.shell import _background
 from ava.shell import sessions as _sessions
+from shared.dotenv_boot import watcher_runner_env
 from shared.watcher import (
     DEFAULT_STANDING_CRON_MAX_SECONDS,
     TEMPLATE_VERSION,
@@ -441,7 +442,7 @@ def _spawn(
             f"({deadline!r}) — refusing to spawn its session"
         )
     session_id, session_name = _sessions._create_session(
-        name, ttl=(deadline - now).total_seconds(), system=True
+        name, ttl=(deadline - now).total_seconds(), system=True, env_overrides=watcher_runner_env()
     )
     # The registry is desired state, so it must remember the generation of
     # the exact PTY record it can later rebuild. Reading the backend record
