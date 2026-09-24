@@ -119,8 +119,7 @@ def _telemetry(
 
 _EVENTS_RUNTIME: dict[str, EventSpec] = {
     # ── audit (category=audit, 29) — registry.md §2, append-only operations ──
-    # Lineage includes spawn/fork/resurrect and agent_spawned/agent_resurrected
-    # telemetry mirrors; retaining only one spelling loses some rows.
+    # Keep spawn/fork/resurrect and their telemetry mirrors for complete lineage.
     "spawn": _audit("spawn", "new agent born", payload=Spawn, retention_class="lineage"),
     "fork": _audit("fork", "agent forked from another", retention_class="lineage"),
     "send_message": _audit("send_message", "message sent to an agent"),
@@ -236,12 +235,10 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         family=LLM_ERROR_FAMILY,
         tier="anomaly",
     ),
-    # Deliberately NOT in LLM_ERROR_FAMILY (task #3884, caliber reaffirmed
-    # 2026-09-18): every pair co-emits 1:1 with the stream_stalled_retry that
-    # precedes it, and the family's consumers sum the family — including the
-    # pair would double-count that call and silently raise the ops error
-    # baseline. Display surface: the "Provider stalls" panel and the
-    # ava-ops-llm-stall-pair rule (task #3948); test_event_contract pins the family at 4.
+    # Excluded from LLM_ERROR_FAMILY (task #3884, reaffirmed 2026-09-18):
+    # each pair co-emits 1:1 with stream_stalled_retry, so family sums would
+    # double-count the call. The Provider stalls panel/rule (task #3948)
+    # displays the pair; test_event_contract pins the family at 4.
     "stream_stall_pair_terminated": _telemetry(
         "stream_stall_pair_terminated",
         "two adjacent stream stalls (stream segment + non-streaming fallback) terminated "
@@ -325,8 +322,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         payload=ExecSubprocessKilled,
         tier="anomaly",
     ),
-    # hosted runner (future/infra/agent-runner-as-server.md) — the dispatcher
-    # that turns an inbound wake into a turn task, and the turn tasks it runs
+    # Hosted runner dispatcher and turns (future/infra/agent-runner-as-server.md).
     "host_stale_running_settled": _telemetry(
         "host_stale_running_settled",
         "hosted boot settle restored rows a previous host instance left running "
@@ -336,6 +332,16 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "host_dispatcher_subscribed": _telemetry(
         "host_dispatcher_subscribed",
         "hosted dispatcher subscribed to the inbound wake pattern",
+        tier="noise",
+    ),
+    "host_recovery_wake_started": _telemetry(
+        "host_recovery_wake_started",
+        "hosted recovery wake started a turn and occupied an in-flight pacing slot",
+        tier="noise",
+    ),
+    "host_recovery_wake_released": _telemetry(
+        "host_recovery_wake_released",
+        "hosted recovery turn completed and released its in-flight pacing slot",
         tier="noise",
     ),
     "host_dispatcher_reconnect": _telemetry(
@@ -377,8 +383,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "state (fingerprint)",
         tier="anomaly",
     ),
-    # ── write-side model settlement (task #4306): the overlay write paths'
-    # counterpart of the wake-time host_config_normalized above ──
+    # Write-side counterpart to wake-time host_config_normalized (task #4306).
     "spawn_config_normalized": _telemetry(
         "spawn_config_normalized",
         "a spawn request's config_overlay carried a withdrawn llm_model — the "
@@ -459,8 +464,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "checkpoint",
         tier="anomaly",
     ),
-    # corpse reaper (task #2609) — crash-dead hosted rows get a firsthand
-    # death marker and are terminated by the host's own beat reaper
+    # Corpse reaper (task #2609): mark crashed hosted rows, then terminate them.
     "host_turn_corpse_marked": _telemetry(
         "host_turn_corpse_marked",
         "a hosted turn crashed and the row was stamped with the corpse marker "
@@ -533,8 +537,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "the checkpoint",
         tier="anomaly",
     ),
-    # Settled-abort reconcile (task #3615): dispose claims at settlement
-    # rather than waiting for cold admission.
+    # Settled-abort reconcile (task #3615): dispose claims at settlement.
     "host_abort_reconcile_skipped": _telemetry(
         "host_abort_reconcile_skipped",
         "the settled hosted turn abort skipped the immediate inbound reconcile "
@@ -552,8 +555,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "retries the disposal of the claimed rows",
         tier="anomaly",
     ),
-    # Finished-turn reconcile (task #3999): dispose claims after the
-    # checkpoint flush with the same fail-closed gates as abort.
+    # Finished-turn reconcile (task #3999): dispose claims after checkpoint flush.
     "host_turn_reconcile_skipped": _telemetry(
         "host_turn_reconcile_skipped",
         "the finished hosted turn skipped the immediate inbound reconcile "
@@ -571,9 +573,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
         "retries the disposal of the claimed rows",
         tier="anomaly",
     ),
-    # impersonation core-component death auto-stop (task #3998) — the native
-    # supervisor found the executor or the bound relay gone and closed the
-    # lease instead of respawning.
+    # Impersonation auto-stop (task #3998): close the lease on executor/relay death.
     "impersonation_aborted": _telemetry(
         "impersonation_aborted",
         "the native impersonation supervisor detected a dead core component "
