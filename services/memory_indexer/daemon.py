@@ -42,7 +42,6 @@ files, and a pull failure is logged at ERROR and retried next cycle.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import queue
@@ -53,7 +52,6 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import NoReturn
 
 import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
@@ -81,7 +79,8 @@ from services.memory_indexer.embeddings.base import EmbeddingAPIError, Embedding
 from services.memory_indexer.embeddings.factory import get_provider
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon_shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
 from shared.paths import gateway_memory_dir
 from shared.platform import CREATE_NO_WINDOW
@@ -681,34 +680,6 @@ async def run() -> None:
         _log.info("[indexer] daemon stopped")
 
 
-def _hard_exit(code: int) -> NoReturn:
-    """End the process now, skipping interpreter teardown. Never returns.
-
-    Teardown is precisely what hangs: the reconcile pass and every batch embed
-    run on the default executor (``asyncio.to_thread``), and their runs are
-    routinely multi-minute (a full rebuild beats the liveness ceiling by
-    design). ``asyncio.Runner.close`` joins that executor behind CPython's
-    ``THREAD_JOIN_TIMEOUT`` cap (300 s) — the stop flow's entire budget
-    (`PAUSE_TIMEOUT_SECONDS`) — and a pass still in flight at SIGTERM then
-    keeps interpreter teardown waiting with no bound at all (measured: a
-    ``shutdown(wait=False)`` worker is still joined at exit, task #3940).
-    Nothing after ``run()`` needs that pass: failed paths stay dirty on disk
-    and the next process's reconcile re-derives them. Logs are flushed first:
-    they are the one thing a skipped teardown would lose. Same shape as
-    services/agent_ops/daemon.py and services/pitr/uploader_daemon.py.
-    """
-    with contextlib.suppress(Exception):
-        from loguru import logger as _loguru
-
-        _loguru.remove()  # closes (and so flushes) every sink
-    with contextlib.suppress(Exception):
-        logging.shutdown()
-    for stream in (sys.stdout, sys.stderr):
-        with contextlib.suppress(Exception):
-            stream.flush()
-    os._exit(code)
-
-
 def main() -> None:
     """Entry point: log init + install the graceful-stop signal + run asyncio.
 
@@ -735,12 +706,7 @@ def main() -> None:
         # tasks explicitly: run()'s finally still stops the observer, closes
         # the backend and removes the pidfile. The executor is deliberately
         # NOT drained.
-        loop = runner.get_loop()
-        tasks = asyncio.all_tasks(loop)
-        for task in tasks:
-            task.cancel()
-        results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-        failures = [result for result in results if isinstance(result, Exception)]
+        failures = cancel_and_drain(runner)
         if failures:
             _log.error("[indexer] async shutdown failed: %r", failures)
             code = 1
