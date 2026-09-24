@@ -2042,6 +2042,17 @@ BEGIN
 END;
 $function$;
 
+CREATE FUNCTION public.lock_impersonation_event_participant(p_lease_id UUID, p_source_key TEXT)
+RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $function$
+DECLARE receipt_state TEXT;
+BEGIN
+    SELECT state INTO receipt_state FROM public.agent_impersonation_event_participants
+    WHERE lease_id=p_lease_id AND source_key=p_source_key FOR UPDATE;
+    RETURN receipt_state;
+END;
+$function$;
+
 CREATE FUNCTION public.freeze_impersonation_event_manifest(
     p_lease_id UUID, p_digest TEXT, p_count BIGINT, p_floor TIMESTAMPTZ
 ) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
@@ -2177,6 +2188,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.lock_impersonation_event_participant(UUID,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.freeze_impersonation_event_manifest(UUID,TEXT,BIGINT,TIMESTAMPTZ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) FROM PUBLIC;
@@ -2208,6 +2220,7 @@ BEGIN
         GRANT EXECUTE ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT,TEXT) TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.lock_impersonation_event_participant(UUID,TEXT) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.freeze_impersonation_event_manifest(UUID,TEXT,BIGINT,TIMESTAMPTZ) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) TO ava_runner;
@@ -2476,3 +2489,4 @@ INSERT INTO schema_migrations (name) VALUES ('20260923T175411_agent-creation-ava
 INSERT INTO schema_migrations (name) VALUES ('20260923T195300_agent-launch-failure');
 INSERT INTO schema_migrations (name) VALUES ('20260923T205208_impersonation-event-manifest');
 INSERT INTO schema_migrations (name) VALUES ('20260924T070003_hierarchy-worker-breaker');
+INSERT INTO schema_migrations (name) VALUES ('20260924T150840_impersonation-receipt-lock-door');

@@ -159,6 +159,14 @@ INSERT INTO agent_impersonations (
     NULL
 );
 SELECT close_impersonation_event_manifest_admission('00000000-0000-0000-0000-000000000006');
+DO $$
+BEGIN
+    IF lock_impersonation_event_participant(
+        '00000000-0000-0000-0000-000000000006', 'missing-smoke-receipt'
+    ) IS NOT NULL THEN
+        RAISE EXCEPTION 'missing manifest receipt unexpectedly acquired a lock';
+    END IF;
+END $$;
 SELECT admit_impersonation_event_certifier(
     '00000000-0000-0000-0000-000000000006',
     'manifest-smoke-certification-secret-000001'
