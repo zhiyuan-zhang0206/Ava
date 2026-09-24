@@ -7,7 +7,7 @@ The core dashboard panels (ids < 1000) are registered here as core metrics,
 each carrying its as-is placement pins (``panel_id`` / ``section`` /
 ``order`` — task #3697). The four statistics-coverage tiles are included with
 the original panels; the JSON stays the deployment source until slice S3 of
-task #3697 flips it to a ``shared.grafana_dashboard`` render.
+task #3697 flips it to a ``shared.metrics.grafana_dashboard`` render.
 
 Query dialect (Task #1280): event panels read the stream from Loki instead of
 the retired PG ``events`` table — the same read the alert rules (R1-R7) use.

@@ -48,7 +48,7 @@ from shared.metrics import (
     pctiles,
     third_of,
 )
-from shared.metrics_aggregate_loki import (
+from shared.metrics.metrics_aggregate_loki import (
     _MAX_WORKERS,
     _T_BODY,
     LokiBackend,

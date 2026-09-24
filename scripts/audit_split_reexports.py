@@ -20,8 +20,10 @@ shards). This script is the split's reference-completeness gate.
 For every origin module, collect every name the repo references in three
 forms — `from <module> import X`, `<module>.X` attribute access, and
 monkeypatch string targets `"<module>.X"` / `'<module>.X'` — then verify each
-name exists as an attribute of the imported module. Any missing name is a
-missed re-export and exits non-zero.
+name still resolves at the imported module: as an attribute, or as a
+submodule of it (`from <pkg> import <sub>` is Python's documented fallback,
+so a package whose `__init__` stays lean is not a missed re-export). Any
+unresolvable name is a missed re-export and exits non-zero.
 
 The origin module itself and `.venv`/`node_modules` trees are excluded.
 """
@@ -64,8 +66,23 @@ def _referenced_names(module: str) -> set[str]:
 
 
 def _missing(module: str, refs: set[str]) -> list[str]:
+    """Names a caller can still reach at `module`.
+
+    A reference resolves when it is an attribute of the module **or** a
+    submodule of it: `from <pkg> import <sub>` is Python's documented
+    fallback, so a package whose `__init__` stays lean (no eager submodule
+    re-exports) is not a missed re-export.
+    """
     loaded = importlib.import_module(module)
-    return sorted(name for name in refs if not hasattr(loaded, name))
+    missing: list[str] = []
+    for name in sorted(refs):
+        if hasattr(loaded, name):
+            continue
+        try:
+            importlib.import_module(f"{module}.{name}")
+        except ImportError:
+            missing.append(name)
+    return missing
 
 
 def main(argv: list[str]) -> int:

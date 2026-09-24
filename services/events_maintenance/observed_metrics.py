@@ -31,8 +31,8 @@ from shared.loki_index_labels import (
     retention_floor,
     split_index_label_window,
 )
+from shared.metrics.observed_metrics import MetricObservation, observe_row, write_observations
 from shared.observability import cluster_label
-from shared.observed_metrics import MetricObservation, observe_row, write_observations
 from shared.paths import logs_dir
 from shared.telemetry import event_id
 
