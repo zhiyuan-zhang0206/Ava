@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Heal Backoff — bounding the action a block retries, without quietening the block
-description: An acting watchdog controller keeps a persistent per-target heal record under $AVA_HOME so a self-heal that cannot land is retried on the order of ticks-per-hour instead of every round — while every round still reports its block, so fewer attempts never mean a quieter alarm.
+description: An acting watchdog controller keeps a persistent per-target heal record under $AVA_HOME so a self-heal that cannot land is retried on the order of ticks-per-hour instead of every round — while every round still counts toward the streak and the alarm still escalates, so fewer attempts never mean a quieter alarm.
 tags: []
 ---
 
 # Heal Backoff — bounding the action a block retries, without quietening the block
 
 ## What it is
-A **block** and a **heal** are separately rate-limited, and only one of them is limited at all. The parent's per-round alarm ([[services/watchdog/block-scope/block-scope.ava.okf.md]]) is deliberately *not* a rate limit: every blocked round logs, every one counts toward the streak. What is bounded is the *heal* — the action a blocking controller spawns to converge.
+A **block** and a **heal** are separately bounded, and only one of them *rate-limits an action*. The parent's alarm ([[services/watchdog/block-scope/block-scope.ava.okf.md]]) repeats on a cadence rather than every round — first round, then heartbeats at the alarm bound — but *every* round still counts toward the streak: the cadence is an alarm shape, not a limiter. What is bounded is the *heal* — the action a blocking controller spawns to converge.
 
 Each acting controller keeps one small JSON record under `$AVA_HOME`, written through the shared `ops/controllers/_heal_record.py` machinery: `pin_heal_attempt`, `code_heal_attempt`, `schema_heal_attempt`. `in_backoff(path, target, window)` answers "a heal toward *this* target was attempted within the window", and by the caller's contract the host is still off the target when it is asked — so a recent attempt means the previous one did not land, and retrying now would only thrash. Windows are all 1800s (`_PIN_HEAL_BACKOFF_S` / `_CODE_HEAL_BACKOFF_S` / `_SCHEMA_HEAL_BACKOFF_S`).
 
@@ -38,7 +38,7 @@ The DB-unreachable arm must not **clear** the record either. Only a converged ro
 - **Expiry** — the host is slowed to ticks-per-hour, never abandoned.
 
 ## It does not quieten the alarm
-A backed-off schema round still returns `BlockScope.DB_DEPENDENT`, so `ControllerManager` still logs the round as blocked and the streak still escalates to ERROR at `_BLOCKED_ROUND_ALARM_ROUNDS`. A backoff that returned `NONE` would have re-hidden the 3h07m gap it was written to prevent. Pinned by a test that drives the real manager over the real controller for the full escalation distance and asserts one heal attempt, ten blocked-round lines, and an ERROR on the last.
+A backed-off schema round still returns `BlockScope.DB_DEPENDENT`, so `ControllerManager` still logs the round as blocked and the streak still escalates to ERROR at `_BLOCKED_ROUND_ALARM_ROUNDS`. A backoff that returned `NONE` would have re-hidden the 3h07m gap it was written to prevent. Pinned by a test that drives the real manager over the real controller for the full escalation distance and asserts one heal attempt, the start line plus the bound-crossing heartbeat, and an ERROR on the last.
 
 ## Key dependencies
 - [[services/watchdog/block-scope/block-scope.ava.okf.md]] — the block this bounds the heal for
