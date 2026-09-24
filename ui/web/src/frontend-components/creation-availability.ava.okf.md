@@ -27,14 +27,16 @@ model's ladder, so an unavailable level is never sent. A preset's
 `llm_model` and `reasoning_effort` override the pickers when selected; a later
 explicit pick still wins per key in the backend merge.
 
-The selected conversation shows `AgentAvailability` above the pending strip.
-It reads the selected agent's detail every 15 seconds because host-probe
-changes need not emit agent lifecycle events. It treats an observation older
-than two minutes as `unknown` if detail refresh stops succeeding. Host-down,
-refused, and unknown labels link to Machine diagnostics. The labels distinguish
-host admission from first-turn completion. Guide, preset, schedule, and
-package-draft creation toasts say "created" and point to the conversation for
-progress; they do not claim that a turn started.
+The selected conversation shows `AgentAvailability` above the pending strip
+for fresh admission observations and host or admission anomalies, or for a
+launch failure. It reads the selected agent's detail every 15 seconds because
+host-probe changes need not emit agent lifecycle events. For non-launch reasons,
+an observation older than two minutes hides the strip if detail refresh stops
+succeeding. Reason `unknown`, whether fresh or missing evidence, also hides it.
+Fresh host-down and refused labels link to Machine diagnostics. The labels
+distinguish host admission from first-turn completion. Guide, preset,
+schedule, and package-draft creation toasts say "created" and point to the
+conversation for progress; they do not claim that a turn started.
 
 A launch-failure reason stays visible regardless of probe age. The roster row
 shows a launch-failed badge; the selected view shows the reason, failure time,

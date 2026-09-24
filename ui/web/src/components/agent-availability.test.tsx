@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { AgentAvailability } from "./agent-availability";
@@ -61,13 +61,15 @@ it("labels admission without claiming first-turn completion", async () => {
     .toBeTruthy();
 });
 
-it("drops a stale cached admission label when detail cannot refresh", () => {
+it("hides the strip when a cached admission observation expires", () => {
   getAgent.mockReturnValue(new Promise(() => undefined));
   show({ ...agent, availability: {
     reason: "admitted",
     observed_at: "2026-09-24T00:00:00Z",
   } });
-  expect(screen.getByText("Start availability unknown")).toBeTruthy();
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByText("Start availability unknown")).toBeNull();
+  expect(screen.queryByRole("link", { name: "Machine diagnostics" })).toBeNull();
 });
 
 it("keeps a durable launch failure visible and retries the existing id", async () => {
@@ -83,10 +85,23 @@ it("keeps a durable launch failure visible and retries the existing id", async (
   expect(retryAgentLaunch).toHaveBeenCalledWith(6571);
 });
 
-it("offers same-id retry for an unstarted row whose failure observation was unavailable", async () => {
+it("hides the strip and retry when an unstarted row has no failure observation", async () => {
   getAgent.mockResolvedValue({ ...agent, status: "idling", started_at: null, availability: {
     reason: "unknown", observed_at: now,
   } });
-  show({ ...agent, status: "idling", started_at: null });
-  expect(await screen.findByRole("button", { name: "Retry launch" })).toBeTruthy();
+  show({ ...agent, status: "idling", started_at: null, availability: {
+    reason: "admitted", observed_at: now,
+  } });
+  await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  expect(screen.queryByText("Start availability unknown")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry launch" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Machine diagnostics" })).toBeNull();
+});
+
+it("hides the strip for a fresh unknown observation", () => {
+  getAgent.mockReturnValue(new Promise(() => undefined));
+  show();
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByText("Start availability unknown")).toBeNull();
+  expect(screen.queryByRole("link", { name: "Machine diagnostics" })).toBeNull();
 });
