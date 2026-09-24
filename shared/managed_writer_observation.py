@@ -54,12 +54,13 @@ class ExcludedRegistration(EvidenceModel):
 
     Recorded in the receipt (label, definition digest, classification) and never
     silently skipped: either a machine-level registration declaring
-    AVA_JOB_SCOPE=machine, or this home's permissions-helper keeper.
+    AVA_JOB_SCOPE=machine, this home's permissions-helper keeper, or a
+    canonical, installed different unit home (including its keeper).
     """
 
     label: str = Field(min_length=1, max_length=256)
     definition_digest: Digest
-    classification: Literal["machine", "keeper"]
+    classification: Literal["machine", "keeper", "other-unit"]
 
 
 class ExpectedUnitWriters(EvidenceModel):
