@@ -60,6 +60,19 @@ describe("isAtBottom (button visibility — pure position check)", () => {
 });
 
 describe("controller basics", () => {
+  it("reports upward paging intent only for actual upward movement", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 1200);
+    expect(ctl.handleScroll(view(600, 1200))).toBe("none"); // pin echo
+    expect(ctl.handleScroll(view(100, 1200))).toBe("up");
+    expect(ctl.handleScroll(view(100, 1300))).toBe("none"); // layout growth
+    expect(ctl.handleScroll(view(200, 1300))).toBe("down");
+    expect(ctl.handleScroll(view(0, 900))).toBe("none"); // parked reader clamp
+    const clamped = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(clamped, 1200);
+    expect(clamped.handleScroll(view(300, 900))).toBe("none"); // shrink clamp
+  });
+
   it("starts sticky (fresh timeline pins on mount)", () => {
     const ctl = createStickyController();
     expect(ctl.isSticky()).toBe(true);

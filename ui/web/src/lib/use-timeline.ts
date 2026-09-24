@@ -28,6 +28,7 @@ import { useCompactHistoryRetention, type OlderSegmentLoadResult } from "./use-c
  * BASE * 2^olderFetchCount items (capped at 1000), so the window grows
  * exponentially instead of linearly — fewer scroll-ups needed. */
 const OLDER_BASE_LIMIT = 50;
+const RETAINED_ITEMS_FALLBACK = 250;
 import type { BackendTimelineItem, SystemEvent, TimelineResponse } from "./types";
 import type { ConnectionEvent } from "./useEventStream";
 import { useAgentEventStream } from "./useEventStream";
@@ -84,6 +85,7 @@ export interface UseTimelineResult {
    *   timeline calls this when the user scrolls near the top. No-op when
    *   already loading or no older items remain. */
   loadOlder: () => void;
+  retainedItemsMax: number;
 }
 
 export function useTimeline(
@@ -321,6 +323,8 @@ export function useTimeline(
   // Scroll-up base window: display.timeline_history_page_base, read at runtime
   // from /api/config; the baked OLDER_BASE_LIMIT holds until the read lands.
   const olderBaseLimit = useDisplayLimit("AVA_TIMELINE_HISTORY_PAGE_BASE", OLDER_BASE_LIMIT);
+  // Selected-thread follower fuse, resolved through the same config read.
+  const retainedItemsMax = useDisplayLimit("AVA_TIMELINE_RETAINED_ITEMS_MAX", RETAINED_ITEMS_FALLBACK);
 
   // -- Scroll-up: fetch + prepend the previous window of older items --
   // Reads live store state via getState() (not the subscribed values) so
@@ -429,5 +433,6 @@ export function useTimeline(
     hasMoreOlder,
     loadingOlder,
     loadOlder,
+    retainedItemsMax,
   };
 }

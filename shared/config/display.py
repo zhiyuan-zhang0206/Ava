@@ -203,6 +203,27 @@ class DisplaySettings(EnvSettings):
         },
     )
 
+    timeline_retained_items_max: int = Field(
+        default=250,
+        ge=200,
+        le=500,
+        alias="AVA_TIMELINE_RETAINED_ITEMS_MAX",
+        description=(
+            "Maximum selected-thread timeline items retained while following the bottom. "
+            "The oldest items are evicted and remain available by scroll-up paging; a "
+            "reader parked in history keeps the visible window. 250 leaves room for "
+            "normal long sessions (a busy tail measured 57 items) while preventing the "
+            "measured runaway of 857 rendered items, 44k attached nodes, a 278ms frame, "
+            "and clicks taking over 5s."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     events_default_limit: int = Field(
         default=100,
         alias="AVA_EVENTS_DEFAULT_LIMIT",

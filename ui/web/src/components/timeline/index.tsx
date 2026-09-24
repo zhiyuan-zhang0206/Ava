@@ -132,14 +132,12 @@ interface Props {
   // an unfinished task). null = no active agent / fork unavailable.
   onFork?: (() => void) | null;
   forkPending?: boolean;
-  // Scroll-up history loading: the timeline holds only a tail window; when
-  // the view settles at the top and older items remain, the previous window
-  // auto-loads (onLoadOlder fetches + prepends — task #4186). hasMoreOlder
-  // gates the trigger; loadingOlder shows the in-flight spinner and guards
-  // re-triggering.
+  // Scroll-up history loading: a user-driven arrival at the top loads the
+  // previous window; a short initial viewport may fill at most two pages.
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
+  retainedItemsMax?: number;
   // Cold-load flag: the snapshot for this thread is being fetched and there is
   // nothing cached yet. Drives a centered spinner instead of a blank pane so a
   // cold switch doesn't flash empty then pop the whole column in at once.
@@ -162,6 +160,7 @@ export function TimelineView({
   hasMoreOlder = false,
   loadingOlder = false,
   onLoadOlder,
+  retainedItemsMax = 250,
   loading = false,
   maxWidthCss,
 }: Props) {
@@ -219,12 +218,13 @@ export function TimelineView({
   const scrollMemoryRef = useRef<{ entryKey: string; contentKey: string } | null>(null);
   // Live mirrors for the scroll handler (registered once with empty deps, so
   // it must read the latest load-older props through refs, not a stale
-  // closure). Synced in an effect — refs must not be written during render.
+  // closure). Synced before the observer's pre-paint callback — refs must
+  // not be written during render.
   const loadOlderRef = useRef<(() => void) | undefined>(onLoadOlder);
   const hasMoreOlderRef = useRef(hasMoreOlder);
   const loadingOlderRef = useRef(loadingOlder);
   const itemsRef = useRef(items);
-  useEffect(() => {
+  useLayoutEffect(() => {
     loadOlderRef.current = onLoadOlder;
     hasMoreOlderRef.current = hasMoreOlder;
     loadingOlderRef.current = loadingOlder;
@@ -299,6 +299,24 @@ export function TimelineView({
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
   );
+  const canonicalItemsRef = useRef(canonicalItems);
+  const retainedItemsMaxRef = useRef(retainedItemsMax);
+  // A measured runaway reached 857 rendered items / 44k attached nodes,
+  // 278ms frames, and clicks over 5s. A busy tail was 57 items and a normal
+  // long session needs a few hundred, so the default is 250 rather than 100
+  // or 1000. Only a bottom follower can safely release the oldest rows.
+  const trimFollowing = useCallback(() => {
+    if (!controller.isSticky()) return;
+    const store = useTimelineStore.getState();
+    if (store.items !== canonicalItemsRef.current) return;
+    if (store.compactBuffer || store.items.length <= retainedItemsMaxRef.current) return;
+    store.trimOldestWhileFollowing(retainedItemsMaxRef.current);
+  }, [controller]);
+  useLayoutEffect(() => {
+    canonicalItemsRef.current = canonicalItems;
+    retainedItemsMaxRef.current = retainedItemsMax;
+    trimFollowing();
+  }, [canonicalItems, retainedItemsMax, trimFollowing]);
   useCompactTransitionAnchor({
     controller,
     viewportRef,
@@ -406,27 +424,55 @@ export function TimelineView({
     }
   }, []);
 
-  // Auto-load path (task #4186): reaching the top of the viewport with older
-  // pages remaining fetches the previous window automatically — the reader's
-  // only trigger since the load-earlier control and the pull gesture were
-  // removed. The same anchor capture as before keeps the prepend jitter-free.
-  // Guards: nothing while a load is in flight, while no page remains, or
-  // while a captured anchor still waits for its landing commit (the
-  // pendingAnchorRef gate — captureAnchor sets it, the landing effect clears
-  // it, and the release effect below clears it when a cycle ends without a
-  // landing; an arrival can never double-fire and a failed fetch never
-  // deadlocks the gate). One page per arrival: after a landing the reader
-  // sits above the new content, so continued scroll-up paging arrives again
-  // and keeps loading until has_more clears (adjudicated semantics, QA
-  // #3031).
-  const maybeLoadOlderAtTop = useCallback(() => {
+  const coldFillRef = useRef({ pages: 0, open: true, inFlight: false, sawLoading: false });
+  const upwardGestureRef = useRef({ lastAt: 0, pages: 0 });
+  useLayoutEffect(() => {
+    coldFillRef.current = { pages: 0, open: true, inFlight: false, sawLoading: false };
+    upwardGestureRef.current = { lastAt: 0, pages: 0 };
+  }, [threadKey]);
+  useEffect(() => {
+    const fill = coldFillRef.current;
+    if (loadingOlder) fill.sawLoading = true;
+    else if (fill.sawLoading) {
+      fill.inFlight = false;
+      fill.sawLoading = false;
+    }
+  }, [loadingOlder]);
+
+  const loadOneOlderPage = useCallback(() => {
     const viewport = viewportRef.current;
-    if (!viewport || viewport.scrollTop > 0) return;
-    if (!hasMoreOlderRef.current || loadingOlderRef.current) return;
-    if (!loadOlderRef.current || pendingAnchorRef.current !== null) return;
+    if (!viewport || !hasMoreOlderRef.current || loadingOlderRef.current) return false;
+    if (!loadOlderRef.current || pendingAnchorRef.current !== null) return false;
     captureAnchor();
     loadOlderRef.current();
+    return true;
   }, [captureAnchor]);
+
+  const maybeLoadOlderAtTop = useCallback((userScrolledUp: boolean) => {
+    const viewport = viewportRef.current;
+    if (!userScrolledUp || !viewport || viewport.scrollTop > 0 || controller.isSticky()) return;
+    const gesture = upwardGestureRef.current;
+    const now = Date.now();
+    if (now - gesture.lastAt > 750) gesture.pages = 0;
+    gesture.lastAt = now;
+    if (gesture.pages >= 3) return; // one sustained gesture cannot walk unbounded history
+    if (loadOneOlderPage()) gesture.pages += 1;
+  }, [controller, loadOneOlderPage]);
+
+  const maybeColdFill = useCallback(() => {
+    const fill = coldFillRef.current;
+    const viewport = viewportRef.current;
+    if (!fill.open || !viewport || viewport.clientHeight <= 0 || itemsRef.current.length === 0) return;
+    if (viewport.scrollHeight > viewport.clientHeight || fill.pages >= 2) {
+      fill.open = false;
+      return;
+    }
+    if (fill.inFlight) return;
+    if (loadOneOlderPage()) {
+      fill.inFlight = true;
+      fill.pages += 1;
+    }
+  }, [loadOneOlderPage]);
 
   useLayoutEffect(() => {
     if (loadingOlder && !prevLoadingOlderRef.current && pendingAnchorRef.current === null) {
@@ -473,14 +519,15 @@ export function TimelineView({
       scrollHeight: viewport.scrollHeight,
       clientHeight: viewport.clientHeight,
     });
-    // Every scroll event goes to the controller. Reaching the top of the
-    // viewport with older pages remaining auto-loads the previous window
-    // (task #4186) — an inertial momentum run lands on scrollTop = 0 and
-    // triggers it exactly like a slow scroll does.
+    // Only an upward movement classified by the sticky controller can page.
+    // Pin/prepend echoes and layout clamps therefore cannot start a chain.
     const onScroll = () => {
-      controller.handleScroll(snapshot());
+      const direction = controller.handleScroll(snapshot());
+      if (direction === "up") coldFillRef.current.open = false;
+      if (direction === "down") upwardGestureRef.current.pages = 0;
       measureAtBottom();
-      maybeLoadOlderAtTop();
+      maybeLoadOlderAtTop(direction === "up");
+      trimFollowing();
       const mem = scrollMemoryRef.current;
       if (mem) {
         // The reader's position for this history entry; the sticky flag rides
@@ -533,7 +580,8 @@ export function TimelineView({
       applyPendingRestore(viewport);
       if (controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
       measureAtBottom();
-      maybeLoadOlderAtTop();
+      maybeColdFill();
+      trimFollowing();
     });
     ro.observe(viewport);
     if (contentRef.current) ro.observe(contentRef.current);
@@ -546,7 +594,7 @@ export function TimelineView({
       viewport.removeEventListener("touchcancel", onTouchEnd);
       ro.disconnect();
     };
-  }, [applyPendingRestore, controller, measureAtBottom, maybeLoadOlderAtTop, pinToBottom, updateStuckHeader]);
+  }, [applyPendingRestore, controller, measureAtBottom, maybeLoadOlderAtTop, maybeColdFill, pinToBottom, trimFollowing, updateStuckHeader]);
 
   // The SINGLE force-scroll trigger. The store bumps scrollToBottomRequest on
   // exactly the two moments a scroll-to-bottom is unconditional — agent switch

@@ -162,6 +162,10 @@ export interface TimelineState {
    * from the window's `has_more`. Clears loadingOlder. */
   prependOlder: (older: BackendTimelineItem[], hasMoreOlder: boolean) => void;
 
+  /** Drop the oldest selected-thread rows while the view follows the bottom.
+   * The view decides when eviction is safe; the store preserves paging. */
+  trimOldestWhileFollowing: (maxItems: number) => void;
+
   /** Increment the older-fetch counter — called after a successful scroll-up
    * fetch so the next one doubles the limit (exponential growth). */
   incrementOlderFetchCount: () => void;
@@ -421,6 +425,19 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         hasMoreOlder,
         loadingOlder: false,
       };
+    });
+  },
+
+  trimOldestWhileFollowing: (maxItems) => {
+    const state = get();
+    // The compact transition buffer owns a reader anchor across re-keying.
+    // Leave that short transition intact; trim once it is released.
+    if (state.compactBuffer || state.items.length <= maxItems) return;
+    set({
+      items: state.items.slice(-maxItems),
+      hasMoreOlder: true,
+      // A later scroll-up re-reads the evicted tail in small pages.
+      olderFetchCount: 0,
     });
   },
 
