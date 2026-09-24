@@ -584,7 +584,18 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
     assert (
         sum(c.args[0] == "host checkpoint recovery retry" for c in log.warning.call_args_list) == 2
     )
-    log.info.assert_not_called()
+    assert all(c.args[0] != "host turn checkpoint recovered" for c in log.info.call_args_list)
+    assert any(
+        c.args[0]
+        == (
+            "host checkpoint recovery stage failed"
+            if isinstance(error, psycopg.OperationalError) and not isinstance(error, PoolTimeout)
+            else "host checkpoint recovery stage timed out"
+        )
+        and c.kwargs["phase"] == "tool_state_repair"
+        and c.kwargs["duration_ms"] >= 0
+        for c in log.warning.call_args_list
+    )
 
 
 @pytest.mark.parametrize(("attempt_limit", "seconds_limit"), [(2, 300.0), (99, 50.0), (2, 50.0)])
@@ -631,7 +642,7 @@ async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
     assert attempts == 4
     assert backoff.await_count == 3
     log.error.assert_not_called()
-    log.info.assert_called_once()
+    assert sum(c.args[0] == "host turn checkpoint recovered" for c in log.info.call_args_list) == 1
 
 
 @pytest.mark.parametrize("failures", [0, 2])
@@ -662,14 +673,30 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
         )
     assert backoff.await_count == failures
     assert database_wait_snapshot(incarnation.agent_id) is not None
-    log.info.assert_called_once_with(
-        "host turn checkpoint recovered",
-        agent_id=incarnation.agent_id,
-        attempt=failures + 1,
-        elapsed_seconds=3.0,
-        total_attempts=failures + 1,
-        total_elapsed_seconds=failures * 11.0 + 3.0,
-    )
+    recovered = [
+        c for c in log.info.call_args_list if c.args[0] == "host turn checkpoint recovered"
+    ]
+    assert len(recovered) == 1
+    assert recovered[0].kwargs == {
+        "agent_id": incarnation.agent_id,
+        "attempt": failures + 1,
+        "elapsed_seconds": 3.0,
+        "total_attempts": failures + 1,
+        "total_elapsed_seconds": failures * 11.0 + 3.0,
+    }
+    stages = [
+        c for c in log.info.call_args_list if c.args[0] == "host checkpoint recovery stage complete"
+    ]
+    assert len(stages) == 6
+    assert {c.kwargs["phase"] for c in stages} == {
+        "owner_probe",
+        "checkpoint_flush",
+        "inbound_reconciliation",
+        "owner_revalidation",
+        "tool_state_repair",
+        "repaired_owner_validation",
+    }
+    assert all(c.kwargs["outcome"] == "success" and c.kwargs["duration_ms"] >= 0 for c in stages)
     assert all(
         c.args[0] != "host checkpoint recovery prolonged" for c in log.warning.call_args_list
     )

@@ -3,8 +3,10 @@
 import asyncio
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple, TypeVar, cast
+from weakref import WeakKeyDictionary
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
@@ -30,6 +32,16 @@ _CLAIM_DB_ACQUIRE_TIMEOUT_S = min(5.0, settings.agent.db_pool_acquire_timeout_se
 _CLAIM_DB_LOCK_TIMEOUT = f"{_CLAIM_DB_ACQUIRE_TIMEOUT_S:g}s"
 
 _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
+
+
+@dataclass
+class _BorrowSpan:
+    slot_wait_ms: float = 0.0
+    check_ms: float = 0.0
+    check_attempts: int = 0
+
+
+_borrow_spans: WeakKeyDictionary[asyncio.Task[Any], _BorrowSpan] = WeakKeyDictionary()
 
 
 class LoggingConnectionPool(AsyncConnectionPool[_CT]):
@@ -58,8 +70,34 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
             "connections_errors": stats.get("connections_errors", 0),
         }
 
+    async def _getconn_unchecked(self, timeout: float) -> _CT:
+        # Includes the pool lock and client-side queue, not server-side PgBouncer wait.
+        started = time.monotonic()
+        try:
+            return await super()._getconn_unchecked(timeout)
+        finally:
+            task = asyncio.current_task()
+            span = _borrow_spans.get(task) if task is not None else None
+            if span is not None:
+                span.slot_wait_ms += (time.monotonic() - started) * 1000
+
+    async def _check_connection(self, conn: _CT) -> None:
+        started = time.monotonic()
+        try:
+            await super()._check_connection(conn)
+        finally:
+            task = asyncio.current_task()
+            span = _borrow_spans.get(task) if task is not None else None
+            if span is not None:
+                span.check_ms += (time.monotonic() - started) * 1000
+                span.check_attempts += 1
+
     async def getconn(self, timeout: float | None = None) -> _CT:
         t0 = time.monotonic()
+        span = _BorrowSpan()
+        task = asyncio.current_task()
+        assert task is not None  # noqa: S101 — async pool borrow runs in a task
+        _borrow_spans[task] = span
         try:
             conn = await super().getconn(timeout=timeout)
         except PoolTimeout:
@@ -72,23 +110,32 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
                 event="db_pool_acquire_timeout",
                 name=self._pool_name,
                 elapsed=time.monotonic() - t0,
+                slot_wait_ms=span.slot_wait_ms,
+                check_ms=span.check_ms,
+                check_attempts=span.check_attempts,
                 mx=self.max_size,
                 **stats,
             )
             raise
-        elapsed = time.monotonic() - t0
-        if elapsed >= _SLOW_ACQUIRE_WARN_S:
-            stats = self._acquire_stats()
-            logger.warning(
-                "[db pool] {name} acquire took {elapsed:.1f}s "
-                "(size={pool_size}, available={pool_available}, "
-                "waiting={requests_waiting}, connection_errors={connections_errors})",
-                event="db_pool_acquire_slow",
-                name=self._pool_name,
-                elapsed=elapsed,
-                **stats,
-            )
-        return conn
+        else:
+            elapsed = time.monotonic() - t0
+            if elapsed >= _SLOW_ACQUIRE_WARN_S:
+                stats = self._acquire_stats()
+                logger.warning(
+                    "[db pool] {name} acquire took {elapsed:.1f}s "
+                    "(size={pool_size}, available={pool_available}, "
+                    "waiting={requests_waiting}, connection_errors={connections_errors})",
+                    event="db_pool_acquire_slow",
+                    name=self._pool_name,
+                    elapsed=elapsed,
+                    slot_wait_ms=span.slot_wait_ms,
+                    check_ms=span.check_ms,
+                    check_attempts=span.check_attempts,
+                    **stats,
+                )
+            return conn
+        finally:
+            del _borrow_spans[task]
 
 
 class ClaimedInbound(NamedTuple):

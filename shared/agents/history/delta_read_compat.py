@@ -31,8 +31,14 @@ failing loudly keeps the data and makes the fault visible.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import asyncio
+import time
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from threading import local
 from typing import Any, Literal, cast
+from weakref import WeakKeyDictionary
 
 from langchain_core.messages import BaseMessage, RemoveMessage, convert_to_messages
 from langchain_core.messages.utils import message_chunk_to_message
@@ -59,6 +65,55 @@ a snapshot step (where the counters reset to zero and the materialized
 `_DeltaSnapshot` value speaks for itself). Its presence is the primary
 delta-written marker.
 """
+
+
+@dataclass
+class _ReadSpan:
+    tuple_read_ms: float = 0.0
+    history_read_ms: float = 0.0
+    stage1_pages: int = 0
+    stage1_rows: int = 0
+    stage2_rows: int = 0
+    stage2_blob_bytes: int = 0
+    decode_ms: float = 0.0
+    history_build_ms: float = 0.0
+    fold_ms: float = 0.0
+    fold_path: str = "none"
+    in_history_build: bool = False
+
+
+_async_spans: WeakKeyDictionary[asyncio.Task[Any], _ReadSpan] = WeakKeyDictionary()
+_sync_span = local()
+
+
+def _current_span() -> _ReadSpan | None:
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        return cast("_ReadSpan | None", getattr(_sync_span, "value", None))
+    return _async_spans.get(task) if task is not None else None
+
+
+@contextmanager
+def _bound_span(span: _ReadSpan) -> Generator[None]:
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+    previous = _async_spans.get(task) if task is not None else getattr(_sync_span, "value", None)
+    if task is None:
+        _sync_span.value = span
+    else:
+        _async_spans[task] = span
+    try:
+        yield
+    finally:
+        if task is None:
+            _sync_span.value = previous
+        elif previous is None:
+            del _async_spans[task]
+        else:
+            _async_spans[task] = previous
 
 
 def _coerce_group(group: Sequence[Any]) -> list[BaseMessage] | None:
@@ -115,7 +170,13 @@ def _fold_messages(state: Any, writes: Sequence[Any]) -> Any:
     groups: list[list[Any]] = [w if isinstance(w, list) else [w] for w in writes]
     fast = _fast_append(state, groups)
     if fast is not None:
+        span = _current_span()
+        if span is not None:
+            span.fold_path = "fast"
         return fast
+    span = _current_span()
+    if span is not None:
+        span.fold_path = "fallback"
     result: Any = [] if state is MISSING else state
     for group in groups:
         result = add_messages(result, group)
@@ -176,7 +237,11 @@ def _apply_reconstruction(
         return True
     if entry is None or (not entry.get("writes") and "seed" not in entry):
         return False
+    started = time.monotonic()
     checkpoint["channel_values"]["messages"] = _fold_history(entry)
+    span = _current_span()
+    if span is not None:
+        span.fold_ms = (time.monotonic() - started) * 1000
     return True
 
 
@@ -193,9 +258,13 @@ def reconstruct_delta_messages(checkpointer: PostgresSaver, tuple_: CheckpointTu
         return False
     entry: Mapping[str, Any] | None = None
     if kind == "walk":
+        started = time.monotonic()
         history = checkpointer.get_delta_channel_history(
             config=_exact_config(tuple_), channels=["messages"]
         )
+        span = _current_span()
+        if span is not None:
+            span.history_read_ms = (time.monotonic() - started) * 1000
         entry = history.get("messages")
     repaired = _apply_reconstruction(checkpoint, kind, entry)
     if repaired:
@@ -213,9 +282,13 @@ async def areconstruct_delta_messages(
         return False
     entry: Mapping[str, Any] | None = None
     if kind == "walk":
+        started = time.monotonic()
         history = await checkpointer.aget_delta_channel_history(
             config=_exact_config(tuple_), channels=["messages"]
         )
+        span = _current_span()
+        if span is not None:
+            span.history_read_ms = (time.monotonic() - started) * 1000
         entry = history.get("messages")
     repaired = _apply_reconstruction(checkpoint, kind, entry)
     if repaired:
@@ -225,15 +298,77 @@ async def areconstruct_delta_messages(
 
 def _log_reconstruction(tuple_: CheckpointTuple, count: int) -> None:
     configurable: dict[str, Any] = tuple_.config.get("configurable") or {}
+    span = _current_span() or _ReadSpan()
     logger.info(
         "[{label}] {body}",
         label="delta-read-compat",
         event="delta_read_compat",
+        thread_id=configurable.get("thread_id"),
+        checkpoint_id=tuple_.checkpoint["id"],
+        checkpoint_ns=configurable.get("checkpoint_ns", ""),
+        message_count=count,
+        tuple_read_ms=span.tuple_read_ms,
+        history_read_ms=span.history_read_ms,
+        stage1_pages=span.stage1_pages,
+        stage1_rows=span.stage1_rows,
+        stage2_rows=span.stage2_rows,
+        stage2_blob_bytes=span.stage2_blob_bytes,
+        decode_ms=span.decode_ms,
+        history_build_ms=span.history_build_ms,
+        fold_ms=span.fold_ms,
+        fold_path=span.fold_path,
         body=(
             f"reconstructed messages for thread={configurable.get('thread_id')}"
             f" checkpoint={tuple_.checkpoint['id']}: {count} messages"
         ),
     )
+
+
+def _instrument_history_callbacks(saver: AsyncPostgresSaver) -> None:
+    """Count the rows and bytes LangGraph has already fetched for a history walk."""
+    orig_ingest = saver._ingest_stage1_page
+    orig_build = saver._build_delta_channels_writes_history
+    serde = saver.serde
+    if not getattr(serde, "_ava_delta_decode_instrumented", False):
+        orig_decode = serde.loads_typed
+
+        def decode(value: Any) -> Any:
+            span = _current_span()
+            if span is None or not span.in_history_build:
+                return orig_decode(value)
+            started = time.monotonic()
+            try:
+                return orig_decode(value)
+            finally:
+                span.decode_ms += (time.monotonic() - started) * 1000
+
+        serde.loads_typed = decode  # type: ignore[method-assign]
+        serde._ava_delta_decode_instrumented = True  # type: ignore[attr-defined]
+
+    def ingest_stage1_page(*args: Any, **kwargs: Any) -> Any:
+        span = _current_span()
+        if span is not None:
+            span.stage1_pages += 1
+            span.stage1_rows += len(args[0])
+        return orig_ingest(*args, **kwargs)
+
+    def build_history(*args: Any, **kwargs: Any) -> Any:
+        span = _current_span()
+        if span is None:
+            return orig_build(*args, **kwargs)
+        rows = kwargs["stage2_rows"]
+        span.stage2_rows = len(rows)
+        span.stage2_blob_bytes = sum(len(row["blob"]) for row in rows)
+        started = time.monotonic()
+        span.in_history_build = True
+        try:
+            return orig_build(*args, **kwargs)
+        finally:
+            span.in_history_build = False
+            span.history_build_ms = (time.monotonic() - started) * 1000
+
+    saver._ingest_stage1_page = ingest_stage1_page  # type: ignore[method-assign]
+    saver._build_delta_channels_writes_history = build_history  # type: ignore[method-assign]
 
 
 def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> None:
@@ -254,16 +389,25 @@ def wrap_saver_reads_with_delta_reconstruction(saver: AsyncPostgresSaver) -> Non
     orig_aget_tuple = saver.aget_tuple
 
     def get_tuple(config: Any) -> Any:
-        tuple_ = orig_get_tuple(config)
-        if tuple_ is not None:
-            reconstruct_delta_messages(cast("PostgresSaver", saver), tuple_)
-        return tuple_
+        span = _ReadSpan()
+        with _bound_span(span):
+            started = time.monotonic()
+            tuple_ = orig_get_tuple(config)
+            span.tuple_read_ms = (time.monotonic() - started) * 1000
+            if tuple_ is not None:
+                reconstruct_delta_messages(cast("PostgresSaver", saver), tuple_)
+            return tuple_
 
     async def aget_tuple(config: Any) -> Any:
-        tuple_ = await orig_aget_tuple(config)
-        if tuple_ is not None:
-            await areconstruct_delta_messages(saver, tuple_)
-        return tuple_
+        span = _ReadSpan()
+        with _bound_span(span):
+            started = time.monotonic()
+            tuple_ = await orig_aget_tuple(config)
+            span.tuple_read_ms = (time.monotonic() - started) * 1000
+            if tuple_ is not None:
+                await areconstruct_delta_messages(saver, tuple_)
+            return tuple_
 
+    _instrument_history_callbacks(saver)
     saver.get_tuple = get_tuple  # type: ignore[method-assign]
     saver.aget_tuple = aget_tuple  # type: ignore[method-assign]

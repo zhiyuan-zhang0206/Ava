@@ -92,6 +92,10 @@ async def _refresh_owner(pool: AsyncConnectionPool, incarnation: RuntimeIncarnat
 async def _run_bounded_stage(
     waiting: DatabaseWait,
     stage: Callable[[], Awaitable[None]],
+    *,
+    phase: str,
+    agent_id: int,
+    attempt: int,
 ) -> None:
     """Renew the database-wait evidence for one real bounded stage, then run it
     under the shared 30s `database_phase()` bound.
@@ -104,8 +108,40 @@ async def _run_bounded_stage(
     `CancelledError` and propagates untouched.
     """
     waiting.renew()
-    async with database_phase():
-        await stage()
+    started = time.monotonic()
+    try:
+        async with database_phase():
+            await stage()
+    except (PoolTimeout, TimeoutError) as exc:
+        logger.warning(
+            "host checkpoint recovery stage timed out",
+            agent_id=agent_id,
+            attempt=attempt,
+            phase=phase,
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="phase_timeout" if isinstance(exc.__cause__, TimeoutError) else "pool_timeout",
+            error_type=type(exc).__name__,
+        )
+        raise
+    except Exception as exc:
+        logger.warning(
+            "host checkpoint recovery stage failed",
+            agent_id=agent_id,
+            attempt=attempt,
+            phase=phase,
+            duration_ms=(time.monotonic() - started) * 1000,
+            outcome="error",
+            error_type=type(exc).__name__,
+        )
+        raise
+    logger.info(
+        "host checkpoint recovery stage complete",
+        agent_id=agent_id,
+        attempt=attempt,
+        phase=phase,
+        duration_ms=(time.monotonic() - started) * 1000,
+        outcome="success",
+    )
 
 
 async def recover_database(
@@ -165,12 +201,22 @@ async def recover_database(
                 # bound (issue #1972): one slow stage times out alone instead
                 # of eating the budget every following stage needs. The
                 # exact-owner probe keeps its independent 5s bound.
-                await _run_bounded_stage(waiting, lambda: _refresh_owner(pool, incarnation))
+                await _run_bounded_stage(
+                    waiting,
+                    lambda: _refresh_owner(pool, incarnation),
+                    phase=phase,
+                    agent_id=incarnation.agent_id,
+                    attempt=attempt,
+                )
                 # Retained N-step writes are still this task's work. Persist them
                 # before deciding which claimed messages reached the checkpoint.
                 phase = "checkpoint_flush"
                 await _run_bounded_stage(
-                    waiting, lambda: flush_checkpoint(checkpointer, incarnation.agent_id)
+                    waiting,
+                    lambda: flush_checkpoint(checkpointer, incarnation.agent_id),
+                    phase=phase,
+                    agent_id=incarnation.agent_id,
+                    attempt=attempt,
                 )
                 phase = "inbound_reconciliation"
                 await _run_bounded_stage(
@@ -178,16 +224,34 @@ async def recover_database(
                     lambda: _reconcile_claimed_inbounds_at_startup(
                         pool, checkpointer, incarnation.agent_id
                     ),
+                    phase=phase,
+                    agent_id=incarnation.agent_id,
+                    attempt=attempt,
                 )
                 phase = "owner_revalidation"
-                await _run_bounded_stage(waiting, lambda: _refresh_owner(pool, incarnation))
+                await _run_bounded_stage(
+                    waiting,
+                    lambda: _refresh_owner(pool, incarnation),
+                    phase=phase,
+                    agent_id=incarnation.agent_id,
+                    attempt=attempt,
+                )
                 phase = "tool_state_repair"
                 await _run_bounded_stage(
                     waiting,
                     lambda: _repair_dangling_tool_use_at_startup(graph, incarnation.agent_id),
+                    phase=phase,
+                    agent_id=incarnation.agent_id,
+                    attempt=attempt,
                 )
                 phase = "repaired_owner_validation"
-                await _run_bounded_stage(waiting, lambda: _refresh_owner(pool, incarnation))
+                await _run_bounded_stage(
+                    waiting,
+                    lambda: _refresh_owner(pool, incarnation),
+                    phase=phase,
+                    agent_id=incarnation.agent_id,
+                    attempt=attempt,
+                )
                 waiting.complete()
                 completed = time.monotonic()
                 logger.info(

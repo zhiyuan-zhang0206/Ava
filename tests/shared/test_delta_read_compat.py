@@ -184,6 +184,35 @@ async def test_delta_thread_reconstructs_resumes_and_self_heals(
     assert row is not None and row[0] >= 1, "vanilla resume must materialize a messages blob"
 
 
+async def test_delta_read_span_has_phase_fields(
+    aops_pool: AsyncConnectionPool, loguru_records: list[Any]
+) -> None:
+    saver = _saver(aops_pool)
+    cfg = _config("drc-span")
+    await _delta_app(saver).ainvoke({"messages": [], "n": 0, "target": 2}, cfg)  # pyright: ignore[reportUnknownMemberType]
+    wrap_saver_reads_with_delta_reconstruction(saver)
+    checkpoint = await saver.aget(cfg)
+    assert checkpoint is not None
+    spans = [
+        record["extra"]
+        for record in loguru_records
+        if record["extra"].get("event") == "delta_read_compat"
+        and record["extra"].get("checkpoint_id") == checkpoint["id"]
+    ]
+    assert spans
+    span = spans[-1]
+    assert all(
+        span[field] >= 0 for field in ("tuple_read_ms", "history_read_ms", "decode_ms", "fold_ms")
+    )
+    assert span["stage1_pages"] >= 1
+    assert span["stage1_rows"] >= span["stage1_pages"]
+    assert span["stage2_rows"] >= 1
+    assert span["stage2_blob_bytes"] > 0
+    assert span["decode_ms"] > 0
+    assert span["history_build_ms"] >= span["decode_ms"]
+    assert span["fold_path"] in {"fast", "fallback"}
+
+
 async def test_snapshot_tip_unwraps_and_mid_chain_walks(
     aops_pool: AsyncConnectionPool,
 ) -> None:
