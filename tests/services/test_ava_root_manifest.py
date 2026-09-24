@@ -24,21 +24,21 @@ from services.ava_root.manifest import (
 
 
 def _manifest(**overrides: object) -> dict[str, object]:
-    base: dict[str, object] = {"id": "unit-a", "exec": ["/bin/true"], "restart": "always"}
+    base: dict[str, object] = {"id": "unit-a", "exec": ["/usr/bin/true"], "restart": "always"}
     base.update(overrides)
     return base
 
 
 def _unit(unit_id: str, *, attach: str = ROOT_ID, restart: str = "always") -> UnitManifest:
     return UnitManifest(
-        id=unit_id, exec=("/bin/true",), restart=RestartPolicy(restart), attach=attach
+        id=unit_id, exec=("/usr/bin/true",), restart=RestartPolicy(restart), attach=attach
     )
 
 
 def test_minimal_manifest_defaults_attach_to_root() -> None:
     manifest = UnitManifest.from_mapping(_manifest(), origin="t")
     assert manifest.id == "unit-a"
-    assert manifest.exec == ("/bin/true",)
+    assert manifest.exec == ("/usr/bin/true",)
     assert manifest.restart is RestartPolicy.ALWAYS
     assert manifest.attach == ROOT_ID
 
@@ -170,8 +170,13 @@ def test_load_manifests_reads_a_file(tmp_path: Path) -> None:
         json.dumps(
             {
                 "units": [
-                    {"id": "alpha", "exec": ["/bin/true"], "restart": "never"},
-                    {"id": "beta", "exec": ["/bin/true"], "restart": "always", "attach": "alpha"},
+                    {"id": "alpha", "exec": ["/usr/bin/true"], "restart": "never"},
+                    {
+                        "id": "beta",
+                        "exec": ["/usr/bin/true"],
+                        "restart": "always",
+                        "attach": "alpha",
+                    },
                 ]
             }
         ),
@@ -189,7 +194,7 @@ def test_load_manifests_reads_a_file(tmp_path: Path) -> None:
         ('{"units": [], "extra": 1}', "unknown top-level field"),
         ('{"units": "nope"}', "'units' must be a list"),
         ('{"units": [42]}', "must be an object"),
-        ('{"units": [{"id": "a", "exec": ["/bin/true"], "restart": "x"}]}', "restart"),
+        ('{"units": [{"id": "a", "exec": ["/usr/bin/true"], "restart": "x"}]}', "restart"),
     ],
 )
 def test_load_manifests_rejects_bad_documents(tmp_path: Path, content: str, match: str) -> None:
