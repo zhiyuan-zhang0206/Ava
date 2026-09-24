@@ -18,9 +18,10 @@ flight (both default to 4). Only a recovery turn started by that scan spends an
 in-flight slot. Direct pub/sub wakes, force-cancel re-wakes with no task, and
 turn-level stale-cancellation re-wakes do not spend one. Ordinary work, including
 impersonation, and held maintenance wakes are exempt. The slot is released when
-that recovery turn's own task ends. If it is cancelled before its first slice,
-the scheduler reaps it and the replacement consuming the same wake inherits its
-slot. Queued ordinary work successors run without occupying that slot.
+that recovery turn's own task ends. Only a replacement started by the pre-start
+reaper from the same unconsumed wake inherits its slot. Other same-agent
+successors, including a direct wake that starts during cancellation unwind,
+run without occupying that slot.
 
 `AgentHost._invoke_until_done()` invokes the same checkpoint thread until idle
 or a native lifecycle command ends the turn. Each invocation has its own trace.

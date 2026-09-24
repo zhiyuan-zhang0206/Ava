@@ -754,10 +754,8 @@ class TestChannelParsing:
 
 class TestPatternMatchesTheRealChannel:
     def test_pattern_covers_what_inbound_channel_publishes(self) -> None:
-        """The dispatcher's PSUBSCRIBE pattern and the publisher's channel name
-        are derived from the same prefix, and this asserts they actually meet:
-        a drift here is silent (no error, just a runner that never wakes), which
-        is exactly the failure `inbound_channel` was centralised to prevent."""
+        """The subscription must cover published channels; drift silently
+        leaves agents asleep despite successful publishes."""
         from fnmatch import fnmatchcase
 
         from services.agent_host.dispatcher import _INBOUND_PATTERN_SUFFIX
@@ -798,8 +796,6 @@ class TestDispatcherMessageHandling:
 
 
 class _ScanScheduler:
-    """Small scheduler double for the dispatcher's recovery boundary."""
-
     def __init__(
         self,
         active: set[int] | None = None,
@@ -827,6 +823,9 @@ class _ScanScheduler:
         self.woken_event.set()
 
     def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
+        return None
+
+    def reaped_successor(self, agent_id: int) -> asyncio.Task[None] | None:
         return None
 
     async def cancel_agent(self, agent_id: int) -> bool:

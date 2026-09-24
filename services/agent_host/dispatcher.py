@@ -174,14 +174,11 @@ class TurnScheduler:
         activity_clock: Callable[[int], Awaitable[datetime | None]] | None = None,
     ) -> None:
         self._run_turn = run_turn
-        # Injected to keep this scheduler pure asyncio; absent means the
-        # uncancellable-turn report omits the clock (see `_await_unwind`).
         self._activity_clock = activity_clock
         self._tasks: dict[int, asyncio.Task[None]] = {}
-        # Unconsumed wakes use membership, not a count (see module docstring).
+        self._reaped_successors: dict[int, asyncio.Task[None]] = {}
         self._pending: set[int] = set()
         self._closed = False
-        # Refused unwind makes the dispatcher exit for checkpoint restart.
         self._restart_required = False
 
     @property
@@ -197,12 +194,14 @@ class TurnScheduler:
     def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
         return self._tasks.get(agent_id)
 
-    def wake(self, agent_id: int) -> asyncio.Task[None] | None:
-        """Record a wake for `agent_id` and make sure a turn will follow.
+    def reaped_successor(self, agent_id: int) -> asyncio.Task[None] | None:
+        """Pre-start reaper replacement for the same unconsumed wake, if any."""
+        return self._reaped_successors.get(agent_id)
 
-        Idempotent during a turn: its pending flag makes that turn loop.
-        No await can interleave with the task's exit check. Return the task
-        so callers release accounting when that turn ends.
+    def wake(self, agent_id: int) -> asyncio.Task[None] | None:
+        """Record a wake and return its turn task for caller accounting.
+
+        During a turn, its pending flag makes that turn loop.
         """
         if self._closed:
             return None
@@ -212,30 +211,28 @@ class TurnScheduler:
         return self._tasks.get(agent_id)
 
     def _start(self, agent_id: int) -> None:
+        self._reaped_successors.pop(agent_id, None)
         task = asyncio.create_task(self._pump(agent_id), name=f"turn-{agent_id}")
         self._tasks[agent_id] = task
         task.add_done_callback(partial(self._reap_unstarted_task, agent_id))
 
     def _reap_unstarted_task(self, agent_id: int, task: asyncio.Task[None]) -> None:
         """Re-arm a wake cancelled before `_pump` could release its task slot.
-
-        Without this callback, a pre-start cancel leaves a phantom active agent;
-        stale-turn scan treats it as refused unwind (task #3085, PR #2217).
-        The unconsumed wake remains pending, so start its successor here.
-        A running task releases its own slot; a wedged task remains active.
+        Otherwise a pre-start cancel leaves a phantom agent (task #3085,
+        PR #2217); a running task releases its own slot.
         """
         if self._tasks.get(agent_id) is not task:
             return
         self._tasks.pop(agent_id)
         if not self._closed and agent_id in self._pending:
             self._start(agent_id)
+            successor = self._tasks.get(agent_id)
+            if successor is not None:
+                self._reaped_successors[agent_id] = successor
 
     async def _pump(self, agent_id: int) -> None:
         """One Task owns one actual turn; a queued successor gets a new Task.
-
-        Reusing a Task across incarnations would let delayed cancellation of
-        the captured old Task interrupt its successor. Wake handoff and registry
-        replacement have no intervening await, preserving single-flight.
+        New tasks isolate delayed cancels; synchronous handoff keeps single-flight.
         """
         completed = False
         try:
@@ -475,6 +472,8 @@ class _WakeScheduler(Protocol):
 
     def task_for(self, agent_id: int) -> asyncio.Task[None] | None: ...
 
+    def reaped_successor(self, agent_id: int) -> asyncio.Task[None] | None: ...
+
     async def cancel_agent(self, agent_id: int) -> bool: ...
 
 
@@ -685,19 +684,19 @@ class InboundWakeDispatcher:
         return recovery_started
 
     def _release_recovery_slot(self, agent_id: int, task: asyncio.Task[None]) -> None:
-        """Keep the slot with the turn consuming this scan wake.
-
-        A cancelled pre-start task can be reaped and replaced; its live
-        successor inherits the slot. Completed, failed, active-cancelled, and
-        closed turns release it; ordinary work successors do not inherit it.
-        A direct wake before this callback may inherit it conservatively.
-        """
+        """Only a pre-start reaper replacement inherits this scan wake's slot.
+        Same-agent direct/pub-sub successors during cancellation do not."""
         if self._recovery_in_flight.get(agent_id) is not task:
             return
         if not task.done():
             return
         successor = self._scheduler.task_for(agent_id) if task.cancelled() else None
-        if successor is not None and successor is not task and not successor.done():
+        if (
+            successor is not None
+            and successor is not task
+            and not successor.done()
+            and self._scheduler.reaped_successor(agent_id) is successor
+        ):
             self._recovery_in_flight[agent_id] = successor
             successor.add_done_callback(partial(self._release_recovery_slot, agent_id))
             return
