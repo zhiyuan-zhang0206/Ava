@@ -219,7 +219,7 @@ operator-authorized manual reinstall, run the shared sync helper from the
 affected checkout so every protected directory opens and closes together:
 
 ```bash
-env -u VIRTUAL_ENV .venv/bin/python - <<'PY'
+env -u VIRTUAL_ENV PYTHONPATH=. .venv/bin/python - <<'PY'
 from pathlib import Path
 from cli.commands._update_uv_sync import run_uv_sync
 
