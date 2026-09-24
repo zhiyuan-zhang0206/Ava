@@ -5,7 +5,9 @@ launching by hand — it pre-trusts the directory, presets Claude Code's
 first-run dialogs (bypass-permissions confirmation + fullscreen upsell;
 persisted into `~/.claude/settings.json` / `~/.claude.json`, backed up and
 idempotent) so an unattended spawn cannot park on one, and sends the
-contract message:
+contract message. The session resolves `claude` from its PATH, then tries
+`$HOME/.local/bin/claude`. If Claude's UI does not appear, the launcher stops
+before sending the contract or takeover bootstrap:
 
 ```bash
 .venv/bin/python reference/spawn_claude.py <workspace-dir>
