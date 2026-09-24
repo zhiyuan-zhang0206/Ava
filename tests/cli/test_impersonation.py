@@ -700,3 +700,69 @@ def test_request_writes_the_resident_stub_when_scoped(
     err = capsys.readouterr().err
     assert "session plugin starts the claude relay automatically" in err
     assert "arm it as a Monitor watch" in err
+
+
+@pytest.mark.parametrize("handoff_state", ["pending", "consumed"])
+def test_request_rejects_second_resident_relay_handoff_before_creating_a_lease(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    handoff_state: str,
+) -> None:
+    from unittest.mock import Mock
+
+    stub = tmp_path / ".ava-relay.env"
+    marker = tmp_path / ".ava-relay.pid"
+    if handoff_state == "pending":
+        stub.write_text("original credential", encoding="utf-8")
+    else:
+        marker.write_text("1234\n", encoding="utf-8")
+    request = Mock(return_value={"session_id": 10, "relay_token": "new-token"})
+    monkeypatch.setattr(sessions, "request", request)
+    monkeypatch.setenv("AVA_IMPERSONATION_RELAY_STUB", str(stub))
+
+    assert (
+        cli.cmd_impersonate(
+            _args(
+                "request",
+                "--name",
+                "Another takeover",
+                "--agent",
+                "406",
+                "--as",
+                "Claude: task2",
+                "--ttl",
+                "3600",
+                "--provider",
+                "claude",
+                "--batch-window",
+                "0",
+            )
+        )
+        == 1
+    )
+    request.assert_not_called()
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "fresh Claude takeover session" in output.err
+    if handoff_state == "pending":
+        assert stub.read_text(encoding="utf-8") == "original credential"
+        assert not marker.exists()
+    else:
+        assert not stub.exists()
+        assert marker.read_text(encoding="utf-8") == "1234\n"
+
+
+@pytest.mark.skipif(cli.os.name == "nt", reason="fchmod is POSIX-only")
+def test_failed_relay_stub_write_removes_partial_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stub = tmp_path / ".ava-relay.env"
+
+    def fail_mode(_fd: int, _mode: int) -> None:
+        raise OSError("cannot secure stub")
+
+    monkeypatch.setattr(cli.os, "fchmod", fail_mode)
+    with pytest.raises(OSError, match="cannot secure stub"):
+        cli._write_relay_stub(stub, agent_id=405, session_id=9, token="tok")  # noqa: S106
+    assert not stub.exists()

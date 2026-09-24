@@ -35,8 +35,10 @@ set -a
 # shellcheck disable=SC1090
 . "$STUB"
 set +a
+# Mark consumption before removing the stub, so another request never sees
+# both handoff paths empty while this one-time wrapper is already committed.
+echo $$ >"${STUB%.env}.pid"
 rm -f "$STUB"
 
 echo "ava-relay: stub consumed sid=${SID:-?} agent=${AGENT:-?}; exec relay at $(date -u +%FT%TZ)" >>"$LOG"
-echo $$ >"${STUB%.env}.pid"
 exec "$RELAY_PY" -m cli impersonate relay "$AGENT" --session "$SID" --provider claude

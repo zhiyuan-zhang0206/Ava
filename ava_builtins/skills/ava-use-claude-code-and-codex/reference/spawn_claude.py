@@ -484,7 +484,6 @@ def _run_takeover_launch(
                 "launch with --no-relay-resident to use the executor-armed flow"
             )
         plugin_dir = candidate.resolve()
-        _relay_stub_path(workspace).unlink(missing_ok=True)  # never consume a stale credential
     key = coding_session_owner.canonical_key(workspace, tool="claude")
     claim = _claim_canonical(
         key,
@@ -505,6 +504,10 @@ def _run_takeover_launch(
     owner_agent_id = owner.owner_agent_id
     sid: int | None = None
     try:
+        if plugin_dir is not None:
+            stub = _relay_stub_path(workspace)
+            stub.unlink(missing_ok=True)  # never consume a stale credential
+            Path(f"{str(stub).removesuffix('.env')}.pid").unlink(missing_ok=True)
         _pretrust(workspace)
         sid = ava.shell.sessions.new(name=expected_suffix, ttl=ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)

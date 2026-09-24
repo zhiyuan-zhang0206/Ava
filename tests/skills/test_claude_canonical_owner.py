@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
+import os
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import replace
@@ -255,12 +257,38 @@ def test_resident_launch_clears_a_stale_credential_stub(
     workspace = Path(launching.key.workspace)
     stub = spawn_claude._relay_stub_path(workspace)
     stub.write_text("SID=9\nAGENT=41\nAVA_IMPERSONATION_RELAY_TOKEN=stale\n", encoding="utf-8")
+    marker = workspace / ".ava-relay.pid"
+    marker.write_text("1234\n", encoding="utf-8")
 
     assert spawn_claude._launch(workspace, None, None, 3600, None, "Fix login", "brief") == 0
 
     assert not stub.exists()
+    assert not marker.exists()
     assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in sent[0]
     assert "--plugin-dir" in sent[0]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="resident wrapper requires POSIX")
+def test_relay_wrapper_marks_the_standby_stub_consumed(tmp_path: Path) -> None:
+    stub = tmp_path / ".ava-relay.env"
+    stub.write_text("SID=9\nAGENT=41\nAVA_IMPERSONATION_RELAY_TOKEN=token\n", encoding="utf-8")
+    wrapper = _REFERENCE / "ava-relay" / "scripts" / "relay-wrapper.sh"
+    result = subprocess.run(  # noqa: S603 - wrapper path is fixed in this checkout
+        ["bash", str(wrapper)],
+        env=os.environ
+        | {
+            "AVA_IMPERSONATION_RELAY_STUB": str(stub),
+            "AVA_IMPERSONATION_RELAY_PY": "/bin/true",
+            "AVA_IMPERSONATION_RELAY_STUB_WAIT_SECONDS": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not stub.exists()
+    assert int((tmp_path / ".ava-relay.pid").read_text(encoding="utf-8")) > 0
 
 
 def test_start_receipt_survives_a_dead_session_at_the_enter_retry(
@@ -452,11 +480,17 @@ def test_takeover_launch_refuses_a_workspace_with_a_live_generation(
         return coding_session_owner.CodingSessionClaim(action="adopt", owner=record)
 
     monkeypatch.setattr(spawn_claude, "_claim_canonical", _claim)
+    stub = Path(record.key.workspace) / ".ava-relay.env"
+    marker = Path(record.key.workspace) / ".ava-relay.pid"
+    stub.write_text("current credential", encoding="utf-8")
+    marker.write_text("1234\n", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="fresh coding workspace"):
         spawn_claude._launch(
             Path(record.key.workspace), None, None, 3600, None, "Fix login", "the briefing"
         )
+    assert stub.read_text(encoding="utf-8") == "current credential"
+    assert marker.read_text(encoding="utf-8") == "1234\n"
 
 
 @pytest.mark.parametrize(
