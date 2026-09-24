@@ -770,14 +770,14 @@ def test_stall_verdict_closes_run_row(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # QA P2-1: a stall-guard hard exit closes its run-history row ok=false
-    # (like a crash / command stall), so the run drawer shows the failure
-    # instead of a forever-in-progress row.
+    # so the run drawer shows the failure instead of a forever-in-progress row.
     import gateway.schedule_runner as sr
 
     sid = _insert_schedule(db_conn, script="x = 1\n")
     run_id = sr._record_run_start(sid)
     exited: list[int] = []
     monkeypatch.setattr(sr.os, "_exit", exited.append)
+    monkeypatch.setattr(sr.shared.proc, "kill_process_tree", lambda *_args, **_kwargs: None)
 
     sr._stall_action(sid, "stalled in foo", run_id)
 

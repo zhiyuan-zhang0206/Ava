@@ -26,6 +26,8 @@ A **schedule** is a **resident process** supervised by the gateway (supervised r
 - Materializes the script to `$AVA_HOME/schedules/<id>/`
 - Binds the `schedule:<id>` actor identity (so `ava.agents.*` invocations are attributed to the schedule)
 - `.py` scripts are executed in-process via `runpy`; other commands are run as subprocesses
+- **Stall guard**: a stable deepest non-park frame beyond `schedule_stall_timeout_seconds` records failure and hard-exits 1. Wrapped sleep/sleep-family waits park, as do subprocess's `_wait` and selectors' `select` immediately inside subprocess's `_communicate`. Caller `timeout=` bounds child waits; its absence is accepted. Spawn, argument conversion, stdin flush and other selectors stay guarded. Leaving a park resets the stall budget.
+- **Hard-exit cleanup**: retain PID-checked runner descendants before TERM, allow 3 seconds of grace, then KILL survivors and reap for up to 5 seconds. The runner, PTY shell and unrelated group members are excluded; no group signals. `setsid()` children stay covered. Pre-capture reparented/double-fork daemons and later births are script-owned exemptions. Unsignalable/uninterruptible survivors cannot hold the exit indefinitely.
 - **Exit means terminal**: script exits cleanly with rc=0 → runner writes `status='completed'` before exiting (the resident process finished, manager will not restart); non-zero rc / uncaught exception → traceback written to `schedules.last_error` (crash, handed to manager to restart); SIGTERM/SIGHUP active kill → nothing written, not counted as a crash
 
 ### Built-in Cron Slot Claims (`schedules/catchup.py`)

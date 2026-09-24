@@ -322,10 +322,16 @@ def request_stop(pid: int) -> None:
         return
 
 
-def kill_process_tree(pid: int, *, grace_s: float = _TERMINATE_GRACE_S) -> None:
+def kill_process_tree(
+    pid: int, *, grace_s: float = _TERMINATE_GRACE_S, include_root: bool = True
+) -> None:
     """Take down `pid` **and every descendant**: terminate the tree, wait up to
     `grace_s`, then hard-kill whatever is still standing. A pid that is already
     gone is a no-op.
+
+    With ``include_root=False``, capture and terminate only descendants. This
+    lets a hard-exiting owner clean up its children without signalling itself
+    or its process group (which may also contain its PTY shell).
 
     Escalation (terminate → wait → kill) rather than a straight kill for one
     reason only, spelled out at `_TERMINATE_GRACE_S`: git unlinks its lockfiles
@@ -346,7 +352,9 @@ def kill_process_tree(pid: int, *, grace_s: float = _TERMINATE_GRACE_S) -> None:
     """
     try:
         parent = psutil.Process(pid)
-        tree = [*parent.children(recursive=True), parent]
+        tree = parent.children(recursive=True)
+        if include_root:
+            tree.append(parent)
     except _GONE:
         return
 

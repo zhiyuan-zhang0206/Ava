@@ -19,7 +19,7 @@ cannot close (a SIGTERM/SIGHUP kill, a manager SIGKILL on stop/restart/
 edited-script save) stays ``ok = NULL`` until the ScheduleManager's reconcile
 sweep closes it as ``interrupted`` — a NULL row is legitimate only while the
 schedule has a live session; a stall-guard hard exit closes it ``ok = false``
-before dying.
+and reaps owned descendants before dying.
 
 The ScheduleManager launches this inside a session named
 ``ava-schedule-<id>`` and keeps it up (with a circuit breaker) if it
@@ -47,6 +47,7 @@ from types import FrameType
 from loguru import logger
 
 import shared.db
+import shared.proc
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.paths import ava_home, prod_service_checkout_error
@@ -69,6 +70,12 @@ _STALL_CHECK_INTERVAL_S = settings.gateway.schedule_stall_check_interval_seconds
 # subprocess's blocking waitpid or the selector wait immediately inside
 # _communicate. Spawn, argument conversion, and stdin.flush stay guarded.
 _PARK_FRAME_NAMES = frozenset({"sleep", "wait", "wait_for", "run_forever", "acquire"})
+
+# Cache the code's filenames, the same identities the sampled frames carry.
+# Unlike module __file__, these also work with loaders that omit __file__;
+# a missing attribute must not turn every guard tick into a skipped check.
+_SUBPROCESS_FILENAME = subprocess.Popen.wait.__code__.co_filename
+_SELECTORS_FILENAME = selectors.SelectSelector.select.__code__.co_filename
 
 
 def _schedule_dir(schedule_id: int) -> Path:
@@ -213,14 +220,22 @@ def _restore_park_detection() -> None:
 
 def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
     """The stall verdict: record ``last_error``, close the run-history row as
-    failed (a hard-exit is an abnormal end, like a crash), then hard-exit so
-    the ScheduleManager's crash path (backoff + breaker) relaunches the
+    failed (a hard-exit is an abnormal end, like a crash), reap descendants,
+    then hard-exit so the ScheduleManager's crash path (backoff + breaker) relaunches the
     schedule."""
     with suppress(Exception):
         _record_error(schedule_id, message)
     logger.error("Schedule {} {}", schedule_id, message)
     _record_run_end(run_id, ok=False, note=f"stalled ({_STALL_TIMEOUT_S:.0f}s)")
-    os._exit(1)  # hard exit — the schedule manager owns the restart
+    try:
+        # Snapshot descendants while ancestry still proves ownership. Retain
+        # their identities through TERM/KILL; never signal the shared PTY group.
+        # setsid alone stays covered; already-reparented daemons are exempt.
+        shared.proc.kill_process_tree(os.getpid(), include_root=False)
+    except Exception:
+        logger.exception("Schedule {} child cleanup failed", schedule_id)
+    finally:
+        os._exit(1)  # hard exit — the schedule manager owns the restart
 
 
 def _is_parked_frame(frame: FrameType) -> bool:
@@ -228,15 +243,15 @@ def _is_parked_frame(frame: FrameType) -> bool:
     if frame.f_code.co_name in _PARK_FRAME_NAMES:
         return True
     signature = (frame.f_code.co_filename, frame.f_code.co_name)
-    if signature == (subprocess.__file__, "_wait"):
+    if signature == (_SUBPROCESS_FILENAME, "_wait"):
         return True
-    if signature != (selectors.__file__, "select"):
+    if signature != (_SELECTORS_FILENAME, "select"):
         return False
     parent = frame.f_back
     return parent is not None and (
         parent.f_code.co_filename,
         parent.f_code.co_name,
-    ) == (subprocess.__file__, "_communicate")
+    ) == (_SUBPROCESS_FILENAME, "_communicate")
 
 
 def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
