@@ -48,10 +48,12 @@ granularity for write volume and must go through this protocol.
    checkpoint write rate / `checkpoint_blobs` growth over one full day against
    the pre-canary baseline. Compare the result with N=4 before accepting a
    larger recovery window.
-4. **Forced kill → resurrect recovery check** (the thing that could regress):
-   for each canary, `ava agents kill <id>` mid-turn (hard stop — `terminate` is
-   graceful and lets the agent finish its turn), then `ava agents resurrect
-   <id>` / send it a message and confirm:
+4. **Force interruption → resurrect recovery check** (the thing that could regress):
+   for each canary, `ava agents kill <id>` mid-turn (an interruption request —
+   `terminate` is graceful and lets the agent finish its turn). An `enqueued`
+   response confirms acceptance, not completed exit or resource settlement.
+   After the original host settles the turn and its resources, run `ava agents
+   resurrect <id>` / send it a message and confirm:
    - the agent comes back with its conversation state intact;
    - up to N-1 super-steps replay and the final state is consistent
      (no stuck "in flight" node, no duplicate-visible inbound loss — the
@@ -82,7 +84,7 @@ granularity for write volume and must go through this protocol.
 
 - One full day at the proposed interval on the canaries with write-volume
   reduction observed against the N=4 baseline.
-- Forced kill → resurrect passes for every canary (step 4).
+- Force interruption → resurrect passes for every canary (step 4).
 - No new watchdog respawns, wedged-loop alerts, or lost-inbound reports on
   the canaries.
 - Fleet-graph / history / time-travel reads over the canaries' checkpoints
