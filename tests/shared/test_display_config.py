@@ -12,6 +12,9 @@ DISPLAY_RANGES = (
     ("notices_resolved_default_page", 1, 100),
     ("shell_capture_default_lines", 50, 2000),
     ("timeline_history_page_base", 1, 1000),
+    ("timeline_window_activation_rows", 2, 5000),
+    ("timeline_window_turn_rows", 1, 5000),
+    ("timeline_window_measure_rows", 1, 4999),
 )
 
 
