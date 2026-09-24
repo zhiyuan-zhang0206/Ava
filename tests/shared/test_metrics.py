@@ -2,7 +2,7 @@
 SQL-aggregated metrics path.
 
 These are the pure helpers (`pctiles`, `third_of`, `_fix_kinds`) that
-`shared.metrics_aggregate` reuses so the math cannot drift between the SQL
+`shared.metrics.metrics_aggregate` reuses so the math cannot drift between the SQL
 aggregation and the rendered report. The per-row computation units they used
 to accompany (EventRow/EventIndex/@metric_unit) were retired with the SQL
 aggregation — see the module docstring in shared/metrics/report.py.

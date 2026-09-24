@@ -28,7 +28,7 @@ Panel ids: core panels carry their as-is id (``panel_id``), row ids come from
 the section registry, and plugin ids are allocated from ``_PLUGIN_ID_BASE``
 (1001) per sorted plugin block without gaps.
 
-The plugin side of the spec set comes from ``shared.grafana_dashboard_supply``
+The plugin side of the spec set comes from ``shared.metrics.grafana_dashboard_supply``
 (``load_repo_plugin_specs`` / ``load_installed_plugin_specs`` /
 ``collect_plugin_specs``) — kept out of this module so the renderer stays a
 pure function with no import machinery or database access.

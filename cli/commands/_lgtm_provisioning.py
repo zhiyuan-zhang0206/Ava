@@ -4,7 +4,7 @@ Split out of ``_lgtm_native`` when the runtime-rendered dashboard (S3) pushed
 that module over the per-file line ceiling. Every provisioning file is
 copied VERBATIM under the content-hash user-edit guard — except
 ``dashboards/ava-ops-main.json``, which is generated from the metric
-registries through ``shared.grafana_dashboard_supply``.
+registries through ``shared.metrics.grafana_dashboard_supply``.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _render_ava_ops_dashboard(dest: Path, hashes_path: Path, key: str) -> None:
     copies. A render failure keeps the previous file and emits a warning
     event — a dashboard must never fail converge.
     """
-    from shared.grafana_dashboard_supply import render_dashboard_json
+    from shared.metrics.grafana_dashboard_supply import render_dashboard_json
 
     try:
         rendered, failed = render_dashboard_json()

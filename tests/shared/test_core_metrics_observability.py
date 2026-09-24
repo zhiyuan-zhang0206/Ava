@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from shared.metrics.core import core_metrics
-from shared.metrics_logql import validate_logql
+from shared.metrics.metrics_logql import validate_logql
 from shared.plugin_metrics import InvalidMetricQuery, render_query, render_targets
 
 EXPECTED = {
@@ -175,7 +175,7 @@ def test_logql_template_validation_rejects_drift() -> None:
     """The template-form validator refuses: a query that lost the stream
     selector, one without the json pipeline, and one that hardcodes an
     event filter instead of the placeholders."""
-    from shared.metrics_logql import _validate_logql_template
+    from shared.metrics.metrics_logql import _validate_logql_template
 
     with pytest.raises(InvalidMetricQuery, match="stream"):
         _validate_logql_template(

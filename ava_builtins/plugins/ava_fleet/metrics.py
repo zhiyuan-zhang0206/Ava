@@ -1,6 +1,6 @@
 """ava_fleet Grafana + inspector metrics — registered at import time.
 
-``shared/grafana_dashboard_supply`` imports this module (inside a
+``shared/metrics/grafana_dashboard_supply`` imports this module (inside a
 PluginContext) to collect the registrations for the rendered Ava Ops
 dashboard (``ava lgtm render``, task #3697). Two metrics:
 

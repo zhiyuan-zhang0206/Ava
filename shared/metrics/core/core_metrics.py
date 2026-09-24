@@ -18,7 +18,7 @@ then one row per plugin. The inspector surface (``gateway/routers/
 _plugin_metrics.py``) builds both registries in process — task #180 PR D
 replaced the generator's state snapshot ($AVA_HOME/state/plugin_metrics.json),
 which froze when the generator did not survive the archive->public port. The
-dashboard render is being rebuilt (task #3697): ``shared.grafana_dashboard``
+dashboard render is being rebuilt (task #3697): ``shared.metrics.grafana_dashboard``
 renders the registries into the dashboard JSON, previewed by ``ava lgtm
 render`` and wired into converge by slice S3.
 

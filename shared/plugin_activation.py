@@ -41,7 +41,7 @@ failure is swallowed (`Exception` only, so cancel/timeout injection still
 propagates) and never perturbs hook or wrap semantics — no state update is
 changed, no result or exception is altered. No new table: the events land in the
 unified stream `sdk_call` already uses, so `collect.py` and
-`shared.metrics_aggregate` read them with no new plumbing.
+`shared.metrics.metrics_aggregate` read them with no new plumbing.
 """
 
 from __future__ import annotations

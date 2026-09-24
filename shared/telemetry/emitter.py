@@ -385,7 +385,7 @@ def _write_batch(events: list[Event]) -> None:
         return
     _append_jsonl(events)
     try:
-        from shared.observed_metrics import project_events
+        from shared.metrics.observed_metrics import project_events
 
         project_events(events)
     except Exception as exc:
@@ -786,7 +786,7 @@ def _drain_on_exit() -> None:
     pipeline.flush()
     pipeline.stop()
     with contextlib.suppress(Exception):
-        from shared.observed_metrics import close_projection
+        from shared.metrics.observed_metrics import close_projection
 
         close_projection()
     with contextlib.suppress(Exception):

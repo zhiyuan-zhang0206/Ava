@@ -1,6 +1,6 @@
 """Loki-aggregate metrics path — golden output lock (task #1197 A3).
 
-`shared.metrics_aggregate.fetch_aggregate` + `build_report_from_aggregate` +
+`shared.metrics.metrics_aggregate.fetch_aggregate` + `build_report_from_aggregate` +
 `agent_rollups_from_aggregate` are the ONLY metrics path after the /api/metrics
 RSS fix (the per-row reference implementation was retired with the SQL
 aggregation — single-day materialization outgrew 430K+ rows). These tests lock
@@ -19,7 +19,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from shared.metrics_aggregate import (
+from shared.metrics.metrics_aggregate import (
     agent_rollups_from_aggregate,
     build_report_from_aggregate,
     fetch_aggregate,

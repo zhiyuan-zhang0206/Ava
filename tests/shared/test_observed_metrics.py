@@ -12,9 +12,9 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
-from shared import observed_metrics as metrics
 from shared import telemetry
 from shared.config import settings
+from shared.metrics import observed_metrics as metrics
 from shared.telemetry import emitter
 
 _AT = datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC)

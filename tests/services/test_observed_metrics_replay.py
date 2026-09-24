@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 from services.events_maintenance import observed_metrics as replay
-from shared.observed_metrics import observe_row, write_observations
+from shared.metrics.observed_metrics import observe_row, write_observations
 
 
 def _source(db: psycopg.Connection, event_id: int = 1) -> dict[str, Any]:

@@ -39,7 +39,7 @@ from psycopg_pool import ConnectionPool
 from gateway import loki_events, loki_query_budget
 from gateway.schemas import MetricPoint, PluginMetricResult
 from shared.metrics.core import core_metrics
-from shared.metrics_logql import validate_logql
+from shared.metrics.metrics_logql import validate_logql
 from shared.plugin_context import PluginContext
 from shared.plugin_metrics import (
     MetricSpec,

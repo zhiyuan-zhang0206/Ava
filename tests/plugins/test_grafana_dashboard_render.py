@@ -3,8 +3,8 @@
 The provisioning file ``deploy/lgtm/config/grafana/provisioning/dashboards/
 ava-ops-main.json`` is on its way to becoming a render of the metric
 registries instead of a hand-maintained file. This module locks the renderer
-(``shared.grafana_dashboard``) and the plugin suppliers
-(``shared.grafana_dashboard_supply``):
+(``shared.metrics.grafana_dashboard``) and the plugin suppliers
+(``shared.metrics.grafana_dashboard_supply``):
 
 1. **Fidelity vs the as-is board** — for every registered ``grafana`` spec,
    the rendered panel must equal its counterpart in the current provisioning
@@ -56,7 +56,8 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from shared.grafana_dashboard import (
+from shared.metrics.core import core_metrics
+from shared.metrics.grafana_dashboard import (
     _CORE_SECTIONS_PREFIX,
     _CORE_SECTIONS_SUFFIX,
     DashboardRenderError,
@@ -64,11 +65,10 @@ from shared.grafana_dashboard import (
     render_dashboard,
     render_to_json,
 )
-from shared.grafana_dashboard_supply import (
+from shared.metrics.grafana_dashboard_supply import (
     load_installed_plugin_specs,
     load_repo_plugin_specs,
 )
-from shared.metrics.core import core_metrics
 from shared.plugin_context import PluginContext
 from shared.plugin_metrics import MetricSpec, clear_registry, registered_metrics
 
@@ -395,8 +395,8 @@ def test_render_is_deterministic_and_environment_independent(
         "import hashlib, sys;"
         f"sys.path.insert(0, {str(_REPO_ROOT)!r});"
         "from shared.metrics.core import core_metrics;"
-        "from shared.grafana_dashboard import render_dashboard, render_to_json;"
-        "from shared.grafana_dashboard_supply import collect_plugin_specs;"
+        "from shared.metrics.grafana_dashboard import render_dashboard, render_to_json;"
+        "from shared.metrics.grafana_dashboard_supply import collect_plugin_specs;"
         "plugins = collect_plugin_specs();"
         "core = core_metrics.collect_core_metrics();"
         "print(hashlib.sha256(render_to_json(render_dashboard(core, plugins.specs)).encode()).hexdigest())"
@@ -450,7 +450,7 @@ def test_repo_supplier_reports_a_broken_plugin_loudly(
     )
     (plugins_dir / "broken_one").mkdir()
     (plugins_dir / "broken_one" / "metrics.py").write_text("raise RuntimeError('boom')\n")
-    import shared.grafana_dashboard_supply as supply
+    import shared.metrics.grafana_dashboard_supply as supply
 
     monkeypatch.setattr(supply, "_REPO_PLUGINS_DIR", plugins_dir)
     for name in ("good_one", "broken_one"):
