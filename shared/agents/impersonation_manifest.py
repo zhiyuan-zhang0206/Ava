@@ -10,9 +10,12 @@ durable handoff ledger.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, replace
+from collections.abc import Generator
+from contextlib import contextmanager
+from contextvars import ContextVar  # noqa: TID251 -- SDK async finally needs task-local admission
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from threading import Lock
+from threading import Condition, Lock
 from typing import Any
 
 import psycopg
@@ -47,8 +50,51 @@ class LocalParticipant:
     source_key: str
 
 
+@dataclass
+class _CaptureGate:
+    """Per-participant close fence for local producer work."""
+
+    participant: LocalParticipant
+    admission_closed: bool = False
+    in_flight: int = 0
+    capture_failure_pending: bool = False
+    condition: Condition = field(default_factory=Condition, repr=False)
+
+    def admit(self) -> _CaptureAdmission | None:
+        with self.condition:
+            if self.admission_closed:
+                return None
+            self.in_flight += 1
+        return _CaptureAdmission(self)
+
+    def close_and_wait(self, timeout: float) -> bool:
+        with self.condition:
+            self.admission_closed = True
+            self.condition.wait_for(lambda: self.in_flight == 0, timeout=timeout)
+            return self.in_flight == 0
+
+
+@dataclass
+class _CaptureAdmission:
+    """One admitted SDK call that may still emit after close starts."""
+
+    gate: _CaptureGate
+    released: bool = False
+
+    def release(self) -> None:
+        if self.released:
+            return
+        self.released = True
+        _release_capture_admission(self.gate)
+
+
 _participant_lock = Lock()
 _active_participant: LocalParticipant | None = None
+_active_capture_gate: _CaptureGate | None = None
+_capture_gates: dict[LocalParticipant, _CaptureGate] = {}
+_sdk_capture_admission: ContextVar[_CaptureAdmission | None] = ContextVar(
+    "impersonation_manifest_sdk_capture_admission", default=None
+)
 
 
 def session_tag(agent_id: int, session_id: int) -> str:
@@ -109,24 +155,80 @@ def open_local_participant(lease_id: str, *, agent_id: int, source_key: str) -> 
 
 def bind_local_participant(participant: LocalParticipant) -> None:
     """Bind the current external controller to its already durable receipt."""
-    global _active_participant  # noqa: PLW0603 - one external attachment per process
+    global _active_capture_gate, _active_participant  # noqa: PLW0603 - one external attachment per process
     with _participant_lock:
         if _active_participant is not None:
             raise RuntimeError("An impersonation event participant is already bound")
         _active_participant = participant
+        gate = _CaptureGate(participant)
+        _capture_gates[participant] = gate
+        _active_capture_gate = gate
 
 
 def unbind_local_participant(participant: LocalParticipant) -> None:
     """Remove a participant binding only after its receipt closure path ran."""
-    global _active_participant  # noqa: PLW0603 - one external attachment per process
+    global _active_capture_gate, _active_participant  # noqa: PLW0603 - one external attachment per process
     with _participant_lock:
         if _active_participant == participant:
             _active_participant = None
+            _active_capture_gate = None
 
 
 def _bound_participant() -> LocalParticipant | None:
     with _participant_lock:
         return _active_participant
+
+
+def _bound_capture_gate() -> _CaptureGate | None:
+    with _participant_lock:
+        return _active_capture_gate
+
+
+def _capture_gate(participant: LocalParticipant) -> _CaptureGate | None:
+    with _participant_lock:
+        return _capture_gates.get(participant)
+
+
+def admit_local_sdk_call() -> _CaptureAdmission | None:
+    """Admit one SDK call before its body can defer telemetry to ``finally``."""
+    gate = _bound_capture_gate()
+    return None if gate is None else gate.admit()
+
+
+@contextmanager
+def admitted_local_sdk_call() -> Generator[None, None, None]:
+    """Carry one pre-close SDK admission through its eventual emit ``finally``."""
+    admission = admit_local_sdk_call()
+    token = _sdk_capture_admission.set(admission)
+    try:
+        yield
+    finally:
+        _sdk_capture_admission.reset(token)
+        if admission is not None:
+            admission.release()
+
+
+def close_local_participant_admission(participant: LocalParticipant, *, timeout: float) -> bool:
+    """Close new local admissions and bounded-wait for already admitted work."""
+    gate = _capture_gate(participant)
+    if gate is None:
+        raise RuntimeError("Missing local impersonation event capture gate")
+    return gate.close_and_wait(timeout)
+
+
+def _release_capture_admission(gate: _CaptureGate) -> None:
+    should_seal = False
+    with gate.condition:
+        if gate.in_flight <= 0:
+            raise RuntimeError("Impersonation event capture admission underflow")
+        gate.in_flight -= 1
+        gate.condition.notify_all()
+        should_seal = gate.admission_closed and gate.in_flight == 0
+    if should_seal:
+        try:
+            seal_local_participant(gate.participant)
+        except Exception:
+            logger.exception("Could not seal drained impersonation event receipt")
 
 
 def _is_local_eligible(event: Event, participant: LocalParticipant) -> bool:
@@ -153,9 +255,18 @@ def capture_local_event(event: Event) -> Event:
     failed whenever the database is reachable, leaving the lease honestly
     pending instead of making a best-effort sink failure look complete.
     """
-    participant = _bound_participant()
+    admission = _sdk_capture_admission.get()
+    participant = admission.gate.participant if admission is not None else _bound_participant()
     if participant is None or not _is_local_eligible(event, participant):
         return event
+    transient_admission: _CaptureAdmission | None = None
+    if admission is None:
+        gate = _bound_capture_gate()
+        if gate is None or gate.participant != participant:
+            return event
+        transient_admission = gate.admit()
+        if transient_admission is None:
+            return event
     tagged = replace(
         event,
         attributes={
@@ -167,7 +278,10 @@ def capture_local_event(event: Event) -> Event:
         _insert_local_item(participant, tagged)
     except Exception:
         logger.exception("Impersonation event-manifest local capture failed")
-        _mark_participant_failed(participant, "capture_failed")
+        _mark_participant_failed(participant)
+    finally:
+        if transient_admission is not None:
+            transient_admission.release()
     return tagged
 
 
@@ -211,19 +325,56 @@ def _insert_local_item(participant: LocalParticipant, event: Event) -> None:
                 raise RuntimeError("Impersonation event id maps to conflicting event bytes")
 
 
-def _mark_participant_failed(participant: LocalParticipant, reason: str) -> None:
+def _mark_participant_failed(participant: LocalParticipant) -> None:
+    """Record a capture failure without allowing a transient writer loss to erase it."""
+    gate = _capture_gate(participant)
+    if gate is not None:
+        with gate.condition:
+            gate.capture_failure_pending = True
     try:
-        with write_transaction() as conn:
-            lease = lock_lease(conn, participant.lease_id)
+        _persist_capture_failure(participant)
+    except Exception:
+        logger.exception("Could not record impersonation event-manifest capture failure")
+        return
+    if gate is not None:
+        with gate.condition:
+            gate.capture_failure_pending = False
+    _alert_capture_failure(participant)
+
+
+def _persist_capture_failure(participant: LocalParticipant) -> None:
+    """Durably turn an open receipt into failed before alert delivery is attempted."""
+    with write_transaction() as conn:
+        lease = lock_lease(conn, participant.lease_id)
+        receipt = conn.execute(
+            "SELECT state FROM agent_impersonation_event_participants "
+            "WHERE lease_id=%s AND source_key=%s FOR UPDATE",
+            (participant.lease_id, participant.source_key),
+        ).fetchone()
+        if receipt is None:
+            raise RuntimeError("Missing local impersonation event receipt")
+        if receipt[0] == "open":
             conn.execute(
-                "SELECT seal_impersonation_event_participant(%s,%s,'failed',%s,NULL,NULL)",
-                (participant.lease_id, participant.source_key, reason),
+                "SELECT seal_impersonation_event_participant(%s,%s,'failed','capture_failed',NULL,NULL)",
+                (participant.lease_id, participant.source_key),
             )
             conn.execute(
                 "UPDATE agent_impersonations SET event_delivery_pending_reason='capture_failed' "
                 "WHERE id=%s AND events_completed_at IS NULL",
                 (participant.lease_id,),
             )
+        elif receipt[0] != "failed":
+            raise RuntimeError("Cannot record a capture failure after receipt sealing")
+        # Keep ``lease`` live so its dict-row shape is checked before alerting.
+        if str(lease["id"]) != participant.lease_id:
+            raise RuntimeError("Local receipt belongs to another lease")
+
+
+def _alert_capture_failure(participant: LocalParticipant) -> None:
+    """Best-effort alert after the failed receipt is committed independently."""
+    try:
+        with write_transaction() as conn:
+            lease = lock_lease(conn, participant.lease_id)
             _upsert_manifest_alert(
                 _alerts_upsert(),
                 conn,
@@ -232,7 +383,7 @@ def _mark_participant_failed(participant: LocalParticipant, reason: str) -> None
                 datetime.now(UTC),
             )
     except Exception:
-        logger.exception("Could not record impersonation event-manifest capture failure")
+        logger.exception("Could not alert on impersonation event-manifest capture failure")
 
 
 def _alerts_upsert() -> Any:
@@ -243,6 +394,15 @@ def _alerts_upsert() -> Any:
 
 def seal_local_participant(participant: LocalParticipant) -> None:
     """Seal one receipt after its controller has finished admitted work."""
+    gate = _capture_gate(participant)
+    if gate is not None:
+        with gate.condition:
+            retry_capture_failure = gate.capture_failure_pending
+        if retry_capture_failure:
+            _mark_participant_failed(participant)
+            with gate.condition:
+                if gate.capture_failure_pending:
+                    raise RuntimeError("Local capture failure is not durably recorded")
     with write_transaction() as conn:
         lease = lock_lease(conn, participant.lease_id)
         if not is_protocol_v1(lease):

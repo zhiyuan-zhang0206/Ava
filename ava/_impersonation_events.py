@@ -19,6 +19,9 @@ from shared.db_transaction import write_transaction
 from shared.impersonation_events import consume_events
 from shared.impersonation_history import event_belongs_to_agent
 
+_EVENT_PAGE_SIZE = 1000
+_EVENT_OFFSET_MAX = 10_000
+
 
 def consume_recorded_events(session: dict[str, Any], *, page_budget: int = 4) -> None:
     """Consume a bounded portion of the fixed activation/end interval.
@@ -69,7 +72,7 @@ def consume_recorded_events(session: dict[str, Any], *, page_budget: int = 4) ->
                 "to": window["end"],
                 # 1000 = the events API's page ceiling (le); the durable
                 # cursor resumes across steps (task #3696 exception inventory).
-                "limit": 1000,
+                "limit": _EVENT_PAGE_SIZE,
                 "offset": window["offset"],
                 **_session_filter(session, protocol_v1=protocol_v1),
             },
@@ -87,10 +90,10 @@ def consume_recorded_events(session: dict[str, Any], *, page_budget: int = 4) ->
         )
         if not page["meta"]["has_more"]:
             cursor.pop(0)
-        elif window["offset"] < 10_000:
+        elif window["offset"] + _EVENT_PAGE_SIZE <= _EVENT_OFFSET_MAX:
             # Walk to the API's offset ceiling (le=10_000); past it the window
             # is bisected below.
-            window["offset"] += 1000
+            window["offset"] += _EVENT_PAGE_SIZE
         else:
             start, end = (
                 datetime.fromisoformat(window["start"]),
@@ -186,25 +189,39 @@ def _indexed_manifest_items(
         expected = frozen_items(conn, lease_id)
     actual: dict[str, tuple[str, str]] = {}
     session = f"{lease['agent_id']}:{lease['session_id']}"
-    max_items = settings.general.impersonation_event_manifest_max_items
     for kind, filters in (
         ("sdk_call", {"event_name": "sdk_call", "agent_id": lease["agent_id"]}),
         ("api_event", {"category": "audit"}),
     ):
-        for offset in range(0, max_items + 1, 1000):
+        if _read_indexed_event_family(lease, kind, filters, session, actual):
+            return expected, actual, True
+    return expected, actual, False
+
+
+def _read_indexed_event_family(
+    lease: dict[str, Any],
+    kind: str,
+    filters: dict[str, Any],
+    session: str,
+    actual: dict[str, tuple[str, str]],
+) -> bool:
+    """Read one tagged family without issuing an API offset above its ceiling."""
+    end = lease["ended_at"] + timedelta(
+        seconds=settings.general.impersonation_event_clock_skew_guard_seconds
+    )
+    windows = [(lease["manifest_envelope_floor_at"], end)]
+    while windows:
+        start, finish = windows.pop()
+        offset = 0
+        while True:
             response: httpx.Response = _get(
                 "/api/events",
                 params={
                     **filters,
-                    "from": lease["manifest_envelope_floor_at"].isoformat(),
-                    "to": (
-                        lease["ended_at"]
-                        + timedelta(
-                            seconds=settings.general.impersonation_event_clock_skew_guard_seconds
-                        )
-                    ).isoformat(),
+                    "from": start.isoformat(),
+                    "to": finish.isoformat(),
                     "impersonation_session": session,
-                    "limit": 1000,
+                    "limit": _EVENT_PAGE_SIZE,
                     "offset": offset,
                 },
             )
@@ -218,9 +235,18 @@ def _indexed_manifest_items(
                 item = (event["line_sha256"], event_kind)
                 previous = actual.setdefault(key, item)
                 if previous != item:
-                    return expected, actual, True
+                    return True
             if not page["meta"]["has_more"]:
                 break
-        else:
-            return expected, actual, True
-    return expected, actual, False
+            if offset + _EVENT_PAGE_SIZE <= _EVENT_OFFSET_MAX:
+                offset += _EVENT_PAGE_SIZE
+                continue
+            midpoint = start + (finish - start) / 2
+            if midpoint in (start, finish):
+                raise RuntimeError("Too many tagged events at one timestamp for the event API")
+            # The gateway's time bounds can overlap at midpoint. Stable IDs
+            # collapse that overlap while the smaller windows keep every
+            # request at or below the public offset ceiling.
+            windows.extend(((midpoint, finish), (start, midpoint)))
+            break
+    return False

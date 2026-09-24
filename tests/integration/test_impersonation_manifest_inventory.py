@@ -15,6 +15,7 @@ import pytest
 _AUDIT_HELPERS = frozenset(
     {"insert_event_log", "insert_event_log_async", "insert_event_log_many", "prepare_event_log"}
 )
+_DIRECT_AUDIT_EMITTERS = frozenset({"emit", "prepare_event"})
 _INVENTORY: dict[str, str] = {
     "agent/_runloop.py:183": "ineligible",
     "agent/_runloop.py:354": "ineligible",
@@ -62,23 +63,71 @@ def _audit_roots(root: Path) -> set[str]:
         ):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = (
-                node.func.id
-                if isinstance(node.func, ast.Name)
-                else (node.func.attr if isinstance(node.func, ast.Attribute) else "")
-            )
-            direct_audit = (
-                name == "prepare_event"
-                and bool(node.args)
-                and isinstance(node.args[0], ast.Constant)
-                and node.args[0].value == "audit"
-            )
-            if name in _AUDIT_HELPERS or direct_audit:
-                found.add(f"{relative}:{node.lineno}")
+        visitor = _AuditRootVisitor()
+        visitor.visit(tree)
+        found.update(f"{relative}:{line}" for line in visitor.lines)
     return found
+
+
+class _AuditRootVisitor(ast.NodeVisitor):
+    """Find helper calls plus direct telemetry construction through aliases."""
+
+    def __init__(self) -> None:
+        self.lines: set[int] = set()
+        self._telemetry_modules: set[str] = set()
+        self._telemetry_functions: set[str] = set()
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            if alias.name == "shared.telemetry":
+                self._telemetry_modules.add(alias.asname or "shared.telemetry")
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "shared":
+            self._telemetry_modules.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "telemetry"
+            )
+        if node.module == "shared.telemetry":
+            for alias in node.names:
+                if alias.name in _DIRECT_AUDIT_EMITTERS:
+                    self._telemetry_functions.add(alias.asname or alias.name)
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if self._is_audit_helper(node) or self._is_direct_audit_emitter(node):
+            self.lines.add(node.lineno)
+        self.generic_visit(node)
+
+    def _is_audit_helper(self, node: ast.Call) -> bool:
+        if isinstance(node.func, ast.Name):
+            return node.func.id in _AUDIT_HELPERS
+        return isinstance(node.func, ast.Attribute) and node.func.attr in _AUDIT_HELPERS
+
+    def _is_direct_audit_emitter(self, node: ast.Call) -> bool:
+        if not _is_audit_category(node):
+            return False
+        if isinstance(node.func, ast.Name):
+            return node.func.id == "prepare_event" or node.func.id in self._telemetry_functions
+        return (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in _DIRECT_AUDIT_EMITTERS
+            and _attribute_name(node.func.value) in self._telemetry_modules
+        )
+
+
+def _is_audit_category(node: ast.Call) -> bool:
+    return (
+        bool(node.args) and isinstance(node.args[0], ast.Constant) and node.args[0].value == "audit"
+    )
+
+
+def _attribute_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return f"{_attribute_name(node.value)}.{node.attr}"
+    return ""
 
 
 def _assert_classified(roots: set[str], inventory: dict[str, str]) -> None:
@@ -116,4 +165,17 @@ def test_an_unclassified_new_audit_construction_root_fails(tmp_path: Path) -> No
         encoding="utf-8",
     )
     with pytest.raises(AssertionError, match="unclassified audit roots"):
+        _assert_classified(_audit_roots(root), {})
+
+
+def test_an_unclassified_aliased_direct_audit_emitter_fails(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "new_producer.py").write_text(
+        "from shared import telemetry as events\n"
+        "def emit():\n"
+        "    events.emit('audit', 'send_message')\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError, match=r"new_producer\.py:3"):
         _assert_classified(_audit_roots(root), {})

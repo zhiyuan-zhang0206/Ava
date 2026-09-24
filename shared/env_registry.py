@@ -74,6 +74,15 @@ from shared.port_block import BLOCK_MAX, BLOCK_SIZE, PORT_OFFSETS
 # a new enum.
 ProcessRole = Literal["gateway", "agent", "runner"]
 
+# The certification proof is a host-local setting, but it is not a general
+# host-child capability.  The root/service launchers project it only into the
+# agent-host finalizer; model-facing sessions and agent children never receive
+# it.  Keeping the alias here makes every boundary use the Settings declaration
+# rather than a second string literal.
+MANIFEST_CERTIFICATION_SECRET_ENV = FIELD_ALIASES[
+    "impersonation_event_manifest_certification_secret"
+]
+
 # ── Passthrough rows (A1: every non-Settings env key declared exactly once) ──
 
 
@@ -530,13 +539,25 @@ def _enabled_provider_key_envs() -> frozenset[str]:
 def session_forward_keys() -> frozenset[str]:
     """The daemon/session child allowlist (settings half) — the host-scope
     settings aliases (machine identity, per-unit health ports, the gateway URL
-    the fetch dials, AVA_HOME). No cluster-scope value, no agent-scope knob, no
-    non-modeled AVA_* identity (audit F-s3-4: the old denylist forwarded
-    AVA_AGENT_ID into daemon sessions). The ambient passthroughs
+    the fetch dials, AVA_HOME), except the certification proof that only the
+    agent-host finalizer receives through its targeted launcher projection. No
+    cluster-scope value, no agent-scope knob, no non-modeled AVA_* identity
+    (audit F-s3-4: the old denylist forwarded AVA_AGENT_ID into daemon
+    sessions). The ambient passthroughs
     (DISPLAY/WAYLAND_DISPLAY/HOME) and the temp-dir vars are applied by
     `child_env`, not part of this set. A new host-scope field is forwarded
-    automatically."""
-    return _scope_aliases("host")
+    automatically unless it is deliberately finalizer-only."""
+    return _scope_aliases("host") - {MANIFEST_CERTIFICATION_SECRET_ENV}
+
+
+def manifest_certification_secret_env() -> dict[str, str]:
+    """Return the proof's one-purpose projection for the agent-host finalizer.
+
+    The secret remains in the root process long enough to launch the finalizer,
+    but never joins the reusable daemon/session or agent-child projections.
+    """
+    value = os.environ.get(MANIFEST_CERTIFICATION_SECRET_ENV)
+    return {MANIFEST_CERTIFICATION_SECRET_ENV: value} if value else {}
 
 
 def _agent_guide_keys() -> frozenset[str]:

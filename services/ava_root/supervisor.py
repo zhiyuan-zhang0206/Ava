@@ -62,8 +62,20 @@ from services.ava_root.manifest import (
     UnitRegistry,
     UnknownUnitError,
 )
+from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+from shared.process_env import inherited_process_env
 
 _log = logging.getLogger(__name__)
+
+_MANIFEST_FINALIZER_UNIT = "agent-host"
+
+
+def _unit_env(unit_id: str) -> dict[str, str]:
+    """Return one root child env with the proof limited to the finalizer."""
+    env = inherited_process_env()
+    if unit_id != _MANIFEST_FINALIZER_UNIT:
+        env.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
+    return env
 
 
 @dataclass(frozen=True, slots=True)
@@ -587,6 +599,7 @@ class Supervisor:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=log_fd,
                 stderr=asyncio.subprocess.STDOUT,
+                env=_unit_env(manifest.id),
                 close_fds=True,
             )
         finally:

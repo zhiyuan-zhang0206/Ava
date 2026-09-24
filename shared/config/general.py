@@ -32,7 +32,7 @@ class GeneralSettings(EnvSettings):
     impersonation_event_manifest_certification_secret: str = Field(
         default="",
         alias="AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET",
-        description="Host-local random secret that authorizes this agent-runner to certify the manifests of leases on its machine. It is never returned by the gateway or readable through the runner database role. Enabling manifest leases requires a distinct nonempty value on every participating agent-runner.",
+        description="Host-local random secret projected only into the agent-host finalizer to certify manifests for leases on its machine. It is never returned by the gateway, readable through the runner database role, or forwarded to sessions or model execute_code children. Enabling manifest leases requires a distinct nonempty value on every participating agent-runner.",
         json_schema_extra={
             "restart_required": "all",
             "writable": False,
