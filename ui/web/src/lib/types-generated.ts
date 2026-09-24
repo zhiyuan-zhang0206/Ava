@@ -7972,11 +7972,12 @@ export interface components {
          *
          *     - `live_count`: current non-terminated count (from agents_meta, not
          *       events; not windowed)
-         *     - `tokens`: windowed telemetry LLM token usage (cached for at most 60s)
+         *     - `tokens`: windowed telemetry LLM token usage (fresh-cache TTL:
+         *       `display.stats_dashboard_cache_ttl_s`, default 60s)
          *     - `cost_usd`: windowed LLM spend in USD, summed from the usage-time
          *       `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;
-         *       events that pre-date the snapshot field contribute 0 (cached for at
-         *       most 60s with `tokens`)
+         *       events that pre-date the snapshot field contribute 0 (shares the
+         *       configured fresh-cache TTL with `tokens`, default 60s)
          *     - `avg_turn_seconds`: windowed avg LLM call wall time
          *       (event=turn_end + ok=true)
          *     - `warnings` / `errors`: raw level totals over the window (critical

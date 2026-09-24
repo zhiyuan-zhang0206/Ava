@@ -42,13 +42,25 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | warning/error `*_dismissed` / `*_net` split | active `event_dismissals` rows (Postgres) applied to the same window's Loki class counts |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`shared/plugin_stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
 
-No standalone daemon: the gateway aggregates on demand. Loki work runs before
-the short Postgres metadata read, so waiting for the global Loki budget never
-holds a pooled DB connection. The four telemetry `llm_usage` token/cost sums
-are full-window instant aggregates and cache for 60s per requested window to
-absorb every other sidebar poll. Turn/warning/error aggregates remain fresh
-and merge the shared helper's contiguous, clock-aligned 12h shards for a
-longer window. The warning/error section reads per-class counts with the
+The gateway caches the whole response per requested window for
+`display.stats_dashboard_cache_ttl_s` (60s by default). After expiry, a payload
+within `display.stats_dashboard_swr_max_s` (300s since the last successful
+recompute) returns immediately with `stale=false`, keeping its original `as_of`.
+One daemon thread per window refreshes through the same pipeline and shared
+Loki query budget. Cold or over-cap requests wait for recompute, joining any
+in-flight refresh before rechecking freshness. A zero SWR cap disables detached
+refresh. Failed refreshes retain the payload and its age, mark subsequent serves
+`stale=true` within the existing failure cap, and back off background retries for
+one fresh TTL. Success clears degradation. Past either applicable cap, requests
+use the synchronous path with its existing failure contract. Transient Loki
+failures emit the same rate-capped stale event described below, even when the
+synchronous failure fallback is disabled. Unexpected non-Loki errors are logged.
+
+Loki work runs before the short Postgres metadata read, so waiting for the
+global Loki budget never holds a pooled DB connection. Token/cost sums combine
+settled UTC-day ledger rows with live Loki tails; turn/warning/error aggregates
+merge the shared helper's contiguous, clock-aligned 12h shards for a longer
+window. The warning/error section reads per-class counts with the
 events-maintenance daemon's grouped query and applies its class arithmetic
 (`resolution.level_splits`) over the SELECTED window (task #1935): events
 whose class has an active dismissal in `event_dismissals` — an exact
