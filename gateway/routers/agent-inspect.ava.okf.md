@@ -22,8 +22,11 @@ instead, with unexpected gaps raised as alert episodes (task #3869, user ruling
 2026-09-17).
 Missing evidence is null/partial with window and observation timestamps, not a
 zero or a claim of complete collection. No synchronous log scan or completed
-result TTL is part of the statistics path. Since-compact is unavailable without
-an authoritative completed compact boundary. The `/inspect/live` half remains
+result TTL is part of the statistics path. The statistics path serves only the
+explicit hour windows whitelisted by `StatsWindowHours` (0/1/6/24/72/168); it
+has no since-compact window (a window over compact boundaries would first need
+an authoritative completed-compact stamp — a separate execution-contract
+decision). The `/inspect/live` half remains
 window-independent — see [[gateway/routers/ops-surfaces.ava.okf.md]].
 
 Shell deadlines in `/inspect/live` and the shell monitor come only from

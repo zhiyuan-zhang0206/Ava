@@ -130,7 +130,7 @@ describe("setMobileInspectorOpen", () => {
 });
 
 describe("setInspectorHours", () => {
-  it("shares the session window used by panel queries and row prefetch", () => {
+  it("shares the session window used by panel queries", () => {
     act(() => useStore.getState().setInspectorHours(1));
     expect(useStore.getState().inspectorHours).toBe(1);
     act(() => useStore.getState().setInspectorHours(null));
