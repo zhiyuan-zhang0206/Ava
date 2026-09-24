@@ -20,6 +20,15 @@ update `events_completed_at`; certification requires the secret and the fixed
 SQL procedure after the final tagged read. This removes the former forgeable
 session GUC from the normal runner path.
 
+The proof lives in the unit `.env` for agent-host recovery, but config boot
+removes it from every non-finalizer environment before Settings constructs. A
+targeted agent-host launch carries a one-use finalizer ticket, consumed before
+the file load, so only that process retains the proof. The ticket never joins a
+generic child projection; an `execute_code` child, session/daemon child, agent
+child, and nested `ava` CLI therefore cannot re-materialize it by booting
+config. Same-user direct reads of the unit file remain the documented physical
+residual pending the per-machine authority design.
+
 All agent runners currently share the `ava_runner` database role. Native
 acceptance binds the proof before its accepted row commits, so a normal request
 cannot preempt the target host. A malicious process with the shared runner

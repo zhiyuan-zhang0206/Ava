@@ -82,6 +82,9 @@ ProcessRole = Literal["gateway", "agent", "runner"]
 MANIFEST_CERTIFICATION_SECRET_ENV = FIELD_ALIASES[
     "impersonation_event_manifest_certification_secret"
 ]
+# A targeted agent-host launch ticket, consumed before config boot. It is not a
+# Settings field and never joins a generic child projection.
+MANIFEST_CERTIFICATION_FINALIZER_ENV = "AVA_MANIFEST_CERTIFICATION_FINALIZER"
 
 # ── Passthrough rows (A1: every non-Settings env key declared exactly once) ──
 
@@ -553,11 +556,22 @@ def session_forward_keys() -> frozenset[str]:
 def manifest_certification_secret_env() -> dict[str, str]:
     """Return the proof's one-purpose projection for the agent-host finalizer.
 
-    The secret remains in the root process long enough to launch the finalizer,
-    but never joins the reusable daemon/session or agent-child projections.
+    A non-finalizer config boot removes the proof from its ambient environment.
+    The launcher re-reads only this value from its own unit file and supplies a
+    one-use ticket, so the finalizer retains it while a child cannot obtain it
+    merely by booting against that same file.
     """
-    value = os.environ.get(MANIFEST_CERTIFICATION_SECRET_ENV)
-    return {MANIFEST_CERTIFICATION_SECRET_ENV: value} if value else {}
+    from shared.dotenv_boot import manifest_certification_secret_from_env_file
+
+    value = manifest_certification_secret_from_env_file()
+    return (
+        {
+            MANIFEST_CERTIFICATION_SECRET_ENV: value,
+            MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
+        }
+        if value
+        else {}
+    )
 
 
 def _agent_guide_keys() -> frozenset[str]:

@@ -97,11 +97,20 @@ def test_finalizer_proof_is_private_in_root_tree_and_release_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The agent-host can receive the proof without exposing it in a launch receipt."""
-    from services.ava_root.supervisor import _unit_env
+    from services.ava_root import supervisor
 
-    monkeypatch.setenv(MANIFEST_CERTIFICATION_SECRET_ENV, "host-finalizer-proof")
-    assert _unit_env("agent-host")[MANIFEST_CERTIFICATION_SECRET_ENV] == "host-finalizer-proof"
-    assert MANIFEST_CERTIFICATION_SECRET_ENV not in _unit_env("gateway")
+    monkeypatch.setattr(
+        supervisor,
+        "manifest_certification_secret_env",
+        lambda: {
+            MANIFEST_CERTIFICATION_SECRET_ENV: "host-finalizer-proof",
+            "AVA_MANIFEST_CERTIFICATION_FINALIZER": "1",
+        },
+    )
+    agent_host_env = supervisor._unit_env("agent-host")
+    assert agent_host_env[MANIFEST_CERTIFICATION_SECRET_ENV] == "host-finalizer-proof"
+    assert agent_host_env["AVA_MANIFEST_CERTIFICATION_FINALIZER"] == "1"
+    assert MANIFEST_CERTIFICATION_SECRET_ENV not in supervisor._unit_env("gateway")
 
     root = tmp_path / "image"
     root.mkdir()

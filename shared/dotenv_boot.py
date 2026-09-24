@@ -90,6 +90,11 @@ _HOME_POINTER = ".ava_home"
 _HOME_OVERRIDE = "AVA_HOME_OVERRIDE"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
+# A finalizer receives this one-use launch ticket alongside its private proof.
+# `load_ava_env` consumes it before reading `.env`, so a value planted in the
+# file cannot turn an arbitrary model child into a finalizer.
+_manifest_finalizer_boot_authorized = False
+
 
 class AvaHomeContradictionError(RuntimeError):
     """AVA_HOME names one cluster's home while the executing checkout claims another.
@@ -282,12 +287,39 @@ def load_ava_env() -> None:
     alias is normalized before a lower-priority layer can supply the other alias.
     Additional index settings remain separate and are never merged here.
     """
+    global _manifest_finalizer_boot_authorized  # noqa: PLW0603 - per-process boot authority
+    from shared.env_registry import (
+        MANIFEST_CERTIFICATION_FINALIZER_ENV,
+        MANIFEST_CERTIFICATION_SECRET_ENV,
+    )
+
+    if os.environ.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None) == "1":
+        _manifest_finalizer_boot_authorized = True
     os.environ.setdefault("AVA_HOME", str(_HOME))
     if not _ANCHORED:
         os.environ.setdefault("AVA_DB_URL", UNANCHORED_DB_SENTINEL)
     _load_dotenv_layer(AVA_ENV_PATH)
     _load_dotenv_layer(AVA_MIRROR_ENV_PATH)
     _enforce_cluster_env_authority()
+    # The unit file is necessary for launcher recovery, but must not become an
+    # ambient model-child capability whenever a proof-free child boots config.
+    # The finalizer ticket is consumed above rather than trusted from `.env`.
+    if not _manifest_finalizer_boot_authorized:
+        os.environ.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
+    os.environ.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None)
+
+
+def manifest_certification_secret_from_env_file() -> str:
+    """Read the finalizer proof for its targeted launcher projection only.
+
+    Non-finalizer config boot deliberately removes the proof from ``os.environ``.
+    Launchers still need the unit-file value to construct the agent-host's
+    private environment; this direct read has no environment side effect.
+    """
+    from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+
+    value = dotenv_values(AVA_ENV_PATH).get(MANIFEST_CERTIFICATION_SECRET_ENV)
+    return value if isinstance(value, str) else ""
 
 
 def _identity_env_only() -> frozenset[str]:

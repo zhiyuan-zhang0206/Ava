@@ -8,6 +8,8 @@ from services.healthchecks import agent_host as healthcheck
 
 
 def test_agent_host_env_carries_projected_runner_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared import env_registry
+
     projected_url = "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
 
     def _project(_url: str) -> str:
@@ -19,13 +21,19 @@ def test_agent_host_env_carries_projected_runner_url(monkeypatch: pytest.MonkeyP
         _project,
     )
 
-    monkeypatch.setenv(
-        "AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET", "host-finalizer-proof"
+    monkeypatch.setattr(
+        env_registry,
+        "manifest_certification_secret_env",
+        lambda: {
+            "AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET": "host-finalizer-proof",
+            "AVA_MANIFEST_CERTIFICATION_FINALIZER": "1",
+        },
     )
     assert healthcheck._agent_host_env() == {
         "AVA_PROCESS_PROFILE": "agent",
         "AVA_DB_URL": projected_url,
         "AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET": "host-finalizer-proof",
+        "AVA_MANIFEST_CERTIFICATION_FINALIZER": "1",
     }
 
 

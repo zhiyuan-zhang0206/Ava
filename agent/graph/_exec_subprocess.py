@@ -47,6 +47,7 @@ from shared import editable_install
 from shared.env_registry import (
     AGENT_BIRTH_CONFIG_ENV,
     AGENT_CONFIG_OVERLAY_ENV,
+    MANIFEST_CERTIFICATION_FINALIZER_ENV,
     MANIFEST_CERTIFICATION_SECRET_ENV,
 )
 from shared.log import logger
@@ -163,6 +164,7 @@ def _build_child_env(
     # parent can retain it to certify only after its gateway equality read;
     # every execute_code subprocess gets a deliberately proof-free env.
     env.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
+    env.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None)
     source_root = editable_install.current_interpreter_source_root()
     if source_root is not None and not _cwd_is_inside_checkout(
         Path.cwd().resolve(), source_root.resolve()

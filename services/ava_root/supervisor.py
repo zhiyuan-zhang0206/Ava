@@ -62,7 +62,11 @@ from services.ava_root.manifest import (
     UnitRegistry,
     UnknownUnitError,
 )
-from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+from shared.env_registry import (
+    MANIFEST_CERTIFICATION_FINALIZER_ENV,
+    MANIFEST_CERTIFICATION_SECRET_ENV,
+    manifest_certification_secret_env,
+)
 from shared.process_env import inherited_process_env
 
 _log = logging.getLogger(__name__)
@@ -73,8 +77,11 @@ _MANIFEST_FINALIZER_UNIT = "agent-host"
 def _unit_env(unit_id: str) -> dict[str, str]:
     """Return one root child env with the proof limited to the finalizer."""
     env = inherited_process_env()
-    if unit_id != _MANIFEST_FINALIZER_UNIT:
+    if unit_id == _MANIFEST_FINALIZER_UNIT:
+        env.update(manifest_certification_secret_env())
+    else:
         env.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
+        env.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None)
     return env
 
 
