@@ -6,11 +6,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
+import psycopg
 import pytest
+from psycopg_pool import AsyncConnectionPool
 
 from cli.commands import _update_orchestration as orch
+from shared import db, maintenance_cohort
 from shared.api_contracts.status import MachineStatus
+from shared.db import insert_inbound_message
+from tests.agent.test_maintenance import _agent
+from tests.agent.test_maintenance import isolate as isolate
+from tests.agent.test_maintenance_lifecycle_wait import _claim, _live_member
 
 NOW = datetime(2026, 9, 12, 4, 5, 6, tzinfo=UTC)
 SHA = "abcdef0123456789"
@@ -318,3 +326,70 @@ def test_reset_failure_file_is_valid(sources: Path) -> None:
     baseline = orch._collect_health_baseline(target_sha=None)
     assert baseline.health_probe.failures == orch._BaselineValue((0, "code", "", NOW.isoformat()))
     assert "failures=0/3" in orch._format_health_baseline(baseline)[4]
+
+
+async def test_scan_reports_only_eligible_claims_without_writes(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parked = _agent(db_conn)
+    live = await _live_member(db_conn, aops_pool, uuid4())
+    orphan = insert_inbound_message(db_conn, parked, "orphan", "user")
+    messages = [
+        orphan,
+        insert_inbound_message(db_conn, live, "live", "user"),
+        insert_inbound_message(db_conn, parked, "", "user", kind="restart"),
+        insert_inbound_message(db_conn, parked, "", "user", kind="terminate"),
+        insert_inbound_message(db_conn, parked, "", "user", payload={"maintenance": {}}),
+        insert_inbound_message(db_conn, parked, "", "user", payload={"maintenance": None}),
+    ]
+    for message in messages:
+        _claim(db_conn, message)
+    insert_inbound_message(db_conn, parked, "pending", "user")
+    db_conn.commit()
+    read_claims = maintenance_cohort.orphaned_claims
+
+    def read_only(conn: psycopg.Connection[Any]) -> list[maintenance_cohort.OrphanClaim]:
+        assert conn.execute("SHOW transaction_read_only").fetchone() == ("on",)
+        return read_claims(conn)
+
+    monkeypatch.setattr(db, "connect", lambda: nullcontext(db_conn))
+    monkeypatch.setattr(maintenance_cohort, "orphaned_claims", read_only)
+    orch._report_pause_orphans()
+    output = capsys.readouterr()
+    assert output.out == (
+        "pause-prepare orphans: 1 claimed ordinary row(s) on "
+        f"runtime-less agents ({parked}:{orphan})\n"
+    )
+    assert output.err == ""
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE id=ANY(%s) AND status='claimed'",
+        (messages,),
+    ).fetchone() == (len(messages),)
+
+
+def test_scan_with_no_orphans_is_silent(
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(db, "connect", lambda: nullcontext(db_conn))
+    orch._report_pause_orphans()
+    output = capsys.readouterr()
+    assert output.out == output.err == ""
+
+
+@pytest.mark.parametrize("seam", ["connect", "orphaned_claims"])
+def test_scan_failure_never_aborts_preflight(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], seam: str
+) -> None:
+    def fail(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("scan unavailable")
+
+    monkeypatch.setattr(db if seam == "connect" else maintenance_cohort, seam, fail)
+    orch._report_pause_orphans()
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "pause-prepare orphan scan unavailable: RuntimeError: scan unavailable\n"

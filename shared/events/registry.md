@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 219 | event stream |
+| telemetry (category=telemetry) | `events` | 220 | event stream |
 | log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 219)
+## 3. Telemetry events (category=telemetry, 220)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -240,6 +240,7 @@ consumers: see the comments at each emit point.
 | `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | events |
 | `launch_retry` | launch retried | observation | — | — | events |
 | `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events |
+| `pause_orphan_claim_settled` | preparation settled an ordinary claim without a live runtime | anomaly | agent, message_id, age_s, outcome | — | events |
 | `update_straggler_reaped` | drain reaped straggler cohort agent(s) past their restart window | anomaly | agents, window_s | — | events |
 | `update_straggler_reap_settled` | successor boundary settled stranded straggler-reap marks | anomaly | agents, site | — | events |
 | `host_turn_truncated` | the update drain's straggler reap ended this hosted turn on purpose — the row was CAS-marked 'restarting' mid-turn and the turn's fail-closed guard read refused; no corpse marker, no error event, no failure receipt. The successor boundary settles the mark and re-delivers the claimed work | observation | — | — | events |

@@ -219,9 +219,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # schema_mismatch_blocked (task #4618) raises it to 214; the hierarchy
     # trigger + guardrail quintet (task #4674: hierarchy_enqueue_failed /
     # hierarchy_regen_alert / hierarchy_regen_halt / hierarchy_regen_low_reuse /
-    # hierarchy_regen_budget_tripped) raises it to 219.
+    # hierarchy_regen_budget_tripped) raises it to 219; pause_orphan_claim_settled
+    # (task #4728's parked orphan settlement) raises it to 220.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 219
+    assert len(_TELEMETRY_KINDS) == 220
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

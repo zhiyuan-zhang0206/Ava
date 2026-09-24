@@ -435,6 +435,15 @@ class PauseLifecycleWait(TypedDict):
     agents: list[int]
 
 
+class PauseOrphanClaimSettled(TypedDict):
+    """`pause_orphan_claim_settled` payload — shared/maintenance_cohort.py."""
+
+    agent: int
+    message_id: int
+    age_s: float
+    outcome: Literal["pending", "done"]
+
+
 class UpdateStragglerReaped(TypedDict):
     """`update_straggler_reaped` payload — ops/agent_pause.py::_drain.
 
