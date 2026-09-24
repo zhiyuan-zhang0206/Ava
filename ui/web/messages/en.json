@@ -258,7 +258,6 @@
     "noReadyRunner": "No agent runner with an available host"
   },
   "agentAvailability": {
-    "unknown": "Start availability unknown",
     "host_unavailable": "Agent host unavailable; creation may be accepted while execution waits",
     "awaiting_admission": "Creation accepted; waiting for host admission",
     "admission_refused": "Host tried to start this agent but admission was refused",

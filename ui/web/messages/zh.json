@@ -258,7 +258,6 @@
     "noReadyRunner": "没有 host 可用的 agent runner"
   },
   "agentAvailability": {
-    "unknown": "启动可用性未知",
     "host_unavailable": "Agent host 不可用；创建可被接受，但执行需要等待",
     "awaiting_admission": "创建已接受；等待 host 接纳",
     "admission_refused": "Host 已尝试启动，但接纳被拒绝",
