@@ -58,7 +58,7 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     try:
         yield str(home)
     finally:
-        from shared.pty_sessions import cli as pty_cli
+        from shared.sessions.pty import cli as pty_cli
 
         for name in list(pty_cli.live_sessions()):
             try:

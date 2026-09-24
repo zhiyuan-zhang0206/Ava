@@ -459,7 +459,7 @@
     "shared/plugin_metrics_sql.py::_check_from_item": 20,
     "shared/plugins_config.py::update_all_disk_images": 16,
     "shared/port_preflight.py::listener_addrs": 18,
-    "shared/pty_sessions/cli.py::main": 17,
+    "shared/sessions/pty/cli.py::main": 17,
     "shared/pyproject_mirror.py::_parse_py_spec": 18,
     "shared/pyproject_mirror.py::_pick_bound": 16,
     "shared/pyproject_mirror.py::pyproject_dependency_specs": 15,

@@ -313,7 +313,7 @@ class ScheduleManager:
             self._stall_alerted.add(schedule_id)
 
     def _live_ids(self) -> set[int]:
-        from shared.pty_sessions.allocation_freeze import current_generation
+        from shared.sessions.pty.allocation_freeze import current_generation
 
         live: set[int] = set()
         backend = get_shell_backend()

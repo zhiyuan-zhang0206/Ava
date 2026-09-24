@@ -1,6 +1,6 @@
 """One detached PTY host per persistent agent shell.
 
-Usage: ``python -m shared.pty_sessions.host <name> <cwd> <envfile> <record>
+Usage: ``python -m shared.sessions.pty.host <name> <cwd> <envfile> <record>
 <socket> <transcript> <generation> [cmd_b64]``.
 
 The spawner reparents this process through ``shared._reparent``. No service
@@ -46,13 +46,13 @@ import psutil
 from shared import session_log
 from shared.log import logger
 from shared.proc_tree import stable_create_time
-from shared.pty_sessions._paths import (
+from shared.session_record import SessionRecord
+from shared.sessions.pty._paths import (
     CAPTURE_MAX_LINES,
     RESIZE_MAX,
     err,
     ok,
 )
-from shared.session_record import SessionRecord
 
 # A pid is "the same process we launched" only if its start-time matches to
 # within this tolerance — guards against the OS recycling the pid onto an
@@ -179,7 +179,7 @@ class PtySession:
         replaying the ring."""
         with self._lock:
             if self._screen is None:
-                from shared.pty_sessions.screen import PtyScreen
+                from shared.sessions.pty.screen import PtyScreen
 
                 screen = PtyScreen(self.cols, self.rows)
                 with contextlib.suppress(Exception):
@@ -662,12 +662,12 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=_handle_conn, args=(conn, session), daemon=True).start()
 
 
-# `python -m shared.pty_sessions.host` executes this file as __main__ without
+# `python -m shared.sessions.pty.host` executes this file as __main__ without
 # registering it under its canonical name; launch.py imports the host module
 # lazily, so register the running module to keep exactly one instance.
-sys.modules.setdefault("shared.pty_sessions.host", sys.modules[__name__])
+sys.modules.setdefault("shared.sessions.pty.host", sys.modules[__name__])
 
-from shared.pty_sessions.launch import (  # noqa: E402 — bring-up lives in launch.py (host.py split at the 800-line ceiling, issue #2063)
+from shared.sessions.pty.launch import (  # noqa: E402 — bring-up lives in launch.py (host.py split at the 800-line ceiling, issue #2063)
     _bring_up,
 )
 

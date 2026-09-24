@@ -1,4 +1,4 @@
-"""End-to-end tests for shared.pty_sessions — the CLI contract against REAL
+"""End-to-end tests for shared.sessions.pty — the CLI contract against REAL
 detached per-session hosts and REAL pty shells (bash -l -i).
 
 There is no supervisor daemon: each `new` spawns the session's own host
@@ -30,14 +30,14 @@ import psutil
 import pytest
 
 from shared.platform import IS_LINUX, IS_WINDOWS, LockTimeoutError, file_lock
-from shared.pty_sessions import allocation_freeze, orphan_reaper
-from shared.pty_sessions import cli as pty_cli
-from shared.pty_sessions import host as pty_host
-from shared.pty_sessions._paths import host_identity, record_path, socket_path
-from shared.pty_sessions.cli import write_env_file
-from shared.pty_sessions.host import PtySession, _parse_request
 from shared.session_backend import PtySessionBackend
 from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.sessions.pty import allocation_freeze, orphan_reaper
+from shared.sessions.pty import cli as pty_cli
+from shared.sessions.pty import host as pty_host
+from shared.sessions.pty._paths import host_identity, record_path, socket_path
+from shared.sessions.pty.cli import write_env_file
+from shared.sessions.pty.host import PtySession, _parse_request
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
 
@@ -47,7 +47,7 @@ REPO = Path(__file__).resolve().parents[2]
 def _run_cli(home: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Invoke the CLI exactly as the SDK will: a subprocess, AVA_HOME pinned."""
     return subprocess.run(  # noqa: S603 — repo-internal argv; check=False, rc asserted by callers
-        [sys.executable, "-m", "shared.pty_sessions.cli", *args],
+        [sys.executable, "-m", "shared.sessions.pty.cli", *args],
         cwd=REPO,
         env={**os.environ, "AVA_HOME": str(home)},
         capture_output=True,
@@ -120,7 +120,7 @@ def sessions(unit_home: Path) -> Iterator[Path]:
     yield unit_home
     # In-process (no subprocess.run): a test may leave a global
     # subprocess.run monkeypatch in place at teardown time.
-    from shared.pty_sessions import cli as pty_cli
+    from shared.sessions.pty import cli as pty_cli
 
     for name in list(pty_cli.live_sessions()):
         try:
@@ -145,7 +145,7 @@ def _start_new(home: Path, name: str) -> tuple[subprocess.Popen[str], Path]:
         [
             sys.executable,
             "-m",
-            "shared.pty_sessions.cli",
+            "shared.sessions.pty.cli",
             name,
             "new",
             str(home),
@@ -478,7 +478,7 @@ def test_hostless_record_reads_dead_and_is_swept(sessions: Path) -> None:
     listing must filter it and the sweep must tear the identity-matched
     orphan shell down — never by bare pid.
     """
-    import shared.pty_sessions.cli as pty_cli_mod
+    import shared.sessions.pty.cli as pty_cli_mod
 
     name = "ava-test-hostless-1"
     shell = subprocess.Popen(["/bin/sleep", "300"])
@@ -678,8 +678,8 @@ def test_retained_record_warning_is_deduped_across_scans(
     not on every scan — the page-server daemon scans every ~2s pass and an
     unchanged warning would flood the log (2026-08-28 incident). A swept
     record's entry is dropped, so a re-created record warns again."""
-    import shared.pty_sessions.cli as pty_cli_mod
-    import shared.pty_sessions.records as pty_records
+    import shared.sessions.pty.cli as pty_cli_mod
+    import shared.sessions.pty.records as pty_records
 
     name = "ava-test-retain-dedupe"
     retained = SessionRecord(
@@ -1198,7 +1198,7 @@ def test_child_env_does_not_inherit_spawner_process_profile(sessions: Path) -> N
     name = "ava-test-profile-1"
     envfile = write_env_file({})
     result = subprocess.run(  # noqa: S603 — repo-internal argv
-        [sys.executable, "-m", "shared.pty_sessions.cli", name, "new", str(home), str(envfile)],
+        [sys.executable, "-m", "shared.sessions.pty.cli", name, "new", str(home), str(envfile)],
         cwd=REPO,
         env={**os.environ, "AVA_HOME": str(home), "AVA_PROCESS_PROFILE": "runner"},
         capture_output=True,
@@ -1300,7 +1300,7 @@ def test_kill_by_record_reaches_a_wedged_host(sessions: Path) -> None:
     host_pid, _ = identity
     os.kill(host_pid, signal.SIGSTOP)
     try:
-        from shared.pty_sessions.cli import _kill_by_record
+        from shared.sessions.pty.cli import _kill_by_record
 
         assert _kill_by_record(name) == 0
     finally:

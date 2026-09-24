@@ -1,4 +1,4 @@
-"""Screen-model tests for shared.pty_sessions.screen — the pyte wrapper.
+"""Screen-model tests for shared.sessions.pty.screen — the pyte wrapper.
 
 These exercise the PtyScreen in isolation (no daemon): incremental UTF-8
 decode across reads, the raw byte ring buffer, screen-parity render semantics
@@ -13,7 +13,7 @@ move-down-without-carriage-return, exactly like the terminal it emulates.
 
 from __future__ import annotations
 
-from shared.pty_sessions.screen import DEFAULT_COLS, DEFAULT_ROWS, PtyScreen
+from shared.sessions.pty.screen import DEFAULT_COLS, DEFAULT_ROWS, PtyScreen
 
 
 def _feed(screen: PtyScreen, text: str) -> None:

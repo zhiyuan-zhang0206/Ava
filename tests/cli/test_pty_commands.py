@@ -13,7 +13,7 @@ import redis
 from cli import main as cli_main
 from shared.config import settings
 from shared.platform import LockTimeoutError
-from shared.pty_sessions import allocation_freeze
+from shared.sessions.pty import allocation_freeze
 
 
 @pytest.fixture(autouse=True)
