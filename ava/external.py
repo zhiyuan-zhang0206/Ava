@@ -178,11 +178,12 @@ class Attachment:
             self._manifest_participant = participant
 
     def _seal_manifest_participant(self) -> None:
-        """Seal the durable receipt in every attachment close path."""
+        """Close admission, drain local SDK work, then seal the durable receipt."""
         if self._manifest_participant is None:
             return
         from shared.agents.impersonation_manifest import (
             alert_if_participant_still_open,
+            close_local_participant_admission,
             seal_local_participant,
         )
         from shared.config import settings
@@ -198,7 +199,17 @@ class Attachment:
         timer.daemon = True
         timer.start()
         try:
-            seal_local_participant(self._manifest_participant)
+            drained = close_local_participant_admission(
+                self._manifest_participant,
+                timeout=settings.general.impersonation_event_manifest_seal_wait_seconds,
+            )
+            if drained:
+                seal_local_participant(self._manifest_participant)
+            else:
+                # The final admitted SDK finally seals when it drains. The
+                # timer remains a diagnostic only; a live call never becomes
+                # a synthetic failed or empty receipt at this deadline.
+                alert_if_participant_still_open(self._manifest_participant)
         finally:
             timer.cancel()
 

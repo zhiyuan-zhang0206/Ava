@@ -67,12 +67,29 @@ class TestScopeDerivationRules:
         assert len(expected) > 150  # the six-gap class lives in this set
 
     def test_session_forward_is_host_scope(self) -> None:
-        from shared.env_registry import session_forward_keys
+        from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV, session_forward_keys
 
-        expected = _aliases_with(scope=("host",))
+        expected = _aliases_with(scope=("host",)) - {MANIFEST_CERTIFICATION_SECRET_ENV}
         assert session_forward_keys() == expected
         # The F-s3-4 headline: per-agent identity never rides a daemon session.
         assert "AVA_AGENT_ID" not in session_forward_keys()
+
+    def test_manifest_certification_proof_is_not_forwarded_to_model_children(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The host finalizer receives its proof only through a dedicated projection."""
+        from shared.env_registry import (
+            MANIFEST_CERTIFICATION_SECRET_ENV,
+            child_env,
+            manifest_certification_secret_env,
+        )
+
+        monkeypatch.setenv(MANIFEST_CERTIFICATION_SECRET_ENV, "host-finalizer-proof")
+        assert manifest_certification_secret_env() == {
+            MANIFEST_CERTIFICATION_SECRET_ENV: "host-finalizer-proof"
+        }
+        for role in ("gateway", "runner", "agent"):
+            assert MANIFEST_CERTIFICATION_SECRET_ENV not in child_env(role, "posix")
 
     def test_session_forward_carries_the_ambient_passthroughs(self) -> None:
         from shared.env_registry import HOST_PASSTHROUGH_KEYS

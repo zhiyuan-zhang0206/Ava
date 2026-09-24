@@ -2119,6 +2119,11 @@ BEGIN
        OR lease.manifest_frozen_at IS NULL THEN
         RAISE EXCEPTION 'Event delivery certification requires a frozen protocol-v1 lease';
     END IF;
+    IF lease.event_delivery_pending_reason='retention_loss'
+       OR (lease.event_delivery_retention_horizon_at IS NOT NULL
+           AND lease.manifest_envelope_floor_at < lease.event_delivery_retention_horizon_at) THEN
+        RAISE EXCEPTION 'Event delivery certification is vetoed by retention loss';
+    END IF;
     IF EXISTS (SELECT 1 FROM public.agent_impersonation_event_participants
                WHERE lease_id=p_lease_id AND state <> 'sealed') THEN
         RAISE EXCEPTION 'Event delivery certification requires sealed local receipts';
@@ -2134,18 +2139,18 @@ BEGIN
     ) THEN RAISE EXCEPTION 'Manifest contains conflicting duplicate event identities'; END IF;
     IF EXISTS (
         WITH expected AS (
-            SELECT event_key,min(event_kind) AS event_kind FROM (
-                SELECT event_key,event_kind FROM public.agent_impersonation_event_participant_items WHERE lease_id=p_lease_id
+            SELECT event_key,min(event_kind) AS event_kind,min(line_sha256) AS line_sha256 FROM (
+                SELECT event_key,event_kind,line_sha256 FROM public.agent_impersonation_event_participant_items WHERE lease_id=p_lease_id
                 UNION ALL
-                SELECT event_key,event_kind FROM public.agent_impersonation_event_expected_items WHERE lease_id=p_lease_id
+                SELECT event_key,event_kind,line_sha256 FROM public.agent_impersonation_event_expected_items WHERE lease_id=p_lease_id
             ) all_expected GROUP BY event_key
         ), actual AS (
-            SELECT event_key,kind AS event_kind FROM public.agent_impersonation_entries
+            SELECT event_key,kind AS event_kind,payload->>'line_sha256' AS line_sha256 FROM public.agent_impersonation_entries
             WHERE lease_id=p_lease_id AND kind IN ('sdk_call','api_event')
         )
-        (SELECT event_key,event_kind FROM expected EXCEPT SELECT event_key,event_kind FROM actual)
+        (SELECT event_key,event_kind,line_sha256 FROM expected EXCEPT SELECT event_key,event_kind,line_sha256 FROM actual)
         UNION ALL
-        (SELECT event_key,event_kind FROM actual EXCEPT SELECT event_key,event_kind FROM expected)
+        (SELECT event_key,event_kind,line_sha256 FROM actual EXCEPT SELECT event_key,event_kind,line_sha256 FROM expected)
     ) THEN RAISE EXCEPTION 'Manifest differs from durable consumed events'; END IF;
     UPDATE public.agent_impersonations SET events_completed_at=clock_timestamp(),events_cursor=NULL,
         handoff_document=NULL,event_delivery_pending_reason=NULL WHERE id=p_lease_id;

@@ -148,3 +148,14 @@ def test_child_env_drops_foreign_virtual_env_but_preserves_its_own(
     assert "VIRTUAL_ENV" not in sibling_env
     assert "VIRTUAL_ENV" not in claude_sibling_env
     assert no_root_env["VIRTUAL_ENV"] == "/source/.venv"
+
+
+def test_execute_code_child_cannot_read_manifest_certification_proof(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Probe the exact env passed to model-executed Python, not a policy copy."""
+    from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+
+    monkeypatch.setenv(MANIFEST_CERTIFICATION_SECRET_ENV, "host-finalizer-proof")
+    env = _exec_subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    assert MANIFEST_CERTIFICATION_SECRET_ENV not in env
