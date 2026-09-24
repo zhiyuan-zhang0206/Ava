@@ -92,7 +92,15 @@ def test_resume_inventory_allows_only_the_verified_observer_substitution(
 def test_resume_inventory_accepts_only_the_accounted_launcher_quiescence(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    before = _expected(ExpectedProcess(pid=11, create_time=1.0, starttime=1))
+    initial = _expected(ExpectedProcess(pid=11, create_time=1.0, starttime=1))
+    before = initial.model_copy(
+        update={
+            "launchers": (
+                *initial.launchers,
+                ExpectedLauncher(kind="launchd", name="com.ava.second", definition_digest="a" * 64),
+            )
+        }
+    )
     live = ExpectedSession(
         name="ava-ops", process=ExpectedProcess(pid=22, create_time=2.0, starttime=2)
     )
@@ -125,6 +133,22 @@ def test_resume_inventory_accepts_only_the_accounted_launcher_quiescence(
     )
     assert result == before
     assert allow_empty
+
+    # A crash between native definition removals leaves an exact subset.
+    partial = current_expected.model_copy(update={"launchers": before.launchers[:1]})
+    current = _inventory(partial)
+    assert (
+        inventory.revalidate_bootstrap_inventory(
+            cast("psycopg.Connection", None),
+            cast("VerifiedRelease", object()),
+            tmp_path,
+            "machine",
+            receipt,
+            current_session=live,
+            schema_digest="d" * 64,
+        )
+        == before
+    )
 
     changed = current_expected.model_copy(
         update={
@@ -195,6 +219,7 @@ def test_journal_round_trips_the_strict_phase_tuple_as_json(
             )
         ),
         validation_seconds=0.0,
+        launchd=(),
     )
     envelope: dict[str, object] | None = None
 
@@ -301,6 +326,7 @@ def test_launch_exception_before_record_never_starts_recovery(
         old_session=SimpleNamespace(process=old),
         journal=None,
         validation_seconds=0.0,
+        launchd=(),
     )
     stage = ""
     starts = 0
@@ -352,3 +378,256 @@ def test_launch_exception_before_record_never_starts_recovery(
     with pytest.raises(ReleaseRejectedError, match="spawn is ambiguous"):
         bootstrap._execute_bootstrap_hop(cast("bootstrap.PreparedBootstrapHop", plan), "g")
     assert starts == 1
+
+
+@pytest.fixture
+def native_launchd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
+    import os
+    import plistlib
+    import subprocess
+
+    from cli.commands._update_bootstrap import native
+
+    directory = tmp_path / "LaunchAgents"
+    directory.mkdir()
+    home = tmp_path / "unit"
+    home.mkdir()
+    (home / "run").mkdir(mode=0o700)
+    argv = ["/retained/python", "-m", "services.agent_ops.daemon"]
+    loaded: set[str] = set()
+    actions: list[list[str]] = []
+    launchers: list[ExpectedLauncher] = []
+    for label in ("com.ava.a", "com.ava.b"):
+        body = plistlib.dumps(
+            {
+                "Label": label,
+                "ProgramArguments": argv,
+                "EnvironmentVariables": {"AVA_HOME": str(home)},
+                "RunAtLoad": label not in loaded,
+            }
+        )
+        definition_path = directory / f"{label}.plist"
+        definition_path.write_bytes(body)
+        definition_path.chmod(0o600)
+        launchers.append(
+            ExpectedLauncher(
+                kind="launchd",
+                name=label,
+                definition_digest=hashlib.sha256(body).hexdigest(),
+            )
+        )
+
+    def path(label: str) -> Path:
+        return directory / f"{label}.plist"
+
+    def read(label: str) -> bytes | None:
+        return path(label).read_bytes() if path(label).exists() else None
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        actions.append(argv)
+        if argv[1] == "bootout":
+            loaded.remove(argv[2].split("/")[-1])
+        elif argv[1] == "bootstrap":
+            loaded.add(Path(argv[3]).stem)
+        else:
+            pytest.fail("unexpected native write")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(native, "_path", path)
+    monkeypatch.setattr(native, "read_launchd_definition", read)
+    monkeypatch.setattr(native, "launchd_loaded_state", lambda label, _until: label in loaded)
+    # Native writes are forbidden: membership cannot bind the effective argv.
+    monkeypatch.setattr(subprocess, "run", run)
+    expected = _expected(ExpectedProcess(pid=os.getpid(), create_time=1.0, starttime=None))
+    expected = expected.model_copy(update={"home": str(home), "launchers": tuple(launchers)})
+    until = datetime.now(UTC) + timedelta(minutes=1)
+    snapshots = native.capture_launchd(expected, argv, until)
+    return SimpleNamespace(
+        native=native,
+        directory=directory,
+        expected=expected,
+        argv=argv,
+        loaded=loaded,
+        actions=actions,
+        until=until,
+        snapshots=snapshots,
+        path=path,
+    )
+
+
+def test_native_launchd_roundtrip_preserves_bytes_and_loaded_state(
+    native_launchd: SimpleNamespace,
+) -> None:
+    env = native_launchd
+    original = {item.label: env.path(item.label).read_bytes() for item in env.snapshots}
+    env.native.quiesce_launchd(env.snapshots, env.until, lambda: None)
+    assert not env.loaded
+    assert not list(env.directory.glob("*.plist"))
+    env.native.quiesce_launchd(env.snapshots, env.until, lambda: None)
+    assert env.actions == []  # No loaded-job authority is inferred.
+    env.native.restore_launchd(env.snapshots, env.until, lambda: None)
+    assert not env.loaded
+    assert {item.label: env.path(item.label).read_bytes() for item in env.snapshots} == original
+    env.native.restore_launchd(env.snapshots, env.until, lambda: None)
+    assert env.actions == []  # Unloaded RunAtLoad stays unloaded, even on replay.
+
+
+@pytest.mark.parametrize("crash_at", [1, 2])
+def test_native_launchd_restores_partial_quiesce_after_crash(
+    native_launchd: SimpleNamespace,
+    crash_at: int,
+) -> None:
+    from shared.updater_recovery import LaunchdRecovery
+
+    env = native_launchd
+    calls = 0
+
+    def authorize() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == crash_at:
+            raise SystemExit("updater died")
+
+    with pytest.raises(SystemExit, match="updater died"):
+        env.native.quiesce_launchd(env.snapshots, env.until, authorize)
+    assert not env.loaded
+    assert env.path("com.ava.a").exists() is (crash_at == 1)
+    assert env.path("com.ava.b").exists()
+    retained = tuple(
+        LaunchdRecovery.model_validate_json(item.model_dump_json()) for item in env.snapshots
+    )
+    recaptured = env.native.capture_launchd(env.expected, env.argv, env.until, retained=retained)
+    env.native.restore_launchd(recaptured, env.until, lambda: None)
+    assert not env.loaded
+    assert all(env.path(item.label).read_bytes() == item.definition.encode() for item in retained)
+
+
+@pytest.mark.parametrize("phase", ["quiesce", "restore"])
+def test_native_launchd_never_overwrites_changed_definition(
+    native_launchd: SimpleNamespace,
+    phase: str,
+) -> None:
+    env = native_launchd
+    if phase == "restore":
+        env.native.quiesce_launchd(env.snapshots, env.until, lambda: None)
+    env.path("com.ava.a").write_bytes(b"another writer owns these bytes")
+    before = len(env.actions)
+    operation = env.native.quiesce_launchd if phase == "quiesce" else env.native.restore_launchd
+    with pytest.raises(ReleaseRejectedError, match="refusing to overwrite"):
+        operation(env.snapshots, env.until, lambda: None)
+    assert len(env.actions) == before
+    assert env.path("com.ava.a").read_bytes() == b"another writer owns these bytes"
+
+
+def test_native_launchd_refuses_loaded_run_at_load_before_mutation(
+    native_launchd: SimpleNamespace,
+) -> None:
+    env = native_launchd
+    env.loaded.add("com.ava.b")
+    with pytest.raises(ReleaseRejectedError, match="no verified effective binding"):
+        env.native.capture_launchd(env.expected, env.argv, env.until)
+    assert env.actions == []
+
+
+def test_native_launchd_unknown_is_never_absence(
+    native_launchd: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = native_launchd
+    monkeypatch.setattr(env.native, "launchd_loaded_state", lambda *_args: None)
+    with pytest.raises(ReleaseRejectedError, match="state is unknown"):
+        env.native.quiesce_launchd(env.snapshots, env.until, lambda: None)
+    assert env.actions == []
+    assert all(env.path(item.label).exists() for item in env.snapshots)
+
+
+@pytest.mark.parametrize("recreated", [False, True])
+def test_native_launchd_custody_preserves_a_concurrent_replacement(
+    native_launchd: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    recreated: bool,
+) -> None:
+    env = native_launchd
+    first = env.snapshots[0]
+    actual_rename = env.native.os.rename
+    source = env.path(first.label)
+    foreign = b"concurrent replacement after the admission read"
+    later = b"another public generation after atomic custody"
+
+    def race(before: Path, after: Path) -> None:
+        assert before == source
+        before.write_bytes(foreign)
+        actual_rename(before, after)
+        if recreated:
+            before.write_bytes(later)
+
+    monkeypatch.setattr(env.native.os, "rename", race)
+    with pytest.raises(ReleaseRejectedError, match="retained"):
+        env.native.quiesce_launchd(env.snapshots, env.until, lambda: None)
+    assert source.read_bytes() == (later if recreated else foreign)
+    assert Path(first.custody).read_bytes() == foreign
+    assert env.path(env.snapshots[1].label).exists()
+    assert env.actions == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("definition", "changed"),
+        ("mode", 420),
+        ("custody", "/unit/run/bootstrap-launcher-other.held"),
+    ],
+)
+def test_bootstrap_journal_cannot_rebind_native_originals(
+    field: str, value: object, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shared.updater_recovery import LaunchdRecovery
+
+    handoff = bootstrap.updater_handoff
+    monkeypatch.setattr(handoff.shared.paths, "run_dir", lambda: tmp_path)
+    handoff.begin(expected_session="ava-updater", generation="bootstrap")
+    assert handoff.claim_running("bootstrap", expected_session="ava-updater")
+    phase = bootstrap.BootstrapPhase(
+        stage="prepared",
+        observed_at=datetime.now(UTC),
+        monotonic_s=0.0,
+        pid=1,
+        elapsed_s=None,
+    )
+    original = bootstrap.BootstrapJournal(
+        request="/unit/run/request",
+        request_digest="a" * 64,
+        inventory_digest="b" * 64,
+        candidate_context_digest="c" * 64,
+        recovery_context_digest="d" * 64,
+        stage="prepared",
+        cron="",
+        phases=(phase,),
+        launchd=(
+            LaunchdRecovery(
+                label="com.ava.bootstrap",
+                definition="retained",
+                loaded=False,
+                mode=384,
+                custody="/unit/run/bootstrap-launcher-original.held",
+            ),
+        ),
+    )
+    handoff.write_bootstrap_recovery("bootstrap", original.model_dump(mode="json"))
+    before = handoff.bootstrap_state_path().read_bytes()
+    changed = original.model_copy(
+        update={
+            "stage": "launchers_quiesced",
+            "phases": (phase, phase.model_copy(update={"stage": "launchers_quiesced"})),
+            "launchd": (original.launchd[0].model_copy(update={field: value}),),
+        }
+    )
+    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="identity changed"):
+        handoff.write_bootstrap_recovery("bootstrap", changed.model_dump(mode="json"))
+    assert handoff.bootstrap_state_path().read_bytes() == before
+    changed = changed.model_copy(update={"launchd": original.launchd})
+    handoff.write_bootstrap_recovery("bootstrap", changed.model_dump(mode="json"))
+    retained = handoff.read_bootstrap_recovery()
+    assert retained is not None
+    assert retained["journal"] == changed.model_dump(mode="json")

@@ -17,6 +17,7 @@ from shared.managed_writer_publication import PublishedUnit, UnitActivationReadb
 BootstrapRecoveryStage = Literal[
     "prepared",
     "cron_quiesced",
+    "launchers_quiesced",
     "old_stopped",
     "candidate_starting",
     "candidate_started",
@@ -186,6 +187,16 @@ def validate_normal_recovery_transition(
         raise ValueError("committed normal recovery changed observed readback")
 
 
+class LaunchdRecovery(EvidenceModel):
+    """Exact private original for one admitted restricted bootstrap launcher."""
+
+    label: str = Field(pattern=r"^com\.ava\.[A-Za-z0-9_.-]{1,247}$")
+    definition: str = Field(min_length=1, max_length=65536)
+    loaded: Literal[False]
+    custody: str = Field(min_length=1, max_length=4096)
+    mode: Literal[384, 420]  # Owner-write-only 0600 or 0644 definitions.
+
+
 class BootstrapRecoveryJournal(EvidenceModel):
     request: str = Field(min_length=1, max_length=4096)
     request_digest: Digest
@@ -195,9 +206,10 @@ class BootstrapRecoveryJournal(EvidenceModel):
     normal_release_planned: bool = False
     stage: BootstrapRecoveryStage
     cron: str = Field(max_length=65536)
+    launchd: tuple[LaunchdRecovery, ...] = Field(default=(), max_length=64)
     phases: tuple[BootstrapRecoveryPhase, ...] = Field(min_length=1, max_length=64)
     # The hop ledger's launcher facts: one terminal per prepared launcher,
-    # written once at ``cron_quiesced`` (the proven quiesce) and carried
+    # written once at the proven native quiesce and carried
     # unchanged afterwards; empty before that write and in journals written
     # before this field existed. The collector consumes these directly.
     launcher_terminals: tuple[LauncherTerminal, ...] = ()
@@ -205,6 +217,13 @@ class BootstrapRecoveryJournal(EvidenceModel):
 
     @model_validator(mode="after")
     def coherent_terminal_evidence(self) -> Self:
+        labels = [item.label for item in self.launchd]
+        if labels != sorted(set(labels)) or (self.cron and self.launchd):
+            raise ValueError("bootstrap native originals must be unique and one scheduler family")
+        if sum(len(item.definition.encode()) for item in self.launchd) > 65536:
+            raise ValueError("bootstrap launchd originals exceed their byte budget")
+        if self.stage == "launchers_quiesced" and not self.launchd:
+            raise ValueError("launchd quiesce requires retained native originals")
         if self.phases[-1].stage != self.stage:
             raise ValueError("bootstrap recovery stage requires a matching last phase")
         if self.normal_release is not None and (

@@ -328,6 +328,7 @@ def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> Non
                 candidate.recovery_context_digest,
                 candidate.normal_release_planned,
                 candidate.cron,
+                candidate.launchd,
             ) != (
                 retained.request,
                 retained.request_digest,
@@ -336,6 +337,7 @@ def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> Non
                 retained.recovery_context_digest,
                 retained.normal_release_planned,
                 retained.cron,
+                retained.launchd,
             ):
                 raise BootstrapRecoveryInvalidError("bootstrap recovery identity changed")
             if (

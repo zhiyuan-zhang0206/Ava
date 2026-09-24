@@ -43,6 +43,7 @@ def _bootstrap_journal(stage: str, *, normal_release_planned: bool = False) -> d
         "normal_release_planned": normal_release_planned,
         "stage": stage,
         "cron": "",
+        "launchd": [],
         "phases": [
             {
                 "stage": stage,
