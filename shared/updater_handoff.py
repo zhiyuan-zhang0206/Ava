@@ -22,7 +22,6 @@ import logging
 import os
 import shutil
 import stat
-import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +30,7 @@ from typing import Literal, Never, cast
 import psutil
 
 import shared.paths
-from shared import spawn_receipt
+from shared import atomic_io, spawn_receipt
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.platform import file_lock
 from shared.proc_tree import create_time_matches, stable_create_time
@@ -183,28 +182,21 @@ def read(*, now: dt.datetime | None = None) -> UpdaterHandoffSnapshot:
 def _fsync_parent(path: Path) -> None:
     if os.name == "nt":
         return
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    atomic_io.fsync_parent(path)
 
 
 def _write_atomic(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(dir=path.parent, prefix=".updater-handoff-", suffix=".tmp")
-    if os.name != "nt":
-        os.fchmod(fd, 0o600)
-    tmp = Path(raw_tmp)
-    try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(payload, stream, separators=(",", ":"), sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)  # noqa: PTH105 — explicit atomic replace injection seam
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    atomic_io.write_text_atomic(
+        path,
+        text,
+        mode=0o600,
+        sync_file=True,
+        sync_parent=False,
+        prefix=".updater-handoff-",
+        suffix=".tmp",
+    )
     try:
         _fsync_parent(path)
     except OSError:

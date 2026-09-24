@@ -11,6 +11,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
+from unittest.mock import Mock
 from uuid import UUID
 
 import psutil
@@ -642,6 +643,33 @@ def test_exact_generation_clear_cannot_remove_a_replacement() -> None:
     handoff.begin(expected_session="ava-updater", generation="new")
     assert not handoff.clear("old")
     assert handoff.read().generation == "new"
+
+
+def test_atomic_write_json_and_parent_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "handoff.json"
+    monkeypatch.setattr(handoff, "_fsync_parent", Mock(side_effect=OSError("sync failed")))
+    with caplog.at_level(logging.WARNING, logger="shared.updater_handoff"):
+        handoff._write_atomic(path, {"z": "café", "a": 1})
+    assert path.read_bytes() == b'{"a":1,"z":"caf\\u00e9"}'
+    assert "directory fsync failed after commit" in caplog.text
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("target,method", [(os, "fsync"), (os, "replace"), (Path, "replace")])
+def test_atomic_write_precommit_failure_preserves_old_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: object, method: str
+) -> None:
+    path = tmp_path / "handoff.json"
+    path.write_bytes(b"old")
+    fail = Mock(side_effect=OSError("write failed"))
+    monkeypatch.setattr(target, method, fail)
+    with pytest.raises(OSError, match="write failed"):
+        handoff._write_atomic(path, {"new": True})
+    assert path.read_bytes() == b"old"
+    assert sorted(tmp_path.iterdir()) == [path]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
