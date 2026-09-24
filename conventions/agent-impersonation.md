@@ -38,6 +38,12 @@ a host that starts the relay by hand, start the Monitor immediately after the
 request, armed with `timeout_ms: 1800000` and re-armed at each expiry notice.
 See [host setup](agent-impersonation-hosts.md).
 
+The resident Claude wrapper consumes one request per session. A second request
+from that session is rejected before creating a lease when its stub is pending
+or already consumed. Finish or cancel the current takeover, then launch a fresh
+Claude session in a separate workspace for another agent. A new launch clears
+the previous session's stub and consumption marker after claiming the workspace.
+
 The response returns a per-agent integer `id` / `session_id`, starting at zero.
 There is no controller credential: control commands are authorized by the
 session id plus caller attestation — each command must run from a process that
