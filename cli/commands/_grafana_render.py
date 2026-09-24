@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from shared.atomic_io import write_text_atomic
+
 __all__ = ["cmd_grafana_render"]
 
 _DASHBOARD_FILE = "ava-ops-main.json"
@@ -29,11 +31,11 @@ def _provisioning_dashboard(home: Path) -> Path:
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    """Write via a sibling temp file + replace — a reader never sees a partial
+    """Write via a unique sibling temp file + replace — a reader never sees a partial
     file, and a failed write leaves the previous file untouched."""
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
+    write_text_atomic(
+        path, content, encoding="utf-8", mode=0o644, sync_file=False, sync_parent=False
+    )
 
 
 def _digest(content: str) -> str:

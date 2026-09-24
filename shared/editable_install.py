@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import cast
 
 import shared.telemetry
+from shared.atomic_io import write_text_atomic
 from shared.log import logger
 
 EDITABLE_PTH_NAME = "_editable_impl_ava.pth"
@@ -194,7 +195,7 @@ def _pth_content_is_allowed(raw_text: str, allowed_roots: frozenset[str]) -> boo
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
-    """Replace ``path`` through a same-directory temp file plus rename.
+    """Replace ``path`` through a unique same-directory temp file.
 
     A crash mid-write must never leave a half-written pointer: the next
     interpreter would parse a truncated target, which the allowlist rejects
@@ -202,9 +203,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
     failed to start on it.
     """
 
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
+    write_text_atomic(path, text, mode=0o644, sync_file=False, sync_parent=False)
 
 
 @contextlib.contextmanager
