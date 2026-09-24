@@ -174,40 +174,35 @@ class TurnScheduler:
         activity_clock: Callable[[int], Awaitable[datetime | None]] | None = None,
     ) -> None:
         self._run_turn = run_turn
-        # Optional, and INJECTED rather than read here, for the same reason
-        # `run_turn` is: this class is the correctness story in pure asyncio and
-        # owns no database handle. The host supplies a reader; without one the
-        # uncancellable-turn report simply omits the clock (see `_await_unwind`).
+        # Injected to keep this scheduler pure asyncio; absent means the
+        # uncancellable-turn report omits the clock (see `_await_unwind`).
         self._activity_clock = activity_clock
         self._tasks: dict[int, asyncio.Task[None]] = {}
-        # Agents with a wake no turn has consumed yet. Membership, not a count:
-        # see the module docstring.
+        # Unconsumed wakes use membership, not a count (see module docstring).
         self._pending: set[int] = set()
         self._closed = False
-        # Set by a turn task that refuses its bounded unwind: the dispatcher
-        # loop checks it each iteration and raises HostRestartRequiredError so
-        # the daemon exits and the supervisor restarts from the checkpoint.
+        # Refused unwind makes the dispatcher exit for checkpoint restart.
         self._restart_required = False
 
     @property
     def active_agents(self) -> frozenset[int]:
-        """Agents with a turn task right now — the in-process answer to "who is
-        running"; the host also mirrors that state in the database row."""
+        """Agents with a turn task; the host also mirrors this in the database."""
         return frozenset(self._tasks)
 
     @property
     def restart_required(self) -> bool:
-        """True when a turn refused its bounded cancellation and this daemon
-        must exit. The dispatcher loop picks it up at the next iteration."""
+        """True when refused turn cancellation requires daemon restart."""
         return self._restart_required
+
+    def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
+        return self._tasks.get(agent_id)
 
     def wake(self, agent_id: int) -> asyncio.Task[None] | None:
         """Record a wake for `agent_id` and make sure a turn will follow.
 
-        Idempotent while a turn is running: the flag is set and the running
-        task will loop. Safe to call from the dispatcher's read loop — it never
-        awaits, so it cannot interleave with a task's exit check.
-        Return the turn task so callers release accounting when that turn ends.
+        Idempotent during a turn: its pending flag makes that turn loop.
+        No await can interleave with the task's exit check. Return the task
+        so callers release accounting when that turn ends.
         """
         if self._closed:
             return None
@@ -222,21 +217,12 @@ class TurnScheduler:
         task.add_done_callback(partial(self._reap_unstarted_task, agent_id))
 
     def _reap_unstarted_task(self, agent_id: int, task: asyncio.Task[None]) -> None:
-        """Release a slot whose task was cancelled before it ever ran, re-arming its wake.
+        """Re-arm a wake cancelled before `_pump` could release its task slot.
 
-        `_pump`'s `finally` releases the registry entry — but a cancel can land
-        before the task's first event-loop slice, and a task that never started
-        executes no line of `_pump`, not even the `finally`. The slot would
-        leak: the agent stays in `active_agents`, the stale-turn scan's
-        post-cancel check reads that as a refused unwind and exits the host,
-        and `wake()` starts no successor while the stale entry holds the slot
-        (task #3085, from the PR #2217 review). The wake the task never got to
-        consume is still in `_pending`, so the successor is started here — the
-        same guarantee `wake()` makes.
-
-        A task that ran already released its slot inside `_pump` (this callback
-        then finds a successor or nothing, and returns); a task that refuses to
-        unwind is not done, so a wedged turn keeps its slot.
+        Without this callback, a pre-start cancel leaves a phantom active agent;
+        stale-turn scan treats it as refused unwind (task #3085, PR #2217).
+        The unconsumed wake remains pending, so start its successor here.
+        A running task releases its own slot; a wedged task remains active.
         """
         if self._tasks.get(agent_id) is not task:
             return
@@ -487,6 +473,8 @@ class _WakeScheduler(Protocol):
 
     def wake(self, agent_id: int) -> asyncio.Task[None] | None: ...
 
+    def task_for(self, agent_id: int) -> asyncio.Task[None] | None: ...
+
     async def cancel_agent(self, agent_id: int) -> bool: ...
 
 
@@ -697,7 +685,21 @@ class InboundWakeDispatcher:
         return recovery_started
 
     def _release_recovery_slot(self, agent_id: int, task: asyncio.Task[None]) -> None:
+        """Keep the slot with the turn consuming this scan wake.
+
+        A cancelled pre-start task can be reaped and replaced; its live
+        successor inherits the slot. Completed, failed, active-cancelled, and
+        closed turns release it; ordinary work successors do not inherit it.
+        A direct wake before this callback may inherit it conservatively.
+        """
         if self._recovery_in_flight.get(agent_id) is not task:
+            return
+        if not task.done():
+            return
+        successor = self._scheduler.task_for(agent_id) if task.cancelled() else None
+        if successor is not None and successor is not task and not successor.done():
+            self._recovery_in_flight[agent_id] = successor
+            successor.add_done_callback(partial(self._release_recovery_slot, agent_id))
             return
         del self._recovery_in_flight[agent_id]
         logger.info(
@@ -708,7 +710,6 @@ class InboundWakeDispatcher:
         )
 
     def _release_completed_recovery_slots(self) -> None:
-        # Cover a done task whose callback has not run yet.
         for agent_id, task in tuple(self._recovery_in_flight.items()):
             if task.done():
                 self._release_recovery_slot(agent_id, task)
@@ -724,8 +725,7 @@ class InboundWakeDispatcher:
             # pub/sub has no replay. The operator owns stop-leg cancellation.
             return
 
-        # Task completion normally releases the slot via callback. Queued work
-        # successors and turns from other wake paths never spend one.
+        # Reconcile completed tasks before admitting more recovery turns.
         self._release_completed_recovery_slots()
 
         # Old inbox/DB timestamps cannot license cancellation; only the current

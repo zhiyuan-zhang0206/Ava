@@ -826,6 +826,9 @@ class _ScanScheduler:
         self.woken.append(agent_id)
         self.woken_event.set()
 
+    def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
+        return None
+
     async def cancel_agent(self, agent_id: int) -> bool:
         self.cancelled.append(agent_id)
         if self._unwinds_on_cancel:
@@ -835,8 +838,7 @@ class _ScanScheduler:
 
 class TestPendingScan:
     async def test_scan_wakes_pending_inbound_even_when_pubsub_missed_it(self) -> None:
-        """The database scan is the hosted counterpart of process mode's
-        fallback SELECT: Redis notification loss may cost latency, never work."""
+        """Redis notification loss may cost latency, never durable work."""
         scheduler = _ScanScheduler()
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
@@ -854,10 +856,8 @@ class TestPendingScan:
     async def test_scan_defers_through_the_stop_leg_and_runs_from_the_start_leg(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The stop leg neither wakes nor cancels: the durable rows wait for
-        the first scan after the start leg begins. The start leg scans even
-        while the unit is still held — recovery may not wait for the hold to
-        release, because pub/sub has no replay."""
+        """Stop leg leaves rows untouched; start leg scans even while held
+        because pub/sub has no replay."""
         from shared import maintenance
 
         state = {"in_stop_leg": True}

@@ -319,6 +319,93 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
 
 
 class TestHostedWakePacing:
+    async def test_active_cancel_releases_slot_without_claiming_direct_wake(self) -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def run_turn(agent_id: int) -> None:
+            if agent_id == 1:
+                entered.set()
+            await release.wait()
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return [dispatcher.PendingInboundWake(1, False, True)]
+
+        scheduler = TurnScheduler(run_turn)
+        disp = InboundWakeDispatcher(
+            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+        )
+        try:
+            direct = scheduler.wake(3)
+            assert direct is not None and disp._recovery_in_flight == {}
+            await disp.scan_once()
+            first = disp._recovery_in_flight[1]
+            await asyncio.wait_for(entered.wait(), 3)
+            assert await scheduler.cancel_agent(1) is True
+            assert first.done() and disp._recovery_in_flight == {}
+            assert 1 not in scheduler.active_agents
+
+            await disp.scan_once()
+            second = disp._recovery_in_flight[1]
+            assert second is not first
+            disp._release_recovery_slot(1, first)  # A late callback cannot remove a newer slot.
+            assert disp._recovery_in_flight[1] is second
+            release.set()
+            await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
+        finally:
+            release.set()
+            await scheduler.aclose()
+
+    async def test_prestart_reap_transfers_recovery_slot_until_replacement_finishes(self) -> None:
+        entered: list[int] = []
+        release = {agent_id: asyncio.Event() for agent_id in (1, 2)}
+
+        async def run_turn(agent_id: int) -> None:
+            entered.append(agent_id)
+            await release[agent_id].wait()
+
+        pending = [dispatcher.PendingInboundWake(1, False, True)]
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return pending
+
+        scheduler = TurnScheduler(run_turn)
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            scheduler,
+            pending_scan=_pending,
+            stale_after_s=180.0,
+            recovery_wake_batch=2,
+            recovery_wake_inflight=1,
+        )
+        try:
+            await disp.scan_once()
+            original = disp._recovery_in_flight[1]
+            assert not original.done()
+            assert await scheduler.cancel_agent(1) is True
+            await asyncio.sleep(0)
+            successor = scheduler.task_for(1)
+            assert successor is not None and successor is not original and not successor.done()
+            assert disp._recovery_in_flight[1] is successor
+
+            pending[:] = [dispatcher.PendingInboundWake(2, False, True)]
+            await disp.scan_once()
+            await poll_until_async(lambda: entered == [1], timeout=3)
+            assert scheduler.active_agents == {1}
+            assert len(disp._recovery_in_flight) == 1
+
+            release[1].set()
+            await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
+            await disp.scan_once()
+            await poll_until_async(lambda: entered == [1, 2], timeout=3)
+            assert set(disp._recovery_in_flight) == {2}
+            release[2].set()
+            await poll_until_async(lambda: disp._recovery_in_flight == {}, timeout=3)
+        finally:
+            for event in release.values():
+                event.set()
+            await scheduler.aclose()
+
     async def test_recovery_slot_released_before_ordinary_work_successor_finishes(self) -> None:
         first_started = asyncio.Event()
         successor_started = asyncio.Event()
