@@ -1,14 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { select } from "d3-selection";
-import {
-  zoom as d3Zoom,
-  zoomIdentity,
-  type D3ZoomEvent,
-  type ZoomBehavior,
-  type ZoomTransform,
-} from "d3-zoom";
 import { Loader2, MessageSquare, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -38,6 +30,7 @@ import type { MemoryGraphNode, MemoryGraphResponse, MemoryNoteResponse } from "@
 import { useBreakpoint } from "@/lib/breakpoint";
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout";
 import { panelLayoutStorage } from "@/lib/panel-layout-storage";
+import { useSvgZoomPan } from "@/lib/use-svg-zoom-pan";
 import { cn } from "@/lib/utils";
 
 // ── Memory graph force defaults ──
@@ -64,13 +57,6 @@ const MEMORY_FORCE_KEY = "display.memory_force_params";
 // (memory tag names), and one of them matches the scan's storage-key pattern;
 // keeping the data in lib/ keeps the page source free of that false positive.
 import { colorForTag, FOLDER_COLOR } from "@/lib/memory-graph-colors";
-
-// Zoom floor only — scale factor on the memory-graph content <g>.
-// No upper bound (user ruling 2026-08-25: zoom must never be capped); d3
-// clamps wheel zoom to this extent, so the non-functional floor keeps k
-// strictly positive and prevents a degenerate zero-area transform.
-const ZOOM_MIN = 0.001;
-const ZOOM_MAX = Infinity;
 
 const MEMORY_GRAPH_QUERY_KEY = ["memory-graph"] as const;
 
@@ -420,12 +406,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
   });
 
   // ── Zoom / pan via d3-zoom ──
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const zoomRef =
-    useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const [transform, setTransform] = useState<ZoomTransform>(zoomIdentity);
-  const [animateZoom, setAnimateZoom] = useState(false);
-  const extentRef = useRef<[[number, number], [number, number]]>([
+  const { attachZoom, setExtent, transform, animateZoom, focusBounds, resetZoom, endZoomTransition } = useSvgZoomPan([
     [-400, -400],
     [400, 400],
   ]);
@@ -433,29 +414,8 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
   // Keep extent in sync with the settled layout.
   useEffect(() => {
     if (!layout) return;
-    extentRef.current = [
-      [layout.minX, layout.minY],
-      [layout.minX + layout.w, layout.minY + layout.h],
-    ];
-  }, [layout]);
-
-  // Install the d3-zoom behavior.
-  const attachZoom = useCallback((svg: SVGSVGElement | null) => {
-    svgRef.current = svg;
-    if (!svg) {
-      zoomRef.current = null;
-      return;
-    }
-    const behavior = d3Zoom<SVGSVGElement, unknown>()
-      .scaleExtent([ZOOM_MIN, ZOOM_MAX])
-      .extent(() => extentRef.current)
-      .on("zoom", (event: D3ZoomEvent<SVGSVGElement, unknown>) => {
-        setAnimateZoom(event.sourceEvent == null);
-        setTransform(event.transform);
-      });
-    zoomRef.current = behavior;
-    select(svg).call(behavior).on("dblclick.zoom", null);
-  }, []);
+    setExtent(layout);
+  }, [layout, setExtent]);
 
   // Precompute neighbor sets for dimming (selection AND hover share it).
   const neighborMap = useMemo(() => {
@@ -505,9 +465,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
   // Focus a node — center + scale its neighborhood.
   const focusNode = useCallback(
     (id: string) => {
-      const svg = svgRef.current;
-      const behavior = zoomRef.current;
-      if (!svg || !behavior || !layout) return;
+      if (!layout) return;
       const p = positions.get(id);
       if (!p) return;
       const neighbors = neighborMap.get(id);
@@ -526,28 +484,14 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
           }
         }
       }
-      const pad = params.nodeSizeMax + params.zoomPadding;
-      minX -= pad;
-      minY -= pad;
-      maxX += pad;
-      maxY += pad;
-      const boxW = maxX - minX || 1;
-      const boxH = maxY - minY || 1;
-      const boxCx = (minX + maxX) / 2;
-      const boxCy = (minY + maxY) / 2;
-      // Scale to fit without an upper cap; retain only the positive zoom floor.
-      const fitScale =
-        Math.min(layout.w / boxW, layout.h / boxH) *
-        params.zoomFitRatio;
-      const scale = Math.max(ZOOM_MIN, fitScale);
-      const tx = layout.minX + layout.w / 2 - boxCx * scale;
-      const ty = layout.minY + layout.h / 2 - boxCy * scale;
-      behavior.transform(
-        select(svg),
-        zoomIdentity.translate(tx, ty).scale(scale),
+      focusBounds(
+        { minX, minY, maxX, maxY },
+        layout,
+        params.nodeSizeMax + params.zoomPadding,
+        params.zoomFitRatio,
       );
     },
-    [positions, neighborMap, params, layout],
+    [positions, neighborMap, params, layout, focusBounds],
   );
 
   // Auto-focus on selection change.
@@ -562,13 +506,6 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
     focusedRef.current = selectedId;
     focusNode(selectedId);
   }, [selectedId, positions, focusNode]);
-
-  const resetZoom = () => {
-    const svg = svgRef.current;
-    const behavior = zoomRef.current;
-    if (svg && behavior)
-      behavior.transform(select(svg), zoomIdentity);
-  };
 
   // Chip counters — folders are pseudo nodes, not notes.
   const noteCount = graph.nodes.filter(
@@ -606,10 +543,7 @@ const MemoryForceGraph = memo(function MemoryForceGraph({
               ? "transform 0.4s ease"
               : "none",
           }}
-          onTransitionEnd={(ev) => {
-            if (ev.propertyName === "transform")
-              setAnimateZoom(false);
-          }}
+          onTransitionEnd={(ev) => endZoomTransition(ev.propertyName)}
         >
           {/* Edges — containment is the main structure; cross-references
               between notes are deliberately weaker (thin, dashed, faint). */}

@@ -14,18 +14,11 @@
 
 "use client";
 
-import { select } from "d3-selection";
-import {
-  zoom as d3Zoom,
-  zoomIdentity,
-  type D3ZoomEvent,
-  type ZoomBehavior,
-  type ZoomTransform,
-} from "d3-zoom";
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useForceLayout, type Pos, type SimLink, type SimNode } from "@/lib/use-force-layout";
+import { useSvgZoomPan, type SvgViewport } from "@/lib/use-svg-zoom-pan";
 import { cn } from "@/lib/utils";
 
 import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
@@ -84,12 +77,6 @@ export function radiusOf(score: number, maxScore: number, minR: number, maxR: nu
   return minR + (maxR - minR) * Math.sqrt(ratio);
 }
 
-// Zoom floor only — scale factor on the content <g>, shared by both graphs.
-// No upper bound (user ruling 2026-08-25: zoom must never be capped); d3
-// clamps wheel zoom to this extent, so the non-functional floor keeps k
-// strictly positive and prevents a degenerate zero-area transform.
-const ZOOM_MIN = 0.001;
-const ZOOM_MAX = Infinity;
 export const LABEL_MIN_ZOOM = 0.45;
 
 // Label wrapping: the 6px mono font advances ~0.6em per Latin glyph but a full
@@ -375,12 +362,10 @@ export const ForceGraph = memo(function ForceGraph({
   // separate from the fit-to-content viewBox base frame. d3-zoom owns wheel /
   // pinch / drag; programmatic transforms (reset, focus) flow through the same
   // "zoom" handler. identity transform == fit-to-content.
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const [transform, setTransform] = useState<ZoomTransform>(zoomIdentity);
-  // Animate the <g> only for programmatic transforms (event.sourceEvent == null);
-  // interactive wheel/drag must track the cursor 1:1 with no transition lag.
-  const [animateZoom, setAnimateZoom] = useState(false);
+  const { attachZoom, setExtent, transform, animateZoom, focusBounds, resetZoom, endZoomTransition } = useSvgZoomPan([
+    [-120, -120],
+    [120, 120],
+  ]);
 
   // Direct ref mirrors kept current via useLayoutEffect so focusNode never
   // reads a stale Map / box (the layout effect can lag by one microtask).
@@ -388,54 +373,18 @@ export const ForceGraph = memo(function ForceGraph({
   useLayoutEffect(() => {
     positionsRef.current = positions;
   });
-  const layoutRef = useRef<{ positions: Map<number | string, Pos>; cx: number; cy: number; w: number; h: number }>({
+  const layoutRef = useRef<{ positions: Map<number | string, Pos>; viewport: SvgViewport }>({
     positions,
-    cx: 0,
-    cy: 0,
-    w: 200,
-    h: 200,
+    viewport: { minX: -100, minY: -100, w: 200, h: 200 },
   });
-  const extentRef = useRef<[[number, number], [number, number]]>([
-    [-120, -120],
-    [120, 120],
-  ]);
   useLayoutEffect(() => {
     if (!layout) return;
     layoutRef.current = {
       positions,
-      cx: layout.minX + layout.w / 2,
-      cy: layout.minY + layout.h / 2,
-      w: layout.w,
-      h: layout.h,
+      viewport: layout,
     };
-    extentRef.current = [
-      [layout.minX, layout.minY],
-      [layout.minX + layout.w, layout.minY + layout.h],
-    ];
-  }, [layout, positions]);
-
-  // Install the d3-zoom behavior via a callback ref so it attaches the moment
-  // the <svg> actually mounts (the svg only renders once the layout settles, so
-  // an effect keyed on mount would miss it). The extent accessor returns our
-  // own box (never reads the DOM viewBox), so wheel-to-cursor centering stays
-  // correct under a scaled viewBox. dblclick.zoom is removed so a double-click
-  // on a node doesn't fight the node's own double-click handler.
-  const attachZoom = useCallback((svg: SVGSVGElement | null) => {
-    svgRef.current = svg;
-    if (!svg) {
-      zoomRef.current = null;
-      return;
-    }
-    const behavior = d3Zoom<SVGSVGElement, unknown>()
-      .scaleExtent([ZOOM_MIN, ZOOM_MAX])
-      .extent(() => extentRef.current)
-      .on("zoom", (event: D3ZoomEvent<SVGSVGElement, unknown>) => {
-        setAnimateZoom(event.sourceEvent == null);
-        setTransform(event.transform);
-      });
-    zoomRef.current = behavior;
-    select(svg).call(behavior).on("dblclick.zoom", null);
-  }, []);
+    setExtent(layout);
+  }, [layout, positions, setExtent]);
 
   // Precomputed neighbor sets (node id → neighbor ids) for the zoom bounding
   // box when focusing a node.
@@ -463,9 +412,6 @@ export const ForceGraph = memo(function ForceGraph({
   // settles.
   const focusNode = useCallback(
     (id: number) => {
-      const svg = svgRef.current;
-      const behavior = zoomRef.current;
-      if (!svg || !behavior) return;
       const { positions: pos } = layoutRef.current;
       // Prefer the direct positionsRef (kept current via useLayoutEffect) for
       // the node coordinate; fall back to the layoutRef copy.
@@ -488,38 +434,15 @@ export const ForceGraph = memo(function ForceGraph({
       }
 
       // Padding so nodes aren't clipped at the viewport edges.
-      const pad = params.nodeSizeMax + params.zoomPadding;
-      minX -= pad;
-      minY -= pad;
-      maxX += pad;
-      maxY += pad;
-
-      const boxW = maxX - minX || 1;
-      const boxH = maxY - minY || 1;
-      const boxCx = (minX + maxX) / 2;
-      const boxCy = (minY + maxY) / 2;
-
-      // Scale to fit without an upper cap; retain only the positive zoom floor.
-      const { cx, cy, w, h } = layoutRef.current;
-      const fitScale = Math.min(w / boxW, h / boxH) * params.zoomFitRatio;
-      const scale = Math.max(ZOOM_MIN, fitScale);
-
-      // Transform: center the bounding-box midpoint at the viewBox center.
-      // SVG transform "translate(tx, ty) scale(s)": (x, y) → (x * s + tx, y * s + ty)
-      // We want (boxCx, boxCy) → (cx, cy): tx = cx - boxCx * s, ty = cy - boxCy * s
-      const tx = cx - boxCx * scale;
-      const ty = cy - boxCy * scale;
-
-      behavior.transform(select(svg), zoomIdentity.translate(tx, ty).scale(scale));
+      focusBounds(
+        { minX, minY, maxX, maxY },
+        layoutRef.current.viewport,
+        params.nodeSizeMax + params.zoomPadding,
+        params.zoomFitRatio,
+      );
     },
-    [neighborMap, params.nodeSizeMax, params.zoomPadding, params.zoomFitRatio],
+    [neighborMap, params.nodeSizeMax, params.zoomPadding, params.zoomFitRatio, focusBounds],
   );
-
-  const resetZoom = useCallback(() => {
-    const svg = svgRef.current;
-    const behavior = zoomRef.current;
-    if (svg && behavior) behavior.transform(select(svg), zoomIdentity);
-  }, []);
 
   // Auto-focus the selected node whenever it changes (e.g. from the
   // Decisions/Reviews panel or the other graph). Fire once per selection change
@@ -584,7 +507,7 @@ export const ForceGraph = memo(function ForceGraph({
             // After the focus/reset zoom animation finishes, disable the CSS
             // transition so that subsequent simulation-tick re-renders (which
             // don't change the transform) never trigger a stray transition.
-            if (ev.propertyName === "transform") setAnimateZoom(false);
+            endZoomTransition(ev.propertyName);
           }}
         >
           {/* Edges. */}
