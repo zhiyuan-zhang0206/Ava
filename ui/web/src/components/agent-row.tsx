@@ -16,12 +16,9 @@
 // highlighting, but it stole focus visually; the active row's background highlight is
 // already distinctive enough).
 //
-// Row actions: alive rows carry no on-row buttons — restart / terminate /
-// fork / force-kill all live in the right-click context menu (long-press on
-// touch), keeping the list clean. A terminated row keeps one always-on
-// resurrect button (the single primary action for a dead agent); in-flight
-// restart / terminate / resurrect shows an in-place spinner so feedback
-// stays on the row.
+// Row actions: an open takeover has a visible end-session button. Other alive
+// actions remain in the context menu (long-press on touch). A terminated row
+// keeps one always-on resurrect button; in-flight actions show a row spinner.
 // Terminated rows are distinguished only by the red dot — label font
 // matches alive rows, no italic or dim opacity (the red dot is strong
 // enough; another visual layer just becomes noise).
@@ -30,7 +27,7 @@
 // plain items fire immediately with no prompt. The destructive Kill
 // (SIGKILL) sits behind a confirm so it can't be hit by accident.
 
-import { GitFork, Loader2, PowerOff, RotateCw, Shrink, X } from "lucide-react";
+import { GitFork, PowerOff, RotateCw, Shrink, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
@@ -50,6 +47,7 @@ import { formatShort } from "@/lib/time";
 import type { AgentRow, PublicAgentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout";
+import { RowActions } from "./agent-sidebar/row-actions";
 
 // Radix Dialog is needed only after an advanced prompt-taking menu action;
 // closed rows keep no modal payload in the initial graph.
@@ -386,18 +384,20 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                   <span className={cn("break-words", MIN_W_0)}>{displayLabel}</span>
                 </span>
               )}
+              {agent.open_impersonation_session_id != null ? (
+                <span className="text-[10px] text-foreground/70">
+                  {t(pending === "expiring" ? "takeoverEnding" : "takeoverOpen")}
+                </span>
+              ) : null}
             </span>
             {showTime ? (
               <span className="text-[10px] opacity-60 shrink-0 tabular-nums">
                 {absTime}
               </span>
             ) : null}
-            {/* Reserve room for the absolutely-positioned resurrect button /
-                pending spinner so the timestamp never underlaps it. Alive
-                idle rows render nothing there, so the timestamp keeps the
-                right edge. */}
-            {!editing && (agent.status === "terminated" || pending) ? (
-              <span className="w-5 shrink-0" />
+            {/* Reserve room for the on-row action or pending spinner. */}
+            {!editing && (agent.status === "terminated" || pending || agent.open_impersonation_session_id != null) ? (
+              <span className={cn("shrink-0", agent.open_impersonation_session_id != null && !pending ? "w-14" : "w-5")} />
             ) : null}
           </button>
           {!editing ? (
@@ -405,6 +405,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
               agent={agent}
               pending={pending}
               onResurrect={() => onResurrect()}
+              onForceExpire={confirmForceExpire}
             />
           ) : null}
         </li>
@@ -483,79 +484,5 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
         />
       ) : null}
     </ContextMenu>
-  );
-}
-
-// On-row feedback + the one quick action that stays on the row. Alive rows
-// render nothing unless an action is in flight (restart / terminate live in
-// the context menu); a terminated row keeps the always-on resurrect button —
-// always visible, not hover-gated, because mobile has no hover.
-function RowActions({
-  agent,
-  pending,
-  onResurrect,
-}: {
-  agent: AgentRow;
-  pending: PendingAction | undefined;
-  onResurrect: () => void;
-}) {
-  const t = useTranslations("agentRow");
-  // right-3 (12px) instead of flush with the right edge — leaves room
-  // for the ScrollArea vertical scrollbar (w-2.5 / 10px); otherwise the
-  // button is covered by the scrollbar and clicks land on the scrollbar.
-  const wrapperCls =
-    "absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5";
-
-  if (agent.status === "terminated") {
-    return (
-      <div className={wrapperCls}>
-        {pending === "resurrecting" ? (
-          <Spinner color="text-emerald-500" />
-        ) : (
-          <button
-            type="button"
-            onClick={onResurrect}
-            disabled={pending !== undefined}
-            className="p-0.5 rounded hover:bg-emerald-500/20 hover:text-emerald-500 text-muted-foreground disabled:opacity-30"
-            aria-label={t("resurrectConfirm", { id: agent.agent_id })}
-          >
-            <RotateCw className="size-3" />
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  if (pending === "restarting") {
-    return (
-      <div className={wrapperCls}>
-        <Spinner color="text-emerald-500" />
-      </div>
-    );
-  }
-  if (pending === "terminating" || pending === "expiring") {
-    return (
-      <div className={wrapperCls}>
-        <Spinner color="text-destructive" />
-      </div>
-    );
-  }
-  if (pending === "compacting") {
-    return (
-      <div className={wrapperCls}>
-        <Spinner color="text-amber-500" />
-      </div>
-    );
-  }
-
-  // Alive, idle — no on-row actions
-  return null;
-}
-
-function Spinner({ color }: { color: string }) {
-  return (
-    <span className="p-0.5 inline-flex items-center justify-center">
-      <Loader2 className={cn("size-3 animate-spin", color)} />
-    </span>
   );
 }
