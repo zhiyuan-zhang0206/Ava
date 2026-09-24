@@ -32,7 +32,10 @@ for fresh admission observations and host or admission anomalies, or for a
 launch failure. It reads the selected agent's detail every 15 seconds because
 host-probe changes need not emit agent lifecycle events. For non-launch reasons,
 an observation older than two minutes hides the strip if detail refresh stops
-succeeding. Reason `unknown`, whether fresh or missing evidence, also hides it.
+succeeding. The freshness comparison tolerates a small future skew: a
+just-fetched observation (stamped a beat after the client clock snapshot) shows
+immediately instead of waiting for the next tick. Reason `unknown`, whether
+fresh or missing evidence, also hides it.
 Fresh host-down and refused labels link to Machine diagnostics. The labels
 distinguish host admission from first-turn completion. Guide, preset,
 schedule, and package-draft creation toasts say "created" and point to the
