@@ -530,12 +530,8 @@ class TestResurrectAgent:
                 (agent_id,),
             )
         db_conn.commit()
-        events: list[dict[str, object]] = []
-
-        def _record(**kwargs: object) -> None:
-            events.append(kwargs)
-
-        monkeypatch.setattr("ops.agent_wake.insert_event_log", _record)
+        events: list[Any] = []
+        monkeypatch.setattr("ops.agent_wake.telemetry.emit_prepared", events.append)
 
         returned = resurrect_agent(agent_id, resurrected_by="user")
 
@@ -545,8 +541,8 @@ class TestResurrectAgent:
         assert db_conn.execute(
             "SELECT closed_at FROM agents_meta WHERE id = %s", (agent_id,)
         ).fetchone() == (None,)
-        assert events[-1]["event_type"] == "resurrect"
-        assert events[-1]["payload"] == {"reopened": True}
+        assert events[-1].event_name == "resurrect"
+        assert events[-1].attributes == {"reopened": True}
         reopened_records = [
             r for r in loguru_records if r["extra"].get("event") == "agent_reopened"
         ]
