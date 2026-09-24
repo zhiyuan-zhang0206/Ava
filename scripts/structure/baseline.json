@@ -110,7 +110,7 @@
     "tests/services/test_embeddings.py": 922,
     "tests/services/test_gate.py": 844,
     "tests/services/test_healthcheck_browser.py": 891,
-    "tests/services/test_hierarchy_worker.py": 972,
+    "tests/services/test_hierarchy_worker.py": 897,
     "tests/services/test_im_bridge_core.py": 1423,
     "tests/services/test_memory_indexer.py": 1515,
     "tests/services/test_page_server_daemon.py": 855,

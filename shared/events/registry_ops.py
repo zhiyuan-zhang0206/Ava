@@ -24,6 +24,11 @@ from shared.events.system import (
     GatewayEventLoop,
     GatewayLatency,
     GatewayProcess,
+    HierarchyEnqueueFailed,
+    HierarchyRegenAlert,
+    HierarchyRegenBudgetTripped,
+    HierarchyRegenHalt,
+    HierarchyRegenLowReuse,
     HookTiming,
     LogPayload,
     LokiQueryBudget,
@@ -546,5 +551,39 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         category="log",
         tier="observation",
         doc="the gateway TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples",
+    ),
+    # hierarchy regen guardrails (task #4674): the understanding-tree build
+    # queue's cost breakers — a reader fix that invalidated every input hash
+    # turned into a fleet-wide full re-cut, so repair waves are bounded by
+    # explicit config and made visible on the stream.
+    "hierarchy_enqueue_failed": _telemetry(
+        "hierarchy_enqueue_failed",
+        "a compact-boundary build job could not be enqueued (best-effort; the reconcile scan backstops)",
+        payload=HierarchyEnqueueFailed,
+        tier="anomaly",
+    ),
+    "hierarchy_regen_alert": _telemetry(
+        "hierarchy_regen_alert",
+        "one build job generated more nodes than the alert threshold (observability only)",
+        payload=HierarchyRegenAlert,
+        tier="anomaly",
+    ),
+    "hierarchy_regen_halt": _telemetry(
+        "hierarchy_regen_halt",
+        "generation stopped mid-run at the halt threshold; the remainder is skipped and the continuation waits out the backoff",
+        payload=HierarchyRegenHalt,
+        tier="anomaly",
+    ),
+    "hierarchy_regen_budget_tripped": _telemetry(
+        "hierarchy_regen_budget_tripped",
+        "the 24h fleet-wide generated-node total crossed the daily budget; the worker stopped claiming until an operator resets the breaker",
+        payload=HierarchyRegenBudgetTripped,
+        tier="anomaly",
+    ),
+    "hierarchy_regen_low_reuse": _telemetry(
+        "hierarchy_regen_low_reuse",
+        "one build job reused almost none of an established tree's texts — the shape of a full re-cut",
+        payload=HierarchyRegenLowReuse,
+        tier="anomaly",
     ),
 }

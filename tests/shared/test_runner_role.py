@@ -3,11 +3,10 @@
 Prove the design's grant matrix on a throwaway Postgres: the runner role can
 write exactly its audited surface — checkpoint tables (full CRUD), inbound
 claim (SELECT/UPDATE), agents_meta status (SELECT/UPDATE), machine_units
-(INSERT/UPDATE/SELECT), and SELECT everywhere — and NOTHING else: agents
-INSERT, agents_meta INSERT and any DDL fail with a permission error. Also
-covers idempotent provisioning, the password re-affirm on re-run, and the
-checkpoint-schema ensure that makes a fresh birth's grants target existing
-tables.
+(INSERT/UPDATE/SELECT), the compact-boundary enqueue, and SELECT everywhere —
+and NOTHING else: agents INSERT, agents_meta INSERT and any DDL fail with a
+permission error. Also covers idempotent provisioning and the checkpoint-
+schema ensure that makes a fresh birth's grants target existing tables.
 """
 
 from __future__ import annotations
@@ -599,6 +598,8 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # first-run / ad-hoc regeneration path runs from the runner side —
         # task #3704)
         _exercise_understanding_node_grants(conn, agent_id)
+        # the compact-boundary build enqueue (INSERT; task #4674)
+        _exercise_hierarchy_job_grants(conn, agent_id)
         # the start-readiness alert surface (SELECT + INSERT + UPDATE — the
         # firing upsert / resolve path runs in the runner process; task
         # #3747, where the surface shipped without the alerts entry and every
@@ -691,11 +692,9 @@ def _exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The pause-trail surface ava.self.pause_heartbeat writes from the runner
     process: SELECT the previous window (the backoff-reminder lookup) and
     INSERT the new row; the BIGSERIAL id draws from the owning sequence.
-
-    Regression for task #1932: the table shipped without a runner grant, so
-    every pause_heartbeat INSERT failed with InsufficientPrivilege until prod
-    was patched by hand. UPDATE/DELETE are deliberately NOT granted — the
-    trail is append-only and no runner path rewrites rows.
+    Regression for task #1932: the table shipped without a runner grant and
+    every INSERT failed with InsufficientPrivilege until prod was patched by
+    hand. UPDATE/DELETE stay ungranted — the trail is append-only.
     """
     conn.execute(
         "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, 1800)",
@@ -714,12 +713,10 @@ def _exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int
     the database side: creating a lease fires the lifecycle trigger, whose
     INSERT into agent_impersonation_entries must land, and the relay reads
     rows back by lease.
-
-    Regression for task #3549: the table shipped without a runner grant, so
-    lease creation failed with InsufficientPrivilege on
-    agent_impersonation_entries and impersonation was unusable. UPDATE/DELETE
-    are deliberately NOT granted — the trail is append-only (the preserve
-    trigger rejects rewrites) and no runner path updates rows.
+    Regression for task #3549: the table shipped without a runner grant and
+    lease creation failed with InsufficientPrivilege. UPDATE/DELETE stay
+    ungranted — the trail is append-only (the preserve trigger rejects
+    rewrites).
     """
     lease = conn.execute(
         "INSERT INTO agent_impersonations (id, agent_id, source, machine,"
@@ -739,11 +736,9 @@ def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int)
     """The understanding-node surface the hierarchy build writes from the
     runner side (manual first-run / ad-hoc regeneration, task #3704): INSERT a
     node (the BIGSERIAL id draws from the owning sequence), UPDATE it in
-    place (the write path's upsert rewrites a node when its text
-    regenerates), SELECT it back, and DELETE it — the write-side
-    reconciliation removes rows of a superseded earlier cut when a rebuild
-    re-cuts the same stretch (the provisional tail re-splits as history
-    grows; final compact-sealed cells are never deleted by construction).
+    place, SELECT it back, and DELETE it — the reconciliation removes rows of
+    a superseded earlier cut (the provisional tail re-splits as history grows;
+    sealed cells are never touched).
     """
     conn.execute(
         "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end,"
@@ -777,15 +772,27 @@ def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int)
     )
 
 
+def _exercise_hierarchy_job_grants(conn: psycopg.Connection, agent_id: int) -> None:
+    """The compact-boundary enqueue INSERT the agent-side twin writes from the
+    runner process (task #4674): one pending build job — BIGSERIAL id from the
+    owning sequence, idempotent via the live partial index — SELECTed back."""
+    conn.execute(
+        "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail)"
+        " VALUES (%s, 'compact', 'b1', 'pending', false)",
+        (agent_id,),
+    )
+    row = conn.execute(
+        "SELECT status FROM hierarchy_jobs WHERE agent_id = %s", (agent_id,)
+    ).fetchone()
+    assert row == ("pending",)
+
+
 def _exercise_watcher_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The watcher surface the runner process writes directly: INSERT (spawn),
     UPDATE (mark_status), and DELETE — the watcher child's clean-exit finally
     removes its own registry row (shared/watcher_registry.delete_watcher).
-
-    The DELETE grant was missing until 2026-08-28 (prod finding): the delete
-    failed with "permission denied for table agent_watchers", the row
-    survived, and the next boot reconcile treated the gone session as a
-    killed watcher to rebuild / false-mark 'missed'.
+    The DELETE grant landed 2026-08-28 (prod finding): without it the row
+    survived and the next boot reconcile false-marked 'missed'.
     """
     conn.execute(
         "INSERT INTO agent_watchers (session_id, agent_id, kind, name) VALUES (1, %s, 'at', 'w1')",
@@ -803,14 +810,11 @@ def _exercise_alert_grants(conn: psycopg.Connection) -> None:
     """The start-readiness alert surface `ava start` writes from the runner
     process (cli/commands/_probe.py): the firing upsert INSERTs the instance
     (or updates the open one in place), the recovery edge resolves it with an
-    UPDATE, and the open-instance lookup SELECTs it by labels before either
+    UPDATE, and the open-instance lookup SELECTs it by labels first.
+    Regression for task #3747: the surface shipped without the alerts entry
+    and every pure agent-runner's start logged the resolve failing with
+    InsufficientPrivilege. DELETE stays ungranted — resolution is a status
     write.
-
-    Regression for task #3747: the surface shipped without the alerts entry,
-    so every pure agent-runner's start logged "non-critical service alert
-    resolve failed (InsufficientPrivilege)" and the instance stayed open until
-    the row was patched by hand. DELETE is deliberately NOT granted —
-    resolution is a status write and no runner path deletes alert rows.
     """
     conn.execute(
         "INSERT INTO alerts (status, severity, alertname, labels, starts_at,"
@@ -837,12 +841,10 @@ def _exercise_alert_grants(conn: psycopg.Connection) -> None:
 
 def _identity_url(url: str) -> str:
     """The cluster's MAIN identity — the role migrations actually run as.
-
-    On a live cluster `AVA_DB_URL` names role and database with one identifier
-    (`identity_from_url`), so the applier connects as `identity`. The throwaway
-    fixture's URL dials the initdb superuser instead, which would make a
-    default-privileges test pass for the wrong reason: default privileges key on
-    the role that CREATES the object.
+    `AVA_DB_URL` names role and database with one identifier on a live cluster
+    (`identity_from_url`); the fixture dials the initdb superuser instead,
+    making a default-privileges test pass for the wrong reason — default
+    privileges key on the role that CREATES the object.
     """
     return url.replace("://ava@", f"://{_IDENTITY}@", 1)
 
@@ -850,21 +852,13 @@ def _identity_url(url: str) -> str:
 def test_read_grant_reaches_a_table_created_after_provisioning(runner_db: str) -> None:
     """A table a LATER migration creates is still readable by the runner role.
 
-    `test_runner_grant_matrix` cannot reach this: its fixture applies the whole
-    of `schema.sql` and provisions afterwards, so every table it checks existed
-    at grant time. The live order is the reverse — install births the cluster and
-    grants once, then migrations keep creating tables for the rest of the
-    cluster's life.
-
-    That matters because `GRANT SELECT ON ALL TABLES IN SCHEMA public` is a
-    point-in-time loop, not a standing policy: Postgres expands it into
-    per-object ACL entries and nothing carries forward. Without the
-    `ALTER DEFAULT PRIVILEGES` beside it, every table added after birth is
-    invisible to `ava_runner` forever, and nothing re-runs the grant on a
-    schedule. It went unnoticed until `20260820T175737_extension-registry.sql`,
-    the first post-baseline migration to CREATE a table rather than add columns
-    — which came out unreadable on every pure agent-runner, where processes dial
-    as `ava_runner` rather than the main identity.
+    `test_runner_grant_matrix` cannot reach this: its fixture applies all of
+    `schema.sql` before provisioning, so every table existed at grant time.
+    The live order is the reverse — install grants once, then migrations keep
+    creating tables, and `GRANT SELECT ON ALL TABLES` is a point-in-time loop:
+    without the `ALTER DEFAULT PRIVILEGES` beside it every later table stayed
+    invisible to `ava_runner` (found on `20260820T175737`, the first
+    post-baseline migration to CREATE a table).
     """
     ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
 
@@ -888,17 +882,12 @@ def test_pause_log_write_grant_reaches_a_cluster_born_before_the_table(
 ) -> None:
     """Task #1932 regression: a cluster born BEFORE heartbeat_pause_log existed.
 
-    Fresh-birth coverage lives in `test_runner_grant_matrix` (schema.sql +
-    grant layer in birth order). The prod shape is the reverse: the cluster was
-    born, THEN the migration created the table — and the runner's write grant
-    for it is a per-table entry in `ensure_runner_role`, so nothing covers the
-    new table until the start-path refresh re-runs the grant layer (which
-    happens only on a start that applied a migration). Without that entry the
-    fleet-wide `pause_heartbeat` INSERT failed with InsufficientPrivilege.
-
-    The refresh itself is pinned in `tests/cli/test_runner_grant_refresh.py`;
-    here we pin the grant-layer effect: INSERT is denied before the re-run and
-    lands after it.
+    Fresh-birth coverage lives in `test_runner_grant_matrix`. The prod shape
+    is the reverse: the cluster was born, THEN the migration created the
+    table — and the runner's write grant for it is a per-table entry in
+    `ensure_runner_role`, so nothing covered the new table until the
+    start-path refresh re-ran the grant layer, and the fleet-wide
+    `pause_heartbeat` INSERT failed with InsufficientPrivilege.
     """
     admin = _admin_url(runner_db)
     ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
@@ -951,17 +940,12 @@ def test_impersonation_entry_grant_reaches_a_cluster_born_before_the_table(
     """Task #3549 regression: a cluster that adopted the impersonation trail
     (20260913T180056) before the runner grant for its table existed.
 
-    Fresh-birth coverage lives in `test_runner_grant_matrix` (schema.sql +
-    grant layer in birth order). The prod shape is the reverse: the cluster
-    was born, THEN the migration created the table — and the runner's write
-    grant for it is a per-table entry in `ensure_runner_role`, so the role
-    could read the trail but creating a lease failed inside the lifecycle
-    trigger with InsufficientPrivilege on agent_impersonation_entries until
-    the start-path refresh re-ran the grant layer.
-
-    The refresh itself is pinned in `tests/cli/test_runner_grant_refresh.py`;
-    here we pin the grant-layer effect: lease creation is denied before the
-    re-run and lands (writing its trail row) after it.
+    Fresh-birth coverage lives in `test_runner_grant_matrix`; the prod shape
+    is the reverse: the cluster was born, THEN the migration created the
+    table, so the role could read the trail but creating a lease failed in
+    the lifecycle trigger with InsufficientPrivilege on
+    agent_impersonation_entries until the start-path refresh re-ran the grant
+    layer.
     """
     admin = _admin_url(runner_db)
     ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
@@ -1025,18 +1009,10 @@ def test_alert_write_grant_reaches_a_cluster_born_before_the_entry(runner_db: st
     """Task #3747 regression: a cluster whose runner surface predates the
     alerts entry.
 
-    Fresh-birth coverage lives in `test_runner_grant_matrix` (schema.sql +
-    grant layer in birth order). The prod shape is the reverse: the cluster
-    adopted the runner role while `ensure_runner_role` carried no alerts
-    entry — the table itself is as old as the baseline, so the role could
-    SELECT it and nothing more, and every start's resolve failed with
-    InsufficientPrivilege. The start-path refresh re-runs the grant layer
-    with the entry present, so an existing cluster heals on its next start
-    that applied a migration.
-
-    The refresh itself is pinned in `tests/cli/test_runner_grant_refresh.py`;
-    here we pin the grant-layer effect: the write is denied before the re-run
-    — the exact prod symptom — and lands after it.
+    Fresh-birth coverage lives in `test_runner_grant_matrix`; the prod shape
+    is the reverse: the role carried no alerts write entry, so every start's
+    resolve failed with InsufficientPrivilege until the start-path refresh
+    re-ran the grant layer with the entry present.
     """
     admin = _admin_url(runner_db)
     ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
@@ -1059,3 +1035,27 @@ def test_alert_write_grant_reaches_a_cluster_born_before_the_entry(runner_db: st
     ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
         _exercise_alert_grants(conn)
+
+
+def test_hierarchy_jobs_insert_grant_reaches_a_cluster_born_before_the_entry(
+    runner_db: str,
+) -> None:
+    """Task #4674 regression: a cluster whose runner surface predates the
+    hierarchy_jobs INSERT entry — every enqueue failed with InsufficientPrivilege
+    and the trigger went dark until the start-path refresh re-ran the grant
+    layer."""
+    admin = _admin_url(runner_db)
+    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    # The role's surface as it was: blanket reads, no INSERT on hierarchy_jobs.
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        conn.execute("REVOKE INSERT ON hierarchy_jobs FROM ava_runner")
+
+    with (
+        psycopg.connect(_runner_url(runner_db), autocommit=True) as conn,
+        pytest.raises(psycopg.errors.InsufficientPrivilege),
+    ):
+        _exercise_hierarchy_job_grants(conn, 880_040)
+
+    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
+        _exercise_hierarchy_job_grants(conn, 880_040)

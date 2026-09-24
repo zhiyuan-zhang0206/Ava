@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 214 | event stream |
+| telemetry (category=telemetry) | `events` | 219 | event stream |
 | log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 214)
+## 3. Telemetry events (category=telemetry, 219)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -321,6 +321,11 @@ consumers: see the comments at each emit point.
 | `fleet_graph_stale` | the fleet-graph route served the stale/last-good graph after a degraded upstream read — one event per degradation episode, not per poll | anomaly | route, reason | — | events |
 | `stats_dashboard_stale` | the stats-dashboard route served its last-good response after a failed recompute — one event per degradation episode, not per poll | anomaly | route, reason | — | events |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events |
+| `hierarchy_enqueue_failed` | a compact-boundary build job could not be enqueued (best-effort; the reconcile scan backstops) | anomaly | agent_id, error | — | events |
+| `hierarchy_regen_alert` | one build job generated more nodes than the alert threshold (observability only) | anomaly | agent_id, job_id, generated, threshold | — | events |
+| `hierarchy_regen_halt` | generation stopped mid-run at the halt threshold; the remainder is skipped and the continuation waits out the backoff | anomaly | agent_id, job_id, generated, threshold | — | events |
+| `hierarchy_regen_budget_tripped` | the 24h fleet-wide generated-node total crossed the daily budget; the worker stopped claiming until an operator resets the breaker | anomaly | window_nodes, budget_nodes | — | events |
+| `hierarchy_regen_low_reuse` | one build job reused almost none of an established tree's texts — the shape of a full re-cut | anomaly | agent_id, job_id, generated, reused | — | events |
 
 ## 4. Log (bare logs, category=log)
 
