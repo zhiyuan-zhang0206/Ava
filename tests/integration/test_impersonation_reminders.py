@@ -16,16 +16,21 @@ from tests.impersonation_support import recorded_tree
 
 
 @pytest.mark.parametrize(
-    ("machine", "home", "stopped_home"),
+    ("machine", "home", "stopped_home", "null_home"),
     [
-        ("macbook-air", "/Users/owner/.ava", None),
-        ("ubuntu-runner", "/home/owner/.ava", None),
-        ("unregistered", None, None),
-        ("macbook-air", "/Users/live/.ava", "/Users/stopped/.ava"),
+        ("macbook-air", "/Users/owner/.ava", None, None),
+        ("ubuntu-runner", "/home/owner/.ava", None, None),
+        ("unregistered", None, None, None),
+        ("macbook-air", "/Users/live/.ava", "/Users/stopped/.ava", None),
+        ("macbook-air", "/Users/live-newest/.ava", None, "/Users/null-uptime/.ava"),
     ],
 )
 def test_reminder_uses_lease_machine_home(
-    db_conn: psycopg.Connection, machine: str, home: str | None, stopped_home: str | None
+    db_conn: psycopg.Connection,
+    machine: str,
+    home: str | None,
+    stopped_home: str | None,
+    null_home: str | None,
 ) -> None:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -58,6 +63,11 @@ def test_reminder_uses_lease_machine_home(
             "VALUES(%s,%s,clock_timestamp()+interval '1 minute',clock_timestamp())",
             (machine, stopped_home),
         )
+    if null_home is not None:
+        db_conn.execute(
+            "INSERT INTO machine_units(machine_name,home,up_since_at) VALUES(%s,%s,NULL)",
+            (machine, null_home),
+        )
     if home is not None:
         db_conn.execute(
             "INSERT INTO machine_units(machine_name,home,up_since_at) "
@@ -80,3 +90,5 @@ def test_reminder_uses_lease_machine_home(
     assert sys.executable not in content
     if stopped_home is not None:
         assert stopped_home not in content
+    if null_home is not None:
+        assert null_home not in content

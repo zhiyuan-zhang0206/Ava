@@ -532,7 +532,7 @@ def machine_home(conn: psycopg.Connection, name: str) -> str | None:
     """Return the preferred registered unit home for a machine, if any."""
     row = conn.execute(
         "SELECT home FROM machine_units WHERE machine_name=%s "
-        "ORDER BY (stopped_at IS NULL) DESC, up_since_at DESC, home LIMIT 1",
+        "ORDER BY (stopped_at IS NULL) DESC, up_since_at DESC NULLS LAST, home LIMIT 1",
         (name,),
     ).fetchone()
     return row[0] if row is not None else None
