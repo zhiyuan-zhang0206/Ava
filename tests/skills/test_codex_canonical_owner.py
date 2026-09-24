@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
+import json
+import os
 import sys
+import time
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -14,6 +17,7 @@ from typing import Any
 import pytest
 
 from shared import coding_session_owner
+from shared.platform import IS_WINDOWS
 
 _REFERENCE = (
     Path(__file__).parents[2]
@@ -136,6 +140,53 @@ def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
 
     assert "os.environ['AVA_AGENT_ID'] = '41'" in code
     assert "['watch']" in code
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions require POSIX")
+def test_codex_supervisor_uses_projected_session_environment(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runner's real sessions.new path must remove an inherited foreign venv."""
+    from ava.shell import sessions
+    from shared.session_backend import PtySessionBackend
+
+    owner = _owner(unit_home)
+    workspace = Path(owner.key.workspace)
+    backend = PtySessionBackend()
+    report = unit_home / "codex-child-env.json"
+    # unit_home pins in-process Settings; subprocesses read the raw env at boot.
+    monkeypatch.setitem(os.environ, "AVA_HOME", str(unit_home))
+    monkeypatch.setenv("HOME", str(unit_home))
+    monkeypatch.setenv("VIRTUAL_ENV", str(unit_home / "foreign" / ".venv"))
+    monkeypatch.setattr(spawn_codex.ava._boot, "_agent_id", 41)
+    monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 7)
+    monkeypatch.setattr(sessions, "_shell_prefix", lambda: "ava-agent-41-shell-")
+    monkeypatch.setattr(sessions, "workspace_dir", lambda _agent_id: workspace)
+    monkeypatch.setattr(sessions, "get_shell_backend", lambda: backend)
+    monkeypatch.setattr(sessions, "_record_ttl", lambda _sid, _ttl: None)
+    # Execute a probe in place of the long-running supervisor; session birth,
+    # envfile transport, host fork, and shell command delivery remain real.
+    monkeypatch.setattr(
+        spawn_codex,
+        "_supervisor_code",
+        lambda _owner: (
+            "import json, os; from pathlib import Path; "
+            f"report = Path({str(report)!r}); pending = report.with_suffix('.tmp'); "
+            "pending.write_text(json.dumps(dict("
+            "virtual_env=os.environ.get('VIRTUAL_ENV'), cwd=os.getcwd()))); pending.replace(report)"
+        ),
+    )
+    name = coding_session_owner.full_session_name(41, 7, spawn_codex._supervisor_name(owner))
+    try:
+        sid, actual_name = spawn_codex._launch_supervisor(owner, 120)
+        assert (sid, actual_name) == (7, name)
+        deadline = time.monotonic() + 15
+        while not report.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert report.exists()
+        assert json.loads(report.read_text()) == {"virtual_env": None, "cwd": str(workspace)}
+    finally:
+        backend.kill_session(name)
 
 
 def test_failed_early_publish_kills_codex_session_before_startup(

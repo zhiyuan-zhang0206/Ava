@@ -134,6 +134,10 @@ def _fork_shell(cwd: str, env: dict[str, str], cols: int, rows: int) -> tuple[in
             # Task #856). Dropped BEFORE the envfile overlay so an explicit
             # caller-supplied marker rides.
             os.environ.pop("AVA_PROCESS_PROFILE", None)
+            # Omission in the caller's projection must remove activation, not
+            # preserve the host's venv. Explicit daemon/session activation in
+            # the overlay still wins; unrelated ambient env stays inherited.
+            os.environ.pop("VIRTUAL_ENV", None)
             os.environ.update(env)  # envfile overlay, never argv
             os.environ.setdefault("TERM", "xterm-256color")
             os.environ.setdefault("LANG", "en_US.UTF-8")
