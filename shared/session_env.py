@@ -14,6 +14,10 @@ Three jobs, all mechanism (no policy):
   recorded pid IS the daemon and a graceful SIGTERM reaches it.
 - `_session_forward_env` is the registry projection both build on.
 
+The POSIX PTY backend overlays this dict onto the launcher's inherited env;
+daemon backends use it as their complete env. Watchers explicitly validate
+and override runner credentials before that PTY handoff.
+
 **The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
 point A): which keys a child receives is the `child_env(role, platform)`
 projection of the env registry (`shared/env_registry.py` — host-scope facts +

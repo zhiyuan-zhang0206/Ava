@@ -1209,14 +1209,11 @@ def test_spawn_binds_registry_generation_to_the_created_session_record(
         cwd: str | None = None,
         ttl: float | None = None,
         system: bool = False,
+        env_overrides: dict[str, str] | None = None,
     ) -> tuple[int, str]:
         return 424271, "ava-agent-1-shell-424271-record-bound"
 
-    monkeypatch.setattr(
-        _sessions,
-        "_create_session",
-        _create_session,
-    )
+    monkeypatch.setattr(_sessions, "_create_session", _create_session)
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
 
@@ -1396,18 +1393,17 @@ def test_spawn_keeps_sibling_files_while_session_alive(
 def test_spawn_back_to_back_keeps_all_files(
     _agent_row: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Bug A acceptance (task #1116): creating several watchers back-to-back
-    must not delete any sibling's not-yet-read boot file — the exact sequence
-    that killed watcher_0/3_boot.py. The fake session registry reports every
-    created session live immediately (as the real backend does), so each
-    launch's prune must leave its siblings' pairs on disk."""
+    """Back-to-back launches must keep every live sibling's boot file (task #1116).
+    The fake exposes each session immediately, as the backend does."""
     from ava.shell import sessions as _sessions
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     alive: set[int] = set()
     counter = iter(range(1000, 1003))
 
-    def _fake_create(name: str, *, ttl: float, system: bool = False) -> tuple[int, str]:
+    def _fake_create(
+        name: str, *, ttl: float, system: bool = False, env_overrides: dict[str, str] | None = None
+    ) -> tuple[int, str]:
         sid = next(counter)
         alive.add(sid)
         return sid, name
