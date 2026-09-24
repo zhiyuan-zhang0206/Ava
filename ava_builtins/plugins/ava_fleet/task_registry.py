@@ -451,9 +451,12 @@ def update(
     # auto-resurrecting a terminated owner (62-agent wake storm, 2026-08-27).
     parent_only = parent_id is not _UNSET and _nothing_to_update(sets, note)
     # Reset the reminder counters on any update — a fresh overdue window starts
-    # from this update, so any previous reminder is stale.
+    # from this update, so any previous reminder is stale. The delegator
+    # escalation marker goes with them: clearing it lets the fresh window
+    # escalate on its own.
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
+    sets.append("escalated_at = NULL")
 
     actor = ava._boot.agent_id()
     with ava.DB.transaction(), ava.DB.cursor() as cur:

@@ -1075,6 +1075,7 @@ CREATE TABLE agent_tasks (
     remind_interval_seconds  INTEGER DEFAULT 1800,  -- seconds until an idle task reminds its owner; default 30 min, capped at 24h. Reminders cannot be disabled: NULL only on the never-reminded root task.
     last_reminded_at   TIMESTAMPTZ,            -- last time the daemon reminded the owner
     reminder_count      INTEGER NOT NULL DEFAULT 0,  -- reminders sent for the current overdue window
+    escalated_at        TIMESTAMPTZ,  -- delegator escalation marker: set by the daemon with the delivered digest; cleared with the counters by any update (the user leg marks itself via its notice)
     token_budget        BIGINT CHECK (token_budget IS NULL OR token_budget > 0),  -- optional ceiling for explicitly task-tagged LLM tokens
     usd_budget          DOUBLE PRECISION CHECK (usd_budget IS NULL OR (usd_budget > 0 AND usd_budget < 'Infinity'::double precision)),  -- optional finite USD ceiling for explicitly task-tagged LLM cost
     token_used          BIGINT NOT NULL DEFAULT 0 CHECK (token_used >= 0),
@@ -2490,3 +2491,4 @@ INSERT INTO schema_migrations (name) VALUES ('20260923T195300_agent-launch-failu
 INSERT INTO schema_migrations (name) VALUES ('20260923T205208_impersonation-event-manifest');
 INSERT INTO schema_migrations (name) VALUES ('20260924T070003_hierarchy-worker-breaker');
 INSERT INTO schema_migrations (name) VALUES ('20260924T150840_impersonation-receipt-lock-door');
+INSERT INTO schema_migrations (name) VALUES ('20260924T193804_task-escalation-marker');
