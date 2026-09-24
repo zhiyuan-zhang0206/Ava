@@ -52,6 +52,20 @@ class DaemonSettings(
         },
     )
 
+    host_recovery_wake_inflight: int = Field(
+        default=4,
+        ge=1,
+        alias="AVA_HOST_RECOVERY_WAKE_INFLIGHT",
+        description="Hosted agent-runner: maximum recovery-class turns started by the pending scan that may remain in flight on this host. AVA_HOST_RECOVERY_WAKE_BATCH limits new recovery starts per scan cycle; both limits apply together. Ordinary work and held maintenance wakes are exempt from both gates. Lower this value on slower hosts when recovery turns contend for database or runtime capacity.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     host_db_recovery_prolonged_attempts: int = Field(
         default=6,
         ge=1,

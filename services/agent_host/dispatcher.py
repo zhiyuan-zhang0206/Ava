@@ -540,6 +540,7 @@ class InboundWakeDispatcher:
         stale_after_s: float | None = None,
         scan_interval_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         recovery_wake_batch: int = 4,
+        recovery_wake_inflight: int = 4,
         max_scan_backoff_s: float = _DEFAULT_MAX_SCAN_BACKOFF_S,
         subscription_read_timeout_s: float = _DEFAULT_SUBSCRIPTION_READ_TIMEOUT_S,
         subscription_read_deadline_grace_s: float = _DEFAULT_SUBSCRIPTION_READ_SLACK_S,
@@ -551,6 +552,8 @@ class InboundWakeDispatcher:
         self._stale_after_s = stale_after_s
         self._scan_interval_s = scan_interval_s
         self._recovery_wake_batch = recovery_wake_batch
+        self._recovery_wake_inflight = recovery_wake_inflight
+        self._recovery_in_flight: set[int] = set()
         self._max_scan_backoff_s = max_scan_backoff_s
         self._subscription_read_timeout_s = subscription_read_timeout_s
         self._subscription_read_deadline_grace_s = subscription_read_deadline_grace_s
@@ -666,17 +669,28 @@ class InboundWakeDispatcher:
         self, candidate: PendingInboundWake, started: set[int], recovery_started: int
     ) -> int:
         starts_turn = candidate.agent_id not in self._scheduler.active_agents
-        if candidate.recovery and starts_turn and recovery_started >= self._recovery_wake_batch:
+        if (
+            candidate.recovery
+            and starts_turn
+            and (
+                recovery_started >= self._recovery_wake_batch
+                or len(self._recovery_in_flight) >= self._recovery_wake_inflight
+            )
+        ):
             return recovery_started
         if starts_turn:
             started.add(candidate.agent_id)
             if candidate.recovery:
                 recovery_started += 1
         self._scheduler.wake(candidate.agent_id)
+        if candidate.recovery and starts_turn:
+            # A wake on a closed scheduler may start no task. The next scan
+            # drops that id if it never appeared in active_agents.
+            self._recovery_in_flight.add(candidate.agent_id)
         return recovery_started
 
     async def scan_once(self) -> None:
-        """Wake all work and one recovery batch; cancel stale active turns first.
+        """Wake all work; bound recovery starts by batch and in-flight limits.
 
         This is public only as the narrow test seam for the durable backstop.
         Production calls it before each deadline-bounded subscription read.
@@ -694,6 +708,8 @@ class InboundWakeDispatcher:
             # still held — recovery may not wait for the hold to release,
             # because pub/sub has no replay.
             return
+
+        self._recovery_in_flight.intersection_update(self._scheduler.active_agents)
 
         # Inbox/DB timestamps describe accumulated work, not this turn. A
         # freshly resumed stream may have old pending rows until its next claim.

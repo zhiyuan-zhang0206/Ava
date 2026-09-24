@@ -319,6 +319,106 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
 
 
 class TestHostedWakePacing:
+    async def test_recovery_inflight_cap_releases_completed_turns_and_preserves_work(self) -> None:
+        entered: set[int] = set()
+        release = {agent_id: asyncio.Event() for agent_id in (1, 2, 3, 4, 99)}
+
+        async def run_turn(agent_id: int) -> None:
+            entered.add(agent_id)
+            await release[agent_id].wait()
+
+        scheduler = TurnScheduler(run_turn)
+        remaining = {1, 2, 3, 4}
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return [
+                dispatcher.PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
+                for agent_id in sorted(remaining)
+            ] + [dispatcher.PendingInboundWake(agent_id=99, stale=False)]
+
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            scheduler,
+            pending_scan=_pending,
+            stale_after_s=180.0,
+            recovery_wake_batch=3,
+            recovery_wake_inflight=2,
+        )
+        try:
+            await disp.scan_once()
+            assert scheduler.active_agents == {1, 2, 99}
+            await disp.scan_once()
+            assert scheduler.active_agents == {1, 2, 99}
+            release[1].set()
+            await poll_until_async(lambda: 1 not in scheduler.active_agents, timeout=3)
+            remaining.remove(1)
+            await disp.scan_once()
+            assert scheduler.active_agents == {2, 3, 99}
+            release[2].set()
+            release[3].set()
+            await poll_until_async(lambda: not ({2, 3} & scheduler.active_agents), timeout=3)
+            remaining.difference_update({2, 3})
+            await disp.scan_once()
+            assert scheduler.active_agents == {4, 99}
+            await poll_until_async(lambda: entered >= {1, 2, 3, 4, 99}, timeout=3)
+        finally:
+            for event in release.values():
+                event.set()
+            await scheduler.aclose()
+
+    async def test_unstarted_recovery_wake_releases_slot_on_next_scan(self) -> None:
+        scheduler = _ScanScheduler()
+        pending = [dispatcher.PendingInboundWake(agent_id=1, stale=False, recovery=True)]
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return pending
+
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            scheduler,
+            pending_scan=_pending,
+            stale_after_s=180.0,
+            recovery_wake_batch=2,
+            recovery_wake_inflight=1,
+        )
+        await disp.scan_once()
+        assert scheduler.woken == [1]
+        pending[:] = [dispatcher.PendingInboundWake(agent_id=2, stale=False, recovery=True)]
+        await disp.scan_once()
+        assert scheduler.woken == [1, 2]
+
+    async def test_failed_recovery_turn_releases_slot_on_next_scan(self) -> None:
+        attempted: list[int] = []
+
+        async def run_turn(agent_id: int) -> None:
+            attempted.append(agent_id)
+            raise RuntimeError("failed before admission")
+
+        scheduler = TurnScheduler(run_turn)
+        pending = [dispatcher.PendingInboundWake(agent_id=1, stale=False, recovery=True)]
+
+        async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
+            return pending
+
+        disp = InboundWakeDispatcher(
+            "redis://unused",
+            scheduler,
+            pending_scan=_pending,
+            stale_after_s=180.0,
+            recovery_wake_batch=2,
+            recovery_wake_inflight=1,
+        )
+        try:
+            await disp.scan_once()
+            await poll_until_async(
+                lambda: attempted == [1] and not scheduler.active_agents, timeout=3
+            )
+            pending[:] = [dispatcher.PendingInboundWake(agent_id=2, stale=False, recovery=True)]
+            await disp.scan_once()
+            await poll_until_async(lambda: attempted == [1, 2], timeout=3)
+        finally:
+            await scheduler.aclose()
+
     async def test_recovery_cap_drains_across_scans_without_delaying_work(self) -> None:
         scheduler = _ScanScheduler()
         remaining = set(range(1, 7))
@@ -443,6 +543,17 @@ class TestHostedHostWakePacing:
             (17, False),
             (23, False),
         ]
+        scheduler = _ScanScheduler()
+        wake_dispatcher = InboundWakeDispatcher(
+            "redis://unused",
+            scheduler,
+            pending_scan=host.pending_inbound_wakes,
+            stale_after_s=30,
+            recovery_wake_batch=1,
+            recovery_wake_inflight=1,
+        )
+        await wake_dispatcher.scan_once()
+        assert scheduler.woken == [17, 23]
 
     async def test_settled_reap_wake_is_consumed_by_first_turn_attempt(
         self, monkeypatch: pytest.MonkeyPatch
