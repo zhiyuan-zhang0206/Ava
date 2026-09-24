@@ -99,7 +99,7 @@ named-PTY rule covers `<name>.{out,host}.log` without traversing any subtree.
   boundary.
   The host consumes the 0600
   envfile (values never on argv, #974), binds its socket, forks the shell
-  (child drops `AVA_PROCESS_PROFILE`, overlays the envfile), writes the
+  (drops `AVA_PROCESS_PROFILE`/`VIRTUAL_ENV`, overlays envfile), writes the
   record, and answers `ping`; the CLI waits for readiness and fails fast
   with the host log tail if the host dies pre-socket.
 - **death** — the reader reaps the child (waitpid on every pass) and on EOF

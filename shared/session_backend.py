@@ -400,8 +400,11 @@ class PtySessionBackend(SessionBackend):
     login shell (``bash -l -i``, the classic pane shape) carried by its own
     detached host process (``shared.pty_sessions.host``), so no infra process
     holds every shell and sessions persist across agent exits, restarts, and
-    cluster updates. ``cmd`` accepted but ignored; ``login_shell=False``
-    raises ``NotImplementedError``. Env rides a 0600 file, never argv (#974).
+    cluster updates. ``cmd`` is submitted after the shell is ready;
+    ``login_shell=False`` raises ``NotImplementedError``. Env rides a 0600
+    file, never argv (#974). Omitted env uses the standard projection, with
+    venv activation only for cwd inside this checkout (excluding worktrees).
+    The host clears inherited VIRTUAL_ENV before applying that projection.
     Liveness ops map the CLI exit status to the interface's bool/tuple/list
     shape; the enumeration ops read the session records in-process (no
     subprocess, no socket — task #1200's snapshot-cost fix, now structural).
@@ -426,7 +429,7 @@ class PtySessionBackend(SessionBackend):
         cmd: str,
         cwd: Path,
         *,
-        env: dict[str, str],
+        env: dict[str, str] | None = None,
         login_shell: bool = True,
         exec_cmd: bool = True,  # noqa: ARG002 — an interactive shell is never exec'd away
         gate_fd: int | None = None,
@@ -436,6 +439,11 @@ class PtySessionBackend(SessionBackend):
             raise NotImplementedError(f"{type(self).__name__} has no gated spawn")
         if not login_shell:
             raise NotImplementedError(f"{type(self).__name__} only creates login shells")
+        if env is None:
+            from shared.paths import repo_root
+            from shared.session_env import cwd_is_inside_checkout, forward_env_dict
+
+            env = forward_env_dict(activate_venv=cwd_is_inside_checkout(cwd, repo_root()))
         envfile = _write_session_env_file(env)
         args = [name, "new", str(cwd), str(envfile)]
         if cmd:  # the per-session host submits the base64 command when ready
