@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 from shared.agent_observation import AgentAvailability, AgentObservation, availability, observation
 from shared.agents import AgentStatus
 from shared.config import settings
+from shared.db import connect
+from shared.log import logger
 from shared.tasks.priority import Priority
 
 # Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
@@ -167,21 +169,32 @@ class AgentSnapshot(BaseModel):
     heartbeat_paused_until: datetime | None
 
 
-def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
-    from shared.lm.factory import model_supports_vision
+def _effective_model(config_overlay: Any) -> str:
+    """The model an agent's own calls run, withdrawal-resolved (task #3212).
+
+    `config_overlay.llm_model` when set, otherwise `settings.lm.llm_model`; a
+    configured withdrawn id is served by its registered fallback. One
+    resolution site serves both the snapshot's capability judgment and
+    `agent_effective_model` — generation couples to the agent's own model for
+    provider cache parity (task #4674).
+    """
     from shared.lm.registry import resolve_available_model
 
-    # Pydantic does the per-field type coercion / validation; the tuple
-    # positions match the SELECT column order above.
-    config_overlay = row[17]
-    configured_model = (
+    configured = (
         config_overlay["llm_model"]
         if config_overlay and "llm_model" in config_overlay
         else settings.lm.llm_model
     )
-    # Capability judgments answer for the model that will run: a configured
-    # withdrawn id is served by its fallback (task #3212).
-    effective_model = resolve_available_model(configured_model)
+    return resolve_available_model(configured)
+
+
+def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
+    from shared.lm.factory import model_supports_vision
+
+    # Pydantic does the per-field type coercion / validation; the tuple
+    # positions match the SELECT column order above. Capability judgments
+    # answer for the model that will run (task #3212).
+    effective_model = _effective_model(row[17])
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
@@ -225,6 +238,32 @@ def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
         )
         row = cur.fetchone()
     return _row_to_snapshot(row) if row else None
+
+
+def agent_effective_model(agent_id: int, *, fallback: str) -> str:
+    """The model `agent_id`'s own calls run, withdrawal-resolved.
+
+    The same resolution `_row_to_snapshot` applies for the snapshot, without
+    building one; a consumer couples to it so its requests ride the agent's
+    own model (hierarchy generation, task #4674 — a hard model mismatch
+    silently halves its provider cache hit rate). A failed agents_meta read
+    logs a warning and returns `fallback` — generation must not die on a
+    bookkeeping miss.
+    """
+    try:
+        with connect(autocommit=True) as conn:
+            row = conn.execute(
+                "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+            ).fetchone()
+    except Exception as exc:
+        logger.warning(
+            "agent {agent}: effective-model lookup failed ({error!r}); falling back to {model}",
+            agent=agent_id,
+            error=exc,
+            model=fallback,
+        )
+        return fallback
+    return _effective_model(row[0] if row else None)
 
 
 class ActivityEntry(BaseModel):

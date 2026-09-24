@@ -15,6 +15,11 @@ load reads every boundary that exists at its own later start, so the target
 is guaranteed to be inside what the run walked. A boundary stamped after the
 read simply triggers the next job instead of being silently skipped —
 advancing to a value the run did not seal would lose that stretch for good.
+
+Generation is agent-shaped (task #4674): requests ride the target agent's own
+conversation prefix and tool schema so the provider serves them from its
+prefix cache, and the generation model is the agent's own effective model —
+`shared.agent_snapshot.agent_effective_model`.
 """
 
 from __future__ import annotations
@@ -22,7 +27,9 @@ from __future__ import annotations
 import time
 import traceback
 
+from agent.llm import execute_code
 from services.hierarchy_worker.scan import KIND_COMPACT, KIND_TAIL
+from shared.agent_snapshot import agent_effective_model
 from shared.agents.history.checkpoint import (
     latest_checkpoint_id,
     list_compact_boundary_checkpoint_ids,
@@ -70,7 +77,7 @@ def execute_job(job_id: int) -> int:
         )
         return 0
 
-    model = settings.lm.hierarchy_model
+    model = agent_effective_model(agent_id, fallback=settings.lm.hierarchy_model)
     started = time.monotonic()
     try:
         # Each channel reads only its own bookkeeping target: a compact run
@@ -100,6 +107,7 @@ def execute_job(job_id: int) -> int:
                 known_texts=known,
                 max_concurrent=settings.daemon.hierarchy_generation_concurrency,
                 deadline=deadline,
+                tools=[execute_code],
             )
         finally:
             close_chat_model(llm)

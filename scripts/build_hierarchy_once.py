@@ -22,6 +22,8 @@ from __future__ import annotations
 import argparse
 from urllib.parse import urlsplit
 
+from agent.llm import execute_code
+from shared.agent_snapshot import agent_effective_model
 from shared.agents.history.hierarchy.generate import build_generation_llm
 from shared.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
 from shared.agents.history.hierarchy.store import load_known_texts, write_tree
@@ -69,17 +71,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="build and report; write nothing")
     parser.add_argument(
-        "--model", default=None, help="generation model (default: settings.lm.hierarchy_model)"
+        "--model",
+        default=None,
+        help="generation model (default: the agent's own model — cache parity, task #4674)",
     )
     args = parser.parse_args(argv)
 
-    model: str = args.model or settings.lm.hierarchy_model
+    model: str = args.model or agent_effective_model(
+        args.agent_id, fallback=settings.lm.hierarchy_model
+    )
     print(f"target: {_db_label()} | agent {args.agent_id} | model {model}")
 
     known = load_known_texts(args.agent_id)
     llm = build_generation_llm(model)
     try:
-        tree = build_agent_tree(args.agent_id, llm=llm, model=model, known_texts=known)
+        tree = build_agent_tree(
+            args.agent_id, llm=llm, model=model, known_texts=known, tools=[execute_code]
+        )
     finally:
         close_chat_model(llm)
     _report(tree, known_count=len(known))

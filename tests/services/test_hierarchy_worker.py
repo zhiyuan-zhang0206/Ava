@@ -413,7 +413,7 @@ def test_execute_builds_one_model_and_closes_it(
         return {}
 
     def fake_tree(*args: object, **kwargs: object) -> MaterializedTree:
-        seen_llm.append(kwargs["llm"])
+        seen_llm.append((kwargs["llm"], kwargs["tools"]))
         return MaterializedTree(nodes=(), errors=(), pending={}, max_level=1, batches=1)
 
     def fake_write(*args: object, **kwargs: object) -> int:
@@ -429,8 +429,8 @@ def test_execute_builds_one_model_and_closes_it(
     monkeypatch.setattr(execute_module, "write_tree", fake_write)
 
     assert execute_module.execute_job(job_id) == 0
-    assert built == [settings.lm.hierarchy_model]
-    assert seen_llm == [sentinel]  # the built model is passed in, never None
+    assert built == [settings.lm.llm_model]
+    assert seen_llm == [(sentinel, [execute_module.execute_code])]  # model + tool schema ride in
     assert closed == [sentinel]
 
 

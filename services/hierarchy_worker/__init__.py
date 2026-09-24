@@ -16,7 +16,11 @@ Modules:
   `llm_usage` ledger rows reach the event stream — task #3868), and
   `execute.execute_job` owns the job row's outcome (scope + token stats; the
   scan-cursor advance for a `compact` job, the tail-seal delta column for a
-  `tail` job) and the build itself.
+  `tail` job) and the build itself. Generation runs agent-shaped (task #4674):
+  the child resolves the target agent's own model
+  (`shared.agent_snapshot.agent_effective_model`) and passes the agent's tool
+  schema, so each request rides the agent's conversation prefix and serves
+  from the provider's prefix cache.
 
 The build is `shared.agents.history.hierarchy.pipeline.build_agent_tree` plus the storage
 layer's `write_tree`; generation is hash-idempotent, so any interrupted run

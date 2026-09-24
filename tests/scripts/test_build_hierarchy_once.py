@@ -1,13 +1,13 @@
 """Contract tests for the manual hierarchy build entry (`scripts/build_hierarchy_once.py`).
 
-The script composes five entry points: `load_known_texts` -> `build_agent_tree`
--> `write_tree`, plus the model lifecycle (`build_generation_llm` /
-`close_chat_model`). These tests fake all five and lock the script's own
-contract: dry-run builds but never writes; a clean run writes what was built
-under the resolved model; the model is built once and closed even when the
-build raises; failed nodes still let the rest write and force exit code 1; the
-report shows levels, triggers and a bounded error list; and an empty build says
-so instead of failing.
+The script composes its entry points: `agent_effective_model` ->
+`load_known_texts` -> `build_agent_tree` -> `write_tree`, plus the model
+lifecycle (`build_generation_llm` / `close_chat_model`). These tests fake all
+of them and lock the script's own contract: dry-run builds but never writes; a
+clean run writes what was built under the resolved model; the model is built
+once and closed even when the build raises; failed nodes still let the rest
+write and force exit code 1; the report shows levels, triggers and a bounded
+error list; and an empty build says so instead of failing.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from agent.llm import execute_code
 from scripts import build_hierarchy_once as build
 from shared.agents.history.hierarchy.generate import GenResult
 from shared.agents.history.hierarchy.pipeline import MaterializedNode, MaterializedTree
@@ -81,11 +82,26 @@ def _install_fakes(
     def fake_close(llm: Any) -> None:
         rec.llm_closes.append(llm)
 
+    def fake_effective_model(_agent_id: int, *, fallback: str) -> str:
+        assert fallback == settings.lm.hierarchy_model
+        return "agent-own-model"
+
     def fake_build(
-        agent_id: int, *, llm: Any, model: str, known_texts: Mapping[str, str] | None
+        agent_id: int,
+        *,
+        llm: Any,
+        model: str,
+        known_texts: Mapping[str, str] | None,
+        tools: Sequence[Any] | None = None,
     ) -> MaterializedTree:
         rec.built.append(
-            {"agent_id": agent_id, "llm": llm, "model": model, "known_texts": known_texts}
+            {
+                "agent_id": agent_id,
+                "llm": llm,
+                "model": model,
+                "known_texts": known_texts,
+                "tools": tools,
+            }
         )
         if build_error is not None:
             raise build_error
@@ -98,6 +114,7 @@ def _install_fakes(
     monkeypatch.setattr(build, "load_known_texts", fake_load)
     monkeypatch.setattr(build, "build_generation_llm", fake_llm)
     monkeypatch.setattr(build, "close_chat_model", fake_close)
+    monkeypatch.setattr(build, "agent_effective_model", fake_effective_model)
     monkeypatch.setattr(build, "build_agent_tree", fake_build)
     monkeypatch.setattr(build, "write_tree", fake_write)
     return rec
@@ -129,10 +146,11 @@ def test_clean_run_writes_nodes_under_the_resolved_model(
     assert rc == 0
     assert rec.written[0]["agent_id"] == 7
     assert rec.written[0]["nodes"] == nodes
-    assert rec.built[0]["model"] == settings.lm.hierarchy_model
-    assert rec.llm_models == [settings.lm.hierarchy_model]
+    assert rec.built[0]["model"] == "agent-own-model"
+    assert rec.built[0]["tools"] == [execute_code]
+    assert rec.llm_models == ["agent-own-model"]
     assert rec.llm_closes == [rec.built[0]["llm"]]
-    assert rec.written[0]["model"] == settings.lm.hierarchy_model
+    assert rec.written[0]["model"] == "agent-own-model"
     assert "upserted 2 node row(s)" in capsys.readouterr().out
 
 
@@ -213,5 +231,5 @@ def test_model_closed_even_when_the_build_raises(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(RuntimeError, match="engine exploded"):
         build.main(["--agent-id", "7"])
 
-    assert rec.llm_models == [settings.lm.hierarchy_model]
+    assert rec.llm_models == ["agent-own-model"]
     assert rec.llm_closes == [rec.built[0]["llm"]]
