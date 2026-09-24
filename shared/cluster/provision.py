@@ -610,6 +610,16 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                 pgsql.Identifier(RUNNER_ROLE)
             )
         )
+        # The compact-boundary event enqueue (task #4674): the agent-side
+        # `mark_compact_boundary` twin (shared/agents/history/checkpoint_cleanup)
+        # INSERTs one tree-build job row per new boundary — best-effort,
+        # ON CONFLICT DO NOTHING against the live partial unique index; the
+        # SELECT half and the id sequence ride the blanket grants. Without this
+        # entry every enqueue fails with InsufficientPrivilege and the trigger
+        # goes silently dark (the #1932/#3747 shipped-without-the-grant class).
+        conn.execute(
+            pgsql.SQL("GRANT INSERT ON hierarchy_jobs TO {}").format(pgsql.Identifier(RUNNER_ROLE))
+        )
         # A watcher that exits cleanly deletes its OWN registry row from the
         # watcher child's finally (shared/watcher_registry.delete_watcher) —
         # without DELETE the row survives and the boot reconcile later treats

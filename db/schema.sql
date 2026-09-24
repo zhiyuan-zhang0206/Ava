@@ -2395,6 +2395,20 @@ CREATE INDEX hierarchy_jobs_agent
 COMMENT ON TABLE hierarchy_jobs IS
     'Understanding-tree build queue (task #3704 P2b): one row per execution attempt; hash-idempotent retries, crash-recoverable, scope+token stats.';
 
+-- ava_runner surface: the compact-boundary event enqueue (task #4674) inserts
+-- one build job per new boundary from the agent process
+-- (`mark_compact_boundary`'s async twin) — idempotent via the live partial
+-- unique index, best-effort by design. Gated on the role's existence (fresh
+-- bootstrap applies this baseline before install birth creates ava_runner),
+-- and shared/cluster/provision.py's ensure_runner_role grants the same
+-- surface at birth.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT INSERT ON hierarchy_jobs TO ava_runner;
+    END IF;
+END $$;
+
 -- ─────────────── hierarchy_worker_state ───────────────
 -- Per-agent scan cursor of the hierarchy worker: the newest compact boundary
 -- fully covered. First sight records it without building (silent baseline);
@@ -2410,6 +2424,28 @@ CREATE TABLE hierarchy_worker_state (
 
 COMMENT ON TABLE hierarchy_worker_state IS
     'Per-agent scan cursor of the understanding-tree worker (task #3704 P2b): newest fully covered compact boundary; the row itself is the silent baseline.';
+
+-- ─────────────── hierarchy_worker_breaker ───────────────
+-- The worker's regeneration circuit breaker (task #4674 guardrail): a
+-- singleton row recording the last trip and its operator reset. The 24h
+-- generated-node budget trips it and the worker stops claiming; resuming is
+-- an explicit, auditable operator act:
+--   UPDATE hierarchy_worker_breaker SET reset_at = now(), reset_note = '<who/why>'
+--    WHERE id = 1;
+-- Active trip = reset_at IS NULL; after a reset the first cooled (<= budget)
+-- window reading sets rearmed_at, and only then may a new excursion trip.
+-- The row exists only once a trip happened; its absence means armed.
+CREATE TABLE hierarchy_worker_breaker (
+    id             INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    tripped_at     TIMESTAMPTZ,
+    tripped_reason TEXT,
+    reset_at       TIMESTAMPTZ,
+    reset_note     TEXT,
+    rearmed_at     TIMESTAMPTZ
+);
+
+COMMENT ON TABLE hierarchy_worker_breaker IS
+    'Regeneration circuit breaker (task #4674): singleton row; active trip = reset_at IS NULL; operators reset with reset_at + reset_note; re-arms (rearmed_at) only after a reset and a cooled window.';
 
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `shared.migrations`. Keyed by
@@ -2439,3 +2475,4 @@ INSERT INTO schema_migrations (name) VALUES ('20260923T031516_schema-baseline');
 INSERT INTO schema_migrations (name) VALUES ('20260923T175411_agent-creation-availability');
 INSERT INTO schema_migrations (name) VALUES ('20260923T195300_agent-launch-failure');
 INSERT INTO schema_migrations (name) VALUES ('20260923T205208_impersonation-event-manifest');
+INSERT INTO schema_migrations (name) VALUES ('20260924T070003_hierarchy-worker-breaker');

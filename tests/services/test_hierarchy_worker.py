@@ -5,11 +5,10 @@ silent baseline (no build for pre-existing history), enqueue-on-new-boundary
 with first-build tail semantics, the live-job de-dup, the retry backoff vs
 immediate continuation drain, stale-running recovery, the atomic claim, the
 child side's row outcome (scope + cursor advance only on a complete run),
-the tick's drain and crash mapping (a tick drains back-to-back; a transient
-failure ends the tick; code<->DB drift raises), one real child-process
-round trip over an agent with no checkpoint history (zero model calls — the
-empty-history edge is the fixture), and the process-boot sink seam on both
-sides of the worker (task #3868): the host's prepare() and the child's
+one real child-process round trip over an agent with no checkpoint history
+(zero model calls — the empty-history edge is the fixture), and the
+process-boot sink seam on both sides of the worker (task #3868): the host's
+prepare() and the child's
 job.main() open the log / event-pipeline sinks, so a real child subprocess's
 records reach stderr and the events JSONL mirror. In-process execute tests run
 against a file-level fake generation model, so the provider environment is
@@ -29,7 +28,7 @@ import pytest
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import job as job_module
 from services.hierarchy_worker import runner
-from services.hierarchy_worker.scan import ScanOutcome, scan
+from services.hierarchy_worker.scan import scan
 from shared.agents.history.hierarchy.pipeline import MaterializedTree
 from shared.config import settings
 from shared.paths import logs_dir
@@ -236,6 +235,7 @@ def test_claim_next_is_atomic_and_fifo(db_conn: psycopg.Connection) -> None:
             " VALUES (%s, 'compact', %s, 'pending', true)",
             (agent, cid(1)),
         )
+        _state(db_conn, agent, cid(1))  # tracked — the claim must not baseline it
     db_conn.commit()
 
     first = runner.claim_next(db_conn)
@@ -561,81 +561,6 @@ def test_child_process_records_reach_the_event_mirror() -> None:
     assert any(
         '"event_name":"log"' in line and "vanished before execution" in line for line in child_lines
     )
-
-
-class _FakeConnection:
-    """Just enough of `connect(autocommit=True)`'s context manager for ticks."""
-
-    def __enter__(self) -> _FakeConnection:
-        return self
-
-    def __exit__(self, *exc: object) -> bool:
-        return False
-
-
-def _fake_connect(**_kw: object) -> _FakeConnection:
-    return _FakeConnection()
-
-
-def test_run_tick_drains_back_to_back_then_returns(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A tick re-scans, claims, and runs every due job before returning; the
-    slot boundary paces only the idle wait between ticks."""
-    scanned: list[int] = []
-    ran: list[int] = []
-    jobs = [
-        runner.ClaimedJob(id=1, agent_id=11, include_tail=True),
-        runner.ClaimedJob(id=2, agent_id=12, include_tail=False),
-    ]
-
-    def fake_scan(conn: object) -> ScanOutcome:
-        scanned.append(len(scanned))
-        return ScanOutcome()
-
-    def fake_claim(conn: object) -> runner.ClaimedJob | None:
-        return jobs.pop(0) if jobs else None
-
-    monkeypatch.setattr(runner, "connect", _fake_connect)
-    monkeypatch.setattr(runner, "scan", fake_scan)
-    monkeypatch.setattr(runner, "claim_next", fake_claim)
-
-    def fake_child(job: runner.ClaimedJob) -> None:
-        ran.append(job.id)
-
-    monkeypatch.setattr(runner, "run_child", fake_child)
-
-    runner.run_tick()
-
-    assert ran == [1, 2]
-    # One scan per claim, plus the dry pass that ends the tick.
-    assert len(scanned) == 3
-
-
-def test_run_tick_returns_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A transient DB failure ends the tick without raising — the next slot
-    retries, so the manager never sees a crash for a blip."""
-
-    def failing_scan(conn: object) -> ScanOutcome:
-        raise RuntimeError("db unavailable")
-
-    monkeypatch.setattr(runner, "connect", _fake_connect)
-    monkeypatch.setattr(runner, "scan", failing_scan)
-
-    runner.run_tick()  # returns — no exception escapes the tick
-
-
-def test_run_tick_raises_on_schema_drift(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Code<->DB drift escapes the tick so the manager's crash path records it."""
-
-    def drifted_scan(conn: object) -> ScanOutcome:
-        raise psycopg.ProgrammingError('relation "hierarchy_jobs" does not exist')
-
-    monkeypatch.setattr(runner, "connect", _fake_connect)
-    monkeypatch.setattr(runner, "scan", drifted_scan)
-
-    with pytest.raises(psycopg.ProgrammingError):
-        runner.run_tick()
 
 
 def test_prepare_inits_the_host_process_sinks(

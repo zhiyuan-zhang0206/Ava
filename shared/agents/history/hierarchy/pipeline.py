@@ -10,9 +10,10 @@ history:
 5. `materialize` walks the levels from the bottom: leaves render their blocks,
    upper nodes reduce their children's texts, aliases copy their child's text.
    Within a level, nodes generate newest-span first in bounded chunks; a
-   `deadline` stops generation cleanly between chunks (the worker's job
-   budget), leaving the unattempted remainder (`skipped`) to the next run —
-   which resumes from the reuse cache and redoes nothing.
+   `deadline` (the worker's job budget) or the `max_generated` regen halt
+   (task #4674) stops generation cleanly between chunks, leaving the
+   unattempted remainder (`skipped`) to the next run — which resumes from the
+   reuse cache and redoes nothing.
 
 Model calls happen only for nodes whose input hash is not in `known_texts` (the
 storage layer's reuse cache: `input_hash -> text`), so a rerun over unchanged
@@ -78,15 +79,19 @@ class MaterializedTree:
     max_level: int
     # Run-scope stats for the build job (task #3704 P2b): the trigger batches
     # walked (`batches`), nodes written from a model call vs the reuse cache,
-    # nodes a deadline left unattempted (`skipped`; 0 = the run walked the
-    # whole sealed tree), and the token sums of the generation attempts
-    # (compression retries excluded — the llm usage ledger is authoritative).
+    # nodes a deadline or the regen halt left unattempted (`skipped`; 0 = the
+    # run walked the whole sealed tree), and the token sums of the generation
+    # attempts (compression retries excluded — the llm usage ledger is
+    # authoritative). `halted` marks the node-cap stop specifically (task
+    # #4674): the worker writes it onto the job row so the continuation waits
+    # out the retry backoff instead of hot-looping a runaway wave.
     batches: int = 0
     generated: int = 0
     reused: int = 0
     skipped: int = 0
     src_tokens: int = 0
     out_tokens: int = 0
+    halted: bool = False
 
 
 def trigger_batches(
@@ -162,6 +167,7 @@ def materialize(
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
     tools: Sequence[Any] | None = None,
     deadline: float | None = None,
+    max_generated: int | None = None,
 ) -> MaterializedTree:
     """Generate the sealed tree's nodes, level by level, newest stretch first.
 
@@ -176,6 +182,13 @@ def materialize(
     before each chunk and stops cleanly between chunks once passed — the
     remaining nodes of that level and of every higher level count into
     `skipped` and wait for a continuation run. `None` = run to completion.
+
+    `max_generated` is the regen halt (task #4674): a cumulative cap on this
+    run's generated nodes, checked at those same chunk boundaries and BEFORE
+    the deadline, so a wave cut by the cap is attributed to it (`halted`) —
+    the worker then backs the continuation off instead of letting the wave
+    hot-loop. `None` = uncapped (first builds and tail seals, whose full
+    windows are legitimately large).
 
     `known_texts` maps `input_hash -> text` (the storage's reuse cache): a node
     whose input hash is known reuses its text without a model call (counted in
@@ -196,6 +209,7 @@ def materialize(
     nodes: list[MaterializedNode] = []
     errors: list[GenResult] = []
     generated = reused = failed_nonalias = src_tokens = out_tokens = 0
+    halted = False
     # One generate_nodes call per chunk; the chunk bounds only how often the
     # deadline is checked (a chunk ≈ max_concurrent * 4 model calls), never
     # the per-call fan-out itself. The 4 is a granularity choice, not a
@@ -229,6 +243,8 @@ def materialize(
             tools=tools,
             chunk_size=chunk_size,
             deadline=deadline,
+            generated_so_far=generated,
+            max_generated=max_generated,
         )
         nodes.extend(run.nodes)
         errors.extend(run.errors)
@@ -237,12 +253,13 @@ def materialize(
         src_tokens += run.src_tokens
         out_tokens += run.out_tokens
         if run.stopped:
+            halted = run.halted
             break
 
     # A node counts as covered when it materialized (generated or cache-hit) or
     # failed as a non-alias spec; everything else — never reached because the
-    # deadline stopped generation, at this level or above — is `skipped` and
-    # waits for the continuation run.
+    # deadline or the regen halt stopped generation, at this level or above —
+    # is `skipped` and waits for the continuation run.
     total_nonalias = sum(1 for spec in sealed.nodes if spec.kind != "alias")
     return MaterializedTree(
         nodes=tuple(nodes),
@@ -254,6 +271,7 @@ def materialize(
         skipped=total_nonalias - generated - reused - failed_nonalias,
         src_tokens=src_tokens,
         out_tokens=out_tokens,
+        halted=halted,
     )
 
 
@@ -366,6 +384,7 @@ class _ChunkRun(NamedTuple):
     src_tokens: int
     out_tokens: int
     stopped: bool
+    halted: bool
 
 
 def _run_chunks(
@@ -380,17 +399,27 @@ def _run_chunks(
     tools: Sequence[Any] | None,
     chunk_size: int,
     deadline: float | None,
+    generated_so_far: int = 0,
+    max_generated: int | None = None,
 ) -> _ChunkRun:
     """Generate `queued` in newest-first chunks, stopping cleanly between chunks
-    once `deadline` (a monotonic reading) has passed."""
+    once `deadline` (a monotonic reading) has passed or the cumulative
+    `max_generated` cap is reached (the cap is checked first, and the stop's
+    cause rides `halted` — see `MaterializedTree.halted`)."""
     # Newest first inside the level — the order is free within a level and the
     # newest window is what a viewer needs covered first.
     queued = sorted(queued, key=lambda item: item[1].span, reverse=True)
     run_nodes: list[MaterializedNode] = []
     run_errors: list[GenResult] = []
     generated = failed = src_tokens = out_tokens = 0
-    stopped = False
+    stopped = halted = False
     for start in range(0, len(queued), chunk_size):
+        # The regen halt precedes the deadline: both stop cleanly between
+        # chunks, but a wave that hit the node cap must be attributed to the
+        # cap (task #4674) so its continuation backs off rather than drains.
+        if max_generated is not None and generated_so_far + generated >= max_generated:
+            stopped = halted = True
+            break
         if deadline is not None and time.monotonic() > deadline:
             stopped = True
             break
@@ -432,6 +461,7 @@ def _run_chunks(
         src_tokens=src_tokens,
         out_tokens=out_tokens,
         stopped=stopped,
+        halted=halted,
     )
 
 
@@ -522,6 +552,7 @@ def build_agent_tree(
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
     tools: Sequence[Any] | None = None,
     deadline: float | None = None,
+    max_generated: int | None = None,
 ) -> MaterializedTree:
     """One full run for an agent over its retained checkpoint history.
 
@@ -532,7 +563,9 @@ def build_agent_tree(
     `deadline` (a `time.monotonic` reading) bounds the generation pass only —
     load/fold/seal always run whole. A run stopped at the deadline writes the
     nodes it produced (`skipped` names the remainder) and a continuation run
-    resumes from the reuse cache without redoing any of them.
+    resumes from the reuse cache without redoing any of them. `max_generated`
+    is threaded through to `materialize` as the regen halt (task #4674); its
+    stop also lands in `skipped`, marked by `halted`.
     """
     msgs = load_checkpoint_messages_full(agent_id)
     items, _ = build_timeline_items(msgs, [])
@@ -553,5 +586,6 @@ def build_agent_tree(
         retry_attempts=retry_attempts,
         tools=tools,
         deadline=deadline,
+        max_generated=max_generated,
     )
     return replace(tree, batches=len(batches))
