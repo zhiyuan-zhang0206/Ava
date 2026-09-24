@@ -47,6 +47,10 @@ def test_retry_policy_excludes_fatal_llm_stream_error() -> None:
         "SystemExit must still be excluded from retry (default behavior)"
     )
 
+    from agent.hooks.compact import CompactionFailedError
+
+    assert not retry_on(CompactionFailedError("summary retry budget exhausted"))  # type: ignore[arg-type]
+
     # FatalProviderError (permanent 402/401/403 rejection): must NOT retry
     assert not retry_on(FatalProviderError("test out of balance")), (  # type: ignore[arg-type]
         "FatalProviderError must be excluded from retry -- a permanent billing/auth "

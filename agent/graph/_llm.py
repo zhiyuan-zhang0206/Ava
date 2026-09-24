@@ -58,6 +58,7 @@ from langgraph.types import Command
 import ava
 from agent import state as _state
 from agent._turn_progress import mark_turn_progress
+from agent.hooks.compact import auto_compact_for_llm
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.observe import log_llm_usage
 from agent.state_channels import CircuitState
@@ -151,7 +152,7 @@ Before using any `ava.*` function, you must explicitly `import ava` in your code
 
 # llm_node normal → BEFORE_EXEC; cancel / no-tool-call halt → AFTER_EXEC
 # (halted=True makes after_exec route back to claim). Type narrow catches illegal goto.
-LlmGoto = Literal["before_exec", "after_exec"]
+LlmGoto = Literal["before_exec", "after_exec", "init_context", "claim"]
 
 
 _silent_idle_output_tokens: dict[str, int] = {}
@@ -552,6 +553,11 @@ async def _llm_node_impl(
     assert ctx.llm is not None, "_llm_node_impl requires ctx.llm"  # noqa: S101
     llm = ctx.llm  # narrowed local — the assert can't reach nested helpers
     agent_id = agent_id_from_config(config)
+
+    compacted = await auto_compact_for_llm(state, runtime, config)
+    if compacted is not None:
+        goto = compacted.pop("goto")
+        return Command[LlmGoto](update=compacted, goto=goto)
 
     # Consecutive same-error retry cap: if the same LLMStreamError has occurred
     # N times across retries, fail fast with FatalLLMStreamError instead of

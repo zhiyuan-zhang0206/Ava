@@ -662,22 +662,23 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     assert classify_logs[0]["extra"]["error_class"] == "permanent"
     assert classify_logs[0]["extra"]["status"] == 400
     assert classify_logs[0]["extra"]["fatal"] is True
-    # Every classification log carries the billing verdict and the model that
-    # failed, not only the billing ones — the alert filters on billing=true, so
-    # an ordinary failure must state False rather than omit the key.
+    # Every provider failure records an explicit billing verdict.
     assert classify_logs[0]["extra"]["billing"] is False
     assert classify_logs[0]["extra"]["model"] == settings.lm.llm_model
 
 
-async def test_llm_node_billing_error_logs_billing_vendor_and_model(loguru_records) -> None:
-    """A 402 (DeepSeek's `Insufficient Balance`) lands billing=True plus the
-    vendor + model on the `llm_provider_error` log — the three fields the
-    ava-ops-llm-billing-quota rule filters and groups on, and the ones its IM
-    message interpolates. Without them an out-of-credit key is indistinguishable
-    from any other permanent rejection in the event stream."""
+async def test_llm_node_billing_error_logs_billing_vendor_and_model(
+    loguru_records, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Provider 402 logs the billing flag, vendor, and model for alert routing."""
     from agent.graph._llm_errors import FatalProviderError, _consecutive_errors
     from shared.config import settings
+    from shared.lm.context_budget import ContextBudget
 
+    def fixture_budget(_model: str) -> ContextBudget:
+        return ContextBudget(10_000, 3_000, 4_000)
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixture_budget)
     _consecutive_errors.pop("7", None)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(402))
@@ -692,8 +693,6 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(loguru_recor
         settings.lm.llm_model = original
 
     assert "out of credit or quota" in str(exc_info.value)
-    # The exception message names the vendor next to the provider path: the
-    # runloop's block / recovery notifications embed it verbatim (task #3916).
     assert "vendor=deepseek" in str(exc_info.value)
     classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]  # pyright: ignore[reportUnknownMemberType]
     assert len(classify_logs) == 1  # pyright: ignore[reportUnknownArgumentType]

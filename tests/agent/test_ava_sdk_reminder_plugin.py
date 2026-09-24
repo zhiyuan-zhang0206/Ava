@@ -5,7 +5,7 @@ Both hooks are graph-edge nodes: they read the message tail + their own plugin
 fields straight off the `state` arg and return a delta dict (no exec-turn state
 plumbing). So these tests build a dynamic AgentState instance with the plugin
 fields and call the hook functions directly, mirroring the
-`_auto_compact_with_version_bump` tests in test_compact.py.
+`_compact_reminder` tests in test_compact.py.
 
 Covered:
 - after_exec (code categories shell/wait/files/http): first hit injects the
@@ -34,7 +34,7 @@ Covered:
 import inspect
 import sys
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -899,11 +899,12 @@ async def test_defer_predicate_matches_real_gate(
     history_len_kind,
     auto_compact_tokens,
     expect_fire,
+    fake_cancel_event,
 ):
     """`auto_compact_will_fire(state)` is the single shared gate the reminder plugins
-    call; this pins it to the real `auto_compact_before_llm` firing across the
+    call; this pins it to the real `auto_compact_for_llm` firing across the
     threshold boundary. For each parametrized state, the predicate must equal
-    "does the real auto_compact_before_llm actually return a replacement"
+    "does the real auto_compact_for_llm actually return a replacement"
     (generate_summary stubbed so a fire produces a non-None result without a
     live LLM).
     """
@@ -935,7 +936,7 @@ async def test_defer_predicate_matches_real_gate(
 
     state = _state(msgs)
     predicate = auto_compact_will_fire(state)
-    real = await compact_mod.auto_compact_before_llm(state, _runtime(), _config())  # pyright: ignore[reportUnknownMemberType]
+    real = await compact_mod.auto_compact_for_llm(state, _runtime_for_runner(), _config())  # pyright: ignore[reportUnknownMemberType]
     assert predicate is expect_fire
     assert predicate == (real is not None)
 
@@ -945,15 +946,12 @@ async def test_defer_predicate_matches_real_gate(
 
 @pytest.mark.parametrize("reminder_first", [True, False])
 async def test_real_runner_compaction_wins_no_note(
-    _loaded: Any, monkeypatch: pytest.MonkeyPatch, reminder_first
+    _loaded: Any, monkeypatch: pytest.MonkeyPatch, reminder_first, fake_cancel_event
 ):
-    """Register the real ava_compact wrapper + the sdk_reminder agent_reply hook
-    into a real make_hook_runner('before_llm', ...) and run it in BOTH
-    orderings. With the force ceiling pinned to 1 token + a long history + a tail
-    agent inbound, auto-compact fires; the reminder must defer (no system_note in the
-    final messages, agent_reply unmarked) and compact.version bumps exactly +1.
-    After A2 the runner also raises if the two hooks ever co-write a key — a
-    passing run proves the defer prevents a same-key (messages) collision.
+    """Both hook orderings defer to the LLM compaction operation.
+
+    No reminder is committed above the ceiling. The real LLM node then
+    replaces history once, with a single compact version increment.
     """
     from langgraph.graph.message import add_messages
 
@@ -964,7 +962,7 @@ async def test_real_runner_compaction_wins_no_note(
     _pin_compact_budget(monkeypatch, hard_tokens=1)
 
     # The compact hook wrapper lives directly in agent.hooks.compact.
-    from agent.hooks.compact import _auto_compact_with_version_bump
+    from agent.hooks.compact import _compact_reminder
 
     # Long enough to clear the auto-compact retry floor on the first attempt.
     long_summary = "compacted summary " * 100
@@ -974,11 +972,9 @@ async def test_real_runner_compaction_wins_no_note(
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
 
-    compact_hook = _auto_compact_with_version_bump
+    compact_hook = _compact_reminder
     reminder_hook = _loaded.sdk_reminder_agent_reply_before_llm
 
-    # Install exactly these two hooks (in the chosen order) on before_llm,
-    # snapshotting + restoring the live list so other tests are unaffected.
     saved = list(HOOKS["before_llm"])
     HOOKS["before_llm"][:] = (
         [reminder_hook, compact_hook] if reminder_first else [compact_hook, reminder_hook]
@@ -996,15 +992,19 @@ async def test_real_runner_compaction_wins_no_note(
     finally:
         HOOKS["before_llm"][:] = saved
 
+    assert cmd.goto == "llm"
+    hook_update = cast("dict[str, object]", cmd.update)
+    assert isinstance(hook_update, dict) and "messages" not in hook_update
+    from agent.graph._llm import llm_node
+
+    cmd = await llm_node(state, _runtime_for_runner(), _config())
     update = cmd.update
     assert isinstance(update, dict)
     # Apply the real add_messages reducer to get the committed messages.
     final = add_messages(list(state.messages), update["messages"])  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(final, list)
 
-    # Compaction cleared the window outright — the standing head is rebuilt by
-    # the init_context node, not by this hook — so nothing survives the reducer,
-    # and in particular no reminder note slipped in alongside the compaction.
+    # Only init_context rebuilds the head; no reminder survives the wipe.
     assert final == []
     # The summary rides in the parked tail the compaction handed to that node.
     assert [m.content for m in update["context_reset"].tail] == [  # pyright: ignore[reportUnknownMemberType]
