@@ -279,3 +279,26 @@ def test_coerce_scalar_forms() -> None:
         coerce_config_scalar("bool", "maybe")
     with pytest.raises(ValueError):
         coerce_config_scalar("enum", "z", ["x", "y"])
+
+
+# ── real-field provisioning surface pins ──
+
+
+def test_manifest_certification_secret_stays_locally_provisionable() -> None:
+    """The operator provisioning surface for manifest enablement (task #4719).
+
+    The host-scoped certification secret requires a distinct value on every
+    participating agent-runner, and the official config path is the only
+    sanctioned way to set it (direct `.env` writes are barred by the 2026-09-01
+    ruling). It must stay editable on its own host and never remotely: the value
+    must not traverse the gateway.
+    """
+    meta = next(
+        item
+        for item in get_config_metadata()
+        if item.name == "impersonation_event_manifest_certification_secret"
+    )
+    assert meta.scope == "host"
+    assert meta.sensitive is True
+    assert field_editable(meta, local=True) is True
+    assert field_editable(meta, local=False) is False
