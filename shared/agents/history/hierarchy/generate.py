@@ -113,8 +113,10 @@ class GenParams:
     """Generation calibration (defaults = the v0.3 contract, task #3704).
 
     These are engine-calibration constants with written reasons, the same
-    shape as `seal.SealParams`; deployment policy (which model) lives in
-    config (`settings.lm.hierarchy_model`).
+    shape as `seal.SealParams`; which model a run uses is resolved per target
+    agent (`shared.agent_snapshot.agent_effective_model` — overlay preferred,
+    fleet default else), with `settings.lm.hierarchy_model` as the last-resort
+    fallback.
     """
 
     # Ask under the budget so an ordinary response lands inside the hard
@@ -490,7 +492,7 @@ def _invoke_node(
             if text:
                 return text
             raise GenerateError(
-                f"Model ({desc}) returned an empty response (possible safety block). "
+                f"Model ({desc}) returned empty response (possible safety block). "
                 f"response_metadata: {getattr(response, 'response_metadata', None)!r}"
             )
         if rounds >= limit:

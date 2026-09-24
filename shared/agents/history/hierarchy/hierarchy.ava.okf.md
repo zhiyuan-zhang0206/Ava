@@ -115,8 +115,10 @@ in `hierarchy_jobs` + `hierarchy_worker_state`.
   drains immediately.
 - **Knobs** (`settings.daemon.hierarchy_*`, each with its written reason):
   job budget, hard deadline, retry base/cap, generation concurrency, and the
-  child-kill / stale-row graces; the generation model is
-  `settings.lm.hierarchy_model`.
+  child-kill / stale-row graces; the generation model is the target agent's
+  own effective model (`shared.agent_snapshot.agent_effective_model` — overlay
+  preferred, fleet default else), with `settings.lm.hierarchy_model` as the
+  last-resort fallback.
 - **Cost observability**: each job row records the run's scope (stretches,
   nodes generated/reused/failed/skipped) and its token sums; the LLM usage
   ledger (`usage_source='hierarchy.generate'`) is the authoritative per-call
