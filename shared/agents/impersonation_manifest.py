@@ -16,7 +16,7 @@ from contextvars import ContextVar  # noqa: TID251 -- SDK async finally needs ta
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from threading import Condition, Lock
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -314,18 +314,23 @@ def capture_local_event(event: Event) -> Event:
     return tagged
 
 
+def _locked_receipt_state(conn: psycopg.Connection, lease_id: str, source_key: str) -> str | None:
+    row = conn.execute(
+        "SELECT lock_impersonation_event_participant(%s,%s)", (lease_id, source_key)
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("Receipt lock function returned no row")
+    return cast(str | None, row[0])
+
+
 def _insert_local_item(participant: LocalParticipant, event: Event) -> None:
     key, digest, kind, timestamp = _event_item(event)
     with write_transaction() as conn:
         lease = lock_lease(conn, participant.lease_id)
         if not is_protocol_v1(lease):
             raise RuntimeError("Local receipt belongs to a lease outside protocol v1")
-        row = conn.execute(
-            "SELECT state FROM agent_impersonation_event_participants "
-            "WHERE lease_id=%s AND source_key=%s FOR UPDATE",
-            (participant.lease_id, participant.source_key),
-        ).fetchone()
-        if row is None or row[0] != "open":
+        state = _locked_receipt_state(conn, participant.lease_id, participant.source_key)
+        if state != "open":
             raise RuntimeError("Local receipt is not open for event capture")
         item_count = conn.execute(
             "SELECT count(*) FROM agent_impersonation_event_participant_items "
@@ -375,14 +380,10 @@ def _persist_capture_failure(participant: LocalParticipant) -> None:
     """Durably turn an open receipt into failed before alert delivery is attempted."""
     with write_transaction() as conn:
         lease = lock_lease(conn, participant.lease_id)
-        receipt = conn.execute(
-            "SELECT state FROM agent_impersonation_event_participants "
-            "WHERE lease_id=%s AND source_key=%s FOR UPDATE",
-            (participant.lease_id, participant.source_key),
-        ).fetchone()
-        if receipt is None:
+        state = _locked_receipt_state(conn, participant.lease_id, participant.source_key)
+        if state is None:
             raise RuntimeError("Missing local impersonation event receipt")
-        if receipt[0] == "open":
+        if state == "open":
             conn.execute(
                 "SELECT seal_impersonation_event_participant(%s,%s,'failed','capture_failed',NULL,NULL)",
                 (participant.lease_id, participant.source_key),
@@ -392,7 +393,7 @@ def _persist_capture_failure(participant: LocalParticipant) -> None:
                 "WHERE id=%s AND events_completed_at IS NULL",
                 (participant.lease_id,),
             )
-        elif receipt[0] != "failed":
+        elif state != "failed":
             raise RuntimeError("Cannot record a capture failure after receipt sealing")
         # Keep ``lease`` live so its dict-row shape is checked before alerting.
         if str(lease["id"]) != participant.lease_id:
@@ -436,16 +437,12 @@ def seal_local_participant(participant: LocalParticipant) -> None:
         lease = lock_lease(conn, participant.lease_id)
         if not is_protocol_v1(lease):
             return
-        receipt = conn.execute(
-            "SELECT state FROM agent_impersonation_event_participants "
-            "WHERE lease_id=%s AND source_key=%s FOR UPDATE",
-            (participant.lease_id, participant.source_key),
-        ).fetchone()
-        if receipt is None:
+        state = _locked_receipt_state(conn, participant.lease_id, participant.source_key)
+        if state is None:
             raise RuntimeError("Missing local impersonation event receipt")
-        if receipt[0] == "sealed":
+        if state == "sealed":
             return
-        if receipt[0] != "open":
+        if state != "open":
             raise RuntimeError("Failed local impersonation event receipt cannot seal")
         digest, count = _participant_digest(conn, participant.lease_id, participant.source_key)
         conn.execute(
@@ -559,11 +556,12 @@ def freeze_manifest(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
     """Freeze the sealed local and central union immediately before release."""
     if not is_protocol_v1(lease):
         return
-    receipts = conn.execute(
-        "SELECT state FROM agent_impersonation_event_participants WHERE lease_id=%s FOR UPDATE",
-        (lease["id"],),
+    lease_id = lease["id"]
+    source_keys = conn.execute(
+        "SELECT source_key FROM agent_impersonation_event_participants WHERE lease_id=%s ORDER BY source_key",
+        (lease_id,),
     ).fetchall()
-    states = {row[0] for row in receipts}
+    states = {_locked_receipt_state(conn, lease_id, key) for (key,) in source_keys}
     if "failed" in states:
         raise RuntimeError("Impersonation event capture failed")
     if "open" in states:
