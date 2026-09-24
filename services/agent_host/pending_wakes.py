@@ -13,26 +13,10 @@ _WORK_EXISTS_SQL = (
     "AND work.kind NOT IN ('restart','terminate')) "
     "OR EXISTS (SELECT 1 FROM agent_impersonations work_lease "
     "WHERE work_lease.agent_id=m.id "
-    "AND work_lease.status IN ('requested','accepted','active'))"
+    "AND (work_lease.status IN ('requested','accepted','active') "
+    "OR work_lease.delta_version>work_lease.applied_version "
+    "OR (work_lease.automatic AND work_lease.handoff_applied_at IS NULL)))"
 )
-
-
-async def work_candidate_ids(
-    pool: AsyncConnectionPool[psycopg.AsyncConnection], agent_ids: list[int]
-) -> set[int]:
-    """Classify the exact maintenance-held cohort without changing its membership."""
-    if not agent_ids:
-        return set()
-    async with pool.connection() as conn:
-        rows = await (
-            await conn.execute(
-                "SELECT m.id FROM agents_meta m WHERE m.id = ANY(%s::bigint[]) AND ("  # noqa: S608 -- static predicate
-                + _WORK_EXISTS_SQL
-                + ")",
-                (agent_ids,),
-            )
-        ).fetchall()
-    return {row[0] for row in rows}
 
 
 async def scan_rows(

@@ -417,9 +417,7 @@ class TestHostedWakePacing:
 
 
 class TestHostedHostWakePacing:
-    async def test_held_cohort_keeps_membership_and_classifies_work(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_held_cohort_wakes_are_never_paced(self, monkeypatch: pytest.MonkeyPatch) -> None:
         pool = _PendingScanPool([(17, False, False)])
         host = AgentHost(
             pool=cast(AsyncConnectionPool[Any], pool),
@@ -438,14 +436,13 @@ class TestHostedHostWakePacing:
             "services.agent_host.host.maintenance_receipts.pending_wakes",
             held_wakes,
         )
+        # The drain's held re-drive is update machinery: never paced.
         assert [
             (wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(30)
         ] == [
             (17, False),
-            (23, True),
+            (23, False),
         ]
-        assert "m.id = ANY(%s::bigint[])" in pool.sql
-        assert "work.kind NOT IN ('restart','terminate')" in pool.sql
 
     async def test_settled_reap_wake_is_consumed_by_first_turn_attempt(
         self, monkeypatch: pytest.MonkeyPatch

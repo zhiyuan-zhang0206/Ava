@@ -80,7 +80,7 @@ from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase, recover_database
 from services.agent_host.dispatcher import PendingInboundWake
 from services.agent_host.force_termination import force_termination_outcome, force_termination_stop
-from services.agent_host.pending_wakes import scan_rows, work_candidate_ids
+from services.agent_host.pending_wakes import scan_rows
 from services.agent_host.runtime import (
     HostStats,
     TurnOutcome,
@@ -572,15 +572,9 @@ class AgentHost:
         """
         held_wakes = maintenance_receipts.pending_wakes(self._maintenance_failed)
         if held_wakes is not None:
-            work_ids = await work_candidate_ids(
-                self._control_pool, [wake.agent_id for wake in held_wakes]
-            )
-            return [
-                PendingInboundWake(
-                    wake.agent_id, wake.stale, recovery=wake.agent_id not in work_ids
-                )
-                for wake in held_wakes
-            ]
+            # The drain's held re-drive is update machinery, never the paced
+            # cohort: its pace belongs to the drain windows (task #4652).
+            return held_wakes
         rows = await scan_rows(self._control_pool, self._owner, self._machine, stale_after_s)
         wakes = [PendingInboundWake(agent_id=row[0], stale=row[1], recovery=row[2]) for row in rows]
         pending = {wake.agent_id for wake in wakes}
