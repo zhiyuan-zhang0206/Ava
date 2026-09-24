@@ -12,7 +12,7 @@ tags: []
 
 - **`NONE`** — nothing held back; the round runs its full roster.
 - **`DB_DEPENDENT`** — the cluster's Postgres is unusable *from here* (unreachable, or its applied migrations disagree with this checkout). Only services that read or write it are held back: reviving one spawns a daemon that dies in its own `assert_schema_current` and crash-loops once a round.
-- **`ALL`** — this host is mid-transition of its own code or processes (paused by a rollout, an `ava update` spawned, an off-pin force-update). Everything is about to be restarted by that transition, so reviving anything fights it.
+- **`ALL`** — this host is mid-transition of its own code or processes (paused by a rollout, an `ava cluster update` spawned, an off-pin force-update). Everything is about to be restarted by that transition, so reviving anything fights it.
 
 ## The division of knowledge
 A controller states only the **blast radius of its own finding** and never names services. Each service states what it needs, on its own spec: `ServiceSpec.requires_db` (required, no default — see [[services/services.ava.okf.md]]). `services/watchdog/daemon.py:_checks_for_round` is the ONE place the two meet: `ALL` runs nothing (returning before the roster is even built, so a paused host costs nothing per round), `DB_DEPENDENT` keeps the `requires_db=False` entries, `NONE` keeps everything. It is total over the enum — an unhandled member raises rather than defaulting to "run everything" (unsafe) or "run nothing" (the bug below).
@@ -37,23 +37,7 @@ The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgb
 | code — stale-process restart spawned | `ALL` | same, minus the checkout |
 
 ## A block's start, heartbeats and end are never silent
-`ops/manager.py` logs the first blocked round immediately: which dimension blocked, the scope, the controller's `detail`, and how many **consecutive** rounds the streak has run (WARNING). The streak then repeats on the alarm-bound cadence — `_BLOCKED_ROUND_ALARM_ROUNDS` (10 rounds ≈ 10 min — "no legitimate rollout is longer than this"; `STRANDED_PAUSE_TIMEOUT_S` no longer shares that judgment, since it now bounds only a provably unowned pause) — escalating to ERROR once past the bound, with the running count on every line. The round that clears a streak logs too, so the gap has an end timestamp and the counter resets.
-
-Expected block dimensions (`pause`) never escalate past the first WARNING and their heartbeats drop to INFO: a paused host is the state its operator asked for, and the bounds on pause pathology live in the controllers and hold machinery (`stalled_rollout` ahead of `pause`; the unowned-pause release after `STRANDED_PAUSE_TIMEOUT_S`; the OS hold watchdog). 2026-09-24: a fleet-wide freeze pause turned per-round repeats into ~2.8k lines — 79% of one 24h error bucket; the cadence removes that class of noise.
-
-Why the block still must not be silent: a skipped round and an all-green round were previously **indistinguishable in the log**, so a Windows runner's 3h07m window with zero roster reconciles (2026-07-28 22:04 → 2026-07-29 01:11, blocked every minute by `Schema ahead of code` while its `ava update` trigger kept failing ~85 times) could only be found forensically, by counting `__main__:_run_check` lines per hour. The start line plus cadence heartbeats keep that gap readable directly.
-
-The cadence is an alarm shape, never a rate limit on the *action* a block retries. Bounding the *action* a block retries — the ~85 failed `ava update` triggers of that window — is a separate mechanism, and a backed-off round still reports its block: [[services/watchdog/block-scope/heal-backoff.ava.okf.md]].
-
-For a schema mismatch, `ops/controllers/schema_mismatch.py` also compares the applied DB
-migrations with local code and the cluster pin tree. Each capability watchdog
-atomically records its own consecutive schema-blocked rounds and exact
-DB-dependent checks held back. The first round, tenth round, and every 60th
-round emit `schema_mismatch_blocked` at error level. Host status and the
-cluster roster expose the mismatch kind, machine, count, held services, and
-recovery detail even when the ops daemon remains online. A gateway whose pin
-lacks applied migrations replays the full pin-aware rollout on `ava cluster
-update`, including when its own checkout has no newer commit to pull.
+See [[services/watchdog/block-scope/blocked-round-logging.ava.okf.md]] for manager and schema pin-blocker cadence, expected pause levels, and schema mismatch status/events.
 
 ## DB-free services today
 `browser`, `browser-mcp`, `milvus`, `memory-indexer`, `frontend`, plus the `redis-acl`, `pgbouncer`, `lgtm`, and `brew-pin` pseudo-checks. Everything else on the roster calls `assert_schema_current` at boot and then reads or writes the DB.
