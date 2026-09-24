@@ -160,9 +160,12 @@ class Attachment:
         from shared.agents.impersonation_manifest import (
             LocalParticipant,
             bind_local_participant,
+            is_protocol_v1,
             open_local_participant,
         )
 
+        if not is_protocol_v1(self._lease()):
+            return
         source_key = f"attachment:{process_metadata()['pid']}:{uuid4().hex}"
         if open_local_participant(self.lease_id, agent_id=self.agent_id, source_key=source_key):
             participant = LocalParticipant(
