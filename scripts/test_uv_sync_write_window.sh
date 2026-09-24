@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Convergence guard for the editable-venv write window: a production-scoped
 # `uv sync` that reinstalls the editable package must survive a hardened venv
-# whose site-packages AND ava-*.dist-info directories are both 0o555 — exactly
+# whose site-packages, ava-*.dist-info and bin directories are 0o555 — exactly
 # the state converge's protection leaves on a host — and must restore those
 # exact original modes afterwards.
 #
@@ -25,7 +25,7 @@ cd "$REPO_ROOT"
 PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ava-uv-sync-window.XXXXXX")"
 trap 'if [ -d "$PROBE_DIR" ]; then chmod -R u+w "$PROBE_DIR" 2>/dev/null || true; rm -rf "$PROBE_DIR"; fi' EXIT
 
-uv run python - "$PROBE_DIR" <<'PY'
+env -u VIRTUAL_ENV .venv/bin/python - "$PROBE_DIR" <<'PY'
 import stat
 import subprocess
 import sys
@@ -41,6 +41,9 @@ probe = Path(sys.argv[1])
             "requires-python = \">=3.10\"",
             "dependencies = []",
             "",
+            "[project.scripts]",
+            "ava = \"ava:main\"",
+            "",
             "[build-system]",
             "requires = [\"hatchling\"]",
             "build-backend = \"hatchling.build\"",
@@ -49,11 +52,20 @@ probe = Path(sys.argv[1])
     )
 )
 (probe / "src" / "ava").mkdir(parents=True)
-(probe / "src" / "ava" / "__init__.py").write_text("__version__ = '0.1.5.dev0'\n")
+(probe / "src" / "ava" / "__init__.py").write_text("def main():\n    return 0\n")
+
+subprocess.run(
+    ["env", "-u", "VIRTUAL_ENV", "uv", "venv", str(probe / ".venv"),
+     "--python", ".venv/bin/python"],
+    check=True,
+)
 
 
 def uv(*args: str) -> None:
-    subprocess.run(["uv", *args], cwd=probe, check=True)
+    subprocess.run(
+        ["env", "-u", "VIRTUAL_ENV", "uv", *args, "--python", ".venv/bin/python"],
+        cwd=probe, check=True,
+    )
 
 
 uv("lock")
@@ -63,10 +75,14 @@ site_packages = next(iter(sorted(probe.glob(".venv/lib/python*/site-packages")))
 dist_infos = sorted(site_packages.glob("ava-*.dist-info"))
 assert len(dist_infos) == 1, f"expected one ava dist-info directory, found {dist_infos}"
 dist_info = dist_infos[0]
+bin_dir = probe / ".venv" / "bin"
+launcher = bin_dir / "ava"
+assert launcher.is_file(), "initial install did not create the launcher"
 
 # Simulate converge's post-sync protection: harden the whole uv write surface.
 site_packages.chmod(0o555)
 dist_info.chmod(0o555)
+bin_dir.chmod(0o555)
 
 from cli.commands._update_uv_sync import run_uv_sync
 
@@ -80,5 +96,8 @@ assert (
     stat.S_IMODE(dist_info.stat().st_mode) == 0o555
 ), "ava dist-info protection was not restored"
 assert (dist_info / "INSTALLER").is_file(), "reinstall did not complete"
+assert stat.S_IMODE(bin_dir.stat().st_mode) == 0o555, "bin protection was not restored"
+assert launcher.is_file(), "reinstall lost the launcher"
+subprocess.run([str(launcher)], cwd=probe, check=True)
 print("OK: hardened venv survived reinstall sync; 0o555 modes restored")
 PY

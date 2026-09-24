@@ -171,6 +171,25 @@ def editable_dist_info_dirs(source_root: Path) -> tuple[Path, ...]:
     return tuple(sorted(matches, key=str))
 
 
+def protected_editable_paths(source_root: Path) -> tuple[Path, ...]:
+    """Existing directories shared by converge protection and every write window.
+
+    Discover bin even if a half-uninstall removed the launcher or records.
+    Windows keeps its legacy dist-info write adjustment, but skips POSIX
+    site-packages/bin protection; converge itself is a no-op there.
+    """
+
+    dist_infos = editable_dist_info_dirs(source_root)
+    if os.name == "nt":
+        return dist_infos
+    bin_dir = source_root / ".venv" / "bin"
+    return (
+        *editable_site_packages_dirs(source_root),
+        *dist_infos,
+        *((bin_dir,) if bin_dir.is_dir() else ()),
+    )
+
+
 def _normalized_exact_path(path: Path) -> str:
     """Platform-native exact path identity, including Windows case folding."""
 
@@ -206,6 +225,12 @@ def _atomic_write_text(path: Path, text: str) -> None:
     write_text_atomic(path, text, mode=0o644, sync_file=False, sync_parent=False)
 
 
+def _restore_mode(path: Path, mode: int) -> None:
+    """Restore an existing path, including a replacement at the same location."""
+    with contextlib.suppress(FileNotFoundError):
+        path.chmod(mode)
+
+
 @contextlib.contextmanager
 def _write_window(paths: Iterable[Path]) -> Generator[None, None, None]:
     """Temporarily add owner-write to read-only files, then restore it.
@@ -216,37 +241,18 @@ def _write_window(paths: Iterable[Path]) -> Generator[None, None, None]:
     are skipped because a recreated virtualenv has no prior mode to restore.
     """
 
-    original_modes: dict[Path, int] = {}
-    for path in paths:
-        try:
-            mode = stat.S_IMODE(path.stat().st_mode)
-            if mode & stat.S_IWUSR:
+    # Register rollback before each mutation. ExitStack unwinds partial entry
+    # and attempts every restore even if one callback raises; errors propagate.
+    with contextlib.ExitStack() as restore:
+        for path in paths:
+            try:
+                mode = stat.S_IMODE(path.stat().st_mode)
+                if mode & stat.S_IWUSR:
+                    continue
+                restore.callback(_restore_mode, path, mode)
+                path.chmod(mode | stat.S_IWUSR)
+            except FileNotFoundError:
                 continue
-            original_modes[path] = mode
-            path.chmod(mode | stat.S_IWUSR)
-        except FileNotFoundError:
-            continue
-    try:
-        yield
-    finally:
-        for path, mode in original_modes.items():
-            with contextlib.suppress(FileNotFoundError):
-                path.chmod(mode)
-
-
-@contextlib.contextmanager
-def editable_site_packages_write_window(source_root: Path) -> Generator[None, None, None]:
-    """Temporarily make protected Ava site-packages directories owner-writable.
-
-    POSIX blocks uv's atomic replacement at the directory boundary, not the
-    read-only record file. Windows ACLs have a different permission model, so
-    this is intentionally a no-op there.
-    """
-
-    if os.name == "nt":
-        yield
-        return
-    with _write_window(editable_site_packages_dirs(source_root)):
         yield
 
 
@@ -256,16 +262,13 @@ def editable_pth_write_window(source_root: Path) -> Generator[None, None, None]:
 
     The exact original mode is restored in ``finally`` on both successful and
     failed syncs. Directory access covers uv's atomic replacement and the
-    reinstall uninstall of a hardened ``ava-*.dist-info`` directory, while file
-    access keeps direct repair compatible with the legacy file-level guard.
+    reinstall uninstall of hardened ``ava-*.dist-info`` and ``.venv/bin``
+    directories, while file access keeps direct repair compatible with the
+    legacy file-level guard. Partial entry also restores earlier permissions.
     """
 
     records = editable_ava_pth_paths(source_root) + editable_direct_url_paths(source_root)
-    with (
-        editable_site_packages_write_window(source_root),
-        _write_window(editable_dist_info_dirs(source_root)),
-        _write_window(records),
-    ):
+    with _write_window((*protected_editable_paths(source_root), *records)):
         yield
 
 

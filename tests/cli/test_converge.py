@@ -7,11 +7,12 @@ import stat
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
-from cli.commands import _converge, _update_uv_sync
+from cli.commands import _converge, _converge_steps, _update_uv_sync
 from cli.commands import _converge_frontend_env as _fe_env
 from shared import editable_install
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
@@ -229,6 +230,8 @@ def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
         json.dumps({"url": source_root.as_uri(), "dir_info": {"editable": True}})
     )
     dist_info.chmod(0o755)
+    bin_dir = source_root / ".venv" / "bin"
+    bin_dir.mkdir(mode=0o755)
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
     monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: False)
     step = next(
@@ -242,6 +245,7 @@ def test_prod_editable_dir_protection_is_host_global_and_sets_read_only_mode(
     assert step.host_global
     assert stat.S_IMODE(pth.parent.stat().st_mode) == 0o555
     assert stat.S_IMODE(dist_info.stat().st_mode) == 0o555
+    assert stat.S_IMODE(bin_dir.stat().st_mode) == 0o555
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX site-packages protection")
@@ -253,6 +257,8 @@ def test_prod_editable_dir_protection_skips_while_update_in_flight(
     pth = source_root / ".venv" / "lib" / "python3.12" / "site-packages" / "_editable_impl_ava.pth"
     pth.parent.mkdir(parents=True)
     pth.parent.chmod(0o755)
+    bin_dir = source_root / ".venv" / "bin"
+    bin_dir.mkdir(mode=0o755)
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
     monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: True)
     step = next(
@@ -264,6 +270,30 @@ def test_prod_editable_dir_protection_skips_while_update_in_flight(
     step.apply(_ctx(source_root, tmp_path / ".ava"))
 
     assert stat.S_IMODE(pth.parent.stat().st_mode) == 0o755
+    assert stat.S_IMODE(bin_dir.stat().st_mode) == 0o755
+
+
+def test_prod_editable_dir_protection_skips_non_prod(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bin_dir = tmp_path / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    before = stat.S_IMODE(bin_dir.stat().st_mode)
+    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: None)
+    monkeypatch.setattr("cli.commands.status._update_in_flight", lambda: False)
+    _converge._ensure_prod_editable_dir_protection(_ctx(tmp_path, tmp_path / ".ava"))
+    assert stat.S_IMODE(bin_dir.stat().st_mode) == before
+
+
+def test_prod_editable_dir_protection_skips_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_converge_steps, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        "shared.cluster_drift.prod_source_dir",
+        lambda: pytest.fail("Windows must skip before discovering protected paths"),
+    )
+    _converge._ensure_prod_editable_dir_protection(_ctx(tmp_path, tmp_path / ".ava"))
 
 
 def test_prod_editable_pth_converge_step_repairs_and_warns(
@@ -414,7 +444,11 @@ def test_prod_editable_exec_gate_recovers_a_missing_console_script(
 
     source_root = tmp_path / "prod" / "source"
     launcher = _write_healthy_prod_editable_install(source_root)
-    calls: list[tuple[Path, str | None]] = []
+    (source_root / "uv.lock").write_text("version = 1\npackage = []\n")
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pypi.org/simple")
+    if os.name != "nt":
+        launcher.parent.chmod(0o555)
+    calls: list[list[str]] = []
     monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source_root)
 
     def import_gate(
@@ -424,24 +458,22 @@ def test_prod_editable_exec_gate_recovers_a_missing_console_script(
     ) -> tuple[str, ...]:
         return ()
 
-    def recover(
-        root: Path,
-        *,
-        timeout_s: float = UV_SYNC_TIMEOUT_S,
-        reinstall_package: str | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        calls.append((root, reinstall_package))
-        if reinstall_package == "ava":
+    def recover(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        if argv[1] == "sync":
+            assert argv[-2:] == ["--reinstall-package", "ava"]
             launcher.touch()
-        return subprocess.CompletedProcess(["uv", "sync"], returncode=0)
+        return subprocess.CompletedProcess(argv, returncode=0)
 
     monkeypatch.setattr(editable_install, "editable_import_gate", import_gate)
-    monkeypatch.setattr(_update_uv_sync, "run_uv_sync", recover)
+    monkeypatch.setattr(_update_uv_sync, "run_bounded", recover)
 
     _prod_editable_gate_step().apply(_ctx(source_root, tmp_path / ".ava"))
 
-    assert calls == [(source_root, "ava")]
+    assert [argv[1] for argv in calls] == ["export", "sync"]
     assert launcher.exists()
+    if os.name != "nt":
+        assert stat.S_IMODE(launcher.parent.stat().st_mode) == 0o555
 
 
 def test_prod_editable_exec_gate_rejects_a_fake_successful_recovery(
@@ -473,7 +505,7 @@ def test_prod_editable_exec_gate_rejects_a_fake_successful_recovery(
 
     with pytest.raises(
         RuntimeError,
-        match=r"cd .* && uv sync --reinstall-package ava",
+        match="Manual editable-install recovery write-window recipe",
     ):
         _prod_editable_gate_step().apply(_ctx(source_root, tmp_path / ".ava"))
 
