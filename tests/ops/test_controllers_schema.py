@@ -510,9 +510,10 @@ class TestHealBackoff:
 
         Drives the real `ControllerManager` over the real `SchemaController` for the
         full escalation distance: the heal fires ONCE and then stays backed off, but
-        every round still reports `DB_DEPENDENT`, so the streak keeps counting and
-        reaches ERROR. A backoff that returned `NONE` instead would have hidden the
-        3h07m gap all over again — quieter attempts, same signal.
+        every round still reports `DB_DEPENDENT`, so the streak keeps counting — the
+        start line and the bound-crossing heartbeat — and reaches ERROR. A backoff
+        that returned `NONE` instead would have hidden the 3h07m gap all over again —
+        quieter attempts, same signal.
         """
         self._drifted(monkeypatch)
         attempts = self._gateway_rejects_and_local_fails(monkeypatch)
@@ -525,8 +526,10 @@ class TestHealBackoff:
 
         assert attempts == ["gateway", "local"], "one heal attempt across the whole streak"
         blocked = [r for r in caplog.records if "round blocked by schema" in r.message]
-        assert len(blocked) == manager._BLOCKED_ROUND_ALARM_ROUNDS, "every round must say so"
+        assert len(blocked) == 2, "the start line and the bound-crossing heartbeat"
+        assert "1 consecutive round(s)" in blocked[0].message
         assert blocked[-1].levelno == logging.ERROR, "the streak must still escalate"
+        assert f"{manager._BLOCKED_ROUND_ALARM_ROUNDS} consecutive round(s)" in blocked[-1].message
 
 
 def test_controller_wraps_reconcile_into_result(monkeypatch: pytest.MonkeyPatch) -> None:

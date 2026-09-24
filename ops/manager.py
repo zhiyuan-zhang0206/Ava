@@ -55,16 +55,19 @@ services that need Postgres, while a host-scoped one (paused, update spawned) ho
 back the whole roster. The manager passes that scope up; the watchdog is what
 matches it against each service's declared needs.
 
-**Every blocked round says so, and a streak escalates.** A block used to be
+**A block's start, heartbeats and end all say so.** A block used to be
 invisible: a skipped round and an all-green round were indistinguishable in the log,
 so a Windows runner spent 3h07m (2026-07-28 22:04 → 2026-07-29 01:11) never
 reconciling its roster once — blocked every minute by ``Schema ahead of code`` while
 its ``ava cluster update`` trigger kept failing — and it took a forensic reconstruction
 (counting ``_run_check`` lines per hour) to see it, because the absence of log output
-WAS the only evidence. Each blocked round now logs which dimension blocked, how wide,
-and how many consecutive rounds it has been going on; past
-``_BLOCKED_ROUND_ALARM_ROUNDS`` it logs at ERROR, and the round that finally clears a
-streak says so too. This is the alarm only, and it stays an alarm: bounding the
+WAS the only evidence. The first blocked round now logs immediately — which dimension
+blocked, how wide, and how many consecutive rounds — and the streak repeats on the
+``_BLOCKED_ROUND_ALARM_ROUNDS`` cadence (ten rounds ≈ ten minutes) with the running
+count, so a gap stays readable without one line per round (a fleet-wide freeze pause
+once made per-round repeats ~2.8k lines, 79% of a 24h error bucket). Past the bound
+the level is ERROR, and the round that finally clears a streak says so too. This is
+the alarm only, and it stays an alarm: bounding the
 underlying *heal* (the ~85 failed ``ava cluster update`` triggers of that window) belongs to
 each acting controller's own persistent backoff, and a backed-off round still reports
 a block — so fewer attempts never mean a quieter alarm.
@@ -101,6 +104,18 @@ _log = logging.getLogger("ops.manager")
 # is: that constant now bounds only an UNOWNED pause, whose owner is provably gone, so
 # it is sized for a spawn gap rather than for a rollout's length.)
 _BLOCKED_ROUND_ALARM_ROUNDS = 10
+
+# The same bound doubles as the streak's REPEAT cadence: the first blocked round logs
+# immediately, then every ``_BLOCKED_ROUND_ALARM_ROUNDS`` rounds. One number for both
+# roles, so a long block is a bounded heartbeat — the running count on every line
+# keeps the gap forensically countable — instead of one line per round.
+#
+# Block dimensions whose block is an EXPECTED state never escalate past the first
+# WARNING, and their heartbeats drop to INFO. A paused host is doing exactly what it
+# was asked to; the bounds on pause pathology live in the controllers and hold
+# machinery (``stalled_rollout`` ahead of ``pause``; the unowned-pause release; the OS
+# hold watchdog), which is why a surviving pause streak cannot be evidence of a defect.
+_EXPECTED_BLOCK_DIMENSIONS = frozenset({"pause"})
 
 
 def build_controllers() -> tuple[Controller, ...]:
@@ -186,20 +201,29 @@ class ControllerManager:
         return BlockScope.NONE
 
     def _note_blocked(self, result: ReconcileResult) -> None:
-        """Log this blocked round, escalating once a streak passes the alarm bound.
+        """Log this blocked round — first round immediately, then on heartbeat cadence.
 
-        Logged every round rather than on change: the operator signal is "this host is
-        STILL not reconciling", and a once-only line cannot distinguish a block that
-        cleared from one that has been holding for hours — which is exactly the
-        ambiguity that forced a forensic log reconstruction.
+        Repeats ride ``_BLOCKED_ROUND_ALARM_ROUNDS`` (ten rounds ≈ ten minutes at the
+        60s round) and carry the running streak count, so "this host is STILL not
+        reconciling" stays readable without one line per round — per-round repeats once
+        made a planned pause the loudest thing in the error bucket (2026-09-24).
+        Past the bound the level is ERROR, except for the expected dimensions (see
+        ``_EXPECTED_BLOCK_DIMENSIONS``); the round that clears a streak always logs its
+        end (``_note_unblocked``), so a block always has a start and an end timestamp.
         """
         self._blocking_dimension = result.dimension
         self._blocked_streak += 1
-        level = (
-            logging.ERROR
-            if self._blocked_streak >= _BLOCKED_ROUND_ALARM_ROUNDS
-            else logging.WARNING
-        )
+        heartbeat_due = self._blocked_streak % _BLOCKED_ROUND_ALARM_ROUNDS == 0
+        if self._blocked_streak != 1 and not heartbeat_due:
+            return
+        if result.dimension in _EXPECTED_BLOCK_DIMENSIONS:
+            level = logging.WARNING if self._blocked_streak == 1 else logging.INFO
+        else:
+            level = (
+                logging.ERROR
+                if self._blocked_streak >= _BLOCKED_ROUND_ALARM_ROUNDS
+                else logging.WARNING
+            )
         _log.log(
             level,
             "[ops.manager] round blocked by %s (scope=%s%s), roster NOT fully reconciled "
