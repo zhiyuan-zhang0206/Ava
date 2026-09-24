@@ -4,7 +4,7 @@
 // (Task #1224). Alert is fully separate from Notice: own table, own UI, own
 // IM channel.
 //
-// One EventSource to /api/alerts/stream feeds the TanStack Query ["alerts"]
+// One profile-shared stream to /api/alerts/stream feeds the TanStack Query ["alerts"]
 // prefix: every frame (one AlertRow JSON per ingest) folds into every
 // matching cache (the badge query with default params, the section query
 // cache) — no polling for SSE-backed data (frontend AGENTS.md state rule).
@@ -32,6 +32,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { API_BASE, api } from "./api";
 import { notifySessionInvalid, useAuth } from "./auth-context";
+import { sharedSseSupported, sharedSseTransport } from "./sse-share";
 import type { Alert, AlertsResponse } from "./types";
 import { useDocumentVisible } from "./use-document-visible";
 
@@ -114,10 +115,12 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [retryNonce, setRetryNonce] = useState(0);
   const failCountRef = useRef(0);
+  const lastReconnectNonce = useRef(reconnectNonce);
 
   // Stable reconnect callback (mirrors useEventStream's bumpReconnect).
   const bumpReconnect = useCallback(() => setReconnectNonce((n) => n + 1), []);
   const isVisible = useDocumentVisible();
+  const shared = sharedSseSupported();
 
   useEffect(() => {
     if (authStatus !== "authenticated" || !isVisible) {
@@ -125,6 +128,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
       // unauthenticated SSE GET 401s and blind retries produced the 43k/24h
       // /api/alerts/stream storm). Login flips the status → effect re-runs → opens.
       // Hidden pages suspend work; reopening reconciles active alert reads.
+      lastReconnectNonce.current = reconnectNonce;
       return;
     }
 
@@ -132,11 +136,13 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     let disposed = false;
     let watchdog: ReturnType<typeof setTimeout> | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const transport = shared ? sharedSseTransport() : null;
 
     const armWatchdog = () => {
       if (watchdog !== null) clearTimeout(watchdog);
       watchdog = setTimeout(() => {
-        bumpReconnect();
+        if (transport) transport.restart("alerts");
+        else bumpReconnect();
       }, WATCHDOG_MS);
     };
 
@@ -158,7 +164,9 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
         parseFailures += 1;
         if (parseFailures >= 3) {
           parseFailures = 0;
-          scheduleReopen();
+          if (transport) {
+            if (transport.isLeader()) transport.restart("alerts", true);
+          } else scheduleReopen();
         }
         return;
       }
@@ -171,8 +179,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const es = new EventSource(`${API_BASE}/api/alerts/stream`, { withCredentials: true });
-    es.onopen = () => {
+    const handleOpen = () => {
       if (disposed) return;
       failCountRef.current = 0;
       // Alerts have their own stream and staleTime: Infinity, so this provider
@@ -181,13 +188,36 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: ALERTS_QUERY_KEY });
       armWatchdog();
     };
-    es.onmessage = (e) => {
+    const handleFrame = (raw: string) => {
       if (disposed) return;
       armWatchdog();
-      const raw = typeof e.data === "string" ? e.data : "";
       if (!raw) return;
       foldFrame(raw);
     };
+    if (transport) {
+      const unsubscribe = transport.subscribe("alerts", {
+        onFrame: handleFrame,
+        onState: (state) => {
+          if (disposed) return;
+          if (state === "open") handleOpen();
+          else if (state === "closed") {
+            if (watchdog !== null) clearTimeout(watchdog);
+            watchdog = null;
+          }
+        },
+      });
+      if (lastReconnectNonce.current !== reconnectNonce) transport.restart("alerts");
+      lastReconnectNonce.current = reconnectNonce;
+      return () => {
+        disposed = true;
+        if (watchdog !== null) clearTimeout(watchdog);
+        unsubscribe();
+      };
+    }
+
+    const es = new EventSource(`${API_BASE}/api/alerts/stream`, { withCredentials: true });
+    es.onopen = handleOpen;
+    es.onmessage = (event) => handleFrame(typeof event.data === "string" ? event.data : "");
     es.onerror = () => {
       if (disposed) return;
       switch (es.readyState) {
@@ -229,7 +259,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     // reconnectNonce + retryNonce are the reopen levers; isVisible gates the
     // stream on tab visibility; the cache folders are stable identities
     // included only to satisfy the lint.
-  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible]);
+  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible, shared]);
 
   return children;
 }
