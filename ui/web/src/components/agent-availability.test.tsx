@@ -123,5 +123,8 @@ it("hides an observation stamped beyond the future-skew allowance", async () => 
   } });
   show();
   await waitFor(() => expect(getAgent).toHaveBeenCalled());
+  // Let the query result commit and the component re-render; without this the
+  // null assertion can pass before a too-large skew would have shown the strip.
+  await new Promise((r) => setTimeout(r, 120));
   expect(screen.queryByRole("status")).toBeNull();
 });
