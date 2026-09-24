@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import logging
 import multiprocessing
 import os
-from datetime import UTC, datetime
+import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 from typing import Any
+from unittest.mock import Mock
 
 import psycopg
 import pytest
@@ -16,6 +20,97 @@ import pytest
 from schedules.catchup import catch_up, claimed_slot, fire_slot_once
 
 _ROOT = Path(__file__).resolve().parents[2]
+_DAILY_SCRIPTS = ("c9-daily-report-schedule.py", "dev-ci-metrics-schedule.py")
+
+
+def _load_daily_script(filename: str) -> ModuleType:
+    path = _ROOT / "schedules" / filename
+    spec = importlib.util.spec_from_file_location(filename.removesuffix(".py"), path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module
+
+
+class _LoopStoppedError(Exception):
+    pass
+
+
+@pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
+def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
+    filename: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_daily_script(filename)
+    host = sys.modules[module.run_daily_loop.__module__]
+    start = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
+    now = datetime(2026, 9, 6, 10, 1, tzinfo=UTC)
+    next_slot = datetime(2026, 9, 6, 10, 2, tzinfo=UTC)
+    clock = iter((start, now))
+
+    class FakeDatetime:
+        @staticmethod
+        def now(zone: Any) -> datetime:
+            assert zone == UTC
+            return next(clock)
+
+    catch_up_call = Mock()
+    next_fire_call = Mock(side_effect=(start, next_slot))
+    claim = Mock()
+    sleep = Mock(side_effect=_LoopStoppedError)
+    monkeypatch.setattr(host, "datetime", FakeDatetime)
+    monkeypatch.setattr(host, "catch_up", catch_up_call)
+    monkeypatch.setattr(host, "next_fire", next_fire_call)
+    monkeypatch.setattr(host, "fire_slot_once", claim)
+    monkeypatch.setattr(host.time, "sleep", sleep)
+
+    with pytest.raises(_LoopStoppedError):
+        module._main_loop()
+
+    catch_up_call.assert_called_once_with(
+        [(module.CRON, None)], timezone=module.TZ, fire=module._fire
+    )
+    assert [call.kwargs["after"] for call in next_fire_call.call_args_list] == [
+        now - timedelta(minutes=2),
+        start,
+    ]
+    claim.assert_not_called()
+    sleep.assert_called_once_with(60)
+
+
+@pytest.mark.parametrize("filename", _DAILY_SCRIPTS)
+def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
+    filename: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_daily_script(filename)
+    host = sys.modules[module.run_daily_loop.__module__]
+    start = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
+    now = datetime(2026, 9, 6, 10, 5, tzinfo=UTC)
+    slot = datetime(2026, 9, 6, 10, 4, tzinfo=UTC)
+    clock = iter((start, now, now))
+
+    class FakeDatetime:
+        @staticmethod
+        def now(zone: Any) -> datetime:
+            assert zone == UTC
+            return next(clock)
+
+    claim = Mock(return_value=True)
+    sleep = Mock(side_effect=_LoopStoppedError)
+    monkeypatch.setattr(host, "datetime", FakeDatetime)
+    monkeypatch.setattr(host, "catch_up", Mock())
+    monkeypatch.setattr(host, "next_fire", Mock(return_value=slot))
+    monkeypatch.setattr(host, "fire_slot_once", claim)
+    monkeypatch.setattr(host.time, "sleep", sleep)
+
+    with pytest.raises(_LoopStoppedError):
+        module._main_loop()
+
+    claim.assert_called_once_with(slot, None, fire=module._fire)
+    sleep.assert_called_once_with(120)
 
 
 def _insert_schedule(conn: psycopg.Connection, *, created_at: datetime) -> int:
@@ -217,5 +312,20 @@ def test_builtin_schedule_templates_use_catch_up_and_slot_claims(script_path: Pa
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
 
-    assert "catch_up" in calls
-    assert "fire_slot_once" in calls
+    if script_path.name in _DAILY_SCRIPTS:
+        assert "run_daily_loop" in calls
+    else:
+        assert "catch_up" in calls
+        assert "fire_slot_once" in calls
+
+
+def test_daily_host_owns_catch_up_and_slot_claims() -> None:
+    helper = _ROOT / "schedules" / "daily_host.py"
+    tree = ast.parse(helper.read_text(encoding="utf-8"), filename=str(helper))
+    calls = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+    assert {"catch_up", "fire_slot_once"} <= calls

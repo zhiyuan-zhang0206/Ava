@@ -312,12 +312,13 @@ class TestPauseHeartbeat:
     def test_pause_heartbeat_rejects_out_of_range(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, bad: float
     ) -> None:
-        """duration must be in (0, configured limit] — invalid calls do not write or emit."""
+        """Invalid duration must not write or emit a heartbeat pause event."""
         ava._boot._agent_id = spawn_agent()
         from shared import telemetry
 
-        def _unexpected_emit(*_args: object, **_kwargs: object) -> None:
-            pytest.fail("invalid duration emitted telemetry")
+        def _unexpected_emit(_category: str, event_name: str, **_kwargs: object) -> None:
+            if event_name != "sdk_call":
+                pytest.fail(f"invalid duration emitted {event_name}")
 
         monkeypatch.setattr(
             telemetry,

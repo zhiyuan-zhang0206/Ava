@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 SCHEDULES_DIR = Path(__file__).resolve().parents[2] / "schedules"
+_DAILY_HOST_SCRIPTS = {"c9-daily-report-schedule.py", "dev-ci-metrics-schedule.py"}
 
 EXPECTED_STATUS_MEMBERS: dict[str, set[str]] = {
     "c9-daily-report-schedule.py": {
@@ -78,7 +79,17 @@ def test_builtin_schedule_guards_every_referenced_status_member(
     filename: str, expected: set[str]
 ) -> None:
     tree = ast.parse((SCHEDULES_DIR / filename).read_text())
-    assert _status_references(tree) == expected
+    referenced = _status_references(tree)
+    if filename in _DAILY_HOST_SCRIPTS:
+        assert any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "schedules.daily_host"
+            and any(alias.name == "report_agent" for alias in node.names)
+            for node in ast.walk(tree)
+        )
+        helper = ast.parse((SCHEDULES_DIR / "daily_host.py").read_text())
+        referenced |= _status_references(helper)
+    assert referenced == expected
 
     calls = _guard_calls(tree)
     if not expected:
