@@ -20,7 +20,8 @@ import psutil
 from shared.log import logger
 from shared.platform import LockTimeoutError, file_lock
 from shared.proc_tree import stable_create_time
-from shared.pty_sessions._paths import (
+from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.sessions.pty._paths import (
     host_identity,
     host_starttime,
     pty_dir,
@@ -28,7 +29,6 @@ from shared.pty_sessions._paths import (
     records_lock_path,
     socket_path,
 )
-from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # Record liveness + enumeration (no process to dial — the records ARE the
 # session listing; a dead record is swept as it is discovered).

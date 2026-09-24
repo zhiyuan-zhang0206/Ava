@@ -108,7 +108,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             # Runner-owned central producers and lifecycle paths share the
             # manifest alert writer with the agent-host monitor.
             "alerts",
-            # The pty CLI (shared/pty_sessions/cli.py, reachable from the runner
+            # The pty CLI (shared/sessions/pty/cli.py, reachable from the runner
             # closure) resolves an omitted capture window from
             # display.shell_capture_default_lines (task #3696).
             "display",

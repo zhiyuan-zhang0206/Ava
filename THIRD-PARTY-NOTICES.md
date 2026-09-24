@@ -18,7 +18,7 @@ report with `uv pip licenses` / `npx license-checker` when shipping a release.
 | Package | License | Role |
 |---|---|---|
 | `psycopg`, `psycopg-binary`, `psycopg-pool` | LGPL-3.0-only | PostgreSQL driver |
-| `pyte` | LGPL-3.0 | terminal screen model for PTY sessions (`shared/pty_sessions/screen.py`) |
+| `pyte` | LGPL-3.0 | terminal screen model for PTY sessions (`shared/sessions/pty/screen.py`) |
 | `browser-cookie3` | LGPL-3.0 | browser cookie access |
 | `certifi` | MPL-2.0 | CA certificate bundle |
 | `tqdm` | MPL-2.0 AND MIT | progress bars |

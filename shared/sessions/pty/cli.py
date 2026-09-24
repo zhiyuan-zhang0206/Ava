@@ -2,9 +2,9 @@
 
 Invocation shape::
 
-    python -m shared.pty_sessions.cli <name> <op> [args]
-    python -m shared.pty_sessions.cli list [prefix]
-    python -m shared.pty_sessions.cli list-started-at [prefix]
+    python -m shared.sessions.pty.cli <name> <op> [args]
+    python -m shared.sessions.pty.cli list [prefix]
+    python -m shared.sessions.pty.cli list-started-at [prefix]
 
 Ops (session ops take the session name first):
 
@@ -73,7 +73,8 @@ from shared.log import logger
 from shared.paths import run_dir
 from shared.platform import LockTimeoutError
 from shared.proc_tree import stable_create_time
-from shared.pty_sessions._paths import (
+from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.sessions.pty._paths import (
     CAPTURE_MAX_LINES,
     host_identity,
     host_log_path,
@@ -82,9 +83,9 @@ from shared.pty_sessions._paths import (
     socket_path,
     transcript_path,
 )
-from shared.pty_sessions.allocation_freeze import locked_freeze_state, state_path
-from shared.pty_sessions.orphan_reaper import _reap_orphaned_hosts
-from shared.pty_sessions.records import (
+from shared.sessions.pty.allocation_freeze import locked_freeze_state, state_path
+from shared.sessions.pty.orphan_reaper import _reap_orphaned_hosts
+from shared.sessions.pty.records import (
     _CREATE_TIME_TOLERANCE_S,
     _record_alive,
     _sweep_dead,
@@ -93,7 +94,6 @@ from shared.pty_sessions.records import (
     session_generation,
     session_started_at,
 )
-from shared.session_record import SessionRecord, pid_starttime_ticks
 
 # ---------------------------------------------------------------------------
 # Key translation — the classic send-keys vocabulary (prototype _KEYMAP, with
@@ -239,7 +239,7 @@ def write_env_file(env: dict[str, str]) -> Path:
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# Record liveness + enumeration: see shared.pty_sessions.records (split out
+# Record liveness + enumeration: see shared.sessions.pty.records (split out
 # 2026-09-09, task #2670 — the file-size ceiling). The CLI re-exports the
 # same names from the module-level import above.
 # ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ def _spawn_host(
     host_argv = [
         sys.executable,
         "-m",
-        "shared.pty_sessions.host",
+        "shared.sessions.pty.host",
         name,
         cwd,
         envfile,
@@ -661,7 +661,7 @@ def _op_list_started_at(rest: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Dispatch one CLI invocation. `python -m shared.pty_sessions.cli`."""
+    """Dispatch one CLI invocation. `python -m shared.sessions.pty.cli`."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
         sys.stderr.write(

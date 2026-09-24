@@ -168,7 +168,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_REAP_TIMEOUT_S",
     ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",
     (
-        "shared/pty_sessions/host.py",
+        "shared/sessions/pty/host.py",
         "_REAP_POLL_S",
     ): "independent: waitpid poll after SIGKILL to collect the zombie, no lattice neighbour",
     (

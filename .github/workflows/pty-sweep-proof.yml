@@ -2,7 +2,7 @@ name: PTY terminal sweep proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['shared/pty_sessions/**', 'tests/shared/test_pty_zombie_sweep.py', '.github/workflows/pty-sweep-proof.yml']
+    paths: ['shared/sessions/pty/**', 'tests/shared/test_pty_zombie_sweep.py', '.github/workflows/pty-sweep-proof.yml']
 permissions:
   contents: read
 jobs:
@@ -30,7 +30,7 @@ jobs:
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
           timeout 240 uv run pytest tests/shared/test_pty_zombie_sweep.py tests/shared/test_pty_sessions_cli.py -k 'lazy_sweep_requires or crashed_host_is_swept or live_sessions_keeps_live_legacy' -q --junitxml=proof/head.xml
-          git show bd6b15ed0:shared/pty_sessions/cli.py > shared/pty_sessions/cli.py
+          git show bd6b15ed0:shared/pty_sessions/cli.py | sed -e 's|shared\.pty_sessions|shared.sessions.pty|g' -e 's|shared/pty_sessions|shared/sessions/pty|g' > shared/sessions/pty/cli.py
           set +e
           timeout 180 uv run pytest tests/shared/test_pty_zombie_sweep.py -q --junitxml=proof/baseline.xml
           result=$?

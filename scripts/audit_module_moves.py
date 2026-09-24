@@ -14,6 +14,8 @@ For each pair, report old-path references with file:line locations, then import
 the new module and check names from `from NEW import X`, `NEW.X`, and quoted
 targets. Comments, documentation, and non-Python text are included. Wildcard
 imports cannot enumerate their references and fail the completeness check.
+`git show <rev>:<path>` operands are object reads of pinned history, so they
+are blanked before matching.
 
 The invariant is that committed repository content carries no reference to the
 old path. Scan working-tree text for `git ls-files` entries, excluding the frozen
@@ -40,6 +42,12 @@ _FROZEN = ("decisions/", "postmortems/", "docs/history/")
 # compatibility patch is bound by manifest.json `patch_sha256` to the 612326d
 # base, so its context lines must keep that base's paths verbatim.
 _FROZEN_FILES = frozenset({"scripts/legacy_lkg/compatibility.patch"})
+_HISTORY_READ_RE = re.compile(r"""git\s+show\s+(?:"[^"]*"|'[^']*'|\S+)""")
+
+
+def _mask_history_reads(text: str) -> str:
+    """Blank `git show <rev>:<path>` operands — object reads, never live references."""
+    return _HISTORY_READ_RE.sub(lambda match: " " * len(match.group(0)), text)
 
 
 def _is_excluded(name: str) -> bool:
@@ -86,6 +94,7 @@ def _from_imports(module: str, text: str) -> list[tuple[int, set[str]]]:
 
 
 def _old_references(module: str, text: str) -> list[int]:
+    text = _mask_history_reads(text)
     pattern = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
     offsets = [match.start() for match in pattern.finditer(text)] if module in text else []
     parent, _, leaf = module.rpartition(".")
@@ -99,6 +108,7 @@ def _old_references(module: str, text: str) -> list[int]:
 
 
 def _referenced_names(module: str, text: str) -> set[str]:
+    text = _mask_history_reads(text)
     if module not in text:
         return set()
     refs = set(re.findall(rf"(?<![\w.]){re.escape(module)}\.([A-Za-z_]\w*)", text))

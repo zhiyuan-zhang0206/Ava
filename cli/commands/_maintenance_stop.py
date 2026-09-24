@@ -25,7 +25,6 @@ from cli.commands._maintenance_stop_report import (
 from shared.os_watchdog_probe import clear_held_stop_marker, write_held_stop_marker
 from shared.paths import run_dir
 from shared.proc_tree import OwnedProcess, capture_tree
-from shared.pty_sessions._paths import host_identity, host_starttime
 from shared.session_backend import (
     SessionBackend,
     WinprocSessionBackend,
@@ -33,6 +32,7 @@ from shared.session_backend import (
     get_shell_backend,
 )
 from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.sessions.pty._paths import host_identity, host_starttime
 
 _TERMINAL_NAME = re.compile(r"ava-(?:agent-\d+-shell-\d+(?:-|$)|schedule-\d+(?:-|$))")
 

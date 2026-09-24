@@ -50,7 +50,7 @@ def _kill_watcher_orphan_processes(session_id: int) -> None:
     generation on the orphan and both fire. The generated boot script path is
     unique per (agent, session), so matching it in the process's argv is
     precise; SIGKILL matches the pty reaper's convention for detached orphans
-    (shared/pty_sessions/orphan_reaper.py) and skips the child's finally, so
+    (shared/sessions/pty/orphan_reaper.py) and skips the child's finally, so
     its registry row survives for the transition below. Fail-soft: a scan
     error must not block the boot reconcile it serves.
     """

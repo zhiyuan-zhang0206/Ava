@@ -34,7 +34,7 @@ _LOCK_TIMEOUT_S = 60.0
 _STATE_FILENAME = "pty-allocation-freeze.json"
 _LOCK_FILENAME = "pty-allocation.lock"
 
-_log = logging.getLogger("shared.pty_sessions.allocation_freeze")
+_log = logging.getLogger("shared.sessions.pty.allocation_freeze")
 
 
 @dataclass(frozen=True)

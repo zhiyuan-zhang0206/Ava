@@ -67,7 +67,7 @@ def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
 @pytest.fixture
 def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[_FakeBackend, list[int]]:
     from shared import start_serving
-    from shared.pty_sessions import allocation_freeze
+    from shared.sessions.pty import allocation_freeze
 
     backend = _FakeBackend()
     launched: list[int] = []
@@ -212,7 +212,7 @@ def test_launches_enabled_missing_session(
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
     """An enabled schedule remains desired after a current-generation restart."""
-    from shared.pty_sessions import allocation_freeze
+    from shared.sessions.pty import allocation_freeze
 
     _backend, launched = fake_session
     monkeypatch.setattr(allocation_freeze, "current_generation", lambda: "current-generation")
@@ -261,7 +261,7 @@ def test_live_superseded_generation_is_reaped_before_schedule_reconcile(
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
     """A same-name schedule session from a flip cannot be adopted as current."""
-    from shared.pty_sessions import allocation_freeze
+    from shared.sessions.pty import allocation_freeze
 
     backend, _launched = fake_session
     name = session_name("schedule-77")
@@ -280,7 +280,7 @@ def test_superseded_generation_reap_retries_before_rebuilding_enabled_schedule(
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
     """A failed old-generation reap blocks replacement until the official retry wins."""
-    from shared.pty_sessions import allocation_freeze
+    from shared.sessions.pty import allocation_freeze
 
     backend, launched = fake_session
     sid = _insert(db_conn, "generation-retry")

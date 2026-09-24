@@ -2,7 +2,7 @@ name: PTY zombie observation regression proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['shared/pty_sessions/**', 'tests/shared/test_pty_sessions_cli.py', 'tests/shared/test_posixproc.py', '.github/workflows/pty-zombie-proof.yml']
+    paths: ['shared/sessions/pty/**', 'tests/shared/test_pty_sessions_cli.py', 'tests/shared/test_posixproc.py', '.github/workflows/pty-zombie-proof.yml']
 permissions:
   contents: read
 jobs:
@@ -32,8 +32,8 @@ jobs:
           git rev-parse HEAD > proof/head-sha.txt
           printf '%s\n' "$BASELINE_SHA" > proof/baseline-sha.txt
           timeout 240 uv run pytest tests/shared/test_pty_sessions_cli.py tests/shared/test_posixproc.py -k 'zombie_is_not or crashed_host_is_swept or kill_session_group_kill_reaps_late_spawned_child' -q --junitxml=proof/head.xml
-          git show "$BASELINE_SHA:shared/pty_sessions/cli.py" > shared/pty_sessions/cli.py
-          git show "$BASELINE_SHA:shared/pty_sessions/host.py" > shared/pty_sessions/host.py
+          git show "$BASELINE_SHA:shared/pty_sessions/cli.py" | sed -e 's|shared\.pty_sessions|shared.sessions.pty|g' -e 's|shared/pty_sessions|shared/sessions/pty|g' > shared/sessions/pty/cli.py
+          git show "$BASELINE_SHA:shared/pty_sessions/host.py" | sed -e 's|shared\.pty_sessions|shared.sessions.pty|g' -e 's|shared/pty_sessions|shared/sessions/pty|g' > shared/sessions/pty/host.py
           set +e
           timeout 180 uv run pytest tests/shared/test_pty_sessions_cli.py -k zombie_is_not -q --junitxml=proof/baseline.xml
           result=$?

@@ -370,7 +370,7 @@ class PosixProcSessionBackend(SessionBackend):
 
 
 # ── POSIX: per-session PTY hosts ───────────────────────────────────────────
-_PTY_CLI = "shared.pty_sessions.cli"  # python -m <this> <name> <op> [args]
+_PTY_CLI = "shared.sessions.pty.cli"  # python -m <this> <name> <op> [args]
 _ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # env keys a POSIX shell can assign
 
 
@@ -398,7 +398,7 @@ class PtySessionBackend(SessionBackend):
     """POSIX backend for agent interactive shells / watchers — what
     ``get_shell_backend()`` returns on POSIX. Each session is an interactive
     login shell (``bash -l -i``, the classic pane shape) carried by its own
-    detached host process (``shared.pty_sessions.host``), so no infra process
+    detached host process (``shared.sessions.pty.host``), so no infra process
     holds every shell and sessions persist across agent exits, restarts, and
     cluster updates. ``cmd`` is submitted after the shell is ready;
     ``login_shell=False`` raises ``NotImplementedError``. Env rides a 0600
@@ -510,7 +510,7 @@ class PtySessionBackend(SessionBackend):
         per live host); a record whose shell is gone is swept as it is
         discovered. There is no daemon whose downtime could blank this view.
         """
-        from shared.pty_sessions.cli import live_sessions
+        from shared.sessions.pty.cli import live_sessions
 
         return sorted(live_sessions(prefix))
 
@@ -518,7 +518,7 @@ class PtySessionBackend(SessionBackend):
         """Epoch seconds the named pty session was launched, or None when it
         is not alive — the CLI's record + shell-pid liveness rule, read
         in-process (no subprocess, task #1200)."""
-        from shared.pty_sessions.cli import session_started_at
+        from shared.sessions.pty.cli import session_started_at
 
         return session_started_at(name)
 
@@ -532,7 +532,7 @@ class PtySessionBackend(SessionBackend):
         with an I/O error, preserving the pre-batch behavior."""
         if not names:
             return {}
-        from shared.pty_sessions.cli import live_sessions
+        from shared.sessions.pty.cli import live_sessions
 
         try:
             live = live_sessions()
@@ -542,7 +542,7 @@ class PtySessionBackend(SessionBackend):
 
     def session_generation(self, name: str) -> str | None:
         """The live PTY record's flip generation, or None for legacy records."""
-        from shared.pty_sessions.cli import session_generation
+        from shared.sessions.pty.cli import session_generation
 
         return session_generation(name)
 

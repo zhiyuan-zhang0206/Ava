@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from shared.config import settings
-from shared.pty_sessions import allocation_freeze
-from shared.pty_sessions import cli as pty_cli
+from shared.sessions.pty import allocation_freeze
+from shared.sessions.pty import cli as pty_cli
 
 
 @pytest.fixture(autouse=True)

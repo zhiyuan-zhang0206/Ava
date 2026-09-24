@@ -107,7 +107,7 @@ def _session_generation(session_id: int) -> str | None:
 
 def _current_session_generation() -> str | None:
     """Host flip generation used to classify desired session records."""
-    from shared.pty_sessions.allocation_freeze import current_generation
+    from shared.sessions.pty.allocation_freeze import current_generation
 
     return current_generation()
 

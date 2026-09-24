@@ -32,7 +32,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 import shared.db
-import shared.pty_sessions.cli
+import shared.sessions.pty.cli
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.cluster import session_name
 from shared.config import settings
@@ -304,7 +304,7 @@ def _live_session_records(backend: SessionBackend) -> dict[str, SessionRecord] |
     """
     if not isinstance(backend, PtySessionBackend):
         return None
-    return shared.pty_sessions.cli.live_sessions()
+    return shared.sessions.pty.cli.live_sessions()
 
 
 def _session_is_live(

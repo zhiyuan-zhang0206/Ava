@@ -344,7 +344,7 @@ def _wait_for_app_server(
             with contextlib.suppress(OSError):
                 probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 # Local connect-probe bound; the house 2s for same-machine
-                # sockets (shared/pty_sessions/launch.py). Reference-script
+                # sockets (shared/sessions/pty/launch.py). Reference-script
                 # default, not config (task #3696 exception inventory).
                 probe.settimeout(2.0)
                 try:

@@ -743,7 +743,7 @@ session with multiple windows. On POSIX they run as **detached native processes*
 the process supervisor, `shared/posixproc.py`); orchestration sessions (updater /
 rollout / cluster-restart) are native sessions on the same backend. Agent
 interactive shells / watchers each run in their own detached pty host
-(`shared/pty_sessions/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
+(`shared/sessions/pty/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
 byte transcript under `$AVA_HOME/logs/` per host, session ops over the
 session's own socket at `$AVA_HOME/run/pty/<name>.sock`; hosts reparent to
 init at creation, so they are outside the service roster. Pause and update
