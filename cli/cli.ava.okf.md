@@ -55,6 +55,9 @@ pg/redis + provisioned database + `$AVA_HOME/.env`). Flags (`--role`,
 The dependency-free installation seam shared by install and update is described
 in [[cli/python-install.ava.okf.md]].
 
+The inactive committed application build input is described in
+[[cli/release-build.ava.okf.md]].
+
 ## Internal Commands (`_` prefix, run by start/update)
 
 Per-cluster pg/redis bring-up, host convergence, the staged upgrade legs, and
