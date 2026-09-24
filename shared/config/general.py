@@ -35,7 +35,7 @@ class GeneralSettings(EnvSettings):
         description="Host-local random secret projected only into the agent-host finalizer to certify manifests for leases on its machine. A one-use finalizer launch ticket retains it at config boot; every non-finalizer boot removes the `.env` value before Settings constructs. It is never returned by the gateway, readable through the runner database role, or forwarded to sessions or model execute_code children. Enabling manifest leases requires a distinct nonempty value on every participating agent-runner. Processes running as the same OS user may read the unit `.env`; this proof is not a security boundary against such code.",
         json_schema_extra={
             "restart_required": "all",
-            "writable": False,
+            "writable": True,
             "sensitive": True,
             "scope": "host",
             "remote_writable": False,
