@@ -105,7 +105,7 @@ import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { classifyItem } from "./runs";
 import { groupTimelineSegments } from "./segments";
 import { useCompactTransitionAnchor } from "./use-compact-transition-anchor";
-import { resolveSavedTimelineAnchor, useTimelineWindow } from "./use-timeline-window";
+import { resolveSavedTimelineAnchor, useTimelineWindow, useTimelineWindowLimits } from "./use-timeline-window";
 import { CompactHistoryDivider, LoadOlderSpinner, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
@@ -165,6 +165,7 @@ export function TimelineView({
   maxWidthCss,
 }: Props) {
   const t = useTranslations("timeline");
+  const { activationRows, turnRows, measureRows } = useTimelineWindowLimits();
   const bufferedItems = useMemo(
     () => compactBuffer?.rows.map((row) => row.item) ?? [],
     [compactBuffer],
@@ -1128,10 +1129,8 @@ export function TimelineView({
       : null;
     return { entry, groupKey, virtualKey, runExpanded, virtualRows };
   }), [groups, compactBuffer?.epoch, turnOverrides, effectiveDetailsMode, turnActive, threadKey]);
-  const renderedRows = groupEntries.reduce(
-    (total, entry) => total + (entry.virtualRows?.length ?? 1), 0,
-  );
-  const virtualEnabled = renderedRows > 100;
+  const renderedRows = groupEntries.reduce((total, entry) => total + (entry.virtualRows?.length ?? 1), 0);
+  const virtualEnabled = renderedRows > activationRows;
   const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, virtualRows }) => ({
       key: virtualKey,
       rank: entry.rank,
@@ -1160,6 +1159,8 @@ export function TimelineView({
   const { range: virtualRange, rowRange } = useTimelineWindow({
     groups: virtualGroups,
     enabled: virtualEnabled,
+    turnRows,
+    measureRows,
     viewportRef,
     contentRef,
     identity: threadKey ?? null,

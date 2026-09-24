@@ -15,6 +15,11 @@ import type { BackendTimelineItem } from "@/lib/types";
 import type { CompactTransitionBuffer } from "@/lib/compact-transition";
 import { useTimelineStore } from "@/lib/timeline-store";
 
+const displayLimits = vi.hoisted(() => new Map<string, number>());
+vi.mock("@/lib/display-limits", () => ({
+  useDisplayLimit: (envVar: string, fallback: number) => displayLimits.get(envVar) ?? fallback,
+}));
+
 vi.mock("./markdown", () => ({
   ChatMarkdown: ({ content }: { content: string }) => (
     <div data-testid="chat-markdown">{content}</div>
@@ -124,6 +129,8 @@ afterEach(() => {
   cleanup();
   resetToggleState();
   resetUserSettings();
+  displayLimits.clear();
+  vi.unstubAllGlobals();
 });
 
 function makeItem(overrides: Partial<BackendTimelineItem> & Pick<BackendTimelineItem, "kind" | "payload">): BackendTimelineItem {
@@ -1453,6 +1460,62 @@ describe("load-older spinner (pinned top overlay)", () => {
 
 // ---------------------------------------------------------------------------
 describe("deep history DOM window", () => {
+  it("uses configured activation and child-window row thresholds", () => {
+    displayLimits.set("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
+    const chats = Array.from({ length: 60 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    const { unmount } = render(<TimelineView items={chats} threadKey="configured-activation" />);
+    let viewport = screen.getByTestId("scroll-viewport");
+    expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
+    expect(viewport.querySelector('[data-timeline-spacer="before"]')).not.toBeNull();
+    unmount();
+
+    displayLimits.set("AVA_TIMELINE_WINDOW_TURN_ROWS", 20);
+    const reasoning = Array.from({ length: 60 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_reasoning", payload: `Thought ${index + 1}`,
+    }));
+    render(<TimelineView items={reasoning} threadKey="configured-turn" />);
+    viewport = screen.getByTestId("scroll-viewport");
+    expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
+    expect(viewport.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
+  });
+
+  it("starts measuring at the configured row count before activation", () => {
+    displayLimits.set("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 50);
+    displayLimits.set("AVA_TIMELINE_WINDOW_MEASURE_ROWS", 10);
+    const observed: Element[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      observe(target: Element) { observed.push(target); }
+      disconnect = vi.fn();
+    });
+    const chats = Array.from({ length: 20 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    render(<TimelineView items={chats} threadKey="configured-measure" />);
+    expect(observed.some((node) => node.hasAttribute("data-virtual-group"))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("measures the mounted rows before a late config read lowers activation", () => {
+    const observed: Element[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      observe(target: Element) { observed.push(target); }
+      disconnect = vi.fn();
+    });
+    const chats = Array.from({ length: 60 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    const { rerender } = render(<TimelineView items={chats} threadKey="late-config" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    expect(viewport.querySelectorAll(".timeline-item").length).toBe(60);
+
+    displayLimits.set("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
+    rerender(<TimelineView items={chats} threadKey="late-config" />);
+    expect(observed.filter((node) => node.hasAttribute("data-virtual-group")).length).toBeGreaterThanOrEqual(60);
+    expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
+  });
+
   it("keeps keyboard focus in the log when a focused card leaves the window", () => {
     const items = Array.from({ length: 1200 }, (_, index) => makeItem({
       item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,

@@ -1,13 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CompactTransitionBuffer } from "@/lib/compact-transition";
 import type { SavedScroll } from "@/lib/scroll-memory";
 import { parseItemIdParts } from "@/lib/timeline";
 import type { BackendTimelineItem } from "@/lib/types";
+import { useDisplayLimit } from "@/lib/display-limits";
 
 const GAP = 12; // space-y-3 on the timeline and expanded turn body
 const BUFFER_VIEWPORTS = 1;
+const ACTIVATION_ROWS_FALLBACK = 100;
+const TURN_ROWS_FALLBACK = 100;
+const MEASURE_ROWS_FALLBACK = 75;
+
+export function useTimelineWindowLimits() {
+  const configuredActivationRows = useDisplayLimit("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", ACTIVATION_ROWS_FALLBACK);
+  const activationRows = useDeferredValue(configuredActivationRows);
+  const turnRows = useDisplayLimit("AVA_TIMELINE_WINDOW_TURN_ROWS", TURN_ROWS_FALLBACK);
+  // A lower runtime threshold first renders with measurement active, then switches
+  // the DOM window on the next commit so the parked row can be pinned.
+  const measureRows = Math.min(
+    useDisplayLimit("AVA_TIMELINE_WINDOW_MEASURE_ROWS", MEASURE_ROWS_FALLBACK),
+    configuredActivationRows - 1, activationRows - 1,
+  );
+  return { activationRows, turnRows, measureRows };
+}
 
 /** Locate a saved reading item, including a child whose turn is now collapsed. */
 export function resolveSavedTimelineAnchor(
@@ -107,6 +124,8 @@ export function windowForSizes(
 interface Options {
   groups: readonly WindowGroup[];
   enabled: boolean;
+  turnRows: number;
+  measureRows: number;
   identity: string | null;
   viewportRef: { current: HTMLElement | null };
   contentRef: { current: HTMLElement | null };
@@ -117,6 +136,8 @@ interface Options {
 export function useTimelineWindow({
   groups,
   enabled,
+  turnRows,
+  measureRows,
   identity,
   viewportRef,
   contentRef,
@@ -131,7 +152,7 @@ export function useTimelineWindow({
   const readingRef = useRef<{ node: HTMLElement; top: number; id: string; rank: number; identity: string | null } | null>(null);
   const preserveRef = useRef<typeof readingRef.current>(null);
   const tracking = enabled || groups.reduce((count, group) =>
-    count + (group.expandedRows?.length ?? 1), 0) >= 75;
+    count + (group.expandedRows?.length ?? 1), 0) >= measureRows;
   const rememberVisible = useCallback(() => {
     const content = contentRef.current;
     const viewport = viewportRef.current;
@@ -144,8 +165,8 @@ export function useTimelineWindow({
       ? previous : { id, rank, identity });
   }, [contentRef, identity, viewportRef]);
   useLayoutEffect(() => { viewRef.current = view; }, [view]);
-  // Layout cleanup runs before React replaces rows. It covers activation at
-  // row 101 and a Details-mode change even when neither fires a scroll event.
+  // Layout cleanup runs before React replaces rows. It covers window activation
+  // and a Details-mode change even when neither fires a scroll event.
   useLayoutEffect(() => () => {
     if (!tracking || preserveRef.current) return;
     preserveRef.current = readingRef.current;
@@ -235,7 +256,7 @@ export function useTimelineWindow({
   const rowRange = (groupIndex: number): WindowRange => {
     const group = groups[groupIndex];
     const rows = group.expandedRows;
-    if (!enabled || !rows || rows.length <= 100) {
+    if (!enabled || !rows || rows.length <= turnRows) {
       return { start: 0, end: rows?.length ?? 0, before: 0, after: 0 };
     }
     const childSizes = rows.map((key) => heights.get(key) ?? 80);
