@@ -113,13 +113,13 @@ def test_derived_roster_covers_all_role_healthchecks(
     }
     got = {c.name for c in wd._checks_for_capability(role)}
     # The roster is the derived set plus pseudo-checks with no ServiceSpec:
-    # brew-pin is host-local on both roles; native data-plane processes, the
+    # brew-pin and prod-venv are host-local on both roles; native data-plane processes, the
     # lgtm stack, and the remote-station probe (WP4, task #1946) are
     # gateway-only; agent-runners add permissions-helper and browser-reach.
     # pg-backup is a ServiceSpec service.
     pseudo = (
-        {"redis-acl", "pgbouncer", "lgtm", "station-probe", "brew-pin"}
+        {"redis-acl", "pgbouncer", "lgtm", "station-probe", "brew-pin", "prod-venv"}
         if role == "gateway"
-        else {"brew-pin", "permissions-helper", "browser-reach"}
+        else {"brew-pin", "prod-venv", "permissions-helper", "browser-reach"}
     )
     assert got == expected | pseudo

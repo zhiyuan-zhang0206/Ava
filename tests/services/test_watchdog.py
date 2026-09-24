@@ -453,6 +453,7 @@ def test_checks_for_capability_agent_runner_returns_ops_and_agent_host(
     # are gated out above; computer-mcp / mcp-daemon have no browser gate.
     assert names == [
         "brew-pin",
+        "prod-venv",
         "permissions-helper",
         "page-server",
         "agent-host",
@@ -468,7 +469,7 @@ def test_checks_for_capability_agent_runner_browser_enabled_pins_browser_reach(
 ) -> None:
     """With the browser enabled, the hand-added browser-reach check sits between
     permissions-helper and the derived services — the order the checklist
-    documents (brew-pin -> permissions-helper -> browser-reach -> services)."""
+    documents (brew-pin -> prod-venv -> permissions-helper -> browser-reach -> services)."""
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", True)
     monkeypatch.setattr("shared.config.settings.services.permissions_helper_enabled", True)
     monkeypatch.setattr("ops.spec._computer_mcp_gate_reason", lambda: None)
@@ -478,6 +479,7 @@ def test_checks_for_capability_agent_runner_browser_enabled_pins_browser_reach(
     names = [c.name for c in wd._checks_for_capability("agent-runner")]
     assert names == [
         "brew-pin",
+        "prod-venv",
         "permissions-helper",
         "browser-reach",
         "page-server",
