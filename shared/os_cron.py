@@ -23,6 +23,7 @@ is anchored to (`ava_binary_path` / `job_home` / `launchd_env_block` /
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -72,6 +73,91 @@ def os_jobs_enabled() -> bool:
 def skip_os_job(kind: str) -> None:
     """Log that `kind` was not registered because `os_jobs_enabled()` is off."""
     logger.info("OS jobs disabled (AVA_OS_JOBS_ENABLED=false) — not registering {}", kind)
+
+
+def reload_launchd_job(label: str, plist_path: Path) -> int:
+    """Replace a loaded LaunchAgent after its caller writes the plist."""
+    subprocess.run(  # noqa: S603
+        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+        capture_output=True,
+        check=False,
+    )
+    result = subprocess.run(  # noqa: S603
+        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        logger.error("launchctl bootstrap failed for {}: {}", label, result.stderr)
+        return 1
+    return 0
+
+
+def remove_launchd_job(label: str, plist_path: Path) -> None:
+    """Unload a LaunchAgent and remove its plist, even when already absent."""
+    subprocess.run(  # noqa: S603
+        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+        capture_output=True,
+        check=False,
+    )
+    plist_path.unlink(missing_ok=True)
+
+
+def require_crontab(missing_message: str, *, missing_returncode: int) -> int | None:
+    """Report a missing crontab with the caller's existing message and policy."""
+    if shutil.which("crontab") is None:
+        print(missing_message, file=sys.stderr)  # noqa: T201
+        return missing_returncode
+    return None
+
+
+def replace_crontab_entry(marker: str, entry: str, *, registration_name: str) -> int:
+    """Replace all matching lines while preserving every other crontab line."""
+    with crontab_lock():
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+        if result.returncode != 0 and "no crontab" not in (result.stderr or "").lower():
+            print(  # noqa: T201
+                f"  * crontab -l failed ({result.stderr.strip() or result.returncode}); "
+                f"skipping {registration_name} registration to avoid clobbering the crontab",
+                file=sys.stderr,
+            )
+            return 1
+        current = result.stdout if result.returncode == 0 else ""
+        lines = [line for line in current.splitlines() if marker not in line]
+        lines.append(entry)
+        result = subprocess.run(
+            ["crontab", "-"],
+            input="\n".join(lines) + "\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"  * crontab update failed: {result.stderr}", file=sys.stderr)  # noqa: T201
+            return 1
+    return 0
+
+
+def remove_crontab_entry(marker: str) -> int:
+    """Remove matching lines, leaving an absent entry or table untouched."""
+    with crontab_lock():
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            return 0
+        lines = [line for line in result.stdout.splitlines() if marker not in line]
+        if len(lines) == len(result.stdout.splitlines()):
+            return 0
+        result = subprocess.run(
+            ["crontab", "-"],
+            input="\n".join(lines) + "\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return 1
+    return 0
 
 
 def ava_binary_path() -> str:

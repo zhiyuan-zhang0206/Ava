@@ -14,11 +14,7 @@ loud warning, like its sibling jobs (`shared.platform_backend`).
 
 from __future__ import annotations
 
-import os
 import shlex
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -26,7 +22,6 @@ from loguru import logger
 
 import shared.os_cron
 from shared.config import settings
-from shared.platform import crontab_lock
 
 _CRON_MARKER = "# ava-packages-refresh"
 _WINDOWS_TIME_LIMIT_S = 900
@@ -93,35 +88,14 @@ def _register_macos() -> int:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     plist_path.write_text(_launchd_plist_content(), encoding="utf-8")
 
-    subprocess.run(  # noqa: S603
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
-        capture_output=True,
-        check=False,
-    )
-    result = subprocess.run(  # noqa: S603
-        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        logger.error("launchctl bootstrap failed for {}: {}", label, result.stderr)
+    if shared.os_cron.reload_launchd_job(label, plist_path) != 0:
         return 1
     logger.info("launchd job '{}' loaded (every {}s)", label, _tick_seconds())
     return 0
 
 
-def _remove_macos_job(label: str, plist_path: Path) -> None:
-    subprocess.run(  # noqa: S603
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
-        capture_output=True,
-        check=False,
-    )
-    plist_path.unlink(missing_ok=True)
-
-
 def _unregister_macos(slug: str) -> int:
-    _remove_macos_job(_label(slug), _launchd_plist_path(slug))
+    shared.os_cron.remove_launchd_job(_label(slug), _launchd_plist_path(slug))
     return 0
 
 
@@ -131,13 +105,13 @@ def _cron_marker(slug: str) -> str:
 
 def _register_linux() -> int:
     """Replace this cluster's refresh line in the user crontab."""
-    if shutil.which("crontab") is None:
-        print(  # noqa: T201
-            "  * packages refresh: crontab not installed; the recurring refresh "
-            "pass cannot be registered",
-            file=sys.stderr,
-        )
-        return 1
+    missing_rc = shared.os_cron.require_crontab(
+        "  * packages refresh: crontab not installed; the recurring refresh "
+        "pass cannot be registered",
+        missing_returncode=1,
+    )
+    if missing_rc is not None:
+        return missing_rc
 
     slug = shared.os_cron._home_slug()
     marker = _cron_marker(slug)
@@ -149,51 +123,14 @@ def _register_linux() -> int:
         f"/bin/sh -c {shlex.quote(_shell_command())} "
         f">> {shlex.quote(str(log_file))} 2>&1  {marker}"
     )
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0 and "no crontab" not in (result.stderr or "").lower():
-            print(  # noqa: T201
-                f"  * crontab -l failed ({result.stderr.strip() or result.returncode}); "
-                "skipping packages-refresh registration to avoid clobbering the crontab",
-                file=sys.stderr,
-            )
-            return 1
-        current = result.stdout if result.returncode == 0 else ""
-        lines = [line for line in current.splitlines() if marker not in line]
-        lines.append(entry)
-        result = subprocess.run(
-            ["crontab", "-"],
-            input="\n".join(lines) + "\n",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            print(f"  * crontab update failed: {result.stderr}", file=sys.stderr)  # noqa: T201
-            return 1
+    if shared.os_cron.replace_crontab_entry(marker, entry, registration_name="packages-refresh"):
+        return 1
     logger.info("crontab packages-refresh entry added ({})", marker)
     return 0
 
 
 def _unregister_linux(slug: str) -> int:
-    marker = _cron_marker(slug)
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            return 0
-        lines = [line for line in result.stdout.splitlines() if marker not in line]
-        if len(lines) == len(result.stdout.splitlines()):
-            return 0
-        result = subprocess.run(
-            ["crontab", "-"],
-            input="\n".join(lines) + "\n",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return 1
-    return 0
+    return shared.os_cron.remove_crontab_entry(_cron_marker(slug))
 
 
 def _register_windows() -> str | None:
