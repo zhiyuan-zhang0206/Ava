@@ -7,6 +7,9 @@ on:
       - 'shared/runtime_interpreter.py'
       - 'shared/runtime_publication_input.py'
       - 'shared/verified_file.py'
+      - 'shared/migration_layout.py'
+      - 'cli/release_build.py'
+      - 'tests/integration/test_release_build.py'
       - 'scripts/prove_runtime_publication_input.py'
       - 'scripts/prove_exec_owner_installed.py'
       - 'scripts/runtime-node-version'
@@ -131,6 +134,22 @@ jobs:
       - name: Download the existing pinned collector outside maintenance
         shell: bash
         run: uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
+      - name: Build the committed application input offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked --no-dev python -m cli.release_build \
+            --repo "$GITHUB_WORKSPACE" --commit "$(git rev-parse HEAD)" \
+            --output "$RUNNER_TEMP/prepare/application-build" \
+            --uv "$(command -v uv)" --python "$(uv python find)"
+          python3 - <<'PY'
+          import json, os, pathlib, shutil
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
+          receipt = json.loads((root / 'application-build/build-receipt.json').read_bytes())
+          previous, = (root / 'wheels').glob('ava-*.whl')
+          assert previous.name == receipt['wheel']
+          shutil.copyfile(root / 'application-build/wheels' / receipt['wheel'], previous)
+          PY
       - name: Type-check retained collector integration
         shell: bash
         run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py scripts/prove_normal_release.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py cli/commands/_update_bootstrap cli/commands/_update_agent_runner.py
@@ -154,6 +173,23 @@ jobs:
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/updater-bootstrap-proof.json"; fi
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/managed-writer-chain-proof.json"; fi
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/normal-release-proof.json"; fi
+      - name: Verify committed source identity survived runtime preparation
+        shell: bash
+        run: |
+          uv run --locked --no-dev python - <<'PY'
+          import json, os, pathlib, platform
+          from cli.release_build import read_application_identity
+          from shared.runtime_release import verify_release
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
+          build = json.loads((root / 'application-build/build-receipt.json').read_bytes())
+          proof = json.loads((root / 'proof.json').read_bytes())
+          image = verify_release(root / 'unit/releases', proof['artifact_digest'],
+              manifest_digest=proof['manifest_digest'], platform_tag=platform.platform(),
+              schema_digest=build['schema_digest'])
+          identity = read_application_identity(image, build['source_commit']).model_dump(mode='json')
+          assert all(build[key] == value for key, value in identity.items())
+          (root / 'application-identity-proof.json').write_text(json.dumps(identity) + '\n')
+          PY
       - name: Updater bootstrap regression cases
         if: runner.os == 'Linux'
         shell: bash
@@ -170,6 +206,8 @@ jobs:
           name: inactive-prepare-${{ matrix.os }}-${{ github.event.pull_request.head.sha }}
           path: |
             ${{ runner.temp }}/prepare/proof.json
+            ${{ runner.temp }}/prepare/application-build/build-receipt.json
+            ${{ runner.temp }}/prepare/application-identity-proof.json
             ${{ runner.temp }}/prepare/migration-proof.json
             ${{ runner.temp }}/prepare/otel-proof.json
             ${{ runner.temp }}/prepare/plugin-proof.json

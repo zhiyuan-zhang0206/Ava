@@ -34,3 +34,8 @@ that manifest and the expected target. Complete manifests have an explicit
 an application input to runtime preparation; it does not prove bootability,
 database compatibility, full fleet coverage, or rollout readiness. The complete
 release-context producer and normal updater entry remain separate consumers.
+
+The Linux/macOS runtime preparation workflow uses this wheel as its application
+input, then independently verifies that its committed identity survives the
+complete retained image build. Real Git/process regression tests cover ambient
+Git overrides, lost SQL, backend SQL rewrites, and failed output isolation.
