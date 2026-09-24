@@ -14,9 +14,10 @@ Three jobs, all mechanism (no policy):
   recorded pid IS the daemon and a graceful SIGTERM reaches it.
 - `_session_forward_env` is the registry projection both build on.
 
-The POSIX PTY backend overlays this dict onto the launcher's inherited env;
-daemon backends use it as their complete env. Watchers explicitly validate
-and override runner credentials before that PTY handoff.
+The POSIX PTY backend clears inherited VIRTUAL_ENV before overlaying this
+dict onto the launcher's env; daemon backends use it as their complete env.
+Watchers explicitly validate and override runner credentials before that PTY
+handoff.
 
 **The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
 point A): which keys a child receives is the `child_env(role, platform)`
@@ -47,6 +48,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+from pathlib import Path
 
 from shared.platform import IS_WINDOWS
 from shared.platform_backend import get_backend
@@ -110,6 +112,21 @@ def _session_forward_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     forward = child_env("gateway", "windows" if IS_WINDOWS else "posix")
     forward.update(extra or {})
     return forward
+
+
+def cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:
+    """Whether a session cwd may select this checkout's virtualenv.
+
+    A stable checkout can host disposable sibling worktrees. They are
+    lexically below the checkout but must not inherit its ``VIRTUAL_ENV``.
+    """
+    session_cwd = session_cwd.resolve()
+    checkout_root = checkout_root.resolve()
+    return (
+        session_cwd.is_relative_to(checkout_root)
+        and not session_cwd.is_relative_to(checkout_root / ".worktrees")
+        and not session_cwd.is_relative_to(checkout_root / ".claude" / "worktrees")
+    )
 
 
 def forward_env_dict(*, activate_venv: bool = True) -> dict[str, str]:

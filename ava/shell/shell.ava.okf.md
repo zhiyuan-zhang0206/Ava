@@ -33,4 +33,13 @@ Interface for executing shell commands. Three modes: one-shot `run()`, backgroun
 ## Notes
 Sessions retain cwd, environment variables, and background processes, used to drive interactive CLI tools like Claude Code, Codex. Sessions outside the spawning checkout, including paths under its `.worktrees/` or `.claude/worktrees/` sibling-worktree directories, retain the venv-prefixed PATH but omit `VIRTUAL_ENV`, preventing a bare uv command from selecting the spawning checkout's venv. Sessions survive after the agent process exits (not reclaimed with the process) and across cluster restarts/updates — each runs in its own detached host process, so only its own `kill`, its shell exiting, its TTL expiring, or a machine reboot ends it; watchers are also special sessions and appear in `sessions.list()`. TTL reclamation notifies the owner only when it interrupts a running job; an empty shell's reaping is silent.
 
+The SDK, including Codex/Claude launchers and watchers, supplies
+`forward_env_dict(activate_venv=...)`. `PtySessionBackend.new_session` builds
+the same cwd-based projection when `env` is omitted; an explicit empty dict
+stays empty. The PTY shell fork clears inherited `VIRTUAL_ENV` before applying
+the projection, so a launcher or permissions-helper host cannot restore an
+omitted activation. Other ambient variables remain inherited; explicit
+envfile activation and watcher runner overrides still win. This is a
+creation-time rule; a later `cd` does not change it.
+
 Page servers opened with `ava.ui.serve` run in your own sessions (`page-<name>`, one entry per open page) and appear in `sessions.list()`; see the [[ava/ui.ava.okf.md]] server lifecycle for closure through `close()` or TTL expiry — killing the entry does not close the page.
