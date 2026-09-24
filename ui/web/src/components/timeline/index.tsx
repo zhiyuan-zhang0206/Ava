@@ -72,7 +72,6 @@
 // - `./row`       — TimelineRow (memo) + cardConfigFor (per-item config cache)
 // - `./overlays`  — LoadOlderSpinner / ColdLoadSpinner / ScrollToBottomButton
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -95,7 +94,7 @@ import {
 import type { BackendTimelineItem } from "@/lib/types";
 import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline-store";
-import type { CompactTransitionBuffer } from "@/lib/compact-transition";
+import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/compact-transition";
 import { BAR_HEIGHT_PX, BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 import { useTimelineColors } from "@/lib/use-timeline-colors";
@@ -106,6 +105,7 @@ import { findClosestStuckHeaderId, TurnBlock } from "./run-block";
 import { classifyItem } from "./runs";
 import { groupTimelineSegments } from "./segments";
 import { useCompactTransitionAnchor } from "./use-compact-transition-anchor";
+import { resolveSavedTimelineAnchor, useTimelineWindow } from "./use-timeline-window";
 import { CompactHistoryDivider, LoadOlderSpinner, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 import { TimelineRow, cardConfigFor } from "./row";
 
@@ -246,7 +246,7 @@ export function TimelineView({
   // `frontId` is the landing signal: the first item that is not standing
   // context re-attached at the head of every window. The ARRAY front does not
   // change when older items land — only the front real item does.
-  const pendingAnchorRef = useRef<{ id: string; frontId: string | null; docTop: number } | null>(null);
+  const pendingAnchorRef = useRef<{ id: string; rank: number; frontId: string | null; docTop: number } | null>(null);
 
   const prevLoadingOlderRef = useRef(loadingOlder);
   // Scroll-to-bottom button visibility. Driven by the *measured* current
@@ -317,7 +317,7 @@ export function TimelineView({
     retainedItemsMaxRef.current = retainedItemsMax;
     trimFollowing();
   }, [canonicalItems, retainedItemsMax, trimFollowing]);
-  useCompactTransitionAnchor({
+  const compactPin = useCompactTransitionAnchor({
     controller,
     viewportRef,
     prependAnchorRef: pendingAnchorRef,
@@ -397,7 +397,9 @@ export function TimelineView({
     const vpRect = viewport.getBoundingClientRect();
     let anchorNode: HTMLElement | null = null;
     let contextNode: HTMLElement | null = null;
-    for (const n of viewport.querySelectorAll<HTMLElement>("[data-item-id]")) {
+    for (const n of viewport.querySelectorAll<HTMLElement>(
+      ".timeline-item, [data-turn-expanded='false'][data-item-id]",
+    )) {
       const id = n.dataset.itemId;
       if (!id || id.startsWith("_")) continue;
       if (contextIds.has(id)) {
@@ -422,6 +424,7 @@ export function TimelineView({
         )?.item_id ?? null;
       pendingAnchorRef.current = {
         id: anchorId,
+        rank: Number(anchorNode.dataset.displayRank ?? 0),
         frontId: frontRealId,
         docTop: anchorNode.getBoundingClientRect().top + viewport.scrollTop,
       };
@@ -510,7 +513,15 @@ export function TimelineView({
       }
       const max = viewport.scrollHeight - viewport.clientHeight;
       if (max <= 0) return; // content not laid out yet -- retried on the next pass
-      viewport.scrollTop = Math.min(saved.scrollTop, max);
+      const anchor = !saved.followBottom ? saved.anchor : undefined;
+      const target = anchor ? resolveSavedTimelineAnchor(viewport, anchor, compactBuffer, canonicalItemsRef.current) : null;
+      if (target?.present && !target.node) return;
+      if (target?.node) {
+        viewport.scrollTop += target.node.getBoundingClientRect().top -
+          viewport.getBoundingClientRect().top - target.viewportTop;
+      } else {
+        viewport.scrollTop = Math.min(saved.scrollTop, max);
+      }
       controller.notifyRestored({
         scrollTop: viewport.scrollTop,
         scrollHeight: viewport.scrollHeight,
@@ -518,7 +529,7 @@ export function TimelineView({
       });
       pendingRestoreRef.current = null;
     },
-    [controller, threadKey],
+    [compactBuffer, controller, threadKey],
   );
 
   useEffect(() => {
@@ -548,9 +559,19 @@ export function TimelineView({
         // The reader's position for this history entry; the sticky flag rides
         // along so a follower returns following instead of frozen at a stale
         // offset.
+        const rect = viewport.getBoundingClientRect();
+        const anchorNode = [...viewport.querySelectorAll<HTMLElement>(
+          ".timeline-item[data-item-id], [data-turn-expanded='false'][data-item-id]",
+        )].find((node) => {
+          const box = node.getBoundingClientRect();
+          return box.bottom > rect.top && box.top < rect.bottom;
+        });
         saveScrollMemory(mem.entryKey, {
           contentKey: mem.contentKey,
           scrollTop: viewport.scrollTop,
+          anchor: anchorNode?.dataset.itemId
+            ? { itemId: anchorNode.dataset.itemId, rank: Number(anchorNode.dataset.displayRank ?? 0), viewportTop: anchorNode.getBoundingClientRect().top - rect.top }
+            : undefined,
           followBottom: controller.isSticky(),
         });
       }
@@ -739,8 +760,9 @@ export function TimelineView({
     if (!viewport) return;
     const escapedId = CSS.escape(anchor.id);
     const findNode = () =>
-      viewport.querySelector<HTMLElement>(`[data-item-id="${escapedId}"]`) ??
-      viewport.querySelector<HTMLElement>(`[data-turn-member-ids~="${escapedId}"]`);
+      viewport.querySelector<HTMLElement>(`.timeline-item[data-item-id="${escapedId}"][data-display-rank="${anchor.rank}"]`) ??
+      viewport.querySelector<HTMLElement>(`[data-turn-expanded="false"][data-item-id="${escapedId}"][data-display-rank="${anchor.rank}"]`) ??
+      viewport.querySelector<HTMLElement>(`[data-turn-member-ids~="${escapedId}"][data-display-rank="${anchor.rank}"]`);
     // Prepend landed? Standing context remains at the array front across a
     // prepend, so compare the first real item id captured at trigger instead.
     // Streaming commits / snapshot folds only touch the tail, so the front
@@ -1089,6 +1111,65 @@ export function TimelineView({
     return [...buffered, ...current];
   }, [canonicalItems, compactBuffer, bufferedItems, currentItems]);
 
+  const groupEntries = useMemo(() => groups.map((entry) => {
+    const group = entry.group;
+    const groupKey = group.kind === "single" ? group.item.item_id : group.items[0].item_id;
+    const virtualKey = `${threadKey ?? ""}:${entry.source}:${entry.source === "buffer" ? compactBuffer?.epoch : ""}:${entry.rank}:${groupKey}`;
+    const isLastTurn = entry === groups[groups.length - 1];
+    const runExpanded = group.kind === "turn" && (turnOverrides.has(groupKey)
+      ? (turnOverrides.get(groupKey) ?? false)
+      : effectiveDetailsMode === "all"
+        ? true
+        : effectiveDetailsMode === "last"
+          ? isLastTurn && turnActive
+          : false);
+    const virtualRows = group.kind === "turn" && runExpanded
+      ? group.items.map((item) => `${virtualKey}:${item.item_id}`)
+      : null;
+    return { entry, groupKey, virtualKey, runExpanded, virtualRows };
+  }), [groups, compactBuffer?.epoch, turnOverrides, effectiveDetailsMode, turnActive, threadKey]);
+  const renderedRows = groupEntries.reduce(
+    (total, entry) => total + (entry.virtualRows?.length ?? 1), 0,
+  );
+  const virtualEnabled = renderedRows > 100;
+  const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, virtualRows }) => ({
+      key: virtualKey,
+      rank: entry.rank,
+      itemIds: entry.group.kind === "single"
+        ? [entry.group.item.item_id]
+        : entry.group.items.map((item) => item.item_id),
+      estimatedHeight: (entry.group.kind === "turn" && virtualRows
+        ? 60 + virtualRows.length * 92
+        : entry.group.kind === "turn" ? 56 : 80) + (entry.dividerRank === null ? 0 : 32),
+      expandedRows: virtualRows,
+    })), [groupEntries]);
+  const compactPinnedId = compactPin && (() => {
+    const bufferedCoordinates = new Map((compactBuffer?.rows ?? []).map((row) => [
+      `${row.rank}:${row.item.item_id}`, canonicalBufferCoordinate(row),
+    ]));
+    for (const { entry } of groupEntries) {
+      for (const item of entry.group.kind === "single" ? [entry.group.item] : entry.group.items) {
+        const coordinate = entry.source === "buffer"
+          ? bufferedCoordinates.get(`${entry.rank}:${item.item_id}`)
+          : parseItemIdParts(item.item_id);
+        if (entry.rank === compactPin.rank && coordinate?.msg === compactPin.msg && coordinate.block === compactPin.block) return { id: item.item_id, rank: entry.rank };
+      }
+    }
+    return null;
+  })();
+  const { range: virtualRange, rowRange } = useTimelineWindow({
+    groups: virtualGroups,
+    enabled: virtualEnabled,
+    viewportRef,
+    contentRef,
+    identity: threadKey ?? null,
+    pendingAnchor: pendingAnchorRef.current ?? compactPinnedId ??
+      (!pendingRestoreRef.current?.followBottom && pendingRestoreRef.current?.anchor
+        ? { id: pendingRestoreRef.current.anchor.itemId, rank: pendingRestoreRef.current.anchor.rank }
+        : null),
+    restoreTop: pendingRestoreRef.current?.scrollTop ?? null,
+  });
+
   const handleScrollToBottom = useCallback(() => {
     const viewport =
       viewportRef.current ??
@@ -1135,10 +1216,11 @@ export function TimelineView({
         <div
           ref={contentRef}
           role="log"
+          data-timeline-item-count={items.length}
           aria-live="polite"
           aria-relevant="additions"
           style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-          className={cn("mx-auto w-full px-4 pb-3 space-y-3", BAR_CLEAR_TOP_PADDING_CLASS)}
+          className={cn("mx-auto w-full px-4 pb-3 space-y-3", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
         >
           {turnAnnouncement ? (
             <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">
@@ -1149,10 +1231,12 @@ export function TimelineView({
           {/* Rows and history dividers opt out individually so streaming and
               prepends stay quiet without changing the direct-child timeline
               structure used by scroll anchoring and compact-history dividers. */}
-          {groups.map((entry) => {
+          {virtualEnabled && virtualRange.before > 0 ? (
+            <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
+          ) : null}
+          {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ entry, virtualKey, runExpanded, virtualRows }, offset) => {
             const group = entry.group;
-            const groupKey =
-              group.kind === "single" ? group.item.item_id : group.items[0].item_id;
+            const groupIndex = virtualRange.start + offset;
             const renderedGroup = (() => {
               if (group.kind === "single") {
                 return renderRow(group.item, entry.indexOffset + group.index, entry.source, entry.rank);
@@ -1162,17 +1246,8 @@ export function TimelineView({
               // streaming item is visible. Run id = the first member's item_id
               // (stable across streaming commits).
               const turnId = group.items[0].item_id;
-              // The turn is "last" only when it is the last group overall — not just
-              // the last turn-kind group. When a primary item follows this turn, the
-              // turn is no longer last and its live clock must stop immediately.
               const isLastTurn = entry === groups[groups.length - 1];
-              const runExpanded = turnOverrides.has(turnId)
-                ? (turnOverrides.get(turnId) ?? false)
-                : effectiveDetailsMode === "all"
-                  ? true
-                  : effectiveDetailsMode === "last"
-                    ? isLastTurn && turnActive
-                    : false;
+              const childRange = rowRange(groupIndex);
               return (
                 <TurnBlock
                   id={turnId}
@@ -1185,29 +1260,42 @@ export function TimelineView({
                   timelineSource={entry.source}
                   displayRank={entry.rank}
                 >
-                  {runExpanded
-                    ? group.items.map((it, i) =>
-                        renderRow(
-                          it,
-                          entry.indexOffset + group.startIndex + i,
-                          entry.source,
-                          entry.rank,
-                          runExpanded,
-                        ),
-                      )
-                    : null}
+                  {runExpanded ? (
+                    virtualRows ? (
+                      <>
+                        {virtualEnabled && childRange.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: childRange.before }} aria-hidden="true" /> : null}
+                        {group.items.slice(childRange.start, childRange.end).map((it, offset) => {
+                          const index = childRange.start + offset;
+                          return (
+                            <div key={virtualRows[index]} data-virtual-row={virtualRows[index]}>
+                              {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, runExpanded)}
+                            </div>
+                          );
+                        })}
+                        {virtualEnabled && childRange.after > 0 ? <div data-timeline-spacer="turn-after" style={{ height: childRange.after }} aria-hidden="true" /> : null}
+                      </>
+                    ) : null
+                  ) : null}
                 </TurnBlock>
               );
             })();
-            return (
-              <Fragment key={`${entry.source}:${entry.source === "buffer" ? compactBuffer?.epoch : ""}:${entry.rank}:${groupKey}`}>
+            const content = (
+              <>
                 {entry.dividerRank === null ? null : (
                   <CompactHistoryDivider rank={entry.dividerRank} />
                 )}
                 {renderedGroup}
-              </Fragment>
+              </>
+            );
+            return (
+              <div key={virtualKey} data-virtual-group={virtualKey} className={entry.dividerRank === null ? undefined : "space-y-3"}>
+                {content}
+              </div>
             );
           })}
+          {virtualEnabled && virtualRange.after > 0 ? (
+            <div data-timeline-spacer="after" style={{ height: virtualRange.after }} aria-hidden="true" />
+          ) : null}
           <CompactingBlock />
           <div ref={endRef} />
         </div>

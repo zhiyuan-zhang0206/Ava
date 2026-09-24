@@ -1,0 +1,12 @@
+diff --git a/ui/web/src/components/timeline/index.tsx b/ui/web/src/components/timeline/index.tsx
+--- a/ui/web/src/components/timeline/index.tsx
++++ b/ui/web/src/components/timeline/index.tsx
+@@ -1133,7 +1133,7 @@
+   const renderedRows = groupEntries.reduce(
+     (total, entry) => total + (entry.virtualRows?.length ?? 1), 0,
+   );
+-  const virtualEnabled = renderedRows > 100;
++  const virtualEnabled = false;
+   const virtualGroups = useMemo(() => groupEntries.map(({ entry, virtualKey, virtualRows }) => ({
+       key: virtualKey,
+       rank: entry.rank,

@@ -30,6 +30,8 @@ export interface SavedScroll {
   contentKey: string;
   /** Offset of the scrolling element. */
   scrollTop: number;
+  /** The visible timeline item and its position inside the viewport. */
+  anchor?: { itemId: string; rank: number; viewportTop: number };
   /** Whether the container was following the bottom (new output keeps
    *  pulling it down) when saved. A follower comes back following, not
    *  frozen at a stale offset. */

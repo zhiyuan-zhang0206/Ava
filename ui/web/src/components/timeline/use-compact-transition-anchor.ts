@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import {
   canonicalBufferCoordinate,
@@ -18,6 +18,8 @@ interface CompactAnchor {
   block: number;
   screenTop: number;
 }
+
+export type CompactPin = Pick<CompactAnchor, "rank" | "msg" | "block">;
 
 function nodeCoordinates(
   node: HTMLElement,
@@ -85,9 +87,10 @@ export function useCompactTransitionAnchor(options: {
   viewportRef: { current: HTMLElement | null };
   prependAnchorRef: { current: { id: string; frontId: string | null; docTop: number } | null };
   compactBuffer: CompactTransitionBuffer | null;
-}): void {
+}): CompactPin | null {
   const { controller, viewportRef, prependAnchorRef, compactBuffer } = options;
   const anchorRef = useRef<CompactAnchor | null>(null);
+  const [pin, setPin] = useState<CompactPin | null>(null);
   const compactReplaceSeq = useTimelineStore((s) => s.compactReplaceSeq);
 
   // The store announces the transition before publishing it to React.
@@ -100,7 +103,9 @@ export function useCompactTransitionAnchor(options: {
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
     const oldHeadNotes = standingHeadNoteIds(change.items);
-    for (const node of viewport.querySelectorAll<HTMLElement>("[data-item-id][data-display-rank]")) {
+    for (const node of viewport.querySelectorAll<HTMLElement>(
+      ".timeline-item[data-item-id][data-display-rank], [data-turn-expanded='false'][data-item-id][data-display-rank]",
+    )) {
       const box = node.getBoundingClientRect();
       if (box.bottom < rect.top || box.top > rect.bottom) continue;
       const id = node.dataset.itemId;
@@ -122,6 +127,7 @@ export function useCompactTransitionAnchor(options: {
         block: parts.block,
         screenTop: box.top,
       };
+      setPin({ rank: anchorRef.current.rank, msg: anchorRef.current.msg, block: anchorRef.current.block });
       return;
     }
   }), [controller, viewportRef, prependAnchorRef]);
@@ -138,7 +144,9 @@ export function useCompactTransitionAnchor(options: {
       if (!coordinate) continue;
       bufferedCoordinates.set(`${row.rank}:${row.item.item_id}`, coordinate);
     }
-    const nodes = [...viewport.querySelectorAll<HTMLElement>("[data-item-id][data-display-rank]")];
+    const nodes = [...viewport.querySelectorAll<HTMLElement>(
+      ".timeline-item[data-item-id][data-display-rank], [data-turn-expanded='false'][data-item-id][data-display-rank]",
+    )];
     let target = nodes.find((node) => matchesAnchor(node, anchor, bufferedCoordinates)) ??
       nodes.find((node) => matchesAnchor(node, anchor, bufferedCoordinates, true));
     if (!target) {
@@ -170,5 +178,7 @@ export function useCompactTransitionAnchor(options: {
       materializeViewportRows(viewport);
       viewport.scrollTop += target.getBoundingClientRect().top - anchor.screenTop;
     }
+    setPin(null);
   }, [compactBuffer, compactReplaceSeq, viewportRef]);
+  return pin;
 }
