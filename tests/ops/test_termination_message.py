@@ -14,6 +14,7 @@ from ops import ops_exit
 from ops.rpc_schemas import TerminateAgentRequest
 from shared.config import settings
 from shared.db import create_agent
+from shared.telemetry import Event
 
 
 @pytest.fixture
@@ -233,12 +234,12 @@ class TestFinalTerminationClosureMarker:
         accompanied (`test_force_final_stamps_the_marker` pins the marker)."""
         from ops import ops_lifecycle
 
-        events: list[dict[str, object]] = []
+        events: list[Event] = []
 
-        def _record(**kwargs: object) -> None:
-            events.append(kwargs)
+        def _record(event: Event) -> None:
+            events.append(event)
 
-        monkeypatch.setattr(ops_exit, "insert_event_log", _record)
+        monkeypatch.setattr(ops_exit.telemetry, "emit_prepared", _record)
 
         async def _noop_cancel(_aid: int, _command_id: int) -> None:
             return None
@@ -255,14 +256,9 @@ class TestFinalTerminationClosureMarker:
         ).fetchone()
         assert row is not None
         (inbound_id,) = row
-        assert events == [
-            {
-                "event_type": "terminate",
-                "agent_id": running_agent_id,
-                "source": "user",
-                "payload": {"inbound_id": inbound_id, "closed": True},
-            }
-        ]
+        assert [
+            (event.event_name, event.agent_id, event.source, event.attributes) for event in events
+        ] == [("terminate", running_agent_id, "user", {"inbound_id": inbound_id, "closed": True})]
 
     def test_repeat_close_keeps_the_first_time(
         self, db_conn: psycopg.Connection, db_pool: ConnectionPool, running_agent_id: int
@@ -298,23 +294,18 @@ class TestFinalTerminationClosureMarker:
             (running_agent_id,),
         )
         db_conn.commit()
-        events: list[dict[str, object]] = []
+        events: list[Event] = []
 
-        def _record(**kwargs: object) -> None:
-            events.append(kwargs)
+        def _record(event: Event) -> None:
+            events.append(event)
 
-        monkeypatch.setattr(ops_exit, "insert_event_log", _record)
+        monkeypatch.setattr(ops_exit.telemetry, "emit_prepared", _record)
 
         assert ops_exit.mark_agent_closed(running_agent_id, source="user", db_pool=db_pool) is True
         assert ops_exit.mark_agent_closed(running_agent_id, source="user", db_pool=db_pool) is False
-        assert events == [
-            {
-                "event_type": "terminate",
-                "agent_id": running_agent_id,
-                "source": "user",
-                "payload": {"closed": True},
-            }
-        ]
+        assert [
+            (event.event_name, event.agent_id, event.source, event.attributes) for event in events
+        ] == [("terminate", running_agent_id, "user", {"closed": True})]
 
     @pytest.mark.asyncio
     async def test_terminate_op_marks_closed_on_an_already_dead_row(

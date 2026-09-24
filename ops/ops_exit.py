@@ -7,8 +7,9 @@ from psycopg_pool import ConnectionPool
 
 from ops.ops_events import publish_page_closed as publish_page_closed
 from ops.pages import list_open_page_names
+from shared import telemetry
 from shared.agents import AgentNotFound, AgentStatus
-from shared.audit_events import insert_event_log
+from shared.audit_events import prepare_event_log
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.envelope import validate_writable_source
@@ -130,6 +131,28 @@ def _stamp_closed(conn: psycopg.Connection, agent_id: int) -> None:
         )
 
 
+def _stage_termination_event(
+    conn: psycopg.Connection,
+    *,
+    agent_id: int,
+    source: str,
+    inbound_id: int,
+    closed: bool,
+) -> telemetry.Event:
+    """Register a terminate audit fact before its operation commits."""
+    payload: dict[str, object] = {"inbound_id": inbound_id}
+    if closed:
+        payload["closed"] = True
+    event = prepare_event_log(
+        event_type="terminate", agent_id=agent_id, source=source, payload=payload
+    )
+    from shared.agents.impersonation_manifest import stage_central_expected_event
+
+    return stage_central_expected_event(
+        conn, event, origin_kind="ops_terminate", origin_id=inbound_id
+    )
+
+
 def _enqueue_termination_inbounds(
     agent_id: int,
     db_pool: ConnectionPool,
@@ -152,6 +175,14 @@ def _enqueue_termination_inbounds(
         )
         if final:
             _stamp_closed(conn, agent_id)
+        prepared_event = _stage_termination_event(
+            conn,
+            agent_id=agent_id,
+            source=source,
+            inbound_id=terminate_id,
+            closed=final,
+        )
+    telemetry.emit_prepared(prepared_event)
     _publish_force_terminate_inbound(agent_id, terminate_id, source, closed=final)
     return terminate_id
 
@@ -200,22 +231,27 @@ def _force_terminate_transaction(
         install_hosted_force(conn, agent_id, terminate_inbound_id)
         if final:
             _stamp_closed(conn, agent_id)
+        prepared_event = _stage_termination_event(
+            conn,
+            agent_id=agent_id,
+            source=source,
+            inbound_id=terminate_inbound_id,
+            closed=final,
+        )
+    telemetry.emit_prepared(prepared_event)
     return old_status, pid, page_names, terminate_inbound_id
 
 
 def _publish_force_terminate_inbound(
-    agent_id: int, inbound_id: int, source: str, *, closed: bool = False
+    agent_id: int, inbound_id: int, _source: str, *, closed: bool = False
 ) -> None:
-    """Emit the non-transactional audit/wake side effects after fence commit.
+    """Publish the non-transactional wake after the fenced audit commit.
 
     `closed` records a `final=true` termination in the same audit trail — the
     marker itself is written transactionally with the termination intent; this
     only names it next to the command it accompanied.
     """
-    payload: dict[str, object] = {"inbound_id": inbound_id}
-    if closed:
-        payload["closed"] = True
-    insert_event_log(event_type="terminate", agent_id=agent_id, source=source, payload=payload)
+    del closed  # The matching audit event was staged before the fence committed.
     publish_inbound_wake(agent_id, str(inbound_id))
 
 
@@ -255,10 +291,21 @@ def mark_agent_closed(agent_id: int, *, source: str, db_pool: ConnectionPool) ->
             "RETURNING id",
             (agent_id,),
         ).fetchone()
+        if row is None:
+            prepared_event = None
+        else:
+            event = prepare_event_log(
+                event_type="terminate", agent_id=agent_id, source=source, payload={"closed": True}
+            )
+            from shared.agents.impersonation_manifest import stage_central_expected_event
+
+            prepared_event = stage_central_expected_event(
+                conn, event, origin_kind="ops_mark_closed", origin_id=agent_id
+            )
     if row is None:
         return False
-    insert_event_log(
-        event_type="terminate", agent_id=agent_id, source=source, payload={"closed": True}
-    )
+    if prepared_event is None:
+        raise RuntimeError("closed termination event was not staged")
+    telemetry.emit_prepared(prepared_event)
     publish_agent_updated_sync(agent_id)
     return True

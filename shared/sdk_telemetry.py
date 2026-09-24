@@ -94,6 +94,20 @@ def emit(fn: str, detail: Mapping[str, Any] | None = None, duration: float | Non
 
 
 @contextlib.contextmanager
+def _manifest_sdk_capture_admission() -> Generator[None, None, None]:
+    """Use the optional local manifest gate without changing SDK call behavior."""
+    try:
+        from shared.agents.impersonation_manifest import admitted_local_sdk_call
+    except Exception:
+        # Manifest instrumentation is a side channel. An unavailable settings
+        # bootstrap must never turn an SDK operation into a new hard failure.
+        yield
+        return
+    with admitted_local_sdk_call():
+        yield
+
+
+@contextlib.contextmanager
 def _measure(fn: str) -> Generator[None, None, None]:
     frames = _frames.get()
     # Reinstalled recorders around plugin layers share one public call frame.
@@ -101,18 +115,22 @@ def _measure(fn: str) -> Generator[None, None, None]:
     if frames and frames[-1].fn == fn:
         yield
         return
-    frame = _CallFrame(fn)
-    token = _frames.set((*frames, frame))
-    t0 = time.monotonic()
-    try:
-        yield
-    finally:
-        _frames.reset(token)
-        if not frames:
-            tally = _tally.get()
-            if tally is not None:
-                tally[fn] = tally.get(fn, 0) + 1
-            emit(fn, frame.detail, duration=time.monotonic() - t0)
+    # A controller may close while this call is in its body.  Admit before
+    # entering it, then retain that admission through the `finally` emission
+    # so the local manifest cannot seal between the call and its sdk_call row.
+    with _manifest_sdk_capture_admission():
+        frame = _CallFrame(fn)
+        token = _frames.set((*frames, frame))
+        t0 = time.monotonic()
+        try:
+            yield
+        finally:
+            _frames.reset(token)
+            if not frames:
+                tally = _tally.get()
+                if tally is not None:
+                    tally[fn] = tally.get(fn, 0) + 1
+                emit(fn, frame.detail, duration=time.monotonic() - t0)
 
 
 def run_metered(fn: str, original: Callable[..., Any], args: Any, kwargs: Any) -> Any:
