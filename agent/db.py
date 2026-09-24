@@ -13,6 +13,7 @@ from agent.inbound_ownership import lock_inbound_owner
 from shared.config import settings
 from shared.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
 from shared.db_transaction import async_write_transaction
+from shared.inbound import InterruptReason
 from shared.log import logger
 
 # A successful borrow that took at least this long still gets a WARNING — a
@@ -492,7 +493,14 @@ async def is_agent_closed(pool: AsyncConnectionPool, agent_id: int) -> bool:
 
 
 async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> bool:
-    """Whether an external in-flight abort signal is queued for this agent.
+    """Whether a durable external abort is present, without claiming it."""
+    return await pending_interrupt_reason(pool, agent_id) is not None
+
+
+async def pending_interrupt_reason(
+    pool: AsyncConnectionPool, agent_id: int
+) -> InterruptReason | None:
+    """Attribute the first queued external abort without claiming its command.
 
     Two classes fire. The first is a status='pending' EXTERNAL interrupt (kind
     cancel/terminate): the in-flight llm/exec node polls this (via
@@ -525,7 +533,7 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "SELECT 1 FROM inbound_messages i WHERE i.agent_id=%s "
+            "SELECT i.source FROM inbound_messages i WHERE i.agent_id=%s "
             "AND i.source <> 'self' AND ("
             "(i.kind IN ('cancel','terminate') AND "
             "(i.status='pending' OR (i.status='claimed' AND i.kind='terminate' "
@@ -537,7 +545,10 @@ async def has_pending_interrupt(pool: AsyncConnectionPool, agent_id: int) -> boo
             "AND i.status IN ('pending','claimed') AND i.payload ? 'maintenance' "
             "AND EXISTS (SELECT 1 FROM agents_meta r "
             "WHERE r.id=i.agent_id AND r.status='restarting'))"
-            ") LIMIT 1",
+            ") ORDER BY i.id LIMIT 1",
             (agent_id,),
         )
-        return await cur.fetchone() is not None
+        row = await cur.fetchone()
+    if row is None:
+        return None
+    return InterruptReason.USER if row[0] == "user" else InterruptReason.SYSTEM

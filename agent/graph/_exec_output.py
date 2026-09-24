@@ -32,15 +32,15 @@ from langchain_core.messages import BaseMessage
 import ava
 import ava._boot
 from shared.config import now_timestamp, settings
+from shared.inbound import InterruptReason
 from shared.log import logger
 from shared.paths import workspace_dir
 
 from ._exec_crop import crop_output
 from ._exec_stream import StreamCap
 
-# Marker for exec cancel — thread really ran and was interrupted by user pressing Stop;
-# wrap_code_output adds "Code execution output [cancelled by user]:" prefix to the envelope,
-# EXEC_CANCEL_NOTE is kept as the substring existing tests assert against.
+# The default marker is the user Stop action. Maintenance and other external
+# system interruptions retain their observed attribution in the same envelope.
 EXEC_CANCEL_NOTE = "[cancelled by user]"
 
 # exec_timeout_seconds and exec_output_max_chars are read from shared.config.settings,
@@ -65,6 +65,7 @@ def wrap_code_output(
     output: str,
     *,
     cancelled: bool = False,
+    cancel_reason: InterruptReason = InterruptReason.USER,
     timed_out: bool = False,
     timeout_seconds: float | None = None,
     max_chars: int | None = None,
@@ -78,8 +79,8 @@ def wrap_code_output(
     chronological order of print / traceback / log output, same as
     running Python in a terminal.
 
-    When cancelled=True, adds a [cancelled by user] marker — the agent sees
-    it was interrupted and can handle gracefully next turn.
+    When cancelled=True, names the observed user/system reason. Partial output
+    is retained; cancellation does not imply that external effects were undone.
 
     timeout_seconds / max_chars default to settings.sandbox.exec_timeout_seconds /
     settings.sandbox.exec_output_max_chars. Explicit params let tests override.
@@ -110,7 +111,7 @@ def wrap_code_output(
     # forgets the mutual exclusion, this blows up rather than silently emitting two markers.
     assert not (cancelled and timed_out), "cancelled and timed_out are mutually exclusive"  # noqa: S101
     if cancelled:
-        marker = f" {EXEC_CANCEL_NOTE}"
+        marker = f" [cancelled by {cancel_reason.value}]"
     elif timed_out:
         marker = f" [timeout after {timeout_seconds:.0f}s]"
     else:

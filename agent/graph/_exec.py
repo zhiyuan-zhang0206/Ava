@@ -58,7 +58,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -276,6 +276,8 @@ async def _run_agent_code(
     # timeout still report the honest time-before-stop.
     exec_ms = round((time.monotonic() - exec_started) * 1000)
     result, payload = outcome
+    if isinstance(result, _ExecCancelled) and cancel_event.is_set():
+        result = replace(result, reason=cancel_event.reason)
     if payload is not None and payload.state_update_error is not None:
         # The child reported a tampered slot (agent set ava.state_update to a
         # non-dict) — raise the TypeError the child would have raised.
@@ -349,11 +351,12 @@ def _dispatch_exec_result(
                 f"Unrecognized _LifecycleExit subclass: {type(other_exc).__name__!r} — "
                 f"dispatch ladder missed update"
             )
-        case _ExecCancelled(output=output):
+        case _ExecCancelled(output=output, reason=reason):
             halted = True
             result_text = wrap_code_output(
                 output,
                 cancelled=True,
+                cancel_reason=reason,
                 stream_cap=stream_cap,
                 referenced_messages=referenced_messages,
             )
