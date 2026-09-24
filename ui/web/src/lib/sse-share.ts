@@ -6,6 +6,7 @@
 
 import { API_BASE, api } from "./api";
 import { notifySessionInvalid } from "./auth-context";
+import { track } from "./telemetry";
 
 export type SseChannel = "system" | "alerts" | "systemAll";
 export type SseState = "open" | "reconnecting" | "closed";
@@ -61,6 +62,23 @@ export function sharedSseSupported(): boolean {
   const locks: unknown = Reflect.get(navigator, "locks");
   return typeof locks === "object" && locks !== null &&
     "request" in locks && typeof locks.request === "function";
+}
+
+let modeReported = false;
+
+/** One mode event per tab session, after an authenticated stream starts. */
+export function reportSseTransportMode(): void {
+  if (modeReported) return;
+  const locks: unknown = typeof navigator === "undefined" ? undefined : Reflect.get(navigator, "locks");
+  const hasLocks = typeof locks === "object" && locks !== null;
+  const hasBC = typeof BroadcastChannel !== "undefined";
+  const context: unknown = typeof window === "undefined" ? false : Reflect.get(window, "isSecureContext");
+  const secure = context === true;
+  track("sse-transport", {
+    key: sharedSseSupported() ? "shared" : "fallback",
+    value: `secure=${Number(secure)},locks=${Number(hasLocks)},bc=${Number(hasBC)}`,
+  });
+  modeReported = true;
 }
 
 export class ProfileSseTransport {
@@ -162,15 +180,22 @@ export class ProfileSseTransport {
       if (!this.participating) return;
       this.leader = true;
       this.currentLeader = this.tabId;
-      this.startLeader();
-      await new Promise<void>((resolve) => { this.releaseLock = resolve; });
-      this.releaseLock = null;
-      this.stopLeader();
-      this.leader = false;
+      try {
+        this.startLeader();
+        await new Promise<void>((resolve) => { this.releaseLock = resolve; });
+      } finally {
+        this.releaseLock = null;
+        try {
+          this.stopLeader();
+        } finally {
+          this.leader = false;
+          this.currentLeader = null;
+        }
+      }
     }).catch((error: unknown) => {
       if (error instanceof DOMException && error.name === "AbortError") return;
       this.stopParticipation();
-      throw error;
+      console.error("[sse-share] Web Lock failed", error);
     }).finally(() => {
       this.pendingLock = null;
       if (this.participating) this.requestLock();

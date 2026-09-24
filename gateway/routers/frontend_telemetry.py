@@ -18,8 +18,8 @@ Two volume guards sit between the browser and the event stream:
 
 Content rules: no free text crosses this boundary. `element`/`page` are
 fixed vocabularies maintained in the frontend module; `key`/`value` carry a
-user_settings key and a sanitized scalar rendering of its new value
-(bool / number / ≤64-char string) on setting-change events only. The client
+user_settings change or SSE transport mode and sanitized scalar metadata
+(bool / number / ≤64-char string). The client
 timestamp is advisory and ignored — the server stamps rows with its own
 clock (one time source for the whole stream).
 """

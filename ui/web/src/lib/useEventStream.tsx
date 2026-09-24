@@ -13,7 +13,7 @@ import { notifySessionInvalid, useAuth } from "./auth-context";
 import { useFoldOwner } from "./fold/owner";
 import { useDocumentVisible } from "./use-document-visible";
 import { createSseLifecycle } from "@/lib/sse-lifecycle";
-import { sharedSseSupported, sharedSseTransport, type SseChannel } from "./sse-share";
+import { reportSseTransportMode, sharedSseSupported, sharedSseTransport, type SseChannel } from "./sse-share";
 import { useStore } from "./store";
 import type { SystemEvent } from "./types";
 
@@ -99,6 +99,7 @@ function useSseConnection(
       onOpenChange(false);
       return;
     }
+    reportSseTransportMode();
     // EventSource needs withCredentials for the cross-origin session cookie.
     // Consecutive parse failures within one connection: the backend
     // validates every frame (pydantic rejects raw control characters), so

@@ -47,6 +47,7 @@ export type TelemetryElement =
   | "restart"
   | "resurrect"
   | "setting-change"
+  | "sse-transport"
   | "spawn"
   | "terminate"
   | "web-vitals";

@@ -19,8 +19,8 @@ from pydantic import (
 # One tracked interaction as the client saw it. `ts` is the client-side
 # wall-clock (ms epoch) and is advisory only — the server stamps rows with
 # its own clock so a buggy or offline client cannot inject timestamps.
-# `key` / `value` exist for setting-change events only; other events omit
-# them (None).
+# `key` / `value` carry bounded setting-change or SSE transport metadata;
+# other events omit them (None).
 class FrontendInteractionIn(BaseModel):
     """One tracked interaction from the browser."""
 
