@@ -809,10 +809,10 @@ def test_fail_acceptance_rolls_back_with_reason_and_native_note(
     assert result["rejection_reason"] == "relay process exited at startup"
     assert result["relay_last_failure_at"] is not None
     notes = db_conn.execute(
-        "SELECT content FROM inbound_messages WHERE agent_id=%s AND kind='system_note'",
+        "SELECT content, payload FROM inbound_messages WHERE agent_id=%s AND kind='system_note'",
         (owner.agent_id,),
     ).fetchall()
-    assert any("rolled back" in row[0] for row in notes)
+    assert any("rolled back" in row[0] and row[1]["note_tag"] == "impersonation" for row in notes)
 
 
 def test_fail_acceptance_requires_an_accepted_lease(db_conn: psycopg.Connection) -> None:
