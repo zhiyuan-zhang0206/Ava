@@ -19,7 +19,9 @@ whoever takes over spawns a new agent. Counter updates stay direct DB writes.
   task-counter write is retried without re-delivering (same-cause dedup).
 - Escalate: when `reminder_count` reaches `AVA_TASK_ESCALATE_N` (default 3),
   notify the parent task's owner (the delegator) that the current owner is
-  unresponsive. A top-level task has no delegating parent owner (its parent is
+  unresponsive — once per overdue window: the delivered digest stamps
+  `escalated_at`, and any update() clears it with the reminder counters. A
+  top-level task has no delegating parent owner (its parent is
   the ownerless system root), so it escalates to the user instead
   — a require_response notice posted on the stalled owner that surfaces in the
   human queue, grouped under the task.
@@ -69,7 +71,13 @@ _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
 
 
-def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
+def _deliver_message(
+    pool: ConnectionPool,
+    agent_id: int,
+    message: str,
+    *,
+    escalate_task_ids: list[int] | None = None,
+) -> None:
     """Insert a task-reminder system-note inbound, refresh its badge, then wake.
 
     A reminder is a system notification, not peer chatter: kind='system_note'
@@ -77,7 +85,14 @@ def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
     (system_marker) in the timeline. Direct delivery intentionally cannot
     resurrect a terminated agent; its inbound row remains inspectable while
     escalation directs the work onward (user ruling 2026-08-27 -- plain
-    notifications never resurrect)."""
+    notifications never resurrect).
+
+    `escalate_task_ids` is set by the delegator escalation pass: the stalled
+    subtasks the digest covers. The same transaction stamps their
+    `escalated_at` after the insert, making the escalation at-most-once per
+    overdue window — either the message and its marker commit together, or
+    neither lands and the next sweep retries. Any update() clears the marker
+    with the reminder counters, re-arming the task's next window."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
@@ -85,6 +100,11 @@ def _deliver_message(pool: ConnectionPool, agent_id: int, message: str) -> None:
             (agent_id, message, json.dumps({"note_tag": "task"})),
         )
         inbound_id = int(cur.fetchone()[0])  # type: ignore[index]
+        if escalate_task_ids:
+            cur.execute(
+                "UPDATE agent_tasks SET escalated_at = now() WHERE id = ANY(%s)",
+                (escalate_task_ids,),
+            )
     publish_agent_updated_sync(agent_id)
     # The connection context commits before the best-effort wake. A missing
     # subscriber is expected for a terminated agent and does not resurrect it.
@@ -256,10 +276,12 @@ def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
 # parent is the ownerless system root) — those escalate to the user instead of
 # a delegator (see _run_escalate). The >= here surfaces every
 # at-or-past-threshold task; _run_escalate then applies the per-branch gate (the
-# delegator branch fires exactly at the threshold, the user branch is >= and
-# retry-eligible until its notice is posted).
+# delegator branch fires once per overdue window — at-or-past threshold and
+# not yet `escalated_at`; the user branch is >= and retry-eligible until its
+# notice is posted).
 _ESCALATE_SQL = """
-    SELECT t.id, t.title, t.owner, t.reminder_count, t.priority, p.owner AS parent_owner
+    SELECT t.id, t.title, t.owner, t.reminder_count, t.escalated_at, t.priority,
+           p.owner AS parent_owner
     FROM agent_tasks t
     JOIN agent_tasks p ON p.id = t.parent_id
     WHERE t.status = 'in_progress'
@@ -340,14 +362,17 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
 
     escalated = 0
     stalled_by_delegator: dict[int, list[tuple[int, str, int, int]]] = defaultdict(list)
-    for task_id, title, owner, reminder_count, priority, parent_owner in rows:
+    for task_id, title, owner, reminder_count, escalated_at, priority, parent_owner in rows:
         try:
             if parent_owner is not None:
-                # Delegated subtask -> tell the delegator, once, exactly at the
-                # threshold crossing. A fire-and-forget chat has no persistent
-                # marker, so the exact-equality gate is what stops re-notifying:
-                # the next reminder pushes reminder_count past the threshold.
-                if reminder_count != escalate_n:
+                # Delegated subtask -> tell the delegator once per overdue
+                # window. >= (not ==): a sweep whose escalation failed or was
+                # missed must still fire later, never losing the window.
+                # `escalated_at`, stamped by _deliver_message in the digest's
+                # own transaction, is what makes it at-most-once; any update()
+                # clears it with the reminder counters, re-arming the task's
+                # next window.
+                if reminder_count < escalate_n or escalated_at is not None:
                     continue
                 stalled_by_delegator[parent_owner].append((task_id, title, owner, reminder_count))
             else:
@@ -390,7 +415,12 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
     for delegator, tasks in stalled_by_delegator.items():
         task_ids = [task_id for task_id, _, _, _ in tasks]
         try:
-            _deliver_message(pool, delegator, _delegator_digest_message(tasks))
+            _deliver_message(
+                pool,
+                delegator,
+                _delegator_digest_message(tasks),
+                escalate_task_ids=task_ids,
+            )
             telemetry.emit(
                 "telemetry",
                 "task_escalation",
