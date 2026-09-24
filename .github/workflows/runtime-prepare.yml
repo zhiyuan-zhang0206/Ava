@@ -141,7 +141,7 @@ jobs:
           uv run --locked --no-dev python -m cli.release_build \
             --repo "$GITHUB_WORKSPACE" --commit "$(git rev-parse HEAD)" \
             --output "$RUNNER_TEMP/prepare/application-build" \
-            --uv "$(command -v uv)" --python "$(uv python find)" --cache-dir "$(uv cache dir)"
+            --uv "$(command -v uv)" --python "$GITHUB_WORKSPACE/.venv/bin/python" --cache-dir "$(uv cache dir)"
           python3 - <<'PY'
           import json, os, pathlib, shutil
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
