@@ -19,7 +19,7 @@ A controller states only the **blast radius of its own finding** and never names
 
 One exemption narrows `ALL` (issue #2101): an `ALL` block **from the pause dimension** still runs the gateway healthcheck on the gateway capability. The block's blast radius is "a rollout deliberately took every service down", but a gateway that stays down is the one failure that blocks the rollout's own recovery — so the check probes each round, and its respawn is separately gated on the pause having no live owner (so a live rollout's restart leg is never raced). The other `ALL` shapes (a spawned force-update, a spawned restart) still run nothing: they own the very restart the exemption would fight.
 
-The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgbouncer`, `lgtm`, `brew-pin`, `permissions-helper`, and `browser-reach` are DB-free (`False`); `station-probe` is DB-dependent because it resolves the remote station from Postgres. `pg-backup` is a regular DB-dependent `ServiceSpec` service.
+The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgbouncer`, `lgtm`, `brew-pin`, `prod-venv`, `permissions-helper`, and `browser-reach` are DB-free (`False`); `station-probe` is DB-dependent because it resolves the remote station from Postgres. `pg-backup` is a regular DB-dependent `ServiceSpec` service.
 
 ## Why (the defect it replaced)
 `blocks_tick: bool` conflated "my own reconcile failed" with "nothing else should run either", which forced one controller's local failure to be a global verdict. The schema controller's DB-unreachable arm skipped the WHOLE agent-runner roster, so `browser` / `browser-mcp` — no DB at boot, none at runtime ([[services/agent_runner_side/browser/browser/browser.ava.okf.md]]) — went unrevived for the entire duration of a database outage. A DB outage took out the recovery path for an unrelated Chrome crash, and it did so through a controller deciding on behalf of services it knows nothing about.
@@ -40,7 +40,7 @@ The hand-added pseudo-checks classify themselves the same way: `redis-acl`, `pgb
 See [[services/watchdog/block-scope/blocked-round-logging.ava.okf.md]] for manager and schema pin-blocker cadence, expected pause levels, and schema mismatch status/events.
 
 ## DB-free services today
-`browser`, `browser-mcp`, `milvus`, `memory-indexer`, `frontend`, plus the `redis-acl`, `pgbouncer`, `lgtm`, and `brew-pin` pseudo-checks. Everything else on the roster calls `assert_schema_current` at boot and then reads or writes the DB.
+`browser`, `browser-mcp`, `milvus`, `memory-indexer`, `frontend`, plus the `redis-acl`, `pgbouncer`, `lgtm`, `brew-pin`, and `prod-venv` pseudo-checks. Everything else on the roster calls `assert_schema_current` at boot and then reads or writes the DB.
 
 ## Key dependencies
 - [[services/watchdog/watchdog.ava.okf.md]] — the tick that consumes the scope
