@@ -148,13 +148,43 @@ describe("Memory graph page", () => {
     Object.defineProperty(svg, "createSVGPoint", {
       value: () => ({ x: 0, y: 0, matrixTransform: () => ({ x: 200, y: 200 }) }),
     });
-    for (let i = 0; i < 12; i += 1) {
+    fireEvent.wheel(svg, { deltaY: -100, clientX: 200, clientY: 200 });
+    await waitFor(() => {
+      const match = zoomLayer.getAttribute("transform")?.match(/translate\(([^,]+),([^)]+)\) scale\(([^)]+)\)/);
+      expect(match).toBeTruthy();
+      const scale = 2 ** 0.2;
+      expect(Number(match![1])).toBeCloseTo(200 * (1 - scale));
+      expect(Number(match![2])).toBeCloseTo(200 * (1 - scale));
+      expect(Number(match![3])).toBeCloseTo(scale);
+      expect((zoomLayer as SVGGElement).style.transition).toBe("none");
+    });
+    for (let i = 1; i < 12; i += 1) {
       fireEvent.wheel(svg, { deltaY: -100, clientX: 200, clientY: 200 });
     }
 
     await waitFor(() => {
       const scale = Number(zoomLayer.getAttribute("transform")?.match(/scale\(([^)]+)\)/)?.[1]);
       expect(scale).toBeGreaterThan(4);
+    });
+  });
+
+  it("focuses a selected note with animation and resets to the fit viewBox", async () => {
+    mockGetMemoryGraph.mockResolvedValue(seed());
+    mockGetMemoryNote.mockImplementation((path: string) => Promise.resolve(seedNote(path)));
+    const { container } = wrap();
+    const node = await screen.findByTestId("memory-node-alpha.md");
+    const zoomLayer = container.querySelector<SVGGElement>("svg > g")!;
+
+    fireEvent.click(node);
+    await waitFor(() => {
+      expect(zoomLayer.getAttribute("transform")).not.toBe("translate(0,0) scale(1)");
+      expect(zoomLayer.style.transition).toBe("transform 0.4s ease");
+    });
+
+    fireEvent.click(screen.getByLabelText("Reset zoom"));
+    await waitFor(() => {
+      expect(zoomLayer.getAttribute("transform")).toBe("translate(0,0) scale(1)");
+      expect(zoomLayer.style.transition).toBe("transform 0.4s ease");
     });
   });
 
