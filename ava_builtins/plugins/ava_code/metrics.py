@@ -1,6 +1,6 @@
 """ava_code Grafana metrics — registered at import time.
 
-``shared/grafana_dashboard_supply`` imports this module (inside a
+``shared/metrics/grafana_dashboard_supply`` imports this module (inside a
 PluginContext) to collect the registrations below for the rendered Ava Ops
 dashboard (``ava lgtm render``, task #3697); the plugin name comes from the
 context. Query templates target the unified event stream in Loki

@@ -4,7 +4,7 @@ Covers what ``register_metric`` enforces at import time: name uniqueness and
 query safety per dialect — the static-SQL whitelist (single SELECT over
 `events` / `agents_meta`, function / operator whitelist, no macros /
 placeholders — task #180 PR C) and the LogQL contract
-(``shared/metrics_logql.py``).
+(``shared/metrics/metrics_logql.py``).
 """
 
 from typing import Any

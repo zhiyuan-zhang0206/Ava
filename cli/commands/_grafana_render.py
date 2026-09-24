@@ -1,8 +1,8 @@
 """`ava lgtm render` — the ava-ops dashboard render, from the metric registries.
 
-Task #3697 slice S1 (parent #3689): ``shared.grafana_dashboard`` renders the
+Task #3697 slice S1 (parent #3689): ``shared.metrics.grafana_dashboard`` renders the
 dashboard from the registered ``MetricSpec`` set and
-``shared.grafana_dashboard_supply`` collects the plugin side (checkout plugins
+``shared.metrics.grafana_dashboard_supply`` collects the plugin side (checkout plugins
 plus enabled installed ones). This command is the operator surface for that
 render: it diffs the render against THIS host's native Grafana provisioning
 copy (the live ``ava-ops-main.json``) or writes the render with ``--force``.
@@ -96,7 +96,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool) -> int:
         )
         return 1
 
-    from shared.grafana_dashboard_supply import render_dashboard_json
+    from shared.metrics.grafana_dashboard_supply import render_dashboard_json
 
     rendered, failed = render_dashboard_json(repo_only=repo_only)
     if failed:

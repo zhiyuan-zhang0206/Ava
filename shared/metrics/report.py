@@ -1,13 +1,13 @@
 """Render helpers for the metrics report over the unified event stream.
 
 This module is the shared rendering layer for the SQL-aggregated metrics path
-(`shared.metrics_aggregate`): it owns the ASCII text blocks and the machine
+(`shared.metrics.metrics_aggregate`): it owns the ASCII text blocks and the machine
 data shapes (`MetricSection`, `Pctiles`) that the gateway report endpoint and
 the CLI both emit. The per-row computation it used to host (the
 `EventRow` / `EventIndex` / `@metric_unit` registry and the `query_events`
 fetch) was retired with the SQL aggregation (single-day materialization
 outgrew 430K+ rows; the aggregate path reduced it to a handful of SQL GROUP
-BYs). The only production importer is `metrics_aggregate`, which computes the
+BYs). The only production importer is `shared.metrics.metrics_aggregate`, which computes the
 data dicts in SQL and calls the render helpers here — the math (pctiles,
 third_of, fix-kind parsing) cannot drift because both sides share these
 functions.

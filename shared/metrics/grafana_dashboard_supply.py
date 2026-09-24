@@ -1,7 +1,7 @@
 """Grafana dashboard spec suppliers — the plugin side of the render input.
 
 Task #3697 slice S1 (parent #3689). The dashboard renderer
-(``shared.grafana_dashboard``) is a pure function of its spec lists; this
+(``shared.metrics.grafana_dashboard``) is a pure function of its spec lists; this
 module collects the plugin specs from the two content sources (decision A2):
 
 - **repo** — the checkout's ``ava_builtins/plugins/*/metrics.py``, imported
@@ -47,7 +47,7 @@ class PluginSpecs:
     failed: list[str]
 
 
-_REPO_PLUGINS_DIR = Path(__file__).resolve().parents[1] / "ava_builtins" / "plugins"
+_REPO_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
 
 
 def _plugin_specs_for(names: Iterable[str]) -> list[MetricSpec]:
@@ -203,8 +203,8 @@ def render_dashboard_json(*, repo_only: bool = False) -> tuple[str, tuple[str, .
         ``(dashboard_json, failed_plugins)`` — the deterministic serialization
         plus the sorted names of plugins whose metrics module failed to load.
     """
-    from shared.grafana_dashboard import render_dashboard, render_to_json
     from shared.metrics.core import core_metrics
+    from shared.metrics.grafana_dashboard import render_dashboard, render_to_json
 
     core_specs = core_metrics.collect_core_metrics()
     if repo_only:

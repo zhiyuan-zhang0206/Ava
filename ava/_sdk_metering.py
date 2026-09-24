@@ -6,7 +6,7 @@ Every public ``ava.*`` callable is wrapped, once, by a transparent recorder inst
 at SDK import and again at agent-graph build time after plugins load. On each top-level call the recorder (via ``run_metered``) writes one ``sdk_call``
 event into the unified ``events`` stream, carrying the dotted function name in ``attributes.fn``
 (``files.read``, ``shell.run``, ``self.compact``) plus any ``detail`` the call
-annotated. ``shared.metrics_aggregate``'s sdk_usage counts those events — replacing the old regex
+annotated. ``shared.metrics.metrics_aggregate``'s sdk_usage counts those events — replacing the old regex
 scrape of code-event *source text*, which counted any ``ava.X(`` occurrence in comments,
 string literals, docstrings, and agent-written example code (so ``ava._private(`` from a
 private call, ``ava.bootDefaultActor(`` from a comment, and ``ava.x.y(`` from a

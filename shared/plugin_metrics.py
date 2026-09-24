@@ -4,7 +4,7 @@ Two output surfaces (user-approved design, 2026-08-04, event-system W13):
 
 - ``grafana``: the ops dashboard
   (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``)
-  is becoming a render of the registry — ``shared.grafana_dashboard`` turns
+  is becoming a render of the registry — ``shared.metrics.grafana_dashboard`` turns
   the specs into the dashboard JSON and ``ava lgtm render`` previews / writes
   it (task #3697; slice S3 flips converge onto the render). Until then the
   JSON stays the deployment source, and
@@ -35,7 +35,7 @@ dropped, so SQL templates (whose FROM clauses are restricted to that table)
 fail at runtime; no in-repo registration uses them — external plugins must
 migrate to ``query_type="logql"`` / ``"promql"``. LogQL templates
 (``query_type="logql"``) follow the lighter contract in
-``shared/metrics_logql.py``. PromQL templates (``query_type="promql"``)
+``shared/metrics/metrics_logql.py``. PromQL templates (``query_type="promql"``)
 are static Prometheus expressions.
 """
 
@@ -411,7 +411,7 @@ def validate_spec_sql(spec: MetricSpec) -> None:
     if spec.query_type == "logql":
         # Lazy: metrics_logql imports this module (the exception class), so a
         # module-level from-import here would cycle.
-        from shared.metrics_logql import validate_spec_logql
+        from shared.metrics.metrics_logql import validate_spec_logql
 
         validate_spec_logql(spec)
         return

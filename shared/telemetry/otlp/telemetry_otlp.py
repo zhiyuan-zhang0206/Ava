@@ -84,7 +84,7 @@ import time
 from functools import cache
 from typing import Any
 
-from shared import ci_runs_metrics
+from shared.metrics import ci_runs_metrics
 from shared.observability import (
     cluster_label,
     endpoint_override_is_explicit,

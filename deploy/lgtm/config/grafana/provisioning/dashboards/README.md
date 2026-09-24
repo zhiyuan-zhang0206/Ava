@@ -103,7 +103,7 @@ summaries cover the same information.
 ## Files
 
 - `ava-ops-main.json` — the only dashboard, rendered from the metric
-  registries since task #3697: `shared/grafana_dashboard.py` renders the
+  registries since task #3697: `shared/metrics/grafana_dashboard.py` renders the
   registries into this file's shape (every panel registry-covered, slice
   S2), `ava lgtm render` previews (diff) or force-writes the host
   provisioning copy, and converge generates its provisioning copy from the
@@ -220,7 +220,7 @@ of mass-editing targets.
    #1467) the `event_name`/`agent_id` matchers go INSIDE the stream selector
    (`{service_name="unknown_service", event_name=...}`) and `| json` stays
    for the level/category/attributes filters (those fields are not stream
-   labels); the template contract is validated by `shared/metrics_logql.py`.
+   labels); the template contract is validated by `shared/metrics/metrics_logql.py`.
    Use the fixed window
    that matches the panel's information density; stats and tables remain
    instant over `[$__range]`; every count wraps in `sum(...)`.

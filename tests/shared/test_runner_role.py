@@ -27,7 +27,7 @@ from shared.cluster import (
     provision_database,
 )
 from shared.managed_writer_publication import LegacyProtocolZero, publication_admission
-from shared.observed_metrics import MetricObservation, write_observations
+from shared.metrics.observed_metrics import MetricObservation, write_observations
 from shared.pg_tools import throwaway_postgres
 from shared.url_secret import url_with_userinfo
 
