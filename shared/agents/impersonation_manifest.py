@@ -60,9 +60,11 @@ class _CaptureGate:
     capture_failure_pending: bool = False
     condition: Condition = field(default_factory=Condition, repr=False)
 
-    def admit(self) -> _CaptureAdmission | None:
+    def admit(self, *, fail_closed_capture: bool = False) -> _CaptureAdmission | None:
         with self.condition:
             if self.admission_closed:
+                if fail_closed_capture:
+                    self.capture_failure_pending = True
                 return None
             self.in_flight += 1
         return _CaptureAdmission(self)
@@ -276,9 +278,10 @@ def _event_item(event: Event) -> tuple[str, str, str, object]:
 def capture_local_event(event: Event) -> Event:
     """Tag and record an eligible local event before the telemetry queue.
 
-    Capture failure never suppresses ordinary telemetry.  It marks the receipt
-    failed whenever the database is reachable, leaving the lease honestly
-    pending instead of making a best-effort sink failure look complete.
+    A writer failure marks the receipt failed whenever the database is
+    reachable, leaving the lease honestly pending instead of making a
+    best-effort sink failure look complete. A direct event after closure is
+    refused because it cannot be added to the sealed receipt.
     """
     admission = _sdk_capture_admission.get()
     participant = admission.gate.participant if admission is not None else _bound_participant()
@@ -289,9 +292,10 @@ def capture_local_event(event: Event) -> Event:
         gate = _bound_capture_gate()
         if gate is None or gate.participant != participant:
             return event
-        transient_admission = gate.admit()
+        transient_admission = gate.admit(fail_closed_capture=True)
         if transient_admission is None:
-            return event
+            _mark_participant_failed(participant)
+            raise RuntimeError("Impersonation event capture is closed")
     tagged = replace(
         event,
         attributes={
