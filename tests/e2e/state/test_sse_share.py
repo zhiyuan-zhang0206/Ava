@@ -46,9 +46,15 @@ def _active_count(page: Page) -> int:
     return page.evaluate("() => window.__activeTestSse()")
 
 
-def _open_pages(e2e_env: E2EEnv, requests: dict[Page, list[str]]) -> list[Page]:
+def _open_pages(
+    e2e_env: E2EEnv,
+    requests: dict[Page, list[str]],
+    *,
+    without_locks: bool = False,
+    count: int = 3,
+) -> list[Page]:
     context = e2e_env.page.context
-    pages = [e2e_env.page, context.new_page(), context.new_page()]
+    pages = [e2e_env.page, *(context.new_page() for _ in range(count - 1))]
 
     def track(page: Page) -> None:
         def on_request(request: Request) -> None:
@@ -58,6 +64,11 @@ def _open_pages(e2e_env: E2EEnv, requests: dict[Page, list[str]]) -> list[Page]:
 
         page.on("request", on_request)
         page.add_init_script(_PAGE_INIT)
+        if without_locks:
+            page.add_init_script(
+                'Object.defineProperty(Navigator.prototype, "locks", '
+                "{ configurable: true, get: () => undefined });"
+            )
 
     for page in pages:
         track(page)
@@ -109,3 +120,27 @@ def test_three_pages_share_sse_and_promote_on_close_and_hide(e2e_env: E2EEnv) ->
     promoted.evaluate("() => window.__setTestVisible(true)")
     promoted.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
     assert (_active_count(promoted), _active_count(waiting)) == (0, 3)
+
+
+@pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_terminate:build")
+def test_without_web_locks_keeps_per_page_streams_and_navigation(e2e_env: E2EEnv) -> None:
+    requests: dict[Page, list[str]] = defaultdict(list)
+    # Two pages fill Chromium's six HTTP/1.1 SSE slots in fallback mode.
+    pages = _open_pages(e2e_env, requests, without_locks=True, count=2)
+    _wait_counts(pages, [3, 3], "two independent fallback stream sets", sorted_counts=False)
+    for page in pages:
+        assert requests[page].count("system") == 1
+        assert requests[page].count("alerts") == 1
+        assert requests[page].count("systemAll") == 1
+
+    navigated = pages[0]
+    navigated.get_by_role("button", name="Fleet").first.click()
+    navigated.wait_for_url("**/fleet?agent_id=*")
+    navigated.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
+    _wait_counts(
+        pages, [2, 3], "fallback global streams survive route navigation", sorted_counts=False
+    )
+
+    navigated.go_back()
+    navigated.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
+    _wait_counts(pages, [3, 3], "fallback detail stream returns after back", sorted_counts=False)

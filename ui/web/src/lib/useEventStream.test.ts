@@ -12,6 +12,7 @@
 
 const mocks = vi.hoisted(() => ({ checkAuth: vi.fn() }));
 vi.mock("@/lib/api", () => ({ API_BASE: "", api: { checkAuth: mocks.checkAuth } }));
+vi.mock("./telemetry", () => ({ track: vi.fn() }));
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

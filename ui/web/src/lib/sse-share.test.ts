@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ProfileSseTransport, sharedSseSupported, type SseListener } from "./sse-share";
+vi.mock("./telemetry", () => ({ track: vi.fn() }));
+
+import { track } from "./telemetry";
+import { ProfileSseTransport, reportSseTransportMode, sharedSseSupported, type SseListener } from "./sse-share";
 
 class FakeChannel {
   static channels = new Set<FakeChannel>();
@@ -33,12 +36,14 @@ interface QueuedLock {
 class FakeLocks {
   private held = false;
   private queue: QueuedLock[] = [];
+  failure: Error | null = null;
 
   request(
     name: string,
     options: LockOptions,
     callback: (lock: Lock) => Promise<void>,
   ): Promise<void> {
+    if (this.failure !== null) return Promise.reject(this.failure);
     expect(name).toBe("ava-ui-sse");
     expect(options.mode).toBe("exclusive");
     const signal = options.signal;
@@ -73,12 +78,18 @@ class FakeSource {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSED = 2;
+  static failOnPath: string | null = null;
   readyState = FakeSource.CONNECTING;
   onopen: (() => void) | null = null;
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onerror: (() => void) | null = null;
 
-  constructor(readonly url: string) {}
+  constructor(readonly url: string) {
+    if (FakeSource.failOnPath !== null && url.endsWith(FakeSource.failOnPath)) {
+      FakeSource.failOnPath = null;
+      throw new Error("source construction failed");
+    }
+  }
   close(): void { this.readyState = FakeSource.CLOSED; }
   open(): void {
     this.readyState = FakeSource.OPEN;
@@ -129,6 +140,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("EventSource", FakeSource);
   FakeChannel.channels.clear();
+  FakeSource.failOnPath = null;
 });
 
 afterEach(() => {
@@ -282,6 +294,47 @@ describe("profile SSE transport", () => {
     const original = navigator.locks;
     Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
     expect(sharedSseSupported()).toBe(false);
+    Object.defineProperty(navigator, "locks", { configurable: true, value: original });
+  });
+
+  it("handles a non-abort Web Lock rejection without an unhandled promise", async () => {
+    const locks = new FakeLocks();
+    locks.failure = new Error("lock manager failed");
+    const failed = tab(locks);
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    failed.listen("system");
+    await settle();
+    expect(failed.transport.isLeader()).toBe(false);
+    expect(failed.sources).toHaveLength(0);
+    expect(report).toHaveBeenCalledWith("[sse-share] Web Lock failed", locks.failure);
+    failed.transport.dispose();
+    report.mockRestore();
+  });
+
+  it("clears leadership and closes partial sources when the lock callback throws", async () => {
+    const failed = tab(new FakeLocks());
+    FakeSource.failOnPath = "/api/alerts/stream";
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    failed.listen("system");
+    await settle();
+    expect(failed.transport.isLeader()).toBe(false);
+    expect(failed.sources).toHaveLength(1);
+    expect(failed.sources[0].readyState).toBe(FakeSource.CLOSED);
+    expect(report).toHaveBeenCalledWith("[sse-share] Web Lock failed", expect.any(Error));
+    failed.transport.dispose();
+    report.mockRestore();
+  });
+
+  it("reports the fallback mode and capability flags once per tab session", () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    const original = navigator.locks;
+    Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+    reportSseTransportMode();
+    reportSseTransportMode();
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith("sse-transport", {
+      key: "fallback", value: expect.stringContaining("locks=0,bc=0") as string,
+    });
     Object.defineProperty(navigator, "locks", { configurable: true, value: original });
   });
 });

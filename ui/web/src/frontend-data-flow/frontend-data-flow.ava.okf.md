@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Frontend Data Flow (SSE + hooks)
-description: Profile-shared authenticated SSE transport for system, active-agent, and alerts streams; visible leader ownership, hidden-page release, and connection resilience.
+description: HTTPS profile-shared and direct HTTP per-page SSE transport for system, active-agent, and alerts streams, with connection resilience.
 tags:
 - frontend
 - sse
@@ -13,8 +13,8 @@ Server data enters UI via React Query cache, kept live by SSE while visible; hid
 
 ## Stream ownership (`lib/sse-share.ts`)
 
-**At most one set of SSE connections per browser profile.** Each visible,
-authenticated page requests the exclusive `ava-ui-sse` Web Lock. The lock holder
+**HTTPS shares SSE when Web Locks and BroadcastChannel are available.** Each
+visible, authenticated page requests the exclusive `ava-ui-sse` Web Lock. The lock holder
 owns the real EventSources for `/api/system`, `/api/alerts/stream`, and the
 selected-agent union `/api/system/all`; other pages own no gateway SSE sockets.
 The leader relays raw frames (including heartbeats) and open/reconnecting/closed
@@ -28,8 +28,11 @@ Visible pages announce their selected agent; the leader sorts and unions IDs,
 debouncing URL changes by 250ms. A 15s ping asks pages to renew interest; the
 leader prunes missing pages after 45-50s (45s TTL, 5s sweep). Hide aborts a
 pending lock request or releases a held lock and closes its sources. With no
-visible pages, no streams remain. If BroadcastChannel or Web Locks is missing,
-the Providers retain their original per-page EventSource path.
+visible pages, no streams remain. Direct HTTP is a supported fallback: without
+Web Locks, each page opens its own EventSources. Missing BroadcastChannel or
+Web Locks on HTTPS also selects this path. Keep its navigation, retry, and
+watchdog behavior. HTTP/1.1's six per-origin connection limit can stall a third
+page after two pages open three streams each.
 
 ## Two SSE Providers (`lib/useEventStream.tsx`)
 
@@ -75,4 +78,4 @@ Tracked interactions flow **one-way** to the gateway — never into React Query 
 
 `lib/telemetry.ts` `track(element, {page, key, value, dedupe})` → in-memory buffer (dedupe 2s per page/element/key; Web Vitals and API timing opt out; under the 100/min per-tab and 200 pending caps) → batched `POST /api/frontend-telemetry` (sendBeacon on hide/pagehide, fetch+keepalive otherwise) → gateway validates (shape 422 / 64KB 413 / per-session 120/min backstop) → one `frontend_interaction` event per interaction (category=telemetry, source=user) → the unified event stream (Loki) → Grafana core panels.
 
-Instrumented points: page views plus native FCP/final LCP/CLS/INP (`lib/telemetry-page-view.tsx` + `lib/web-vitals.ts`, mounted in AuthGuard's authenticated branch), API requests slower than 800ms (`lib/api.ts`, normalized numeric path segments), composer send-to-first-turn-start latency (`lib/interaction-timing.ts`), agent lifecycle actions (`lib/use-agent-actions.ts` onSuccess), message send/stop (`components/composer.tsx`), and every user_settings change (`lib/use-user-settings.ts` setSetting). No sensitive content: `element` is a closed union, keys are bounded normalized identifiers, and `value` is a ≤64-char scalar.
+Instrumented points: page views plus native FCP/final LCP/CLS/INP (`lib/telemetry-page-view.tsx` + `lib/web-vitals.ts`, mounted in AuthGuard's authenticated branch), API requests slower than 800ms (`lib/api.ts`, normalized numeric path segments), composer send-to-first-turn-start latency (`lib/interaction-timing.ts`), agent lifecycle actions (`lib/use-agent-actions.ts` onSuccess), message send/stop (`components/composer.tsx`), every user_settings change (`lib/use-user-settings.ts` setSetting), and one `sse-transport` event per authenticated tab session (`key=shared|fallback`, value carries secure-context/Web Locks/BroadcastChannel flags). No sensitive content: `element` is a closed union, keys are bounded normalized identifiers, and `value` is a ≤64-char scalar.
