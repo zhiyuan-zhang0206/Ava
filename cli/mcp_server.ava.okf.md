@@ -33,7 +33,7 @@ enough that an external model can hold the whole surface.
 | `list_agents` | `GET /api/agents` | one directory page with explicit scope, search, cursor, and limit |
 | `get_agent` | `GET /api/agents/{id}` | one agent's full state, incl. blocking questions |
 | `get_messages` | `GET /api/agents/{id}/messages` | transcript as role + text + the code it ran |
-| `terminate_agent` | `POST /api/agents/{id}/terminate` | destructive: end the agent; `message` is retained for resurrection (`force` kills mid-step) |
+| `terminate_agent` | `POST /api/agents/{id}/terminate` | destructive: end the agent; `message` is retained for resurrection; `force` requests interruption when a clean stop cannot progress (`enqueued` confirms acceptance, not exit) |
 | `cluster_status` | `GET /api/cluster/status` | is the cluster up, and is it paused |
 
 `list_agents` forwards the bounded directory page unchanged: `agents` contains
