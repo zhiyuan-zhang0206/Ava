@@ -34,9 +34,8 @@ export function AgentAvailability({ agent }: { agent: AgentRow }) {
     && observedAt <= now && now - observedAt <= 120_000;
   const launchFailed = availability?.reason.startsWith("launch_") ?? false;
   const reason = fresh || launchFailed ? availability?.reason ?? "unknown" : "unknown";
-  const canRetry = current.status === "idling" && (
-    launchFailed || (reason === "unknown" && current.started_at === null)
-  );
+  if (reason === "unknown") return null;
+  const canRetry = current.status === "idling" && launchFailed;
   const detail = availability?.admission_outcome;
   const message = reason === "admission_refused" && detail
     ? t(detail)
@@ -73,7 +72,7 @@ export function AgentAvailability({ agent }: { agent: AgentRow }) {
           </button>
         )}
         {retryError && <span>{retryError}</span>}
-        {(reason === "host_unavailable" || reason === "admission_refused" || reason === "unknown") && (
+        {(reason === "host_unavailable" || reason === "admission_refused") && (
           <Link href="/insights/status" className="shrink-0 underline underline-offset-2">
             {t("machineDiagnostics")}
           </Link>
