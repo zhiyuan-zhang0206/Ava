@@ -25,6 +25,45 @@ def test_recovery_wake_batch_default_bounds_and_metadata() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("name", "default", "valid", "invalid"),
+    [
+        ("host_db_recovery_prolonged_attempts", 6, 1, 0),
+        ("host_db_recovery_prolonged_seconds", 300.0, 0.1, 0.0),
+        ("host_db_recovery_budget_seconds", 3600.0, 600.0, 599.9),
+    ],
+)
+def test_db_recovery_defaults_bounds_and_metadata(
+    name: str, default: float, valid: float, invalid: float
+) -> None:
+    field = DaemonSettings.model_fields[name]
+    alias = f"AVA_{name.upper()}"
+    assert field.default == default
+    assert field.alias == alias
+    assert getattr(DaemonSettings.model_validate({alias: valid}), name) == valid
+    with pytest.raises(ValidationError):
+        DaemonSettings.model_validate({alias: invalid})
+    assert field.json_schema_extra == {
+        "capability": "agent-runner",
+        "restart_required": "agent",
+        "writable": True,
+        "sensitive": False,
+        "scope": "cluster-pinned",
+    }
+
+
+@pytest.mark.parametrize("prolonged_seconds", [600.0, 601.0])
+def test_db_recovery_prolonged_warning_must_precede_budget(prolonged_seconds: float) -> None:
+    with pytest.raises(
+        ValidationError,
+        match="host_db_recovery_prolonged_seconds must be below host_db_recovery_budget_seconds",
+    ):
+        DaemonSettings(
+            AVA_HOST_DB_RECOVERY_PROLONGED_SECONDS=prolonged_seconds,
+            AVA_HOST_DB_RECOVERY_BUDGET_SECONDS=600.0,
+        )
+
+
 @pytest.mark.parametrize("limit", [0, 1, 1000])
 def test_admission_does_not_resize_database_pools(limit: int) -> None:
     config = DaemonSettings(

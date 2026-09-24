@@ -22,7 +22,10 @@ return. Expected provider or compaction failures persist halted state and report
 an error without discarding conversation history.
 
 Database connection loss keeps the original single-flight task waiting with
-bounded, cancellable backoff. Recovery revalidates the exact incarnation, flushes
+bounded, cancellable backoff and a total ladder budget
+(`AVA_HOST_DB_RECOVERY_BUDGET_SECONDS`): when the budget is spent the turn exits
+through the crash path and the next wake retries.
+Recovery revalidates the exact incarnation, flushes
 retained writes, reconciles claimed input and repairs dangling tool pairs before
 continuing — each stage under its own 30s `database_phase` bound (issue #1972),
 never one aggregate deadline across the chain, so a healthy stage is not starved
