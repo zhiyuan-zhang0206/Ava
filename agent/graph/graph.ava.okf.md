@@ -18,7 +18,7 @@ after_init → init_context → claim → before_llm → llm → before_exec →
                   │           (after_exec always returns to claim; claim decides
                   │            end-turn or continue based on halted + pending +
                   │            turn_active)
-                  └── compaction routes claim → init_context to re-establish the
+                  └── compaction routes claim or llm → init_context to re-establish the
                       standing message head (post-compact tail parked in context_reset)
 ```
 
@@ -27,7 +27,7 @@ after_init → init_context → claim → before_llm → llm → before_exec →
 - **init_context** (`_init_context.py`): Sole owner of the standing message head (SystemMessage + the ordered context notes). Lays it down whenever `messages` is empty — an agent's first wake, and the turn after any compaction, which routes back here with the post-compact tail parked in `state.context_reset`. A pass-through otherwise.
 - **claim** (`_claim.py` + `_attach_drain.py` / `_claim_batch.py` / `_claim_routing.py` / `_claim_dispatch.py` / `_claim_decide.py`): At an idle turn boundary, drains pending attachments into one tail HumanMessage before taking the existing end-turn or wait route; otherwise long-waits on Redis pub/sub and dispatches inbound messages (new message / resume / terminate / restart). A non-overflow circuit-breaker heartbeat parks only a heartbeat-only batch; a co-batched chat still routes to `before_llm`.
 - **before_llm** (hook container): Runs all registered `register_before_llm` hooks—plugins can modify state or inject extra context
-- **llm** (`_llm.py`): Streaming LLM inference, supports mid-stream cancellation (cancel = discard current turn); streaming-first with one non-streaming fallback; fatal provider errors fail-fast to idle
+- **llm** (`_llm.py`): Owns automatic compaction and normal streaming inference. Both model operations race the durable interrupt. Interrupted compaction discards its result without replacing history or advancing the compact version; completed compaction routes `init_context → claim`. A tagged summary with no later AIMessage gets one ordinary generation before the threshold re-arms; this survives cancellation, new input, and checkpoint recovery. Actual provider overflow still uses circuit-breaker rescue. Normal streaming cancellation discards the partial generation. Streaming-first with one non-streaming fallback; fatal provider errors fail-fast to idle.
 - **before_exec** (hook container): Runs `register_before_exec` hooks—final checkpoint before tool invocation
 - **exec** (`_exec.py`): Runs Python code in one disposable fault-isolation subprocess; cancel/timeout crosses an owned-tree stop → direct-child reap → bounded output-reader join barrier
 - **after_exec** (hook container): Runs `register_after_exec` hooks—cleanup/recording after execution

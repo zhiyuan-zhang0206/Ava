@@ -447,3 +447,198 @@ class TestWatcherExitBounded:
         async with subscribe_interrupt(object(), 1):  # type: ignore[arg-type]
             await asyncio.sleep(0)  # watcher running, suspended in its sleep
         assert not any("abandoning" in r["message"] for r in loguru_records)
+
+
+@pytest.mark.parametrize("maintenance", [False, True])
+async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    maintenance: bool,
+) -> None:
+    import json
+    from unittest.mock import MagicMock
+
+    from langchain_core.messages import HumanMessage
+    from langgraph.runtime import Runtime
+
+    from agent.graph._llm import llm_node
+    from agent.state import AgentState, CompactState
+    from shared.context import AvaContext
+    from shared.lm.context_budget import ContextBudget
+
+    tid = create_agent(db_conn)
+    monkeypatch.setattr("agent.graph._interrupt._INTERRUPT_POLL_S", 0.01)
+
+    def small_budget(_model: str) -> ContextBudget:
+        return ContextBudget(
+            max_context_tokens=10_000, soft_compact_tokens=1, hard_compact_tokens=1
+        )
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
+    started, settled = asyncio.Event(), asyncio.Event()
+
+    async def summarizing(_messages: object, _llm: object) -> str:
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            settled.set()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr("agent.hooks.compact.generate_summary", summarizing)
+    state = AgentState(
+        messages=[HumanMessage(content="uncompacted original work " * 30)],
+        compact=CompactState(version=4),
+        halted=False,
+    )
+    publisher, model = MagicMock(), MagicMock()
+    runtime = Runtime(context=AvaContext(ops_pool=aops_pool, llm=model, event_publisher=publisher))
+    invocation = asyncio.create_task(
+        llm_node(state, runtime, {"configurable": {"thread_id": str(tid)}})
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=3)
+        if maintenance:
+            db_conn.execute(
+                "INSERT INTO agents_meta(id,status,machine,runtime_kind) "
+                "VALUES(%s,'restarting',%s,'hosted')",
+                (tid, machine_name()),
+            )
+            _insert(db_conn, tid, "restart", source="system:update", payload=_MAINTENANCE_PAYLOAD)
+        else:
+            _insert(db_conn, tid, "cancel")
+        result = await asyncio.wait_for(invocation, timeout=3)
+    finally:
+        invocation.cancel()
+        await asyncio.gather(invocation, return_exceptions=True)
+    assert settled.is_set()
+    assert result.goto == "claim"
+    assert result.update == {"halted": True}
+    assert state.compact.version == 4
+    assert state.context_reset.tail == []
+    assert state.messages[0].content == "uncompacted original work " * 30
+    model.astream.assert_not_called()
+    assert db_conn.execute(
+        "SELECT status,claimed_at FROM inbound_messages WHERE agent_id=%s",
+        (tid,),
+    ).fetchall() == [("pending", None)]
+    compact_events = [
+        json.loads(call.args[0])
+        for call in publisher.emit.call_args_list
+        if json.loads(call.args[0])["role"].startswith("compact_")
+    ]
+    assert [event["role"] for event in compact_events] == ["compact_started", "compact_finished"]
+    assert compact_events[1]["status"] == "replaced"
+    assert compact_events[0]["compact_id"] == compact_events[1]["compact_id"]
+
+
+async def test_model_completion_and_cancel_same_tick_discards_result() -> None:
+    from agent.graph._interrupt import ModelInterruptedError, interruptible_model
+
+    interrupted = asyncio.Event()
+    interrupted.set()
+
+    async def completed() -> str:
+        return "a complete but superseded summary"
+
+    with pytest.raises(ModelInterruptedError):
+        await interruptible_model(completed(), interrupted)
+
+
+@pytest.mark.parametrize("marker", ["compact_summary", "compact_request"])
+async def test_compaction_returns_through_claim_then_generates_before_compacting_again(  # noqa: PLR0915 -- one checkpoint/cancel/resume transition proof.
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    marker: str,
+) -> None:
+    from typing import Any, cast
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langchain_core.messages import AIMessageChunk, HumanMessage
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+    from langgraph.graph.message import add_messages
+    from langgraph.runtime import Runtime
+    from langgraph.types import Command
+
+    from agent.graph._claim import claim_node
+    from agent.graph._init_context import init_context_node
+    from agent.graph._llm import llm_node
+    from agent.hooks.compact import _compact_reminder, auto_compact_will_fire
+    from agent.state import AgentState, checkpoint_msgpack_allowlist
+    from shared.context import AvaContext
+    from shared.lm.context_budget import ContextBudget
+    from tests.conftest import spawn_agent
+
+    def small_budget(_model: str) -> ContextBudget:
+        return ContextBudget(10_000, 1, 1)
+
+    def apply(state: AgentState, command: Command[Any]) -> AgentState:
+        assert isinstance(command.update, dict)
+        update = dict(cast("dict[str, Any]", command.update))  # pyright: ignore[reportUnknownMemberType]
+        if "messages" in update:
+            update["messages"] = add_messages(list(state.messages), update["messages"])
+        return state.model_copy(update=update)
+
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
+    monkeypatch.setattr("agent.graph._init_context.build_system_prompt", lambda: "standing head")
+    monkeypatch.setattr("agent.graph._init_context.context_notes", list)
+    summary = AsyncMock(return_value="the retained summary is still above the ceiling " * 30)
+    monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
+
+    async def ordinary_generation():
+        yield AIMessageChunk(
+            content="resumed ordinary work",
+            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+            usage_metadata={"input_tokens": 500, "output_tokens": 5, "total_tokens": 505},
+        )
+
+    model, publisher = MagicMock(), MagicMock()
+    model.bind_tools.return_value = model
+    model.astream.return_value = ordinary_generation()
+    tid = spawn_agent()
+    config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
+    runtime = Runtime(context=AvaContext(ops_pool=aops_pool, llm=model, event_publisher=publisher))
+    state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)
+    compacted = await llm_node(state, runtime, config)
+    assert compacted.goto == "init_context"
+    state = apply(state, compacted)
+    state.context_reset.tail[0].additional_kwargs["ava_msg_type"] = marker
+    rebuilt = await init_context_node(state, runtime, config)
+    assert rebuilt.goto == "claim"
+    state = apply(state, rebuilt)
+
+    # A real checkpoint round trip and a cancel must preserve the exemption.
+    serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
+    state = state.model_copy(
+        update={"messages": serde.loads_typed(serde.dumps_typed(state.messages))}
+    )
+    assert not auto_compact_will_fire(state)
+    _insert(db_conn, tid, "cancel")
+    cancelled = await claim_node(state, runtime, config)
+    assert cancelled.goto == "claim"
+    state = apply(state, cancelled)
+    assert state.halted
+    assert not auto_compact_will_fire(state)
+    model.astream.assert_not_called()
+
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,kind,source,content) VALUES(%s,'chat','user','continue')",
+        (tid,),
+    )
+    db_conn.commit()
+    resumed = await claim_node(state, runtime, config)
+    assert resumed.goto == "before_llm"
+    state = apply(state, resumed)
+    assert not auto_compact_will_fire(state)
+    assert await _compact_reminder(state, runtime, config) is None
+    generated = await llm_node(state, runtime, config)
+    assert generated.goto == "after_exec"
+    state = apply(state, generated)
+    assert state.messages[-1].content == "resumed ordinary work"
+    assert state.compact.version == 1
+    summary.assert_awaited_once()
+    model.astream.assert_called_once()
+    assert auto_compact_will_fire(state)  # A committed ordinary result re-arms the threshold.

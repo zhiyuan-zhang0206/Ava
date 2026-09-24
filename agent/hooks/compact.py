@@ -1,5 +1,4 @@
-"""Built-in compact hook: auto-compact when context exceeds threshold + Compaction
-LLM helper.
+"""Compaction LLM operation and the built-in, model-free reminder hook.
 
 Exhausted compaction attempts raise `CompactionFailedError`; the hosted turn
 boundary reports the failure, preserves history, and durably halts until new
@@ -12,8 +11,8 @@ not gated behind a plugin. The before_llm hook is registered by
 Exports:
 - `generate_summary(messages, llm) -> summary`: pure function that runs the
   Compaction LLM over the whole conversation and returns the summary text.
-- `register_compact_hooks()`: registers the before_llm hook (force-compact +
-  reminder). Called once at graph build time.
+- `register_compact_hooks()`: registers the model-free before_llm reminder
+  hook. Called once at graph build time.
 - The compaction live-run events (`emit_compact_started` / `emit_compact_finished`)
   live in `agent/hooks/compact_events.py` (file line budget).
 
@@ -42,13 +41,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langchain_core.messages.modifier import RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph._interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
 from agent.history_dump import dump_history, history_dump_note
 from agent.hooks import Hook, register_before_llm
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
@@ -59,13 +59,13 @@ from agent.messages import (
     system_note_message,
     tail_has_agent_inbound,
 )
-from agent.nodes import INIT_CONTEXT, LLM
+from agent.nodes import CLAIM, INIT_CONTEXT
 from agent.state import AgentState, CompactState, ContextReset
 from shared.agents.history.checkpoint_cleanup import mark_compact_boundary
 from shared.audit_events import insert_event_log_async
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext, agent_id_from_config
-from shared.live_events import CompactDone
+from shared.live_events import Cancelled, CompactDone
 from shared.lm.context_budget import latest_input_tokens, resolve_context_budget
 from shared.log import logger
 from shared.message_kwargs import AvaMsgType, read_ava_kwargs
@@ -123,7 +123,7 @@ _EMERGENCY_COMPACT_MARKER = (
 class CompactionFailedError(RuntimeError):
     """Compaction could not produce a usable summary after retries.
 
-    Raised by both compaction paths (the before_llm auto-compact hook and the
+    Raised by both compaction paths (the LLM node automatic operation and the
     claim node's compact_request arm) once every attempt failed — the model
     ignored the template, or the provider kept failing. It is the framework
     signal the runloop turns into a turn-abort (agent stays alive, idles for
@@ -147,7 +147,7 @@ async def stamp_compact_boundary(pool: AsyncConnectionPool | None, agent_id: int
     segment; timeline segment reads and audits anchor on it. Must never abort
     the agent's turn (it runs inside the graph), so a failure is logged and
     swallowed. `pool is None` (container / eval mode) is a no-op. Shared by the
-    auto-compact hook here and the agent-/user-triggered compact paths in the
+    automatic LLM compaction operation here and the agent-/user-triggered compact paths in the
     claim node. Nothing is trimmed here since the never-delete ruling
     (2026-09-12, task #3180).
     """
@@ -209,7 +209,7 @@ async def generate_summary(
 
     Used by the claim node for handling inbound kind `compact_request`
     (backend LLM generation); `compact_summary` (agent-written) skips this
-    function. Also used by this module's auto-compact hook.
+    function. Also used by the LLM node's automatic compaction operation.
 
     The request = the conversation exactly as the main llm node sends it
     (same `prepare_invocation` shape — explicit Gemini cache when live,
@@ -420,74 +420,53 @@ def _context_occupancy(messages: list[AnyMessage]) -> int:
     return tokens if tokens is not None else _estimate_tokens(messages)
 
 
+def _summary_awaits_reply(messages: list[AnyMessage]) -> bool:
+    """A committed summary gets one ordinary generation before another auto compact.
+
+    Derive this from checkpointed messages: cancellation, restart, and new
+    inbounds do not erase the exemption; only a committed AIMessage ends it.
+    """
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            return False
+        if isinstance(message, HumanMessage) and read_ava_kwargs(message).get("ava_msg_type") in (
+            AvaMsgType.COMPACT_SUMMARY.value,
+            AvaMsgType.COMPACT_REQUEST.value,
+        ):
+            return True
+    return False
+
+
 def auto_compact_will_fire(state: AgentState) -> bool:
     """Whether the force-compact path would replace ``state.messages`` this turn:
     occupancy over the model's hard ceiling AND a non-empty conversation to
     compress. The single gate — plugins that must defer a message write on a
     turn compaction will claim (agent-reply / memory / silent-idle notes) call
     this instead of replicating the estimate + threshold, so the prediction can
-    never drift from ``auto_compact_before_llm``.
+    never drift from ``auto_compact_for_llm``.
 
     Resolves the ceiling from the agent's own model (``turn_settings.lm.llm_model``,
     which the spawn overlay already applied); ``UnknownModelWindowError`` surfaces
     rather than silently mis-gating an agent whose window we do not know."""
+    if _summary_awaits_reply(state.messages):
+        return False
     budget = resolve_context_budget(turn_settings.lm.llm_model)
     if _context_occupancy(state.messages) <= budget.hard_compact_tokens:
         return False
     return bool(conversation_messages(state.messages))
 
 
-async def auto_compact_before_llm(
-    state: AgentState,
-    runtime: Runtime[AvaContext],
-    config: RunnableConfig,
-) -> dict | None:
-    """Before each LLM call, estimate state.messages token count and compact
-    if it exceeds the threshold.
-
-    The compaction gate below (occupancy over the model's hard ceiling AND a
-    non-empty conversation to compress) is exposed as `auto_compact_will_fire`
-    for plugins that must defer a message write on a turn this fires — the one
-    gate, no replicated estimate to drift.
-
-    The summary itself is generated by `generate_summary`, whose
-    COMPACTION_INSTRUCTION template is the actual quality defense. The only
-    extra safety here is a retry: a summary shorter than
-    COMPACT_MIN_SUMMARY_CHARS means the model ignored the template (the
-    agent-240 incident), so the cache-mostly request is retried; if every
-    attempt stays short (or returns no text), this raises rather than overwrite
-    history with a non-summary — a real instruction-following regression that
-    must surface, not a state to paper over.
-    """
-    occupancy = _context_occupancy(state.messages)
-    if occupancy <= resolve_context_budget(turn_settings.lm.llm_model).hard_compact_tokens:
-        return None
-    content_msgs = conversation_messages(state.messages)
-    if not content_msgs:
-        logger.info(
-            "[{label}] {body}",
-            label="auto-compact",
-            event="auto_compact",
-            body=f"skip: nothing to compress (no conversation messages), tokens≈{occupancy}",
-        )
-        return None
-    llm = runtime.context.llm
-    assert llm is not None, "auto_compact_before_llm requires ctx.llm"  # noqa: S101
-    logger.info(
-        "[{label}] {body}",
-        label="auto-compact",
-        event="auto_compact",
-        body=f"start: tokens≈{occupancy}, compressing {len(content_msgs)} messages",
-    )
-    agent_id = agent_id_from_config(config)
-    publisher = runtime.context.event_publisher
-    compact_run_id = emit_compact_started(publisher, agent_id, mode="auto")
-
+async def _auto_compact_summary(
+    messages: list[AnyMessage],
+    llm: BaseChatModel,
+    content_count: int,
+) -> str:
+    """Generate and validate a summary without committing any context change."""
     summary: str = ""
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(state.messages, llm)
+            summary = await generate_summary(messages, llm)
         except Exception as e:
             last_error = e
             logger.warning(
@@ -514,13 +493,77 @@ async def auto_compact_before_llm(
         # P1-1 — a compact failure used to kill the process into a
         # non-resurrectable 'exit', one crash per incoming message while the
         # cause persisted).
-        emit_compact_finished(publisher, agent_id, compact_run_id, status="failure")
         raise CompactionFailedError(
             f"Compaction produced no usable summary across {COMPACT_MAX_ATTEMPTS}"
             f" attempts (last: {detail}); the model is not following the"
-            f" compaction template — refusing to overwrite {len(content_msgs)} messages"
+            f" compaction template — refusing to overwrite {content_count} messages"
             f" with a non-summary"
         ) from last_error
+
+    return summary
+
+
+async def auto_compact_for_llm(
+    state: AgentState,
+    runtime: Runtime[AvaContext],
+    config: RunnableConfig,
+) -> dict[str, Any] | None:
+    """Run automatic compaction inside the LLM node when above the ceiling.
+
+    The compaction gate below (occupancy over the model's hard ceiling AND a
+    non-empty conversation to compress) is exposed as `auto_compact_will_fire`
+    for plugins that must defer a message write on a turn this fires — the one
+    gate, no replicated estimate to drift.
+
+    The summary itself is generated by `generate_summary`, whose
+    COMPACTION_INSTRUCTION template is the actual quality defense. The only
+    extra safety here is a retry: a summary shorter than
+    COMPACT_MIN_SUMMARY_CHARS means the model ignored the template (the
+    agent-240 incident), so the cache-mostly request is retried; if every
+    attempt stays short (or returns no text), this raises rather than overwrite
+    history with a non-summary — a real instruction-following regression that
+    must surface, not a state to paper over.
+    """
+    if _summary_awaits_reply(state.messages):
+        return None
+    occupancy = _context_occupancy(state.messages)
+    if occupancy <= resolve_context_budget(turn_settings.lm.llm_model).hard_compact_tokens:
+        return None
+    content_msgs = conversation_messages(state.messages)
+    if not content_msgs:
+        logger.info(
+            "[{label}] {body}",
+            label="auto-compact",
+            event="auto_compact",
+            body=f"skip: nothing to compress (no conversation messages), tokens≈{occupancy}",
+        )
+        return None
+    llm = runtime.context.llm
+    assert llm is not None, "auto_compact_for_llm requires ctx.llm"  # noqa: S101
+    logger.info(
+        "[{label}] {body}",
+        label="auto-compact",
+        event="auto_compact",
+        body=f"start: tokens≈{occupancy}, compressing {len(content_msgs)} messages",
+    )
+    agent_id = agent_id_from_config(config)
+    publisher = runtime.context.event_publisher
+    compact_run_id = emit_compact_started(publisher, agent_id, mode="auto")
+
+    try:
+        async with subscribe_interrupt(runtime.context.ops_pool, agent_id) as interrupted:
+            summary = await interruptible_model(
+                _auto_compact_summary(list(state.messages), llm, len(content_msgs)), interrupted
+            )
+    except ModelInterruptedError:
+        emit_compact_finished(publisher, agent_id, compact_run_id, status="replaced")
+        if publisher is not None:
+            publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
+        # No replacement or version bump: claim owns the still-pending command.
+        return {"halted": True, "goto": CLAIM}
+    except BaseException:
+        emit_compact_finished(publisher, agent_id, compact_run_id, status="failure")
+        raise
 
     logger.info(
         "[{label}] {body}",
@@ -560,8 +603,8 @@ async def auto_compact_before_llm(
 
     # REMOVE_ALL wipes the whole window, standing head included. Re-establishing
     # it is `init_context`'s job: clear the history, park the summary as what
-    # follows the head, and detour there. The turn resumes at the LLM with the
-    # short context, which is where this hook was headed anyway.
+    # follows the head, and detour there. Then claim handles commands that
+    # arrived while the summary was being prepared before any new model call.
     #
     # The summary message carries the same ava_msg_type stamp as the claim-node
     # compact path (Task #1017): without it the timeline read side classifies
@@ -588,16 +631,18 @@ async def auto_compact_before_llm(
         summary_kwargs["additional_kwargs"]["ava_compact_id"] = compact_run_id
     transition = build_compact_transition(
         summary,
-        resume=LLM,
+        resume=CLAIM,
         extra_msgs=([history_dump_note(dump_path)] if dump_path is not None else None),
         summary_kwargs=summary_kwargs,
     )
+    await stamp_compact_boundary(runtime.context.ops_pool, agent_id)
+    transition["compact"] = state.compact.model_copy(update={"version": state.compact.version + 1})
     emit_compact_finished(publisher, agent_id, compact_run_id, status="success")
     return transition
 
 
 # ── Shared compact transition builder ──
-# Both the claim node (agent-/user-triggered) and the auto-compact hook
+# Both the claim node (agent-/user-triggered) and the LLM compaction operation
 # (forced) need the same ContextReset + REMOVE_ALL + INIT_CONTEXT skeleton.
 # This function is the single source of truth; callers layer their own extras
 # (halted, update_initiated, version bump, event publish, checkpoint trim).
@@ -657,7 +702,7 @@ def _compact_reminder_update(state: AgentState) -> dict | None:
     below the forced ceiling (soft_compact_tokens < occupancy <=
     hard_compact_tokens). Returns the `messages` update + bookkeeping, or None.
 
-    The caller only invokes this when the force path did NOT fire, so occupancy
+    The reminder hook invokes this only below the hard ceiling, so occupancy
     is already at-or-below the hard ceiling — force and reminder are mutually
     exclusive by threshold and never both write `messages` in one pass.
 
@@ -708,42 +753,26 @@ def _compact_reminder_update(state: AgentState) -> dict | None:
     }
 
 
-class _AutoCompactHook(Hook):
-    """Single before_llm hook: force-compact at the ceiling, else the one-time
-    wind-down reminder in the band below it.
+class _CompactReminderHook(Hook):
+    """Before-LLM reminder only; model work belongs to the LLM node.
 
-    Keeping both branches in one hook is what makes the clobber-safety hold:
-    force (occupancy > hard ceiling) and reminder (occupancy <= hard ceiling)
-    are mutually exclusive, so this hook writes `messages` at most once per pass
-    — never the same-key double-write the hook runner rejects.
-
-    On a successful force compaction, bump compact.version so subscribers
-    can detect it, and trim the now-frozen per-turn checkpoints.
+    Above the hard ceiling the LLM node compacts first, so a reminder would
+    immediately be summarized away. Other hooks use the same ceiling gate.
     """
 
     async def __call__(
         self,
         state: AgentState,
-        runtime: Runtime[AvaContext],
-        config: RunnableConfig,
+        _runtime: Runtime[AvaContext],
+        _config: RunnableConfig,
         /,
     ) -> dict | None:
-        result = await auto_compact_before_llm(state, runtime, config)
-        if result is not None:
-            await stamp_compact_boundary(runtime.context.ops_pool, agent_id_from_config(config))
-            # Bump version, keep the reminder flags (model_copy from the current
-            # value); result carries `messages` / `context_reset` / `goto`, so
-            # `compact` is not a key collision.
-            return {
-                **result,
-                "compact": state.compact.model_copy(update={"version": state.compact.version + 1}),
-            }
+        if _summary_awaits_reply(state.messages) or auto_compact_will_fire(state):
+            return None
         return _compact_reminder_update(state)
 
 
-# Module-level singleton — the registered instance. `register_compact_hooks`
-# re-appends this same object on each graph build.
-_auto_compact_with_version_bump = _AutoCompactHook()
+_compact_reminder = _CompactReminderHook()
 
 
 def register_compact_hooks() -> None:
@@ -753,4 +782,4 @@ def register_compact_hooks() -> None:
     now a core capability (Issue #1284), this registration is unconditional
     and does not depend on any plugin enable/disable config.
     """
-    register_before_llm(_auto_compact_with_version_bump)
+    register_before_llm(_compact_reminder)
