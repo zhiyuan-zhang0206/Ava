@@ -55,6 +55,7 @@ import json
 import re
 import shlex
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -80,6 +81,7 @@ _PASTE_WRAP_THRESHOLD_CHARS = 1022
 
 _PASTE_BEGIN = "\x1b[200~"
 _PASTE_END = "\x1b[201~"
+_CLAUDE_NOT_FOUND = "claude executable not found in PATH or $HOME/.local/bin/claude"
 
 
 def _bracketed_paste(text: str) -> str:
@@ -155,11 +157,32 @@ def _contract_path() -> Path:
 
 
 def _claude_ui_ready(output: str) -> bool:
-    """The title alone also appears on setup dialogs; require the composer hint."""
-    return bool(re.search(r"\bClaude\s+Code\b", output)) and "? for shortcuts" in output
+    """Require the title and a composer cue, not a setup dialog's title alone."""
+    composer = "? for shortcuts" in output or (
+        bool(re.search(r"(?m)^[ \t]*\u276f[ \t]", output)) and "bypass permissions on" in output
+    )
+    return bool(re.search(r"\bClaude\s+Code\b", output)) and composer
 
 
-def _wait_for_ready(sid: int, timeout: float = 30.0) -> None:
+def _check_missing_claude(failure_marker: Path | None, output: str = "") -> None:
+    # A launched shell has a private marker. Its echoed command can wrap into
+    # arbitrary screen lines, so its screen text is never failure evidence.
+    missing = (
+        failure_marker.is_file()
+        if failure_marker is not None
+        else bool(
+            re.search(
+                r"(?m)^error: claude executable not found in PATH or \$HOME/\.local/bin/claude\r?$",
+                output,
+            )
+        )
+    )
+    if missing:
+        print(f"error: {_CLAUDE_NOT_FOUND}")
+        raise RuntimeError(f"Claude did not start: {_CLAUDE_NOT_FOUND}")
+
+
+def _wait_for_ready(sid: int, timeout: float = 30.0, *, failure_marker: Path | None = None) -> None:
     """Require Claude's rendered UI before delivering any text to the session.
 
     Claude Code startup takes 5-10 seconds.  A fixed ``time.sleep(3)`` often
@@ -169,24 +192,24 @@ def _wait_for_ready(sid: int, timeout: float = 30.0) -> None:
     print(f"waiting for session {sid} to be ready (polling capture)...")
     deadline = time.time() + timeout
     while time.time() < deadline:
+        _check_missing_claude(failure_marker)
         try:
             output = ava.shell.sessions.capture(sid, scrollback=False)
         except ValueError as exc:
+            _check_missing_claude(failure_marker)
             raise RuntimeError(
                 f"Claude session {sid} exited before its UI appeared; check the executable "
                 "in PATH or $HOME/.local/bin/claude"
             ) from exc
-        if "claude executable not found" in output:
-            raise RuntimeError(
-                "Claude did not start: claude executable not found in PATH or "
-                "$HOME/.local/bin/claude"
-            )
+        _check_missing_claude(failure_marker, output)
         if _claude_ui_ready(output):
             time.sleep(2)  # brief stability pause
             try:
                 stable = ava.shell.sessions.capture(sid, scrollback=False)
             except ValueError as exc:
+                _check_missing_claude(failure_marker)
                 raise RuntimeError(f"Claude session {sid} exited before it became ready") from exc
+            _check_missing_claude(failure_marker, stable)
             if _claude_ui_ready(stable):
                 print("  -> ready (Claude Code UI)")
                 return
@@ -334,6 +357,7 @@ def _claude_command(
     workspace: Path,
     caller_instance: str | None = None,
     *,
+    failure_marker: Path | None = None,
     relay_plugin_dir: Path | None = None,
 ) -> str:
     from shared.external_caller import launch_caller_assignment
@@ -347,6 +371,11 @@ def _claude_command(
             f"AVA_IMPERSONATION_RELAY_PY={shlex.quote(sys.executable)} && "
         )
         plugin_flag = f" --plugin-dir {shlex.quote(relay_plugin_dir.as_posix())}"
+    mark_failure = (
+        f"printf '%s\\n' 'claude executable not found' > {shlex.quote(failure_marker.as_posix())}; "
+        if failure_marker is not None
+        else ""
+    )
     return (
         f"cd {shlex.quote(workspace.as_posix())} && "
         "unset ANTHROPIC_API_KEY && "
@@ -354,6 +383,7 @@ def _claude_command(
         "claude_bin=$(command -v claude); "
         'if [ -z "$claude_bin" ]; then claude_bin="$HOME/.local/bin/claude"; fi; '
         'if [ ! -x "$claude_bin" ]; then '
+        f"{mark_failure}"
         "printf '%s\\n' 'error: claude executable not found in PATH or "
         "$HOME/.local/bin/claude' >&2; exit 127; fi; "
         f"{launch_caller_assignment('claude_code', caller_instance)}"
@@ -471,10 +501,13 @@ def _run_supervised_launch(
     # reclaimed.
     sid = ava.shell.sessions.new(name=session_name, ttl=ttl_seconds)
     try:
-        ava.shell.sessions.send(sid, _claude_command(workspace, caller_instance))
-        print(f"+ persistent shell session: {sid} ({session_name})")
-
-        _wait_for_ready(sid)
+        with tempfile.TemporaryDirectory(prefix="ava-claude-launch-") as marker_dir:
+            marker = Path(marker_dir) / "missing-claude"
+            ava.shell.sessions.send(
+                sid, _claude_command(workspace, caller_instance, failure_marker=marker)
+            )
+            print(f"+ persistent shell session: {sid} ({session_name})")
+            _wait_for_ready(sid, failure_marker=marker)
 
         contract = _contract_path()
         msg = (
@@ -550,11 +583,18 @@ def _run_takeover_launch(
             session_id=sid,
             session_name=full_name,
         )
-        ava.shell.sessions.send(
-            sid,
-            _claude_command(workspace, caller_instance, relay_plugin_dir=plugin_dir),
-        )
-        _wait_for_ready(sid)
+        with tempfile.TemporaryDirectory(prefix="ava-claude-launch-") as marker_dir:
+            marker = Path(marker_dir) / "missing-claude"
+            ava.shell.sessions.send(
+                sid,
+                _claude_command(
+                    workspace,
+                    caller_instance,
+                    failure_marker=marker,
+                    relay_plugin_dir=plugin_dir,
+                ),
+            )
+            _wait_for_ready(sid, failure_marker=marker)
         message = _takeover_bootstrap_message(
             owner_agent_id, takeover_name, takeover_brief, relay_resident=plugin_dir is not None
         )

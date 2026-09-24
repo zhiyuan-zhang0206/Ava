@@ -149,6 +149,23 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
             + "bash prompt $ " * 10
         )
 
+    original_command = spawn_claude._claude_command
+
+    def _missing_command(
+        workspace: Path,
+        caller_instance: str | None = None,
+        *,
+        failure_marker: Path,
+        relay_plugin_dir: Path | None = None,
+    ) -> str:
+        failure_marker.write_text("claude executable not found\n")
+        return original_command(
+            workspace,
+            caller_instance,
+            failure_marker=failure_marker,
+            relay_plugin_dir=relay_plugin_dir,
+        )
+
     def _publish(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
         return active
 
@@ -166,6 +183,7 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
     monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send", _send)
     monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
     monkeypatch.setattr(spawn_claude.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(spawn_claude, "_claude_command", _missing_command)
     monkeypatch.setattr(spawn_claude.coding_session_owner, "publish_active", _publish)
     monkeypatch.setattr(spawn_claude.coding_session_owner, "terminate_generation", _terminate)
     monkeypatch.setattr(spawn_claude, "_verify_start_receipt", _receipt)
@@ -226,7 +244,7 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         sent.append(content)
         events.append("send")
 
-    def _ready(_session_id: int) -> None:
+    def _ready(_session_id: int, **_kwargs: object) -> None:
         events.append("ready")
 
     def _receipt(_session_id: int, rebuild_bootstrap: Callable[[], str]) -> None:
@@ -291,8 +309,8 @@ def test_resident_launch_clears_a_stale_credential_stub(
     def _send(_sid: int, content: str) -> None:
         sent.append(content)
 
-    def _ready(_sid: int) -> None:
-        return None
+    def _ready(_sid: int, *, failure_marker: Path) -> None:
+        assert failure_marker.parent.is_dir()
 
     def _receipt(_sid: int, _rebuild: Callable[[], str]) -> None:
         return None
