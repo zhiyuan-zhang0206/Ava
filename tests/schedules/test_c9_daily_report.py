@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 
 import psycopg
 import pytest
@@ -286,6 +287,8 @@ def test_fire_reports_failure_without_raising(
     assert len(failures) == 1
     assert "RuntimeError" in failures[0]
     assert "gh api down" in failures[0]
+    assert not fire_slot_once(slot, None, fire=lambda _payload: pytest.fail("unexpected retry"))
+    assert len(failures) == 1
 
 
 def test_fire_outside_a_claim_fails_loud() -> None:
@@ -293,3 +296,44 @@ def test_fire_outside_a_claim_fails_loud() -> None:
     assert claimed_slot() is None
     with pytest.raises(RuntimeError, match="outside a claimed slot"):
         module._fire(None)
+
+
+def test_report_agent_override_rejects_nonnumeric_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_schedule_module()
+    monkeypatch.setenv(module._REPORT_AGENT_ENV, "not-an-id")
+
+    with pytest.raises(RuntimeError, match="AVA_CI_USAGE_REPORT_AGENT must be a numeric agent id"):
+        module._report_agent()
+
+
+def test_report_failure_uses_exact_label_and_existing_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_schedule_module()
+    monkeypatch.delenv(module._REPORT_AGENT_ENV, raising=False)
+    unrelated = SimpleNamespace(agent_id=31, label="another", status=module.S.RUNNING)
+    target = SimpleNamespace(agent_id=17, label=module._REPORT_LABEL, status=module.S.TERMINATED)
+    find = Mock(
+        side_effect=[
+            SimpleNamespace(agents=[unrelated], next_cursor=31),
+            SimpleNamespace(agents=[target], next_cursor=None),
+        ]
+    )
+    send = Mock()
+    monkeypatch.setattr(module.ava.agents, "list_agents", find)
+    monkeypatch.setattr(module.ava.agents, "send_message", send)
+
+    module._report_failure("collector failed")
+
+    assert [call.kwargs for call in find.call_args_list] == [
+        {"scope": "all", "query": module._REPORT_LABEL, "before_id": None},
+        {"scope": "all", "query": module._REPORT_LABEL, "before_id": 31},
+    ]
+    send.assert_called_once_with(
+        17,
+        "C9 daily reconciliation failed:\ncollector failed\n"
+        "Check the schedule log; backfill the missed window manually with "
+        "`scripts/ci_accounting.py --since ... --until ... --append-ledger`.",
+    )

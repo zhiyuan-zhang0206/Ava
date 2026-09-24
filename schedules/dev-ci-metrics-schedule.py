@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -15,9 +13,9 @@ import ava
 import shared
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import catch_up, claimed_slot, fire_slot_once
+from schedules.catchup import claimed_slot
+from schedules.daily_host import report_agent, run_daily_loop
 from shared.config import settings
-from shared.watcher import next_fire
 
 ensure_agent_status_members(S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics")
 
@@ -29,21 +27,7 @@ _REPO_ROOT = Path(shared.__file__).resolve().parents[1]
 
 
 def _report_agent() -> int:
-    configured = os.environ.get(_REPORT_AGENT_ENV)
-    if configured is not None and configured.strip():
-        agent_id = int(configured)
-        if agent_id <= 0:
-            raise RuntimeError(f"{_REPORT_AGENT_ENV} must be a positive agent id")
-        return agent_id
-    before_id = None
-    while True:
-        page = ava.agents.list_agents(scope="all", query=_REPORT_LABEL, before_id=before_id)
-        for agent in page.agents:
-            if agent.label == _REPORT_LABEL and agent.status in (S.RUNNING, S.IDLING, S.TERMINATED):
-                return agent.agent_id
-        if page.next_cursor is None:
-            raise RuntimeError(f"no report agent labelled {_REPORT_LABEL!r} is available")
-        before_id = page.next_cursor
+    return report_agent(_REPORT_AGENT_ENV, _REPORT_LABEL)
 
 
 def _report_failure(detail: str) -> None:
@@ -106,20 +90,7 @@ def _fire(_payload: None) -> None:
 
 
 def _main_loop() -> None:
-    catch_up([(CRON, None)], timezone=TZ, fire=_fire)
-    last_run_at = datetime.now(UTC)
-    while True:
-        now = datetime.now(UTC)
-        next_run = next_fire(CRON, after=now - timedelta(minutes=2), timezone=TZ)
-        if next_run <= last_run_at:
-            next_run = next_fire(CRON, after=last_run_at, timezone=TZ)
-        delay = (next_run - now).total_seconds()
-        if delay > 0:
-            time.sleep(min(delay, 3600))
-            continue
-        fire_slot_once(next_run, None, fire=_fire)
-        last_run_at = datetime.now(UTC)
-        time.sleep(120)
+    run_daily_loop(CRON, TZ, _fire)
 
 
 if __name__ == "__main__":
