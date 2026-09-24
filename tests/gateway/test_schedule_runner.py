@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -495,6 +497,32 @@ def test_script_filename(command: str, expected: str) -> None:
 #    so the manager's crash path gets a chance) ─────────────────────────────
 
 
+@contextmanager
+def _watch_stalls(
+    monkeypatch: pytest.MonkeyPatch, *, patch_sleep: bool = False
+) -> Generator[list[str], None, None]:
+    """Record real guard verdicts without exiting the test process."""
+    import gateway.schedule_runner as sr
+
+    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
+    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
+    fired: list[str] = []
+
+    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
+        fired.append(msg)
+
+    monkeypatch.setattr(sr, "_stall_action", record_stall)
+    if patch_sleep:
+        sr._patch_park_detection()
+    stop = sr._start_stall_guard(1, None)
+    try:
+        yield fired
+    finally:
+        stop.set()
+        if patch_sleep:
+            sr._restore_park_detection()
+
+
 def test_stall_guard_fires_on_a_stalled_main_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -503,27 +531,13 @@ def test_stall_guard_fires_on_a_stalled_main_thread(
     the guard thread and is not exercised in-process)."""
     import time
 
-    import gateway.schedule_runner as sr
-
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
-    fired: list[str] = []
-    monkeypatch.setattr(
-        sr,
-        "_stall_action",
-        lambda _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    stop = sr._start_stall_guard(1, None)
-    try:
+    with _watch_stalls(monkeypatch) as fired:
         deadline = time.monotonic() + 2.0
         while not fired and time.monotonic() < deadline:
             x = 0
             x += 1  # a stable, non-park frame for the guard to observe
         assert fired, "stall guard never fired on a stalled main thread"
         assert "stalled" in fired[0]
-    finally:
-        stop.set()
 
 
 def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
@@ -569,19 +583,7 @@ def test_stall_guard_ignores_a_live_child_wait(
     """A child wait may outlast the stall budget; its caller owns the timeout."""
     import subprocess
 
-    import gateway.schedule_runner as sr
-
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
-    fired: list[str] = []
-
-    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
-        fired.append(msg)
-
-    monkeypatch.setattr(sr, "_stall_action", record_stall)
-
-    stop = sr._start_stall_guard(1, None)
-    try:
+    with _watch_stalls(monkeypatch) as fired:
         subprocess.run(
             [sys.executable, "-c", "import time; time.sleep(0.5)"],
             capture_output=capture_output,
@@ -589,8 +591,6 @@ def test_stall_guard_ignores_a_live_child_wait(
             check=True,
         )
         assert fired == []
-    finally:
-        stop.set()
 
 
 def test_stall_guard_fires_on_select_outside_subprocess(
@@ -600,27 +600,13 @@ def test_stall_guard_fires_on_select_outside_subprocess(
     import selectors
     import socket
 
-    import gateway.schedule_runner as sr
-
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
-    fired: list[str] = []
-
-    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
-        fired.append(msg)
-
-    monkeypatch.setattr(sr, "_stall_action", record_stall)
-
     reader, writer = socket.socketpair()
     with reader, writer, selectors.DefaultSelector() as selector:
         selector.register(reader, selectors.EVENT_READ)
-        stop = sr._start_stall_guard(1, None)
-        try:
+        with _watch_stalls(monkeypatch) as fired:
             selector.select(timeout=0.5)
             assert fired, "stall guard ignored a socket wait outside subprocess"
             assert "select" in fired[0]
-        finally:
-            stop.set()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="preexec_fn requires POSIX")
@@ -631,22 +617,10 @@ def test_stall_guard_fires_during_subprocess_spawn(
     import subprocess
     import time
 
-    import gateway.schedule_runner as sr
-
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
-    fired: list[str] = []
-
-    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
-        fired.append(msg)
-
     def slow_spawn() -> None:
         time.sleep(0.5)
 
-    monkeypatch.setattr(sr, "_stall_action", record_stall)
-    sr._patch_park_detection()
-    stop = sr._start_stall_guard(1, None)
-    try:
+    with _watch_stalls(monkeypatch, patch_sleep=True) as fired:
         subprocess.run(
             [sys.executable, "-c", "pass"],
             capture_output=True,
@@ -656,9 +630,6 @@ def test_stall_guard_fires_during_subprocess_spawn(
         )
         assert fired, "stall guard ignored subprocess spawn"
         assert "_execute_child" in fired[0]
-    finally:
-        stop.set()
-        sr._restore_park_detection()
 
 
 def test_stall_guard_fires_during_subprocess_argument_conversion(
@@ -670,16 +641,6 @@ def test_stall_guard_fires_during_subprocess_argument_conversion(
     import subprocess
     import threading
 
-    import gateway.schedule_runner as sr
-
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
-    fired: list[str] = []
-
-    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
-        fired.append(msg)
-
-    monkeypatch.setattr(sr, "_stall_action", record_stall)
     reader, writer = socket.socketpair()
     with reader, writer:
         reader.settimeout(2)
@@ -691,23 +652,98 @@ def test_stall_guard_fires_during_subprocess_argument_conversion(
 
         # EOF releases every conversion of the same argument, not just the first.
         wake = threading.Timer(0.5, writer.close)
-        sr._patch_park_detection()
-        stop = sr._start_stall_guard(1, None)
-        wake.start()
+        with _watch_stalls(monkeypatch, patch_sleep=True) as fired:
+            wake.start()
+            try:
+                subprocess.run(  # noqa: S603 - test PathLike always resolves to sys.executable
+                    [SlowExecutable(), "-c", "pass"],
+                    capture_output=True,
+                    timeout=0.2,
+                    check=True,
+                )
+                assert fired, "stall guard ignored subprocess argument conversion"
+                assert "__fspath__" in fired[0]
+            finally:
+                wake.cancel()
+                wake.join()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX subprocess flush and pipe semantics")
+def test_stall_guard_fires_during_subprocess_stdin_flush(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """communicate's entry flush can block before it checks its deadline."""
+    import os
+    import subprocess
+    import threading
+
+    with subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(2)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        bufsize=8192,
+    ) as child:
+        assert child.stdin is not None
+        fd = child.stdin.fileno()
+        os.set_blocking(fd, False)
         try:
-            subprocess.run(  # noqa: S603 - test PathLike always resolves to sys.executable
-                [SlowExecutable(), "-c", "pass"],
-                capture_output=True,
-                timeout=0.2,
-                check=True,
-            )
-            assert fired, "stall guard ignored subprocess argument conversion"
-            assert "__fspath__" in fired[0]
+            while True:
+                os.write(fd, b"x" * 65536)
+        except BlockingIOError:
+            pass  # The actual pipe capacity is full, on both macOS and Linux.
         finally:
-            stop.set()
-            sr._restore_park_detection()
-            wake.cancel()
-            wake.join()
+            os.set_blocking(fd, True)
+        assert child.stdin.write(b"x") == 1  # Leave one byte in BufferedWriter.
+
+        wake = threading.Timer(0.5, child.terminate)
+        with _watch_stalls(monkeypatch, patch_sleep=True) as fired:
+            wake.start()
+            try:
+                with pytest.raises(subprocess.TimeoutExpired):
+                    child.communicate(timeout=0.01)
+                assert fired, "stall guard ignored subprocess stdin.flush"
+                assert "_communicate" in fired[0]
+            finally:
+                wake.cancel()
+                wake.join()
+                child.kill()
+                child.wait(timeout=2)
+
+
+def test_stall_guard_fires_during_subprocess_argument_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A selector in argument conversion is not communicate's selector wait."""
+    import os
+    import selectors
+    import socket
+    import subprocess
+    import threading
+
+    reader, writer = socket.socketpair()
+    with reader, writer, selectors.DefaultSelector() as selector:
+        selector.register(reader, selectors.EVENT_READ)
+
+        class SlowExecutable(os.PathLike[str]):
+            def __fspath__(self) -> str:
+                selector.select(timeout=2)
+                return sys.executable
+
+        # EOF makes every conversion ready; the timeout bounds a broken timer.
+        wake = threading.Timer(0.5, writer.close)
+        with _watch_stalls(monkeypatch, patch_sleep=True) as fired:
+            wake.start()
+            try:
+                subprocess.run(  # noqa: S603 - test PathLike always resolves to sys.executable
+                    [SlowExecutable(), "-c", "pass"],
+                    capture_output=True,
+                    timeout=0.2,
+                    check=True,
+                )
+                assert fired, "stall guard ignored a selector in subprocess argument conversion"
+            finally:
+                wake.cancel()
+                wake.join()
 
 
 def test_run_hung_subprocess_times_out_and_records_error(
