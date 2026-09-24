@@ -3,7 +3,7 @@
 The daemon must exit within a small bound of SIGTERM even with a
 default-executor job mid-flight: the hard exit skips the executor join that
 stalls ``asyncio.run``'s close (task #4224 — see ``daemon_shutdown_test_support``
-for the harness and the daemon's ``_hard_exit`` for the mechanism).
+for the harness and ``shared.daemon_shutdown.hard_exit`` for the mechanism).
 """
 
 from __future__ import annotations

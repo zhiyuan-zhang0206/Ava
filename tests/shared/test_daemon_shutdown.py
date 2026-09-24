@@ -1,5 +1,6 @@
 """Common signal registration and real supervised-daemon cleanup."""
 
+import asyncio
 import os
 import shlex
 import signal
@@ -14,6 +15,69 @@ from shared import daemon_shutdown
 from shared.platform import IS_WINDOWS
 from shared.session_backend import PosixProcSessionBackend, WinprocSessionBackend
 from tests.shared.poll_until import poll_until
+
+
+def test_cancel_and_drain_runs_cleanup_and_returns_only_ordinary_failures() -> None:
+    cleaned: list[str] = []
+    tasks: list[asyncio.Task[None]] = []
+
+    async def cancelled() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaned.append("cancelled")
+
+    async def failed() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaned.append("failed")
+            raise RuntimeError("cleanup failed")
+
+    async def start() -> None:
+        tasks.append(asyncio.create_task(cancelled()))
+        tasks.append(asyncio.create_task(failed()))
+        await asyncio.sleep(0)
+
+    runner = asyncio.Runner()
+    try:
+        runner.run(start())
+        failures = daemon_shutdown.cancel_and_drain(runner)
+        assert sorted(cleaned) == ["cancelled", "failed"]
+        assert len(failures) == 1
+        assert isinstance(failures[0], RuntimeError)
+        assert str(failures[0]) == "cleanup failed"
+    finally:
+        runner.close()
+
+
+def test_hard_exit_flushes_sinks_in_order_before_exiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loguru import logger as loguru_logger
+
+    calls: list[str] = []
+
+    class _Stream:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def flush(self) -> None:
+            calls.append(self.name)
+
+    def exit_process(code: int) -> None:
+        calls.append(f"exit:{code}")
+        raise SystemExit(code)
+
+    monkeypatch.setattr(loguru_logger, "remove", lambda: calls.append("loguru"))
+    monkeypatch.setattr(daemon_shutdown.logging, "shutdown", lambda: calls.append("logging"))
+    monkeypatch.setattr(daemon_shutdown.sys, "stdout", _Stream("stdout"))
+    monkeypatch.setattr(daemon_shutdown.sys, "stderr", _Stream("stderr"))
+    monkeypatch.setattr(daemon_shutdown.os, "_exit", exit_process)
+    with pytest.raises(SystemExit) as stopped:
+        daemon_shutdown.hard_exit(7)
+    assert stopped.value.code == 7
+    assert calls == ["loguru", "logging", "stdout", "stderr", "exit:7"]
 
 
 def test_shutdown_line_avoids_the_unregistered_event_alias(

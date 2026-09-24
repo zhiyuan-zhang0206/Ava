@@ -844,9 +844,9 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
     """A crash escaping `_main` still reaches the log with its traceback and still
     leaves a non-zero code for the supervisor.
 
-    Driven in a subprocess because `main` now ends in `_hard_exit` and never
+    Driven in a subprocess because `main` ends in shared `hard_exit` and never
     returns — the price of skipping the interpreter teardown that a wedged arm
-    hangs in (see `_hard_exit`). The contract it used to keep by re-raising is the
+    hangs in (see `shared.daemon_shutdown`). The contract it used to keep by re-raising is the
     same one asserted here, just observed from outside: logged, and rc != 0."""
     script = textwrap.dedent(f"""
         import sys
@@ -1661,7 +1661,7 @@ def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
 
     Nothing in-process can assert that: the failure IS the interpreter refusing to
     stop. So this drives the daemon's own `_op_thread_pool` / `_shutdown_op_pool` /
-    `_hard_exit` in a real subprocess with a genuinely stuck arm, and asserts the
+    shared `_hard_exit` alias in a real subprocess with a genuinely stuck arm, and asserts the
     process is gone. It fails by timing out against the pre-fix code.
     """
     ready = tmp_path / "wedged"
