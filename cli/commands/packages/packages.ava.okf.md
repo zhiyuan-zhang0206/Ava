@@ -71,7 +71,7 @@ full per-package state lives in `status --json`:
 
 ## The install gate
 
-Every ingestion path above runs `shared/skill_scan.py` over the package before
+Every ingestion path above runs `shared/packages/skills/skill_scan.py` over the package before
 the first byte is copied, and **refuses on a critical finding** — the load dir is
 left untouched and the report names file, line and matched text. `--accept-risk`
 is the override; it installs and records the waived rule ids, and it never

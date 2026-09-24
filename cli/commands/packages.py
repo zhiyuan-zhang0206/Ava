@@ -356,7 +356,7 @@ def cmd_packages_rollback(name: str, *, force: bool = False) -> int:
     watermark (`applied_rev`) is left where it was: a later refresh applies only
     what changed after the revoked rev."""
     from shared import install_registry, paths
-    from shared.skill_names import match_key
+    from shared.packages.skills.skill_names import match_key
 
     try:
         registry = install_registry.load()
@@ -420,7 +420,7 @@ def cmd_packages_policy(
     settings)."""
     from cli.commands._packages_refresh import parse_duration
     from shared import install_registry
-    from shared.skill_names import match_key
+    from shared.packages.skills.skill_names import match_key
 
     if update_mode is None and check_every is None:
         print("[ava packages policy] pass --update-mode and/or --check-every", file=sys.stderr)

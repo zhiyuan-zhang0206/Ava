@@ -56,7 +56,7 @@ renders that projection; `.` separates namespace segments there, while the
 display `identifier()` joins the same segments with `:`
 (`ava.skills.web-ai:deep-research`).
 
-`shared/skill_names.py` is the single fold between them — `match_key` inbound
+`shared/packages/skills/skill_names.py` is the single fold between them — `match_key` inbound
 (dash→underscore, and `:`→`.` so an ecosystem-style `ava-code:pr` resolves),
 `display_name` outbound, `find` where a name has to become a real directory or
 registry key. Every dash/underscore comparison in the system routes through it,

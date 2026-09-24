@@ -9,7 +9,7 @@
 > This doc holds only the open work.
 
 In one line: every package entering `$AVA_HOME/skills/` from outside the
-checkout is scanned by `shared/skill_scan.py` and refused on a critical finding
+checkout is scanned by `shared/packages/skills/skill_scan.py` and refused on a critical finding
 (`--accept-risk` overrides, loudly and on the record), and it lands at trust tier
 `unreviewed` until a human runs `ava skill trust`.
 

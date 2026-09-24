@@ -27,7 +27,7 @@ not close off the possibility (see the module docstring in `ava/security.py`).
 Third-party **skills** are the one ingestion path with a gate of its own, for the
 same reason: a skill is text an agent is instructed to follow, so a malicious one
 needs no exploit. Every package installed from outside this repo is read by
-`shared/skill_scan.py` first, and a critical supply-chain pattern (a
+`shared/packages/skills/skill_scan.py` first, and a critical supply-chain pattern (a
 download-and-execute pipeline, an obfuscated payload, a credential store read
 paired with an outbound sink, instructions to work behind the user's back)
 **refuses the install**. It is pattern matching, so the same sentence applies:

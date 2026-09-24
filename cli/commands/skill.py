@@ -15,7 +15,7 @@ registered and a disabled one stays on disk but out of every agent's tree.
 - `trust <name>`     — record that a human read this package (tier "reviewed").
 
 Everything arriving through `install` / `register` is third-party content, so
-it goes through `shared.skill_scan` first: a critical finding refuses the
+it goes through `shared.packages.skills.skill_scan` first: a critical finding refuses the
 install outright and `--accept-risk` is the recorded override. Nothing here
 promotes a package's trust tier on its own — a clean scan means "no rule
 matched", which is why `trust` is a separate verb a person runs.
@@ -63,7 +63,7 @@ def cmd_skill_install(
     unmodified. A local path is read in place (never moved), so a skill tree
     that lives in a checkout can be installed straight from it.
 
-    Every package is scanned first (`shared.skill_scan`). A critical finding
+    Every package is scanned first (`shared.packages.skills.skill_scan`). A critical finding
     aborts the whole install with the report; `--accept-risk` overrides it and
     records which rules were waived.
     """
@@ -129,7 +129,8 @@ def cmd_skill_scan(target: str) -> int:
     to re-scan an installed package after the rule table grows. Exit code 2 on
     critical findings, so a caller can gate on it; 0 when only notices remain.
     """
-    from shared import install_registry, paths, skill_scan
+    from shared import install_registry, paths
+    from shared.packages.skills import skill_scan
 
     root = Path(target).expanduser()
     if not root.is_dir():
@@ -193,7 +194,7 @@ def cmd_skill_disable(name: str) -> int:
 
 def _set_enabled(name: str, *, enabled: bool) -> int:
     from shared import install_registry
-    from shared.skill_names import find
+    from shared.packages.skills.skill_names import find
 
     verb = "enable" if enabled else "disable"
     with install_registry.mutate() as registry:
@@ -227,9 +228,9 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
     way around every check `ava skill install` makes.
     """
     from shared import install_registry, paths
-    from shared.skill_index import SkillFormatError
-    from shared.skill_index import parse_skill_frontmatter as _parse_frontmatter
-    from shared.skill_names import find
+    from shared.packages.skills.skill_index import SkillFormatError
+    from shared.packages.skills.skill_index import parse_skill_frontmatter as _parse_frontmatter
+    from shared.packages.skills.skill_names import find
 
     from ._skill_package import SkillScanRefused, scan_report
 

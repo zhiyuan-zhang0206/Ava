@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import skill_scan
+from shared.packages.skills import skill_scan
 
 _FRONTMATTER = "---\nname: {name}\ndescription: does a thing, use when asked\n---\n\n"
 
