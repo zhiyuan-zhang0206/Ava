@@ -77,8 +77,9 @@ def test_claude_command_exits_when_executable_is_unavailable(tmp_path: Path) -> 
     path = tmp_path / "empty-path"
     path.mkdir()
 
+    marker = tmp_path / "missing-claude"
     result = subprocess.run(  # noqa: S603 - isolated shell tests the fail-closed launcher command
-        ["/bin/bash", "-c", spawn_claude._claude_command(tmp_path)],
+        ["/bin/bash", "-c", spawn_claude._claude_command(tmp_path, failure_marker=marker)],
         env={"HOME": str(home), "PATH": str(path)},
         capture_output=True,
         text=True,
@@ -87,6 +88,100 @@ def test_claude_command_exits_when_executable_is_unavailable(tmp_path: Path) -> 
 
     assert result.returncode == 127
     assert "claude executable not found in PATH or $HOME/.local/bin/claude" in result.stderr
+    assert marker.read_text() == "claude executable not found\n"
+
+
+def test_command_echo_is_not_a_missing_executable_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    command_echo = "shell $ " + spawn_claude._claude_command(tmp_path)
+    ui = "Claude Code v2.1.278\n? for shortcuts\n"
+    captures = iter((command_echo, ui, ui))
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return next(captures)
+
+    def _no_sleep(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
+
+    spawn_claude._wait_for_ready(7, timeout=1, failure_marker=tmp_path / "missing-claude")
+
+
+def test_command_echo_without_ui_times_out(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    command_echo = "shell $ " + spawn_claude._claude_command(tmp_path)
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return command_echo
+
+    def _no_sleep(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="Claude Code UI did not appear"):
+        spawn_claude._wait_for_ready(7, timeout=0.01, failure_marker=tmp_path / "missing-claude")
+
+
+def test_ready_accepts_recorded_claude_2_1_281_panel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    panel = (
+        " ▐▛███▛█   Claude Code v2.1.281\n"
+        "▝▜██████▀  Opus 5.5 · Claude Pro\n"
+        "  ▝▝ ▝▝    <cwd>\n"
+        "  ... (usage note)\n"
+        "─────────────────────────────────────────────\n"
+        '\u276f\u00a0Try "fix lint errors"\n'
+        "─────────────────────────────────────────────\n"
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n"
+    )
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return panel
+
+    def _no_sleep(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
+
+    spawn_claude._wait_for_ready(7, timeout=1)
+
+
+def test_ready_accepts_other_unicode_spacing_without_a_fixed_suggestion() -> None:
+    panel = 'Claude Code v2.1.281\n\u276f\u2009Try "explain this file"\nbypass permissions on\n'
+    assert spawn_claude._claude_ui_ready(panel)
+
+
+def test_ready_rejects_non_claude_panel_with_a_composer() -> None:
+    panel = 'Other CLI v2.1.281\n\u276f\u00a0Try "fix lint errors"\nbypass permissions on\n'
+    assert not spawn_claude._claude_ui_ready(panel)
+
+
+def test_exited_session_reports_missing_executable_from_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = tmp_path / "missing-claude"
+    marker.write_text("claude executable not found\n")
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        raise ValueError("session ended")
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    with pytest.raises(
+        RuntimeError, match=r"claude executable not found in PATH or \$HOME/\.local/bin/claude"
+    ):
+        spawn_claude._wait_for_ready(7, failure_marker=marker)
+    assert (
+        "claude executable not found in PATH or $HOME/.local/bin/claude" in capsys.readouterr().out
+    )
 
 
 def test_ready_requires_claude_ui_not_a_long_shell_prompt(
@@ -174,6 +269,14 @@ def test_supervised_launch_does_not_send_contract_to_a_shell(
         assert scrollback is False
         return "error: claude executable not found in PATH or $HOME/.local/bin/claude\n"
 
+    original_command = spawn_claude._claude_command
+
+    def _missing_command(
+        workspace: Path, caller_instance: str | None = None, *, failure_marker: Path
+    ) -> str:
+        failure_marker.write_text("claude executable not found\n")
+        return original_command(workspace, caller_instance, failure_marker=failure_marker)
+
     def _kill(sid: int) -> None:
         killed.append(sid)
 
@@ -183,6 +286,7 @@ def test_supervised_launch_does_not_send_contract_to_a_shell(
     monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send", _send)
     monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
     monkeypatch.setattr(spawn_claude.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(spawn_claude, "_claude_command", _missing_command)
 
     with pytest.raises(RuntimeError, match="claude executable not found"):
         spawn_claude._run_supervised_launch(
