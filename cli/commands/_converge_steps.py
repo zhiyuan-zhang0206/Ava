@@ -89,7 +89,7 @@ def _ensure_prod_editable_pth(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 
 def _ensure_prod_editable_dir_protection(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    """Block atomic editable-record replacement outside the sanctioned write window."""
+    """Protect editable records and launchers outside the sanctioned write window."""
     if os.name == "nt":
         return
     import shared.cluster_drift
@@ -97,18 +97,12 @@ def _ensure_prod_editable_dir_protection(ctx: ConvergeCtx) -> None:  # noqa: ARG
     from cli.commands.status import _update_in_flight
 
     if _update_in_flight():
-        print(
-            "  · prod site-packages protection skipped: cluster update in flight", file=sys.stderr
-        )
+        print("  · prod editable protection skipped: cluster update in flight", file=sys.stderr)
         return
     source_root = shared.cluster_drift.prod_source_dir()
     if source_root is None:
         return
-    directories = (
-        *shared.editable_install.editable_site_packages_dirs(source_root),
-        *shared.editable_install.editable_dist_info_dirs(source_root),
-    )
-    for directory in directories:
+    for directory in shared.editable_install.protected_editable_paths(source_root):
         if directory.stat().st_mode & 0o777 == 0o555:
             continue
         directory.chmod(0o555)
@@ -161,9 +155,9 @@ def _ensure_prod_editable_exec_gate(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         return
     detail = "\n".join(f"- {violation}" for violation in violations)
     print(f"  ✗ prod editable exec gate failed:\n{detail}", file=sys.stderr)
-    manual_recovery = f"cd {source_root} && uv sync --reinstall-package ava"
     raise RuntimeError(
-        f"prod editable exec gate failed:\n{detail}\nRun {manual_recovery} or ava cluster update."
+        f"prod editable exec gate failed:\n{detail}\nRun ava cluster update or use the "
+        "Manual editable-install recovery write-window recipe in conventions/runbook.md."
     )
 
 
