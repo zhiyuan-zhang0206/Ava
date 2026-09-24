@@ -20,6 +20,7 @@ import { Fragment, useCallback, useRef, type ReactNode, useEffect } from "react"
 import { LiveSectionsSkeleton, SectionSkeleton } from "@/components/inspector-panel-skeleton";
 import { InspectWidgetSection } from "@/components/inspector-widgets";
 import { Section } from "@/components/inspector-section";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { OpenNoticeDetail } from "@/components/open-notice-detail";
 import { WindowSelect } from "@/components/window-select";
 import { api } from "@/lib/api";
@@ -198,7 +199,10 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   // restore the scroll-to-top reset the remount used to give a new selection.
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    const viewport = scrollRef.current?.querySelector<HTMLDivElement>(
+      '[data-slot="scroll-area-viewport"]',
+    );
+    if (viewport) viewport.scrollTop = 0;
   }, [agentId]);
 
   // Open pages: SSE-driven cache (page_opened/page_closed fold in live), not a
@@ -386,13 +390,15 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         />
       </header>
 
-      <div ref={scrollRef} className={cn("overflow-y-auto px-4 py-3 text-xs", MIN_H_0, FLEX_1)}>
-        <div className="space-y-4">
-          {sections.map((section) => (
-            <Fragment key={section.key}>{section.node}</Fragment>
-          ))}
+      <ScrollArea ref={scrollRef} className={cn("text-xs", MIN_H_0, FLEX_1)}>
+        <div className="px-4 py-3">
+          <div className="space-y-4">
+            {sections.map((section) => (
+              <Fragment key={section.key}>{section.node}</Fragment>
+            ))}
+          </div>
         </div>
-      </div>
+      </ScrollArea>
     </>
   );
 

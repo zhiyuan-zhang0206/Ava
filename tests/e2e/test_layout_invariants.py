@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Locator, Page, Route, expect
@@ -176,6 +177,76 @@ _API_STUBS: dict[str, object] = {
         "shells": {"shells": []},
     },
     "/api/settings": {"settings": []},
+    "/api/agents/1/inspect/live": {
+        "agent_id": 1,
+        "machine": "test-host",
+        "status": "running",
+        "liveness_state": "online",
+        "last_probe_at": None,
+        "shells_available": True,
+        "shells": [{"id": 1, "name": "dev-server", "created_at": None, "uptime_seconds": 120}],
+        "config_overlay": {f"setting_{i}": f"value_{i}" for i in range(24)},
+        "preset_name": None,
+        "heartbeat": {
+            "interval_s": 300,
+            "next_at": None,
+            "paused_until": None,
+            "heartbeat_pending": False,
+            "last_pause": None,
+        },
+        "notice": None,
+        "spawned_at": "2026-09-17T00:00:00Z",
+        "started_at": "2026-09-17T00:00:05Z",
+    },
+    "/api/agents/1/inspect/statistics": {
+        "agent_id": 1,
+        "window_hours": 24,
+        "metadata": {
+            "collection": "observed",
+            "window_start": None,
+            "window_end": "2026-09-17T00:00:00Z",  # time-bomb-ok: historical metadata; no clock-dependent assertion
+            "sampled_at": "2026-09-17T00:00:00Z",
+            "collection_started_at": "2026-09-01T00:00:00Z",
+            "last_observed_at": "2026-09-17T00:00:00Z",
+            "cost": {"availability": "observed", "sources": ["observations"]},
+            "turns": {
+                "availability": "observed",
+                "sources": ["observations"],
+                "duration_precision": "exact",
+            },
+            "activity": {"availability": "observed", "sources": ["observations"]},
+            "lifecycle": {"availability": "observed", "sources": ["state_transitions"]},
+        },
+        "cost": {
+            "cost_usd": 0.42,
+            "unpriced_calls": 1,
+            "llm_calls": 142,
+            "tokens_in": 1200000,
+            "tokens_out": 84000,
+            "tokens_cached": 1100000,
+            "tokens_reasoning": 5000,
+            "cache_hit_pct": 91.7,
+        },
+        "stats": {
+            "turn_total": 7,
+            "turn_ok": 6,
+            "turn_p50_seconds": 3.1,
+            "turn_p90_seconds": 9.4,
+            "turn_min_seconds": 1.2,
+            "turn_max_seconds": 41,
+            "exec_ok": 51,
+            "exec_failed": 2,
+        },
+        "tps": {"lm_stage_tps": 42.5, "agent_lifecycle_tps": 8.3},
+        "activity": {
+            "active_seconds": 1800,
+            "alive_seconds": 3600,
+            "active_rate": 0.5,
+            "llm_seconds": 1200,
+            "exec_seconds": 450,
+        },
+    },
+    "/api/agents/1/inspect/widgets": [],
     "/api/agents/1/pending": [],
     "/api/pages": [],
     "/api/fleet/graph": {"nodes": [], "edges": []},
@@ -303,7 +374,13 @@ def _context(browser: Browser, width: int) -> BrowserContext:
 
 
 def _open(
-    ctx: BrowserContext, base_url: str, path: str, *, stub_api: bool, reconnect_sse: bool = True
+    ctx: BrowserContext,
+    base_url: str,
+    path: str,
+    *,
+    stub_api: bool,
+    reconnect_sse: bool = True,
+    open_inspector: bool = False,
 ) -> Page:
     page = ctx.new_page()
     # The fake EventSource is ALWAYS injected (timeline invariants need the
@@ -314,7 +391,11 @@ def _open(
         def _stub(route: Route) -> None:
             url = route.request.url
             endpoint = "/api/" + url.split("/api/", 1)[1].split("?", 1)[0]
-            body = _API_STUBS.get(endpoint)
+            body = (
+                {"settings": [{"key": "display.inspector_open", "value": True}]}
+                if open_inspector and endpoint == "/api/settings"
+                else _API_STUBS.get(endpoint)
+            )
             if body is not None:
                 route.fulfill(
                     status=200,
@@ -412,6 +493,32 @@ def _content_hover_point(viewport: Locator) -> tuple[float, float]:
     return x, y
 
 
+def _capture_inspector_states(page: Page, panel: Locator, prefix: str) -> None:
+    """Optional full-viewport evidence with the timeline visible beside the panel."""
+    evidence = Path(__file__).resolve().parents[2] / "tmp" / "evidence"
+    evidence.mkdir(parents=True, exist_ok=True)
+    scroller = panel.locator('[data-slot="scroll-area-viewport"], .overflow-y-auto').last
+    box = panel.bounding_box()
+    assert box is not None
+
+    page.mouse.move(1, 1)
+    page.wait_for_timeout(1200)
+    page.screenshot(path=str(evidence / f"{prefix}-rest.png"))
+
+    page.mouse.move(box["x"] + box["width"] - 5, box["y"] + box["height"] / 2)
+    page.wait_for_timeout(350)
+    page.screenshot(path=str(evidence / f"{prefix}-hover.png"))
+
+    page.mouse.move(box["x"] + 80, box["y"] + box["height"] / 2)
+    before = scroller.evaluate("el => el.scrollTop")
+    page.mouse.wheel(0, 400)
+    page.wait_for_function(
+        "([el, before]) => el.scrollTop !== before",
+        arg=[scroller.element_handle(), before],
+    )
+    page.screenshot(path=str(evidence / f"{prefix}-scroll.png"))
+
+
 def test_timeline_scrollbar_hover_reveal(
     playwright_browser: Browser, _frontend_target: str
 ) -> None:
@@ -465,6 +572,86 @@ def test_timeline_scrollbar_hover_reveal(
         )
         assert _no_page_scroll(page), "scroll reveal widened the document"
         _assert_scrollbar_state(page, track, "0", "idle hide")
+    finally:
+        ctx.close()
+
+
+def test_inspector_scrollbar_hover_reveal(
+    playwright_browser: Browser, _frontend_target: str
+) -> None:
+    """The inspector has the same overlay scroll surface as the timeline."""
+    if _OVERRIDE_BASE_URL:
+        pytest.skip("the inspector scroll matrix requires deterministic stubbed sections")
+    ctx = _context(playwright_browser, 1280)
+    try:
+        page = _open(
+            ctx,
+            _frontend_target,
+            "/",
+            stub_api=not _OVERRIDE_BASE_URL,
+            reconnect_sse=False,
+            open_inspector=True,
+        )
+        _wait_layout_settled(page)
+        assert page.evaluate("matchMedia('(hover: hover)').matches")
+        panel = (
+            page.locator("header > span")
+            .get_by_text("Inspector", exact=True)
+            .locator("xpath=ancestor::aside[1]")
+        )
+        expect(panel).to_be_visible()
+        expect(page.locator('[data-testid="timeline-surface"]')).to_be_visible()
+        prefix = os.environ.get("AVA_SCROLLBAR_EVIDENCE_PREFIX")
+        if prefix:
+            _capture_inspector_states(page, panel, prefix)
+
+        surface = panel.locator('[data-slot="scroll-area"]')
+        viewport = surface.locator('[data-slot="scroll-area-viewport"]')
+        track = surface.locator('[data-slot="scroll-area-scrollbar"]')
+        content = viewport.locator(":scope > div > div")
+        expect(surface).to_be_attached()
+        expect(track).to_be_attached()
+        assert viewport.evaluate("el => el.scrollHeight > el.clientHeight")
+        assert viewport.evaluate("el => el.offsetWidth === el.clientWidth"), (
+            "inspector viewport reserves width for a native scrollbar"
+        )
+        thumb_class = track.locator('[data-slot="scroll-area-thumb"]').get_attribute("class")
+        assert thumb_class is not None and "bg-border" in thumb_class
+
+        page.mouse.move(1, 1)
+        _assert_scrollbar_state(page, track, "0", "inspector at rest")
+        before = {
+            "width": viewport.evaluate("el => el.clientWidth"),
+            "rect": content.evaluate("el => el.getBoundingClientRect().toJSON()"),
+        }
+
+        track_x, track_y = _invisible_track_point(track)
+        page.mouse.move(track_x, track_y)
+        _assert_scrollbar_state(page, track, "1", "inspector hovered")
+        _assert_scrollbar_layout(viewport, content, before)
+
+        page.mouse.move(1, 1)
+        _assert_scrollbar_state(page, track, "0", "inspector hidden")
+        content_x, content_y = _content_hover_point(viewport)
+        page.mouse.move(content_x, content_y)
+        page.wait_for_timeout(350)
+        _assert_scrollbar_state(page, track, "0", "inspector content hover")
+
+        scroll_top = viewport.evaluate("el => el.scrollTop")
+        max_scroll = viewport.evaluate("el => el.scrollHeight - el.clientHeight")
+        page.mouse.wheel(0, 400 if scroll_top < max_scroll / 2 else -400)
+        page.wait_for_function(
+            "([el, before]) => el.scrollTop !== before",
+            arg=[viewport.element_handle(), scroll_top],
+        )
+        page.wait_for_function(
+            "el => Number(getComputedStyle(el).opacity) > 0.95",
+            arg=track.element_handle(),
+            timeout=2000,
+        )
+        assert viewport.evaluate("el => el.clientWidth") == before["width"]
+        assert _no_page_scroll(page), "inspector scroll reveal widened the document"
+        _assert_scrollbar_state(page, track, "0", "inspector idle hide")
     finally:
         ctx.close()
 
