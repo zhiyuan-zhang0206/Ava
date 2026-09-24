@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import re
 import shlex
 import sys
 import time
@@ -153,22 +154,47 @@ def _contract_path() -> Path:
     return Path(__file__).resolve().parent / "collaboration_protocol.md"
 
 
+def _claude_ui_ready(output: str) -> bool:
+    """The title alone also appears on setup dialogs; require the composer hint."""
+    return bool(re.search(r"\bClaude\s+Code\b", output)) and "? for shortcuts" in output
+
+
 def _wait_for_ready(sid: int, timeout: float = 30.0) -> None:
-    """Poll ``ava.shell.sessions.capture`` until the tool has rendered its UI.
+    """Require Claude's rendered UI before delivering any text to the session.
 
     Claude Code startup takes 5-10 seconds.  A fixed ``time.sleep(3)`` often
     sends the contract message before the TUI is ready, causing it to be lost.
+    A long shell prompt is not a ready Claude panel.
     """
     print(f"waiting for session {sid} to be ready (polling capture)...")
     deadline = time.time() + timeout
     while time.time() < deadline:
-        output = ava.shell.sessions.capture(sid, scrollback=False)
-        if len(output) > 50:
+        try:
+            output = ava.shell.sessions.capture(sid, scrollback=False)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Claude session {sid} exited before its UI appeared; check the executable "
+                "in PATH or $HOME/.local/bin/claude"
+            ) from exc
+        if "claude executable not found" in output:
+            raise RuntimeError(
+                "Claude did not start: claude executable not found in PATH or "
+                "$HOME/.local/bin/claude"
+            )
+        if _claude_ui_ready(output):
             time.sleep(2)  # brief stability pause
-            print("  -> ready")
-            return
+            try:
+                stable = ava.shell.sessions.capture(sid, scrollback=False)
+            except ValueError as exc:
+                raise RuntimeError(f"Claude session {sid} exited before it became ready") from exc
+            if _claude_ui_ready(stable):
+                print("  -> ready (Claude Code UI)")
+                return
         time.sleep(1)
-    print(f"  -> timeout after {timeout:.0f} s, sending anyway")
+    raise RuntimeError(
+        f"Claude Code UI did not appear in session {sid} within {timeout:.0f} s; "
+        "no text was delivered"
+    )
 
 
 def _bootstrap_submitted(started: float) -> bool:
@@ -325,8 +351,13 @@ def _claude_command(
         f"cd {shlex.quote(workspace.as_posix())} && "
         "unset ANTHROPIC_API_KEY && "
         f"{resident}"
+        "claude_bin=$(command -v claude); "
+        'if [ -z "$claude_bin" ]; then claude_bin="$HOME/.local/bin/claude"; fi; '
+        'if [ ! -x "$claude_bin" ]; then '
+        "printf '%s\\n' 'error: claude executable not found in PATH or "
+        "$HOME/.local/bin/claude' >&2; exit 127; fi; "
         f"{launch_caller_assignment('claude_code', caller_instance)}"
-        f"exec claude --dangerously-skip-permissions{plugin_flag}"
+        f'exec "$claude_bin" --dangerously-skip-permissions{plugin_flag} || exit $?'
     )
 
 
@@ -439,20 +470,25 @@ def _run_supervised_launch(
     # coding session — the supervisor re-spawns the script if a session is ever
     # reclaimed.
     sid = ava.shell.sessions.new(name=session_name, ttl=ttl_seconds)
-    ava.shell.sessions.send(sid, _claude_command(workspace, caller_instance))
-    print(f"+ persistent shell session: {sid} ({session_name})")
+    try:
+        ava.shell.sessions.send(sid, _claude_command(workspace, caller_instance))
+        print(f"+ persistent shell session: {sid} ({session_name})")
 
-    _wait_for_ready(sid)
+        _wait_for_ready(sid)
 
-    contract = _contract_path()
-    msg = (
-        f"Read the collaboration contract at {contract} and follow it. "
-        f"Your workspace is {workspace}. "
-        f"Your task file (read-only for you) is {tasks_file}. "
-        f"Your work file (yours to write, STATUS + log) is {work_file}. "
-        "Now read the task file and start working."
-    )
-    ava.shell.sessions.send(sid, msg)
+        contract = _contract_path()
+        msg = (
+            f"Read the collaboration contract at {contract} and follow it. "
+            f"Your workspace is {workspace}. "
+            f"Your task file (read-only for you) is {tasks_file}. "
+            f"Your work file (yours to write, STATUS + log) is {work_file}. "
+            "Now read the task file and start working."
+        )
+        ava.shell.sessions.send(sid, msg)
+    except BaseException:
+        with contextlib.suppress(Exception):
+            ava.shell.sessions.kill(sid)
+        raise
 
     print(f"ready. name={session_name}  workspace={workspace}")
     print(f"session_id={sid}")

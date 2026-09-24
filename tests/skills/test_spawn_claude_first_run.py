@@ -1,10 +1,11 @@
-"""First-run preset contracts for the Claude Code launcher (task #3996)."""
+"""First-run and launch safety contracts for the Claude Code launcher."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
 import stat
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -31,6 +32,165 @@ def _load(name: str, path: Path) -> ModuleType:
 
 
 spawn_claude = _load("spawn_claude_first_run_under_test", _REFERENCE / "spawn_claude.py")
+
+
+def test_claude_command_uses_home_fallback_when_session_path_has_no_claude(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    executable = home / ".local" / "bin" / "claude"
+    executable.parent.mkdir(parents=True)
+    executable.write_text('#!/bin/sh\nprintf "launched:%s\\n" "$1"\n')
+    executable.chmod(0o755)
+    path = tmp_path / "empty-path"
+    path.mkdir()
+
+    command = spawn_claude._claude_command(tmp_path)
+    result = subprocess.run(  # noqa: S603 - executes only the launcher command against a fake CLI
+        ["/bin/bash", "-c", command],
+        env={"HOME": str(home), "PATH": str(path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "launched:--dangerously-skip-permissions\n"
+
+    path_executable = path / "claude"
+    path_executable.write_text('#!/bin/sh\nprintf "path:%s\\n" "$1"\n')
+    path_executable.chmod(0o755)
+    normal = subprocess.run(  # noqa: S603 - controlled PATH executable verifies precedence
+        ["/bin/bash", "-c", command],
+        env={"HOME": str(home), "PATH": str(path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert normal.returncode == 0
+    assert normal.stdout == "path:--dangerously-skip-permissions\n"
+
+
+def test_claude_command_exits_when_executable_is_unavailable(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    path = tmp_path / "empty-path"
+    path.mkdir()
+
+    result = subprocess.run(  # noqa: S603 - isolated shell tests the fail-closed launcher command
+        ["/bin/bash", "-c", spawn_claude._claude_command(tmp_path)],
+        env={"HOME": str(home), "PATH": str(path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 127
+    assert "claude executable not found in PATH or $HOME/.local/bin/claude" in result.stderr
+
+
+def test_ready_requires_claude_ui_not_a_long_shell_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shell_screen = "exec claude: not found\n" + "bash prompt $ " * 10
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return shell_screen
+
+    def _no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="Claude Code UI did not appear"):
+        spawn_claude._wait_for_ready(7, timeout=0.01)
+
+
+def test_ready_accepts_a_stable_claude_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    captures: list[int] = []
+
+    def _capture(sid: int, *, scrollback: bool) -> str:
+        assert sid == 7 and scrollback is False
+        captures.append(sid)
+        return "Claude Code v2.1.278\n? for shortcuts\n" + "Claude composer " * 10
+
+    def _no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
+    spawn_claude._wait_for_ready(7, timeout=1)
+    assert captures == [7, 7]
+
+
+def test_ready_rejects_claude_setup_screen(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return "Welcome to Claude Code\nChoose the text style that looks best with your terminal"
+
+    def _no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
+    with pytest.raises(RuntimeError, match="Claude Code UI did not appear"):
+        spawn_claude._wait_for_ready(7, timeout=0.01)
+
+
+def test_ready_reports_when_the_session_exits_before_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        raise ValueError("session ended")
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    with pytest.raises(RuntimeError, match="exited before its UI appeared"):
+        spawn_claude._wait_for_ready(7)
+
+
+def test_supervised_launch_does_not_send_contract_to_a_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[str] = []
+    killed: list[int] = []
+
+    def _session_exists(_name: str) -> bool:
+        return False
+
+    def _pretrust(_workspace: Path) -> None:
+        return None
+
+    def _new(*, name: str, ttl: float) -> int:
+        assert name and ttl == 3600
+        return 7
+
+    def _send(_sid: int, content: str) -> None:
+        sent.append(content)
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return "error: claude executable not found in PATH or $HOME/.local/bin/claude\n"
+
+    def _kill(sid: int) -> None:
+        killed.append(sid)
+
+    monkeypatch.setattr(spawn_claude, "_session_exists", _session_exists)
+    monkeypatch.setattr(spawn_claude, "_pretrust", _pretrust)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "new", _new)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "kill", _kill)
+
+    with pytest.raises(RuntimeError, match="claude executable not found"):
+        spawn_claude._run_supervised_launch(
+            tmp_path, tmp_path / "tasks.md", tmp_path / "work.md", 3600, None
+        )
+
+    assert len(sent) == 1
+    assert killed == [7]
 
 
 def _settings(home: Path) -> Path:
