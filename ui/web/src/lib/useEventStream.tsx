@@ -12,6 +12,7 @@ import { API_BASE, api } from "./api";
 import { notifySessionInvalid, useAuth } from "./auth-context";
 import { useFoldOwner } from "./fold/owner";
 import { useDocumentVisible } from "./use-document-visible";
+import { createSseLifecycle } from "@/lib/sse-lifecycle";
 import { sharedSseSupported, sharedSseTransport, type SseChannel } from "./sse-share";
 import { useStore } from "./store";
 import type { SystemEvent } from "./types";
@@ -104,7 +105,6 @@ function useSseConnection(
     // repeated parse errors mean the transport is corrupting frames — count
     // and force a reconnect at 3 (Task #951).
     let parseFailures = 0;
-    let disposed = false;
     const transport = shared ? sharedSseTransport() : null;
     let es: EventSource | null = null;
     if (!transport) {
@@ -112,41 +112,39 @@ function useSseConnection(
       es = new EventSource(url, { withCredentials: true });
     }
 
-    // Any frame, including a heartbeat, resets the half-dead watchdog.
-    let watchdog: ReturnType<typeof setTimeout> | null = null;
-    const armWatchdog = () => {
-      if (watchdog !== null) clearTimeout(watchdog);
-      watchdog = setTimeout(() => {
+    const lifecycle = createSseLifecycle({
+      failCount: failCountRef,
+      watchdogMs: WATCHDOG_MS,
+      reconnectBaseMs: RECONNECT_BASE_MS,
+      reconnectMaxMs: RECONNECT_MAX_MS,
+      onWatchdog: () => {
         for (const sub of subscribersRef.current) sub.conn({ type: "reconnecting" });
         if (transport) transport.restart(channel);
         else bumpReconnect();
-      }, WATCHDOG_MS);
-    };
-
-    // Legacy dead-end CLOSED errors use a single-flight capped retry.
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const scheduleReopen = () => {
-      if (retryTimer !== null) return;
-      const delay = Math.min(RECONNECT_BASE_MS * 2 ** failCountRef.current, RECONNECT_MAX_MS);
-      failCountRef.current += 1;
-      retryTimer = setTimeout(() => {
-        retryTimer = null;
-        setRetryNonce((n) => n + 1);
-      }, delay);
-    };
+      },
+      onRetry: () => setRetryNonce((n) => n + 1),
+      onClosed: () => {
+        for (const sub of subscribersRef.current) sub.conn({ type: "closed" });
+      },
+      onConnecting: () => {
+        for (const sub of subscribersRef.current) sub.conn({ type: "reconnecting" });
+      },
+      checkAuth: () => api.checkAuth(),
+      onInvalidSession: notifySessionInvalid,
+    });
 
     const handleOpen = () => {
-      if (disposed) return;
-      failCountRef.current = 0;
+      if (lifecycle.isDisposed()) return;
+      lifecycle.resetBackoff();
       onOpenChange(true);
-      armWatchdog();
+      lifecycle.armWatchdog();
       for (const sub of subscribersRef.current) sub.conn({ type: "open" });
     };
     const handleFrame = (raw: string) => {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       // Any frame = the connection is alive — reset the watchdog before
       // anything else (heartbeat counts too).
-      armWatchdog();
+      lifecycle.armWatchdog();
       // e.data is spec'd as string, but browser implementations (Blob
       // mode / unusual toString) sometimes drift; defensive cast
       // prevents a String() throw from drowning the catch.
@@ -198,7 +196,7 @@ function useSseConnection(
           // Capped backoff, same as a dead-end CLOSED — an immediate reopen
           // against a source that keeps sending corrupt frames reconnects
           // into the same garbage in a tight loop (Task #1051).
-          scheduleReopen();
+          lifecycle.scheduleReopen();
         }
         return;
       }
@@ -230,13 +228,12 @@ function useSseConnection(
       const unsubscribe = transport.subscribe(channel, {
         onFrame: handleFrame,
         onState: (state) => {
-          if (disposed) return;
+          if (lifecycle.isDisposed()) return;
           if (state === "open") {
             handleOpen();
           } else {
             if (state === "closed") {
-              if (watchdog !== null) clearTimeout(watchdog);
-              watchdog = null;
+              lifecycle.clearWatchdog();
             }
             for (const sub of subscribersRef.current) sub.conn({ type: state });
           }
@@ -245,8 +242,7 @@ function useSseConnection(
       if (lastReconnectNonce.current !== reconnectNonce) transport.restart(channel);
       lastReconnectNonce.current = reconnectNonce;
       return () => {
-        disposed = true;
-        if (watchdog !== null) clearTimeout(watchdog);
+        lifecycle.dispose();
         unsubscribe();
       };
     }
@@ -256,58 +252,10 @@ function useSseConnection(
     es.onmessage = (event) => handleFrame(
       typeof event.data === "string" ? event.data : "[non-string SSE payload]",
     );
-    es.onerror = () => {
-      if (disposed) return;
-      // Explicit tri-state dispatch (CONNECTING/OPEN/CLOSED), no
-      // case _: catch-all. Treating a transient OPEN-state error
-      // (common on Safari mobile under flaky network) as reconnecting
-      // would make the amber banner flicker and hurt UX.
-      switch (es.readyState) {
-        case EventSource.CLOSED:
-          // A CLOSED EventSource hides its HTTP status. The middleware's 401 is
-          // the only auth rejection a credentialed SSE GET can receive (the
-          // origin-check 403 is state-changing-methods only); a 503/500 also
-          // closes the stream but is a server problem, not a session one. Probe
-          // the session instead of retrying blindly: an expired session must NOT
-          // reopen (Task #1635 — the 43k/24h 401 retry storm) — notify the auth
-          // context (AuthGuard redirects to /login) and let the authStatus gate
-          // above keep the stream closed until the user logs in again.
-          for (const sub of subscribersRef.current) sub.conn({ type: "closed" });
-          void api
-            .checkAuth()
-            .then((res) => {
-              if (disposed) return;
-              if (!res.authenticated) {
-                notifySessionInvalid();
-                return;
-              }
-              scheduleReopen();
-            })
-            .catch(() => {
-              if (disposed) return;
-              // Probe itself failed (gateway unreachable) — transient; keep retrying.
-              scheduleReopen();
-            });
-          return;
-        case EventSource.CONNECTING:
-          // The browser is already auto-retrying — surface it, but do NOT also
-          // schedule a manual reopen (that would double up into a storm).
-          for (const sub of subscribersRef.current) {
-            sub.conn({ type: "reconnecting" });
-          }
-          return;
-        case EventSource.OPEN:
-          // Socket still alive; transient fault absorbed by the browser; don't notify UI
-          return;
-        default:
-          throw new Error(`unknown EventSource readyState: ${es.readyState}`);
-      }
-    };
+    es.onerror = () => lifecycle.handleLegacyError(es);
 
     return () => {
-      disposed = true;
-      if (watchdog !== null) clearTimeout(watchdog);
-      if (retryTimer !== null) clearTimeout(retryTimer);
+      lifecycle.dispose();
       es.close();
     };
     // url + authStatus + reconnectNonce + retryNonce are the levers (retryNonce is
