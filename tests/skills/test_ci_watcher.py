@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -61,12 +62,19 @@ class _FakeAva:
     of an unwritable verdict file.
     """
 
-    def __init__(self, files_root: Path, send_failures: int = 0, write_failures: int = 0) -> None:
+    def __init__(
+        self,
+        files_root: Path,
+        send_failures: int = 0,
+        write_failures: int = 0,
+        send_error: Exception | None = None,
+    ) -> None:
         self.wakes: list[tuple[int, str]] = []
         self.send_calls = 0
         self.send_failures = send_failures
         self.write_calls = 0
         self.write_failures = write_failures
+        self.send_error = send_error
         # Whether the verdict file existed at each send attempt — locks the
         # persist-before-send order, not just the end state.
         self.verdict_written_at_send: list[bool] = []
@@ -77,6 +85,8 @@ class _FakeAva:
             def send_message(agent_id: int, content: str) -> None:
                 fake.send_calls += 1
                 fake.verdict_written_at_send.append((files_root / _VERDICT_NAME).exists())
+                if fake.send_error is not None:
+                    raise fake.send_error
                 if fake.send_calls <= fake.send_failures:
                     raise RuntimeError("gateway refused the connection")
                 fake.wakes.append((agent_id, content))
@@ -104,6 +114,7 @@ def _run_watcher(
     *,
     fake: _FakeAva | None = None,
     raise_on_poll: Exception | None = None,
+    run_name: str = "__ci_watcher__",
 ) -> tuple[list[tuple[int, str]], list[Any], _FakeAva]:
     """Exec the substituted template; return its wakes, polls, and fake.
 
@@ -124,6 +135,11 @@ def _run_watcher(
 
     fake_ava = fake if fake is not None else _FakeAva(tmp_path)
     monkeypatch.chdir(tmp_path)
+
+    def workspace_for_test(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr("shared.paths.workspace_dir", workspace_for_test)
 
     code = _TEMPLATE.read_text()
     substitutions = (
@@ -149,7 +165,7 @@ def _run_watcher(
         exec(
             compile(code, str(_TEMPLATE), "exec"),
             {
-                "__name__": "__ci_watcher__",
+                "__name__": run_name,
                 "ava": fake_ava,
                 "CIStatus": statuses,
                 "check_ci": _check_ci,
@@ -277,7 +293,76 @@ def test_probe_error_is_persisted_then_exits_1(
     persisted = (tmp_path / _VERDICT_NAME).read_text(encoding="utf-8")
     assert "CI watcher error" in persisted
     assert "gh exploded" in persisted
-    assert "the verdict is at ci-verdict-1234.txt" in capsys.readouterr().out
+    assert f"the verdict is at {tmp_path / _VERDICT_NAME}" in capsys.readouterr().out
+
+
+def test_persistent_owner_url_error_stops_early_with_absolute_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A guarded config error cannot heal through transport retries."""
+    from pydantic import BaseModel, ValidationError, model_validator
+
+    from shared.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+
+    class _Guarded(BaseModel):
+        @model_validator(mode="after")
+        def reject(self) -> _Guarded:
+            raise AgentProfileOwnerDbUrlRefusedError("agent-profile owner URL refused")
+
+    with pytest.raises(ValidationError) as error:
+        _Guarded()
+    fake = _FakeAva(tmp_path, send_error=error.value)
+    with pytest.raises(SystemExit) as exited:
+        _run_watcher(monkeypatch, tmp_path, [_ci_status().ALL_PASSED], fake=fake)
+
+    assert exited.value.code == 2
+    assert fake.send_calls == 1
+    output = capsys.readouterr().out
+    assert f"the verdict is at {tmp_path / _VERDICT_NAME}" in output
+    assert "cause: agent-profile owner URL refused" in output
+    assert "failed after 1 attempts" in output
+    assert "all_passed" in (tmp_path / _VERDICT_NAME).read_text(encoding="utf-8")
+
+
+def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The final atexit line survives a later cleanup traceback in --tail-file."""
+    import atexit
+
+    from pydantic import BaseModel, ValidationError, model_validator
+
+    from shared.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+
+    class _Guarded(BaseModel):
+        @model_validator(mode="after")
+        def reject(self) -> _Guarded:
+            raise AgentProfileOwnerDbUrlRefusedError("owner URL refused")
+
+    with pytest.raises(ValidationError) as error:
+        _Guarded()
+    callbacks: list[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]] = []
+
+    def record_callback(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        callbacks.append((fn, args, kwargs))
+
+    monkeypatch.setattr(atexit, "register", record_callback)
+    with pytest.raises(SystemExit):
+        _run_watcher(
+            monkeypatch,
+            tmp_path,
+            [_ci_status().ALL_PASSED],
+            fake=_FakeAva(tmp_path, send_error=error.value),
+            run_name="__main__",
+        )
+    assert len(callbacks) == 1
+    sys.stdout.write("later boot cleanup traceback" * 120 + "\n")
+    fn, args, kwargs = callbacks[0]
+    fn(*args, **kwargs)
+
+    notice_tail = capsys.readouterr().out[-2048:]
+    assert f"the verdict is at {tmp_path / _VERDICT_NAME}" in notice_tail
+    assert "cause: owner URL refused" in notice_tail
 
 
 def test_persist_failure_does_not_claim_a_stored_verdict(
