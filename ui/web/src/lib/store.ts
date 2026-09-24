@@ -55,8 +55,8 @@ interface UISlice {
   mobileInspectorOpen: boolean;
   setMobileInspectorOpen: (open: boolean) => void;
 
-  /** Inspector aggregate window. Session-scoped selection shared by the panel
-   *  and sidebar prefetch; null = all time, -1 = since compact. */
+  /** Inspector aggregate window. Session-scoped selection for the panel's
+   *  cost and activity reads; null = all time. */
   inspectorHours: number | null;
   setInspectorHours: (hours: number | null) => void;
 
