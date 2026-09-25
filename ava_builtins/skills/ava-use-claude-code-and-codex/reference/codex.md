@@ -36,3 +36,47 @@ for code review; `codex exec resume --last "<follow-up>"` continues a previous s
   context field is off by default in some builds.
 - Codex expects a git repo; pass `--skip-git-repo-check` if it is not one.
 - Auth: `OPENAI_API_KEY`, or `CODEX_ACCESS_TOKEN` for a ChatGPT-account login.
+
+## Running a non-default model (per-session override)
+
+`spawn_codex.py` always launches the machine's default model — it takes no
+model flag, and that is deliberate. **Never change the global
+`~/.codex/config.toml` to switch a session's model.** Several agents share
+that file; an edit-restore window races between them and has left stale
+residue in the field. The cluster rule is per-session override only
+(2026-09-23).
+
+To start on a specific model, pass the override on the command line — the
+same `-m` / `-c` flags work for the TUI and for `codex exec`:
+
+```bash
+codex -m <model> -c 'model_reasoning_effort="xhigh"' \
+  -C <workspace-dir> --dangerously-bypass-approvals-and-sandbox
+```
+
+Verify the banner before trusting the session (`model: <model> <effort>` and
+the directory), and decline any "upgrade codex" prompt — a session must not
+self-upgrade.
+
+A hand launch is **not canonical**: no generation is registered, no task or
+work files are created, and no supervisor starts — the ownership and
+supervision the spawn script provides are yours to reproduce. Run it under
+the same file-driven discipline as Mode A (task file + work file +
+`watch_work.py` to wake you), and keep to one live Codex per workspace so a
+second launch cannot race the first.
+
+To isolate configuration and session state from the default home, give the
+session a private home: create the directory with mode `0700`, symlink
+`auth.json` in from `~/.codex/`, copy `config.toml` and append the workspace
+trust row (`[projects."<workspace-dir>"]` / `trust_level = "trusted"`), then
+run with `CODEX_HOME=<dir>`. The symlink points at the shared `auth.json`,
+but Codex's credential storage mode (file, keyring, or automatic) is
+build-dependent — the private home isolates configuration and session state,
+not necessarily the login.
+
+Before a large session, check the account's remaining quota at zero token
+cost — the app-server `account/rateLimits/read` request, or `/status` where
+the TUI surfaces it. This is a ChatGPT-account surface: a plain
+`OPENAI_API_KEY` session has no plan quota to read. If the quota is nearly
+exhausted and no reset is imminent, report that before launching instead of
+parking a session that will die mid-task.
