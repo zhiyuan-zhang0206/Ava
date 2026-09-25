@@ -47,6 +47,9 @@ emit only after commit. System, user, malformed, and external client sources
 stay untagged. The static audit-root census rejects an unclassified constructor.
 
 Each agent-host reconciliation pass monitors incomplete local v1 leases.
+Never-activated, rejected, and non-automatic leases remain untouched: they are
+outside both the event-sweep filters (`automatic`, `activated_at`) and the v1
+monitor, so no terminal stamp is written for them.
 `AVA_IMPERSONATION_EVENT_MANIFEST_SEAL_WAIT_SECONDS` alerts on a still-open
 participant but never fails a live SDK `finally`; capture failure and the item
 cap are the only capture failures. A lease older than
@@ -57,6 +60,10 @@ envelope falls before the Loki retention horizon, it is permanently marked
 `GET /api/alerts/impersonation-event-retention?machine=<runner>` with the
 floor, horizon, age inputs, and missing count. Local JSONL evidence never
 clears that condition.
+Each manifest condition has one alert instance per episode, with `starts_at`
+derived from its stored onset. The producer resolves an instance when its
+condition clears or a newer onset supersedes it; gateway reconciliation never
+touches `machine-probe` rows.
 
 Loki is outside the final SQL transaction. A tagged extra row seen before the
 last read refuses certification. One indexed after that read but before (or
