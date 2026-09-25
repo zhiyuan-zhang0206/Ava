@@ -54,6 +54,7 @@ from cli.commands._converge_steps import (
     _ensure_prod_editable_exec_gate,
     _ensure_prod_editable_pth,
     _ensure_redis_url_identity_step,
+    ensure_local_git_hooks,
 )
 from cli.commands._converge_steps import (
     _shell_rc_path as _shell_rc_path,
@@ -548,6 +549,10 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # Warning-only assertion of the operator-approved Homebrew pins. Both roles
     # may share the same macOS host; drift is detected, never repaired here.
     ConvergeStep("Homebrew formula pins", ensure_brew_pin),
+    # Warning-only assertion of the local Git hook installations (a drifted
+    # INSTALL_PYTHON or a missing stage silently disables local checks).
+    # Drift is detected, never repaired here.
+    ConvergeStep("local Git hook pointers", ensure_local_git_hooks),
     ConvergeStep("reap legacy-named sessions", _reap_legacy_sessions_step),
     ConvergeStep(
         "screen capture availability",
