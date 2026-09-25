@@ -22,6 +22,13 @@ import psycopg
 from psycopg.rows import dict_row
 
 from shared.agents.impersonation._impersonation_store import ImpersonationError, lock_lease
+from shared.agents.impersonation_manifest_alerts import (
+    _has_slow_open_participant,
+    _is_old_pending,
+    _manifest_alert_starts_at,
+    _resolve_cleared_manifest_alerts,
+    _retention_lost,
+)
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.log import logger
@@ -410,7 +417,6 @@ def _alert_capture_failure(participant: LocalParticipant) -> None:
                 conn,
                 lease,
                 "ImpersonationManifestCaptureFailed",
-                datetime.now(UTC),
             )
     except Exception:
         logger.exception("Could not alert on impersonation event-manifest capture failure")
@@ -647,6 +653,7 @@ def monitor_manifest_health(*, machine: str) -> None:
         rows = cur.fetchall()
         for lease in rows:
             _monitor_one_manifest(conn, upsert_alert, lease, now=now, horizon=horizon)
+        _resolve_cleared_manifest_alerts(conn, upsert_alert, machine, now, horizon)
 
 
 def _monitor_one_manifest(
@@ -662,34 +669,13 @@ def _monitor_one_manifest(
             "SELECT record_impersonation_event_retention_loss(%s,%s)",
             (lease["id"], horizon),
         )
-        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventRetentionLoss", now)
+        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventRetentionLoss")
         return
     if _has_slow_open_participant(conn, str(lease["id"]), now=now):
-        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationManifestSealSlow", now)
+        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationManifestSealSlow")
         return
     if _is_old_pending(lease, now=now):
-        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventDeliveryPending", now)
-
-
-def _retention_lost(lease: dict[str, Any], *, horizon: datetime) -> bool:
-    return (
-        lease["manifest_frozen_at"] is not None
-        and lease["manifest_envelope_floor_at"] < horizon
-        and lease["events_completed_at"] is None
-    )
-
-
-def _has_slow_open_participant(conn: psycopg.Connection, lease_id: str, *, now: datetime) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM agent_impersonation_event_participants WHERE lease_id=%s "
-        "AND state='open' AND opened_at<%s LIMIT 1",
-        (
-            lease_id,
-            now
-            - timedelta(seconds=settings.general.impersonation_event_manifest_seal_wait_seconds),
-        ),
-    ).fetchone()
-    return row is not None
+        _upsert_manifest_alert(upsert_alert, conn, lease, "ImpersonationEventDeliveryPending")
 
 
 def alert_if_participant_still_open(participant: LocalParticipant) -> None:
@@ -699,7 +685,6 @@ def alert_if_participant_still_open(participant: LocalParticipant) -> None:
     detach wait.  That is evidence for an operator, not permission to call a
     live producer failed or to freeze an empty manifest.
     """
-    now = datetime.now(UTC)
     with write_transaction() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT l.* FROM agent_impersonations l JOIN "
@@ -709,16 +694,7 @@ def alert_if_participant_still_open(participant: LocalParticipant) -> None:
         )
         lease = cur.fetchone()
         if lease is not None:
-            _upsert_manifest_alert(
-                _alerts_upsert(), conn, lease, "ImpersonationManifestSealSlow", now
-            )
-
-
-def _is_old_pending(lease: dict[str, Any], *, now: datetime) -> bool:
-    ended = lease["ended_at"]
-    return ended is not None and ended < now - timedelta(
-        seconds=settings.general.impersonation_event_delivery_alert_age_seconds
-    )
+            _upsert_manifest_alert(_alerts_upsert(), conn, lease, "ImpersonationManifestSealSlow")
 
 
 def _upsert_manifest_alert(
@@ -726,7 +702,6 @@ def _upsert_manifest_alert(
     conn: psycopg.Connection,
     lease: dict[str, Any],
     alertname: str,
-    now: datetime,
 ) -> None:
     upsert_alert(
         conn,
@@ -742,7 +717,7 @@ def _upsert_manifest_alert(
                 "pending_reason": str(lease["event_delivery_pending_reason"] or "unknown"),
                 "session": f"{lease['agent_id']}:{lease['session_id']}",
             },
-            "starts_at": now.isoformat(),
+            "starts_at": _manifest_alert_starts_at(conn, lease, alertname).isoformat(),
         },
         source="machine-probe",
     )
