@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from shared.impersonation_history import ImpersonationMetadata
+from shared.agents.impersonation.impersonation_history import ImpersonationMetadata
 from shared.sdk_telemetry import SdkCall
 
 

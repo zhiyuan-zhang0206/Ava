@@ -23,7 +23,7 @@ from agent.hosted_ownership import admit_hosted_runtime
 from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_checkpoint
 from agent.startup import _wrap_saver_writes_with_nstep_interval
 from ava._external_state import encode_plugin_delta
-from shared import impersonation as leases
+from shared.agents import impersonation as leases
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.caller_identity import CallerIdentity
 from shared.context import AvaContext
@@ -362,7 +362,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     import json
     from pathlib import Path
 
-    from shared import impersonation_history as history
+    from shared.agents.impersonation import impersonation_history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn,
@@ -458,7 +458,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     tmp_path: Path,
 ) -> None:
     from agent.impersonation_handoff import deliver_handoff
-    from shared import impersonation_history as history
+    from shared.agents.impersonation import impersonation_history as history
 
     graph, saver, ctx, config, reset, owner, requested, calls = await _prepare_graph(
         db_conn,
@@ -526,7 +526,7 @@ async def test_end_note_resumes_an_empty_queue(
     idled out with the note unprocessed. The note is the resumed input: the claim
     runs before_llm with an empty queue, and delivery publishes a wake.
     """
-    from shared import impersonation_history as history
+    from shared.agents.impersonation import impersonation_history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch, automatic=True
@@ -579,7 +579,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
     """Task #3998 end to end: the supervisor stops an automatic takeover whose
     relay handle vanished outside the fresh-start window, and the resume chain
     delivers the end note naming the death cause; the note's first turn runs."""
-    from shared import impersonation_history as history
+    from shared.agents.impersonation import impersonation_history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch, automatic=True

@@ -6,10 +6,10 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from shared import impersonation as leases
+from shared.agents import impersonation as leases
+from shared.agents.impersonation.impersonation_maintenance import remind_expiring_impersonations
 from shared.caller_identity import CallerIdentity
 from shared.db import create_agent, pool
-from shared.impersonation_maintenance import remind_expiring_impersonations
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import recorded_tree

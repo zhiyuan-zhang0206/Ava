@@ -23,9 +23,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from services.agent_host.host import AgentHost
 from services.agent_host.settlement import close_hosted_turn
+from shared.agents.impersonation import ImpersonationError
 from shared.context import AvaContext
 from shared.hosted_force import install_hosted_force
-from shared.impersonation import ImpersonationError
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
 

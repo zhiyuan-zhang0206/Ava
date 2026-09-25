@@ -95,10 +95,13 @@ from gateway.watcher_ttl import (
 )
 from ops import cluster_rpc, ops_lifecycle
 from shared import telemetry
+from shared.agents.impersonation.impersonation_maintenance import (
+    reap_impersonations,
+    remind_expiring_impersonations,
+)
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.impersonation_maintenance import reap_impersonations, remind_expiring_impersonations
 from shared.inbound_provenance import InboundProvenance
 from shared.live_announce import publish_agent_updated_sync
 from shared.live_events import PageClosed

@@ -648,7 +648,7 @@ def test_host_target_must_be_explicit(provider: str, thread_id: str | None) -> N
 def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared import impersonation
+    from shared.agents import impersonation
 
     lease: dict[str, Any] = {
         "id": str(LEASE_ID),
@@ -689,7 +689,7 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
 
 
 def test_agent_mismatch_refuses_inbox_before_subscription(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import impersonation
+    from shared.agents import impersonation
 
     def get(_lease_id: str, _token: str) -> dict[str, Any]:
         return {
@@ -739,7 +739,7 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
     listener = Listener(inbox)
     delivered: list[tuple[UUID, str | None]] = []
     monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
-    monkeypatch.setattr("shared.impersonation.relay_get", _public_relay_session)
+    monkeypatch.setattr("shared.agents.impersonation.relay_get", _public_relay_session)
 
     def read(*_args: object) -> relay.InboxSnapshot:
         return relay.InboxSnapshot(frozenset(), {}, inbox.expires_at, inbox.status)
@@ -805,7 +805,7 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     listener = Listener(inbox)
     delivered: list[str] = []
     monkeypatch.setattr(impersonation, "relay_token_from_env", lambda: "test-credential")
-    monkeypatch.setattr("shared.impersonation.relay_get", _public_relay_session)
+    monkeypatch.setattr("shared.agents.impersonation.relay_get", _public_relay_session)
 
     def read(*_args: object) -> relay.InboxSnapshot:
         page = frozenset(sorted(inbox.messages)[: inbox.page_size])
@@ -867,10 +867,10 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
 def test_write_heartbeat_stops_at_a_terminal_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import Mock
 
-    from shared import impersonation as leases
+    from shared.agents import impersonation as leases
 
     beat = Mock()
-    monkeypatch.setattr("shared.impersonation.relay_heartbeat", beat)
+    monkeypatch.setattr("shared.agents.impersonation.relay_heartbeat", beat)
     assert relay._write_heartbeat(LEASE_ID, "relay-token") is True
     beat.assert_called_once_with(str(LEASE_ID), "relay-token")
     beat.side_effect = leases.ImpersonationError("Impersonation has ended")
@@ -897,7 +897,7 @@ def test_invalid_debounce_fails_before_open(debounce: float) -> None:
 
 
 def test_release_racing_with_read_stops_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import impersonation
+    from shared.agents import impersonation
 
     states = iter(["active", "released"])
 
@@ -923,7 +923,7 @@ def test_release_racing_with_read_stops_cleanly(monkeypatch: pytest.MonkeyPatch)
 def test_pending_consent_checks_status_without_opening_inbox(
     monkeypatch: pytest.MonkeyPatch, status: relay.LeaseStatus
 ) -> None:
-    from shared import impersonation
+    from shared.agents import impersonation
 
     def get(_lease_id: str, _token: str) -> dict[str, Any]:
         return {

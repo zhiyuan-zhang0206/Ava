@@ -168,7 +168,7 @@ async def align_accepting_binding(
     """Align an open lease's accepting-incarnation binding with the admitted
     incarnation, in the admission transaction (issue #2052).
 
-    The lazy inheritance in ``shared.impersonation.native_status`` runs only at
+    The lazy inheritance in ``shared.agents.impersonation.native_status`` runs only at
     the replacement's first held wake. A lease released or expired between a
     hosted restart and that wake still fires
     ``restore_native_impersonation_owner``, which writes the recorded

@@ -6,7 +6,7 @@ would allow unlimited duplicates across restarts. An ambiguous or failed send
 therefore consumes an attempt; its body stays pending for native handoff.
 """
 
-from shared._impersonation_store import (
+from shared.agents.impersonation._impersonation_store import (
     OPEN,
     authenticate_relay,
     expire,

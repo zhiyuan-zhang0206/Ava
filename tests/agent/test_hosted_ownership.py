@@ -23,8 +23,8 @@ from agent.hosted_ownership import (
     stamp_turn_fatal,
 )
 from agent.impersonation import native_status
+from shared.agents.impersonation import ImpersonationError
 from shared.db import create_agent, insert_inbound_message
-from shared.impersonation import ImpersonationError
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
 from shared.runtime_admission import PublicationAdmissionDeferredError, RuntimeAdmission

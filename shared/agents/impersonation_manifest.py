@@ -21,7 +21,7 @@ from typing import Any, cast
 import psycopg
 from psycopg.rows import dict_row
 
-from shared._impersonation_store import ImpersonationError, lock_lease
+from shared.agents.impersonation._impersonation_store import ImpersonationError, lock_lease
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.log import logger
@@ -779,7 +779,7 @@ def certify(lease_id: str) -> bool:
     """Invoke certification with this host's non-exported runner proof."""
     from psycopg.types.json import Jsonb
 
-    from shared.impersonation_history import export_handoff
+    from shared.agents.impersonation.impersonation_history import export_handoff
 
     with write_transaction() as conn:
         row = conn.execute(

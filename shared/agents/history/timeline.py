@@ -31,9 +31,9 @@ from langchain_core.messages import (
 # Re-export: TimelineItem's home is shared/agents/history/timeline_item.py (file line budget);
 # callers keep importing it from here.
 from shared.agents.history.timeline_item import TimelineItem as TimelineItem
+from shared.agents.impersonation.impersonation_history import ImpersonationMetadata
 from shared.config import now_timestamp, settings
 from shared.db import InboundRow
-from shared.impersonation_history import ImpersonationMetadata
 from shared.message_kwargs import (
     AvaMessageKwargs,
     AvaMsgType,

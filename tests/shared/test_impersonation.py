@@ -9,7 +9,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from shared import impersonation as leases
+from shared.agents import impersonation as leases
 from shared.caller_identity import CallerIdentity
 from shared.config import settings
 from shared.db import create_agent, insert_inbound_message
@@ -466,7 +466,7 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared import impersonation_maintenance as maintenance
+    from shared.agents.impersonation import impersonation_maintenance as maintenance
     from shared.db import pool
 
     announced: list[int] = []
@@ -506,7 +506,7 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
 def test_operator_force_expire_closes_only_observed_session(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, lease_status: str
 ) -> None:
-    from shared import impersonation_maintenance as maintenance
+    from shared.agents.impersonation import impersonation_maintenance as maintenance
     from shared.db import pool
 
     owner = _agent(db_conn)
@@ -591,8 +591,8 @@ def test_operator_force_expire_closes_only_observed_session(
 def test_operator_force_expire_automatic_session_has_no_manual_end_note(
     db_conn: psycopg.Connection,
 ) -> None:
+    from shared.agents.impersonation.impersonation_maintenance import force_expire_impersonation
     from shared.db import pool
-    from shared.impersonation_maintenance import force_expire_impersonation
 
     owner = _agent(db_conn)
     lease = leases.request(
@@ -922,8 +922,8 @@ def test_relay_liveness_alert_logs_only_for_stale_active_leases(
 def test_reminder_is_inserted_once_per_lease_and_wakes(
     db_conn: psycopg.Connection,
 ) -> None:
+    from shared.agents.impersonation.impersonation_maintenance import remind_expiring_impersonations
     from shared.db import pool
-    from shared.impersonation_maintenance import remind_expiring_impersonations
 
     owner = _agent(db_conn)
     lease = _active(owner)
@@ -960,8 +960,8 @@ def test_reminder_ack_suppresses_further_reminders(
     the window (the old NOT EXISTS only excluded 'pending' rows, so each cycle
     re-inserted — a nag storm with urgent pushes and re-delivery on top).
     """
+    from shared.agents.impersonation.impersonation_maintenance import remind_expiring_impersonations
     from shared.db import pool
-    from shared.impersonation_maintenance import remind_expiring_impersonations
 
     owner = _agent(db_conn)
     lease = _active(owner)
@@ -996,8 +996,8 @@ def test_reminder_ack_suppresses_further_reminders(
 
 
 def test_reminder_skips_leases_outside_the_window(db_conn: psycopg.Connection) -> None:
+    from shared.agents.impersonation.impersonation_maintenance import remind_expiring_impersonations
     from shared.db import pool
-    from shared.impersonation_maintenance import remind_expiring_impersonations
 
     owner = _agent(db_conn)
     _active(owner)
@@ -1016,8 +1016,8 @@ def test_reminder_skips_leases_outside_the_window(db_conn: psycopg.Connection) -
 
 
 def test_release_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> None:
+    from shared.agents.impersonation.impersonation_maintenance import remind_expiring_impersonations
     from shared.db import pool
-    from shared.impersonation_maintenance import remind_expiring_impersonations
 
     owner = _agent(db_conn)
     lease = _active(owner)
@@ -1037,8 +1037,8 @@ def test_release_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> 
 
 
 def test_expiry_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> None:
+    from shared.agents.impersonation import impersonation_maintenance as maintenance
     from shared.db import pool
-    from shared.impersonation_maintenance import reap_impersonations, remind_expiring_impersonations
 
     owner = _agent(db_conn)
     lease = _active(owner)
@@ -1049,14 +1049,14 @@ def test_expiry_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> N
     )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert remind_expiring_impersonations(reaper_pool) == 1
+        assert maintenance.remind_expiring_impersonations(reaper_pool) == 1
         db_conn.execute(
             "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
             "WHERE id=%s",
             (lease["id"],),
         )
         db_conn.commit()
-        assert reap_impersonations(reaper_pool) == 1
+        assert maintenance.reap_impersonations(reaper_pool) == 1
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),
@@ -1065,8 +1065,8 @@ def test_expiry_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> N
 
 @pytest.mark.parametrize("ending", ["released", "expired"])
 def test_closure_restores_six_native_owners(db_conn: psycopg.Connection, ending: str) -> None:
+    from shared.agents.impersonation.impersonation_maintenance import reap_impersonations
     from shared.db import pool
-    from shared.impersonation_maintenance import reap_impersonations
     from shared.maintenance_cohort import _classify, _RuntimeRow
     from shared.maintenance_state import MaintenanceHold
 

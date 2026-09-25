@@ -16,8 +16,8 @@ import ava
 from agent import state as state_module
 from ava import _boot, external
 from ava._external_state import decode_plugin_delta, load_snapshot
-from shared import impersonation as leases
-from shared import impersonation_history as history
+from shared.agents import impersonation as leases
+from shared.agents.impersonation import impersonation_history as history
 from shared.caller_identity import CallerIdentity
 from shared.config import settings
 from shared.db import create_agent

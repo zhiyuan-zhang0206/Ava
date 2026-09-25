@@ -141,7 +141,7 @@ def _print_claude_relay_instructions(response: dict[str, Any], *, agent_id: int)
 async def _wait_inbox(
     lease_id: str, caller: dict[str, Any], limit: int, wait: float
 ) -> list[dict[str, Any]]:
-    from shared import impersonation as control
+    from shared.agents import impersonation as control
     from shared.config import settings
     from shared.redis_listener import RedisInboundListener
 
@@ -189,8 +189,8 @@ def _send(args: argparse.Namespace) -> int:
     stamps for ``ava.agents.send_message`` (task #4102).
     """
     from cli.commands.agents import send_agent_message
-    from shared import impersonation as control
-    from shared import impersonation_sessions as sessions
+    from shared.agents import impersonation as control
+    from shared.agents.impersonation import impersonation_sessions as sessions
     from shared.proc_tree import process_metadata
 
     content = sys.stdin.read() if args.content == "-" else args.content
@@ -204,9 +204,9 @@ def _send(args: argparse.Namespace) -> int:
 
 
 def _dispatch(args: argparse.Namespace) -> int:
-    from shared import impersonation as control
-    from shared import impersonation_sessions as sessions
-    from shared.impersonation_history import public_session, say
+    from shared.agents import impersonation as control
+    from shared.agents.impersonation import impersonation_sessions as sessions
+    from shared.agents.impersonation.impersonation_history import public_session, say
     from shared.proc_tree import process_metadata
 
     command = args.impersonation_cmd

@@ -16,8 +16,9 @@ from fastapi.testclient import TestClient
 from psycopg import sql
 
 from gateway.routers import alerts as alerts_router
-from shared import impersonation as leases
-from shared import impersonation_history as history
+from shared.agents import impersonation as leases
+from shared.agents.impersonation import impersonation_history as history
+from shared.agents.impersonation.impersonation_events import _validate_event
 from shared.agents.impersonation_manifest import (
     LocalParticipant,
     alert_if_participant_still_open,
@@ -36,7 +37,6 @@ from shared.audit_events import prepare_event_log
 from shared.caller_identity import CallerIdentity
 from shared.config import settings
 from shared.db import create_agent
-from shared.impersonation_events import _validate_event
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
@@ -238,7 +238,7 @@ def test_manual_is_pending_manual_while_nonempty_legacy_never_certifies(
         "source": f"agent:{owner.agent_id}",
         "attributes": {"fn": "ava.agents.send_message", "duration": 0.1},
     }
-    from shared.impersonation_events import consume_events
+    from shared.agents.impersonation.impersonation_events import consume_events
 
     assert consume_events(owner.agent_id, 1, [event]) == 1
     leases.release(str(legacy["id"]), attested_caller(legacy), "Legacy work completed")

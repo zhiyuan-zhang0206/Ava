@@ -104,7 +104,7 @@ def test_drain_accepts_the_reaped_turns_failure_with_a_fresh_lease(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, failure_first: bool
 ) -> None:
     """The status fence alone raises; either receipt arrival order must drain."""
-    from shared.impersonation import ImpersonationError, native_status
+    from shared.agents.impersonation import ImpersonationError, native_status
     from shared.runtime_incarnation import RuntimeIncarnation
 
     agent, owner, generation = _running_agent(db_conn)

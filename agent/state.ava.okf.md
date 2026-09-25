@@ -14,7 +14,7 @@ Ava agent's LangGraph state management system. Base `BaseAgentState` carries con
 `impersonation_request_id` records the last consent request and version across
 compaction. `impersonation_applied` records the external lease and plugin-log
 version applied in the same checkpoint as its delta; recovery uses it to avoid
-repeating reducers after an acknowledgement failure. See [[impersonation.ava.okf.md]].
+repeating reducers after an acknowledgement failure. See [[shared/agents/impersonation/impersonation.ava.okf.md]].
 
 ## Core Responsibilities
 

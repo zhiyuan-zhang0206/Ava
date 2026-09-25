@@ -8,7 +8,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from shared import redis_client
-from shared._impersonation_store import (
+from shared.agents.impersonation._impersonation_store import (
     OPEN,
     authenticate,
     dismiss_reminders,
@@ -24,15 +24,15 @@ from shared._impersonation_store import (
     validate_active,
     validate_relay_spec,
 )
-from shared._impersonation_store import (
+from shared.agents.impersonation._impersonation_store import (
     ImpersonationError as ImpersonationError,
 )
+from shared.agents.impersonation.impersonation_history import append, capture_pending, set_actor
 from shared.caller_identity import CallerIdentity
 from shared.config import settings
 from shared.config.service_read import current_field_values
 from shared.db import connect, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.impersonation_history import append, capture_pending, set_actor
 from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
 from shared.live_events import Cancelled
 from shared.log import logger
@@ -575,9 +575,9 @@ def relay_liveness_alert(agent_id: int) -> None:
         logger.exception("impersonation relay liveness check failed", agent_id=agent_id)
 
 
-# The relay binding and its failure paths live in shared/impersonation/relay.py;
-# re-exported here so every shared.impersonation.<name> caller keeps resolving.
-from shared.impersonation.relay import (  # noqa: E402, I001
+# The relay binding and its failure paths live in shared/agents/impersonation/relay.py;
+# re-exported here so every shared.agents.impersonation.<name> caller keeps resolving.
+from shared.agents.impersonation.relay import (  # noqa: E402, I001
     RELAY_HEARTBEAT_SECONDS as RELAY_HEARTBEAT_SECONDS,
     RELAY_HEARTBEAT_STALE_SECONDS as RELAY_HEARTBEAT_STALE_SECONDS,
     _ABORTED_REASON_PREFIX as _ABORTED_REASON_PREFIX,

@@ -2,10 +2,10 @@
 
 from typing import Any
 
-from shared import impersonation as control
+from shared.agents import impersonation as control
+from shared.agents.impersonation.impersonation_history import public_session, resolve
 from shared.caller_identity import CallerIdentity
 from shared.db import connect
-from shared.impersonation_history import public_session, resolve
 
 
 def request(
