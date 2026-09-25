@@ -24,6 +24,25 @@ from shared.machine import machine_name
 from shared.paths import workspace_dir
 from shared.private_storage import write_private_bytes
 
+# A consumed event's durable identity is content parsed from the original log line.
+# Reader-synthesized projections (event id, line_sha256, tier, or future additions)
+# stay outside this tuple; add a field only when it becomes producer content.
+_EVENT_CONTENT_FIELDS: tuple[str, ...] = (
+    "ts",
+    "trace_id",
+    "span_id",
+    "agent_id",
+    "machine",
+    "process",
+    "category",
+    "event_name",
+    "level",
+    "source",
+    "target_agent_id",
+    "attributes",
+)
+_CONSUMED_EVENT_KINDS: tuple[str, ...] = ("sdk_call", "api_event")
+
 
 class ImpersonationMetadata(BaseModel):
     """Declared identity and observed process facts on a rendered message."""
@@ -100,6 +119,10 @@ def set_actor(conn: psycopg.Connection, actor: str) -> None:
     conn.execute("SELECT set_config('ava.impersonation_actor',%s,true)", (actor,))
 
 
+def _event_content(payload: dict[str, Any]) -> tuple[Any, ...]:
+    return tuple(payload.get(field) for field in _EVENT_CONTENT_FIELDS)
+
+
 def append(
     conn: psycopg.Connection,
     lease_id: str,
@@ -116,7 +139,12 @@ def append(
             (lease_id, event_key),
         ).fetchone()
         if existing is not None:
-            if existing[1] != payload:
+            same_content = (
+                _event_content(existing[1]) == _event_content(payload)
+                if kind in _CONSUMED_EVENT_KINDS
+                else existing[1] == payload
+            )
+            if not same_content:
                 raise ValueError("Event key already belongs to different content")
             return int(existing[0])
     row = conn.execute(
