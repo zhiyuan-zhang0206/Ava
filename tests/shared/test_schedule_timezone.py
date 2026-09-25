@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo, available_timezones
 
 import pytest
 
-from shared.watcher import next_fire
+from shared.daemon.schedules.watcher import next_fire
 
 _SCHEDULES = Path(__file__).resolve().parents[2] / "schedules"
 # Templates whose cron expressions are wall-clock-sensitive. trace-ship-tempo is

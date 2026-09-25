@@ -28,7 +28,7 @@ from schedules.catchup import catch_up, claimed_slot, fire_slot_once
 from shared.config import settings
 from shared.log import init_gateway_process
 from shared.paths import ava_home
-from shared.watcher import next_fire
+from shared.daemon.schedules.watcher import next_fire
 
 ensure_agent_status_members(
     S,

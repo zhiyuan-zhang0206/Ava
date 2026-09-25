@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from psycopg_pool import ConnectionPool
 
 from gateway.routers._delivery import deliver_chat_inbound
-from shared.completion_notices import (
+from shared.daemon.schedules.completion_notices import (
     CompletionDigest,
     format_digest,
     mark_digest_delivered,

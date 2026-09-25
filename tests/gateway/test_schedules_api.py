@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from shared.builtin_schedules import load_manifest
+from shared.daemon.schedules.builtin_schedules import load_manifest
 
 BUILTIN_MANIFEST_NAMES = [s.name for s in load_manifest()]
 

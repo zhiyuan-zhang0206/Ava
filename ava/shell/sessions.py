@@ -360,7 +360,7 @@ def kill(id: int) -> None:
     # script's clean-exit delete follows).
     try:
         from ava import _boot
-        from shared.watcher_registry import delete_watcher
+        from shared.daemon.schedules.watcher_registry import delete_watcher
 
         delete_watcher(int(_boot.agent_id()), id)
     except Exception:
@@ -388,7 +388,7 @@ def kill_all() -> int:
     # make the cleanup itself fail — visible for the same reason as kill().
     try:
         from ava import _boot
-        from shared.watcher_registry import delete_watcher, watcher_session_ids
+        from shared.daemon.schedules.watcher_registry import delete_watcher, watcher_session_ids
 
         agent_id = int(_boot.agent_id())
         for session_id in watcher_session_ids(agent_id=agent_id):
@@ -420,7 +420,7 @@ def renew(id: int, *, ttl: float) -> datetime:
     # Not this agent's / not alive -> ValueError, same rule as send/capture.
     _resolve(id)
     agent_id = int(ava._boot.agent_id())
-    from shared.watcher_registry import watcher_session_ids
+    from shared.daemon.schedules.watcher_registry import watcher_session_ids
 
     if id in watcher_session_ids(agent_id):
         raise ValueError(

@@ -42,14 +42,14 @@ from shared.agents.history.checkpoint import (
     load_checkpoint_messages_by_trace,
 )
 from shared.chat_delivery import ClientMessageConflictError
-from shared.completion_notices import (
+from shared.config import settings
+from shared.daemon.schedules.completion_notices import (
     CompletionNotice,
     CompletionNoticePolicy,
     current_default_completion_notice_policy,
     delivery_required_for_agent,
     policy_for_agent,
 )
-from shared.config import settings
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
 from shared.db_transaction import write_transaction
 from shared.inbound import InboundKind

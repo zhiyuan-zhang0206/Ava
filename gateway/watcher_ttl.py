@@ -2,7 +2,7 @@
 
 A watcher session's shell TTL IS the watcher's target deadline (user ruling
 2026-09-14, task #3411): launch = created + timeout, cron = end, at = moment
-+ grace — one derivation (`shared.watcher.session_deadline`) for the spawn
++ grace — one derivation (`shared.daemon.schedules.watcher.session_deadline`) for the spawn
 write path, the boot reconcile, and this reclaim side. Everything here is
 that rule applied to the registry:
 
@@ -29,10 +29,10 @@ from psycopg_pool import ConnectionPool
 
 from ops import cluster_rpc
 from shared import telemetry
+from shared.daemon.schedules.watcher import session_deadline
 from shared.db import insert_inbound_message
 from shared.db_transaction import write_transaction
 from shared.inbound_provenance import InboundProvenance
-from shared.watcher import session_deadline
 
 _log = logging.getLogger(__name__)
 

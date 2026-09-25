@@ -29,12 +29,12 @@ from shared import pause_owner
 from shared.cluster import inbound_channel
 from shared.config import settings
 from shared.context import AvaContext
+from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+from shared.daemon.schedules.watcher_registry import register_watcher, watcher_rows
 from shared.machine import machine_name
 from shared.maintenance_state import MaintenanceHold
 from shared.platform import IS_WINDOWS
 from shared.redis_client import sync_redis
-from shared.watcher import TEMPLATE_VERSION
-from shared.watcher_registry import register_watcher, watcher_rows
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="Real POSIX PTY session fixture"),

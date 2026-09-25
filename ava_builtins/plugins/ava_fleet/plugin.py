@@ -192,7 +192,7 @@ def notify(
 
     expire_at_iso: str | None = None
     if expire_at is not None:
-        from shared.watcher import normalize_when
+        from shared.daemon.schedules.watcher import normalize_when
 
         due_at = normalize_when(expire_at)
         if due_at < datetime.now(UTC):

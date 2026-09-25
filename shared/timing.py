@@ -21,11 +21,11 @@ import shared.deploy_timing as deploy
 import shared.stop_timing as stop
 from shared import cluster_lock
 from shared.config import settings
+from shared.daemon.schedules.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from shared.host_deploy_state import UPDATER_LEASE_TTL_S
-from shared.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 
 # --- schedule supervision family ---------------------------------------------
-# Value lives in shared/schedule_timing.py: the gateway's schedule manager
+# Value lives in shared/daemon/schedules/schedule_timing.py: the gateway's schedule manager
 # imports it from there directly, without the lattice module's agent/sandbox
 # settings reads. The NO_PROGRESS_TIMEOUT_S ordering is declared in
 # CONSTRAINTS below.

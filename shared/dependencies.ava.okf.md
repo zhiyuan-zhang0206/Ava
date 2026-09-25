@@ -28,5 +28,5 @@ The shared-layer domain map below complements the public
 - [[shared/plugins_config.ava.okf.md]] — per-machine plugin enable state
 - [[cluster_lock.ava.okf.md]] — the cluster deploy lease
 - [[host_deploy_state.ava.okf.md]] — per-host deploy posture + updater lease
-- [[watcher_registry.ava.okf.md]] — the `agent_watchers` registry
+- [[shared/daemon/schedules/watcher_registry.ava.okf.md]] — the `agent_watchers` registry
 - [[shared/impersonation/impersonation.ava.okf.md]] — cooperative local leases, native consent, external inbox ACKs and handoff
