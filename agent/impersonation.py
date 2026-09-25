@@ -37,7 +37,7 @@ async def native_status(agent_id: int) -> dict[str, Any] | None:
     incarnation = current_incarnation(agent_id)
     if incarnation is None:
         return None
-    from shared.impersonation import native_status as read_status
+    from shared.agents.impersonation import native_status as read_status
 
     return await asyncio.to_thread(read_status, agent_id, incarnation)
 
@@ -76,7 +76,7 @@ async def claim_gate(
         return None
     if session["status"] == "requested" and session["automatic"]:
         from agent.impersonation_handoff import start_marker
-        from shared.impersonation import accept
+        from shared.agents.impersonation import accept
 
         incarnation = current_incarnation(agent_id)
         assert incarnation is not None  # noqa: S101 — native_status requires it
@@ -165,7 +165,7 @@ async def settle_checkpoint(
         return False
     incarnation = current_incarnation(agent_id)
     assert incarnation is not None  # noqa: S101 — native_status requires it
-    from shared.impersonation import activate, mark_plugin_applied
+    from shared.agents.impersonation import activate, mark_plugin_applied
 
     if session["status"] == "accepted":
         if not activate_accepted:
@@ -205,7 +205,7 @@ async def settle_checkpoint(
         await asyncio.to_thread(mark_plugin_applied, session["id"], version, incarnation)
     if session["automatic"] and session["handoff_applied_at"] is None:
         from agent.impersonation_handoff import deliver_handoff
-        from shared.impersonation import aborted_detail
+        from shared.agents.impersonation import aborted_detail
 
         # A supervisor-aborted lease (task #3998) carries its death cause as
         # "aborted: <detail>" in rejection_reason; the end note names it.
@@ -333,7 +333,7 @@ def _terminate_relay(child: _RelayChild) -> None:
 
 
 def _heartbeat_fresh(heartbeat: datetime | None, *, now: datetime | None = None) -> bool:
-    from shared.impersonation import RELAY_HEARTBEAT_STALE_SECONDS
+    from shared.agents.impersonation import RELAY_HEARTBEAT_STALE_SECONDS
 
     current = now or datetime.now(UTC)
     if heartbeat is None:
@@ -353,12 +353,17 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
     control resumes. A lease that is no longer 'accepted' returns False without
     a transition — someone else already ended it.
     """
-    from shared.impersonation import ImpersonationError, fail_acceptance, provision_relay, relay_get
+    from shared.agents.impersonation import (
+        ImpersonationError,
+        fail_acceptance,
+        provision_relay,
+        relay_get,
+    )
 
     provider = session["relay_provider"]
     if provider == "claude":
         if session["automatic"]:
-            from shared.impersonation import native_status as read_status
+            from shared.agents.impersonation import native_status as read_status
 
             deadline = time.monotonic() + _RELAY_READY_TIMEOUT_S
             while (
@@ -440,7 +445,7 @@ def _roll_back_relay_failure(
     fail_acceptance: Callable[[str, RuntimeIncarnation, str], dict[str, Any]],
     reason: str,
 ) -> bool:
-    from shared.impersonation import ImpersonationError
+    from shared.agents.impersonation import ImpersonationError
 
     with contextlib.suppress(ImpersonationError):
         fail_acceptance(session["id"], incarnation, reason)  # already ended: no-op
@@ -449,7 +454,7 @@ def _roll_back_relay_failure(
 
 def _provider_anchor_states(process_metadata: object) -> list[str]:
     """The lease's recorded provider anchors classified against the live table."""
-    from shared._impersonation_store import provider_anchor_states
+    from shared.agents.impersonation._impersonation_store import provider_anchor_states
 
     return provider_anchor_states(process_metadata)
 
@@ -479,7 +484,7 @@ async def _abort_for_death(
     session: dict[str, Any], agent_id: int, component: str, detail: str
 ) -> bool:
     """Stop the lease after a core-component death; emits impersonation_aborted."""
-    from shared.impersonation import ImpersonationError, abort_lease
+    from shared.agents.impersonation import ImpersonationError, abort_lease
 
     incarnation = current_incarnation(agent_id)
     if incarnation is None:
@@ -531,7 +536,7 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
     Only a stale heartbeat escalates: at most one provision write, one relay
     spawn, and the rate-limited failure stamp.
     """
-    from shared.impersonation import (
+    from shared.agents.impersonation import (
         ImpersonationError,
         provision_relay,
         record_relay_failure,
@@ -643,7 +648,7 @@ def _stamp_relay_failure(
     agent_id: int,
     record_relay_failure: Callable[[str, RuntimeIncarnation], bool],
 ) -> None:
-    from shared.impersonation import ImpersonationError
+    from shared.agents.impersonation import ImpersonationError
     from shared.log import logger
 
     incarnation = current_incarnation(agent_id)

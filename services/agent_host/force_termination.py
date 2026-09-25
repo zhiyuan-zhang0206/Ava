@@ -7,7 +7,7 @@ unobserved terminate command bound to the current hosted incarnation
 recovery is its loudest caller — it force-terminates a wedged incarnation and
 queues the durable recovery chat — but a CLI/operator force and a machine
 pause write the same durable shape. The turn's next fail-closed guard read
-(`agent.impersonation.protect_native_hooks` -> `shared.impersonation.native_status`)
+(`agent.impersonation.protect_native_hooks` -> `shared.agents.impersonation.native_status`)
 then refuses it: the row has left (running, idling). That refusal is a
 *deliberate* termination, not an ownership loss — this pump's own boundary
 observes the command right after (`shared.hosted_force.original_host_force`).
@@ -30,7 +30,7 @@ from contextlib import asynccontextmanager
 from psycopg_pool import AsyncConnectionPool
 
 from services.agent_host.runtime import TurnOutcome
-from shared.impersonation import ImpersonationError
+from shared.agents.impersonation import ImpersonationError
 from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 

@@ -172,7 +172,7 @@ def say(
     message_key: str,
 ) -> int:
     """Commit a user-visible reply before publishing its refresh notification."""
-    from shared._impersonation_store import lock_lease, require_active_locked
+    from shared.agents.impersonation._impersonation_store import lock_lease, require_active_locked
     from shared.config import settings
     from shared.live_events import ImpersonationChanged
     from shared.redis_client import publish_best_effort_sync

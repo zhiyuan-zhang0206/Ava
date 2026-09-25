@@ -5,7 +5,7 @@ from typing import Any
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from shared._impersonation_store import (
+from shared.agents.impersonation._impersonation_store import (
     OPEN,
     ImpersonationError,
     authenticate_relay,
@@ -30,7 +30,7 @@ _RELAY_FAILURE_STAMP_SECONDS = 600
 
 def relay_get(lease_id: str, relay_token: str) -> dict[str, Any]:
     """Lease reads for the bound relay process, under its scoped credential."""
-    from shared.impersonation import _wake
+    from shared.agents.impersonation import _wake
 
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
@@ -127,7 +127,7 @@ def fail_acceptance(lease_id: str, incarnation: RuntimeIncarnation, reason: str)
     agent its acceptance was rolled back and it keeps running. Only the
     accepting native runtime may fail its own acceptance.
     """
-    from shared.impersonation import _wake
+    from shared.agents.impersonation import _wake
 
     if not reason.strip():
         raise ValueError("A nonempty failure reason is required")
@@ -214,7 +214,7 @@ def abort_lease(
     lock serializes with claim-time expiry, the TTL reaper and the terminate
     trigger, so an abort that loses the race is a no-op here.
     """
-    from shared.impersonation import _wake
+    from shared.agents.impersonation import _wake
 
     detail = detail.strip()
     if not detail:

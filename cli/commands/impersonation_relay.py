@@ -24,9 +24,9 @@ from pydantic import BaseModel
 
 import shared.redis_listener
 from cli.commands.codex_app_server import live_submit, require_control_endpoint
+from shared.agents.impersonation import RELAY_HEARTBEAT_SECONDS
+from shared.agents.impersonation.impersonation_delivery import reserve_delivery
 from shared.config import settings
-from shared.impersonation import RELAY_HEARTBEAT_SECONDS
-from shared.impersonation_delivery import reserve_delivery
 
 _CATCHUP_SECONDS = 30.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
@@ -235,7 +235,7 @@ def host_emitter(
 
 
 def _read_inbox(agent_id: int, lease_id: UUID, token: str) -> InboxSnapshot:
-    from shared import impersonation
+    from shared.agents import impersonation
 
     lease = _Lease.model_validate(impersonation.relay_get(str(lease_id), token))
     if lease.agent_id != agent_id or lease.id != lease_id:
@@ -451,7 +451,7 @@ async def relay_inbox(  # noqa: PLR0915 — one consent/window/reservation deliv
 def _write_heartbeat(lease_id: UUID, token: str) -> bool:
     """One durable liveness beat; False means the lease ended or the relay
     credential was revoked — the heartbeat loop stops silently."""
-    from shared import impersonation
+    from shared.agents import impersonation
 
     try:
         impersonation.relay_heartbeat(str(lease_id), token)
@@ -479,8 +479,8 @@ def cmd_relay(args: argparse.Namespace) -> int:
     from cli.commands import impersonation
 
     try:
-        from shared.impersonation import relay_get
-        from shared.impersonation_history import resolve
+        from shared.agents.impersonation import relay_get
+        from shared.agents.impersonation.impersonation_history import resolve
 
         if args.lease_id is None:
             lease_id = UUID(str(resolve(args.agent_id, args.session_id)["id"]))

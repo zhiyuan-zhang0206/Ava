@@ -9,7 +9,7 @@ from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
 
-from shared import impersonation as control
+from shared.agents import impersonation as control
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.machine import machine_name
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
@@ -299,7 +299,7 @@ def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
     plugin-state operations recheck the lease. Direct reads of loaded Python
     objects do not. Attaching never renews the lease.
     """
-    from shared.impersonation_sessions import private_id
+    from shared.agents.impersonation.impersonation_sessions import private_id
 
     if isinstance(session_id, int) and not isinstance(session_id, bool) and agent_id is not None:
         return Attachment(private_id(agent_id, session_id))

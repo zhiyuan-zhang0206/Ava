@@ -16,8 +16,8 @@ import pytest
 from cli.commands import impersonation as cli
 from cli.commands.agent_timeline import cmd_agents_timeline
 from cli.parsers import build_parser
-from shared import impersonation as control
-from shared import impersonation_sessions as sessions
+from shared.agents import impersonation as control
+from shared.agents.impersonation import impersonation_sessions as sessions
 
 
 def _private_id(agent_id: int, session_id: int) -> str:
@@ -292,7 +292,7 @@ def test_ack_uses_explicit_processed_ids_only(
 def test_classified_attestation_refusal_fails_without_leaking_state(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from shared.impersonation import ImpersonationError
+    from shared.agents.impersonation import ImpersonationError
 
     def deny(_lease: str, _caller: object) -> dict[str, Any]:
         raise ImpersonationError("Controller caller check failed (chain-mismatch): see docs")
@@ -318,7 +318,9 @@ def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
         _private_id,
     )
     monkeypatch.setattr(control, "release", release)
-    monkeypatch.setattr("shared.impersonation_history.public_session", _public_session)
+    monkeypatch.setattr(
+        "shared.agents.impersonation.impersonation_history.public_session", _public_session
+    )
     assert (
         cli.cmd_impersonate(
             _args("release", "0", "--agent", "405", "--summary", "Completed X.\nNext Y.")

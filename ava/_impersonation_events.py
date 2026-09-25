@@ -7,7 +7,9 @@ import httpx
 from psycopg.types.json import Jsonb
 
 from ava._gateway_transport import _get
-from shared._impersonation_store import lock_lease
+from shared.agents.impersonation._impersonation_store import lock_lease
+from shared.agents.impersonation.impersonation_events import consume_events
+from shared.agents.impersonation.impersonation_history import event_belongs_to_agent
 from shared.agents.impersonation_manifest import (
     certify,
     frozen_items,
@@ -16,8 +18,6 @@ from shared.agents.impersonation_manifest import (
 )
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.impersonation_events import consume_events
-from shared.impersonation_history import event_belongs_to_agent
 
 _EVENT_PAGE_SIZE = 1000
 _EVENT_OFFSET_MAX = 10_000

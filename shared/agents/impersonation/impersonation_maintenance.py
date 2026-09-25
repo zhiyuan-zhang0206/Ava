@@ -6,7 +6,7 @@ from typing import Literal
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from shared._impersonation_store import expire, lock_lease
+from shared.agents.impersonation._impersonation_store import expire, lock_lease
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
@@ -54,9 +54,13 @@ def force_expire_impersonation(
     """
     from psycopg.rows import dict_row
 
-    from shared._impersonation_store import dismiss_reminders, insert_handoff, lock_agent
+    from shared.agents.impersonation._impersonation_store import (
+        dismiss_reminders,
+        insert_handoff,
+        lock_agent,
+    )
+    from shared.agents.impersonation.impersonation_history import set_actor
     from shared.agents.impersonation_manifest import close_manifest_admission, is_protocol_v1
-    from shared.impersonation_history import set_actor
     from shared.log import logger
 
     with write_transaction(pool) as conn:

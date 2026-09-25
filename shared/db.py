@@ -180,12 +180,11 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     sync and stay inside the ACL grant."""
     from redis.exceptions import ResponseError
 
-    from shared.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
-
     # A wake for an impersonated agent whose relay heartbeat is stale must not
     # be silent: the inbound can sit unread in the inbox forever. Best-effort,
     # lazy-imported to keep this module importable without the lease layer.
-    from shared.impersonation import relay_liveness_alert
+    from shared.agents.impersonation import relay_liveness_alert
+    from shared.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
     from shared.redis_client import sync_redis
 
     relay_liveness_alert(agent_id)

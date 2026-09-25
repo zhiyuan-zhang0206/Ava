@@ -10,7 +10,7 @@ tags:
 
 # Named agent impersonation sessions
 
-`shared/impersonation_sessions.py` exposes `(agent_id, session_id)` handles.
+`shared/agents/impersonation/impersonation_sessions.py` exposes `(agent_id, session_id)` handles.
 Each agent allocates increasing integers starting at zero, through a database
 counter and allocation trigger, including when an older client inserts a row.
 The session `name` and free `executor_name` are separate from the CLI's observed
@@ -24,19 +24,19 @@ tree. Relay credentials are returned once and stored as hashes.
 
 ## Ownership and return
 
-See [[shared/impersonation/ownership.ava.okf.md]] for the lease state machine,
+See [[shared/agents/impersonation/ownership.ava.okf.md]] for the lease state machine,
 native return, renewal, and operator closure.
 
 ## Relay binding
 
-`shared/impersonation/relay.py` owns relay credential provisioning and
+`shared/agents/impersonation/relay.py` owns relay credential provisioning and
 re-provisioning, relay reads, heartbeats, failure stamps, and aborting a lease
-when a component dies. The package door re-exports this surface, so callers
-keep importing `shared.impersonation`.
+when a component dies. The package door exposes this surface to callers through
+`shared.agents.impersonation`.
 
 ## Bounded delivery
 
-`shared/impersonation_delivery.py` reserves host submissions against the
+`shared/agents/impersonation/impersonation_delivery.py` reserves host submissions against the
 lease's `max_delivery_attempts` and `ack_window_seconds`. Requests snapshot
 `impersonation_max_delivery_attempts` and `impersonation_ack_window_seconds`
 from cluster config (defaults: 2 total attempts, 180 seconds per ACK window).
@@ -86,7 +86,7 @@ inputs become processed only after the note is durable; unacknowledged incoming
 content remains in the file for the resumed agent to handle.
 
 SDK collection, sampling and instrumentation belong to the upstream collector.
-The consumption boundary is `shared/impersonation_events.py`: explicit scoped
+The consumption boundary is `shared/agents/impersonation/impersonation_events.py`: explicit scoped
 session binding, stable event IDs, skew-guarded time validation, deduplication
 and export refresh when late facts arrive. Protocol-v1 controller receipts
 capture event identities before telemetry enqueue, central transactional audit
@@ -126,5 +126,5 @@ keep a default because one value is the only reading:
   hints); not an operator parameter.
 
 See [[ava/external.ava.okf.md]],
-[external agent procedure](../../conventions/agent-impersonation.md), and
-[host relay setup](../../conventions/agent-impersonation-hosts.md).
+[external agent procedure](../../../conventions/agent-impersonation.md), and
+[host relay setup](../../../conventions/agent-impersonation-hosts.md).

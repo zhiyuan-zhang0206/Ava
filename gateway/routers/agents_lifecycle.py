@@ -38,9 +38,9 @@ from ops.rpc_schemas import (
     TerminateAgentRequest,
     TerminateAgentResponse,
 )
-from shared._impersonation_store import ImpersonationError
+from shared.agents.impersonation._impersonation_store import ImpersonationError
+from shared.agents.impersonation.impersonation_maintenance import force_expire_impersonation
 from shared.db import agent_exists, insert_compact_request_inbound
-from shared.impersonation_maintenance import force_expire_impersonation
 
 router = APIRouter()
 

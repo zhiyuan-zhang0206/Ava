@@ -12,8 +12,8 @@ import pytest
 from psycopg import sql
 
 import shared.agents.impersonation_manifest as manifest
-from shared import impersonation as leases
-from shared import impersonation_history as history
+from shared.agents import impersonation as leases
+from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation_manifest import (
     LocalParticipant,
     bind_local_participant,

@@ -7,8 +7,8 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from shared import _impersonation_store as store
-from shared import impersonation as leases
+from shared.agents import impersonation as leases
+from shared.agents.impersonation import _impersonation_store as store
 from shared.caller_identity import CallerIdentity
 from shared.db import create_agent
 from shared.machine import machine_name

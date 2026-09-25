@@ -4,7 +4,7 @@
 'restarting' while its maintenance restart is still un-applied — the durable
 truncation signal `agent.db.has_pending_interrupt` turns into an abort for the
 member's in-flight turn. The turn's next fail-closed guard read
-(`agent.impersonation.protect_native_hooks` -> `shared.impersonation.native_status`)
+(`agent.impersonation.protect_native_hooks` -> `shared.agents.impersonation.native_status`)
 then refuses it: the row's status has left (running, idling). That refusal is a
 *deliberate* truncation, not an ownership loss — the drain already released the
 member with the honest `reaped` receipt and a successor boundary settles the
@@ -26,7 +26,7 @@ from contextlib import asynccontextmanager
 from psycopg_pool import AsyncConnectionPool
 
 from services.agent_host.runtime import TurnOutcome
-from shared.impersonation import ImpersonationError
+from shared.agents.impersonation import ImpersonationError
 from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
