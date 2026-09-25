@@ -209,7 +209,7 @@ def split_content(content: Content) -> tuple[str, dict[str, object] | None]:
     The strip mirrors the wire model: `ops/rpc_schemas._MessageContent` parses
     string content with `strip_whitespace=True, min_length=1`, so the route's
     stored row carries the stripped form. A flushed insert bypasses that model,
-    and `shared/chat_delivery._matching_receipt` compares stored vs incoming
+    and `shared.agents.messages.chat_delivery._matching_receipt` compares stored vs incoming
     content exactly — an unstripped replay of a whitespace-edged string would
     read as a different message (a false `key_conflict` / 409) although it is
     the same one.
