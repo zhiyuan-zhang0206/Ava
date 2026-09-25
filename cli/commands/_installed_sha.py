@@ -49,7 +49,7 @@ _REV_PARSE_TIMEOUT_S = 10.0
 
 def _main() -> int:
     from cli.commands._repo import _repo_root
-    from shared.gitenv import git_env
+    from shared.deploy.git.gitenv import git_env
     from shared.source_integrity import set_installed
 
     repo = _repo_root()

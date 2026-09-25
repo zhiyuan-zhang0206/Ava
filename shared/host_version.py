@@ -22,7 +22,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.paths import repo_root as _repo_root
 from shared.proc import run_bounded
 

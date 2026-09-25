@@ -59,7 +59,7 @@ from shared.rollout_telemetry import stage as _stage_telemetry
 # schema or backend daemons). A backend-only pull leaves the frontend serving
 # (skips the ~30-60s npm build). Classification runs BEFORE the pull (git fetch
 # + diff against origin/main) so the frontend-only fast path can skip Phase A.
-# The frontend/backend/doc partition itself lives in `shared.repo_change`
+# The frontend/backend/doc partition itself lives in `shared.deploy.git.repo_change`
 # (`_classify_change` above is the re-export) so the gateway's read-only update
 # preflight shares one source of truth.
 

@@ -748,7 +748,7 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_normal_release(args.normal_release)
     if args.target_sha is not None:
-        from shared.git_sha import require_full_sha
+        from shared.deploy.git.git_sha import require_full_sha
 
         try:
             require_full_sha(args.target_sha, entry="--target-sha")

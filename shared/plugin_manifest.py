@@ -634,7 +634,7 @@ def _git_rc(repo: Path, *args: str) -> int | None:
 
 
 def _git_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
-    from shared.gitenv import git_env
+    from shared.deploy.git.gitenv import git_env
     from shared.proc import run_bounded
 
     try:

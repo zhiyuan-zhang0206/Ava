@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from cli.commands import _update_uv_sync
 from cli.commands._update_pitr import RECOVERY_SUFFIX
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.paths import ava_home
 from shared.proc import run_bounded
 from shared.rollout_telemetry import RolloutTelemetry, record_bytes, record_detail, stage

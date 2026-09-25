@@ -104,7 +104,7 @@ from ops.updater_reap import (
     _updater_hung as _updater_hung,
 )
 from shared.config import settings
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.platform import LockTimeoutError
 from shared.proc import run_bounded, timeout_stderr_tail
 from shared.session_env import venv_activation_prefix
@@ -224,7 +224,7 @@ def spawn_update(  # noqa: PLR0915 — one pause-to-detached-child transaction
             updater session.
     """
     if target_sha is not None:
-        from shared.git_sha import require_full_sha
+        from shared.deploy.git.git_sha import require_full_sha
 
         require_full_sha(target_sha, entry="cluster update --target-sha")
     deploy_spawn.assert_prod_home_has_its_own_checkout()
