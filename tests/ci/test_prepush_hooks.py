@@ -335,3 +335,94 @@ def test_stable_uv_tool_interpreter_is_silent(checkout: Path, tmp_path: Path) ->
     install_fixture(checkout, interpreter)
     result = check_install(checkout)
     assert result.returncode == 0 and result.stdout == result.stderr == ""
+
+
+def _init_checkout(path: Path) -> Path:
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    interpreter = path / ".venv/bin/python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.symlink_to(sys.executable)
+    return path
+
+
+def _scan(home: Path) -> subprocess.CompletedProcess[str]:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env["HOME"] = str(home)
+    return subprocess.run(
+        [sys.executable, str(CHECK), "--scan-machine"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+
+def test_machine_scan_clean(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    repo = _init_checkout(home / "Ava")
+    install_fixture(repo, repo / ".venv/bin/python")
+    source = _init_checkout(home / ".ava" / "source")
+    install_fixture(source, source / ".venv/bin/python")
+    result = _scan(home)
+    assert result.returncode == 0
+    assert "hook check: OK (2 clone(s))" in result.stdout
+    assert "WARNING" not in result.stdout
+
+
+def test_machine_scan_reports_drifted_checkout(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    repo = _init_checkout(home / "Ava")
+    install_fixture(repo, repo / ".venv/bin/python")
+    drifted = _init_checkout(home / ".ava-preview" / "source")
+    interpreter = drifted / ".worktrees" / "wt" / ".venv/bin/python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.symlink_to(sys.executable)
+    install_fixture(drifted, interpreter)
+    result = _scan(home)
+    assert result.returncode == 1
+    assert "points into a disposable worktree" in result.stdout
+    assert "hook check: 2 problem(s) across 2 clone(s)" in result.stdout
+
+
+def test_machine_scan_reports_missing_hooks(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _init_checkout(home / "Ava")  # hooks dir holds only the samples
+    result = _scan(home)
+    assert result.returncode == 1
+    assert result.stdout.count("missing or non-executable") == 2
+    assert "hook check: 2 problem(s) across 1 clone(s)" in result.stdout
+
+
+def test_machine_scan_dedupes_linked_worktrees(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    repo = _init_checkout(home / "Ava")
+    install_fixture(repo, repo / ".venv/bin/python")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.email=probe@example.com",
+            "-c",
+            "user.name=probe",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "--no-verify",
+            "-m",
+            "probe",
+        ],
+        check=True,
+    )
+    linked = home / ".ava-linked" / "source"
+    linked.parent.mkdir()
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", str(linked), "-b", "probe"],
+        check=True,
+    )
+    result = _scan(home)
+    assert result.returncode == 0
+    assert "hook check: OK (1 clone(s))" in result.stdout

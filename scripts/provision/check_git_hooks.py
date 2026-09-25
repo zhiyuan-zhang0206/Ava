@@ -1,13 +1,24 @@
-"""Warn about missing Git hooks or ephemeral interpreter pointers; never install."""
+"""Warn about missing Git hooks or ephemeral interpreter pointers; never install.
 
+Default mode inspects the repository at the current directory and stays
+warn-only (exit 0) during hook rollout. ``--scan-machine`` sweeps every
+conventional local checkout on this machine — both dev clones and each home's
+``source`` tree — and exits 1 when any of them reports a problem; that is the
+form the converge warning step runs.
+"""
+
+import argparse
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 
-def git(*args: str) -> str:
-    return subprocess.check_output(["git", *args], text=True).strip()  # noqa: S603 — fixed git calls only
+def git(*args: str, cwd: Path | None = None) -> str:
+    return subprocess.check_output(  # noqa: S603 — fixed git calls only
+        ["git", *args], text=True, cwd=cwd
+    ).strip()
 
 
 def hook_problem(hook: Path) -> str:
@@ -34,23 +45,36 @@ def hook_problem(hook: Path) -> str:
     return ""
 
 
-def main() -> None:
-    problems = []
+def hooks_path_override(checkout: Path) -> str:
+    override = subprocess.run(
+        ["git", "config", "--get", "core.hooksPath"],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if override.returncode == 0:
+        return (
+            "core.hooksPath overrides the shared hooks directory; review and remove that override"
+        )
+    return ""
+
+
+def inspect_checkout(checkout: Path) -> tuple[list[str], str | None]:
+    """Problems for one checkout, plus its main-clone path (None when unknown)."""
+    problems: list[str] = []
     try:
-        common_dir = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
-        main_clone = Path(
-            git("worktree", "list", "--porcelain").splitlines()[0].removeprefix("worktree ")
+        common_dir = Path(
+            git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=checkout)
         )
-        override = subprocess.run(
-            ["git", "config", "--get", "core.hooksPath"],
-            capture_output=True,
-            text=True,
-            check=False,
+        main_clone = (
+            git("worktree", "list", "--porcelain", cwd=checkout)
+            .splitlines()[0]
+            .removeprefix("worktree ")
         )
-        if override.returncode == 0:
-            problems.append(
-                "core.hooksPath overrides the shared hooks directory; review and remove that override"
-            )
+        override = hooks_path_override(checkout)
+        if override:
+            problems.append(override)
         for hook_type in ("pre-commit", "pre-push"):
             hook = common_dir / "hooks" / hook_type
             try:
@@ -60,11 +84,90 @@ def main() -> None:
             if problem:
                 problems.append(problem)
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-        problems.append(f"cannot inspect Git hook installation: {exc}")
-        location = "the main clone"
-    else:
-        location = shlex.quote(str(main_clone))
+        return [f"cannot inspect Git hook installation: {exc}"], None
+    return problems, main_clone
+
+
+def machine_checkouts(home: Path) -> list[Path]:
+    """Conventional local checkouts: both dev clones and each home's source tree.
+
+    Deliberately shallow — a bounded listing of ``home``, never a deep walk,
+    which would trip macOS TCC prompts on operator machines.
+    """
+    candidates = [home / "Ava", home / "MyAva"]
+    for directory in sorted(home.glob(".ava*")):
+        candidates.append(directory / "source")
+        candidates.append(directory)
+    checkouts: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            if not (candidate / ".git").exists():
+                continue
+            key = str(candidate.resolve())
+        except OSError:
+            continue
+        if key not in seen:
+            seen.add(key)
+            checkouts.append(candidate)
+    return checkouts
+
+
+def scan_machine() -> int:
+    """Check every conventional local checkout; exit 1 when any problem is found.
+
+    Linked worktrees of one clone are inspected once (their shared hooks live
+    in the same ``git-common-dir``); the first discovered checkout represents
+    the clone in both the report and the count.
+    """
+    clones: dict[str, Path] = {}
+    for checkout in machine_checkouts(Path.home()):
+        try:
+            key = str(
+                Path(
+                    git(
+                        "rev-parse",
+                        "--path-format=absolute",
+                        "--git-common-dir",
+                        cwd=checkout,
+                    )
+                ).resolve()
+            )
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            key = str(checkout)  # unreadable: inspect it standalone so it still reports
+        clones.setdefault(key, checkout)
+    problems_total = 0
+    for checkout in clones.values():
+        problems, _ = inspect_checkout(checkout)
+        for problem in problems:
+            print(f"WARNING: [{checkout}] {problem}")
+            problems_total += 1
+    if problems_total:
+        print(f"hook check: {problems_total} problem(s) across {len(clones)} clone(s)")
+        print(
+            "Reinstall from each main clone's stable interpreter (never a worktree): "
+            ".venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push"
+        )
+        return 1
+    print(f"hook check: OK ({len(clones)} clone(s))")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Warn about missing Git hooks or ephemeral interpreter pointers."
+    )
+    parser.add_argument(
+        "--scan-machine",
+        action="store_true",
+        help="check every conventional checkout under $HOME instead of the current repository",
+    )
+    args = parser.parse_args(argv)
+    if args.scan_machine:
+        return scan_machine()
+    problems, main_clone = inspect_checkout(Path.cwd())
     if problems:
+        location = shlex.quote(main_clone) if main_clone else "the main clone"
         for problem in problems:
             print(f"WARNING: {problem}")
         print(
@@ -77,7 +180,8 @@ def main() -> None:
             "~/.local/bin/pre-commit install --hook-type pre-commit --hook-type pre-push"
         )
         print("Warn-only during hook rollout; independent CI checks remain the merge gate.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

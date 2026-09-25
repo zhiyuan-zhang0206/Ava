@@ -2188,7 +2188,10 @@ Never install from an ephemeral worktree: all worktrees of a clone share
 `git rev-parse --git-common-dir`'s `hooks/` directory, and pre-commit writes the
 installing interpreter's absolute path into `INSTALL_PYTHON`. Deleting that
 worktree leaves a dead pointer. `scripts/setup-worktree.sh` checks the shared
-installation without rewriting hooks or `core.hooksPath`. Before deleting a
+installation without rewriting hooks or `core.hooksPath`. Converge re-asserts
+the same health on every `ava start` / `ava cluster update`
+(`ensure_local_git_hooks` runs `check_git_hooks.py --scan-machine` over the
+conventional local checkouts); drift warns, it never blocks. Before deleting a
 worktree, inspect both shared hooks' `INSTALL_PYTHON` values and reinstall from
 the main clone if either points into the worktree.
 

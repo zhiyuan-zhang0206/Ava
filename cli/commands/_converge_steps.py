@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 from cli.commands._converge_spec import ConvergeCtx
 from shared.config import settings
+from shared.paths import repo_root
 from shared.platform_backend import get_backend
 from shared.private_storage import converge_private_tree, ensure_private_file
 
@@ -257,6 +259,36 @@ def _ensure_redis_url_identity_step(ctx: ConvergeCtx) -> None:
     refreshed = DataPlaneSettings()  # pyright: ignore[reportCallIssue] — committed aliases supply config
     settings.data_plane.redis_url = refreshed.redis_url
     print(f"  · backfilled AVA_REDIS_URL username {identity!r} (legacy URL carried none)")
+
+
+def ensure_local_git_hooks(ctx: ConvergeCtx) -> None:  # noqa: ARG001
+    """Warn when a conventional local checkout's Git hook installation is
+    missing or drifted; never repair or block start.
+
+    Runs the stdlib-only checker (``scripts/provision/check_git_hooks.py
+    --scan-machine``) from THIS checkout and mirrors its ``WARNING`` lines to
+    stderr. A checkout that predates the flag (usage error), a missing script,
+    or any subprocess failure degrades to silence — a warn-only assertion must
+    never make converge noisy or fatal on its own account.
+    """
+    script = repo_root() / "scripts" / "provision" / "check_git_hooks.py"
+    if not script.exists():
+        return
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script), "--scan-machine"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    if result.returncode not in (0, 1):
+        return  # pre-flag checkout or unexpected failure: stay silent
+    for line in result.stdout.splitlines():
+        if line.startswith("WARNING:"):
+            print(f"  ! hooks: {line.removeprefix('WARNING: ').strip()}", file=sys.stderr)
 
 
 # --- unit-state steps (need a configured unit) ----------------------------
