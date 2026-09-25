@@ -736,7 +736,7 @@ class DeliveryRecoveryDecision(TypedDict):
 
 
 class DeliveryOutboxFlushed(TypedDict):
-    """`delivery_outbox_flushed` payload — shared/delivery_outbox.py flusher."""
+    """`delivery_outbox_flushed` payload — shared/agents/messages/delivery_outbox.py flusher."""
 
     inbound_id: int
     attempts: int
@@ -746,7 +746,7 @@ class DeliveryOutboxFlushed(TypedDict):
 
 
 class DeliveryOutboxAbandoned(TypedDict):
-    """`delivery_outbox_abandoned` payload — shared/delivery_outbox.py flusher.
+    """`delivery_outbox_abandoned` payload — shared/agents/messages/delivery_outbox.py flusher.
 
     `reason` stays the stable code readers match on; `detail` carries the
     readable failure text when the abandonment had one (gate refusal, key

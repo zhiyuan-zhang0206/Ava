@@ -19,10 +19,13 @@ are blanked before matching.
 
 The invariant is that committed repository content carries no reference to the
 old path. Scan working-tree text for `git ls-files` entries, excluding the frozen
-decisions/, postmortems/, and docs/history/ axes, the hash-pinned legacy
-compatibility patch (`scripts/legacy_lkg/compatibility.patch`, bound by
-`manifest.json` patch_sha256 to the 612326d base — its context lines must keep
-that base's paths), and this script itself. Untracked
+decisions/, postmortems/, and docs/history/ axes, the fixed-base legacy proof
+artifacts — the hash-pinned compatibility patch
+(`scripts/legacy_lkg/compatibility.patch`, bound by `manifest.json`
+patch_sha256 to the 612326d base) and the proof script
+(`scripts/legacy_lkg/cold_boot.py`, executed inside that reconstructed
+install, so its references must keep the base's paths) — and this script
+itself. Untracked
 environments, caches, and operator scaffolding are outside that universe. Stage
 new files before auditing. Binary files are skipped. Any failed check exits 1.
 """
@@ -38,10 +41,17 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _FROZEN = ("decisions/", "postmortems/", "docs/history/")
-# Hash-pinned frozen single files outside the frozen axes: the legacy
-# compatibility patch is bound by manifest.json `patch_sha256` to the 612326d
-# base, so its context lines must keep that base's paths verbatim.
-_FROZEN_FILES = frozenset({"scripts/legacy_lkg/compatibility.patch"})
+# Fixed single files outside the frozen axes, bound to the 612326d base:
+# the compatibility patch (context lines keep that base's paths verbatim) and
+# the cold-boot proof script (runs inside the reconstructed base install, so
+# its module/path references resolve against that base - a move in main does
+# not rewrite them; a base bump re-proves and updates them).
+_FROZEN_FILES = frozenset(
+    {
+        "scripts/legacy_lkg/compatibility.patch",
+        "scripts/legacy_lkg/cold_boot.py",
+    }
+)
 _HISTORY_READ_RE = re.compile(r"""git\s+show\s+(?:"[^"]*"|'[^']*'|\S+)""")
 
 

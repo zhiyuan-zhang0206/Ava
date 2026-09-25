@@ -614,7 +614,7 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
     from ava import _impersonation_events as reader
     from cli.commands.impersonation import _send
     from services.agent_host.impersonation_events import reconcile_one
-    from shared import delivery_outbox as outbox
+    from shared.agents.messages import delivery_outbox as outbox
 
     class SingleConnectionPool:
         def connection(self, *, timeout: float | None = None) -> Any:

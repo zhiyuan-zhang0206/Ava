@@ -31,9 +31,9 @@ from agent.messages import NoteTag, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import scan_inbound_content
+from shared.agents.messages.inbound import InboundKind
 from shared.config import now_timestamp, settings
 from shared.context import AvaContext
-from shared.inbound import InboundKind
 from shared.live_events import Cancelled
 from shared.log import logger
 from shared.message_kwargs import AvaMsgType, read_ava_kwargs

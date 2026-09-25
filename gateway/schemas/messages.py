@@ -18,7 +18,7 @@ from pydantic import (
 
 from ops.rpc_content import UserContent
 from shared.agents import AgentStatus
-from shared.envelope import validate_writable_source
+from shared.agents.messages.envelope import validate_writable_source
 from shared.message_kwargs import NoteTag
 from shared.tasks.priority import Priority
 

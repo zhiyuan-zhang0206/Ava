@@ -20,6 +20,11 @@ from typing import Any, NamedTuple
 import psycopg
 
 from shared.agents import AgentStatus
+from shared.agents.messages.inbound_provenance import (
+    InboundProvenance,
+    content_sha256,
+    source_assertion_match,
+)
 from shared.db_connections import DEFAULT_POOL_TIMEOUT_S as DEFAULT_POOL_TIMEOUT_S
 from shared.db_connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
 from shared.db_connections import (
@@ -45,7 +50,6 @@ from shared.db_connections import connect as connect
 from shared.db_connections import direct_db_url as direct_db_url
 from shared.db_connections import pool as pool
 from shared.db_transaction import write_transaction
-from shared.inbound_provenance import InboundProvenance, content_sha256, source_assertion_match
 from shared.log import logger
 from shared.telemetry import Event
 
@@ -237,7 +241,7 @@ def insert_inbound_message(
 
     Args:
         source: provenance tag — claim node reads it and goes
-            through `shared/envelope.py:wrap_inbound` envelope prefix to tell
+            through `shared/agents/messages/envelope.py:wrap_inbound` envelope prefix to tell
             the agent who the message came from. The UI passes
             `'user'`; a peer agent passes `'agent:N'`.
         kind: default `'chat'` (user dialogue). Other valid values
@@ -268,8 +272,8 @@ def insert_inbound_message(
         {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys()
     ):
         raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
+    from shared.agents.messages.envelope import reject_unnegotiated_caller
     from shared.caller_identity import caller_payload
-    from shared.envelope import reject_unnegotiated_caller
 
     reject_unnegotiated_caller(source)
     payload = caller_payload(source, payload)
@@ -368,8 +372,8 @@ def insert_spawn_prompt_in_transaction(
     lost announcement. Spawn prompts have no multimodal payload or transport
     provenance; caller identity still follows the ordinary inbound rules.
     """
+    from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
     from shared.caller_identity import caller_payload
-    from shared.envelope import reject_unnegotiated_caller, validate_writable_source
 
     validate_writable_source(source)
     reject_unnegotiated_caller(source)

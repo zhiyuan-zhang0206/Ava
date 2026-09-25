@@ -166,7 +166,7 @@ def _prepare_resurrect_attempt(
     refused (`ResurrectRefused`) — the batch entry never crosses the closure
     marker and only reinstates the recorded billing cohort.
     """
-    from shared.envelope import reject_unnegotiated_caller
+    from shared.agents.messages.envelope import reject_unnegotiated_caller
     from shared.exec_owner_recovery import recover_local_resources
     from shared.lifecycle_acceptance import supersede_lifecycle_for_resurrect
 

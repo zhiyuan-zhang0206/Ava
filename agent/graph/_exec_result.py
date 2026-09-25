@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from shared.inbound import InterruptReason
+from shared.agents.messages.inbound import InterruptReason
 from shared.lifecycle import (
     AgentImpersonation,
     AgentRestart,

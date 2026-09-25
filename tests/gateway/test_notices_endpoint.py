@@ -681,7 +681,7 @@ def test_dismiss_require_response_delivers_system_note(db_conn: psycopg.Connecti
     assert row is not None and row[0] == "dismissed"
 
     # one self-describing inbound, system-sourced — the claim node envelope-wraps
-    # it as "[system] ..." (see shared/envelope.py), never as the user "[ts]" header
+    # it as "[system] ..." (see shared/agents/messages/envelope.py), never as the user "[ts]" header
     rows = _pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]

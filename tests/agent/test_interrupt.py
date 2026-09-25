@@ -18,8 +18,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph._interrupt import subscribe_interrupt
+from shared.agents.messages.inbound import InterruptReason
 from shared.db import create_agent
-from shared.inbound import InterruptReason
 from shared.machine import machine_name
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous

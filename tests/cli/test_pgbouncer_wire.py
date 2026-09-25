@@ -576,7 +576,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     import shared.db as shared_db
     from gateway.routers.schedules import _update_blocking
     from shared import config
-    from shared.chat_delivery import insert_chat_inbound_once
+    from shared.agents.messages.chat_delivery import insert_chat_inbound_once
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
@@ -586,7 +586,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
         def _no_wake(*_args: object, **_kwargs: object) -> None:
             return None
 
-        monkeypatch.setattr("shared.chat_delivery.publish_inbound_wake", _no_wake)
+        monkeypatch.setattr("shared.agents.messages.chat_delivery.publish_inbound_wake", _no_wake)
         with psycopg.connect(pg_url, autocommit=True) as admin:
             row = admin.execute(
                 "INSERT INTO agents (label) VALUES ('poison-probe-agent') RETURNING id"

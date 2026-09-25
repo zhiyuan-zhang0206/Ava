@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ops.rpc_content import UserContent
-from shared.envelope import reject_unnegotiated_caller, validate_writable_source
+from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 
 
 class TerminateAgentRequest(BaseModel):

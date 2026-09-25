@@ -29,10 +29,10 @@ from psycopg_pool import ConnectionPool
 
 from ops import cluster_rpc
 from shared import telemetry
+from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.daemon.schedules.watcher import session_deadline
 from shared.db import insert_inbound_message
 from shared.db_transaction import write_transaction
-from shared.inbound_provenance import InboundProvenance
 
 _log = logging.getLogger(__name__)
 

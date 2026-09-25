@@ -65,9 +65,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
+from shared.agents.messages.delivery_outbox_types import FlushReport
 from shared.atomic_io import write_text_atomic
 from shared.daemon.schedules import completion_notices
-from shared.delivery_outbox_types import FlushReport
 from shared.log import logger
 from shared.paths import ava_home
 from shared.turn_identity import effective_agent_id
@@ -545,8 +545,11 @@ class PermanentDeliveryError(Exception):
 
 def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> int | None:
     """Commit one entry through the canonical chat-inbound path; returns the id."""
+    from shared.agents.messages.chat_delivery import (
+        ClientMessageConflictError,
+        insert_chat_inbound_once,
+    )
     from shared.caller_protocol import CallerProtocolUnavailableError
-    from shared.chat_delivery import ClientMessageConflictError, insert_chat_inbound_once
     from shared.db import publish_inbound_wake
 
     text, payload = split_content(entry.content)

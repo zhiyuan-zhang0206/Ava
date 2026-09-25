@@ -4160,7 +4160,7 @@ export interface components {
          *     `source` is required — the SDK passes f"agent:{my_id}", the generated
          *     notices pass shell:N / watcher:N; there is no default to prevent callers
          *     from forgetting and having inbounds silently tagged as "user", muddying
-         *     envelope labels. The valid set is in `shared/envelope.py:validate_source`
+         *     envelope labels. The valid set is in `shared/agents/messages/envelope.py:validate_source`
          *     (system / agent:N / user / ui:page:<name> / watcher:N / shell:N /
          *     schedule:N); an illegal source is intercepted by 422 at the HTTP layer —
          *     otherwise it would land in inbound_messages and the agent claim node
@@ -7222,7 +7222,7 @@ export interface components {
          *     composes it into the marker `[system ts] You have been resurrected
          *     by {resurrected_by}` so the agent knows who resurrected it.
          *
-         *     The value must pass `shared.envelope.validate_source` (same check as
+         *     The value must pass `shared.agents.messages.envelope.validate_source` (same check as
          *     `AgentMessageIn.source`): the same value becomes the prompt chat
          *     inbound's source, and the claim node's envelope wrap raises on
          *     anything outside the whitelist — killing the freshly resurrected

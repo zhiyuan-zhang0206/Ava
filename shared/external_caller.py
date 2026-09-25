@@ -9,8 +9,8 @@ from __future__ import annotations
 import os
 import shlex
 
+from shared.agents.messages.envelope import validate_source
 from shared.caller_identity import CallerIdentity
-from shared.envelope import validate_source
 
 
 def external_caller() -> CallerIdentity | None:

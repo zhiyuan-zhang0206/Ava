@@ -17,7 +17,6 @@ from ops import pty_close_notices
 from shared import (
     atomic_io,
     coding_session_owner_record,
-    delivery_outbox,
     editable_install,
     pause_owner,
     spawn_receipt,
@@ -25,6 +24,7 @@ from shared import (
     ui_update_state,
 )
 from shared import updater_handoff as handoff
+from shared.agents.messages import delivery_outbox
 from shared.sessions.pty import allocation_freeze
 from tests.shared.test_updater_handoff import (
     _isolated as _isolated,

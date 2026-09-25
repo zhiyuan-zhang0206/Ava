@@ -99,10 +99,10 @@ from shared.agents.impersonation.impersonation_maintenance import (
     reap_impersonations,
     remind_expiring_impersonations,
 )
+from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.config import cluster_tz, settings
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.inbound_provenance import InboundProvenance
 from shared.live_announce import publish_agent_updated_sync
 from shared.live_events import PageClosed
 from shared.redis_client import publish_best_effort_sync

@@ -47,7 +47,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import pending_interrupt_reason
 from agent.graph._node_log import awaiter_chain_lines
-from shared.inbound import InterruptReason
+from shared.agents.messages.inbound import InterruptReason
 from shared.log import logger
 
 

@@ -275,7 +275,7 @@ def split_commands(content: str) -> list[Invocation] | None:
 def _expand_one(inv: Invocation) -> str:
     """Expand a single invocation into its prompt text.
 
-    Source-neutral: the envelope (shared.envelope.wrap_inbound) already frames
+    Source-neutral: the envelope (shared.agents.messages.envelope.wrap_inbound) already frames
     the message ("Agent 5:" for peers; the bare "[ts]" header for the user), so
     the expansion must not re-name an actor — a `/command` sent by a peer agent
     reads correctly without the old "User invoked …" phrasing.

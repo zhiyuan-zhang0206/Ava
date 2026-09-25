@@ -19,8 +19,8 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from shared import delivery_outbox as outbox
-from shared.chat_delivery import insert_chat_inbound_once
+from shared.agents.messages import delivery_outbox as outbox
+from shared.agents.messages.chat_delivery import insert_chat_inbound_once
 from shared.config import settings
 from shared.db import create_agent
 

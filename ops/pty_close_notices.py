@@ -31,10 +31,10 @@ from typing import cast
 from psycopg_pool import ConnectionPool
 
 from ops.cluster_status import _AGENT_SHELL_RE
+from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.atomic_io import write_text_atomic
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.inbound_provenance import InboundProvenance
 from shared.log import logger
 from shared.paths import ava_home
 
