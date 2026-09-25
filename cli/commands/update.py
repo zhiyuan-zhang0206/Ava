@@ -28,6 +28,8 @@ from cli.commands._managed_writer_wiring import (
     _begin_managed_writer_publication,
     _collect_managed_writer_publication,
     _commit_managed_writer_publication,
+    _commit_managed_writer_tails,
+    _drive_managed_writer_continuation,
 )
 from cli.commands._repo import _repo_root as _repo_root
 from cli.commands._update_agent_runner import (
@@ -538,12 +540,16 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     # The finalizer may compensate only after this rollout has entered Phase A.
     phase_a_started = False
     # Whether a managed-writer publication failed -- a failed candidate-ready
-    # wait, or a collection/commit refusal -- and the durable pending journal
-    # was retained for checked recovery. It rides
+    # wait, or a collection/continuation/commit refusal -- and the durable
+    # pending journal was retained for checked recovery. It rides
     # the finally so the aftermath names the one recovery command that fits, and
     # the record reads INCOMPLETE -- not the CLEAN the pre-refusal outcome still
     # carried.
     publication_refused = False
+    # The other managed-writer failure shape: the publication commit was PAID
+    # but some units' commit tails did not complete. Nothing is retained; the
+    # aftermath names the tail's idempotent re-dispatch instead of recovery.
+    tails_pending = False
 
     # ── Phase 0: pre-flight git fetch on every agent-runner ──────────────────
     # Every selected runner must confirm fetch. Missing acknowledgements abort
@@ -604,6 +610,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             recovered=recovered,
             local_launch_failures=local_launch_failures,
             publication_refused=publication_refused,
+            tails_pending=tails_pending,
             telemetry=telemetry,
             refresh_settings=refresh_data_plane_settings,
             finalize_rollout_runner=finalize_rollout,
@@ -752,9 +759,9 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             outcome = RolloutOutcome.INCOMPLETE if local_launch_failures else RolloutOutcome.CLEAN
             return finish(1 if local_launch_failures else 0)
 
-        # The rollout's closing section (6.4 through 9) lives in
-        # `_update_verdict` (file-size budget). Its five seams are injected from
-        # this module's namespace so the `_up.*` monkeypatch seams keep
+        # The rollout's closing section (6.4 through 9.5) lives in
+        # `_update_verdict` (file-size budget). Its seven seams are injected
+        # from this module's namespace so the `_up.*` monkeypatch seams keep
         # resolving; the verdict carries the outcome / hosts_to_resume the
         # `finally` reports.
         phase_b = _phase_b_and_commit(
@@ -771,13 +778,16 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
             readiness=_gateway_ready_or_incomplete,
             poll_outcome=_phase_b_outcome,
             collect=_collect_managed_writer_publication,
+            continue_drive=_drive_managed_writer_continuation,
             commit=_commit_managed_writer_publication,
+            tails=_commit_managed_writer_tails,
             phase_input=phase_input,
         )
         rc, outcome = phase_b.rc, phase_b.outcome
         hosts_to_resume = phase_b.hosts_to_resume
         failing_step = phase_b.failing_step or failing_step
         publication_refused = publication_refused or phase_b.publication_refused
+        tails_pending = tails_pending | phase_b.tails_pending
         return finish(rc)
     finally:
         finish(1)

@@ -49,11 +49,13 @@ from cli.commands._managed_writer_gather import (
 from cli.commands._managed_writer_hop import (
     CollectorInput,
     CollectorUnitInput,
+    ContinueUnitInput,
     HopUnitPlan,
     ManagedWriterPhaseInput,
 )
 from cli.commands._release_context import ReleaseContext, read_release_context
 from cli.commands._update_bootstrap import BootstrapHopRequest
+from cli.commands._update_normal_release import NormalReleaseRequest
 from cli.commands._update_publication import open_pending_publication, published_unit
 from cli.prepared_update import PreparedOperatorPlan, PreparedOperatorUnit
 from ops.rpc_prepare_dispatch import PrepareDispatchResult, ProjectionFile, prepared_hop_name
@@ -374,19 +376,21 @@ def assemble_phase_inputs(
     Per unit: the candidate observation context (the receipt's expected writers
     plus the operation, the journal's single challenge bound to the begin's V,
     and the sealed schema digest) and the hop request that references it, the
-    shipped recovery context, and the unit's own sealed inventory receipt --
-    with `normal_release_path` still None (restricted-only, task #4129 I4; the
-    normal projection arrives with I6). The projections are content-named, so
+    shipped recovery context, the unit's own sealed inventory receipt, and the
+    sealed `NormalReleaseRequest` the request names (task #4129 I6) -- whose
+    bytes travel as the third projection. The projections are content-named, so
     each consuming path exists before any unit has seen a byte; the units'
     `cluster_prepare_dispatch` op is the only writer. The same loop carries the
     collection phase's `CollectorInput` (task #4129 I5): the exact canonical
     bytes this execution stages (the closure is re-derived from them later,
-    never from a re-derivation here) and the sealed identities, in the same
-    (machine, home) order as the plans.
+    never from a re-derivation here) and the sealed identities, and the
+    continuation phase's `ContinueUnitInput` tuple (task #4129 I6), all in the
+    same (machine, home) order as the plans.
     """
     urls = {target.machine: target.ops_url for target in targets}
     plans: list[HopUnitPlan] = []
     units: list[CollectorUnitInput] = []
+    continue_units: list[ContinueUnitInput] = []
     for item in sorted(
         facts,
         key=lambda entry: (
@@ -405,6 +409,14 @@ def assemble_phase_inputs(
         )
         candidate_bytes = _canonical_bytes(candidate_context.model_dump(mode="json"))
         candidate_name = prepared_hop_name("candidate-context", candidate_bytes)
+        normal_request = NormalReleaseRequest(
+            context_path=f"{home}/run/{candidate_name}",
+            unit=published_unit(item.publication),
+            previous_selector=item.previous_selector,
+            predecessor=item.hop_material.predecessor,
+        )
+        normal_bytes = _canonical_bytes(normal_request.model_dump(mode="json"))
+        normal_name = prepared_hop_name("normal-request", normal_bytes)
         request = BootstrapHopRequest(
             candidate_context=f"{home}/run/{candidate_name}",
             recovery_context=item.hop_material.recovery_context_path,
@@ -412,7 +424,7 @@ def assemble_phase_inputs(
                 f"{home}/run/release-inventory-{item.publication.prepared_receipt_digest}.json"
             ),
             predecessor=item.hop_material.predecessor,
-            normal_release_path=None,
+            normal_release_path=f"{home}/run/{normal_name}",
         )
         request_bytes = _canonical_bytes(request.model_dump(mode="json"))
         request_name = prepared_hop_name("request", request_bytes)
@@ -426,6 +438,7 @@ def assemble_phase_inputs(
                 projections=(
                     ProjectionFile(name=candidate_name, content=candidate_bytes.decode("ascii")),
                     ProjectionFile(name=request_name, content=request_bytes.decode("ascii")),
+                    ProjectionFile(name=normal_name, content=normal_bytes.decode("ascii")),
                 ),
             )
         )
@@ -437,7 +450,17 @@ def assemble_phase_inputs(
                 candidate_context=candidate_bytes,
                 request=request_bytes,
                 recovery_context=item.hop_material.recovery_context.encode("ascii"),
+                normal_request=normal_bytes,
                 prepared_receipt_digest=item.publication.prepared_receipt_digest,
+            )
+        )
+        continue_units.append(
+            ContinueUnitInput(
+                machine=expected.machine,
+                home=home,
+                ops_url=urls[expected.machine],
+                artifact_digest=item.publication.artifact_digest,
+                request_path=f"{home}/run/{normal_name}",
             )
         )
     return ManagedWriterPhaseInput(
@@ -449,6 +472,7 @@ def assemble_phase_inputs(
             candidate_digest=candidate_digest,
             units=tuple(units),
         ),
+        continue_units=tuple(continue_units),
     )
 
 

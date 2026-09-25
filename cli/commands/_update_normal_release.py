@@ -4,8 +4,9 @@ The planner binds the existing per-unit updater, bootstrap evidence, publication
 plan and service identities. ``execute_normal_release`` is the activation entry
 and drives the checked chain (``_drive_checked_normal_release``): one stage
 machine over waiting -> selected -> bootstrap_stopped -> starting -> observed
--> committed. Every entry — fresh continuation, resumed continuation, standalone
-recovery — runs the same reconciliation: each stage first adjudicates its
+-> committed. Every entry — the drive entry (the standalone seat, shared by the
+coordinator's nominal dispatch and death recovery) and the per-unit commit tail
+(task #4129 I6) — runs the same reconciliation: each stage first adjudicates its
 retained evidence, skips what is already proved, and performs only the missing
 effect under fresh authority (idempotent re-entry; design #4117 §5). Service
 starts go through the gated spawn (per-session gate + pre-exec birth receipt)
@@ -20,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -97,12 +98,20 @@ class NormalReleaseRequest(EvidenceModel):
 
 @dataclass(frozen=True)
 class PreparedNormalRelease:
+    """One unit's prepared normal release, drive or commit variant.
+
+    ``services`` and ``bootstrap`` are the stop-stage faces: the drive
+    preparation fills them, and the commit-only variant (``run_normal_commit``)
+    leaves them empty/None -- the stop and roster seats are unreachable from
+    the commit entry (task #4129 I6).
+    """
+
     request_path: Path
     request: NormalReleaseRequest
     context: PreparedObservation
     projection: ObserverProjection
     services: tuple[PreparedService, ...]
-    bootstrap: SessionRecord
+    bootstrap: SessionRecord | None
     resume_generation: str
 
 
@@ -213,34 +222,6 @@ def _candidate_ready_recovery(generation: str) -> BootstrapRecoveryJournal:
     return journal
 
 
-def continue_after_bootstrap(
-    hop: PreparedBootstrapHop, plan: PreparedNormalRelease, generation: str
-) -> int:
-    """Validate retained identity, then enter the checked activation entry.
-
-    ``prepare_after_bootstrap`` ran before the hop stopped A, so its retained
-    record predates B; the current ``ava-ops`` record — B, the process the hop
-    actually left serving — is re-read here and bound into the plan, so the
-    stop stage compares against that exact process and no later lookup can
-    signal a replacement.
-    """
-    journal = _candidate_ready_recovery(generation)
-    if (
-        journal.request != str(hop.request_path)
-        or journal.request_digest != hashlib.sha256(regular_bytes(hop.request_path)).hexdigest()
-        or journal.inventory_digest
-        != hashlib.sha256(regular_bytes(Path(hop.request.inventory_receipt))).hexdigest()
-        or journal.candidate_context_digest
-        != hashlib.sha256(regular_bytes(Path(hop.request.candidate_context))).hexdigest()
-        or journal.recovery_context_digest
-        != hashlib.sha256(regular_bytes(Path(hop.request.recovery_context))).hexdigest()
-        or hop.request.normal_release_path != str(plan.request_path)
-    ):
-        raise ReleaseRejectedError("normal continuation differs from its retained bootstrap")
-    bootstrap = _read_ops_record(Path(plan.request.unit.home))
-    return execute_normal_release(replace(plan, bootstrap=bootstrap), generation)
-
-
 def _read_ops_record(home: Path) -> SessionRecord:
     """Strict read of the unit's current ``ava-ops`` session record.
 
@@ -269,6 +250,8 @@ def _stop_bootstrap_checked(plan: PreparedNormalRelease) -> None:
     exact identity, after a fresh operation validation.
     """
     record = _read_ops_record(Path(plan.request.unit.home))
+    if plan.bootstrap is None:  # unreachable from the drive preparation; fail closed
+        raise ReleaseRejectedError("normal stop has no retained bootstrap record")
     if record != plan.bootstrap:
         raise ReleaseRejectedError("normal stop no longer identifies the retained bootstrap")
     process = ExpectedProcess(

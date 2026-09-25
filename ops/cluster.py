@@ -3,7 +3,7 @@
 A pure re-export facade: every name this module ever exposed is still an
 attribute of it, so `from ops.cluster import ...` and
 `monkeypatch.setattr("ops.cluster.spawn_update", ...)` keep working unchanged.
-The implementation lives in four modules beside it, layered so that nothing
+The implementation lives in five modules beside it, layered so that nothing
 imports this facade back:
 
 - `ops/cluster_session.py` — the session + orchestration-liveness primitives
@@ -12,8 +12,11 @@ imports this facade back:
 - `ops/cluster_status.py` — this host's `ClusterStatus` snapshot.
 - `ops/cluster_deploy.py` — the rollout preflight and the three detached-session
   triggers, with in-flight refusal and stall reaping.
+- `ops/ops_bootstrap_hop.py` — the restricted-hop handler and the detached
+  retained-image entry spawns (the restricted hop and the normal-continuation
+  steps), the spawns split out of `cluster_deploy.py` at the file-size budget.
 
-**These four modules reach the state-touching names they share through the module
+**These five modules reach the state-touching names they share through the module
 that OWNS them** — `shared.cluster.session_name(...)`,
 `shared.host_deploy_state` posture row, `cluster_session._has_orchestration_session(...)` —
 rather than from-importing them. A from-imported name is resolved from the module
@@ -44,9 +47,9 @@ from __future__ import annotations
 # spawn entry points through `_stub_everywhere`, which rebinds every alias of the
 # real function by object identity but only across modules **the run has already
 # imported** ("Nothing is imported to find them"). Importing `ops.cluster` eagerly
-# pulls all four submodules in, so that scan always reaches the definition site.
+# pulls all its submodules in, so that scan always reaches the definition site.
 # Made lazy, the scan would reach whichever submodules an earlier test happened to
-# import — the guard would silently cover three of four, and a test could spawn a
+# import — the guard would silently cover only some, and a test could spawn a
 # real `ava cluster update` with nothing failing to say so.
 from ops._update_shell import (
     _restart_recovery_cmd as _restart_recovery_cmd,
@@ -68,9 +71,6 @@ from ops.cluster_deploy import (
 )
 from ops.cluster_deploy import (
     _new_update_log as _new_update_log,
-)
-from ops.cluster_deploy import (
-    spawn_bootstrap_hop as spawn_bootstrap_hop,
 )
 from ops.cluster_deploy import (
     spawn_restart as spawn_restart,
@@ -156,6 +156,12 @@ from ops.cluster_status import (
 from ops.cluster_status import (
     status_snapshot as status_snapshot,
 )
+from ops.ops_bootstrap_hop import (
+    spawn_bootstrap_hop as spawn_bootstrap_hop,
+)
+from ops.ops_bootstrap_hop import (
+    spawn_normal_continue as spawn_normal_continue,
+)
 from ops.rpc_schemas import SessionInfo as SessionInfo
 from ops.update_check import (
     UpdateCheck as UpdateCheck,
@@ -196,6 +202,7 @@ __all__ = [
     "pause_local_cluster",
     "reap_stalled_updater_if_hung",
     "spawn_bootstrap_hop",
+    "spawn_normal_continue",
     "spawn_restart",
     "spawn_rollout",
     "spawn_update",

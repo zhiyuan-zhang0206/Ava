@@ -119,9 +119,13 @@ def finalize_orchestration(
     recovered: bool,
     local_launch_failures: list[str],
     # Set when a managed-writer publication failed (a failed candidate-ready
-    # wait, or a collection/commit refusal) and retained its pending journal:
-    # the aftermath must name that one recovery command.
+    # wait, or a collection/continuation/commit refusal) and retained its
+    # pending journal: the aftermath must name that one recovery command.
     publication_refused: bool = False,
+    # The other managed-writer failure shape: the publication commit was paid
+    # but some units' commit tails did not complete; the aftermath names the
+    # tail's idempotent re-dispatch instead.
+    tails_pending: bool = False,
     telemetry: RolloutTelemetry,
     refresh_settings: Callable[[], None],
     finalize_rollout_runner: Callable[..., RolloutOutcome],
@@ -161,6 +165,7 @@ def finalize_orchestration(
         recovered=recovered,
         local_launch_failures=local_launch_failures,
         publication_refused=publication_refused,
+        tails_pending=tails_pending,
     )
     if final_outcome is RolloutOutcome.CLEAN:
         finalize_commit_telemetry(telemetry)

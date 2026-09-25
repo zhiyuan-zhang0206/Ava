@@ -7,21 +7,25 @@ set (6.4), ask the readiness gate (6.5), run the Phase-B poll + verdict (7-8),
 then consume the enable point's decision at the managed-writer collection
 (8.5, task #4128 E2-c) and P5 commit (9, task #4128 E2-a).
 
-The five orchestration seams arrive as injected callables, resolved at the
+The seven orchestration seams arrive as injected callables, resolved at the
 call site from `update.py`'s namespace so the `cli.commands.update.*`
 monkeypatch seams keep resolving for tests. An `active` managed-writer rollout
 additionally passes its phase input (`ManagedWriterPhaseInput`: the per-unit
 hop plans plus the collector's inputs): the hop gate then replaces the Phase-B
 poll, a CLEAN gate waits for every unit's candidate-ready journal inside the
-sealed window, and on success the shared collect/commit window below runs
-exactly as the poll path's does (task #4129 I4/I5):
+sealed window, and on success the shared window below -- collect, continue,
+commit, tails -- runs exactly as the poll path's does (task #4129 I4/I5/I6):
 
 - `targets` -- `_phase_b_targets` (the fan-out set, this host excluded),
 - `readiness` -- `_gateway_ready_or_incomplete` (Phase B's precondition),
 - `poll_outcome` -- `_phase_b_outcome` (the poll + verdict),
 - `collect` -- `_collect_managed_writer_publication` (the P2 collection;
   receives the window's `phase_input`, None on the poll path),
-- `commit` -- `_commit_managed_writer_publication` (the P5 commit).
+- `continue_drive` -- `_drive_managed_writer_continuation` (the channel-E
+  drive: every unit's normal release + the full readback roster, step 8.7),
+- `commit` -- `_commit_managed_writer_publication` (the P5 commit),
+- `tails` -- `_commit_managed_writer_tails` (the channel-E commit tails and
+  the committed-slot wait, step 9.5).
 
 Every exit is a `PhaseBVerdict` rather than a bare rc: the caller still reports
 the rollout's aftermath through its compensating `finally`.
@@ -44,8 +48,12 @@ class PhaseBVerdict(NamedTuple):
     `failing_step` is an override only: None means nothing inside this section
     failed and the caller keeps its own (the local leg's defect, set before the
     call). `publication_refused` marks a managed-writer publication failure
-    (a failed candidate-ready wait, or a collection/commit refusal) whose
-    pending journal was retained for checked recovery.
+    (a failed candidate-ready wait, or a collection/continuation refusal)
+    whose pending journal was retained for checked recovery. `tails_pending`
+    marks the other managed-writer failure shape: the publication commit was
+    PAID but some units' commit tails did not complete -- nothing is retained
+    and the tail re-runs idempotently, so the aftermath must not point at
+    recovery or a re-publish.
     """
 
     rc: int
@@ -53,6 +61,7 @@ class PhaseBVerdict(NamedTuple):
     hosts_to_resume: list[tuple[str, str | None]]
     failing_step: str | None
     publication_refused: bool
+    tails_pending: bool
 
 
 def _phase_b_and_commit(
@@ -72,14 +81,16 @@ def _phase_b_and_commit(
         ..., tuple[int, RolloutOutcome, list[tuple[str, str | None]], str | None]
     ],
     collect: Callable[[ManagedWriterPhaseInput | None], int],
+    continue_drive: Callable[[ManagedWriterPhaseInput | None], int],
     commit: Callable[[], int],
+    tails: Callable[[ManagedWriterPhaseInput | None], int],
     phase_input: ManagedWriterPhaseInput | None = None,
 ) -> PhaseBVerdict:
-    """Steps 6.4 through 9 of the rollout: fan-out set, readiness gate, Phase-B
-    poll + verdict, managed-writer collection + commit -- returning the verdict
-    to report.
+    """Steps 6.4 through 9.5 of the rollout: fan-out set, readiness gate,
+    Phase-B poll + verdict, managed-writer collection + continuation + commit +
+    tails -- returning the verdict to report.
 
-    The five injected seams are the real functions in production; tests patch
+    The seven injected seams are the real functions in production; tests patch
     them on `update.py`, and the call site resolves each name there.
     """
     # 6.4) Who Phase B actually fans out to: every rollout target except THIS
@@ -105,6 +116,7 @@ def _phase_b_and_commit(
             hosts_to_resume=hosts_to_resume,
             failing_step="the gateway was not serving, so Phase B never fanned out",
             publication_refused=False,
+            tails_pending=False,
         )
 
     if phase_input is not None:
@@ -124,13 +136,14 @@ def _phase_b_and_commit(
         # recovery, never an ad-hoc compensating resume.
         with _stage_telemetry("managed_writer_hop"):
             hop_rc, hop_outcome, hop_hosts, hop_failing = phase_b_hops(phase_input.hop_plans)
-            if hop_outcome is not RolloutOutcome.CLEAN or hop_rc != 0:
+            if (hop_outcome, hop_rc) != (RolloutOutcome.CLEAN, 0):
                 return PhaseBVerdict(
                     rc=hop_rc,
                     outcome=hop_outcome,
                     hosts_to_resume=hop_hosts,
                     failing_step=hop_failing,
                     publication_refused=False,
+                    tails_pending=False,
                 )
             from cli.commands._managed_writer_collector import wait_for_candidate_ready
 
@@ -142,6 +155,7 @@ def _phase_b_and_commit(
                 hosts_to_resume=[],
                 failing_step=wait_detail,
                 publication_refused=True,
+                tails_pending=False,
             )
         rc, outcome, hosts_to_resume = hop_rc, hop_outcome, hop_hosts
         failing_step = hop_failing
@@ -180,13 +194,16 @@ def _phase_b_and_commit(
             # keeps it) and the aftermath block lists them.
             outcome, rc = RolloutOutcome.INCOMPLETE, 1
 
-    # 8.5-9) The managed-writer publication window (task #4128), reached only
-    #    by a clean, non-restart-only rollout. The steps themselves consume
-    #    the enable point's decision: under `active`, the collection (E2-c)
-    #    first adopts the completed units' post-stop facts and the P5 commit
-    #    (E2-a) then publishes them through their seats; every other decision
-    #    skips the window without touching the publication seats. A refusal
-    #    fails the rollout; the pending journal stays for checked recovery.
+    # 8.5-9.5) The managed-writer publication window (task #4128 + #4129 E),
+    #    reached only by a clean, non-restart-only rollout. The steps
+    #    themselves consume the enable point's decision: under `active`, the
+    #    collection (E2-c) first adopts the completed units' post-stop facts,
+    #    the continuation drive (channel E, 8.7) starts every unit's normal
+    #    release and waits for the full readback roster, the P5 commit (E2-a)
+    #    publishes it, and the commit tails (channel E, 9.5) record the
+    #    committed stage per unit; every other decision skips the window
+    #    without touching the publication seats. A refusal fails the rollout;
+    #    the pending journal stays for checked recovery.
     if outcome is RolloutOutcome.CLEAN and not restart_only:
         collect_rc = collect(phase_input)
         if collect_rc != 0:
@@ -204,6 +221,27 @@ def _phase_b_and_commit(
                 hosts_to_resume=hosts_to_resume,
                 failing_step=failing_step,
                 publication_refused=True,
+                tails_pending=False,
+            )
+
+        # 8.7) The continuation drive (channel E, task #4129 I6): start every
+        #      unit's normal release and wait for the full readback roster --
+        #      the commit seat accepts nothing less, so a refusal here keeps
+        #      the pending journal for checked recovery.
+        drive_rc = continue_drive(phase_input)
+        if drive_rc != 0:
+            failing_step = (
+                "the managed-writer continuation drive refused; the pending "
+                "journal remains for `ava cluster recover-pending`"
+            )
+            outcome, rc = RolloutOutcome.INCOMPLETE, drive_rc
+            return PhaseBVerdict(
+                rc=rc,
+                outcome=outcome,
+                hosts_to_resume=hosts_to_resume,
+                failing_step=failing_step,
+                publication_refused=True,
+                tails_pending=False,
             )
 
         commit_rc = commit()
@@ -222,6 +260,30 @@ def _phase_b_and_commit(
                 hosts_to_resume=hosts_to_resume,
                 failing_step=failing_step,
                 publication_refused=True,
+                tails_pending=False,
+            )
+
+        # 9.5) The commit tails (channel E, task #4129 I6): each unit records
+        #      its committed stage and disposes its retained envelope. The
+        #      publication commit is PAID by the time this runs -- a failure
+        #      retains nothing and needs no re-publish; the tail re-runs
+        #      idempotently, so the record names that re-dispatch instead of
+        #      checked recovery.
+        tails_rc = tails(phase_input)
+        if tails_rc != 0:
+            failing_step = (
+                "the managed-writer commit tail did not complete; the publication "
+                "commit is already paid — re-dispatch the commit tail (it is "
+                "idempotent)"
+            )
+            outcome, rc = RolloutOutcome.INCOMPLETE, tails_rc
+            return PhaseBVerdict(
+                rc=rc,
+                outcome=outcome,
+                hosts_to_resume=hosts_to_resume,
+                failing_step=failing_step,
+                publication_refused=False,
+                tails_pending=True,
             )
     return PhaseBVerdict(
         rc=rc,
@@ -229,4 +291,5 @@ def _phase_b_and_commit(
         hosts_to_resume=hosts_to_resume,
         failing_step=failing_step,
         publication_refused=False,
+        tails_pending=False,
     )
