@@ -23,8 +23,7 @@ from shared.lm.provider_api import (
 from shared.lm.registry import ModelSpec, ModelTuning
 from shared.lm.stop import StopCategory, StopSpec
 
-# Effort vocabulary shared by every GPT model — named once so the entries stay
-# readable; it remains per-model data.
+# Effort vocabulary shared by GPT-5.6 and GPT-6 Sol/Luna; Astra differs.
 _GPT_EFFORT = ("none", "low", "medium", "high", "xhigh", "max")
 
 
@@ -54,10 +53,9 @@ def build(ctx: BuildContext) -> BaseChatModel:
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
     gpt_effort = "none" if thinking_disabled else (ctx.resolved_effort or "medium")
     # Clamp onto the model's declared effort vocabulary (per-model
-    # ModelSpec.effort_levels). gpt-6 dropped "none" and "minimal" from the
-    # wire vocabulary (official guide: start at "low" when coming from
-    # either), so an explicit AVA_REASONING_EFFORT=none/minimal or a
-    # thinking-disabled build must not reach the wire unclamped. Models
+    # ModelSpec.effort_levels). GPT-6 Astra rejects "none" and "minimal";
+    # GPT-6 Sol and Luna accept "none" but reject "minimal" (live-checked
+    # 2026-09-25), so only out-of-vocabulary efforts are clamped. Models
     # without a declared vocabulary keep the historic verbatim passthrough.
     model_levels = ctx.spec.effort_levels if ctx.spec is not None else None
     if model_levels is not None:
@@ -101,8 +99,8 @@ register(
             spawnable=True,
             context_window=1_050_000,
             knowledge_cutoff="2026-04",
-            # gpt-6 dropped "none" and "minimal" from the effort vocabulary
-            # (official model guide: start at "low" when coming from either);
+            # GPT-6 Astra rejects "none" and "minimal" (live-checked
+            # 2026-09-25), unlike Sol and Luna which accept "none";
             # the builder clamps out-of-vocabulary efforts onto these rungs.
             effort_levels=("low", "medium", "high", "xhigh", "max"),
             tuning=ModelTuning(
@@ -113,6 +111,8 @@ register(
         "gpt-5.6-sol": ModelSpec(
             provider="gpt",
             spawnable=True,
+            # Display-superseded only; existing configs remain valid (2026-09-25).
+            superseded_by="gpt-6-sol",
             context_window=1_050_000,
             knowledge_cutoff="2026-02",
             # Flagship tier (explicit id; the bare gpt-5.6 alias also routes here,
@@ -140,10 +140,30 @@ register(
         "gpt-5.6-luna": ModelSpec(
             provider="gpt",
             spawnable=True,
+            # Display-superseded only; existing configs remain valid (2026-09-25).
+            superseded_by="gpt-6-luna",
             context_window=1_050_000,
             knowledge_cutoff="2026-02",
             effort_levels=_GPT_EFFORT,
             tuning=ModelTuning(reasoning_effort="medium"),  # OpenAI default (see gpt-5.6-sol)
+            media_types=frozenset({"image"}),
+        ),
+        "gpt-6-sol": ModelSpec(
+            provider="gpt",
+            spawnable=True,
+            context_window=1_050_000,
+            knowledge_cutoff="2026-04",
+            effort_levels=_GPT_EFFORT,
+            tuning=ModelTuning(reasoning_effort="medium"),
+            media_types=frozenset({"image"}),
+        ),
+        "gpt-6-luna": ModelSpec(
+            provider="gpt",
+            spawnable=True,
+            context_window=1_050_000,
+            knowledge_cutoff="2026-05",
+            effort_levels=_GPT_EFFORT,
+            tuning=ModelTuning(reasoning_effort="medium"),
             media_types=frozenset({"image"}),
         ),
         # Removed 2026-09-23 (task #4508): gpt-5.5 and gpt-5.4-mini
@@ -222,6 +242,38 @@ register(
                 ),
             ),
         ),
+        "gpt-6-sol": PriceRates(
+            cache_miss=2.0,
+            cache_hit=0.20,
+            output=10.0,
+            source_url="https://developers.openai.com/api/docs/models/gpt-6-sol",
+            source_checked_at="2026-09-25",
+            vendor="openai",
+            # Cache writes cost $2.50/M; the full request uses tier 2 above
+            # 272K input tokens (official model page, checked 2026-09-25).
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=272_000,
+                            cache_miss="2.0",
+                            cache_hit="0.20",
+                            output="10.0",
+                        ),
+                        PriceTier(
+                            input_tokens_min=272_001,
+                            input_tokens_max=None,
+                            cache_miss="4.0",
+                            cache_hit="0.40",
+                            output="15.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
         "gpt-5.6-terra": PriceRates(
             cache_miss=2.0,
             cache_hit=0.20,
@@ -277,6 +329,38 @@ register(
                             cache_miss="0.40",
                             cache_hit="0.04",
                             output="1.80",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "gpt-6-luna": PriceRates(
+            cache_miss=0.10,
+            cache_hit=0.01,
+            output=0.50,
+            source_url="https://developers.openai.com/api/docs/models/gpt-6-luna",
+            source_checked_at="2026-09-25",
+            vendor="openai",
+            # Cache writes cost $0.125/M; the full request uses tier 2 above
+            # 272K input tokens (official model page, checked 2026-09-25).
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=272_000,
+                            cache_miss="0.10",
+                            cache_hit="0.01",
+                            output="0.50",
+                        ),
+                        PriceTier(
+                            input_tokens_min=272_001,
+                            input_tokens_max=None,
+                            cache_miss="0.20",
+                            cache_hit="0.02",
+                            output="0.75",
                         ),
                     ),
                 ),
