@@ -9,7 +9,7 @@ import pathlib
 from collections.abc import Callable
 from typing import Any
 
-from shared.watcher import TEMPLATE_VERSION, session_deadline
+from shared.daemon.schedules.watcher import TEMPLATE_VERSION, session_deadline
 
 _agent_id: Callable[[], int]
 _watchers_dir: Callable[[], pathlib.Path]
@@ -107,7 +107,7 @@ def _live_cron_session(
     Fail-soft: a registry read failure logs and yields no duplicate — the
     dedupe is advisory and must never block a registration.
     """
-    from shared.watcher_registry import watcher_rows
+    from shared.daemon.schedules.watcher_registry import watcher_rows
 
     if alive is None:
         return None
@@ -168,7 +168,7 @@ def _reconcile_missing(
 
     `alive` is the caller's live-session set, used to spot a live duplicate
     before rebuilding a cron (Task #1825)."""
-    from shared.watcher_registry import delete_watcher, mark_status, wake_delivered
+    from shared.daemon.schedules.watcher_registry import delete_watcher, mark_status, wake_delivered
 
     agent_id = _agent_id()
     session_id = row["session_id"]
@@ -284,7 +284,7 @@ def _reap_superseded_watcher(row: dict[str, Any], alive: set[int]) -> str:
     a later boot.
     """
     from ava.shell import sessions as _sessions_mod
-    from shared.watcher_registry import mark_status
+    from shared.daemon.schedules.watcher_registry import mark_status
 
     session_id = row["session_id"]
     if session_id in alive:
@@ -387,7 +387,7 @@ def reconcile() -> list[str]:
     """
 
     from ava.shell import sessions as _sessions_mod
-    from shared.watcher_registry import (
+    from shared.daemon.schedules.watcher_registry import (
         watcher_rows,
     )
 

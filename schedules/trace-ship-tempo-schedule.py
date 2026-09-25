@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import ava
 from schedules.catchup import catch_up, fire_slot_once
-from shared.watcher import next_fire
+from shared.daemon.schedules.watcher import next_fire
 
 CRON = "*/5 * * * *"
 TIMEZONE = "UTC"

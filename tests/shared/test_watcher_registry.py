@@ -1,4 +1,4 @@
-"""`shared.watcher_registry` — the agent_watchers table CRUD.
+"""`shared.daemon.schedules.watcher_registry` — the agent_watchers table CRUD.
 
 The registry is the "should it exist?" half of the R1 watcher frame (Task
 #1021): `ava.watcher.at/cron/launch` writes a row at spawn; a clean-exiting
@@ -15,8 +15,8 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
-from shared import watcher_registry as wr
 from shared.config import settings
+from shared.daemon.schedules import watcher_registry as wr
 from shared.test_db_guard import assert_test_db_url
 
 _FUTURE = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)

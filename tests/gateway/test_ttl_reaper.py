@@ -36,8 +36,8 @@ from gateway.ttl_reaper import (
 from gateway.watcher_ttl import reap_terminated_owner_watchers
 from ops.rpc_schemas import ShellKillResult
 from shared.config import settings
+from shared.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
 from shared.db import create_agent
-from shared.watcher import AT_SESSION_TTL_GRACE_SECONDS
 
 
 @pytest.fixture()

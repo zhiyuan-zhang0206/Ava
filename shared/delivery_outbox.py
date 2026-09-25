@@ -65,8 +65,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
-from shared import completion_notices
 from shared.atomic_io import write_text_atomic
+from shared.daemon.schedules import completion_notices
 from shared.delivery_outbox_types import FlushReport
 from shared.log import logger
 from shared.paths import ava_home

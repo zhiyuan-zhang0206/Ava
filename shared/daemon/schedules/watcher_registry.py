@@ -300,7 +300,7 @@ def register_watcher(
     rebuild payload (see `_KIND_PAYLOAD`). `notify` is the selected completion
     policy, which each rebuild passes to the replacement watcher.
     `template_version` is the generated script's template generation
-    (shared.watcher.TEMPLATE_VERSION); the boot reconcile rebuilds a live cron
+    (shared.daemon.schedules.watcher.TEMPLATE_VERSION); the boot reconcile rebuilds a live cron
     watcher whose row version is behind, so a template fix reaches sessions
     that were already running when it landed (issue #1330). `generation`
     identifies the PTY record that this desired row may restore. Registry

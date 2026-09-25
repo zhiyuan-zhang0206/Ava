@@ -28,7 +28,7 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 
 1. **Defined in a lattice family module** — `shared/timing.py`,
    `shared/deploy_timing.py`, `shared/stop_timing.py`,
-   `shared/schedule_timing.py`, `shared/cluster_lock.py`,
+   `shared/daemon/schedules/schedule_timing.py`, `shared/cluster_lock.py`,
    `shared/host_deploy_state.py`. These are the lattice's homes; registering a
    new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
@@ -100,7 +100,7 @@ _FAMILY_MODULES = (
     "shared/timing.py",
     "shared/deploy_timing.py",
     "shared/stop_timing.py",
-    "shared/schedule_timing.py",
+    "shared/daemon/schedules/schedule_timing.py",
     "shared/cluster_lock.py",
     "shared/host_deploy_state.py",
 )
@@ -223,7 +223,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "the commit-time pointer->done fence, next to the absent-machine fence settle); "
     "nothing orders against it",
     (
-        "shared/watcher.py",
+        "shared/daemon/schedules/watcher.py",
         "AT_SESSION_TTL_GRACE_SECONDS",
     ): "independent: the at-watcher session's post-fire reclamation window (wake delivery + "
     "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "

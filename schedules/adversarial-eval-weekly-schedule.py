@@ -22,7 +22,7 @@ from ava.agents import AgentRow
 from ava.agents import AgentStatus as S
 from shared.config import settings
 from shared.paths import ava_home
-from shared.watcher import next_fire
+from shared.daemon.schedules.watcher import next_fire
 
 from schedules.adversarial_eval_cases import (
     AuditResult,

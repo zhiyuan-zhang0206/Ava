@@ -343,7 +343,7 @@ def cmd_schedules_provision() -> int:
     that must also work while the gateway is down (and the gateway itself runs
     the same provision at every boot). Idempotent — existing schedules (by
     name) are never modified, so an operator's edits survive a provision."""
-    from shared.builtin_schedules import provision_builtin_schedules
+    from shared.daemon.schedules.builtin_schedules import provision_builtin_schedules
     from shared.db_transaction import write_transaction
 
     with write_transaction() as conn:

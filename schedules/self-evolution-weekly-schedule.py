@@ -18,7 +18,7 @@ from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, fire_slot_once
 from shared.config import settings
 from shared.observability import observability_refusal_detail
-from shared.watcher import next_fire
+from shared.daemon.schedules.watcher import next_fire
 
 ensure_agent_status_members(
     S,

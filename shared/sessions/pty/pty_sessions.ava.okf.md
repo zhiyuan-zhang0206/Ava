@@ -140,6 +140,5 @@ ScheduleManager, the page-server daemon, `ops.ops_cluster.capture_shell`, and
   A desired-state owner may rebuild a missing record only when its persisted
   desired generation is current; superseded exact records are reaped instead.
 - A machine reboot ends every session (hosts are processes, not state);
-  the watcher registry ([[shared/watcher_registry.ava.okf.md]]) is the
-  rebuild net for watchers, and page servers self-heal via the heartbeat
-  probe.
+  the watcher registry ([[shared/daemon/schedules/watcher_registry.ava.okf.md]])
+  guides watcher rebuilds; page servers recover via heartbeat.
