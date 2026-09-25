@@ -175,7 +175,16 @@ def test_launchd_path_env_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
 # cluster's register/unregister rewrote them all.
 
 
-def _crontab_stub(monkeypatch: pytest.MonkeyPatch, existing: str, writes: dict[str, str]) -> None:
+def _crontab_stub(
+    monkeypatch: pytest.MonkeyPatch,
+    existing: str,
+    writes: dict[str, str],
+    *,
+    read_rc: int = 0,
+    read_error: str = "",
+    write_rc: int = 0,
+    write_error: str = "",
+) -> None:
     import shutil
 
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
@@ -183,10 +192,10 @@ def _crontab_stub(monkeypatch: pytest.MonkeyPatch, existing: str, writes: dict[s
 
     def _run(cmd, **kw):  # type: ignore[no-untyped-def]
         if cmd[:2] == ["crontab", "-l"]:
-            return types.SimpleNamespace(returncode=0, stdout=existing, stderr="")
+            return types.SimpleNamespace(returncode=read_rc, stdout=existing, stderr=read_error)
         if cmd == ["crontab", "-"]:
             writes["input"] = kw.get("input", "")  # pyright: ignore[reportUnknownMemberType]
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        return types.SimpleNamespace(returncode=write_rc, stdout="", stderr=write_error)
 
     monkeypatch.setattr(os_cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -215,6 +224,80 @@ def test_register_linux_leaves_another_clusters_line_alone(
     assert theirs in body
     assert body.count("# ava-health-probe.ava-mine") == 1
     assert "0 3 * * * backup" in body
+
+
+def test_register_linux_clears_both_unmarked_legacy_forms_and_reports_success(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(os_cron, "_home_slug", lambda: "ava-mine")
+    legacy_command = "*/5 * * * * /old/ava cluster health-probe --threshold 2"
+    legacy_script = "*/5 * * * * /old/health-probe-cron"
+    foreign = "*/5 * * * * /other/ava cluster health-probe # ava-health-probe.ava-other"
+    writes: dict[str, str] = {}
+    _crontab_stub(monkeypatch, f"{legacy_command}\n{legacy_script}\n{foreign}\n", writes)
+
+    assert os_cron._register_linux(300, 3) == 0
+    assert capsys.readouterr() == (
+        "  . crontab entry added (every 5 min, threshold=3)\n",
+        "",
+    )
+    assert legacy_command not in writes["input"]
+    assert legacy_script not in writes["input"]
+    assert foreign in writes["input"]
+    assert writes["input"].count("# ava-health-probe.ava-mine") == 1
+
+
+@pytest.mark.parametrize(
+    ("read_rc", "read_error", "write_rc", "write_error", "expected_out", "expected_err"),
+    [
+        (
+            1,
+            "permission denied",
+            0,
+            "",
+            "",
+            "  * crontab -l failed (permission denied); skipping health-probe registration to avoid clobbering the crontab\n",
+        ),
+        (0, "", 1, "disk full", "", "  * crontab update failed: disk full\n"),
+    ],
+)
+def test_register_linux_failure_messages_and_rc(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    read_rc: int,
+    read_error: str,
+    write_rc: int,
+    write_error: str,
+    expected_out: str,
+    expected_err: str,
+) -> None:
+    writes: dict[str, str] = {}
+    _crontab_stub(
+        monkeypatch,
+        "",
+        writes,
+        read_rc=read_rc,
+        read_error=read_error,
+        write_rc=write_rc,
+        write_error=write_error,
+    )
+
+    assert os_cron._register_linux(300, 3) == 1
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == (expected_out, expected_err)
+    assert ("input" in writes) == (read_rc == 0)
+
+
+def test_register_linux_missing_crontab_message_and_rc(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(os_cron.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+
+    assert os_cron._register_linux(300, 3) == 0
+    assert capsys.readouterr() == (
+        "  ! health probe cron: crontab not installed on this host (skipping); cluster runs without a health-probe cron\n",
+        "",
+    )
 
 
 def test_unregister_linux_removes_only_the_named_cluster(
@@ -260,6 +343,38 @@ def test_unregister_linux_ignores_the_watchdog_probe_lines(
 
     assert os_cron._unregister_linux("ava-mine") == 0
     assert writes == {}  # nothing matched, so the crontab was never rewritten
+
+
+@pytest.mark.parametrize(
+    ("read_rc", "existing", "write_rc", "expected_out", "should_write"),
+    [
+        (1, "", 0, "  . no crontab to unregister\n", False),
+        (0, "0 3 * * * backup\n", 0, "  . no Ava health-probe entry found in crontab\n", False),
+        (
+            0,
+            "*/5 * * * * /x/ava cluster health-probe # ava-health-probe.ava-mine\n",
+            0,
+            "  . crontab entry removed\n",
+            True,
+        ),
+        (0, "*/5 * * * * /x/ava cluster health-probe # ava-health-probe.ava-mine\n", 1, "", True),
+    ],
+)
+def test_unregister_linux_messages_and_success_gated_removal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    read_rc: int,
+    existing: str,
+    write_rc: int,
+    expected_out: str,
+    should_write: bool,
+) -> None:
+    writes: dict[str, str] = {}
+    _crontab_stub(monkeypatch, existing, writes, read_rc=read_rc, write_rc=write_rc)
+
+    assert os_cron._unregister_linux("ava-mine") == 0
+    assert capsys.readouterr() == (expected_out, "")
+    assert ("input" in writes) == should_write
 
 
 def test_unregister_macos_removes_only_the_named_clusters_plist(
