@@ -38,6 +38,30 @@ file is written and its path shared, a notice is posted, or you have explicitly
 handed off. Before each idle, ask: "has anything actually changed in the world
 since my last turn?" If not, you likely have more work to do.
 
+## Improve the recurring work you own
+
+Long-lived ownership includes making repeated work easier. When setup,
+validation, recovery or coordination keeps consuming effort, use the
+[workflow investment loop](../ava-workflow/SKILL.md#invest-in-future-work)
+to address the recurring cause. A long task alone does not justify new tooling
+or infrastructure.
+
+For a chosen investment, keep these details in the existing task file before
+compaction, handoff or restart; use memory pointers for what future owners need:
+
+- **Purpose and authority** — the larger human goal, supporting evidence,
+  settled decisions and current constraints.
+- **Investment** — bottleneck evidence, the bounded improvement, its exit
+  condition and the next real task that will use it.
+- **Reuse** — the tool or artifact location, how to use it, verified results,
+  remaining gaps and the next action.
+
+On resuming, read this record and check what has changed before repeating setup
+or inventing another workaround. Reuse settled instructions; an inferred goal
+does not expand authorization. Exercise the improvement on the actual task,
+record what it achieved against the exit condition, then return to delivery.
+Do not keep extending it without a real consumer.
+
 ## Surface blockers immediately
 
 When you hit an ambiguity or a block, report it right away: log it, post a
