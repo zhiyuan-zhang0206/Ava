@@ -14,9 +14,9 @@ from scripts.preview import runtime
 
 @pytest.mark.parametrize("body", ["(no output)", "Traceback: error at line 3", "13", "3\nError"])
 def test_timestamp_or_traceback_is_not_execution_success(body: str) -> None:
-    items = [
-        {"kind": "agent_code", "payload": "print(1 + 2)"},
-        {"kind": "agent_chat", "payload": "done"},
+    items: list[runtime.TimelineItem] = [
+        {"kind": "agent_code", "payload": "print(1 + 2)", "exec_ms": None},
+        {"kind": "agent_chat", "payload": "done", "exec_ms": None},
         {
             "kind": "code_output",
             "exec_ms": 12,
@@ -49,15 +49,15 @@ def test_process_with_rewritten_argv_still_belongs_to_home(tmp_path: Path) -> No
 def test_recorded_real_execution_is_checked_exactly() -> None:
     # The envelope shape includes a timestamp, while exec_ms proves this is an
     # execution result item rather than the scripted model's final claim.
-    output = {
+    output: runtime.TimelineItem = {
         "kind": "code_output",
         "payload": "Code execution output [13:03]:\n\n3\n",
         "exec_ms": 573,
     }
-    items = [
-        {"kind": "agent_code", "payload": "print(1 + 2)\n"},
+    items: list[runtime.TimelineItem] = [
+        {"kind": "agent_code", "payload": "print(1 + 2)\n", "exec_ms": None},
         output,
-        {"kind": "agent_chat", "payload": "done"},
+        {"kind": "agent_chat", "payload": "done", "exec_ms": None},
     ]
     assert runtime.execution_completed(json.loads(json.dumps(items)), "done")
     output["exec_ms"] = None
