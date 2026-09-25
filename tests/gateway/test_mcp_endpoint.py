@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from shared import config, telemetry
+from shared.api_contracts.mcp_tool_contract import project_message
 from shared.cluster_auth import bearer_header
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -183,6 +184,29 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
         in terminate_description
     )
     assert "Use force only when a clean stop cannot progress" in terminate_description
+
+
+async def test_gateway_contract_matches_pre_extraction_golden() -> None:
+    from gateway import mcp_endpoint
+
+    server = mcp_endpoint._build_server(None)
+    tools = await server.list_tools()
+    contract = {
+        "instructions": server.instructions,
+        "tools": [
+            {"name": t.name, "description": t.description, "inputSchema": t.input_schema}
+            for t in sorted(tools, key=lambda t: t.name)
+        ],
+    }
+    encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    assert hashlib.sha256(encoded.encode()).hexdigest() == (
+        "9222f5212d0d92b23cb8eb52db0314f9f6c59bae0cf2ab590efe32ff395f4227"
+    )
+    assert mcp_endpoint.project_message is project_message
+    assert project_message({"type": "ai", "tool_calls": [{"args": {"other": 1}}]}) == {
+        "role": "ai",
+        "text": "",
+    }
 
 
 def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -> None:
