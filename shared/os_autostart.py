@@ -44,7 +44,6 @@ what actually covers it.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -59,9 +58,12 @@ from shared.os_cron import (
     cron_env_prefix,
     launchd_env_block,
     os_jobs_enabled,
+    remove_crontab_entry,
+    replace_crontab_entry,
+    require_crontab,
     skip_os_job,
 )
-from shared.platform import IS_MACOS, crontab_lock
+from shared.platform import IS_MACOS
 
 
 def _home_slug() -> str:
@@ -201,72 +203,43 @@ def _register_linux() -> int:
             f"  . cluster boot autostart: {unit_name(ava_home())} (enabled)"
         )
         return 0
-    if shutil.which("crontab") is None:
-        print(  # noqa: T201
-            "  ! autostart: crontab not installed on this host (skipping); "
-            "cluster will not auto-start on reboot"
-        )
-        return 0
+    missing = require_crontab(
+        "  ! autostart: crontab not installed on this host (skipping); "
+        "cluster will not auto-start on reboot",
+        missing_returncode=0,
+        missing_stream=sys.stdout,
+    )
+    if missing is not None:
+        return missing
     ava_path = ava_binary_path()
     slug = _home_slug()
     # `cron_env_prefix()` first (the assignment must precede the command for cron
     # to scope it to this line), then `boot` rather than `start` — the retry loop.
     entry = f"@reboot {cron_env_prefix()}{ava_path} boot  {_CRON_MARKER}.{slug}"
 
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0 and "no crontab" not in (result.stderr or "").lower():
-            # Anything but the benign "no crontab for <user>" would make the rewrite
-            # below clobber the user's real crontab from "".
-            print(  # noqa: T201
-                f"  * crontab -l failed ({result.stderr.strip() or result.returncode}); "
-                "skipping autostart registration to avoid clobbering the crontab",
-                file=sys.stderr,
-            )
-            return 1
-        current = result.stdout if result.returncode == 0 else ""
-        marker = f"{_CRON_MARKER}.{slug}"
-        lines = [line for line in current.splitlines() if marker not in line]
-        lines.append(entry)
-
-        result = subprocess.run(
-            ["crontab", "-"],
-            input="\n".join(lines) + "\n",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            logger.error("crontab update failed: {}", result.stderr)
-            return 1
+    rc = replace_crontab_entry(
+        f"{_CRON_MARKER}.{slug}",
+        entry,
+        skip_phrase="autostart registration",
+        update_failure=lambda err: logger.error("crontab update failed: {}", err),
+    )
+    if rc == 0:
         logger.info("crontab @reboot entry added ({}.{})", _CRON_MARKER, slug)
-        return 0
+    return rc
 
 
 def _unregister_linux(slug: str) -> int:
-    with crontab_lock():
-        try:
-            result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        except FileNotFoundError:
-            # No crontab binary -> nothing was ever registered, so removal is a
-            # no-op. Keeps minimal hosts destroyable and the unit-owned branch
-            # (which cleans up a stale entry) crash-free.
-            return 0
-        if result.returncode != 0:
-            return 0
-        marker = f"{_CRON_MARKER}.{slug}"
-        lines = [line for line in result.stdout.splitlines() if marker not in line]
-        if len(lines) == len(result.stdout.splitlines()):
-            return 0
-        subprocess.run(
-            ["crontab", "-"],
-            input="\n".join(lines) + "\n",
-            capture_output=True,
-            text=True,
-            check=False,
+    try:
+        return remove_crontab_entry(
+            f"{_CRON_MARKER}.{slug}",
+            write_failure_rc=0,
+            on_removed=lambda: logger.info("crontab @reboot entry removed"),
         )
-        logger.info("crontab @reboot entry removed")
-    return 0
+    except FileNotFoundError:
+        # No crontab binary -> nothing was ever registered, so removal is a
+        # no-op. Keeps minimal hosts destroyable and the unit-owned branch
+        # (which cleans up a stale entry) crash-free.
+        return 0
 
 
 def _register_windows() -> str | None:
