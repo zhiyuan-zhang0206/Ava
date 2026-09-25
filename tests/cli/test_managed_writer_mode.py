@@ -4,9 +4,10 @@ Covers the gate's truth table (off / active / blocked), the fail-closed guard
 semantics (absent / not-exactly-True), the read-once cache, the recorded
 evidence (rollout log line + telemetry field + `managed_writer_blocked` event),
 the read point inside the orchestration (a blocked decision still runs the
-legacy flow), the `ava cluster status` bit, the single-read static pin, and the
+legacy flow), the `ava cluster status` bit, the single-read static pin, the
 begin / collect+adopt / commit steps the orchestration consumes from the
-decision (task #4128 E2-b/E2-c/E2-a).
+decision (task #4128 E2-b/E2-c/E2-a), and the completion declaration's
+presence in its real module (E2-e).
 """
 
 from __future__ import annotations
@@ -112,6 +113,21 @@ def test_wiring_incomplete_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_guard(monkeypatch, _WIRING)
     mode = mode_mod.effective_managed_writer_mode()
     assert (mode.state, mode.blocked_reasons) == ("blocked", ("wiring_incomplete",))
+
+
+def test_wiring_declaration_is_present_in_the_real_module() -> None:
+    """The final wiring slice (#4128 E2-e) declares the guard in the module it proves."""
+    assert (
+        mode_mod._guard_ready("cli.commands._update_publication", "MANAGED_WRITER_WIRING_COMPLETE")
+        is True
+    )
+
+
+def test_the_real_declarations_activate_the_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With both declarations carried by their real modules, the switch alone activates."""
+    _enable(monkeypatch)
+    mode = mode_mod.effective_managed_writer_mode()
+    assert (mode.state, mode.blocked_reasons) == ("active", ())
 
 
 def test_both_guards_missing_join_reasons(monkeypatch: pytest.MonkeyPatch) -> None:

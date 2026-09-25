@@ -6,8 +6,8 @@ real `deployment_state` row (same reasoning as
 nothing). Prepared receipts and candidate plans are constructed directly —
 their producers (`_release_inventory`, `_release_services`) are covered by
 their own prove scripts — so every refusal is pinned to exactly the fact under
-test. One structural test pins the seats' inertness: no production package
-imports the module until the rollout wiring lands.
+test. One structural test pins the seats' importers by name; the final wiring
+slice (task #4128 E2-e) lands the completion declaration in the module.
 """
 
 from __future__ import annotations
@@ -868,9 +868,9 @@ def test_the_seat_has_no_unnamed_production_callsite() -> None:
       begin position -- plus the `published_unit` datum alias (task #4129 I3,
       channel B), all under the wiring's `active` decision.
 
-    The declaration stays False until the last wiring slice flips it; the
-    collect refusal persists until the collection channel connects it (the
-    begin chain is connected by task #4129 I3).
+    The final wiring slice (task #4128 E2-e) landed the declaration as True;
+    the begin chain is connected by task #4129 I3, the collection channel by
+    task #4129 I5, and the closing section by channel E (I6).
     """
     root = Path(__file__).resolve().parents[2]
     allowed = {

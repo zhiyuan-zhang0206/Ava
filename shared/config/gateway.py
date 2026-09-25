@@ -288,7 +288,7 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
             "true: a rollout enters managed-writer mode only when both readiness "
             "guards exist and are True -- the checked normal-release activation "
             "(CHECKED_ACTIVATION_READY, task #4117) and the completed rollout wiring "
-            "(MANAGED_WRITER_WIRING_COMPLETE, task #4122); with either guard missing "
+            "(MANAGED_WRITER_WIRING_COMPLETE, task #4128 E2); with either guard missing "
             "it runs the legacy flow and records a visible blocked decision (rollout log, "
             "rollout telemetry, `managed_writer_blocked` event, `ava cluster "
             "status`). Flip only in the same ceremony as the checked-activation "
