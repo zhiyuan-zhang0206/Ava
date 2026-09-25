@@ -39,6 +39,7 @@ from cli.commands._observatory_urls import (
 )
 from shared.log import logger
 from shared.loki_index_labels import validate_loki_deploy_config
+from shared.resilience import Policy, retry
 
 SUPPORTED_TAGS = {"darwin_arm64", "linux_amd64"}
 
@@ -48,6 +49,23 @@ _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 5.0
 _DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
 _LAUNCHCTL_TIMEOUT_S = 5.0
+
+
+def _download_backoff(attempt: int) -> float:
+    return _DOWNLOAD_RETRY_BACKOFF_S * (attempt + 1)
+
+
+# Pinned archive download retries every failure on the original 5s, 10s schedule.
+_DOWNLOAD_POLICY = Policy(
+    max_attempts=_DOWNLOAD_ATTEMPTS,
+    backoff=_download_backoff,
+    jitter="none",
+    jitter_span=1.0,
+    classify=lambda _exc: True,
+    idempotent=True,
+    respect_retry_after=False,
+    on_final_failure=None,
+)
 
 
 def platform_tag() -> str | None:
@@ -186,25 +204,29 @@ def _stream_download(url: str, destination: Path) -> None:
 def _download_with_retry(url: str, archive: Path) -> None:
     """Retry a pinned archive download a bounded number of times."""
     started = time.monotonic()
-    last_error: Exception | None = None
-    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+    attempt = 0
+
+    def _download_once() -> None:
+        nonlocal attempt
+        attempt += 1
         try:
             _stream_download(url, archive)
-            return
         except Exception as exc:  # network and filesystem failures are all retriable here
-            last_error = exc
             elapsed = time.monotonic() - started
             print(
                 f"  ! lgtm native: download attempt {attempt}/{_DOWNLOAD_ATTEMPTS} failed "
                 f"after {elapsed:.0f}s: {exc}",
                 file=sys.stderr,
             )
-            if attempt < _DOWNLOAD_ATTEMPTS:
-                time.sleep(_DOWNLOAD_RETRY_BACKOFF_S * attempt)
-    raise RuntimeError(
-        f"failed to download native LGTM backend from {url} after {_DOWNLOAD_ATTEMPTS} "
-        f"attempts ({time.monotonic() - started:.0f}s total): {last_error}"
-    ) from last_error
+            raise
+
+    try:
+        retry(_DOWNLOAD_POLICY)(_download_once)
+    except Exception as exc:
+        raise RuntimeError(
+            f"failed to download native LGTM backend from {url} after {_DOWNLOAD_ATTEMPTS} "
+            f"attempts ({time.monotonic() - started:.0f}s total): {exc}"
+        ) from exc
 
 
 def _extract_member(name: str, archive: Path, destination: Path, member: str | None = None) -> None:

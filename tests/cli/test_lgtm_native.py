@@ -12,6 +12,7 @@ import yaml
 
 from cli.commands import _lgtm_native
 from cli.commands._converge_spec import ConvergeCtx
+from shared import resilience
 from shared.loki_index_labels import validate_loki_deploy_config
 
 
@@ -226,6 +227,59 @@ def test_download_refuses_an_archive_with_the_wrong_sha256(
             {"url": "https://example.invalid/loki.zip", "sha256": "0" * 64},
             destination,
         )
+
+
+def test_download_retry_preserves_sleep_and_stderr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def fail_then_succeed(_url: str, _archive: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ValueError("bad payload")
+
+    monkeypatch.setattr(_lgtm_native, "_stream_download", fail_then_succeed)
+    monkeypatch.setattr(_lgtm_native.time, "sleep", sleeps.append)
+    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
+    monkeypatch.setattr(_lgtm_native.time, "monotonic", lambda: 10.0)
+    _lgtm_native._download_with_retry("https://example.invalid/loki.zip", tmp_path / "loki.zip")
+
+    assert calls == 2
+    assert sleeps == [5.0]
+    assert capsys.readouterr().err == (
+        "  ! lgtm native: download attempt 1/3 failed after 0s: bad payload\n"
+    )
+
+
+def test_download_retry_preserves_final_error_and_chain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    errors = [OSError(f"reset {i}") for i in range(1, 4)]
+    sleeps: list[float] = []
+
+    def fail(_url: str, _archive: Path) -> None:
+        raise errors.pop(0)
+
+    final_error = errors[-1]
+    monkeypatch.setattr(_lgtm_native, "_stream_download", fail)
+    monkeypatch.setattr(_lgtm_native.time, "sleep", sleeps.append)
+    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
+    monkeypatch.setattr(_lgtm_native.time, "monotonic", lambda: 10.0)
+    url = "https://example.invalid/loki.zip"
+    with pytest.raises(RuntimeError) as caught:
+        _lgtm_native._download_with_retry(url, tmp_path / "loki.zip")
+
+    assert str(caught.value) == (
+        f"failed to download native LGTM backend from {url} after 3 attempts (0s total): reset 3"
+    )
+    assert caught.value.__cause__ is final_error
+    assert sleeps == [5.0, 10.0]
+    assert capsys.readouterr().err == "".join(
+        f"  ! lgtm native: download attempt {i}/3 failed after 0s: reset {i}\n" for i in range(1, 4)
+    )
 
 
 def test_ensure_renders_configs_with_native_paths_and_loopback(

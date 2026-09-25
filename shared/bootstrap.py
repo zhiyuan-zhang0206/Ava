@@ -43,6 +43,11 @@ from urllib.parse import urlencode
 _FETCH_ATTEMPTS = 2
 _FETCH_TIMEOUT_S = 10.0
 
+
+def _fetch_backoff(attempt: int) -> float:
+    return 0.5 * (attempt + 1)
+
+
 # The parent config snapshot (P0 #2100): a successful fetch writes the payload
 # to `$AVA_HOME/run/bootstrap-snapshot.json` (0600). A later process on the same
 # unit — most importantly the exec child the agent process spawns per turn —
@@ -238,25 +243,31 @@ def fetch_bootstrap_config(
     import httpx
 
     from shared.cluster_auth import bearer_header
+    from shared.resilience import Policy, retry
 
     secret = os.environ.get("AVA_CLUSTER_SECRET", "")
     headers = bearer_header(secret) if secret else {}
     params = {"role": role} if role else {}
     url = f"{base_url.rstrip('/')}/api/bootstrap?{urlencode(params)}"
-    attempt = 0
-    while True:
-        try:
-            resp = dial_get(url, timeout=timeout, headers=headers)
-            resp.raise_for_status()
-            return _validated_bootstrap_payload(resp.json())
-        except (httpx.ConnectError, httpx.ConnectTimeout):
-            # Gateway briefly down (mid-restart): connect fails fast, so retrying
-            # doesn't eat the timeout budget. A ReadTimeout propagates uncaught --
-            # see the note on _FETCH_TIMEOUT_S for why it isn't retried.
-            attempt += 1
-            if attempt >= attempts:
-                raise
-            time.sleep(0.5 * attempt)
+    # Gateway briefly down: retry connect errors only; ReadTimeout propagates.
+    # Keep the original 0.5s, 1.0s, ... schedule without Retry-After or jitter.
+    policy = Policy(
+        max_attempts=attempts,
+        backoff=_fetch_backoff,
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda exc: isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)),
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
+    )
+
+    def _fetch_once() -> dict[str, str]:
+        resp = dial_get(url, timeout=timeout, headers=headers)
+        resp.raise_for_status()
+        return _validated_bootstrap_payload(resp.json())
+
+    return retry(policy)(_fetch_once)
 
 
 def _snapshot_path() -> Path | None:
