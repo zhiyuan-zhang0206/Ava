@@ -164,7 +164,12 @@ def test_register_linux_skips_when_crontab_absent(
     capability, not a bring-up failure."""
     monkeypatch.setattr(shutil, "which", lambda _n: None)  # pyright: ignore[reportUnknownArgumentType]
     assert probe._register_linux("gateway", 60) == 0
-    assert "crontab not installed" in capsys.readouterr().out
+    output = capsys.readouterr()
+    assert output.out == (
+        "  ! watchdog probe (gateway): crontab not installed on this host (skipping); "
+        "a dead watchdog will not be revived automatically\n"
+    )
+    assert output.err == ""
 
 
 def test_register_linux_aborts_when_crontab_read_fails(
@@ -181,7 +186,33 @@ def test_register_linux_aborts_when_crontab_read_fails(
 
     monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
     assert probe._register_linux("gateway", 60) == 1
-    assert "avoid clobbering" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "  * crontab -l failed (permission denied); "
+        "skipping watchdog-probe registration for gateway to avoid clobbering the crontab\n"
+    )
+
+
+def test_register_linux_reports_write_failure_through_logger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/crontab")  # pyright: ignore[reportUnknownArgumentType]
+    errors: list[tuple[object, ...]] = []
+
+    def record_error(*args: object) -> None:
+        errors.append(args)
+
+    monkeypatch.setattr(probe.logger, "error", record_error)
+
+    def _run(cmd, **_kw):  # type: ignore[no-untyped-def]
+        if cmd == ["crontab", "-"]:
+            return type("R", (), {"returncode": 1, "stderr": "write denied", "stdout": ""})()
+        return type("R", (), {"returncode": 1, "stderr": "no crontab for u", "stdout": ""})()
+
+    monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
+    assert probe._register_linux("agent-runner", 60) == 1
+    assert errors == [
+        ("crontab update failed for watchdog probe {}: {}", "agent-runner", "write denied")
+    ]
 
 
 def test_register_linux_preserves_foreign_lines_and_replaces_own(
@@ -321,6 +352,44 @@ def test_unregister_linux_is_a_noop_without_our_line(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(probe.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
     assert probe._unregister_linux("gateway", "ava-deadbeef") == 0
     assert wrote == []
+
+
+def test_unregister_linux_logs_only_after_successful_removal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marker = probe._cron_marker("agent-runner", "ava-deadbeef")
+    line = f"*/1 * * * * /x/ava cluster watchdog-probe --role agent-runner  {marker}\n"
+    body = "0 3 * * * backup\n"
+    write_rc = 0
+    written: list[str] = []
+    infos: list[tuple[object, ...]] = []
+
+    def record_info(*args: object) -> None:
+        infos.append(args)
+
+    monkeypatch.setattr(probe.logger, "info", record_info)
+
+    def _run(cmd: list[str], **kw: object) -> object:
+        if cmd == ["crontab", "-"]:
+            assert isinstance(kw["input"], str)
+            written.append(kw["input"])
+            return type("R", (), {"returncode": write_rc, "stderr": "", "stdout": ""})()
+        return type("R", (), {"returncode": 0, "stderr": "", "stdout": body})()
+
+    monkeypatch.setattr(probe.subprocess, "run", _run)
+    assert probe._unregister_linux("agent-runner", "ava-deadbeef") == 0
+    assert written == [] and infos == []
+
+    body = line
+    write_rc = 1
+    assert probe._unregister_linux("agent-runner", "ava-deadbeef") == 0
+    assert infos == []
+    assert capsys.readouterr() == ("", "")
+
+    write_rc = 0
+    assert probe._unregister_linux("agent-runner", "ava-deadbeef") == 0
+    assert written == ["\n", "\n"]
+    assert infos == [("crontab watchdog-probe entry removed ({})", marker)]
 
 
 def test_register_linux_holds_crontab_lock_around_rmw(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -45,7 +45,6 @@ violating the import layering (shared < ava < agent < gateway < cli).
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -62,9 +61,11 @@ from shared.os_cron import (
     cron_env_prefix,
     launchd_env_block,
     os_jobs_enabled,
+    remove_crontab_entry,
+    replace_crontab_entry,
+    require_crontab,
     skip_os_job,
 )
-from shared.platform import crontab_lock
 
 # One minute. The watchdog's own round is 60s, so probing faster would only
 # shorten the window in which a *dead* watchdog goes unnoticed, not the window
@@ -147,22 +148,22 @@ def _plist_content(role: str, interval_s: int) -> str:
 """
 
 
-_LAUNCHCTL_TIMEOUT_S = 5.0
-_BOOTOUT_SETTLE_S = 10.0
+LAUNCHCTL_TIMEOUT_S = 5.0
+BOOTOUT_SETTLE_S = 10.0
 
 
-def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
+def launchctl(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
         ["launchctl", *args],
         capture_output=True,
         text=True,
         check=False,
-        timeout=_LAUNCHCTL_TIMEOUT_S,
+        timeout=LAUNCHCTL_TIMEOUT_S,
     )
 
 
-def _job_loaded(service: str) -> bool:
-    result = _launchctl("print", service)
+def launchd_job_loaded(service: str) -> bool:
+    result = launchctl("print", service)
     if result.returncode == 0:
         return True
     if result.returncode in (3, 113):  # ESRCH / launchctl's missing-service verdict
@@ -170,16 +171,16 @@ def _job_loaded(service: str) -> bool:
     raise RuntimeError(f"cannot inspect launchd job {service}: {result.stderr.strip()}")
 
 
-def _unload_before_bootstrap(service: str) -> None:
-    result = _launchctl("bootout", service)
+def unload_launchd_job_before_bootstrap(service: str) -> None:
+    result = launchctl("bootout", service)
     if result.returncode not in (0, 3, 113):
         raise RuntimeError(f"cannot unload launchd job {service}: {result.stderr.strip()}")
     # bootout can return before launchd removes the service. Reusing its label
     # in that window produces bootstrap EIO even for a valid plist.
-    deadline = time.monotonic() + _BOOTOUT_SETTLE_S
-    while _job_loaded(service):
+    deadline = time.monotonic() + BOOTOUT_SETTLE_S
+    while launchd_job_loaded(service):
         if time.monotonic() >= deadline:
-            raise RuntimeError(f"launchd job {service} did not unload within {_BOOTOUT_SETTLE_S}s")
+            raise RuntimeError(f"launchd job {service} did not unload within {BOOTOUT_SETTLE_S}s")
         time.sleep(0.1)
 
 
@@ -200,16 +201,16 @@ def _register_macos(role: str, interval_s: int) -> int:
         # intact so an external converge can still detect the pending change.
         logger.info("Watchdog probe '{}' is registering itself — deferring reload", label)
         return 0
-    loaded = _job_loaded(service)
+    loaded = launchd_job_loaded(service)
     if loaded and plist_path.exists() and plist_path.read_text() == content:
         return 0
     if loaded:
-        _unload_before_bootstrap(service)
+        unload_launchd_job_before_bootstrap(service)
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     # Publish the desired file only after removal is confirmed. An unsuccessful
     # unload must not leave a new file falsely certifying the old loaded job.
     plist_path.write_text(content)
-    result = _launchctl("bootstrap", f"gui/{os.getuid()}", str(plist_path))
+    result = launchctl("bootstrap", f"gui/{os.getuid()}", str(plist_path))
     if result.returncode != 0:
         logger.error("launchctl bootstrap failed for {}: {}", label, result.stderr)
         return 1
@@ -251,12 +252,14 @@ def _register_linux(role: str, interval_s: int) -> int:
     or drops job output otherwise, and the probe's stderr lines (stand-down,
     revival) are the held-stop observation's only record (task #3867).
     """
-    if shutil.which("crontab") is None:
-        print(  # noqa: T201
-            f"  ! watchdog probe ({role}): crontab not installed on this host (skipping); "
-            "a dead watchdog will not be revived automatically"
-        )
-        return 0
+    missing_rc = require_crontab(
+        f"  ! watchdog probe ({role}): crontab not installed on this host (skipping); "
+        "a dead watchdog will not be revived automatically",
+        missing_returncode=0,
+        missing_stream=sys.stdout,
+    )
+    if missing_rc is not None:
+        return missing_rc
 
     minutes = max(1, interval_s // 60)
     marker = _cron_marker(role, _home_slug())
@@ -273,55 +276,26 @@ def _register_linux(role: str, interval_s: int) -> int:
         f">> {log_file} 2>&1  {marker}"
     )
 
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0 and "no crontab" not in (result.stderr or "").lower():
-            # Only the benign "no crontab for <user>" may be treated as an empty
-            # crontab; anything else (permissions, a broken cron) would make the
-            # rewrite below clobber the user's real crontab from "".
-            print(  # noqa: T201
-                f"  * crontab -l failed ({result.stderr.strip() or result.returncode}); "
-                f"skipping watchdog-probe registration for {role} to avoid clobbering the crontab",
-                file=sys.stderr,
-            )
-            return 1
-        current = result.stdout if result.returncode == 0 else ""
-
-        lines = [line for line in current.splitlines() if marker not in line]
-        lines.append(entry)
-
-        result = subprocess.run(
-            ["crontab", "-"],
-            input="\n".join(lines) + "\n",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            logger.error("crontab update failed for watchdog probe {}: {}", role, result.stderr)
-            return 1
-        logger.info("crontab watchdog-probe entry added ({}, every {} min)", marker, minutes)
-        return 0
+    if replace_crontab_entry(
+        marker,
+        entry,
+        skip_phrase=f"watchdog-probe registration for {role}",
+        update_failure=lambda err: logger.error(
+            "crontab update failed for watchdog probe {}: {}", role, err
+        ),
+    ):
+        return 1
+    logger.info("crontab watchdog-probe entry added ({}, every {} min)", marker, minutes)
+    return 0
 
 
 def _unregister_linux(role: str, slug: str) -> int:
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            return 0
-        marker = _cron_marker(role, slug)
-        lines = [line for line in result.stdout.splitlines() if marker not in line]
-        if len(lines) == len(result.stdout.splitlines()):
-            return 0
-        subprocess.run(
-            ["crontab", "-"],
-            input="\n".join(lines) + "\n",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        logger.info("crontab watchdog-probe entry removed ({})", marker)
-    return 0
+    marker = _cron_marker(role, slug)
+    return remove_crontab_entry(
+        marker,
+        write_failure_rc=0,
+        on_removed=lambda: logger.info("crontab watchdog-probe entry removed ({})", marker),
+    )
 
 
 # Windows-only: how long ONE probe invocation may run before Task Scheduler ends

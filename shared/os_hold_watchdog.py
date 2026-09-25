@@ -19,8 +19,8 @@ completes it in one place. The command itself decides what to do (see
 provably orphaned.
 
 The skeleton deliberately mirrors ``shared.os_watchdog_probe`` - same launchd
-bootout-settle dance (its helpers are reused wholesale), same crontab
-lock-and-rewrite, same marker-scoped idempotence, same Windows degradation
+bootout-settle dance (its helpers are reused wholesale), shared crontab
+read-modify-write primitives, same marker-scoped idempotence, same Windows degradation
 contract (a registration failure warns loudly instead of failing converge).
 What differs:
 
@@ -38,7 +38,6 @@ What differs:
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -51,6 +50,9 @@ from shared.os_cron import (
     cron_env_prefix,
     launchd_env_block,
     os_jobs_enabled,
+    remove_crontab_entry,
+    replace_crontab_entry,
+    require_crontab,
     skip_os_job,
 )
 
@@ -133,7 +135,11 @@ def _register_macos(interval_s: int) -> int:
     # Reused from the watchdog probe: the launchd bootout-settle mechanics
     # (bootout then wait for removal before bootstrap) are subtle enough that
     # a second implementation would be a second bug.
-    from shared.os_watchdog_probe import _job_loaded, _launchctl, _unload_before_bootstrap
+    from shared.os_watchdog_probe import (
+        launchctl,
+        launchd_job_loaded,
+        unload_launchd_job_before_bootstrap,
+    )
     from shared.platform import descends_from_launchd_job, launchd_job_label
 
     slug = _home_slug()
@@ -148,14 +154,14 @@ def _register_macos(interval_s: int) -> int:
     if launchd_job_label() == label or descends_from_launchd_job(label):
         logger.info("Hold watchdog '{}' is registering itself - deferring reload", label)
         return 0
-    loaded = _job_loaded(service)
+    loaded = launchd_job_loaded(service)
     if loaded and plist_path.exists() and plist_path.read_text() == content:
         return 0
     if loaded:
-        _unload_before_bootstrap(service)
+        unload_launchd_job_before_bootstrap(service)
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     plist_path.write_text(content)
-    result = _launchctl("bootstrap", f"gui/{os.getuid()}", str(plist_path))
+    result = launchctl("bootstrap", f"gui/{os.getuid()}", str(plist_path))
     if result.returncode != 0:
         logger.error("launchctl bootstrap failed for {}: {}", label, result.stderr)
         return 1
@@ -189,14 +195,14 @@ def _register_linux(interval_s: int) -> int:
     this capability (warn and skip), and the line captures output into the
     job log the launchd plist also names.
     """
-    from shared.platform import crontab_lock
-
-    if shutil.which("crontab") is None:
-        print(  # noqa: T201 — converge output
-            "  ! hold watchdog: crontab not installed on this host (skipping); "
-            "an orphaned maintenance hold will not be completed automatically"
-        )
-        return 0
+    missing_rc = require_crontab(
+        "  ! hold watchdog: crontab not installed on this host (skipping); "
+        "an orphaned maintenance hold will not be completed automatically",
+        missing_returncode=0,
+        missing_stream=sys.stdout,
+    )
+    if missing_rc is not None:
+        return missing_rc
 
     minutes = max(1, interval_s // 60)
     marker = _cron_marker(_home_slug())
@@ -207,52 +213,24 @@ def _register_linux(interval_s: int) -> int:
         f">> {log_file} 2>&1  {marker}"
     )
 
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0 and "no crontab" not in (result.stderr or "").lower():
-            print(  # noqa: T201 — converge output
-                f"  * crontab -l failed ({result.stderr.strip() or result.returncode}); "
-                "skipping hold-watchdog registration to avoid clobbering the crontab",
-                file=sys.stderr,
-            )
-            return 1
-        current = result.stdout if result.returncode == 0 else ""
-        lines = [line for line in current.splitlines() if marker not in line]
-        lines.append(entry)
-        result = subprocess.run(
-            ["crontab", "-"],
-            input="\n".join(lines) + "\n",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            logger.error("crontab update failed for hold watchdog: {}", result.stderr)
-            return 1
-        logger.info("crontab hold-watchdog entry added ({}, every {} min)", marker, minutes)
-        return 0
+    if replace_crontab_entry(
+        marker,
+        entry,
+        skip_phrase="hold-watchdog registration",
+        update_failure=lambda err: logger.error("crontab update failed for hold watchdog: {}", err),
+    ):
+        return 1
+    logger.info("crontab hold-watchdog entry added ({}, every {} min)", marker, minutes)
+    return 0
 
 
 def _unregister_linux(slug: str) -> int:
-    from shared.platform import crontab_lock
-
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            return 0
-        marker = _cron_marker(slug)
-        lines = [line for line in result.stdout.splitlines() if marker not in line]
-        if len(lines) == len(result.stdout.splitlines()):
-            return 0
-        subprocess.run(
-            ["crontab", "-"],
-            input="\n".join(lines) + "\n",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        logger.info("crontab hold-watchdog entry removed ({})", marker)
-    return 0
+    marker = _cron_marker(slug)
+    return remove_crontab_entry(
+        marker,
+        write_failure_rc=0,
+        on_removed=lambda: logger.info("crontab hold-watchdog entry removed ({})", marker),
+    )
 
 
 def _register_windows(interval_s: int) -> str | None:
