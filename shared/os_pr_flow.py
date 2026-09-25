@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import shlex
 import shutil
+import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -154,6 +155,7 @@ def _register_linux() -> int:
     missing_rc = shared.os_cron.require_crontab(
         "  * PR flow: crontab not installed; the daily sampler job cannot be registered",
         missing_returncode=1,
+        missing_stream=sys.stderr,
     )
     if missing_rc is not None:
         return missing_rc
@@ -163,14 +165,21 @@ def _register_linux() -> int:
     log_file = _log_file()
     log_file.parent.mkdir(parents=True, exist_ok=True)
     entry = f"{_cron_entry()}  {marker}"
-    if shared.os_cron.replace_crontab_entry(marker, entry, registration_name="PR-flow"):
+    if shared.os_cron.replace_crontab_entry(
+        marker,
+        entry,
+        skip_phrase="PR-flow registration",
+        update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
+    ):
         return 1
     logger.info("crontab PR-flow entry added ({})", marker)
     return 0
 
 
 def _unregister_linux(slug: str) -> int:
-    return shared.os_cron.remove_crontab_entry(_cron_marker(slug))
+    return shared.os_cron.remove_crontab_entry(
+        _cron_marker(slug), write_failure_rc=1, on_removed=None
+    )
 
 
 def credential_blocker() -> str | None:

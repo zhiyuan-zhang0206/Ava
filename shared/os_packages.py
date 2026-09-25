@@ -15,6 +15,7 @@ loud warning, like its sibling jobs (`shared.platform_backend`).
 from __future__ import annotations
 
 import shlex
+import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -109,6 +110,7 @@ def _register_linux() -> int:
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered",
         missing_returncode=1,
+        missing_stream=sys.stderr,
     )
     if missing_rc is not None:
         return missing_rc
@@ -123,14 +125,21 @@ def _register_linux() -> int:
         f"/bin/sh -c {shlex.quote(_shell_command())} "
         f">> {shlex.quote(str(log_file))} 2>&1  {marker}"
     )
-    if shared.os_cron.replace_crontab_entry(marker, entry, registration_name="packages-refresh"):
+    if shared.os_cron.replace_crontab_entry(
+        marker,
+        entry,
+        skip_phrase="packages-refresh registration",
+        update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
+    ):
         return 1
     logger.info("crontab packages-refresh entry added ({})", marker)
     return 0
 
 
 def _unregister_linux(slug: str) -> int:
-    return shared.os_cron.remove_crontab_entry(_cron_marker(slug))
+    return shared.os_cron.remove_crontab_entry(
+        _cron_marker(slug), write_failure_rc=1, on_removed=None
+    )
 
 
 def _register_windows() -> str | None:
