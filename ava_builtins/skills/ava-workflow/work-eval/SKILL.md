@@ -35,6 +35,7 @@ own failure mode and its own owner:
 | "The premise of this step is false — the system doesn't do what we assumed" | **Calibrate** failure | Re-run a calibration slice on that fact, then resume |
 | "The goal itself was off — success criteria no longer make sense" | **Align** failure | Re-question the affected branch, update the alignment document, reconfirm |
 | "The decomposition is wrong — steps too big, wrong order, missing pieces" | **Plan** failure | Re-split the remaining work, update the plan |
+| "The same setup or failure class keeps consuming work" | Workflow or design bottleneck | Use the [investment loop](../SKILL.md#invest-in-future-work); fix the shared cause and exercise it on this task |
 
 The self-challenge loop below is the mechanism; the table above is the routing.
 **Never just "push on" past a finding** — a finding that belongs to another
@@ -83,6 +84,14 @@ be the final gate for a large task; use the independent review below.
 - **"Is there a simpler way?"**
   - Did we introduce unnecessary complexity?
   - What would happen if we cut this step entirely?
+
+- **"Is the next similar task becoming easier?"**
+  - Are we learning through a reproducible real path, or repeatedly rebuilding
+    the environment and discovering integration assumptions late?
+  - Have repeated patches exposed a missing boundary, shared tool or reusable
+    regression scenario? Address that cause before adding another workaround.
+  - Did the chosen investment reach its exit condition? Use it and return to
+    delivery; a growing framework with no real consumer is not progress.
 
 - **"Am I solving the wrong problem?"**
   - Did we discover new information during execution that changes the original assumptions?

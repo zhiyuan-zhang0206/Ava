@@ -95,9 +95,57 @@ The phases express *logical* dependencies — understanding precedes goal-settin
 
 ## Core Principles
 
+### Invest in future work
+
+Apply the system prompt's **Invest in the future** rule when choosing the work,
+not only when closing a task. A request is often one step in maintaining a
+system, running a business, or developing a research program. Infer that larger
+purpose from the conversation and evidence; distinguish it from an unconfirmed
+assumption. Optimize for the immediate result **and** the cost of the next
+similar task. Do not make the human spell out every useful implication.
+
+Before a substantial implementation, and whenever progress repeatedly stalls:
+
+1. **Find the actual bottleneck.** Separate implementation, environment setup,
+   build/test turnaround, external waiting, integration and rework. Use available
+   logs and artifacts; do not blame CI or merge queues without evidence, or
+   invent a time breakdown when none was recorded.
+2. **Choose a bounded investment.** Reuse existing capabilities first. When the
+   same setup, manual procedure or failure class will recur, improve the tool,
+   infrastructure or design that causes it. State what repeated cost it removes,
+   who will reuse it, and how the current task will exercise it. A substantial
+   share of effort, such as 30%, can be worthwhile; it is neither a mandatory
+   quota nor permission for an unrelated platform rewrite.
+3. **Close the feedback loop early.** Exercise the smallest real path through
+   the relevant system before expanding the implementation or test matrix.
+   Automate reproducible setup, observation and cleanup when those are the
+   repeated work. When a failure exposes a recurring gap, improve that shared
+   path rather than require another disposable script or isolated patch.
+4. **Check the return and resume delivery.** Give the investment an exit
+   condition: demonstrate a reproducible run, fewer manual steps, faster useful
+   feedback or removal of a recurring failure class. Compare with the previous
+   workflow where evidence exists. Shrink or stop an investment that is not
+   paying back; do not keep extending it before using it on the original task.
+
+Keep experimentation independent of promotion. For software, an isolated
+preview can consume an unmerged remote or local branch without waiting for
+green CI. Resolve the branch to a fixed commit or record an exact source
+snapshot for each run; preserve the result's provenance and failures. Preview
+answers a specific runtime question; it does not erase a failing CI check or
+replace merge and production gates. Respect current machine, network, budget
+and authority constraints when choosing the shortest useful feedback path.
+
+Keep this reasoning short in the alignment/plan or working notes: **larger
+purpose; bottleneck evidence; investment and exit condition; next real use**.
+Preserve reusable tools in the project and durable handoff state using
+[Being a Long-Running Agent](../ava-being-a-long-running-agent/SKILL.md).
+New spending, external effects and material scope changes still need the
+appropriate authority; routine improvements within the agreed scope do not
+need another ceremonial approval.
+
 ### 1. Reality first, question second (Calibrate → Align)
 
-Before asking the user anything, look for the answer in the environment — codebase, docs, config files, running state. Facts are discovered; only decisions need the user. When the user's model of the subject is uncalibrated, run the Calibrate loop first so the plan is grounded in reality. Then actively question — inspired by Matt Pocock's ["grill me"](https://github.com/mattpocock/skills) — working the open decisions as a design tree in rounds: each round asks the settled frontier of questions, every question carrying your recommended answer, until no branch is left silently assumed. Don't enter Plan or act until the user confirms you've reached a shared understanding.
+Before asking the user anything, look for the answer in the environment — codebase, docs, config files, running state. Facts are discovered; material decisions need the user. When the user's model of the subject is uncalibrated, run the Calibrate loop first so the plan is grounded in reality. Then actively question — inspired by Matt Pocock's ["grill me"](https://github.com/mattpocock/skills) — working unresolved material decisions as a design tree in rounds, every question carrying your recommended answer. Existing instructions and confirmed decisions remain authorization; do not require another sign-off just because you restated them in a document. Settle genuinely open scope, trade-off and authority questions before dependent work.
 
 ### 2. Plan when execution demands it (Plan)
 
@@ -145,7 +193,9 @@ When all phases are used together:
 3. **Plan** (only when the task is large or parallel) reads the alignment document → produces an execution plan → send to user for confirmation
 4. **Work & Eval** reads the execution plan (or, for smaller tasks, the alignment document directly) → executes step by step → evaluates against the success criteria from Align → delivers when done
 
-Each confirmation point is a **checkpoint** — the user can correct course at any checkpoint, avoiding the cost of drifting too far before discovery.
+Each confirmation point is a **checkpoint** for material choices still open,
+not a demand to reapprove settled instructions. The user can correct course at
+any checkpoint, avoiding the cost of drifting too far before discovery.
 
 ## Relationship to Goal Mode
 
