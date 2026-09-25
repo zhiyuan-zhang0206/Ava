@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Converge host wiring
-description: The _converge_firewall and _converge_redis_bridge steps and their guard rails.
+description: The _converge_firewall, _converge_redis_bridge and hook-drift warning steps and their guard rails.
 tags:
 - cli
 ---
@@ -17,6 +17,10 @@ tags:
   `sudo -n` and then an exact manual command without blocking `ava start`.
   `_gateway_ready` uses the same audit when an off-box probe fails. See
   [[shared/shared.ava.okf.md|Shared Libraries]].
+- `_converge_steps.ensure_local_git_hooks` warns when any conventional local
+  checkout's Git hook installation is missing or drifted (via
+  `provision/check_git_hooks.py --scan-machine`); warn-only, it never blocks a
+  start or update. See the runbook's Git hooks section.
 - `_converge_redis_bridge` installs the repo-owned pure-stdlib relay into
   `$AVA_HOME`, converges or retires its macOS KeepAlive job as the cluster shape
   changes, and exposes the authenticated Redis PING used by `ava status` and the
