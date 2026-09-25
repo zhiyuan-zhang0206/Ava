@@ -13,14 +13,18 @@ once the units recorded their normal-service readbacks, it reads the journaled
 set and publishes exactly the complete readbacks through `commit_current`,
 leaving the deployment phase and lease with the existing finalizer.
 
-Both seats are inert until the rollout wiring slice connects them: no production
-module imports this module, and it performs no filesystem or network work —
-prepared facts are expected inventory, not closure or permission. The live-lease
-fence, registered unit coverage and the same-operation retry rule remain owned
-by `begin_pending_publication`/`lock_rollout`; the seats only supply the plan
-and the completion. The caller owns the transaction and the short-lock
-discipline: nothing may run while the deployment/registry locks are held, and
-delivery is the caller's commit.
+The wiring is complete (design §8.1, task #4128 E2-e): every seat now has its
+production caller — the managed-writer mode gate's `active` decision drives the
+begin / collect / commit positions — and this module declares
+``MANAGED_WRITER_WIRING_COMPLETE`` below as the completion declaration; the gate
+enters only on an exactly-True value (absent or non-True refuses fail-closed).
+The module itself performs no filesystem or network work: prepared facts are
+expected inventory, not closure or permission. The live-lease fence, registered
+unit coverage and the same-operation retry rule remain owned by
+`begin_pending_publication`/`lock_rollout`; the seats only supply the plan and
+the completion. The caller owns the transaction and the short-lock discipline:
+nothing may run while the deployment/registry locks are held, and delivery is
+the caller's commit.
 """
 
 from __future__ import annotations
@@ -47,6 +51,13 @@ from shared.managed_writer_publication import (
     begin_pending_publication,
 )
 from shared.runtime_publication_input import PreparationReceipt
+
+# The completion declaration (design §8.1, task #4128 E2-e): lands as the final
+# wiring slice, after every seat has its production caller. The enable-point
+# gate (``cli.commands._managed_writer_mode``) reads this attribute and enters
+# only on an exactly-True value — absent or non-True refuses fail-closed;
+# revert = the same diff reversed.
+MANAGED_WRITER_WIRING_COMPLETE = True
 
 
 @dataclass(frozen=True)
