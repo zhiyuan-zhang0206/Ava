@@ -1,10 +1,10 @@
-"""shared.gitenv — the non-interactive environment every Ava git call runs under."""
+"""shared.deploy.git.gitenv — the non-interactive environment every Ava git call runs under."""
 
 from __future__ import annotations
 
 import pytest
 
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 
 
 def test_prompts_are_off_and_ssh_is_bounded() -> None:

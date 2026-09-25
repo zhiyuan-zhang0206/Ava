@@ -25,7 +25,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.proc import run_bounded
 
 # These reads are local-only (rev-parse / merge-base against an existing

@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from shared.config import settings
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.machine import is_gateway
 from shared.proc import run_bounded
 

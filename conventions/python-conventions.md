@@ -185,7 +185,7 @@ git: the fleet's Windows agent-runner accumulated 66 orphaned `git.exe` + 66
 `ssh.exe` + 63 `sh.exe`, all below a killed stub. Anything with a shell in the
 middle (`shell=True`, a `-lc` wrapper) has the same shape on every platform.
 
-Git specifically: pass `env=shared.gitenv.git_env()` so a credential prompt
+Git specifically: pass `env=shared.deploy.git.gitenv.git_env()` so a credential prompt
 errors instead of blocking on a terminal that does not exist, and ssh neither
 asks nor dials unbounded. Note that `ConnectTimeout` is not the bound — an
 `ssh.exe` on that box reached a state where its own timeout never fired, so the

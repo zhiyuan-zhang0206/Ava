@@ -32,7 +32,7 @@ from pathlib import Path
 
 import shared.telemetry
 from shared.cluster_drift import prod_source_dir
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.proc import run_bounded
 
 # Bounded git: a guard must never hang a probe or a start (mirrors

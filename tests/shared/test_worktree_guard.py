@@ -1,4 +1,4 @@
-"""Tests for shared/worktree_guard.py — the `git worktree remove` guard (issue #194)."""
+"""Tests for shared/deploy/git/worktree_guard.py — the `git worktree remove` guard (issue #194)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.worktree_guard import find_live_anchors
+from shared.deploy.git.worktree_guard import find_live_anchors
 
 
 def test_session_record_anchor_reported(tmp_path: Path) -> None:

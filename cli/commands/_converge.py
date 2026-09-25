@@ -237,7 +237,7 @@ def _ensure_github_pr(ctx: ConvergeCtx) -> None:
         return
     if not settings.general.require_github_pr:
         return
-    from shared.github_pr import github_pr_blocker
+    from shared.deploy.git.github_pr import github_pr_blocker
 
     reason = github_pr_blocker()
     if reason is not None:

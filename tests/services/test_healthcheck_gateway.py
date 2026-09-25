@@ -266,7 +266,7 @@ def _patch_converge_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return _FakeGit()
 
     monkeypatch.setattr("shared.proc.run_bounded", _fake_run_bounded)
-    monkeypatch.setattr("shared.gitenv.git_env", dict)
+    monkeypatch.setattr("shared.deploy.git.gitenv.git_env", dict)
     return recorded
 
 

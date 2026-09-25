@@ -121,7 +121,7 @@ def _converge_off_pin_checkout(repo: Path) -> None:
     from ops.controllers.pin import read_pin_and_head
     from shared import source_switch
     from shared.cluster_lock import read_update_lease
-    from shared.gitenv import git_env
+    from shared.deploy.git.gitenv import git_env
     from shared.proc import run_bounded
 
     try:

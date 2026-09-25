@@ -16,7 +16,9 @@ _SCRIPT_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_REPOSITORY_ROOT))
 
-from shared.repo_change import is_doc_path  # noqa: E402 - direct script entry needs repo root first
+from shared.deploy.git.repo_change import (  # noqa: E402 - direct script entry needs repo root first
+    is_doc_path,
+)
 
 _FORCED_FULL_ROOTS = (
     "shared/",

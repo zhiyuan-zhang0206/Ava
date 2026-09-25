@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 from cli.commands import _update_snapshot as _snapshot_mod
 from cli.commands._repo import _repo_root
 from shared.config import settings
-from shared.gitenv import git_env
+from shared.deploy.git.gitenv import git_env
 from shared.platform import LockTimeoutError
 from shared.proc import run_bounded
 from shared.runtime_migration import ReleaseMigrationContext

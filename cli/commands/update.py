@@ -271,15 +271,15 @@ from shared.cluster_lock import (
 from shared.config import (
     refresh_data_plane_settings as refresh_data_plane_settings,
 )
-from shared.paths import ava_home as ava_home
 
 # Re-exported as `cli.commands._classify_change` (cli/commands/__init__.py). The
-# frontend/backend/doc partition lives in `shared.repo_change` so the gateway's
+# frontend/backend/doc partition lives in `shared.deploy.git.repo_change` so the gateway's
 # read-only update preflight and the rollout classification (`_classify_rollout`,
 # in `_update_orchestration`) share one source of truth.
-from shared.repo_change import (
+from shared.deploy.git.repo_change import (
     classify_change as _classify_change,  # noqa: F401 # pyright: ignore[reportUnusedImport]  # re-export (accessed as cli.commands._classify_change)
 )
+from shared.paths import ava_home as ava_home
 from shared.rollout_telemetry import activate as _activate_telemetry
 from shared.rollout_telemetry import stage as _stage_telemetry
 
