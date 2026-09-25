@@ -50,7 +50,7 @@ from pydantic import ValidationError
 import shared.db
 from ops import cluster_session
 from ops.cluster import ClusterUpdateInProgress
-from ops.rpc_bootstrap_hop import BootstrapRecoveryReadResult
+from ops.ops_bootstrap_hop import BootstrapRecoveryReadResult
 from shared import ui_update_state, updater_handoff
 from shared.audit_events import insert_event_log
 from shared.cluster_lock import (

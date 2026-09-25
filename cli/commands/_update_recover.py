@@ -332,6 +332,7 @@ def finalize_rollout(
     recovered: bool = False,
     local_launch_failures: list[str] | None = None,
     publication_refused: bool = False,
+    tails_pending: bool = False,
 ) -> RolloutOutcome:
     """`finally`-clause tail of the gateway orchestration: best-effort resume
     every potentially paused host, record the resulting verdict, then — unless it was
@@ -356,10 +357,14 @@ def finalize_rollout(
 
     `publication_refused` selects the third INCOMPLETE shape's report: a
     managed-writer publication failure -- a failed candidate-ready wait, or a
-    collection/commit refusal -- and its durable pending journal was retained.
-    Nothing is stranded and every host converged there too, so the host-oriented
-    block would name the wrong machine; the journal's checked recovery is the
-    one command that fits.
+    collection/continuation/commit refusal -- and its durable pending journal
+    was retained. Nothing is stranded and every host converged there too, so the
+    host-oriented block would name the wrong machine; the journal's checked
+    recovery is the one command that fits. `tails_pending` selects the fourth:
+    the publication commit was PAID but some units' commit tails did not
+    complete -- nothing is retained there either, and the tail's idempotent
+    re-dispatch (never recovery, never a re-publish) is the one action that
+    fits.
 
     `recovered` is the caller's first-hand answer to the one question `outcome`
     cannot express: an `ABORTED` rollout whose gateway leg rolled itself back to
@@ -397,6 +402,7 @@ def finalize_rollout(
         outcome=outcome,
         local_launch_failures=local_launch_failures or [],
         publication_refused=publication_refused,
+        tails_pending=tails_pending,
     )
     return outcome
 
@@ -430,6 +436,45 @@ def _record_outcome(
         )
 
 
+def _aftermath_banner(
+    outcome: RolloutOutcome,
+    *,
+    publication_refused: bool,
+    tails_pending: bool,
+    unreached: list[str],
+    local_launch_failures: list[str],
+) -> str:
+    """The residual-state banner for a rollout that did not finish clean.
+
+    Keyed on `outcome` because the two cases need opposite instructions: an
+    ABORTED rollout is retried once its cause is fixed, while an INCOMPLETE
+    one has already migrated and advanced the pin -- re-running `ava cluster
+    update` into it is the 2026-07-29 collision, and the correct move is to
+    wait out (or look at) the hosts the settle hold names.
+
+    INCOMPLETE has four shapes, so the banner distinguishes them: hosts that
+    never came back, a local service session that never launched, a retained
+    managed-writer publication failure, and the commit-tail failure whose
+    publication commit IS paid. Naming the wrong one sends the operator to
+    the wrong machine -- or to the wrong command.
+    """
+    if outcome is not RolloutOutcome.INCOMPLETE:
+        return "ROLLOUT ABORTED — cluster residual state + recovery"
+    if publication_refused:
+        return (
+            "ROLLOUT INCOMPLETE — the code landed, but the managed-writer "
+            "activation did not publish"
+        )
+    if tails_pending:
+        return (
+            "ROLLOUT INCOMPLETE — the publication is committed; some units' "
+            "commit tails did not complete"
+        )
+    if unreached or not local_launch_failures:
+        return "ROLLOUT INCOMPLETE — the gateway landed; some agent-runners did not"
+    return "ROLLOUT INCOMPLETE — the code landed; a service on this host did not come up"
+
+
 def _print_rollout_aftermath(
     *,
     reached: list[str],
@@ -438,36 +483,25 @@ def _print_rollout_aftermath(
     outcome: RolloutOutcome,
     local_launch_failures: list[str],
     publication_refused: bool = False,
+    tails_pending: bool = False,
 ) -> None:
     """Print the residual-state + recovery block after a rollout that did not finish
     clean, so an operator does not have to reverse-engineer the cluster's state from a
     traceback: which resumes are confirmed vs unconfirmed, whether the pin advanced, and
     the exact recovery commands. stderr (the rollout log's error stream).
 
-    The banner is keyed on `outcome` because the two cases need opposite instructions:
-    an ABORTED rollout is retried once its cause is fixed, while an INCOMPLETE one has
-    already migrated and advanced the pin — re-running `ava cluster update` into it is the
-    2026-07-29 collision, and the correct move is to wait out (or look at) the hosts
-    the settle hold names.
-
-    INCOMPLETE now has three shapes, so the banner distinguishes them: hosts that never
-    came back, a local service session that never launched, and a managed-writer
-    publication failure (a failed candidate-ready wait, or a collection/commit
-    refusal) whose durable journal was retained. Naming the wrong one sends the
-    operator to the wrong machine — or to the wrong command.
+    Banner selection lives in `_aftermath_banner`; the block below names the
+    residual detail: which resumes are confirmed vs unconfirmed, whether the
+    pin advanced, and the exact recovery commands.
     """
     rule = "=" * 64
-    if outcome is not RolloutOutcome.INCOMPLETE:
-        banner = "ROLLOUT ABORTED — cluster residual state + recovery"
-    elif publication_refused:
-        banner = (
-            "ROLLOUT INCOMPLETE — the code landed, but the managed-writer "
-            "activation did not publish"
-        )
-    elif unreached or not local_launch_failures:
-        banner = "ROLLOUT INCOMPLETE — the gateway landed; some agent-runners did not"
-    else:
-        banner = "ROLLOUT INCOMPLETE — the code landed; a service on this host did not come up"
+    banner = _aftermath_banner(
+        outcome,
+        publication_refused=publication_refused,
+        tails_pending=tails_pending,
+        unreached=unreached,
+        local_launch_failures=local_launch_failures,
+    )
     out = ["", rule, banner, rule]
     # Local sessions first: unlike the host rows below, this one names a service
     # process that does not exist on the host printing the block, and it is the
@@ -508,6 +542,13 @@ def _print_rollout_aftermath(
             "the gateway. The journal is durable by design — every new deploy, agent birth "
             "and generic release stays refused until the checked protocol clears it."
         )
+    if tails_pending:
+        out.append(
+            "    · re-dispatch the per-unit commit tail for the units named above: it is "
+            "idempotent, and the tail only records each unit's committed stage and "
+            "releases its retained compensation. The publication commit is already paid "
+            "— nothing needs re-publishing."
+        )
     if local_launch_failures:
         out.append(
             "    · on THIS host: `ava start` (idempotent; relaunches only what is missing). "
@@ -531,6 +572,12 @@ def _print_rollout_aftermath(
         out.append(
             "    · do NOT re-run `ava cluster update` yet: the durable pending journal "
             "refuses a new deploy until its checked recovery completes."
+        )
+    elif tails_pending:
+        out.append(
+            "    · do NOT re-run `ava cluster update` for this shape: every host has "
+            "converged and the publication is committed — the residual is the per-unit "
+            "commit tail named above, and the tail's own re-dispatch is the re-run."
         )
     elif outcome is RolloutOutcome.INCOMPLETE and (reached or unreached):
         out.append(

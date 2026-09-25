@@ -473,6 +473,7 @@ def _phase_input() -> ManagedWriterPhaseInput:
             candidate_digest="e" * 64,
             units=(),
         ),
+        continue_units=(),
     )
 
 
@@ -486,56 +487,6 @@ def test_begin_step_returns_the_phase_input_under_active(monkeypatch: pytest.Mon
     monkeypatch.setattr(dispatch_mod, "begin_managed_writer_publication", lambda _sha: phase_input)  # pyright: ignore[reportUnknownArgumentType]
 
     assert wiring._begin_managed_writer_publication("0" * 40) == (0, phase_input)
-
-
-def test_active_rollout_runs_the_hop_phase_instead_of_the_legacy_poll(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The phase input returned by the begin reaches the closing section: the hop
-    gate replaces the Phase-B poll -- never joins it -- and its CLEAN continuation
-    hands the same phase input to the collection (task #4129 I4/I5, channels C+D)."""
-    from cli.commands import _managed_writer_collector as collector_mod
-    from cli.commands import _update_verdict as verdict_mod
-    from cli.commands import update as _up
-
-    _ready_guards(monkeypatch)
-    phase_input = _phase_input()
-    _stub_orchestration_to_phase_b(monkeypatch, phase_input=phase_input)
-    seen: list[list[HopUnitPlan]] = []
-
-    def _hop(
-        plans: list[HopUnitPlan],
-    ) -> tuple[int, _up.RolloutOutcome, list[tuple[str, str | None]], str | None]:
-        seen.append(list(plans))
-        return 0, _up.RolloutOutcome.CLEAN, [], None
-
-    monkeypatch.setattr(verdict_mod, "phase_b_hops", _hop)
-    waited: list[object] = []
-
-    def _wait(collector: object) -> str | None:
-        waited.append(collector)
-        return None
-
-    monkeypatch.setattr(collector_mod, "wait_for_candidate_ready", _wait)
-    legacy: list[None] = []
-    monkeypatch.setattr(
-        _up,
-        "_phase_b_outcome",
-        lambda *_a, **_k: legacy.append(None) or (0, _up.RolloutOutcome.CLEAN, [], None),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    collected: list[object] = []
-    monkeypatch.setattr(
-        _up,
-        "_collect_managed_writer_publication",
-        lambda window_input: collected.append(window_input) or 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(_up, "_commit_managed_writer_publication", lambda: 0)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert _run_inner() == 0
-    assert seen == [list(phase_input.hop_plans)]
-    assert waited == [phase_input.collector], "the CLEAN gate waits on the same collector"
-    assert collected == [phase_input], "the window collects through the same phase input"
-    assert legacy == [], "the hop branch replaces the Phase-B poll"
 
 
 # ── the P2 collect wiring (task #4128, E2-c) ─────────────────────────────────

@@ -112,14 +112,17 @@ def _unit_input(
     home: str = "/ava-a",
     *,
     ops_url: str | None = "http://runner-a:9",
+    normal_request: bytes | None = None,
+    request: bytes | None = None,
 ) -> CollectorUnitInput:
     return CollectorUnitInput(
         machine=machine,
         home=home,
         ops_url=ops_url,
         candidate_context=_context_bytes(_expected(machine, home)),
-        request=b'{"hop":"request"}\n',
+        request=request if request is not None else b'{"hop":"request"}\n',
         recovery_context=b'{"recovery":"context"}\n',
+        normal_request=normal_request,
         prepared_receipt_digest=RECEIPT_DIGEST,
     )
 
@@ -560,18 +563,6 @@ def test_wait_reports_a_foreign_ledger_as_a_refusal(monkeypatch: pytest.MonkeyPa
 # ── the unit acceptance ──────────────────────────────────────────────────────
 
 
-def test_accept_derives_the_positive_closure() -> None:
-    world = _world()
-
-    closure = _accept(world)
-
-    assert closure.outcome == "old_writers_absent_relaunchers_fenced"
-    assert closure.unit == ManagedUnit(
-        machine="runner-a", home="/ava-a", inventory_digest=RECEIPT_DIGEST
-    )
-    assert closure.boot_id is not None
-
-
 class _Rejection(NamedTuple):
     expected: str
     observation: dict[str, object]
@@ -742,7 +733,7 @@ def _rejections() -> list[_Rejection]:
         ),
         _rejection(
             world,
-            "plans a normal release",
+            "normal plan does not match the sealed dispatch",
             ledger=_ledger_dict(unit, _journal_dict(unit, planned=True)),
         ),
         _rejection(world, "hop request does not match", ledger=_ledger_dict(unit, bad_journal)),
@@ -915,6 +906,7 @@ def test_collect_refuses_without_a_window_source(
                     candidate_context=b"not a context",
                     request=b"{}",
                     recovery_context=b"{}",
+                    normal_request=None,
                     prepared_receipt_digest=RECEIPT_DIGEST,
                 )
             )

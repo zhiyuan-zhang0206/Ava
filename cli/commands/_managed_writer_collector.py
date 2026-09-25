@@ -33,6 +33,8 @@ import httpx
 from pydantic import AwareDatetime
 
 from cli.commands._managed_writer_hop import CollectorInput, CollectorUnitInput
+from cli.commands._update_bootstrap import BootstrapHopRequest
+from ops.rpc_prepare_dispatch import prepared_hop_name
 from services.agent_ops.bootstrap import BootstrapRuntimeIdentity, PreparedObservation
 from shared import http_dial, machines
 from shared.cluster_auth import bearer_header
@@ -309,6 +311,40 @@ def collect_and_adopt(collector: CollectorInput) -> int:
     return 0
 
 
+def _validated_observation_read(
+    observation: dict[str, object],
+    *,
+    expected: ExpectedUnitWriters,
+    operation: RolloutIdentity,
+    challenge: UUID,
+    valid_until: datetime,
+) -> UnitObservationRead:
+    """Re-derive the observer read's wire shape and sealed-window placement.
+
+    The first face of ``accept_unit``: the served observation must parse as
+    its schema, describe the restricted pre-publication observer, echo this
+    challenge and this unit's inventory, and sit inside the sealed window
+    (``acquired_at <= observed_at < valid_until``). Anything else refuses.
+    """
+    try:
+        read = UnitObservationRead.model_validate_json(json.dumps(observation))
+    except ValueError as exc:
+        raise CollectorRefusal("the observer read is not its wire shape") from exc
+    if read.mode != "bootstrap_observation":
+        raise CollectorRefusal("the observer read belongs to another mode")
+    if read.full_ready is not False:
+        raise CollectorRefusal("the observer is not the restricted pre-publication observer")
+    if read.closure != "unknown":
+        raise CollectorRefusal("the observer claimed a closure it cannot own")
+    if read.challenge != challenge:
+        raise CollectorRefusal("the observer read echoes another challenge")
+    if read.unit != expected.unit():
+        raise CollectorRefusal("the observer read describes another unit inventory")
+    if not operation.acquired_at <= read.observed_at < valid_until:
+        raise CollectorRefusal("the observation is outside the sealed window")
+    return read
+
+
 def accept_unit(  # noqa: PLR0915 — one ordered evidence re-derivation; every check is one refusal.
     unit: CollectorUnitInput,
     expected: ExpectedUnitWriters,
@@ -332,22 +368,13 @@ def accept_unit(  # noqa: PLR0915 — one ordered evidence re-derivation; every 
     journaled launcher terminals. Anything unknown, drifted or malformed
     raises `CollectorRefusal`.
     """
-    try:
-        read = UnitObservationRead.model_validate_json(json.dumps(observation))
-    except ValueError as exc:
-        raise CollectorRefusal("the observer read is not its wire shape") from exc
-    if read.mode != "bootstrap_observation":
-        raise CollectorRefusal("the observer read belongs to another mode")
-    if read.full_ready is not False:
-        raise CollectorRefusal("the observer is not the restricted pre-publication observer")
-    if read.closure != "unknown":
-        raise CollectorRefusal("the observer claimed a closure it cannot own")
-    if read.challenge != challenge:
-        raise CollectorRefusal("the observer read echoes another challenge")
-    if read.unit != expected.unit():
-        raise CollectorRefusal("the observer read describes another unit inventory")
-    if not operation.acquired_at <= read.observed_at < valid_until:
-        raise CollectorRefusal("the observation is outside the sealed window")
+    read = _validated_observation_read(
+        observation,
+        expected=expected,
+        operation=operation,
+        challenge=challenge,
+        valid_until=valid_until,
+    )
     runtime = read.runtime
     if (
         runtime.home != expected.home
@@ -411,8 +438,23 @@ def accept_unit(  # noqa: PLR0915 — one ordered evidence re-derivation; every 
         raise CollectorRefusal("the hop journal does not parse as its schema") from exc
     if journal.stage != "candidate_ready":
         raise CollectorRefusal("the hop journal is not at candidate-ready")
-    if journal.normal_release_planned:
-        raise CollectorRefusal("the hop journal plans a normal release")
+    # The normal plan (task #4129 I6): the journal's one-bit claim must agree
+    # with the sealed dispatch in both directions, and the sealed request must
+    # name the sealed normal projection by its content name. The projection
+    # bytes ride unclaimed beyond that -- the continuation entry re-validates
+    # them locally before any effect.
+    if journal.normal_release_planned != (unit.normal_request is not None):
+        raise CollectorRefusal("the hop journal's normal plan does not match the sealed dispatch")
+    if unit.normal_request is not None:
+        try:
+            sealed_request = BootstrapHopRequest.model_validate_json(unit.request)
+        except ValueError as exc:
+            raise CollectorRefusal("the sealed hop request is not its wire shape") from exc
+        expected_normal_path = (
+            f"{unit.home}/run/{prepared_hop_name('normal-request', unit.normal_request)}"
+        )
+        if sealed_request.normal_release_path != expected_normal_path:
+            raise CollectorRefusal("the sealed request does not name its normal projection")
     if journal.request_digest != hashlib.sha256(unit.request).hexdigest():
         raise CollectorRefusal("the journal's hop request does not match the dispatched bytes")
     if journal.candidate_context_digest != hashlib.sha256(unit.candidate_context).hexdigest():

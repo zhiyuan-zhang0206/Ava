@@ -165,14 +165,16 @@ def test_malformed_service_commands_are_controlled_refusals(
         ("expected", "candidate_started"),
     ],
 )
-def test_continuation_requires_same_actual_ready_handoff(
+def test_candidate_ready_recovery_requires_the_actual_ready_handoff(
     monkeypatch: pytest.MonkeyPatch, generation: str, stage: str
 ) -> None:
-    from unittest.mock import Mock
+    """A replacement generation or any stage but candidate-ready refuses.
 
+    The continuation gate reads the retained journal itself (task #4129 I6:
+    the standalone drive entry runs this same gate before any effect), so a
+    hop exit code alone can never authorize the normal chain.
+    """
     from cli.commands import _update_normal_release as normal
-    from cli.commands import _update_normal_release_standalone as standalone
-    from cli.commands._update_bootstrap import PreparedBootstrapHop
 
     monkeypatch.setattr(
         normal.updater_handoff,
@@ -203,15 +205,8 @@ def test_continuation_requires_same_actual_ready_handoff(
         },
     )
 
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("exit code alone must not authorize normal probing or service effects")
-
-    monkeypatch.setattr(standalone, "probe_bootstrap", forbidden)
-    monkeypatch.setattr(normal, "execute_normal_release", forbidden)
     with pytest.raises(ReleaseRejectedError, match="actual candidate-ready handoff"):
-        normal.continue_after_bootstrap(
-            Mock(spec=PreparedBootstrapHop), Mock(spec=normal.PreparedNormalRelease), "expected"
-        )
+        normal._candidate_ready_recovery("expected")
 
 
 def test_prepared_services_pin_dependency_order_before_mutable_roster_changes(
@@ -1154,6 +1149,7 @@ def test_stop_bootstrap_signals_only_the_exact_retained_identity(
 ) -> None:
     plan = _prepared_plan(unit_home, ())
     record = plan.bootstrap
+    assert record is not None
     _write_ops_record(unit_home, record)
     calls: list[object] = []
     backend = Mock()
@@ -1184,6 +1180,7 @@ def test_stop_bootstrap_is_complete_without_a_signal_when_the_process_is_gone(
     monkeypatch: pytest.MonkeyPatch, unit_home: Path, verdict: ProcessVerdict
 ) -> None:
     plan = _prepared_plan(unit_home, ())
+    assert plan.bootstrap is not None
     _write_ops_record(unit_home, plan.bootstrap)
     monkeypatch.setattr(normal, "observe_process", _observe_as(verdict))
 
@@ -1199,6 +1196,7 @@ def test_stop_bootstrap_refuses_unknown_or_changed_identities(
     monkeypatch: pytest.MonkeyPatch, unit_home: Path
 ) -> None:
     plan = _prepared_plan(unit_home, ())
+    assert plan.bootstrap is not None
     with pytest.raises(ReleaseRejectedError, match="no ava-ops session record"):
         normal._stop_bootstrap_checked(plan)
     _write_ops_record(unit_home, plan.bootstrap)
@@ -1612,91 +1610,3 @@ def test_ready_loop_retries_transient_observation_failures(
         release_services.await_normal_service_ready(
             _stub_connection(), plan.context, selector, prepared, record
         )
-
-
-# --- continuation entry: identity rebinding -----------------------------------
-
-
-def test_continuation_rebinds_the_current_ops_record_before_execute(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
-    request_path = unit_home / "bootstrap.json"
-    request_path.write_bytes(b"{}")
-    inventory = unit_home / "inventory.json"
-    inventory.write_bytes(b"inventory")
-    candidate = unit_home / "candidate.json"
-    candidate.write_bytes(b"candidate")
-    recovery = unit_home / "recovery.json"
-    recovery.write_bytes(b"recovery")
-    _seed_environment(
-        unit_home,
-        request=str(request_path),
-        request_digest=hashlib.sha256(b"{}").hexdigest(),
-        inventory_digest=hashlib.sha256(b"inventory").hexdigest(),
-        candidate_context_digest=hashlib.sha256(b"candidate").hexdigest(),
-        recovery_context_digest=hashlib.sha256(b"recovery").hexdigest(),
-    )
-    hop = Mock()
-    hop.request_path = request_path
-    hop.request = Mock()
-    hop.request.inventory_receipt = str(inventory)
-    hop.request.candidate_context = str(candidate)
-    hop.request.recovery_context = str(recovery)
-    hop.request.normal_release_path = str(unit_home / "normal-request.json")
-    plan = _prepared_plan(unit_home, ())
-    current = replace(plan.bootstrap, pid=5150)
-    _write_ops_record(unit_home, current)
-    captured: list[normal.PreparedNormalRelease] = []
-
-    def capture(routed: normal.PreparedNormalRelease, _generation: str) -> None:
-        captured.append(routed)
-
-    monkeypatch.setattr(normal, "execute_normal_release", capture)
-
-    normal.continue_after_bootstrap(hop, plan, GENERATION)
-
-    assert len(captured) == 1
-    assert captured[0].bootstrap == current
-    assert captured[0].bootstrap != plan.bootstrap
-
-
-def test_continuation_resumes_a_retained_normal_journal(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
-) -> None:
-    request_path = unit_home / "bootstrap.json"
-    request_path.write_bytes(b"{}")
-    inventory = unit_home / "inventory.json"
-    inventory.write_bytes(b"inventory")
-    candidate = unit_home / "candidate.json"
-    candidate.write_bytes(b"candidate")
-    recovery = unit_home / "recovery.json"
-    recovery.write_bytes(b"recovery")
-    plan = _prepared_plan(unit_home, ())
-    retained = _journal_for(plan, "selected")
-    _seed_environment(
-        unit_home,
-        request=str(request_path),
-        request_digest=hashlib.sha256(b"{}").hexdigest(),
-        inventory_digest=hashlib.sha256(b"inventory").hexdigest(),
-        candidate_context_digest=hashlib.sha256(b"candidate").hexdigest(),
-        recovery_context_digest=hashlib.sha256(b"recovery").hexdigest(),
-        normal_release=retained.model_dump(mode="json"),
-    )
-    hop = Mock()
-    hop.request_path = request_path
-    hop.request = Mock()
-    hop.request.inventory_receipt = str(inventory)
-    hop.request.candidate_context = str(candidate)
-    hop.request.recovery_context = str(recovery)
-    hop.request.normal_release_path = str(plan.request_path)
-    _write_ops_record(unit_home, plan.bootstrap)
-    captured: list[str] = []
-
-    def capture(_plan: normal.PreparedNormalRelease, _generation: str) -> None:
-        captured.append("execute")
-
-    monkeypatch.setattr(normal, "execute_normal_release", capture)
-
-    normal.continue_after_bootstrap(hop, plan, GENERATION)
-
-    assert captured == ["execute"]

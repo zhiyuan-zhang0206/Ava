@@ -215,10 +215,9 @@ def _context(*pairs: tuple[str, str], schema_digest: str = SCHEMA) -> ReleaseCon
     )
 
 
-def _operation() -> RolloutIdentity:
-    return RolloutIdentity(
-        holder="gateway:pid77", acquired_at=datetime.now(UTC), target_sha=TARGET_SHA
-    )
+def _operation(*, now: datetime | None = None) -> RolloutIdentity:
+    acquired_at = now or datetime.now(UTC)
+    return RolloutIdentity(holder="gateway:pid77", acquired_at=acquired_at, target_sha=TARGET_SHA)
 
 
 def _seal(facts: list[PreparedUnitFacts], context: ReleaseContext) -> Any:
@@ -756,10 +755,11 @@ def test_begin_chain_reads_the_context_opens_the_journal_and_dispatches(
     assert collector.candidate_digest == sealed.candidate_digest
     assert [unit.machine for unit in collector.units] == ["runner-a", "runner-b"]
     unit = collector.units[0]
-    candidate_projection, request_projection = plans[0].projections
+    candidate_projection, request_projection, normal_projection = plans[0].projections
     assert (unit.machine, unit.home, unit.ops_url) == ("runner-a", plans[0].home, plans[0].ops_url)
     assert unit.candidate_context == candidate_projection.content.encode("ascii")
-    assert unit.request == request_projection.content.encode("ascii")
+    sealed = (request_projection.content.encode("ascii"), normal_projection.content.encode("ascii"))
+    assert (unit.request, unit.normal_request) == sealed
     assert unit.recovery_context == facts[0].hop_material.recovery_context.encode("ascii")
     assert unit.prepared_receipt_digest == facts[0].publication.prepared_receipt_digest
     out = capsys.readouterr().out
@@ -904,11 +904,13 @@ def test_registered_units_with_urls_reads_the_roster_and_urls_once(
 # ── the phase-input assembly (channels C+D, task #4129 I4/I5) ──────────────
 
 
-def _hop_world() -> tuple[list[PreparedUnitFacts], list[PreparedFactTarget], RolloutIdentity]:
+def _hop_world(
+    *, now: datetime | None = None
+) -> tuple[list[PreparedUnitFacts], list[PreparedFactTarget], RolloutIdentity]:
     facts = [_facts("runner-a", "/ava-a"), _facts("runner-b", "/ava-b")]
     context = _context(("runner-a", "/ava-a"), ("runner-b", "/ava-b"))
     targets = build_targets({("runner-a", "/ava-a"), ("runner-b", "/ava-b")}, {}, context)
-    return facts, targets, _operation()
+    return facts, targets, _operation(now=now)
 
 
 def test_assemble_phase_inputs_binds_each_projection_to_its_content_name() -> None:
@@ -929,12 +931,11 @@ def test_assemble_phase_inputs_binds_each_projection_to_its_content_name() -> No
     assert [plan.machine for plan in plans] == ["runner-a", "runner-b"]
     plan = plans[0]
     assert (plan.home, plan.ops_url, plan.artifact_digest) == ("/ava-a", None, ARTIFACT)
-    candidate_projection, request_projection = plan.projections
+    candidate_projection, request_projection, _ = plan.projections
     assert candidate_projection.name == prepared_hop_name(
         "candidate-context", candidate_projection.content
     )
     assert request_projection.name == prepared_hop_name("request", request_projection.content)
-    assert plan.request_path == f"/ava-a/run/{request_projection.name}"
 
     context = PreparedObservation.model_validate_json(candidate_projection.content)
     assert context.operation == operation
@@ -950,7 +951,6 @@ def test_assemble_phase_inputs_binds_each_projection_to_its_content_name() -> No
         f"/ava-a/run/release-inventory-{facts[0].publication.prepared_receipt_digest}.json"
     )
     assert request.predecessor == facts[0].hop_material.predecessor
-    assert request.normal_release_path is None
 
     # The collector input is derived in the same loop: exact bytes, sealed
     # identities, and the same (machine, home) order as the plans.

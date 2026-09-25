@@ -15,10 +15,11 @@ restricted bootstrap success, deliberately not normal updater success.
 
 The request may also reference [[normal-release.ava.okf.md|a normal continuation]].
 That complete selector and service plan is validated before the first stop.
-Activation is currently disabled before updater ownership because checked
-normal recovery and exact spawn receipts are not implemented. The restricted
-bootstrap primitive itself remains mutation-limited as described here; an exit
-code alone does not authorize normal effects.
+The flip (task #4117 S5) removed the activation fence, and the coordinator
+dispatches the continuation per unit -- drive, then commit tail -- through the
+standalone entries (task #4129 I6); the hop process itself never self-drives.
+The restricted bootstrap primitive remains mutation-limited as described here;
+an exit code alone does not authorize normal effects.
 
 Before changing a service, it verifies
 the candidate's loaded code, both sealed images, canonical registered unit and
