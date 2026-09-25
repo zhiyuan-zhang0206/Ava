@@ -51,16 +51,19 @@ compaction, handoff or restart; use memory pointers for what future owners need:
 
 - **Purpose and authority** — the larger human goal, supporting evidence,
   settled decisions and current constraints.
-- **Investment** — bottleneck evidence, the bounded improvement, its exit
-  condition and the next real task that will use it.
+- **Investment** — the causal chain and evidence, current intervention and
+  consumers, the next checkpoint and unresolved questions about the root cause.
 - **Reuse** — the tool or artifact location, how to use it, verified results,
-  remaining gaps and the next action.
+  remaining caller migrations or obsolete paths to delete, and the next action.
 
 On resuming, read this record and check what has changed before repeating setup
 or inventing another workaround. Reuse settled instructions; an inferred goal
-does not expand authorization. Exercise the improvement on the actual task,
-record what it achieved against the exit condition, then return to delivery.
-Do not keep extending it without a real consumer.
+does not expand authorization. Exercise the improvement on real consumers and
+record what each checkpoint establishes. Continue following the recurring cause
+through completed integration, even when it reaches a deeper architectural layer
+or questions the project's purpose. A session boundary or passed checkpoint is
+not a reason to reset the diagnosis or return to feature work with the cause
+unresolved; explicit authority and resource limits still apply.
 
 ## Surface blockers immediately
 

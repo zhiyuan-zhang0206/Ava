@@ -32,8 +32,11 @@ Ask about a remaining uncertainty only when its answer changes the goal, a
 material trade-off or authority; do not ask the user to repeat settled context.
 An inference guides a recommendation, not permission for unrelated work.
 Use the workflow's [investment loop](../SKILL.md#invest-in-future-work) to decide
-whether a reusable tool, refactor or infrastructure improvement belongs in the
-current scope, rather than automatically deferring it as "not this task."
+what recurring cause to address, following the evidence through architecture
+and even the project's purpose. Distinguish explicit user constraints from
+boundaries inherited from the current code. Resolve genuine changes in purpose,
+priorities or authority; do not use alignment to impose a maximum refactoring
+depth or automatically defer necessary infrastructure as "not this task."
 
 ## Process
 
@@ -104,8 +107,8 @@ After questioning, output a concise alignment document:
 
 ## Larger Purpose and Investment
 [What ongoing goal this serves; evidence for any inferred intent; the recurring
-cost worth removing, the bounded improvement and its first use. Omit when the
-task has no meaningful reusable investment.]
+cause to address, current consumers and the next concrete checkpoint. Omit when
+the task has no meaningful reusable investment.]
 
 ## Success Criteria
 - [ ] Concrete, verifiable condition 1

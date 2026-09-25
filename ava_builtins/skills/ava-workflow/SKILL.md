@@ -110,22 +110,31 @@ Before a substantial implementation, and whenever progress repeatedly stalls:
    build/test turnaround, external waiting, integration and rework. Use available
    logs and artifacts; do not blame CI or merge queues without evidence, or
    invent a time breakdown when none was recorded.
-2. **Choose a bounded investment.** Reuse existing capabilities first. When the
-   same setup, manual procedure or failure class will recur, improve the tool,
-   infrastructure or design that causes it. State what repeated cost it removes,
-   who will reuse it, and how the current task will exercise it. A substantial
-   share of effort, such as 30%, can be worthwhile; it is neither a mandatory
-   quota nor permission for an unrelated platform rewrite.
+2. **Follow the recurring cause.** Trace it through tools, architecture, product
+   assumptions and even the project's purpose; do not preset a layer at which
+   diagnosis or change must stop. Reuse capabilities that fit and replace those
+   that sustain the problem. Ground the intervention in causal evidence and
+   name its current consumers. A substantial share of effort, such as 30%, can
+   be worthwhile; that example is neither a quota nor a ceiling.
 3. **Close the feedback loop early.** Exercise the smallest real path through
    the relevant system before expanding the implementation or test matrix.
    Automate reproducible setup, observation and cleanup when those are the
    repeated work. When a failure exposes a recurring gap, improve that shared
    path rather than require another disposable script or isolated patch.
-4. **Check the return and resume delivery.** Give the investment an exit
-   condition: demonstrate a reproducible run, fewer manual steps, faster useful
-   feedback or removal of a recurring failure class. Compare with the previous
-   workflow where evidence exists. Shrink or stop an investment that is not
-   paying back; do not keep extending it before using it on the original task.
+4. **Test the diagnosis at concrete checkpoints.** Exercise real consumers and
+   check for reproducible runs, fewer manual steps, faster useful feedback or
+   removal of the recurring failure. Compare with the previous workflow where
+   evidence exists. Use the result to continue, revise or abandon the approach.
+   Checkpoints do not impose scope, time or percentage caps; do not force a
+   return to the original feature while its recurring cause remains unresolved.
+
+When replacing architecture, migrate all callers and delete superseded
+entrypoints, compatibility shims and bootstrap tails as part of the same
+completed integration. Verify real consumers through the replacement and check
+that no caller still depends on the obsolete paths.
+Package acquisition and platform permission brokers remain valid capabilities
+when needed. Integrate them into the replacement under their authority checks;
+removing obsolete wiring does not make those responsibilities forbidden.
 
 Keep experimentation independent of promotion. For software, an isolated
 preview can consume an unmerged remote or local branch without waiting for
@@ -136,12 +145,12 @@ replace merge and production gates. Respect current machine, network, budget
 and authority constraints when choosing the shortest useful feedback path.
 
 Keep this reasoning short in the alignment/plan or working notes: **larger
-purpose; bottleneck evidence; investment and exit condition; next real use**.
+purpose; causal evidence; intervention; current consumers; next checkpoint**.
 Preserve reusable tools in the project and durable handoff state using
 [Being a Long-Running Agent](../ava-being-a-long-running-agent/SKILL.md).
-New spending, external effects and material scope changes still need the
-appropriate authority; routine improvements within the agreed scope do not
-need another ceremonial approval.
+Explicit user constraints and resource limits still govern. New spending,
+external effects and changes beyond existing authorization need the appropriate
+authority; technical depth alone does not require another ceremonial approval.
 
 ### 1. Reality first, question second (Calibrate → Align)
 

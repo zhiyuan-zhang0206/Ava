@@ -89,9 +89,13 @@ be the final gate for a large task; use the independent review below.
   - Are we learning through a reproducible real path, or repeatedly rebuilding
     the environment and discovering integration assumptions late?
   - Have repeated patches exposed a missing boundary, shared tool or reusable
-    regression scenario? Address that cause before adding another workaround.
-  - Did the chosen investment reach its exit condition? Use it and return to
-    delivery; a growing framework with no real consumer is not progress.
+    regression scenario? Follow the cause upward, even to the project's purpose,
+    rather than stop at a preset architectural layer.
+  - What did the latest checkpoint show on real consumers? Continue or revise
+    the approach from that evidence; do not return to feature work merely
+    because a checkpoint passed while the recurring cause remains.
+  - Is replacement architecture fully integrated: all callers migrated and
+    superseded entrypoints, compatibility shims and bootstrap tails deleted?
 
 - **"Am I solving the wrong problem?"**
   - Did we discover new information during execution that changes the original assumptions?
