@@ -18,9 +18,9 @@ from typing import Any
 import ava
 from ava.shell import sessions
 from shared.config.turn_view import turn_settings
+from shared.daemon.schedules.watcher import TEMPLATE_VERSION
 from shared.log import logger
 from shared.paths import workspace_dir
-from shared.watcher import TEMPLATE_VERSION
 
 
 def _apply_per_agent_sdk_disable() -> None:
@@ -235,7 +235,7 @@ async def reconcile_agent_watchers(agent_id: int) -> bool:
     Keep boot recovery pending until the remaining desired rows actually have
     current sessions; an action list alone is not proof of completion.
     """
-    from shared.watcher_registry import watcher_rows  # deferred (task #3816)
+    from shared.daemon.schedules.watcher_registry import watcher_rows  # deferred (task #3816)
 
     def reconcile_and_verify() -> bool:
         for action in ava.watcher.reconcile():

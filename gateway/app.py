@@ -322,7 +322,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # manifest must not take the gateway down; the reconcile loop launches any
     # newly created enabled schedule within a poll tick.
     try:
-        from shared.builtin_schedules import provision_builtin_schedules
+        from shared.daemon.schedules.builtin_schedules import provision_builtin_schedules
 
         def _provision() -> list[str]:
             # Connection acquisition included: `pool.connection()` blocks and

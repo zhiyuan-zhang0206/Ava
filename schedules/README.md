@@ -36,7 +36,7 @@ directory. The manifest is the single expression of the built-in policy
 
 ### How built-ins get created
 
-`provision_builtin_schedules()` (`shared/builtin_schedules.py`) creates every
+`provision_builtin_schedules()` (`shared/daemon/schedules/builtin_schedules.py`) creates every
 manifest schedule missing from the `schedules` table, with `enabled` taken
 from the manifest's `default_enabled`. It runs:
 

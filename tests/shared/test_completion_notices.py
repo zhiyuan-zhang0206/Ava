@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import psycopg
 
-from shared.completion_notices import (
+from shared.daemon.schedules.completion_notices import (
     CompletionNotice,
     delivery_required_for_agent,
     format_digest,

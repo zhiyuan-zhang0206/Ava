@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from gateway import completion_notice_flusher
-from shared.completion_notices import CompletionNotice, record_hourly_notice
+from shared.daemon.schedules.completion_notices import CompletionNotice, record_hourly_notice
 from shared.db import create_agent
 
 

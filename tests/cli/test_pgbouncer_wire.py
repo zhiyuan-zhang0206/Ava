@@ -257,7 +257,11 @@ def test_write_transaction_repairs_connect_and_watcher_writes(
     """Rule A writes, including watcher cleanup DELETE, survive poisoned backends."""
     from shared import config
     from shared.cluster_lock import acquire_update_lock, release_update_lock
-    from shared.watcher_registry import delete_watcher, mark_status, register_watcher
+    from shared.daemon.schedules.watcher_registry import (
+        delete_watcher,
+        mark_status,
+        register_watcher,
+    )
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)

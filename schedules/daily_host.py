@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 import ava
 from ava.agents import AgentStatus as S
 from schedules.catchup import catch_up, fire_slot_once
-from shared.watcher import next_fire
+from shared.daemon.schedules.watcher import next_fire
 
 
 def report_agent(env_name: str, label: str) -> int:

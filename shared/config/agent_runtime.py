@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from shared.completion_notices import CompletionNoticePolicy
 from shared.config._base import EnvSettings
+from shared.daemon.schedules.completion_notices import CompletionNoticePolicy
 
 
 class AgentRuntimeSettings(EnvSettings):

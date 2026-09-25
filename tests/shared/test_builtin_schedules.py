@@ -1,4 +1,4 @@
-"""Tests for shared/builtin_schedules.py — the built-in schedules manifest
+"""Tests for shared/daemon/schedules/builtin_schedules.py — the built-in schedules manifest
 and its idempotent create-if-missing provisioning.
 
 The provision path is also exercised at the gateway-boot level by
@@ -15,7 +15,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from shared.builtin_schedules import (
+from shared.daemon.schedules.builtin_schedules import (
     ManifestError,
     load_manifest,
     provision_builtin_schedules,

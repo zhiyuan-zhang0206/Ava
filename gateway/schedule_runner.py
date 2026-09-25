@@ -8,7 +8,7 @@ it shares the bound actor; any other command runs as a subprocess. An uncaught
 crash's traceback is written to ``schedules.last_error``.
 
 Version-controlled schedule templates (manifest + scripts) live in
-``schedules/`` — provisioned via ``shared.builtin_schedules.py``.
+``schedules/`` — provisioned via ``shared/daemon/schedules/builtin_schedules.py``.
 
 Every process execution appends one row to ``schedule_runs`` (the run-history
 drawer's data source): opened with ``ok = NULL`` (in-progress) when the runner

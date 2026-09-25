@@ -222,7 +222,7 @@ def test_renew_rejects_watcher_session(db_conn: psycopg.Connection, _agent_row: 
         assert renewals == 0
         assert _renewal_rows(db_conn, _agent_row, session_id) == []
     finally:
-        from shared.watcher_registry import delete_watcher
+        from shared.daemon.schedules.watcher_registry import delete_watcher
 
         delete_watcher(_agent_row, session_id)
         with contextlib.suppress(ValueError, RuntimeError):

@@ -1,4 +1,4 @@
-"""Unit tests for shared.watcher — cron validation, next-fire, when
+"""Unit tests for shared.daemon.schedules.watcher — cron validation, next-fire, when
 normalization, and watcher script generation (pure string builders)."""
 
 import datetime as dt
@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 import pytest
 
-from shared.watcher import (
+from shared.daemon.schedules.watcher import (
     CronExprError,
     build_at_script,
     build_cron_script,
@@ -192,7 +192,7 @@ def test_cron_script_end_time_branch_does_not_wake() -> None:
 
 
 def test_validate_timezone_accepts_valid() -> None:
-    from shared.watcher import validate_timezone
+    from shared.daemon.schedules.watcher import validate_timezone
 
     validate_timezone("UTC")
     validate_timezone("America/Los_Angeles")
@@ -201,7 +201,7 @@ def test_validate_timezone_accepts_valid() -> None:
 
 
 def test_validate_timezone_rejects_invalid() -> None:
-    from shared.watcher import validate_timezone
+    from shared.daemon.schedules.watcher import validate_timezone
 
     with pytest.raises(ValueError, match="timezone"):
         validate_timezone("Not/A/Real/Timezone")
@@ -401,7 +401,10 @@ def test_cron_script_stamps_template_version() -> None:
     live watchers whose script predates a template fix (issue #1330)."""
     script = build_cron_script(expr="0 * * * *", message="tick", timezone="UTC", end_time_iso=None)
     assert "_TEMPLATE_VERSION = 6" in script
-    assert "TEMPLATE_VERSION" in __import__("shared.watcher", fromlist=["TEMPLATE_VERSION"]).__all__
+    assert (
+        "TEMPLATE_VERSION"
+        in __import__("shared.daemon.schedules.watcher", fromlist=["TEMPLATE_VERSION"]).__all__
+    )
 
 
 def test_at_script_stamps_template_version() -> None:

@@ -259,10 +259,10 @@ def test_at_registers_ttl_row_from_fires_at_plus_grace(
     db_conn: psycopg.Connection, _agent_row: int
 ) -> None:
     """Task #3411: an at watcher's session TTL is its fire moment plus the
-    grace (`shared.watcher.AT_SESSION_TTL_GRACE_SECONDS`), so the wake
+    grace (`shared.daemon.schedules.watcher.AT_SESSION_TTL_GRACE_SECONDS`), so the wake
     delivery and the session's exit notice complete before the reaper may
     reclaim it."""
-    from shared.watcher import AT_SESSION_TTL_GRACE_SECONDS
+    from shared.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
 
     when = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
     wid = watcher.at(when, "wake", name="test-at-ttl")
@@ -575,7 +575,7 @@ def test_cron_defaults_to_host_zone_without_authoritative_zone(
 
 
 def test_cron_invalid_expr_raises(_agent_row: int) -> None:
-    from shared.watcher import CronExprError
+    from shared.daemon.schedules.watcher import CronExprError
 
     with pytest.raises(CronExprError):
         watcher.cron("not a cron", "msg", name="test-bad-cron")
@@ -996,7 +996,7 @@ def _clean_registry_rows(
 
 
 def _registry_rows(agent_id: int) -> list[dict[str, Any]]:
-    from shared.watcher_registry import watcher_rows
+    from shared.daemon.schedules.watcher_registry import watcher_rows
 
     return watcher_rows(agent_id=agent_id)
 
@@ -1054,7 +1054,7 @@ def test_reconcile_rebuilds_missing_cron(_agent_row: int, monkeypatch: pytest.Mo
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     register_watcher(
         _agent_row,
@@ -1081,7 +1081,7 @@ def test_reconcile_rebuilds_missing_current_generation_cron(
 ) -> None:
     """A restart must restore declared cron state in the active generation (#2811)."""
     from ava.shell import sessions as _sessions
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
@@ -1111,7 +1111,7 @@ def test_reconcile_reaps_superseded_generation_without_rebuilding(
 ) -> None:
     """An old exact session is reaped history, never current desired state."""
     from ava.shell import sessions as _sessions
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "list", lambda: {424248: "old-cron"})
@@ -1150,7 +1150,7 @@ def test_reconcile_notifies_when_a_superseded_one_shot_is_reaped(
 ) -> None:
     """A generation flip may never silently discard a one-shot watcher."""
     from ava.shell import sessions as _sessions
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     session_id = 424249 if kind == "at" else 424250
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -1232,8 +1232,8 @@ def test_reconcile_drops_already_fired_one_shot_without_alert(
     reconcile) is dropped silently — the wake was not lost, so the "marked
     missed" alert is a false alarm."""
     from ava.shell import sessions as _sessions
+    from shared.daemon.schedules.watcher_registry import register_watcher
     from shared.db import connect
-    from shared.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
@@ -1262,8 +1262,8 @@ def test_reconcile_completion_notice_does_not_count_as_delivered(
     the same kind+source tag as the wake, so a child that died BEFORE waking
     (notice present, wake absent) must still be marked missed + alerted."""
     from ava.shell import sessions as _sessions
+    from shared.daemon.schedules.watcher_registry import register_watcher
     from shared.db import connect
-    from shared.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
@@ -1300,7 +1300,7 @@ def test_reconcile_marks_missed_one_shot_and_alerts(
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
     monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
     register_watcher(_agent_row, 424243, kind="at", name="once", message="go", fires_at=past)
@@ -1316,7 +1316,7 @@ def test_reconcile_leaves_alive_watchers_alone(
 ) -> None:
     """A row whose session still exists is untouched — the watcher is running."""
     from ava.shell import sessions as _sessions
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "list", lambda: {555555: "test-alive"})
@@ -1339,7 +1339,7 @@ def test_reconcile_never_reruns_launch(_agent_row: int, monkeypatch: pytest.Monk
     monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "launch", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     register_watcher(
         _agent_row,
@@ -1435,7 +1435,7 @@ def test_reconcile_skips_rebuilt_rows(_agent_row: int, monkeypatch: pytest.Monke
     monkeypatch.setattr(_sessions, "list", dict)
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
-    from shared.watcher_registry import mark_status, register_watcher
+    from shared.daemon.schedules.watcher_registry import mark_status, register_watcher
 
     # a rebuilt row (session 424250 was rebuilt into a new session long ago)
     register_watcher(
@@ -1493,7 +1493,7 @@ def test_reconcile_kills_orphan_process_before_rebuild(
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     register_watcher(
         _agent_row,
@@ -1540,7 +1540,7 @@ def test_reconcile_kill_skips_alive_watcher_process(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "list", set)
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     register_watcher(
         _agent_row,
@@ -1595,7 +1595,7 @@ def test_reconcile_rebuilds_live_cron_watcher_with_stale_template(
     behind the current one must be rebuilt: the generated script is frozen at
     launch, so a template fix (issue #182) never reaches a running session —
     it would keep double-firing at the boundary (issue #1330)."""
-    from shared import watcher_registry
+    from shared.daemon.schedules import watcher_registry
 
     monkeypatch.setattr(
         watcher_registry,
@@ -1660,7 +1660,7 @@ def test_reconcile_rebuilds_at_with_saved_notify(
     rebuild_notify: str | None,
 ) -> None:
     """Recovery preserves explicit policy and re-delegates an omitted policy."""
-    from shared import watcher_registry
+    from shared.daemon.schedules import watcher_registry
 
     fires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
     row = _cron_row(
@@ -1720,8 +1720,8 @@ def test_reconcile_leaves_current_template_watcher_alone(
     call raises inside _rebuild_stale_cron_watcher's bare except, swallowing
     the failure and passing the assertions vacuously (2026-08-26 adversarial
     review of the v2 -> v3 bump)."""
-    from shared import watcher_registry
-    from shared.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules import watcher_registry
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
 
     monkeypatch.setattr(
         watcher_registry,
@@ -1767,8 +1767,8 @@ def test_reconcile_missing_session_still_rebuilds_cron(
     """The pre-existing missing-session rebuild (issue #1014) is unaffected by
     the version column: a dead cron watcher is rebuilt regardless of its spawn
     version."""
-    from shared import watcher_registry
-    from shared.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules import watcher_registry
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
 
     monkeypatch.setattr(
         watcher_registry,
@@ -1804,7 +1804,7 @@ def test_reconcile_marks_reaped_when_cron_deadline_passed(
     """Task #3411: a dead cron row past its deadline (cron_end_at) is marked
     `reaped`, never rebuilt — the folded TTL would be <= 0 and the rebuild
     would mount a stillborn session (the rebuild-expire storm guard)."""
-    from shared import watcher_registry
+    from shared.daemon.schedules import watcher_registry
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
     monkeypatch.setattr(
@@ -1842,7 +1842,7 @@ def test_reconcile_rebuild_folds_remaining_deadline(
     session's TTL is the stored deadline minus now, not a fresh default
     (a rebuild of a schedule with 2h left gets ~2h, never 24h/7d)."""
     from ava.shell import sessions as _sessions
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
@@ -1874,7 +1874,7 @@ def test_reconcile_rebuild_folds_remaining_deadline(
             ava.shell.kill(new_id)
     finally:
         with contextlib.suppress(Exception):
-            from shared.watcher_registry import delete_watcher
+            from shared.daemon.schedules.watcher_registry import delete_watcher
 
             delete_watcher(_agent_row, 424273)
 
@@ -1921,7 +1921,7 @@ def test_spawn_fails_when_registry_write_fails(
         raise RuntimeError("db down")
 
     monkeypatch.setattr(
-        "shared.watcher_registry.register_watcher",
+        "shared.daemon.schedules.watcher_registry.register_watcher",
         _fail_registration,
     )
     with pytest.raises(RuntimeError, match="db down"):
@@ -1990,7 +1990,7 @@ def test_kill_logs_registry_delete_failure_and_stays_fail_soft(
     "killed, should exist" at the next boot reconcile, which then rebuilds the
     very watcher this kill ended (the disconnect-window failure shape)."""
     from ava.shell import sessions as _sessions
-    from shared import watcher_registry
+    from shared.daemon.schedules import watcher_registry
 
     class _Backend:
         def kill_session(self, _name: str, *, graceful: bool = False) -> tuple[bool, str]:
@@ -2028,7 +2028,7 @@ def test_kill_all_logs_registry_delete_failure_and_stays_fail_soft(
     """Same contract for the prefix-scoped sweep: the sweep itself must not
     fail, and its failed registry cleanup must be visible."""
     from ava.shell import sessions as _sessions
-    from shared import watcher_registry
+    from shared.daemon.schedules import watcher_registry
 
     class _Backend:
         def kill_session(self, _name: str, *, graceful: bool = False) -> tuple[bool, str]:
@@ -2110,8 +2110,8 @@ def test_reconcile_rebuild_dedupes_against_live_duplicate(
     reconcile must reuse the live one — not spawn a third — and drop the dead
     duplicate row."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []
@@ -2161,8 +2161,8 @@ def test_reconcile_collapses_two_dead_rows_into_one_rebuild(
     backend, unlike the reconcile's once-snapshotted session list) — never a
     second generation."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     register_watcher(
@@ -2271,7 +2271,7 @@ def test_cron_concurrent_registration_yields_one_winner(
     pooled-URL variant runs in
     test_cron_concurrent_registration_through_pooler when a PgBouncer binary
     is available.)"""
-    from shared.watcher_registry import watcher_rows
+    from shared.daemon.schedules.watcher_registry import watcher_rows
 
     ids = _run_cron_racers(_agent_row, tmp_path=tmp_path)
 
@@ -2302,7 +2302,7 @@ def test_cron_concurrent_registration_through_pooler(
 
     import psycopg
 
-    from shared.watcher_registry import watcher_rows
+    from shared.daemon.schedules.watcher_registry import watcher_rows
 
     # the provisioned test PG (trust auth) + a free port for the pooler
     pg_port = int(_provisioned_db.rsplit(":", 1)[1].split("/", 1)[0])
@@ -2384,7 +2384,7 @@ def test_cron_advisory_key_is_stable_and_schedule_scoped() -> None:
     end time): identical schedules key identically across calls; a different
     agent, timezone, or end time keys differently (so they serialize
     independently)."""
-    from shared.watcher_registry import cron_advisory_key
+    from shared.daemon.schedules.watcher_registry import cron_advisory_key
 
     end = datetime.datetime(2026, 12, 31, 16, 0, tzinfo=datetime.UTC)
     assert cron_advisory_key(1, "0 9 * * *", "UTC", None) == cron_advisory_key(
@@ -2462,8 +2462,8 @@ def test_cron_renewal_supersedes_live_twin(
     session's — remains, with the fresh 7-day end. Renewal must never stack
     a second firing watcher (the Task #1825 double-instance shape)."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import delete_watcher, register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import delete_watcher, register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     old_end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3)
@@ -2508,8 +2508,8 @@ def test_cron_renewal_leaves_dead_twin_alone(
     business, not a renewal target — the new registration must not kill (and
     cannot — there is nothing to kill) or otherwise supersede it."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     register_watcher(
@@ -2547,8 +2547,8 @@ def test_cron_renewal_respects_exclude_session(
     (the rebuild caller kills it explicitly; a double kill would report the
     rebuild as failed)."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     register_watcher(
@@ -2589,8 +2589,8 @@ def test_cron_explicit_end_supersedes_standing_twin(
     twin is killed (deliberate-kill drops its row) and exactly one running
     row — the new session's, carrying the explicit end — remains."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import delete_watcher, register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import delete_watcher, register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     register_watcher(
@@ -2655,8 +2655,8 @@ def test_cron_renewal_supersedes_all_live_twins(
     a newest-only supersede would leave the older twin double-firing
     forever."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import delete_watcher, register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import delete_watcher, register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     now = datetime.datetime.now(datetime.UTC)
@@ -2709,8 +2709,8 @@ def test_reconcile_drops_dead_row_when_live_different_end_row_exists(
     is DELETED, not rebuilt — an exact-end check would rebuild the dead twin
     into a second live watcher that double-fires until its end."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []
@@ -2756,8 +2756,8 @@ def test_reconcile_rebuilds_dead_row_without_live_schedule(
     same-schedule row (any end) is rebuilt as before — the dedupe must not
     swallow the only copy of a schedule."""
     from ava.shell import sessions as _sessions
-    from shared.watcher import TEMPLATE_VERSION
-    from shared.watcher_registry import register_watcher
+    from shared.daemon.schedules.watcher import TEMPLATE_VERSION
+    from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[tuple[Any, ...]] = []

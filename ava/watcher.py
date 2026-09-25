@@ -15,8 +15,7 @@ import ava._watcher_reconcile as _reconcile
 from ava._sdk_validation import coerce_str
 from ava.shell import _background
 from ava.shell import sessions as _sessions
-from shared.dotenv_boot import watcher_runner_env
-from shared.watcher import (
+from shared.daemon.schedules.watcher import (
     DEFAULT_STANDING_CRON_MAX_SECONDS,
     TEMPLATE_VERSION,
     _parse_timeout,
@@ -27,9 +26,10 @@ from shared.watcher import (
     validate_cron,
     validate_timezone,
 )
-from shared.watcher import (
+from shared.daemon.schedules.watcher import (
     CronExprError as CronExprError,
 )
+from shared.dotenv_boot import watcher_runner_env
 
 __all_for_ava__ = [
     "at",
@@ -287,7 +287,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "    # A killed watcher skips this finally and keeps its row. Fail-soft:\n"
         "    # a registry blip must not turn a clean exit into a crash.\n"
         "    try:\n"
-        "        from shared.watcher_registry import delete_watcher\n"
+        "        from shared.daemon.schedules.watcher_registry import delete_watcher\n"
         "        delete_watcher(\n"
         "            int(os.environ['AVA_AGENT_ID']),\n"
         "            int(os.environ['AVA_WATCHER_SESSION_ID']),\n"
@@ -333,7 +333,7 @@ def _register_cron_spawn(
     (user ruling 2026-09-10). An already-live exact-end schedule falls
     through to the atomic dedupe below and is reused.
     """
-    from shared.watcher_registry import register_cron_atomic, register_cron_renewal
+    from shared.daemon.schedules.watcher_registry import register_cron_atomic, register_cron_renewal
 
     def _fresh_alive() -> set[int] | None:
         try:
@@ -417,7 +417,7 @@ def _spawn(
     agent_id = _agent_id()
     # The session's shell TTL IS this watcher's target deadline (user ruling
     # 2026-09-14, task #3411): launch = created + timeout, cron = cron_end_at,
-    # at = fires_at + grace — derived by `shared.watcher.session_deadline`,
+    # at = fires_at + grace — derived by `shared.daemon.schedules.watcher.session_deadline`,
     # the one function the boot reconcile and the gateway reaper also read.
     # Written as the system-side TRUE value: a 7-day standing cron is a
     # normal watcher, exempt from the 24h user-session cap — and a rebuild
@@ -517,7 +517,7 @@ def _spawn(
                     _sessions.kill(session_id)
                 return reused
         else:
-            from shared.watcher_registry import register_watcher
+            from shared.daemon.schedules.watcher_registry import register_watcher
 
             register_watcher(
                 agent_id,
@@ -559,7 +559,7 @@ def _spawn(
             exc_info=True,
         )
         with contextlib.suppress(Exception):
-            from shared.watcher_registry import delete_watcher
+            from shared.daemon.schedules.watcher_registry import delete_watcher
 
             delete_watcher(agent_id, session_id)
         with contextlib.suppress(Exception):
@@ -690,7 +690,7 @@ def cron(
     # which every registration now carries, the default being now + 7 days),
     # so no watchdog.
     # Registration carries the Task #1825 dedupe — atomically: one transaction
-    # (pg_advisory_xact_lock + re-check + insert, shared.watcher_registry.
+    # (pg_advisory_xact_lock + re-check + insert, shared.daemon.schedules.watcher_registry.
     # register_cron_atomic), so a concurrent registration of the same schedule
     # can never slip between the check and the insert (N2). `_exclude_session`
     # lets the stale-template rebuild skip the very session it is replacing.

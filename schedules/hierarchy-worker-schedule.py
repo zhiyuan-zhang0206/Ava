@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from schedules.catchup import catch_up, fire_slot_once
 from services.hierarchy_worker.runner import prepare, run_tick
 from shared.config import settings
-from shared.watcher import next_fire
+from shared.daemon.schedules.watcher import next_fire
 
 # One tick a minute: the scan is one aggregated query over `checkpoints`, so
 # a compact reaches its build within a minute; while jobs are pending the
