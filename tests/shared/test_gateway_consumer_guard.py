@@ -235,7 +235,7 @@ _AGENT_ONLY_ALLOWLIST = frozenset(
         # build_chat_model — agent-side only; the gateway reaches
         # shared/lm/factory.py solely for validate_model_config, which reads
         # keys via get_field with a .env-file fallback (see
-        # tests/shared/test_lm_factory.py).
+        # tests/shared/lm_catalog/test_lm_factory.py).
         "shared/lm/_providers.py",
         # The two settings reads here live in chrome_mcp_socket() /
         # permissions_helper_socket() — socket-path helpers called only by
