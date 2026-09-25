@@ -45,6 +45,7 @@ from cli.commands._rendered_file import write_rendered_guarded
 from shared.atomic_io import write_text_atomic
 from shared.machine import MachineRoles
 from shared.observability import collector_allowed_for_home
+from shared.resilience import Policy, retry
 
 # Pinned contrib version — re-validate against the deploy/lgtm backends
 # (Tempo/Loki/Prometheus OTLP intake) when bumping.
@@ -80,6 +81,23 @@ _DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
 _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 5.0
 _DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
+
+
+def _download_backoff(attempt: int) -> float:
+    return _DOWNLOAD_RETRY_BACKOFF_S * (attempt + 1)
+
+
+# Pinned collector download retries every failure on the original 5s, 10s schedule.
+_DOWNLOAD_POLICY = Policy(
+    max_attempts=_DOWNLOAD_ATTEMPTS,
+    backoff=_download_backoff,
+    jitter="none",
+    jitter_span=1.0,
+    classify=lambda _exc: True,
+    idempotent=True,
+    respect_retry_after=False,
+    on_final_failure=None,
+)
 
 
 def _otlp_ingress_port() -> int:
@@ -502,13 +520,14 @@ def _download_with_retry(url: str, tarball: Path) -> None:
     """Bounded retry around ``_stream_download``; a final failure names the
     URL and total elapsed time so the operator knows exactly what to fix."""
     started = time.monotonic()
-    last_err: Exception | None = None
-    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+    attempt = 0
+
+    def _download_once() -> None:
+        nonlocal attempt
+        attempt += 1
         try:
             _stream_download(url, tarball)
-            return
         except Exception as exc:  # URLError / TimeoutError / OSError
-            last_err = exc
             elapsed = time.monotonic() - started
             print(
                 f"  ! otel-collector: download attempt {attempt}/{_DOWNLOAD_ATTEMPTS} "
@@ -516,12 +535,15 @@ def _download_with_retry(url: str, tarball: Path) -> None:
                 file=sys.stderr,
                 flush=True,
             )
-            if attempt < _DOWNLOAD_ATTEMPTS:
-                time.sleep(_DOWNLOAD_RETRY_BACKOFF_S * attempt)
-    raise RuntimeError(
-        f"failed to download otel-collector from {url} after {_DOWNLOAD_ATTEMPTS} "
-        f"attempts ({time.monotonic() - started:.0f}s total): {last_err}"
-    ) from last_err
+            raise
+
+    try:
+        retry(_DOWNLOAD_POLICY)(_download_once)
+    except Exception as exc:
+        raise RuntimeError(
+            f"failed to download otel-collector from {url} after {_DOWNLOAD_ATTEMPTS} "
+            f"attempts ({time.monotonic() - started:.0f}s total): {exc}"
+        ) from exc
 
 
 def _download_and_verify(tag: str, dest_dir: Path) -> None:

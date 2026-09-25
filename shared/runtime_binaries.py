@@ -28,11 +28,13 @@ import lzma
 import platform
 import shutil
 import tarfile
-import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from shared.config import settings
 from shared.log import logger
+from shared.resilience import Policy, retry
 
 # Pinned Postgres distribution. A major-version bump is an expand step (a new
 # version dir beside the old + re-initdb / pg_upgrade), never an in-place swap —
@@ -125,29 +127,53 @@ _DOWNLOAD_ATTEMPTS = 4
 _TRANSIENT_HTTP = frozenset({403, 404, 429, 500, 502, 503, 504})
 
 
-def _download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
-    import urllib.error
-    import urllib.request
+def _is_transient_download_error(exc: Exception) -> bool:
+    if not isinstance(exc, urllib.error.URLError):
+        return False
+    status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
+    return status is None or status in _TRANSIENT_HTTP
 
-    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+
+def _download_backoff(attempt: int) -> float:
+    return float(2 ** (attempt + 1))
+
+
+# SHA-pinned GET retries only the historical urllib transient set at 2s, 4s, 8s.
+_DOWNLOAD_POLICY = Policy(
+    max_attempts=_DOWNLOAD_ATTEMPTS,
+    backoff=_download_backoff,
+    jitter="none",
+    jitter_span=1.0,
+    classify=_is_transient_download_error,
+    idempotent=True,
+    respect_retry_after=False,
+    on_final_failure=None,
+)
+
+
+def _download(url: str, *, headers: dict[str, str] | None = None) -> bytes:
+    attempt = 0
+
+    def _fetch_once() -> bytes:
+        nonlocal attempt
+        attempt += 1
         try:
             request = urllib.request.Request(url, headers=headers or {})  # noqa: S310 — pinned https artifact URLs
             with urllib.request.urlopen(request, timeout=120) as resp:  # noqa: S310
                 return resp.read()
         except urllib.error.URLError as exc:
-            status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
-            transient = status is None or status in _TRANSIENT_HTTP
-            if not transient or attempt == _DOWNLOAD_ATTEMPTS:
-                raise RuntimeError(
-                    f"failed to download vendored Postgres from {url}: {exc}"
-                ) from exc
-            delay = 2**attempt
-            logger.warning(
-                f"[runtime] transient error fetching {url} ({exc}); "
-                f"retry {attempt}/{_DOWNLOAD_ATTEMPTS - 1} in {delay}s"
-            )
-            time.sleep(delay)
-    raise AssertionError("unreachable: the last attempt either returned or raised")
+            if attempt < _DOWNLOAD_ATTEMPTS and _is_transient_download_error(exc):
+                delay = 2**attempt
+                logger.warning(
+                    f"[runtime] transient error fetching {url} ({exc}); "
+                    f"retry {attempt}/{_DOWNLOAD_ATTEMPTS - 1} in {delay}s"
+                )
+            raise
+
+    try:
+        return retry(_DOWNLOAD_POLICY)(_fetch_once)
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"failed to download vendored Postgres from {url}: {exc}") from exc
 
 
 def _extract_pg(jar_bytes: bytes, target: Path) -> None:
