@@ -15,6 +15,7 @@ from typing import Any
 
 from services.browser.protocol import Response
 from shared.config import settings
+from shared.resilience import Policy, aretry
 
 LINE_LIMIT = 64 * 1024 * 1024
 _TRANSPORT_ERRNOS = frozenset({32, 54, 61})  # EPIPE, ECONNRESET, ECONNREFUSED
@@ -46,13 +47,25 @@ async def dial_unix_socket(
     delay: float = 0.5,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     """Dial a supervised daemon, allowing a cold start to finish."""
-    last: Exception | None = None
-    for _ in range(attempts):
-        try:
-            return await asyncio.open_unix_connection(path=sock, limit=line_limit)
-        except (FileNotFoundError, ConnectionRefusedError) as exc:
-            last = exc
-            await asyncio.sleep(delay)
+    policy = Policy(
+        max_attempts=attempts,
+        backoff=lambda attempt: delay,  # noqa: ARG005 — Backoff keyword name
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda exc: isinstance(exc, (FileNotFoundError, ConnectionRefusedError)),
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
+    )
+
+    async def once() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        return await asyncio.open_unix_connection(path=sock, limit=line_limit)
+
+    last: OSError | None = None
+    try:
+        return await aretry(policy)(once)
+    except (FileNotFoundError, ConnectionRefusedError) as exc:
+        last = exc
     raise ConnectionError(f"{service_label} not reachable at {sock}: {last}")
 
 
@@ -142,30 +155,38 @@ class ReconnectingLink:
 
     async def request(self, payload: dict[str, Any]) -> Any:
         async with self._lock:
-            for attempt in range(self._max_attempts):
+            phase = "connect"
+            policy = Policy(
+                max_attempts=self._max_attempts,
+                backoff=lambda attempt: self._base_delay * (2**attempt),
+                jitter="none",
+                jitter_span=1.0,
+                classify=lambda exc: (
+                    phase == "connect"
+                    or isinstance(exc, NotDeliveredError)
+                    or (self._retryable_rejection is not None and self._retryable_rejection(exc))
+                ),
+                idempotent=True,
+                respect_retry_after=False,
+                on_final_failure=None,
+            )
+
+            async def once() -> Any:
+                nonlocal phase
                 if self._link is None:
-                    try:
-                        self._link = await self._connect_once()
-                    except Exception:
-                        if attempt == self._max_attempts - 1:
-                            raise
-                        await asyncio.sleep(self._base_delay * (2**attempt))
-                        continue
+                    phase = "connect"
+                    self._link = await self._connect_once()
+                phase = "request"
                 try:
                     return await self._link.request(payload)
                 except NotDeliveredError:
                     self._drop_link()
-                    if attempt == self._max_attempts - 1:
-                        raise
-                    await asyncio.sleep(self._base_delay * (2**attempt))
+                    raise
                 except Exception as exc:
-                    if self._retryable_rejection is not None and self._retryable_rejection(exc):
-                        self._drop_link()
-                        if attempt == self._max_attempts - 1:
-                            raise
-                        await asyncio.sleep(self._base_delay * (2**attempt))
-                        continue
-                    if self._close_on_error(exc):
+                    if (
+                        self._retryable_rejection is not None and self._retryable_rejection(exc)
+                    ) or self._close_on_error(exc):
                         self._drop_link()
                     raise
-            raise RuntimeError("unreachable")
+
+            return await aretry(policy)(once)

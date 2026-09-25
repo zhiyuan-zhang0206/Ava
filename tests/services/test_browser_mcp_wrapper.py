@@ -14,6 +14,7 @@ import pytest
 
 from services.browser.mcp_socket_bridge import NotDeliveredError
 from services.browser.mcp_wrapper import _Link, _ReconnectingLink
+from shared import resilience
 from shared.config import settings
 
 # ---------------------------------------------------------------------------
@@ -224,20 +225,28 @@ async def test_reconnecting_link_exhausts_retries() -> None:
     """All requests fail before delivery; the retry budget is exhausted and
     the last error propagates."""
     link = _ReconnectingLink(max_retries=2, base_delay=0.0)
+    failure = NotDeliveredError("always broken")
+    writers: list[FakeWriter] = []
 
     async def _always_broken():
-        link_ = _ok_link("unused")
+        writer = FakeWriter()
+        writers.append(writer)
+        link_ = _Link(FakeReader([]), writer)  # type: ignore[arg-type]
 
         async def always_raise(payload: dict[str, Any]) -> Any:
-            raise NotDeliveredError("always broken")
+            raise failure
 
         link_.request = always_raise  # type: ignore[assignment]
         return link_
 
     link._connect_once = _always_broken  # type: ignore[assignment]
 
-    with pytest.raises(NotDeliveredError, match="always broken"):
+    with pytest.raises(NotDeliveredError, match="always broken") as error:
         await link.request({"method": "list_tools"})
+    assert error.value is failure
+    assert len(writers) == 3
+    assert all(writer.closed for writer in writers)
+    assert link._link is None
 
 
 async def test_reconnecting_link_does_not_retry_non_transport_error() -> None:
@@ -370,6 +379,7 @@ async def test_shared_socket_bridge_dials_with_bounded_retries(
 
     monkeypatch.setattr(bridge.asyncio, "open_unix_connection", open_socket)
     monkeypatch.setattr(bridge.asyncio, "sleep", sleep)
+    monkeypatch.setattr(resilience, "_asleep", sleep)
     assert await bridge.dial_unix_socket("test.sock", service_label="chrome MCP daemon") == (
         reader,
         writer,
@@ -386,7 +396,21 @@ async def test_shared_socket_bridge_dials_with_bounded_retries(
     with pytest.raises(ConnectionError) as error:
         await bridge.dial_unix_socket("test.sock", service_label="chrome MCP daemon")
     assert str(error.value) == "chrome MCP daemon not reachable at test.sock: refused"
-    assert sleeps == [0.5] * 10
+    assert error.value.__context__ is None
+    assert sleeps == [0.5] * 9
+
+
+async def test_shared_socket_bridge_passes_through_unclassified_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = import_module("services.browser.mcp_socket_bridge")
+    failure = PermissionError("denied")
+    call = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(bridge.asyncio, "open_unix_connection", call)
+    with pytest.raises(PermissionError) as error:
+        await bridge.dial_unix_socket("test.sock", service_label="chrome MCP daemon")
+    assert error.value is failure
+    assert call.await_count == 1
 
 
 @pytest.mark.parametrize("side", ["browser", "computer"])
@@ -398,11 +422,14 @@ async def test_wrapper_retry_budget_and_backoff(monkeypatch: pytest.MonkeyPatch,
         sleeps.append(delay)
 
     monkeypatch.setattr(wrapper.asyncio, "sleep", sleep)
+    monkeypatch.setattr(resilience, "_asleep", sleep)
     reconnecting = wrapper._ReconnectingLink()
-    connect = AsyncMock(side_effect=ConnectionRefusedError("offline"))
+    failure = RuntimeError("offline")
+    connect = AsyncMock(side_effect=failure)
     reconnecting._connect_once = connect
-    with pytest.raises(ConnectionRefusedError, match="offline"):
+    with pytest.raises(RuntimeError, match="offline") as error:
         await reconnecting.request({"method": "list_tools"})
+    assert error.value is failure
     assert connect.await_count == 6
     base = 1.0 if side == "browser" else 0.5
     assert sleeps == [base * 2**attempt for attempt in range(5)]
@@ -465,6 +492,7 @@ async def test_upstream_rejection_is_browser_only(
         sleeps.append(delay)
 
     monkeypatch.setattr(wrapper.asyncio, "sleep", sleep)
+    monkeypatch.setattr(resilience, "_asleep", sleep)
     reconnecting = wrapper._ReconnectingLink()
     reconnecting._connect_once = connect
     if side == "browser":
@@ -545,6 +573,7 @@ async def test_write_or_drain_failure_is_not_retried(
         sleeps.append(delay)
 
     monkeypatch.setattr(wrapper.asyncio, "sleep", sleep)
+    monkeypatch.setattr(resilience, "_asleep", sleep)
     reconnecting = wrapper._ReconnectingLink()
     reconnecting._connect_once = connect
     with pytest.raises(BrokenPipeError, match="socket broke"):
@@ -605,6 +634,7 @@ async def test_closed_before_write_retries_without_sending(
         sleeps.append(delay)
 
     monkeypatch.setattr(wrapper.asyncio, "sleep", sleep)
+    monkeypatch.setattr(resilience, "_asleep", sleep)
     reconnecting = wrapper._ReconnectingLink()
     reconnecting._connect_once = connect
     assert await reconnecting.request({"method": "call_tool", "tool": "click"}) == "ok"

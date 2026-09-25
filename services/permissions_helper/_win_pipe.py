@@ -18,6 +18,8 @@ import time
 from ctypes import wintypes
 from typing import Any
 
+from shared.resilience import Policy, retry
+
 PIPE_NAME = "ava-permissions-helper"
 
 
@@ -31,6 +33,10 @@ def pipe_path(name: str = PIPE_NAME) -> str:
 
 _CONNECT_ATTEMPTS = 5
 _CONNECT_DELAY_S = 0.2
+
+
+class _WaitNotReadyError(OSError):
+    """WaitNamedPipeW reported a Win32 error before the pipe opened."""
 
 
 def connect(name: str = PIPE_NAME) -> tuple[Any, Any]:
@@ -55,15 +61,28 @@ def connect(name: str = PIPE_NAME) -> tuple[Any, Any]:
         wintypes.HANDLE,
     ]
     full = pipe_path(name)
-    connected = False
-    for _ in range(_CONNECT_ATTEMPTS):
+    policy = Policy(
+        max_attempts=_CONNECT_ATTEMPTS,
+        backoff=lambda attempt: _CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda exc: isinstance(exc, _WaitNotReadyError) and exc.errno in (2, 121),
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
+    )
+
+    def wait_once() -> None:
         if kernel32.WaitNamedPipeW(full, 500):
-            connected = True
-            break
-        if ctypes.get_last_error() not in (2, 121):  # ERROR_FILE_NOT_FOUND / ERROR_SEM_TIMEOUT
-            break
-        time.sleep(_CONNECT_DELAY_S)
-    if not connected:
+            return
+        raise _WaitNotReadyError(ctypes.get_last_error(), "pipe wait failed")
+
+    failed = False
+    try:
+        retry(policy)(wait_once)
+    except _WaitNotReadyError:
+        failed = True
+    if failed:
         raise ConnectionError(f"permissions helper not reachable at pipe {name!r}")
     handle = kernel32.CreateFileW(full, 0xC0000000, 0, None, 3, 0, None)
     if handle == wintypes.HANDLE(-1).value:
