@@ -74,6 +74,10 @@ def _scripts(root: Path, *, complete: bool) -> str:
         "        raise SystemExit(0)\n"
         "(root / (name + '.tmp')).write_text(str(os.getpid()))\n"
         "(root / (name + '.tmp')).replace(root / (name + '.pid'))\n"
+        "if name == 'child' and (root / 'reparent-on-record').exists():\n"
+        "    while not (root / 'record-started').exists():\n"
+        "        time.sleep(0.01)\n"
+        "    raise SystemExit(0)\n"
         "time.sleep(60)\n"
     )
     return (
@@ -127,7 +131,7 @@ def _assert_cleanup(root: Path, owned: list[psutil.Process], *, complete: bool) 
         assert all((root / f"{name}.term").exists() for name in ("child", "grandchild", "session"))
 
 
-@pytest.mark.parametrize("mode", ["stall", "complete", "missing-module-files"])
+@pytest.mark.parametrize("mode", ["stall", "complete", "missing-module-files", "delayed-record"])
 def test_runner_hard_exit_child_ownership(
     db_conn: psycopg.Connection, unit_home: Path, mode: str
 ) -> None:
@@ -144,6 +148,27 @@ def test_runner_hard_exit_child_ownership(
     setup = ""
     if mode == "missing-module-files":
         setup = "import subprocess, selectors; del subprocess.__file__; del selectors.__file__; "
+    elif mode == "delayed-record":
+        (root / "reparent-on-record").touch()
+        setup = (
+            "from gateway import schedule_runner as r\n"
+            "from pathlib import Path\n"
+            "import os, psutil, time\n"
+            f"root = Path({str(root)!r})\n"
+            "record_error = r._record_error\n"
+            "def delayed_record(*args):\n"
+            "    (root / 'record-started').touch()\n"
+            "    deadline = time.monotonic() + 5\n"
+            "    try:\n"
+            "        grandchild = psutil.Process(int((root / 'grandchild.pid').read_text()))\n"
+            "        while os.getpid() in [p.pid for p in grandchild.parents()]:\n"
+            "            assert time.monotonic() < deadline\n"
+            "            time.sleep(0.01)\n"
+            "    except psutil.NoSuchProcess:\n"
+            "        pass\n"
+            "    record_error(*args)\n"
+            "r._record_error = delayed_record\n"
+        )
     code = (
         setup + "from gateway import schedule_runner as r; import ava; "
         "ava._ensure_plugins_loaded = lambda: None; "
@@ -169,9 +194,41 @@ def test_runner_hard_exit_child_ownership(
             root / "runner.log"
         ).read_text()
         assert (root / "park-finished").exists(), "guard killed a legitimate park"
+        if mode == "delayed-record":
+            assert (root / "record-started").exists()
         assert sibling.poll() is None, "cleanup signalled an unrelated group member"
         _assert_cleanup(root, owned, complete=mode == "complete")
     run_row = db_conn.execute(
         "SELECT ok, note FROM schedule_runs WHERE schedule_id = %s", (row[0],)
     ).fetchone()
     assert run_row == ((True, None) if mode == "complete" else (False, "stalled (0s)"))
+
+
+@pytest.mark.parametrize("blocked_write", ["error", "run"])
+def test_stall_exit_bounds_failure_records(tmp_path: Path, blocked_write: str) -> None:
+    """A blocked DB write cannot keep a stalled runner alive past the record budget."""
+    code = (
+        "from gateway import schedule_runner as r\n"
+        "from pathlib import Path\n"
+        "import threading, time\n"
+        f"root = Path({str(tmp_path)!r})\n"
+        "r.settings.gateway.schedule_stall_exit_record_deadline_seconds = 1.0\n"
+        "def record_error(*args):\n"
+        "    (root / 'started').write_text(str(time.monotonic()))\n"
+        f"    time.sleep({60 if blocked_write == 'error' else 0.7})\n"
+        "def record_run_end(*args, **kwargs):\n"
+        "    (root / 'second-write').touch()\n"
+        "    threading.Event().wait()\n"
+        "r._record_error = record_error\n"
+        "r._record_run_end = record_run_end\n"
+        "r._stall_action(1, 'test stall', 1)\n"
+    )
+    with subprocess.Popen([sys.executable, "-c", code]) as runner:  # noqa: S603 - fixed test source
+        try:
+            _await_file(tmp_path / "started")
+            assert runner.wait(timeout=2) == 1
+            elapsed = time.monotonic() - float((tmp_path / "started").read_text())
+            assert 0.9 <= elapsed < 1.5, f"record deadline took {elapsed:.2f}s"
+            assert (tmp_path / "second-write").exists() == (blocked_write == "run")
+        finally:
+            runner.kill()

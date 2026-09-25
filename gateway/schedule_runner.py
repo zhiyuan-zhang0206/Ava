@@ -18,8 +18,8 @@ a run-record write failure never affects the schedule itself. A run the runner
 cannot close (a SIGTERM/SIGHUP kill, a manager SIGKILL on stop/restart/
 edited-script save) stays ``ok = NULL`` until the ScheduleManager's reconcile
 sweep closes it as ``interrupted`` — a NULL row is legitimate only while the
-schedule has a live session; a stall-guard hard exit closes it ``ok = false``
-and reaps owned descendants before dying.
+schedule has a live session. A stall-guard hard exit reaps owned descendants,
+then attempts to close it ``ok = false`` within a bounded record deadline.
 
 The ScheduleManager launches this inside a session named
 ``ava-schedule-<id>`` and keeps it up (with a circuit breaker) if it
@@ -219,14 +219,13 @@ def _restore_park_detection() -> None:
 
 
 def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
-    """The stall verdict: record ``last_error``, close the run-history row as
-    failed (a hard-exit is an abnormal end, like a crash), reap descendants,
-    then hard-exit so the ScheduleManager's crash path (backoff + breaker) relaunches the
-    schedule."""
-    with suppress(Exception):
-        _record_error(schedule_id, message)
-    logger.error("Schedule {} {}", schedule_id, message)
-    _record_run_end(run_id, ok=False, note=f"stalled ({_STALL_TIMEOUT_S:.0f}s)")
+    """Reap descendants, bound failure recording, then hard-exit for manager recovery."""
+
+    def record_failure() -> None:
+        with suppress(Exception):
+            _record_error(schedule_id, message)
+        _record_run_end(run_id, ok=False, note=f"stalled ({_STALL_TIMEOUT_S:.0f}s)")
+
     try:
         # Snapshot descendants while ancestry still proves ownership. Retain
         # their identities through TERM/KILL; never signal the shared PTY group.
@@ -234,6 +233,14 @@ def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
         shared.proc.kill_process_tree(os.getpid(), include_root=False)
     except Exception:
         logger.exception("Schedule {} child cleanup failed", schedule_id)
+    try:
+        logger.error("Schedule {} {}", schedule_id, message)
+        # One deadline covers both writes, even if a DB call never returns.
+        # An abandoned write can leave the run row NULL; manager reconcile
+        # closes that row as interrupted once the runner has exited.
+        recorder = threading.Thread(target=record_failure, daemon=True)
+        recorder.start()
+        recorder.join(settings.gateway.schedule_stall_exit_record_deadline_seconds)
     finally:
         os._exit(1)  # hard exit — the schedule manager owns the restart
 

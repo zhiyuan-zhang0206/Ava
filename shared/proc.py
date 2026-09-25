@@ -322,6 +322,29 @@ def request_stop(pid: int) -> None:
         return
 
 
+def _same_process(proc: psutil.Process, create_time: float) -> bool:
+    """Read fresh birth evidence: Process.create_time() itself caches its value."""
+    try:
+        current = psutil.Process(proc.pid)
+        return current.is_running() and current.create_time() == create_time
+    except _GONE:
+        return False
+
+
+def _verified_descendants(parent: psutil.Process) -> list[tuple[psutil.Process, float]]:
+    """Verify the entire captured set before our own signals can reparent it."""
+    captured: list[tuple[psutil.Process, float]] = []
+    for proc in parent.children(recursive=True):
+        with contextlib.suppress(*_GONE):
+            captured.append((proc, proc.create_time()))
+    verified: list[tuple[psutil.Process, float]] = []
+    for proc, create_time in captured:
+        with contextlib.suppress(*_GONE):
+            if _same_process(proc, create_time) and parent in psutil.Process(proc.pid).parents():
+                verified.append((proc, create_time))
+    return verified
+
+
 def kill_process_tree(
     pid: int, *, grace_s: float = _TERMINATE_GRACE_S, include_root: bool = True
 ) -> None:
@@ -336,28 +359,33 @@ def kill_process_tree(
     Escalation (terminate → wait → kill) rather than a straight kill for one
     reason only, spelled out at `_TERMINATE_GRACE_S`: git unlinks its lockfiles
     from a signal handler. Nothing here waits on the tree's cooperation — the
-    kill is unconditional after `grace_s`.
+    kill is attempted after `grace_s` for surviving identities.
 
     The descendant set is enumerated **once, up front, while the parent is still
     alive**. Walking down from a dead parent is not possible: psutil resolves
     children by ppid, and on Windows there is no reparent-to-init to walk to
     instead — the link is simply lost, which is how a tree survives a kill that
-    was aimed at its root. Order is descendants-then-parent so a supervising
-    parent cannot respawn a child mid-teardown.
+    was aimed at its root. Descendants retain psutil's enumeration order (a
+    parent can precede its child); only the root is signalled last when included.
 
     Limitation worth knowing: a descendant that has already double-forked away
     (reparented to init) is not in the ppid walk and is not reached. git and ssh
     do not do that, so the measured leak shape is covered; a process supervisor
-    is not something to bound with a timeout in the first place.
+    is not something to bound with a timeout in the first place. We also
+    conservatively skip members whose identity or ancestry no longer matches
+    before the first signal pass. Birth identity is rechecked before KILL;
+    reparenting caused by our own TERM pass does not exempt survivors.
     """
     try:
         parent = psutil.Process(pid)
-        tree = parent.children(recursive=True)
+        members = _verified_descendants(parent)
         if include_root:
-            tree.append(parent)
+            members.append((parent, parent.create_time()))
     except _GONE:
         return
 
+    tree = [proc for proc, _ in members]
+    create_times = {proc.pid: create_time for proc, create_time in members}
     for proc in tree:
         # A member that exited between enumeration and this line is the normal
         # case, not a failure — that race is the whole reason the set is
@@ -369,7 +397,8 @@ def kill_process_tree(
         return
     for proc in alive:
         with contextlib.suppress(*_GONE):
-            proc.kill()
+            if _same_process(proc, create_times[proc.pid]):
+                proc.kill()
     psutil.wait_procs(alive, timeout=_REAP_TIMEOUT_S)
 
 
