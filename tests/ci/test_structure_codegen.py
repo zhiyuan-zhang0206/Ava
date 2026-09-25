@@ -298,7 +298,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "ops/update_check.py",
         "ops/updater_outcome.py",
         "shared/last_update.py",
-        "shared/impersonation_history.py",
+        "shared/agents/impersonation/impersonation_history.py",
         "shared/sdk_telemetry.py",
         "shared/agent_snapshot.py",
         "shared/resource_sample.py",

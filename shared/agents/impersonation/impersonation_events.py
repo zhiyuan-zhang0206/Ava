@@ -10,10 +10,14 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from shared._impersonation_store import lock_lease
+from shared.agents.impersonation._impersonation_store import lock_lease
+from shared.agents.impersonation.impersonation_history import (
+    append,
+    event_belongs_to_agent,
+    resolve,
+)
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.impersonation_history import append, event_belongs_to_agent, resolve
 
 
 def _event_key(event_id: object) -> str:
@@ -99,7 +103,7 @@ def consume_events(agent_id: int, session_id: int, events: Iterable[dict[str, An
             if lease["handoff_path"] is not None:
                 from psycopg.types.json import Jsonb
 
-                from shared.impersonation_history import export_handoff
+                from shared.agents.impersonation.impersonation_history import export_handoff
 
                 lease["handoff_document"] = None
                 document, _ = export_handoff(lease, conn)

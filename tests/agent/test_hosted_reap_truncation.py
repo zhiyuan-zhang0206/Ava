@@ -24,8 +24,8 @@ from agent.impersonation import claim_gate
 from services.agent_host.host import AgentHost
 from services.agent_host.settlement import close_hosted_turn
 from services.agent_host.truncation import reap_truncation_outcome
+from shared.agents.impersonation import ImpersonationError
 from shared.context import AvaContext
-from shared.impersonation import ImpersonationError
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
 

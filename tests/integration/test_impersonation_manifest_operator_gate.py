@@ -16,8 +16,8 @@ import pytest
 from ava import _impersonation_events as reader
 from cli.commands import _release_services as release_services
 from ops.spec import ServiceSpec
-from shared import impersonation as leases
-from shared import impersonation_history as history
+from shared.agents import impersonation as leases
+from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation_manifest import (
     LocalParticipant,
     bind_local_participant,
@@ -453,7 +453,7 @@ def test_certifier_rejects_a_durable_entry_with_the_right_key_but_wrong_digest(
     ).fetchone()
     assert expected is not None
     key, event_at = expected
-    from shared.impersonation_events import consume_events
+    from shared.agents.impersonation.impersonation_events import consume_events
 
     assert (
         consume_events(

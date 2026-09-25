@@ -44,7 +44,7 @@ def _nonempty(value: str) -> str:
 def _relay_spec_problem(
     provider: str, thread_id: str | None, codex_remote: str | None
 ) -> str | None:
-    """CLI-boundary mirror of `shared._impersonation_store.validate_relay_spec`.
+    """CLI-boundary mirror of `shared.agents.impersonation._impersonation_store.validate_relay_spec`.
 
     Fails before any command code runs (usage error); the shared validator
     stays in place as the server-side defense.

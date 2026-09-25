@@ -37,7 +37,7 @@ def accept(request_id: str, start_message: str) -> NoReturn:
     relay cannot start, the acceptance rolls back loudly (the lease becomes
     rejected with the reason) and you keep running as native.
     """
-    from shared.impersonation import accept as accept_request
+    from shared.agents.impersonation import accept as accept_request
 
     incarnation = _native_incarnation()
     accept_request(
@@ -51,7 +51,7 @@ def accept(request_id: str, start_message: str) -> NoReturn:
 
 def reject(request_id: str, reason: str = "") -> None:
     """Decline a takeover request; your current execution continues."""
-    from shared.impersonation import reject as reject_request
+    from shared.agents.impersonation import reject as reject_request
 
     incarnation = _native_incarnation()
     reject_request(
