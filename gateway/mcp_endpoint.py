@@ -53,6 +53,8 @@ from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 from shared import agent_roster, agent_snapshot
 from shared.agents import AvaAgentError
 from shared.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
+from shared.agents.messages.chat_delivery import ClientMessageConflictError
+from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.api_contracts.mcp_tool_contract import (
     project_message,
     server_instructions,
@@ -60,8 +62,6 @@ from shared.api_contracts.mcp_tool_contract import (
 )
 from shared.audit_events import insert_event_log
 from shared.caller_identity import CallerIdentity
-from shared.chat_delivery import ClientMessageConflictError
-from shared.inbound_provenance import InboundProvenance
 from shared.machine import machine_name
 
 # Provenance of everything this surface creates. `spawner` groups the agents

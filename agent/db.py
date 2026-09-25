@@ -12,10 +12,10 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.inbound_ownership import lock_inbound_owner
+from shared.agents.messages.inbound import InterruptReason
 from shared.config import settings
 from shared.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
 from shared.db_transaction import async_write_transaction
-from shared.inbound import InterruptReason
 from shared.log import logger
 
 # A successful borrow that took at least this long still gets a WARNING — a
@@ -142,7 +142,7 @@ class ClaimedInbound(NamedTuple):
     """One inbound row returned by `claim_inbound_batch`.
 
     `source` is the message channel ('system' / 'user' / 'agent:N' / 'ui:page:<name>' / 'watcher:N' / 'schedule:N' etc.); the
-    claim node uses it via `shared/envelope.py:wrap_inbound` to add an envelope
+    claim node uses it via `shared/agents/messages/envelope.py:wrap_inbound` to add an envelope
     prefix for kind='chat'; lifecycle kinds directly assemble the marker text
     without going through wrap_inbound.
     """

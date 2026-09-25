@@ -14,7 +14,7 @@ Message formats exchanged between agent, LLM, users, and other agents. `messages
 ## Message Types
 
 ### Inbound Messages (`inbound_message`)
-- `inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope wrapper (product of `shared/envelope.py:wrap_inbound`)
+- `inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope wrapper (product of `shared/agents/messages/envelope.py:wrap_inbound`)
 - `source` is the original source string (`"system"` / `"agent:N"` / `"user"`), `ava_inbound_id` records the source row id for startup reconcile
 - `content` plain text or multimodal block list
 

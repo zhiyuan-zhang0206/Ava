@@ -44,8 +44,8 @@ from ops.rpc_terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_terminate import TerminateAgentResponse as TerminateAgentResponse
 from shared.agent_observation import AvailabilityReason
+from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 from shared.api_contracts.op_envelope import OpEnvelope as OpEnvelope
-from shared.envelope import reject_unnegotiated_caller, validate_writable_source
 
 
 class CancelRequested(BaseModel):
@@ -123,7 +123,7 @@ class SpawnAgentRequest(BaseModel):
         # deferring to the agent claim node, where wrap_inbound raises
         # ValueError on the bad source and kills the just-spawned process.
         # Same legal set as the claim-side wrap — single-sourced via
-        # shared.envelope.validate_source.
+        # shared.agents.messages.envelope.validate_source.
         if self.prompt_source is not None:
             validate_writable_source(self.prompt_source)
         return self
@@ -197,7 +197,7 @@ class ResurrectAgentRequest(BaseModel):
     composes it into the marker `[system ts] You have been resurrected
     by {resurrected_by}` so the agent knows who resurrected it.
 
-    The value must pass `shared.envelope.validate_source` (same check as
+    The value must pass `shared.agents.messages.envelope.validate_source` (same check as
     `AgentMessageIn.source`): the same value becomes the prompt chat
     inbound's source, and the claim node's envelope wrap raises on
     anything outside the whitelist — killing the freshly resurrected

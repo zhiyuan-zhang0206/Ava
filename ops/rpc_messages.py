@@ -14,7 +14,7 @@ from pydantic import (
 )
 
 from ops.rpc_completion import CompletionNoticeIn
-from shared.envelope import validate_source
+from shared.agents.messages.envelope import validate_source
 
 
 class TextContentBlock(BaseModel):
@@ -73,7 +73,7 @@ class AgentMessageIn(BaseModel):
     `source` is required — the SDK passes f"agent:{my_id}", the generated
     notices pass shell:N / watcher:N; there is no default to prevent callers
     from forgetting and having inbounds silently tagged as "user", muddying
-    envelope labels. The valid set is in `shared/envelope.py:validate_source`
+    envelope labels. The valid set is in `shared/agents/messages/envelope.py:validate_source`
     (system / agent:N / user / ui:page:<name> / watcher:N / shell:N /
     schedule:N); an illegal source is intercepted by 422 at the HTTP layer —
     otherwise it would land in inbound_messages and the agent claim node

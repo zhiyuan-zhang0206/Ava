@@ -3,8 +3,8 @@
 import pytest
 from pydantic import ValidationError
 
+from shared.agents.messages.envelope import validate_source, validate_writable_source, wrap_inbound
 from shared.caller_identity import CallerIdentity, caller_payload
-from shared.envelope import validate_source, validate_writable_source, wrap_inbound
 
 
 @pytest.mark.parametrize("subject", ["codex", "claude_code", "mcp"])

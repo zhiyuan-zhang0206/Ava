@@ -15,7 +15,7 @@ identity. Unknown fields and malformed identifiers are rejected. No secrets or
 human identity belong in an instance identifier.
 
 `external_agent:codex:run-42` and `unknown:legacy` are display projections.
-`shared.envelope` reads them as explicitly asserted external or unknown callers,
+`shared.agents.messages.envelope` reads them as explicitly asserted external or unknown callers,
 never as User, Ava Agent, or system. Existing source formats remain readable.
 
 Chat and lifecycle inbound writes persist the parsed object in the existing

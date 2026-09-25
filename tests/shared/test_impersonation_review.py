@@ -16,7 +16,7 @@ from shared import telemetry
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation import impersonation_sessions as sessions
-from shared.chat_delivery import insert_chat_inbound_once
+from shared.agents.messages.chat_delivery import insert_chat_inbound_once
 from shared.db import create_agent
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation

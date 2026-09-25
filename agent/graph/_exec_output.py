@@ -31,8 +31,8 @@ from langchain_core.messages import BaseMessage
 
 import ava
 import ava._boot
+from shared.agents.messages.inbound import InterruptReason
 from shared.config import now_timestamp, settings
-from shared.inbound import InterruptReason
 from shared.log import logger
 from shared.paths import workspace_dir
 

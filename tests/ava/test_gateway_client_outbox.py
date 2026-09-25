@@ -15,8 +15,8 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from shared import delivery_outbox as outbox
 from shared.agents import AgentNotFound, GatewayUnavailable
+from shared.agents.messages import delivery_outbox as outbox
 from shared.config import settings
 
 

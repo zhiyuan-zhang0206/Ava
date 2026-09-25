@@ -28,8 +28,8 @@ from typing import get_args
 import pytest
 
 from shared.agents import AgentStatus, TerminationSource
+from shared.agents.messages.inbound import InboundKind
 from shared.extension_registry import ExtensionKind
-from shared.inbound import InboundKind
 from shared.install_registry import TrustTier
 from shared.machine import MachineRole
 from shared.tasks.task_status import TaskStatus

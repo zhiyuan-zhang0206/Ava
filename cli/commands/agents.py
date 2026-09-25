@@ -51,7 +51,7 @@ class ProvenanceError(ValueError):
 
 def _validated_source_arg(source: str) -> str:
     """Validate one explicit source value (the CLI parse layer runs first)."""
-    from shared.envelope import validate_source
+    from shared.agents.messages.envelope import validate_source
 
     try:
         validate_source(source)
@@ -159,7 +159,7 @@ def cmd_agents_send(
     explicit parameters only). Machine callers pass `shell:N` / `watcher:N`; a
     human operator — or an agent acting as one — passes `user`. A source that
     still reaches the gateway is re-validated there (`AgentMessageIn.source` ->
-    `shared.envelope.validate_source`) and rejected 422 with the legal set
+    `shared.agents.messages.envelope.validate_source`) and rejected 422 with the legal set
     printed. A programmatic caller with no source gets this option list as a
     ProvenanceError, which the CLI handlers report without a traceback.
 
@@ -208,7 +208,7 @@ def send_agent_message(
     not need a follow-up read.
 
     A failed send is not lost: the deferred-delivery outbox
-    (`shared.delivery_outbox`) records a transport failure or a transient HTTP
+    (`shared.agents.messages.delivery_outbox`) records a transport failure or a transient HTTP
     response (429/5xx) on this machine under the message's idempotency key, and
     the machine's ops daemon redelivers it once the gateway returns. 4xx stay
     loud and unrecorded — the wire reason is application semantics, replay
@@ -220,7 +220,7 @@ def send_agent_message(
 
     import httpx
 
-    from shared import delivery_outbox
+    from shared.agents.messages import delivery_outbox
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 

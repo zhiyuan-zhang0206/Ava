@@ -1,4 +1,12 @@
-"""Actual legacy normal ops entry against native PG; CI scratch only."""
+"""Actual legacy normal ops entry against native PG; CI scratch only.
+
+Every module and path reference in this script resolves against the pinned
+base install (`manifest.json` base_sha plus the frozen compatibility patch),
+never the current tree: the probes execute inside the reconstructed legacy
+environment. A module move in main therefore does not rewrite these
+references - they follow the base and change only when the base advances.
+`scripts/audit_module_moves.py` exempts this file for the same reason.
+"""
 
 from __future__ import annotations
 

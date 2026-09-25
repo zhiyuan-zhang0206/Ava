@@ -44,7 +44,7 @@ _INVENTORY: dict[str, str] = {
     "ops/publication_recovery.py::pre_stop_abort_pending_publication_op": "ineligible",
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": "central",
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_session_event": "central",
-    "shared/chat_delivery.py::_insert_chat_inbound_once": "central",
+    "shared/agents/messages/chat_delivery.py::_insert_chat_inbound_once": "central",
     "shared/db.py::insert_inbound_message": "central",
     "shared/db.py::announce_spawn_prompt": "central",
     "shared/db.py::insert_restart_completed_inbound": "central",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from starlette.requests import Request
 
-from shared.inbound_provenance import InboundProvenance
+from shared.agents.messages.inbound_provenance import InboundProvenance
 
 
 def request_inbound_provenance(

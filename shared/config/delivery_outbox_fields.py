@@ -3,7 +3,7 @@
 The deferred-delivery outbox gives a message that exhausted its sender-side
 retry budget a durable machine-local record and a resident retry loop, so a
 gateway outage window cannot silently swallow it (see
-`shared/delivery_outbox.py` for the mechanism). These fields live in their own
+`shared/agents/messages/delivery_outbox.py` for the mechanism). These fields live in their own
 mixin module for the same line-budget reason as the delivery-watchdog block:
 `shared/config/daemon.py` sits at the 800-line ceiling. NOT a config domain —
 `settings.daemon.delivery_outbox_*`, every alias/scope/capability face, and the

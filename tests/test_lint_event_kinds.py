@@ -48,10 +48,10 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
         "billing_resurrect_run",  # ops/billing_recovery.py:_record_run_event telemetry.emit("telemetry", ...)
         "delivery_recovery_decision",  # services/delivery_watchdog/stall_recovery.py:_request_harvest
-        # Outbox emissions go through the module helper (shared/delivery_outbox.py:_emit),
+        # Outbox emissions go through the module helper (shared/agents/messages/delivery_outbox.py:_emit),
         # which passes the name positionally — no `event=` literal to scan.
-        "delivery_outbox_flushed",  # shared/delivery_outbox.py:flush
-        "delivery_outbox_abandoned",  # shared/delivery_outbox.py:_abandon
+        "delivery_outbox_flushed",  # shared/agents/messages/delivery_outbox.py:flush
+        "delivery_outbox_abandoned",  # shared/agents/messages/delivery_outbox.py:_abandon
         "lifecycle_pointer_done_torn",  # gateway/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
         "lifecycle_fences_settled_absent_machine",  # gateway/lifecycle_fences.py:settle_absent_machine_fences (positional emit)
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle

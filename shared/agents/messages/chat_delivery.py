@@ -17,10 +17,14 @@ from dataclasses import dataclass
 import psycopg
 
 from shared import telemetry
+from shared.agents.messages.inbound_provenance import (
+    InboundProvenance,
+    content_sha256,
+    source_assertion_match,
+)
 from shared.caller_identity import caller_payload
 from shared.caller_protocol import require_caller_protocol
 from shared.db import fetch_one, publish_inbound_wake
-from shared.inbound_provenance import InboundProvenance, content_sha256, source_assertion_match
 
 
 class ClientMessageConflictError(ValueError):
