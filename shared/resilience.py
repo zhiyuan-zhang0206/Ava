@@ -117,10 +117,12 @@ def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
     ``mode``:
     - ``"agent"`` (default) — deterministic per-process phase in [0, span)
       plus random ±span: de-phases a fleet AND spreads within one process.
+    - ``"phase"`` — deterministic per-process phase in [0, span) only.
+    - ``"relative"`` — multiply ``delay`` by a random factor in [1-span, 1+span].
     - ``"random"`` — random ±span only.
     - ``"none"`` — ``delay`` unchanged (deterministic schedules: probes).
 
-    The result is clamped at 0.0: the jitter's theoretical lower bound is
+    The result is clamped at 0.0: additive jitter's theoretical lower bound is
     ``delay - span``, and a negative sleep raises ValueError from
     ``time.sleep`` — masking the original exception and killing the retry
     path exactly when the retry is the recovery (audit 2026-08-08 P2; the
@@ -130,6 +132,10 @@ def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
     """
     if mode == "none":
         return delay
+    if mode == "phase":
+        return max(0.0, delay + _agent_phase(span))
+    if mode == "relative":
+        return max(0.0, delay * (1 + random.uniform(-span, span)))  # noqa: S311
     if mode == "random":
         return max(0.0, delay + random.uniform(-span, span))  # noqa: S311 — spread, not secrecy
     return max(0.0, delay + _agent_phase(span) + random.uniform(-span, span))  # noqa: S311
