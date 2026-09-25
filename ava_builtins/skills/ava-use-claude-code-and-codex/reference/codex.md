@@ -65,13 +65,13 @@ the same file-driven discipline as Mode A (task file + work file +
 `watch_work.py` to wake you), and keep to one live Codex per workspace so a
 second launch cannot race the first.
 
-When the default `~/.codex` home should stay untouched entirely, give the
-session a private home: create the directory with mode `0700`, symlink `auth.json` in from
-`~/.codex/`, copy `config.toml` and append the workspace trust row
-(`[projects."<workspace-dir>"]` / `trust_level = "trusted"`), then run with
-`CODEX_HOME=<dir>`. This isolates configuration and session state; auth
-stays shared by design — a token refresh is written through the symlink, so
-both homes see the same account (a frozen copy would go stale on rotation).
+For a home that isolates configuration and session state while reusing the
+existing login, give the session a private home: create the directory with
+mode `0700`, symlink `auth.json` in from `~/.codex/`, copy `config.toml` and
+append the workspace trust row (`[projects."<workspace-dir>"]` /
+`trust_level = "trusted"`), then run with `CODEX_HOME=<dir>`. The symlink
+points back at the shared login — credentials are not isolated; the private
+home owns configuration and session state only.
 
 Before a large session, check the account's remaining quota at zero token
 cost — the app-server `account/rateLimits/read` request, or `/status` where
