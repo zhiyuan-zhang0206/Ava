@@ -31,31 +31,20 @@ gateway's owner DB URL uses `AVA_DB_ADMIN_PASSWORD`; Redis `default`/
 `requirepass` uses `AVA_REDIS_ADMIN_PASSWORD`. All four data-plane credentials
 remain file-only on the gateway.
 
-Which install shape gets one is decided by `--role`:
+The first-start capabilities determine the initial control-plane secret:
 
-| Install | Secret |
+| First-start shape | Secret |
 |---|---|
-| `--role gateway,agent-runner` (single box) | **empty** — a NO-AUTH cluster serving unauthenticated on loopback. Read a token without echo, export it as the one-shot `AVA_INSTALL_CLUSTER_SECRET`, run install, then unset it to turn auth on. |
-| `--role gateway` (split gateway) | **minted automatically** — remote runners depend on it. Transfer it through the operator's secret channel, then expose it to `ava enroll` as `AVA_CLUSTER_SECRET` (not an argv value). |
-| `--worktree` (dev cluster) | **empty**, and never inherited from prod. |
+| `--serve-gateway --serve-agent-runner` | Empty bearer by default; unauthenticated loopback access. The runner DB credential remains independent. |
+| `--serve-gateway --no-serve-agent-runner` | Minted automatically. Transfer only the bearer to runners through the operator's secret channel. |
+| `--worktree` | Single-box defaults; no production secret or data is copied. |
+| `--serve-agent-runner --no-serve-gateway` | Supply the gateway bearer as `AVA_CLUSTER_SECRET` for the first start. |
 
-To opt a single-box install into auth without putting the token in shell history
-or process argv:
+The initialization journal binds credentials before their first effects.
+Repeated or interrupted start preserves them. Do not edit the journal or copy a
+new environment template over the generated file. Credential rotation is a
+separate authorized operation; it is not performed by a start retry.
 
-```bash
-printf 'Install cluster secret: ' >&2
-IFS= read -rs AVA_INSTALL_CLUSTER_SECRET
-printf '\n' >&2
-export AVA_INSTALL_CLUSTER_SECRET
-./scripts/install.sh --role gateway,agent-runner
-unset AVA_INSTALL_CLUSTER_SECRET
-```
-
-A secret already present in the `.env` is never overwritten, so a re-install is
-safe; rotate the bearer only for control-plane emergencies with
-`scripts/rotate_cluster_secret.py`. Rotate data-plane credentials independently
-with `scripts/rotate_data_plane_secrets.py`. The gateway owner DB URL is
-reapplied from `AVA_DB_ADMIN_PASSWORD` (falling back to the bearer only when
-upgrading a legacy installation); Redis URLs are used verbatim. Bootstrap
-projects the runner's separate Postgres and Redis credentials, and their
-rotation is independent of bearer rotation.
+Runner bootstrap projects its independent Postgres and Redis credentials.
+`AVA_CLUSTER_SECRET` remains the HTTP bearer; the gateway's Postgres-owner and
+Redis-admin credentials remain private to that gateway.

@@ -1,10 +1,4 @@
-"""`services.healthchecks.otel_collector` unit tests — OTLP probe + respawn.
-
-The sidecar's health is "does the OTLP receiver answer" — ANY HTTP status from
-/v1/traces proves the collector's listener is up (same probe the agent
-exporters use at init). These tests verify the probe logic and the respawn
-invocation without running a collector.
-"""
+"""Collector protocol health must belong to root-owned listeners."""
 
 from __future__ import annotations
 
@@ -16,28 +10,60 @@ from pathlib import Path
 import pytest
 
 from services.healthchecks import otel_collector as hc
-from shared.daemon_health import DaemonProbe
 from shared.machine import MachineRoleInvalid, MachineRoleMissing
 
 
-def _ignore_process_init(_name: str) -> None:
-    return None
+@pytest.mark.parametrize("owned", [True, False])
+def test_collector_protocol_success_requires_root_owned_listeners(
+    monkeypatch: pytest.MonkeyPatch, owned: bool
+) -> None:
+    from services.ava_root import client
+    from shared.proc_tree import OwnedProcess
+
+    owner = OwnedProcess(101, 12.0, None)
+    monkeypatch.setattr(client, "owned_process", lambda _unit: owner)
+    monkeypatch.setattr(hc, "strict_listeners_on", lambda _port: [202])
+    monkeypatch.setattr(hc, "leader_owns_pids", lambda _expected, _pids: owned)
+    monkeypatch.setattr(hc, "_is_alive", lambda: True)
+
+    result = hc.probe_collector()
+    assert result.alive is owned
+    assert result.terminal is not owned
 
 
-def _fail_probe() -> DaemonProbe:
-    pytest.fail("probe must be skipped")
+def test_collector_cannot_certify_a_listener_without_root_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from services.ava_root import client
+    from shared.daemon_health import ProbeVerdict
+
+    monkeypatch.setattr(client, "owned_process", lambda _unit: None)
+    monkeypatch.setattr(hc, "strict_listeners_on", lambda _port: [202])
+    monkeypatch.setattr(hc, "_is_alive", lambda: pytest.fail("unknown ownership must not pass"))
+    assert hc.probe_collector().verdict is ProbeVerdict.UNAVAILABLE
 
 
-def _fail_liveness_probe() -> bool:
-    pytest.fail("liveness probe must be skipped")
+def test_collector_discovery_failure_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared.daemon_health import ProbeVerdict
+    from shared.port_preflight import ListenerDiscoveryError
+
+    def fail(_port: int) -> list[int]:
+        raise ListenerDiscoveryError("cannot inspect listeners")
+
+    monkeypatch.setattr(hc, "strict_listeners_on", fail)
+    assert hc.probe_collector().verdict is ProbeVerdict.UNAVAILABLE
 
 
-def _fail_metrics_probe() -> hc.CollectorPressure | None:
-    pytest.fail("metrics probe must be skipped")
+def test_collector_root_failure_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from services.ava_root import client
+    from shared.daemon_health import ProbeVerdict
 
+    def fail(_unit: str) -> None:
+        raise client.RootClientError("root status unavailable")
 
-def _fail_restart() -> DaemonProbe:
-    pytest.fail("restart must be skipped")
+    monkeypatch.setattr(client, "owned_process", fail)
+    monkeypatch.setattr(hc, "strict_listeners_on", lambda _port: [202])
+    assert hc.probe_collector().verdict is ProbeVerdict.UNAVAILABLE
 
 
 def test_collector_serves_this_home_fails_closed_without_machine_role(
@@ -85,57 +111,6 @@ def test_collector_serves_this_home_with_explicit_endpoint_skips_marker(
     monkeypatch.setattr(hc, "gateway_observability_home", lambda: tmp_path)
     monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
     assert hc._collector_serves_this_home() is True
-
-
-def test_main_skips_non_lgtm_gateway_before_probe_or_restart(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", _ignore_process_init)
-    monkeypatch.setattr(hc, "_collector_serves_this_home", lambda: False)
-    monkeypatch.setattr(hc, "probe_collector", _fail_probe)
-    monkeypatch.setattr(hc, "_is_alive", _fail_liveness_probe)
-    monkeypatch.setattr(hc, "_queue_pressure", _fail_metrics_probe)
-    monkeypatch.setattr(hc, "_restart_daemon", _fail_restart)
-
-    records: list[str] = []
-
-    class _Log:
-        def bind(self, **kw: object) -> _Log:
-            assert kw == {"_no_emitter": True, "component": "otel-collector-healthcheck"}
-            return self
-
-        def warning(self, message: str, *args: object) -> None:
-            records.append(message.format(*args))
-
-    monkeypatch.setattr(hc, "logger", _Log())
-    hc.main()
-
-    assert len(records) == 1
-    assert "this gateway home is not the LGTM host" in records[0]
-    assert "telemetry export is unavailable" in records[0]
-
-
-@pytest.mark.parametrize(
-    "roles,marker", [(frozenset({"gateway"}), True), (frozenset({"agent-runner"}), False)]
-)
-def test_main_runs_collector_path_for_gateway_marker_and_runner(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    roles: frozenset[str],
-    marker: bool,
-) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", _ignore_process_init)
-    calls: list[str] = []
-    monkeypatch.setattr(hc, "machine_role", lambda: roles)
-    monkeypatch.setattr(hc, "gateway_observability_home", lambda: tmp_path)
-    if marker:
-        (tmp_path / "lgtm-host").touch()
-    monkeypatch.setattr(
-        hc, "probe_collector", lambda: (calls.append("probe"), DaemonProbe.up("ok"))[1]
-    )
-    monkeypatch.setattr(hc, "_queue_pressure", lambda: (calls.append("pressure"), None)[1])
-    hc.main()
-    assert calls == ["probe", "pressure"]
 
 
 def test_is_alive_rejecting_valid_otlp_is_not_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -220,48 +195,6 @@ def test_is_alive_connection_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     assert hc._is_alive() is False
 
 
-def test_restart_invokes_verified_respawn(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_restart_daemon` takes over stale holders and verifies the roster command."""
-
-    took_over: list[int] = []
-
-    def fake_respawn(session: str, cmd: str, _repo, **kwargs) -> DaemonProbe:
-        assert session == "otel-collector"
-        assert "otelcol-contrib" in cmd and "config.yaml" in cmd
-        assert kwargs["verify"] is hc.probe_collector
-        assert kwargs["graceful_timeout_s"] == 5.0
-        return DaemonProbe.up("collector pid 222")
-
-    monkeypatch.setattr(hc, "take_over_stale_collector", lambda: took_over.append(1))
-    monkeypatch.setattr(hc, "respawn_and_verify", fake_respawn)  # pyright: ignore[reportUnknownArgumentType]
-    assert hc._restart_daemon().alive is True
-    assert took_over == [1]
-
-
-def test_main_restarts_a_stale_collector_even_when_its_otlp_port_answers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A stale collector's 2xx cannot suppress the restarter's recovery path."""
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "_is_alive", lambda: True)
-    monkeypatch.setattr(
-        hc,
-        "probe_collector",
-        lambda: DaemonProbe.down("collector pid 1109 has no live ava-otel-collector record"),
-        raising=False,
-    )
-    restarts: list[int] = []
-    monkeypatch.setattr(
-        hc,
-        "_restart_daemon",
-        lambda: (restarts.append(1), DaemonProbe.up("collector pid 222"))[1],
-    )
-
-    hc.main()
-
-    assert restarts == [1]
-
-
 def test_queue_pressure_uses_configured_self_metrics_port(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -287,25 +220,6 @@ def test_queue_pressure_uses_configured_self_metrics_port(
 
     assert hc._queue_pressure() == hc.CollectorPressure(saturated=(), enqueue_failures={})
     assert seen == ["http://localhost:8889/metrics"]
-
-
-def test_stale_collector_reclaim_uses_configured_self_metrics_port(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Takeover inspects this unit's configured listener, not another unit's default."""
-    seen: list[tuple[int, ...]] = []
-
-    def _reclaim(_service: str, *, ports: tuple[int, ...], binary: object, grace_s: float) -> None:
-        assert binary == hc.otel_collector_binary()
-        assert grace_s == 5.0
-        seen.append(ports)
-
-    monkeypatch.setattr(hc.settings.observability, "otel_collector_metrics_port", 8889)
-    monkeypatch.setattr(hc, "reclaim_stale_supervised_listener", _reclaim)
-
-    hc.take_over_stale_collector()
-
-    assert seen == [(4318, 8889)]
 
 
 def test_queue_pressure_reports_full_queue_and_drop_counter(
@@ -336,45 +250,3 @@ otelcol_exporter_queue_size{data_type="logs",exporter="otlphttp/loki"} 12
     assert pressure is not None
     assert pressure.saturated == ("otlphttp/prometheus",)
     assert pressure.enqueue_failures == {"otlphttp/prometheus": 78336}
-
-
-def test_main_warns_on_queue_pressure_without_restart_loop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A remote outage cannot be repaired by respawning the healthy local
-    collector every minute; pressure is loud but service liveness stays up."""
-    pressure = hc.CollectorPressure(
-        saturated=("otlphttp/prometheus",),
-        enqueue_failures={"otlphttp/prometheus": 42},
-    )
-
-    def _ignore_process_init(_name: str) -> None:
-        return None
-
-    monkeypatch.setattr(hc, "init_gateway_process", _ignore_process_init)
-    monkeypatch.setattr(hc, "_is_alive", lambda: True)
-    monkeypatch.setattr(hc, "probe_collector", lambda: DaemonProbe.up("collector pid 111"))
-    monkeypatch.setattr(hc, "_queue_pressure", lambda: pressure)
-    monkeypatch.setattr(
-        hc,
-        "_restart_daemon",
-        lambda: pytest.fail("healthy local collector must not restart for remote pressure"),
-    )
-
-    records: list[str] = []
-
-    class _Log:
-        def bind(self, **_kw: object) -> _Log:
-            return self
-
-        def warning(self, message: str, *args: object) -> None:
-            records.append(message.format(*args))
-
-    monkeypatch.setattr(hc, "logger", _Log())
-
-    hc.main()
-
-    assert len(records) == 1
-    assert "queue saturated" in records[0]
-    assert "otlphttp/prometheus" in records[0]
-    assert "enqueue failures=42" in records[0]

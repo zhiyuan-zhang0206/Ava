@@ -7,8 +7,7 @@ capability selection and runtime gates to it.
 Every service declares its ``ServiceSpec.capabilities`` in one of three groups:
 gateway-only, agent-runner-only, or both. ``services_for_capabilities(roles)``
 selects services whose capabilities intersect the host's roles. A service also
-declares ``requires_db`` so the watchdog can hold back exactly the database's
-users during a DB-scoped round block (``ops.controllers.base.BlockScope``).
+declares ``requires_db`` so database-dependent readiness remains explicit.
 
 Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
 module. ``_plugin_services()`` discovers code-present plugins and appends them
@@ -19,16 +18,13 @@ The fleet task daemon follows this path; see
 
 Layer: the ``ops`` module family imports ``shared``, plus lazy function-local
 reaches into the shared-tier browser identity probe and gate app-port source.
-Nothing reaches up into cli/gateway, so start, watchdog, and ``ava status``
+Nothing reaches up into cli/gateway, so start, root monitoring, and ``ava status``
 share one roster.
 
-**Deliberately outside the roster** (each documented at its own site): the
-``gate`` entry-port service (launchd KeepAlive / pidfile job, no session row —
-``ops/controllers/_converge_gate.py``, probed via ``probe_gate``, not the
-watchdog), the OS-level watchdog-probe jobs (``shared/os_watchdog_probe.py``),
-and the watchdog's hand-prepended ``redis-acl`` healthcheck
-(``services/watchdog/daemon.py``). These are not sessions, so
-``build_services()`` does not see them by design.
+Native Postgres, Redis, and PgBouncer have separate data-plane custody so they
+can remain available during an application-root transition. The macOS helper
+is root's platform parent, not an application service. Read-only extra checks
+live in the root diagnostic roster; they never acquire service ownership.
 ``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
 ``services_for_capabilities`` under their historical names as a cli-facing façade
 (so existing `from cli.commands._repo import ...` call sites keep working), but the
@@ -83,7 +79,7 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
     semantics. A plugin gates its own service (whether it starts) via an explicit
     settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
     ``AVA_TASK_MAINTENANCE_ENABLED`` — which is deterministic at daemon-start and
-    unaffected by any per-agent config overlay. start / watchdog / status all
+    unaffected by any per-agent config overlay. start / root / status all
     follow, since they derive from `build_services()`.
 
     The ``services.py`` module is loaded by FILE PATH (like
@@ -252,6 +248,10 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
         return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
     if session == "computer-mcp":
         return _computer_mcp_gate_reason()
+    if session in {"loki", "prometheus", "grafana"}:
+        from services.healthchecks.lgtm import is_lgtm_host
+
+        return None if is_lgtm_host() else "this home is not an observability station"
     if session == "otel-collector":
         return _otel_collector_gate_reason()
     if session == "heartbeat" and not settings.daemon.heartbeat_enabled:

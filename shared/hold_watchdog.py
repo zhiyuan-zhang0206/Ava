@@ -9,19 +9,10 @@ release never applies to a started stop) or itself lived inside the stopped
 stack. The user ruling that followed (agent #405, 2026-09-17 23:38): an
 unclaimed pause must unbind itself - a bug, not a policy choice.
 
-This module is the OS-side actor for that ruling: the verdict an OS-scheduled,
-one-shot ``ava cluster hold-watchdog`` reads (``shared.os_hold_watchdog``
-registers the job), plus the local compare-and-set that bounds the mechanism
-to ONE completion attempt per hold generation.
-
-**The verdict is deliberately local-only.** The full-stop shape this exists
-for is exactly the shape in which the cluster database is down, so every
-signal read here is a file, a lock, or a process probe on this host - never a
-cluster read. The two sibling mechanisms stay complementary: #3142's
-completion is spawned from a live watchdog round (DB-backed, update-armed
-holds, gateway capability excluded), while this one runs when no in-cluster
-actor can. Both spend their own budget and both run the same official ladder;
-the ladder legs serialize on the lifecycle lock.
+This module provides local completion eligibility and a compare-and-set attempt
+budget for the external transition executor. It never launches processes or
+registers an OS job. The verdict uses files, locks, and captured process identity
+because the application stack and database may both be stopped.
 
 **Gate list (all conditions required; first failure decides the reading).**
 
@@ -41,10 +32,7 @@ the ladder legs serialize on the lifecycle lock.
    cluster-restart / hold-recover), and the updater mutex not held. The
    hold-recover session is included so this mechanism cannot race #3142's
    own completion session.
-6. The held-stop marker is not FRESH: a stop is mid-flight and will clear
-   its own window (STALE / ABSENT / UNREADABLE evaluate - the marker only
-   coordinates, the lifecycle lock is the real mutex).
-7. The lifecycle lock is free: any local start/stop (a boot autostart
+6. The lifecycle lock is free: any local start/stop (a boot autostart
    included) holds it for its whole run, and completing a hold while one is
    in flight is the double-master shape this check exists to prevent.
    A probe that cannot take the lock backs off WITHOUT spending the attempt.
@@ -372,7 +360,6 @@ def evaluate(*, now: float | None = None) -> HoldWatchdogVerdict:
     """
     from shared import pause_owner
     from shared.hold_driver import liveness
-    from shared.os_watchdog_probe import HeldStopState, held_stop_state
 
     clock = time.time() if now is None else now
     try:
@@ -414,9 +401,6 @@ def evaluate(*, now: float | None = None) -> HoldWatchdogVerdict:
     if blocking is not None:
         code, detail = blocking
         return _back(code, detail, **generation)
-    marker = held_stop_state()
-    if marker is HeldStopState.FRESH:
-        return _back("held-stop", "a maintenance stop currently holds this home", **generation)
     if _lifecycle_busy():
         return _back(
             "lifecycle-busy",

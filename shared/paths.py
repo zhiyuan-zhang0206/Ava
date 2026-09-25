@@ -287,17 +287,6 @@ def monitors_dir() -> Path:
     return ava_home() / "monitors"
 
 
-def disabled_services_file() -> Path:
-    """Per-unit record of the services an operator durably disabled via
-    `ava start --disable-service`. Written by start (operator intent) and read by
-    the watchdog so a disabled service stays down instead of being revived on the
-    next 60s healthcheck round. Absent file = nothing disabled.
-
-    Returns the path only; `shared.disabled_services` owns read/write.
-    """
-    return ava_home() / "disabled_services"
-
-
 def launch_failures_path() -> Path:
     """Path of the `$AVA_HOME/last_launch_failures` file — the session names the
     last `ava start` on this host could not launch.

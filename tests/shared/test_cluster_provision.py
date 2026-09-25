@@ -283,3 +283,52 @@ def test_ensure_pgvector_extension_noop_on_connect_failure(
 
     monkeypatch.setattr(psycopg, "connect", boom)
     ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+
+
+def test_interrupted_empty_database_requires_initialization_authority(_provisioned_db: str) -> None:
+    """Only the durable first-start owner can complete a crash after CREATE DATABASE."""
+    identity = _fresh_identity()
+    admin_url = _admin_url()
+    with psycopg.connect(admin_url, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(identity)))
+    try:
+        with pytest.raises(RuntimeError, match="without initialization authority"):
+            provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
+        assert (
+            provision_database(
+                identity,
+                base_admin_url=admin_url,
+                db_admin_password=_SECRET,
+                resume_initialization=True,
+            )
+            is False
+        )
+        with psycopg.connect(_swap_db(admin_url, identity)) as conn:
+            assert conn.execute("SELECT to_regclass('public.agents')").fetchone() == ("agents",)
+    finally:
+        _drop_db_and_role(admin_url, identity)
+
+
+def test_interrupted_database_with_unknown_objects_is_preserved(_provisioned_db: str) -> None:
+    identity = _fresh_identity()
+    admin_url = _admin_url()
+    with psycopg.connect(admin_url, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(identity)))
+    try:
+        with psycopg.connect(_swap_db(admin_url, identity)) as conn:
+            conn.execute("CREATE TABLE preserve_me (value text)")
+            conn.execute("INSERT INTO preserve_me VALUES ('user data')")
+        with pytest.raises(RuntimeError, match="unknown database objects"):
+            provision_database(
+                identity,
+                base_admin_url=admin_url,
+                db_admin_password=_SECRET,
+                resume_initialization=True,
+            )
+        with psycopg.connect(_swap_db(admin_url, identity)) as conn:
+            assert conn.execute("SELECT value FROM preserve_me").fetchall() == [("user data",)]
+            assert conn.execute("SELECT to_regclass('public.schema_migrations')").fetchone() == (
+                None,
+            )
+    finally:
+        _drop_db_and_role(admin_url, identity)

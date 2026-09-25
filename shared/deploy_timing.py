@@ -304,10 +304,13 @@ GATEWAY_DOWN_OWNER_GRACE_S = 600.0
 # they are stated adjacently, because a change in what "a daemon binds its port"
 # costs would move both.
 #
-# They never nest: the rollout's local leg starts the gateway with
-# `--no-readiness-gate` precisely so the readiness question is asked once, by the
-# stronger off-box gate, rather than waited out twice.
+# Local readiness and the off-box rollout probe check different boundaries.
+# The operation deadline must include both; start never waives its verdict.
 SERVICE_READY_TIMEOUT_S = 180.0
+
+# The public serving path shares one critical readiness/startup tier across
+# CLI readiness and root monitoring. All other services use the shorter tier.
+CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-host", "im-bridge"})
 
 # How long `ava start` waits for a NON-CRITICAL service to pass its liveness
 # probe before it stops waiting on it (`cli.commands._probe`).

@@ -426,7 +426,7 @@ async def _probe_agent_runner(
         schema_mismatch=status.schema_mismatch,
         shell_count=status.shell_count,
         agent_host_online=status.agent_host_online,
-        watchdog_online=status.watchdog_online,
+        supervisor_online=status.supervisor_online,
         agent_count=status.agent_count,
         session_count=status.session_count,
         agent_groups=status.agent_groups,

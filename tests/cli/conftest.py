@@ -3,19 +3,18 @@
 Orchestration tests record the local pause/resume seam while updating the
 actual host posture. Without that posture effect, a fake recovery would leave
 later gateway requests behind a stale 503 gate. Production service and OS job
-boundaries remain guarded by the root fixtures and the local gate stubs.
+boundaries remain guarded by the root fixtures.
 """
 
 from __future__ import annotations
 
 import pathlib
-import subprocess
 from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 
 import pytest
 
-from shared import disabled_services as ds
+from shared import service_selection as ds
 from shared.config import settings
 
 
@@ -37,38 +36,6 @@ def stub_deploy_lease_identity(monkeypatch: pytest.MonkeyPatch) -> None:
             kind="rollout",
             acquired_at=datetime(2026, 8, 25, tzinfo=UTC),
         ),
-    )
-
-
-@pytest.fixture(autouse=True)
-def _gate_probe_offline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the gate observation off this box's real entry port and real launchd.
-
-    `ava status` and the health probe now observe the gate (`probe_gate`), which
-    dials `127.0.0.1:<entry port>` and shells out to `launchctl`. On a dev box that
-    entry port belongs to the operator's LIVE prod gate and that label is their real
-    launchd job, so both seams are stubbed for the whole directory rather than left
-    to each test to remember — the same reason `AVA_OS_JOBS_ENABLED=false` exists.
-
-    The default answers are "nothing on the port, no such job", which is what a
-    hermetic host looks like. Tests that assert a particular gate state (including
-    `_ensure_launchd`'s own) install their own `_launchctl` on top."""
-    import cli.commands._converge_gate as cg
-    import cli.commands._gate_systemd as gs
-
-    monkeypatch.setattr(
-        gs,
-        "_systemctl",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            [], 1, "LoadState=not-found\nActiveState=inactive\n", ""
-        ),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(gs, "unit_path", lambda home: home / "test-systemd" / gs.unit_name(home))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cg, "_entry_answers", lambda _port: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        cg,
-        "_launchctl",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 1, "", "no such process"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
@@ -198,7 +165,7 @@ def _isolate_disabled_services_marker(
     shard-5 flake, task #2177). Same redirection `tests/shared/test_disabled_services.py`
     uses: the marker is per-unit durable state, so each test gets a fresh one.
     """
-    monkeypatch.setattr(ds, "disabled_services_file", lambda: tmp_path / "disabled_services")
+    monkeypatch.setattr(ds, "selection_path", lambda: tmp_path / "service-selection.json")
 
 
 @pytest.fixture(autouse=True)

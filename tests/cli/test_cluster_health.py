@@ -166,7 +166,6 @@ def test_liveness_retry_recovers_before_the_counter_is_armed(
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     # Check 7 resolves the real prod venv through prod_source_dir() unless
@@ -246,57 +245,6 @@ def test_environment_failure_keeps_the_previous_code_failure_count(
     assert _read_count(_home).splitlines()[0] == "2"
 
 
-def test_pending_lkg_advances_after_two_gating_passes(
-    _all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The new pin becomes LKG only after two consecutive healthy observations."""
-    promoted: list[float] = []
-    monkeypatch.setattr(
-        "shared.cluster_pin.get_pending_known_good", lambda: ("PENDINGSHA", datetime.now(UTC))
-    )
-
-    def _promote(*, min_age_s: float) -> bool:
-        promoted.append(min_age_s)
-        return True
-
-    monkeypatch.setattr("shared.cluster_pin.promote_pending_known_good_if_ready", _promote)
-
-    assert _cluster_health.run_health_probe() == 0
-    marker = _home / _cluster_health.PENDING_LKG_PASSES_FILE
-    assert marker.read_text().splitlines() == ["PENDINGSHA", "1"]
-
-    assert _cluster_health.run_health_probe() == 0
-    assert promoted == [_cluster_health.PENDING_LKG_MIN_AGE_S]
-    assert not marker.exists()
-
-
-def test_gating_failure_resets_pending_lkg_streak(
-    _all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Any gating failure restarts the observation window, including environmental ones."""
-    monkeypatch.setattr(
-        "shared.cluster_pin.get_pending_known_good", lambda: ("PENDINGSHA", datetime.now(UTC))
-    )
-
-    def _not_ready(*, min_age_s: float) -> bool:
-        return False
-
-    monkeypatch.setattr("shared.cluster_pin.promote_pending_known_good_if_ready", _not_ready)
-
-    assert _cluster_health.run_health_probe() == 0
-    marker = _home / _cluster_health.PENDING_LKG_PASSES_FILE
-    assert marker.exists()
-
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: True)
-    assert _cluster_health.run_health_probe() == 1
-    assert not marker.exists()
-
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    assert _cluster_health.run_health_probe() == 0
-    assert marker.read_text().splitlines() == ["PENDINGSHA", "1"]
-
-
 @pytest.fixture
 def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: True)
@@ -304,7 +252,6 @@ def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
@@ -733,11 +680,10 @@ def test_alert_re_fires_when_failure_reason_changes(
     assert "gateway liveness" in _sent_alerts[1]
 
 
-def test_service_probes_skips_gated_and_probeless_specs(
+def test_service_probes_skips_gated_but_rejects_unknown_specs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_service_probes probes only role-wanted, non-gated specs and collects
-    the sessions whose probe is False (None = no probe available, skipped)."""
+    """Every intended service needs positive evidence; disabled services do not."""
     import cli.commands as _ns
     from cli.commands import ServiceSpec
     from ops.service_spec import (
@@ -771,7 +717,7 @@ def test_service_probes_skips_gated_and_probeless_specs(
 
     monkeypatch.setattr(_ns, "_probe_service", _probe)
 
-    assert _cluster_health._service_probes() == ["frontend"]
+    assert _cluster_health._service_probes() == ["frontend", "browser-mcp"]
 
 
 def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
@@ -864,13 +810,53 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
     assert _cluster_health._service_probes() == ["ops (home='/home/ava/.ava' != '/u/.ava')"]
 
 
-def test_service_probes_no_roles_probes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Role not resolvable (setup unfinished) -> no roster to probe; the
-    core checks are the fallback signals."""
+def test_service_probes_unknown_roster_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A responding gateway cannot replace the missing service inventory."""
     import cli.commands as _ns
 
     monkeypatch.setattr(_ns, "_roles_or_none", lambda: None)
+    assert _cluster_health._service_probes() == ["service roster unavailable"]
+
+
+@pytest.mark.parametrize("mode,names", [("only", ["gateway"]), ("except", ["frontend"])])
+def test_service_probes_respect_durable_service_intent(
+    monkeypatch: pytest.MonkeyPatch, mode: str, names: list[str]
+) -> None:
+    import cli.commands as cli
+    from shared import service_selection
+
+    wanted = cli.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)
+    excluded = cli.ServiceSpec("frontend", "unused", frozenset({"gateway"}), False)
+
+    def roster(_roles: object) -> tuple[tuple[cli.ServiceSpec, None], ...]:
+        return ((wanted, None), (excluded, None))
+
+    def probe(spec: cli.ServiceSpec) -> cli.ServiceProbe:
+        assert spec is wanted
+        return cli.ServiceProbe(True, "owned", "ready")
+
+    monkeypatch.setattr(cli, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(cli, "_services_for_roles_annotated", roster)
+    monkeypatch.setattr(cli, "_probe_service", probe)
+    monkeypatch.setattr(
+        service_selection,
+        "read_selection",
+        lambda: service_selection.ServiceSelection(mode, frozenset(names)),
+    )
     assert _cluster_health._service_probes() == []
+
+
+def test_service_probes_unreadable_selection_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    import cli.commands as cli
+
+    def unreadable() -> None:
+        raise ValueError("corrupt selection")
+
+    monkeypatch.setattr(cli, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.service_selection.read_selection", unreadable)
+    assert _cluster_health._service_probes() == [
+        "service selection unavailable (corrupt selection)"
+    ]
 
 
 # ─── cluster-stamped outbound alerts ─────────────────────────────────────────
@@ -1057,54 +1043,6 @@ def test_notify_owner_honours_im_bridge_health_url_override(
 # ── the gate's entry port rides in check 5 (alert-only) ───────────────────────
 
 
-def _gate(**kw: object) -> object:
-    import cli.commands._converge_gate as cg
-
-    fields: dict[str, object] = {
-        "entry_port": 3000,
-        "app_port": 3001,
-        "serving": True,
-        "supervised": True,
-        "supervisor": "launchd job com.ava.gate.x",
-    }
-    fields.update(kw)
-    return cg.GateStatus(**fields)  # type: ignore[arg-type]
-
-
-def test_gate_probe_is_silent_on_a_runner(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pure agent-runner owns no entry port, so it has nothing to report."""
-    import cli.commands as _ns
-
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    assert _cluster_health._gate_probe() is None
-
-
-def test_gate_probe_reports_a_dark_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    import cli.commands as _ns
-    import cli.commands._converge_gate as cg
-
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(cg, "probe_gate", lambda *_a: _gate(serving=False))  # pyright: ignore[reportUnknownArgumentType]
-    failure = _cluster_health._gate_probe()
-    assert failure is not None
-    assert "not answering" in failure
-
-
-def test_gate_probe_reports_a_serving_but_unsupervised_gate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Serving now, but nothing left to restart it — invisible to a user and to
-    every other probe, which is why it is worth a line of its own."""
-    import cli.commands as _ns
-    import cli.commands._converge_gate as cg
-
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(cg, "probe_gate", lambda *_a: _gate(supervised=False))  # pyright: ignore[reportUnknownArgumentType]
-    failure = _cluster_health._gate_probe()
-    assert failure is not None
-    assert "unsupervised" in failure
-
-
 def test_dark_gate_fails_the_probe_without_arming_rollback(
     monkeypatch: pytest.MonkeyPatch, _all_checks_pass: None, _home: Path, _sent_alerts: list[str]
 ) -> None:
@@ -1113,7 +1051,7 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
     converge step that failed to reinstall the launchd job — rolling the cluster's
     code back would re-run that step identically, so rollback is not the remedy."""
     monkeypatch.setattr(
-        _cluster_health, "_gate_probe", lambda: "gate entry :3000 not answering (dark)"
+        _cluster_health, "_service_probes", lambda: ["gate entry :3000 not answering (dark)"]
     )
     _write_aged_alert_state(
         _home,
@@ -1952,7 +1890,6 @@ def test_run_health_probe_allowed_from_prod_checkout(
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", _ok)
     monkeypatch.setattr(_cluster_health, "_schema_health", _ok)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
@@ -2249,7 +2186,6 @@ def test_editable_install_healthy_records_keep_probe_green(
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     # The throwaway `_prod_source` is not a git checkout; check 8 is not this

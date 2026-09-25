@@ -1,6 +1,6 @@
 """Persistent UI ownership for a whole-cluster rollout/restart.
 
-The always-up gate is the only owner of maintenance-page rendering.  This
+Gate is the only owner of maintenance-page rendering.  This
 module gives it one durable fact to project: while a whole-cluster
 orchestration is active, ``$AVA_HOME/deploy-state.json`` contains one versioned
 generation with a stable ``started_at``; completion removes the file.

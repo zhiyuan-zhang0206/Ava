@@ -8,6 +8,14 @@ tags:
 
 # Converge host wiring
 
+Cold start passes its admitted service roster into preparation before publishing
+the desired service file. Service-specific steps require a selected consumer;
+host wiring and private data-plane preparation remain shared dependencies.
+Standalone converge resolves the persisted selection and capability gates.
+Collector, browser and frontend preparation skip unselected services. Native
+LGTM downloads only selected backends, and invokes Loki's config validator only
+when Loki is selected. Readiness still checks every selected service.
+
 - `_converge_firewall` reconciles the per-binary Application Firewall manifest.
   Version-stamped Python, Postgres, Homebrew, browser, and observability paths mean
   an upgrade can orphan the old ALF identity while loopback keeps working — issue

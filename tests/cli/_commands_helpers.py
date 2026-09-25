@@ -20,7 +20,6 @@ __all__ = [
     "_noop_start_prechecks",
     "_patch_gateway_http",
     "_real_register_machine_or_die",
-    "_real_wait_for_services_ready",
     "_sess",
     "_spec",
 ]
@@ -36,10 +35,6 @@ def _sess(service: str) -> str:
 # _cli module. Keep a reference to the real implementation so tests can exercise
 # its actual behaviour.
 _real_register_machine_or_die = _cli._register_machine_or_die
-# Likewise for _wait_for_services_ready: the autouse fixture noops it on the _cli
-# namespace (so the start-path tests don't stall on real probes), so the tests
-# that exercise the wait itself must call the captured real implementation.
-_real_wait_for_services_ready = _cli._wait_for_services_ready
 
 
 class _FakeResult:
@@ -167,6 +162,7 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
         }, []
 
     monkeypatch.setattr(_cli, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_cli, "admit_live_start", lambda *_a, **_kw: False)
     monkeypatch.setattr(_cli, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     # The per-cluster pg/redis bring-up (`_ensure_gateway_data_plane`) starts a real
     # native instance under $AVA_HOME. These tests assert session/stop/status call
@@ -175,13 +171,19 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     from cli.commands import start as _start_mod
 
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
+    monkeypatch.setattr("cli.commands._data_plane.prepare_gateway_schema", lambda: None)
+    monkeypatch.setattr("cli.commands._data_plane.complete_gateway_data_plane", lambda **_kw: None)
+    from cli.commands._root_driver import LaunchOutcome
 
-    # Source-integrity tests cover repair separately. A prior rollout's fake
-    # installed SHA must not make these call-shape tests run a real uv sync.
-    def _skip_source_integrity(_repo: Path) -> int:
-        return 0
+    monkeypatch.setattr(
+        _cli, "_launch_service_tree", lambda roster, *_a, **_kw: LaunchOutcome(roster, ())
+    )
+    monkeypatch.setattr(
+        _cli,
+        "_wait_for_service_tree",
+        lambda *_a, **_kw: _cli.ReadinessWait((), 0.0, sessions_gone=False),
+    )
 
-    monkeypatch.setattr(_start_mod, "_verify_source_integrity", _skip_source_integrity)
     # _roles_or_none (stop/status/converge) + machine_role (cmd_start service
     # resolution) both read settings + the machine_serve_* files; test env has
     # no file → empty/Missing. Pin both to gateway so the default path is the
@@ -197,32 +199,10 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cli, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
     # _assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
     monkeypatch.setattr(_cli, "_assert_schema_current_or_die", lambda: 0)
-    # The start path now polls launched services' probes before the status
-    # snapshot. These tests stub subprocess, so the real probes (milvus tcp /
-    # watchdog pidfile) would report not-ready and stall the wait to its timeout.
-    # The wait itself is covered by its own unit tests below; noop it here.
-    # Returns a ReadinessWait whose `unready` is empty (= all ready), which keeps the
-    # start path's readiness gate satisfied. tests/cli/test_start_readiness_gate.py is
-    # where a non-empty verdict and the exit code it produces are exercised.
-    monkeypatch.setattr(
-        _cli,
-        "_wait_for_services_ready",
-        lambda *_a, **_kw: _cli.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    # `_launch_sessions`' idempotence guard asks the service's probe as well as
-    # the session (issue #1015: a live session with a dead daemon behind it must be
-    # relaunched, not skipped). Same reason as the readiness wait right above: these
-    # tests stub subprocess, so every real probe reports down and each "already
-    # running" session would be torn down and relaunched — a call-shape assertion
-    # would then be measuring the husk path instead. That path has its own tests in
-    # tests/cli/test_start_husk_session.py.
-    monkeypatch.setattr(_cli, "_husk_session_reason", lambda _spec: None)  # pyright: ignore[reportUnknownArgumentType]
-    # _ensure_frontend_deps shells out to `npm ci` when frontend deps are stale;
-    # these tests assert session call shape, not dep install, and must stay hermetic
-    # regardless of whether this checkout happens to have ui/web/node_modules.
-    from cli.commands import _session_lifecycle as _session_mod
+    # Root service preparation must not install frontend dependencies in unit tests.
+    from cli.commands import _repo, _root_driver
 
-    monkeypatch.setattr(_session_mod, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 
     # These call-shape tests use the suite's owner DB URL, not an enrolled
     # runner's bootstrap projection. Credential forwarding has its own tests
@@ -230,7 +210,7 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fixture_runner_url(_url: str) -> str:
         return "postgresql://ava_runner:test-runner@127.0.0.1:1/ava_citest"
 
-    monkeypatch.setattr(_session_mod, "runner_db_url_projection", _fixture_runner_url)
+    monkeypatch.setattr(_root_driver, "runner_db_url_projection", _fixture_runner_url)
 
 
 @pytest.fixture(autouse=True)

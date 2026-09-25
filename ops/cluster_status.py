@@ -123,7 +123,7 @@ class ClusterStatus(BaseModel):
     # per-machine in the roster; central-only daemons (labeler/memory-indexer) are not
     # here — they live in the gateway services panel.
     agent_host_online: bool | None = None
-    watchdog_online: bool | None = None
+    supervisor_online: bool | None = None
     # Agent-runner detail surfaced on the Status Page. `agent_count` is this
     # host's non-terminated agent identities, including idle and paused agents.
     # `session_count` counts live service and persistent terminal sessions.
@@ -440,6 +440,16 @@ def _paused_reason(state: shared.host_deploy_state.HostDeployState | None) -> Pa
     return None
 
 
+def _supervisor_online() -> bool | None:
+    """An observed native root is online; unavailable inspection stays unknown."""
+    from services.ava_root.client import RootClientError, root_process
+
+    try:
+        return root_process() is not None
+    except (RootClientError, RuntimeError):
+        return None
+
+
 def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
@@ -455,17 +465,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     agent_host_alive = (
         _check_pidfile(str(settings.services.agent_host_pidfile))[0] if is_agent_runner() else None
     )
-    # One watchdog per capability now; `watchdog_online` (single bool for the
-    # frontend dot) means "every watchdog this host should run is alive". A
-    # single-box host requires BOTH; a split unit requires only its own.
-    watchdog_pidfiles: list[str] = []
-    if is_gateway():
-        watchdog_pidfiles.append(str(settings.services.gateway_watchdog_pidfile))
-    if is_agent_runner():
-        watchdog_pidfiles.append(str(settings.services.agent_runner_watchdog_pidfile))
-    watchdog_alive = (
-        all(_check_pidfile(p)[0] for p in watchdog_pidfiles) if watchdog_pidfiles else False
-    )
+    supervisor_alive = _supervisor_online()
     sessions, shell_count, session_total = _collect_sessions()
     # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays
     # an open dict list so the frontend-facing status schema (and its generated TS
@@ -495,7 +495,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         schema_mismatch=schema_status,
         shell_count=shell_count,
         agent_host_online=agent_host_alive,
-        watchdog_online=watchdog_alive,
+        supervisor_online=supervisor_alive,
         agent_count=agent_count,
         session_count=session_total,
         agent_groups=agent_groups,

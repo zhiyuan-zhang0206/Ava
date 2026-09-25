@@ -1,4 +1,4 @@
-"""End-to-end behavior of the always-up gate, against real loopback sockets.
+"""End-to-end behavior of the root-owned Gate, against real loopback sockets.
 
 The gate's whole point is external behavior (what the browser sees during a
 rollout), so these tests exercise the real HTTP path: a fake gateway (auth

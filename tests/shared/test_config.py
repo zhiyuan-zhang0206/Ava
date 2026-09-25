@@ -615,12 +615,8 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "machine_description",
         "permissions_helper_enabled",
         "permissions_helper_spawn",
-        "root_driver_enabled",
         "ops_concurrency",
         "task_maintenance_enabled",
-        "watchdog_interval_seconds",
-        "watchdog_respawn_backoff_cap_seconds",
-        "watchdog_respawn_breaker_rounds",
     }
 )
 

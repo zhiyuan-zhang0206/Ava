@@ -435,30 +435,6 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
         },
     )
 
-    hold_watchdog_interval_seconds: int = Field(
-        default=300,
-        gt=0,
-        le=3600,
-        alias="AVA_HOLD_WATCHDOG_INTERVAL_SECONDS",
-        description=(
-            "How often the OS-scheduled hold watchdog evaluates this host's "
-            "maintenance hold (task #3887). Evaluation is a handful of local "
-            "file/lock reads; recovery latency is the completion bound plus at most "
-            "one interval. Capped at one hour: the mechanism's whole value is a "
-            "bounded blackout, and a longer period would let one missed cycle "
-            "stretch the recovery past an incident-sized window. Applied at "
-            "registration (converge): the launchd StartInterval / crontab minute "
-            "cadence / Task Scheduler period each run the command at this cadence, "
-            "so a change takes effect at the next converge."
-        ),
-        json_schema_extra={
-            "restart_required": "ops",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     abandoned_hold_auto_release: bool = Field(
         default=True,
         alias="AVA_ABANDONED_HOLD_AUTO_RELEASE",

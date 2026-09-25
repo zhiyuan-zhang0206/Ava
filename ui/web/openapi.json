@@ -9114,7 +9114,7 @@
             ],
             "title": "Agent Host Online"
           },
-          "watchdog_online": {
+          "supervisor_online": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -9123,7 +9123,7 @@
                 "type": "null"
               }
             ],
-            "title": "Watchdog Online"
+            "title": "Supervisor Online"
           },
           "agent_count": {
             "type": "integer",
@@ -11754,7 +11754,7 @@
             ],
             "title": "Agent Host Online"
           },
-          "watchdog_online": {
+          "supervisor_online": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -11763,7 +11763,7 @@
                 "type": "null"
               }
             ],
-            "title": "Watchdog Online"
+            "title": "Supervisor Online"
           },
           "agent_count": {
             "type": "integer",

@@ -9,17 +9,24 @@ import pytest
 
 from cli import commands as _cli
 from cli.commands.stop import _force_stop
-from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import (
     _FakeResponse,
     _FakeResult,
-    _FakeSessionBackend,
     _git_aware,
     _patch_gateway_http,
-    _sess,
 )
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_prechecks
+
+
+@pytest.fixture(autouse=True)
+def _root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No command-layer test contacts or signals a native application root."""
+    monkeypatch.setattr(_cli, "_root_tree_plan", lambda _preserve: [])
+    monkeypatch.setattr(_cli, "_stop_root_service_tree", lambda **_kwargs: 0)
+    monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: None)
+    monkeypatch.setattr("cli.commands.stop._stop_terminals_force", lambda: None)
+
 
 # ─── restart ─────────────────────────────────────────────────────────────────
 
@@ -199,7 +206,6 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
 
 def test_stop_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> None:
     """stdin input not y → abort, no kill / down commands called."""
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
 
     def fake_run(args, **_kwargs):
@@ -210,160 +216,72 @@ def test_stop_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rc == 0
 
 
-def test_stop_proceeds_on_yes(
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """stdin y → call the session kill (both backends) + stop shared pg/redis."""
-    gateway_sess = _sess("gateway")
-    service, _shell = _fake_session_backends
-    service.alive.add(gateway_sess)
-    monkeypatch.setattr(_cli, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("builtins.input", lambda _prompt: "y")  # pyright: ignore[reportUnknownArgumentType]
-
-    # This cluster's own pg/redis teardown lives behind `stop_cluster_instance`
-    # (pg_ctl stop + redis shutdown for its private instance) — track the call here.
-    infra_stops: list[int] = []
+def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Confirmed force stop asks root before stopping the private data plane."""
+    events: list[str] = []
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+    monkeypatch.setattr(_cli, "_stop_root_service_tree", lambda **_kw: events.append("root"))
     monkeypatch.setattr(
-        "cli.commands._cluster_instance.stop_cluster_instance",
-        lambda: infra_stops.append(1) or 0,
+        "cli.commands._cluster_instance.stop_cluster_instance", lambda: events.append("infra") or 0
     )
-
-    rc = _cli.cmd_stop(force=True)
-    assert rc == 0
-    # the force path kills the session on the service backend
-    assert (gateway_sess, False) in service.killed
-    assert len(infra_stops) == 1, "stop must stop this cluster's pg/redis once"
+    assert _cli.cmd_stop(force=True) == 0
+    assert events == ["root", "infra"]
 
 
-def test_stop_revokes_serving_before_stopping_sessions(
+def test_stop_revokes_serving_before_stopping_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A deliberate stop removes recovery authority before daemons unwind."""
-    from cli.commands import stop as stop_mod
     from shared import start_serving
 
-    path = tmp_path / "start-serving.json"
-    monkeypatch.setattr(start_serving, "state_path", lambda: path)
+    monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation) is True
     observed: list[bool] = []
-
-    def _compute_stop_scope(
-        *, preserve_sessions: frozenset[str], keep_browser: bool, keep_infra: bool
-    ) -> tuple[list[str], bool, bool]:
-        return [], False, True
-
-    def _print_stop_plan(
-        service_sessions: list[str],
-        *,
-        reap_agents: bool,
-        keep_browser: bool,
-        runner_only: bool,
-        keep_infra: bool,
-    ) -> None:
-        return None
-
-    def _stop_data_plane(*, skip_infra: bool, runner_only: bool) -> None:
-        return None
-
-    def _reap_orphan_step(
-        repo: Path,
-        *,
-        keep_browser: bool,
-        keep_infra: bool,
-        preserve_sessions: frozenset[str],
-        keep_gate: bool,
-    ) -> None:
-        return None
-
-    def _stop_sessions(sessions: list[str]) -> None:
-        observed.append(start_serving.is_serving())
-
-    monkeypatch.setattr(stop_mod, "_compute_stop_scope", _compute_stop_scope)
-    monkeypatch.setattr(stop_mod, "_print_stop_plan", _print_stop_plan)
-    monkeypatch.setattr(stop_mod, "_stop_data_plane", _stop_data_plane)
-    monkeypatch.setattr(stop_mod, "_reap_orphan_step", _reap_orphan_step)
-    monkeypatch.setattr(stop_mod, "_stop_sessions", _stop_sessions)
-
-    assert stop_mod._force_stop(tmp_path, require_confirmation=False) == 0
+    monkeypatch.setattr(
+        _cli, "_stop_root_service_tree", lambda **_kw: observed.append(start_serving.is_serving())
+    )
+    monkeypatch.setattr("cli.commands._cluster_instance.stop_cluster_instance", lambda: 0)
+    assert _force_stop(tmp_path, require_confirmation=False) == 0
     assert observed == [False]
 
 
 def test_do_stop_keep_infra_skips_infra_teardown(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """`_do_stop(keep_infra=True)` skips stopping shared pg/redis — cmd_update orchestrator
-    uses this to keep the DB alive during graceful stop, otherwise the next step
-    apply_pending_migrations would immediately get connect refused (verified in
-    2026-05-19 prod incident).
-    """
-    gateway_sess = _sess("gateway")
-    service, _shell = _fake_session_backends
-    service.alive.add(gateway_sess)
-    monkeypatch.setattr(_cli, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
-
-    infra_stops: list[int] = []
+    events: list[str] = []
+    monkeypatch.setattr(_cli, "_stop_root_service_tree", lambda **_kw: events.append("root"))
     monkeypatch.setattr(
-        "cli.commands._cluster_instance.stop_cluster_instance",
-        lambda: infra_stops.append(1) or 0,
+        "cli.commands._cluster_instance.stop_cluster_instance", lambda: events.append("infra") or 0
     )
-
-    rc = _force_stop(tmp_path, require_confirmation=False, keep_infra=True)
-    assert rc == 0
-    # The explicit force path ends the selected services and retains infra.
-    assert service.signalled == []
-    assert (gateway_sess, False) in service.killed
-    # this cluster's pg/redis **not** stopped (keep_infra keeps DB alive before migrate)
-    assert infra_stops == []
+    assert _force_stop(tmp_path, require_confirmation=False, keep_infra=True) == 0
+    assert events == ["root"]
 
 
 def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """An in-place stop / update leaves the headed browser session running so the
-    login Chrome is not bounced (keep_browser defaults True)."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    killed: list[str] = []
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr("cli.commands._cluster_instance.stop_cluster_instance", lambda: 0)
-
+    calls: list[dict[str, object]] = []
     reaps: list[int] = []
+    monkeypatch.setattr(_cli, "_stop_root_service_tree", lambda **kw: calls.append(kw))
     monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: reaps.append(1))
-
-    rc = _force_stop(tmp_path, require_confirmation=False)
-    assert rc == 0
-    assert _sess("browser") not in killed, "browser session must be preserved by default"
-    assert _sess("gateway") in killed, "non-browser services are still stopped"
-    assert reaps == [], "a stop that preserves the browser must not sweep its Chrome"
+    monkeypatch.setattr("cli.commands._cluster_instance.stop_cluster_instance", lambda: 0)
+    assert _force_stop(tmp_path, require_confirmation=False) == 0
+    assert calls == [{"preserve": frozenset({"browser"}), "force": True}]
+    assert reaps == []
 
 
 def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """keep_browser=False (full teardown / `ava cluster destroy`) takes the browser
-    session down too, AND sweeps a Chrome that left that session on a SingletonLock
-    handoff — a destroyed cluster must not leave an orphan headed Chrome holding
-    the cluster's CDP port."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    killed: list[str] = []
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
+    events: list[str] = []
 
-    monkeypatch.setattr("cli.commands._cluster_instance.stop_cluster_instance", lambda: 0)
+    def stop_root(**kwargs: object) -> None:
+        assert kwargs == {"preserve": frozenset(), "force": True}
+        events.append("root")
 
-    order: list[str] = []
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: (killed.append(s), order.append(s)))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: order.append("reap"))
-
-    rc = _force_stop(tmp_path, require_confirmation=False, keep_browser=False)
-    assert rc == 0
-    assert _sess("browser") in killed, "keep_browser=False must stop the browser session"
-    assert "reap" in order, "keep_browser=False must also sweep the cluster's Chrome"
-    # Ordering matters: the watchdog is already dead when the sweep runs, so
-    # nothing relaunches Chrome onto the port the sweep just cleared.
-    assert order.index("reap") == len(order) - 1, "the sweep runs after every session kill"
+    monkeypatch.setattr(_cli, "_stop_root_service_tree", stop_root)
+    monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: events.append("browser"))
+    monkeypatch.setattr(
+        "cli.commands._cluster_instance.stop_cluster_instance", lambda: events.append("infra") or 0
+    )
+    assert _force_stop(tmp_path, require_confirmation=False, keep_browser=False) == 0
+    assert events == ["root", "browser", "infra"]
 
 
 def test_reap_cluster_chrome_reports_pids_and_survives_a_failure(
@@ -410,120 +328,9 @@ def test_cmd_stop_stop_browser_flag_threads_through(
     assert seen["keep_browser"] is False, "--stop-browser takes the browser down"
 
 
-# ─── graceful stop / update (PR ava-update) ─────────────────────────────────
-
-
-def test_graceful_kill_session_noop_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """session does not exist → (True, 'noop'), idempotent."""
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    ok, mode = _cli._graceful_kill_session("ava-missing", timeout_s=0.5)
-    assert ok
-    assert mode == "noop"
-
-
-def test_graceful_kill_session_forwards_to_the_backend(
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """The cli seam forwards a graceful kill to the service backend and reports
-    its mode."""
-    service, _shell = _fake_session_backends
-    # noop precheck (cli layer) sees the session alive → proceed to the graceful kill
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-
-    ok, mode = _cli._graceful_kill_session("ava-gateway", timeout_s=10.0)
-    assert ok
-    assert mode == "graceful"
-    assert ("ava-gateway", True) in service.killed
-
-
-def test_graceful_kill_session_forced_fallback_is_reported(
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """The backend's graceful-then-force escalation is surfaced as (True, 'forced')
-    — the cli seam passes the mode through, it does not decide it."""
-    service, _shell = _fake_session_backends
-    service.graceful_result = (True, "forced")
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-
-    ok, mode = _cli._graceful_kill_session("ava-gateway", timeout_s=0.01)
-    assert ok
-    assert mode == "forced"
-    assert ("ava-gateway", True) in service.killed
-
-
-# ─── _stop_sessions: the printed marker must carry the confirmation ──────
-
-
-def test_force_stop_ends_controllers_before_dependents(
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    from cli.commands.stop import _stop_sessions
-
-    service, _ = _fake_session_backends
-    targets = ["ava-gateway", "ava-agent-host", "ava-gateway-watchdog", "ava-ops"]
-    service.alive.update(targets)
-    _stop_sessions(targets)
-    assert service.killed[0] == ("ava-gateway-watchdog", False)
-    assert {name for name, graceful in service.killed if not graceful} == set(targets)
-    assert service.signalled == []
-
-
-def test_stop_sessions_force_path_reports_failure(monkeypatch, capsys) -> None:
-    """The explicit force path (`ava stop --force`) also stops printing ✓ for a kill that was
-    not confirmed: `_kill_session` answering False is ✗."""
-    from cli.commands.stop import _stop_sessions
-
-    monkeypatch.setattr(_cli, "_kill_session", lambda _s, **_kw: False)  # pyright: ignore[reportUnknownMemberType]
-
-    with pytest.raises(RuntimeError, match="force stop"):
-        _stop_sessions(["ava-gateway"])
-
-    assert "✗ ava-gateway" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_stop_scope_includes_only_service_backend_sessions(
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """The stop plan covers every service session alive on the SERVICE backend
-    and nothing else — a same-named session on the orchestration backend (the
-    pre-switch leftovers, gone since the migration) is not the stop's
-    business, and must never be killed by it."""
-    from cli.commands.stop import _compute_stop_scope
-
-    service, shell = _fake_session_backends
-    service.alive.add(_sess("gateway"))
-    shell.alive.add(_sess("labeler"))
-
-    sessions, _runner_only, _skip = _compute_stop_scope(
-        preserve_sessions=frozenset(), keep_browser=True, keep_infra=False
-    )
-    assert _sess("gateway") in sessions
-    assert _sess("labeler") not in sessions, (
-        "orchestration-side sessions are never in the stop plan"
-    )
-
-
-def test_stop_scope_is_empty_when_no_session_on_either_backend(
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """No session on either backend → an empty stop plan (nothing to kill)."""
-    from cli.commands.stop import _compute_stop_scope
-
-    sessions, _runner_only, _skip = _compute_stop_scope(
-        preserve_sessions=frozenset(), keep_browser=True, keep_infra=False
-    )
-    assert sessions == []
-
-
 # ─── gateway-backed CLI paths (stop announce) ──────────────────────────────
 def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
-    """Run the real `_do_stop` with its side effects stubbed: no live sessions
-    to kill, gateway-role host, data-plane teardown recorded into `events`."""
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    """Run force stop with a private root boundary and recorded storage teardown."""
     monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
     monkeypatch.setattr("cli.commands.stop._repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(

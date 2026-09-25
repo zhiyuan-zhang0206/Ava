@@ -54,11 +54,9 @@ _HANDLERS: tuple[tuple[list[str], str], ...] = (
     (["firewall", "sync"], "_h_firewall_sync"),
     (["cluster", "status"], "_h_cluster_status"),
     (["cluster", "restart"], "_h_cluster_restart"),
-    (["cluster", "ensure-db-role"], "_h_cluster_ensure_db_role"),
     # The pre-#217 name stays as an alias — both spellings route to the same
     # handler (issue #217: the verb provisions the ava_runner POSTGRES role,
     # not a machine capability).
-    (["cluster", "ensure-runner-role"], "_h_cluster_ensure_db_role"),
     (["plugins", "update"], "_h_plugins_update"),
     (["agents", "ls"], "_h_agents_ls"),
     (["agents", "cancel", "1"], "_h_agents_cancel"),
@@ -257,9 +255,6 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
     # `start` is the one verb with a pre-dispatch side effect (the settings-free
     # installed-home gate), which this test neutralizes — it asserts flag
     # forwarding, not bring-up behaviour.
-    import cli.preflight as _preflight
-
-    monkeypatch.setattr(_preflight, "require_installed_home", lambda: None)
     rc = _main.main(
         [
             "start",
@@ -304,7 +299,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
         assert env.get("AVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
 
     # Starting and graceful draining both need data-plane configuration.
-    monkeypatch.setattr(_preflight, "require_installed_home", lambda: None)
+    monkeypatch.setattr("cli.start_intent.prepare_start", lambda _args: None)
     for verb in ("start", "pause", "stop"):
         env = {"PATH": "/usr/bin"}
         monkeypatch.setattr(_os, "environ", env)
@@ -392,7 +387,7 @@ def test_unanchored_checkout_is_refused_before_dispatch(
     assert dispatched == [], "the handler must never run"
     err = capsys.readouterr().err
     assert "/Users/x/.ava" in err, "the message must name the home it would have hit"
-    assert "install.sh --worktree" in err
+    assert "ava start --worktree" in err
 
 
 @pytest.mark.parametrize(
@@ -457,3 +452,69 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
     parser.add_argument("--path")
     parser.set_defaults(func=lambda _args: sink.append(verb) or 0)
     return parser
+
+
+def test_first_start_is_settings_free_until_identity_is_published(tmp_path: Path) -> None:
+    """Deny settings and network; the real public dispatch must reach its runtime boundary."""
+    repo = Path(__file__).resolve().parents[2]
+    code = r"""
+import importlib.abc
+import os
+import socket
+import sys
+import types
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+class DenySettings(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "shared.config" or fullname.startswith("shared.config."):
+            raise AssertionError("premature runtime Settings import")
+sys.meta_path.insert(0, DenySettings())
+def no_network(*args, **kwargs):
+    raise AssertionError("initialization performed a network dial")
+socket.socket.connect = no_network
+socket.create_connection = no_network
+from cli import main, start_intent
+from shared import cluster
+home = Path(os.environ["AVA_HOME"])
+checkout = home.parent / "checkout"
+checkout.mkdir()
+start_intent._checkout = lambda: checkout
+cluster._port_free = lambda _port: True
+calls = []
+def configured():
+    assert (home / "start-intent.json").is_file()
+    assert (home / ".env").is_file()
+    assert Path(os.environ["AVA_CLUSTER_REGISTRY"]).is_file()
+def log():
+    configured()
+    calls.append("logging")
+main._init_detached_cli_logging = log
+def start(**kwargs):
+    configured()
+    calls.append("runtime")
+    return 0
+sys.modules["cli.commands"] = types.SimpleNamespace(cmd_start=start)
+assert main.main(["start", "--worktree"]) == 0
+assert calls == ["logging", "runtime"]
+assert "shared.config" not in sys.modules
+"""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env.update(
+        AVA_HOME=str(tmp_path / "home"),
+        AVA_HOME_OVERRIDE="1",
+        AVA_CLUSTER_REGISTRY=str(tmp_path / "clusters.json"),
+        AVA_CLI_LOG_NAME="first-start",
+        AVA_DB_URL="postgresql://foreign.invalid/forbidden",
+        AVA_GATEWAY_URL="http://foreign.invalid",
+    )
+    result = subprocess.run(  # noqa: S603 — fixed interpreter and literal probe
+        [sys.executable, "-I", "-B", "-c", code, str(repo)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

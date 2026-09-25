@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Cluster UI Update State
-description: Generation-guarded persistent ownership of the always-up gate's updating page during a whole-cluster rollout or restart.
+description: Generation-guarded persistent ownership of Gate's updating page during a whole-cluster rollout or restart.
 tags:
 - deploy
 - gate
@@ -67,7 +67,9 @@ writer (fleet verified 2026-09-20).
 - Malformed/unknown marker: invalid → Gate renders Service unavailable and
   emits a rate-limited warning; it never guesses that an update exists.
 
-The gate reads one immutable snapshot per HTTP request. An active snapshot
+Gate is an ordinary root-owned service. A full root transition may stop its
+entry listener; the persisted marker does not promise uninterrupted serving.
+While running, Gate reads one immutable snapshot per HTTP request. An active snapshot
 always renders System updating; without one, a gateway/app transport failure
 renders Service unavailable. The two failure phases cannot invent different
 states.

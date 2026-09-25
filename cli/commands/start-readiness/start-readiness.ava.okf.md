@@ -69,7 +69,7 @@ fact: **is the port I am about to bind mine to bind?**
   (`shared/launch_failures.py`). That record exists because the rollout runs this start
   in a *child*: an exit code cannot carry names, and the parent's own roster is the
   pre-pull tree's, so only the child can say what it failed to launch.
-- The readiness gate and its verdict (`_wait_for_services_ready`, the 0/1/4 exit contract, `--no-readiness-gate` callers, the waiver flag-arrival rule, and the record that survives the waiver): [[cli/commands/start-readiness/readiness-verdict.ava.okf.md]].
+- The root-owned readiness verdict, 0/1/4 exit contract, and failure evidence: [[cli/commands/start-readiness/readiness-verdict.ava.okf.md]].
 - The update leg and `ava restart` run the read-only parts of these checks
   BEFORE they stop anything — the pre-bind health-port gate, the private-tree
   skeleton, migration readability, and the venv entry points — so a failure

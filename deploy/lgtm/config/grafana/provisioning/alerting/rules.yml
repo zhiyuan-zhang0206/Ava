@@ -1897,41 +1897,29 @@ groups:
                     params: [C]
 
       # ── Watchdog tick stale (per capability, current or recently seen) ──
-      # A watchdog process can stay alive while a controller or healthcheck
-      # never finishes. Its healthz listener is driven by the same completed
-      # tick timestamp, and this metric observes that timestamp independently
-      # through the OTLP metrics path. The first branch catches a recent but
-      # stale timestamp after 3m. The second carries the alert through Prometheus
-      # staleness: a capability seen within 24h that has emitted no sample in 3m.
-      # ``machine`` and ``process`` distinguish the gateway and agent-runner
-      # watchdogs on one host without paging for a retired machine forever.
-      - uid: ava-ops-watchdog-tick-stale
-        title: "Watchdog stopped completing ticks"
+      # Completed observations are independent from health. The expectation
+      # timestamp also covers root boot without a first completed round. Keep
+      # machine/home/process dimensions so a healthy peer cannot hide a silent root.
+      - uid: ava-ops-root-health-stale
+        title: "Root stopped completing health rounds"
         condition: D
-        # The 3m freshness/absence windows are the debounce. A second `for`
-        # delay would add another round after a watchdog has already failed its
-        # 90s deadline and missed its 60s cadence. The remaining 30s is an
-        # intentional alert margin; re-derive this window if that deadline or
-        # cadence changes.
         for: 0m
         noDataState: OK
         execErrState: OK
         labels:
           severity: error
-          ruleUID: ava-ops-watchdog-tick-stale
-          metric: watchdog_tick_stale
+          ruleUID: ava-ops-root-health-stale
+          metric: root_health_stale
           team: ava-ops
         annotations:
-          summary: "{{ $labels.machine }} {{ $labels.process }} watchdog has not completed a tick for 3 minutes"
+          summary: "{{ $labels.machine }} {{ $labels.home_id }} {{ $labels.process }} has no completed root health round for 3 minutes"
           description: >-
-            This watchdog recorded a completed tick within the previous 24 hours,
-            but its latest tick timestamp is more than three minutes old or it
-            has emitted no tick sample for three minutes. The watchdog process
-            can still be alive while a controller or healthcheck is wedged.
-            Check its role-specific healthz endpoint and log, then inspect the
-            controller or healthcheck named before the timeout. If the sibling
-            ava-ops-gateway-metrics-silent alert also fires, triage the OTLP or
-            Prometheus metrics pipeline before treating this as a watchdog wedge.
+            This root announced expected health rounds within the previous 24
+            hours, but the last completed round is stale or no round completed
+            after startup. Failed and unavailable observations still complete a
+            round; they remain visible in root status and root_diagnostic events.
+            Inspect root status and logs. If metrics pipeline alerts also fire,
+            inspect the OTLP and Prometheus path before concluding root is stuck.
         data:
           - refId: A
             datasourceUid: prometheus
@@ -1943,18 +1931,32 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                max by (machine, process) (
-                  time() - max_over_time(ava_watchdog_tick_last_tick_timestamp_seconds[3m])
-                ) > 180
-                or
                 (
-                  max by (machine, process) (
-                    max_over_time(ava_watchdog_tick_last_tick_timestamp_seconds[24h])
+                  max by (machine, home_id, process) (
+                    time() - max_over_time(ava_root_health_tick_last_tick_timestamp_seconds[3m])
+                  ) > 180
+                  or
+                  (
+                    max by (machine, home_id, process) (
+                      last_over_time(ava_root_health_expected_expected_since_timestamp_seconds[24h])
+                    ) > 0
+                    unless on(machine, home_id, process)
+                    max by (machine, home_id, process) (
+                      max_over_time(ava_root_health_tick_last_tick_timestamp_seconds[3m])
+                    )
                   )
-                  unless on(machine, process)
-                  max by (machine, process) (
-                    max_over_time(ava_watchdog_tick_last_tick_timestamp_seconds[3m])
-                  )
+                )
+                and on(machine, home_id, process)
+                (
+                  max by (machine, home_id, process) (
+                    last_over_time(ava_root_health_expected_expected_since_timestamp_seconds[24h])
+                  ) > 0
+                )
+                and on(machine, home_id, process)
+                (
+                  time() - max by (machine, home_id, process) (
+                    last_over_time(ava_root_health_expected_expected_since_timestamp_seconds[24h])
+                  ) > 180
                 )
               instant: true
               range: false

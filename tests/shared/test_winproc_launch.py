@@ -422,7 +422,7 @@ def test_new_session_shell_command_reaches_popen_as_a_string(
         ("zz-exec-shell", "build && run", winproc._PRIVATE_CONSOLE_FLAGS),
     ],
 )
-def test_persistent_session_breaks_away_only_from_an_exec_job(
+def test_ordinary_session_remains_contained_even_in_an_exec_job(
     unit_home: Path,
     fake_popen: type[_FakePopen],
     tmp_path: Path,
@@ -431,8 +431,7 @@ def test_persistent_session_breaks_away_only_from_an_exec_job(
     cmd: str,
     base_flags: int,
 ) -> None:
-    """Only the verified one-shot context adds CREATE_BREAKAWAY_FROM_JOB;
-    ordinary session launches keep their existing outer-Job behavior."""
+    """A named agent execution cannot silently claim durable terminal lifetime."""
     monkeypatch.setattr(winjob._exec_job_state, "attached", False)
     monkeypatch.setenv("AVA_EXEC_JOB_MEMBER", "1")
     assert winproc.new_session(f"{name}-plain", cmd, tmp_path, env={})
@@ -442,4 +441,4 @@ def test_persistent_session_breaks_away_only_from_an_exec_job(
     winjob.publish_parent_job_gate(gate)
     winjob.await_parent_job_gate(str(gate))
     assert winproc.new_session(name, cmd, tmp_path, env={})
-    assert _target_calls(fake_popen)[-1].creationflags == base_flags | winproc._BREAKAWAY
+    assert _target_calls(fake_popen)[-1].creationflags == base_flags

@@ -107,6 +107,13 @@ _LIVE_READ_ENV_VARS = frozenset(
 # include a one-line inline comment explaining why.
 _ALLOWED_FILES = frozenset(
     {
+        "cli/main.py",  # CLI bootstrap sets config/profile/log routing before importing Settings or command modules.
+        "cli/preflight.py",  # Validates explicit home/registry and config inputs before Settings can load a cluster.
+        "cli/commands/cluster_lifecycle.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
+        "cli/commands/_temporary_stop.py",  # Clears one-shot home override transport; this is child environment control, not runtime config.
+        "cli/start_intent.py",  # Identity bootstrap precedes Settings: read and pin the explicit home and birth inputs before config imports.
+        "tests/cli/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
+        "tests/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
         "scripts/legacy_lkg/prepare.py",  # CI fixed-base reconstruction, before either app Settings exists; never a production entry.
         "scripts/legacy_lkg/cold_boot.py",  # CI private normal-process env and pre-Settings home rejection proof.
         "shared/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
@@ -144,7 +151,6 @@ _ALLOWED_FILES = frozenset(
         "shared/trace.py",  # sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Ava's own config surface is the AVA_TRACE_STRIP_CONTENT settings field, which drives this env translation
         "shared/deploy/git/gitenv.py",  # git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Ava runtime config
         "shared/process_env.py",  # centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state
-        "shared/lgtm_systemd.py",  # _user_bus_environment overlays the logind user-bus identity (XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS) on the live env for systemctl --user; OS session plumbing (same class as shared/platform.py), not Ava runtime config — Settings has no model for it and the overlay must reflect the calling process's env
         "ops/agent_launch.py",  # agent_spawn_env_dict copies the registry's forward view (shared/env_registry.py child_env) from the live env into a detached child's env — the same child-env handoff as shared.session_env; Settings cannot enumerate non-modeled keys and the dict must reflect the parent's live env, not its own snapshot
         "scripts/migration_smoke.py",  # builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Ava runtime config
         "scripts/lint_code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.

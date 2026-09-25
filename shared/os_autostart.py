@@ -94,14 +94,8 @@ def _autostart_plist_content() -> str:
     `shared/boot_policy.py`, with launchd rather than a loop of ours doing the
     retrying — which is why this job runs plain `ava start` and not `ava boot`.
 
-    `--no-readiness-gate` is exactly why that distinction needs handling here rather
-    than only in `cli.boot_retry`. `SuccessfulExit` is a boolean: launchd cannot tell
-    `ava start`'s "a step failed" (1, retry it) from "services launched, one is not
-    serving yet" (`SERVICES_NOT_READY_EXIT_CODE`, do not retry forever). So the boot
-    path opts out of the readiness verdict on every platform, and the three keep the
-    single behaviour `boot_policy` insists they share. The flag suppresses only the
-    exit code; the wait still happens and the unready services are still named in
-    `autostart.log`.
+    Start remains unsuccessful until readiness passes. Its idempotent root
+    reconciliation preserves healthy units on subsequent boot attempts.
     """
     label = _autostart_label(_home_slug())
     ava = ava_binary_path()
@@ -117,7 +111,6 @@ def _autostart_plist_content() -> str:
     <array>
         <string>{ava}</string>
         <string>start</string>
-        <string>--no-readiness-gate</string>
     </array>
 {launchd_env_block()}
     <key>RunAtLoad</key>

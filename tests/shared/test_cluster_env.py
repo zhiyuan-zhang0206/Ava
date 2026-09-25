@@ -48,6 +48,9 @@ def test_derive_env_ports_and_urls(tmp_path: Path):
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
+        db_admin_password="owner-value",  # noqa: S106 — isolated test credential
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
         pgbouncer_enabled=False,  # pooling off -> AVA_DB_URL stays on the direct pg port
     )
     # the secret is written into the cluster .env so every cluster process has it
@@ -61,11 +64,11 @@ def test_derive_env_ports_and_urls(tmp_path: Path):
     assert env["AVA_MILVUS_PORT"] == "18008"
     assert env["AVA_MILVUS_URI"] == "http://127.0.0.1:18008"
     # db_url + redis_url carry the data-plane identity AS DATA: a fresh birth
-    # writes the fixed `ava` db/role/ACL identifier, password = the cluster
-    # secret. The redis URL keeps the base logical DB (0) — every cluster owns
+    # writes the fixed `ava` db/role/ACL identifier with independent data-plane
+    # credentials. The redis URL keeps the base logical DB (0) — every cluster owns
     # its redis, so there is no per-cluster index swap.
-    assert env["AVA_DB_URL"] == "postgresql://ava:sekret@localhost:5432/ava"
-    assert env["AVA_REDIS_URL"] == "redis://ava:sekret@localhost:6379/0"
+    assert env["AVA_DB_URL"] == "postgresql://ava:owner-value@localhost:5432/ava"
+    assert env["AVA_REDIS_URL"] == "redis://ava:runtime-value@localhost:6379/0"
     # channels are fixed (single per-cluster redis, no neighbour to prefix away from)
     assert env["AVA_EVENTS_CHANNEL"] == "ava:events"
 
@@ -103,6 +106,9 @@ def test_derived_env_keys_in_sync(tmp_path: Path):
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
+        db_admin_password="owner-value",  # noqa: S106 — isolated test credential
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
     assert set(env) == env_registry.derived_env_keys()
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -117,6 +123,9 @@ def test_derive_env_pgbouncer_enabled_writes_pooler_port(tmp_path: Path):
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
+        db_admin_password="owner-value",  # noqa: S106 — isolated test credential
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
     from urllib.parse import urlsplit
 
@@ -282,6 +291,9 @@ def test_health_port_env_matches_derive_env_for_the_same_base(tmp_path: Path):
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
+        db_admin_password="owner-value",  # noqa: S106 — isolated test credential
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
     hand_set = env_registry.health_port_env(18000)
     assert {k: installed[k] for k in hand_set} == hand_set
@@ -361,3 +373,25 @@ def test_allocate_ports_skips_blocks_overlapping_existing_records(
     # ±26 window skips 18027 — the record could be a 27-wide block
     # [18010,18036] — and lands on 18054. Pins the window, not just the skip.
     assert cl.allocate_ports({18010})["gateway"] == 18054
+
+
+@pytest.mark.parametrize("missing", ["db_admin_password", "redis_admin_password", "redis_password"])
+def test_derive_authenticated_env_refuses_missing_data_plane_credential(
+    tmp_path: Path, missing: str
+) -> None:
+    credentials = {
+        "db_admin_password": "owner-value",
+        "redis_admin_password": "admin-value",
+        "redis_password": "runtime-value",
+    }
+    credentials[missing] = ""
+    with pytest.raises(ValueError, match="explicit data-plane credentials"):
+        cluster.derive_env(
+            _rec(tmp_path),
+            base_db_url="postgresql://ava@localhost:5432/ava",
+            base_redis_url="redis://localhost:6379/0",
+            cluster_secret="bearer-only",  # noqa: S106 — isolated test credential
+            db_admin_password=credentials["db_admin_password"],
+            redis_admin_password=credentials["redis_admin_password"],
+            redis_password=credentials["redis_password"],
+        )

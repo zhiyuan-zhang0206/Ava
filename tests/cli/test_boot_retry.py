@@ -87,21 +87,24 @@ def test_the_child_is_this_interpreter_running_ava_start(
     `ava.exe`, and re-deriving it here would reopen exactly that."""
     _stub_returncodes(monkeypatch, runs, [0])
     boot_retry.run_boot([])
-    assert runs[0] == [sys.executable, "-m", "cli.main", "start", "--no-readiness-gate"]
+    assert runs[0] == [sys.executable, "-m", "cli.main", "start"]
 
 
 def test_start_flags_are_forwarded(monkeypatch: pytest.MonkeyPatch, runs: list[list[str]]) -> None:
     _stub_returncodes(monkeypatch, runs, [0])
     boot_retry.run_boot(["--machine-name", "laptop-host"])
-    assert runs[0][-4:] == [
-        "start",
-        "--machine-name",
-        "laptop-host",
-        # Appended after the caller's flags, never in place of them: the boot path must
-        # not be able to produce a readiness exit code, because this loop retries any
-        # non-zero forever. tests/cli/test_start_readiness_gate.py owns the why.
-        "--no-readiness-gate",
-    ]
+    assert runs[0][-3:] == ["start", "--machine-name", "laptop-host"]
+
+
+def test_unready_start_is_retried_until_ready(
+    monkeypatch: pytest.MonkeyPatch, runs: list[list[str]]
+) -> None:
+    from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+
+    slept = _stub_returncodes(monkeypatch, runs, [SERVICES_NOT_READY_EXIT_CODE, 0])
+    assert boot_retry.run_boot([]) == 0
+    assert len(runs) == 2
+    assert slept == [BOOT_RETRY_INTERVAL_S]
 
 
 def _stub_run_capturing_stdio(

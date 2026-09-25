@@ -50,7 +50,7 @@ Three doc axes get exemptions, not a blanket skip:
 
 1. **CLI flags.** Every `--flag` written as part of a command invocation,
    checked against the live source of truth: the argparse tree from
-   `cli.main._build_parser` (plus `cli/enroll.py`, routed before the parser) and
+   `cli.main._build_parser` and
    each `scripts/*.sh`'s own case arms.
 
    Three things this gets right that the obvious version does not, each a false
@@ -154,10 +154,6 @@ def ava_flags() -> dict[tuple[str, ...], set[str]]:
                     child = (*path, name)
                     by_path[child] = _options(sub)
                     stack.append((child, sub))
-    # `ava enroll` is routed before the main parser (it must not import Settings),
-    # so its options are not in the tree above.
-    enroll_src = (REPO / "cli" / "enroll.py").read_text()
-    by_path[("ava", "enroll")] = set(re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', enroll_src))
     return by_path
 
 

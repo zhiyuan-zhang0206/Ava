@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 222 | event stream |
+| telemetry (category=telemetry) | `events` | 220 | event stream |
 | log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 222)
+## 3. Telemetry events (category=telemetry, 220)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -249,7 +249,6 @@ consumers: see the comments at each emit point.
 | `host_held_wake_truncated` | a held-controls wake stopped quietly because the update straggler reap had marked its row 'restarting' — the successor boundary owns the row and its un-applied restart, so the wake had nothing left to do; not a failure | observation | — | — | events |
 | `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events |
 | `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events |
-| `schema_mismatch_blocked` | watchdog held back DB-dependent services for a code/schema/pin mismatch | anomaly | — | — | events |
 | `db_outage_wait` | db outage wait | anomaly | — | — | events |
 | `db_outage_pause` | db outage pause | anomaly | — | — | events |
 | `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | events |
@@ -257,7 +256,6 @@ consumers: see the comments at each emit point.
 | `db_pool_acquire_timeout` | db pool acquire timeout | anomaly | — | — | events |
 | `db_pool_acquire_slow` | db pool acquire slow | anomaly | — | — | events |
 | `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events |
-| `pgbouncer_repaired` | pgbouncer watchdog repair | anomaly | — | — | events |
 | `editable_pth_repaired` | poisoned editable-install pointer repaired to the prod source root | anomaly | — | — | events |
 | `editable_direct_url_repaired` | poisoned editable-install direct_url repaired to the prod source root | anomaly | — | — | events |
 | `exec_editable_install_poisoned` | poisoned editable install repaired before an exec child spawn | anomaly | — | — | events |
@@ -282,11 +280,9 @@ consumers: see the comments at each emit point.
 | `circuit_breaker_compact` | forced overflow compact fired by the open breaker | noise | — | — | events |
 | `heartbeat_circuit_open` | heartbeat consumed while the breaker is open | noise | — | — | events |
 | `emergency_compact` | emergency compaction (overflow self-rescue) | noise | — | — | events |
-| `respawn_breaker_open` | watchdog respawn circuit breaker opened — repeated failed respawns held until a probe-alive round | anomaly | — | — | events |
 | `root_chain_broken` | root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact | anomaly | — | — | events |
 | `root_restart_breaker_open` | root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round | anomaly | — | — | events |
 | `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events |
-| `permissions_helper_repair_failed` | permissions helper launchd repair (bootout+bootstrap) did not restore ping — escalating; the episode retries under backoff | anomaly | — | — | events |
 | `schedule_stalled` | enabled non-completed schedule has had no live session for more than two hours | anomaly | schedule_id, status, stalled_seconds | — | events |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events |
 | `checkpoint_trim` | checkpoint trimmed | noise | — | — | events |
@@ -304,7 +300,9 @@ consumers: see the comments at each emit point.
 | `auth401_rejected` | gateway auth-401 rejections in the 60s window (aggregate count) | noise | count | — | events |
 | `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events |
 | `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events |
-| `watchdog_tick` | watchdog completed one full healthcheck and reconcile round | noise | last_tick_timestamp_seconds | — | events |
+| `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events |
+| `root_diagnostic` | root diagnostic verdict changed; observation only, no recovery authority | anomaly | — | — | events |
+| `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events |
 | `pitr_remote_inventory` | PITR remote object inventory (backend-scoped absolute object and byte state) | noise | backend, object_count, bytes | — | events |
 | `recovery_drill_failed` | scheduled logical dump or PITR recovery proof failed | anomaly | drill, detail | — | events |
 | `telemetry_read_stale` | read-side telemetry staleness detected — heartbeat older than threshold | anomaly | source, signal, threshold_s, age_s, action, reason | — | events |

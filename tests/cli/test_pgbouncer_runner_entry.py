@@ -1,8 +1,7 @@
 """Unit tests for the pgbouncer userlist runner entry (Task #1236).
 
-The pooler's userlist carries `ava_runner` with its own password exactly when
-the cluster has a runner credential — a legacy cluster keeps a byte-identical
-userlist until `ava cluster ensure-db-role` runs.
+The pooler receives the recorded independent owner and runner credentials.
+The optional renderer can also represent an owner-only explicit userlist.
 """
 
 from __future__ import annotations
@@ -25,9 +24,10 @@ def _ensure_from_home_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
     """Run the fresh-start path while keeping config writes real and local."""
     monkeypatch.setattr(pg, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(pg, "pgbouncer_bin", lambda: str(Path(__file__)))
-    monkeypatch.setattr(pg, "_live_pg_socket_dir", lambda _port: tmp_path / "pg-socket")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pg, "_pg_socket_dir", lambda: tmp_path / "pg-socket")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(pg, "_running_pid", lambda: None)
+    monkeypatch.setattr(pg.ownership, "pooler", lambda *_a: None)
+    monkeypatch.setattr(pg.ownership, "require_listener", lambda *_a, **_k: None)
     monkeypatch.setattr(pg, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg.subprocess, "run", lambda *_args, **_kwargs: _CompletedOk())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg, "_admin_reachable", lambda *_args, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -40,6 +40,7 @@ def _ensure_from_home_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
             listen_port=6433,
             db_name="ava_main",
             role="ava_main",
+            db_admin_password="owner",  # noqa: S106 — test fixture
             cluster_secret="sec",  # noqa: S106 — test fixture
             runner_password=None,
         )
@@ -91,14 +92,14 @@ def test_ensure_pgbouncer_keeps_runner_entry_from_home_env(
 
     userlist = _ensure_from_home_env(tmp_path, monkeypatch)
 
-    assert userlist.read_text() == '"ava_main" "sec"\n"ava_runner" "abc123"\n'
+    assert userlist.read_text() == '"ava_main" "owner"\n"ava_runner" "abc123"\n'
 
 
-def test_ensure_pgbouncer_without_runner_password_keeps_legacy_userlist(
+def test_ensure_pgbouncer_explicit_owner_only_userlist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / ".env").write_text("AVA_CLUSTER_SECRET=cs\n")
 
     userlist = _ensure_from_home_env(tmp_path, monkeypatch)
 
-    assert userlist.read_text() == '"ava_main" "sec"\n'
+    assert userlist.read_text() == '"ava_main" "owner"\n'

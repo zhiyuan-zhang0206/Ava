@@ -143,7 +143,9 @@ def _stub_all_deploy_write_seams(
         return _Backend()
 
     monkeypatch.setattr("shared.session_backend.get_backend", _stub_backend)
-    monkeypatch.setattr("shared.disabled_services.read_skipped", dict)
+    from shared.service_selection import ServiceSelection
+
+    monkeypatch.setattr("shared.service_selection.read_selection", lambda: ServiceSelection("except", frozenset()))
     monkeypatch.setattr(
         "ops.cluster_session._spawn_detached_session",
         lambda *_a, **_k: records["spawn"].append(_k),  # pyright: ignore[reportUnknownArgumentType]

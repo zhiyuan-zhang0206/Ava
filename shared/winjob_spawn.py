@@ -93,7 +93,16 @@ def _process_api() -> Any:
 
 
 def _start_in_job(
-    api: Any, job: WindowsJob, handles: list[int], argv: list[str], cleanup: contextlib.ExitStack
+    api: Any,
+    job: WindowsJob,
+    handles: list[int],
+    argv: list[str],
+    cleanup: contextlib.ExitStack,
+    *,
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+    private_console: bool = False,
+    command_line: str | None = None,
 ) -> _ProcessInfo:
     size = ctypes.c_size_t()
     api.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
@@ -115,19 +124,36 @@ def _start_in_job(
         startup = _StartupInfoEx()
         startup.info.cb = ctypes.sizeof(startup)
         startup.info.flags = 0x100  # STARTF_USESTDHANDLES
+        if private_console:
+            startup.info.flags |= 1  # STARTF_USESHOWWINDOW; SW_HIDE is zero.
         startup.info.stdin, startup.info.stdout, startup.info.stderr = handles
         startup.attributes = ctypes.addressof(buffer)
         process = _ProcessInfo()
-        command = ctypes.create_unicode_buffer(subprocess.list2cmdline(argv))
+        command = ctypes.create_unicode_buffer(
+            subprocess.list2cmdline(argv) if command_line is None else command_line
+        )
+        environment = None
+        flags = 0x00080010 if private_console else 0x08080000
+        if env is not None:
+            if any("\0" in key + value or "=" in key for key, value in env.items()):
+                raise ValueError("invalid native child environment")
+            environment = ctypes.create_unicode_buffer(
+                "\0".join(
+                    f"{key}={value}"
+                    for key, value in sorted(env.items(), key=lambda item: item[0].upper())
+                )
+                + "\0"
+            )
+            flags |= 0x400  # CREATE_UNICODE_ENVIRONMENT
         if not api.CreateProcessW(
             argv[0],
             command,
             None,
             None,
             1,
-            0x08080000,
-            None,
-            None,
+            flags,
+            environment,
+            cwd,
             ctypes.byref(startup),
             ctypes.byref(process),
         ):

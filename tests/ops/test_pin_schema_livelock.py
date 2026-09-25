@@ -24,7 +24,6 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -32,9 +31,7 @@ import shared.db
 from ops.cluster_status import ClusterStatus
 from ops.controllers import pin, schema, schema_mismatch, update_trigger
 from ops.controllers.base import BlockScope
-from services.watchdog import daemon as watchdog
 from shared.api_contracts.status import MachineStatus
-from shared.machine import MachineRole
 from shared.migrations import CodeBehindSchema
 
 _PIN = "1a90f95d33a145d1df24d17fec0a604f14084b5f"
@@ -234,50 +231,3 @@ def test_mismatch_classification_preserves_local_drift_categories() -> None:
     for applied, required, expected in cases:
         mismatch = schema_mismatch.classify(applied, required, None, None)
         assert mismatch is not None and mismatch.kind == expected
-
-
-async def test_db_scoped_watchdog_block_emits_error_event_with_held_services(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    mismatch = schema_mismatch.classify({"baseline", "new"}, {"baseline"}, {"baseline"}, "a" * 40)
-    assert mismatch is not None
-    monkeypatch.setattr(schema_mismatch, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(schema_mismatch, "detect", lambda: mismatch)
-    monkeypatch.setattr(watchdog, "machine_name", lambda: "company-mini")
-
-    class Manager:
-        async def reconcile(self, _role: MachineRole) -> BlockScope:
-            return BlockScope.DB_DEPENDENT
-
-        def blocking_dimension(self) -> str:
-            return "schema"
-
-    def no_checks(
-        _role: MachineRole, _blocks: BlockScope, _dimension: str | None = None
-    ) -> list[watchdog._Check]:
-        return []
-
-    def capability_checks(_role: MachineRole) -> list[watchdog._Check]:
-        return [watchdog._Check("ava-agent-host", lambda: None, True)]
-
-    monkeypatch.setattr(watchdog, "_manager", Manager())
-    monkeypatch.setattr(watchdog, "_checks_for_round", no_checks)
-    monkeypatch.setattr(watchdog, "_checks_for_capability", capability_checks)
-    events: list[tuple[str, str, dict[str, object]]] = []
-
-    def emit(category: str, name: str, **kw: object) -> None:
-        events.append((category, name, kw))
-
-    monkeypatch.setattr(
-        watchdog.telemetry,
-        "emit",
-        emit,
-    )
-    await watchdog._tick("agent-runner")
-    assert len(events) == 1
-    assert events[0][1] == "schema_mismatch_blocked"
-    assert events[0][2]["level"] == "error"
-    attributes = cast(dict[str, object], events[0][2]["attributes"])
-    assert attributes["held_back_services"] == ["ava-agent-host"]
-    state = schema_mismatch.status()
-    assert state is not None and state.consecutive_blocked_rounds == 1

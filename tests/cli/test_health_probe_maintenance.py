@@ -8,7 +8,13 @@ import psycopg
 import pytest
 
 from cli.commands import _cluster_health, _health_alerts
-from shared import disabled_services, pause_owner
+from shared import pause_owner, service_selection
+
+
+def _select_excluded(names: set[str]) -> None:
+    service_selection.resolve_selection(
+        {"agent-host", "frontend"}, excluded=tuple(sorted(names)), all_services=not names
+    )
 
 
 @pytest.fixture
@@ -18,6 +24,7 @@ def probe_home(
     """Keep the real DB/count/journal paths; intercept only external side effects."""
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr(service_selection, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: True)
     monkeypatch.setattr(_cluster_health, "_deploy_suppression", lambda: None)
     (tmp_path / _cluster_health.FAILURE_COUNT_FILE).write_text(
@@ -60,8 +67,8 @@ def test_expected_low_population_does_not_rollback_or_promote(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     if intent == "disabled":
-        disabled_services.write_skipped({"agent-host"})
-        marker = probe_home / "disabled_services"
+        _select_excluded({"agent-host"})
+        marker = service_selection.selection_path()
     else:
         pause_owner.begin_maintenance("test-maintenance", datetime.now(UTC))
         marker = pause_owner.state_path()
@@ -93,7 +100,7 @@ def test_unexpected_low_population_still_rolls_back(
 ) -> None:
     holder, acquired_at = "test-maintenance", datetime.now(UTC)
     if intent == "other-service":
-        disabled_services.write_skipped({"frontend"})
+        _select_excluded({"frontend"})
     elif intent == "legacy-pause":
         pause_owner.mark_paused(holder, acquired_at)
     elif intent == "resumed":
@@ -116,11 +123,11 @@ def test_unexpected_low_population_still_rolls_back(
 def test_reenabled_host_restores_population_failure_counting(
     probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]]
 ) -> None:
-    disabled_services.write_skipped({"agent-host"})
+    _select_excluded({"agent-host"})
     assert _cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
     assert rollbacks == []
 
-    disabled_services.write_skipped(set())
+    _select_excluded(set())
     assert _cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
     assert len(rollbacks) == 1
     assert (probe_home / _cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "1"
@@ -132,7 +139,7 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     alerts: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    disabled_services.write_skipped({"agent-host"})
+    _select_excluded({"agent-host"})
     monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: False)
 
@@ -146,7 +153,7 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
     alerts: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    disabled_services.write_skipped({"agent-host"})
+    _select_excluded({"agent-host"})
 
     def down(**_kwargs: object) -> None:
         raise ConnectionError("private test data plane unavailable")

@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 import psutil
 from redis.asyncio import Redis
@@ -38,65 +39,16 @@ from cli.commands._maintenance_stop import (
     remaining,
     wait_for_exit,
 )
+from shared.cluster import ownership
 from shared.config import settings
 
 
-def _pidfile(path: Path) -> int | None:
-    if not path.exists():
-        return None
-    try:
-        pid = int(path.read_text().splitlines()[0])
-    except (ValueError, IndexError):
-        raise RuntimeError(f"cannot verify data-plane PID file: {path.name}") from None
-    if pid <= 0:
-        raise RuntimeError(f"invalid data-plane PID file: {path.name}")
-    return pid
-
-
-def _process(pid: int) -> OwnedProcess | None:
-    try:
-        identity = OwnedProcess.capture(psutil.Process(pid))
-        return identity if identity.live() else None
-    except psutil.NoSuchProcess:
-        return None
-
-
 def _capture_postgres() -> OwnedProcess | None:
-    data = instance._pg_data_dir().resolve()
-    pidfile = data / "postmaster.pid"
-    pid = _pidfile(pidfile)
-    if pid is None:
-        return None
-    identity = _process(pid)
-    if identity is None:
-        return None
-    lines = pidfile.read_text().splitlines()
-    process = psutil.Process(pid)
-    argv = process.cmdline()
-    try:
-        valid = (
-            Path(lines[1]).resolve() == data
-            and abs(float(lines[2]) - identity.birth) < 2
-            and process.name() in {"postgres", "postmaster"}
-            and Path(argv[argv.index("-D") + 1]).resolve() == data
-        )
-    except (ValueError, IndexError):
-        valid = False
-    if not valid or not identity.live():
-        raise RuntimeError("cannot verify this home's PostgreSQL process")
-    return identity
+    return ownership.postgres(instance._pg_data_dir())
 
 
 def _capture_pooler() -> OwnedProcess | None:
-    pid = _pidfile(pooler._pidfile_path())
-    if pid is None:
-        return None
-    identity = _process(pid)
-    if identity is None:
-        return None
-    if not pooler._pid_is_our_pooler(pid) or not identity.live():
-        raise RuntimeError("cannot verify this home's PgBouncer process")
-    return identity
+    return ownership.pooler(pooler._ini_path(), pooler._pidfile_path())
 
 
 def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
@@ -158,22 +110,29 @@ def _signal(identity: OwnedProcess) -> None:
 
 
 async def _redis_command(client: Redis, deadline: float, *args: str) -> object:
-    return await asyncio.wait_for(client.execute_command(*args), remaining(deadline))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType] — redis command stubs
+    return cast(
+        "object",
+        await asyncio.wait_for(client.execute_command(*args), remaining(deadline)),  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType] — redis command stubs
+    )
 
 
-async def _capture_redis(client: Redis, deadline: float) -> OwnedProcess:
+async def _capture_redis(
+    client: Redis, deadline: float, port: int, custody: ownership.RedisConnectionCustody
+) -> OwnedProcess | None:
+    # Only refusal proves absence; authentication errors and timeouts do not.
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=remaining(deadline)):
+            pass
+    except ConnectionRefusedError:
+        return None
+    await asyncio.wait_for(client.initialize(), remaining(deadline))
+    if client.connection is None:
+        raise RuntimeError("Redis ownership requires a dedicated connection")
+    client.connection.register_connect_callback(custody.refuse_reconnect)  # pyright: ignore[reportUnknownMemberType] — redis callback stubs
     info = await asyncio.wait_for(client.info("server"), remaining(deadline))  # pyright: ignore[reportUnknownMemberType] — redis command stubs
     config = await asyncio.wait_for(client.config_get("dir"), remaining(deadline))  # pyright: ignore[reportUnknownMemberType] — redis command stubs
-    directory = config["dir"]
-    if not isinstance(directory, str):
-        raise TypeError("Redis did not expose its data directory")
-    identity = _process(int(info["process_id"]))
-    if (
-        identity is None
-        or Path(directory).resolve() != instance._redis_data_dir().resolve()
-        or psutil.Process(identity.pid).name() != "redis-server"
-    ):
-        raise RuntimeError("cannot verify this home's Redis process")
+    identity = ownership.redis_server(info, config, instance._redis_data_dir())
+    ownership.require_listener(identity, port)
     return identity
 
 
@@ -186,9 +145,7 @@ async def _stop(deadline: float, *, save: bool = True) -> list[str]:
     port, _runtime_password = endpoint
     # The default user is the native instance's admin identity. The runtime URL
     # can carry a restricted ACL user's different password and is not admin auth.
-    password = (
-        settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret or None
-    )
+    password = settings.data_plane.redis_admin_password or None
     client = Redis(
         host="127.0.0.1",
         port=port,
@@ -199,16 +156,9 @@ async def _stop(deadline: float, *, save: bool = True) -> list[str]:
         socket_timeout=remaining(deadline),
         retry=Retry(NoBackoff(), 0),
     )
+    custody = ownership.RedisConnectionCustody()
     try:
-        # Only a refused local TCP connection proves this configured endpoint is
-        # absent. Authentication failures, resets, and timeouts are not absence.
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=remaining(deadline)):
-                pass
-        except ConnectionRefusedError:
-            redis_process = None
-        else:
-            redis_process = await _capture_redis(client, deadline)
+        redis_process = await _capture_redis(client, deadline, port, custody)
         captured = {
             name: process
             for name, process in (("pgbouncer", pgb), ("postgres", pg), ("redis", redis_process))

@@ -10,7 +10,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import NoReturn
@@ -18,9 +17,11 @@ from typing import NoReturn
 import psutil
 import pytest
 
+from cli import commands
 from cli.commands import _maintenance_data_plane as plane
 from cli.commands import _maintenance_stop as stop
 from cli.commands import _pgbouncer as pb
+from cli.commands import _root_driver as root_driver
 from shared.config import settings
 from shared.session_backend import PosixProcSessionBackend, PtySessionBackend
 from shared.session_record import SessionRecord, pid_starttime_ticks
@@ -38,8 +39,30 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX sign
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
-    monkeypatch.setattr(stop, "get_backend", PosixProcSessionBackend)
     monkeypatch.setattr(stop, "get_shell_backend", lambda: SimpleNamespace(list_sessions=list))
+    monkeypatch.setattr(root_driver, "_root_tree_selection", dict)
+    monkeypatch.setattr(root_driver, "_stop_root_service_tree", lambda **_kwargs: 0)
+    monkeypatch.setattr(commands, "_stop_root_service_tree", lambda **_kwargs: 0)
+    monkeypatch.setattr(commands, "_root_tree_plan", lambda _preserve: [])
+
+    def private_pty_cli(_self: PtySessionBackend, *tokens: str) -> subprocess.CompletedProcess[str]:
+        # Stop intentionally consumes the ambient override. Every independent
+        # test CLI still needs its explicit private binding when the checkout
+        # currently points at an isolated native-proof home.
+        return subprocess.run(  # noqa: S603 — fixed module and fixture-owned home
+            [sys.executable, "-m", "shared.sessions.pty.cli", *tokens],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={
+                **os.environ,
+                "AVA_HOME": str(tmp_path),
+                "AVA_HOME_OVERRIDE": "1",
+                "HOME": str(tmp_path),
+            },
+        )
+
+    monkeypatch.setattr(PtySessionBackend, "_cli", private_pty_cli)
     return tmp_path
 
 
@@ -82,260 +105,11 @@ def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
             proc.stderr.close()
 
 
-def _wait_armed(sentinel: Path, timeout: float = 10.0) -> None:
-    """The descendant's post-arm sentinel, once it lands (task #4299).
-
-    ``launch`` synchronizes on the leader's 'ready' only, and the leader
-    prints that line right after spawning the descendant — so the fixture can
-    return while the descendant has not yet installed its SIGTERM handler.
-    The stop's escalation TERMs captured descendants as soon as the leader is
-    gone; a TERM landing before ``signal.signal`` kills the descendant by
-    default disposition and the marker the assertions read is never written
-    (the shard15 term-count flake). A descendant creates this sentinel only
-    after arming, so waiting for it here is the test's sync point. Bounded: a
-    missing sentinel fails the test instead of hanging it.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if sentinel.exists():
-            return
-        time.sleep(0.02)
-    raise AssertionError(f"the descendant never armed: {sentinel}")
-
-
 _EXIT = "import time; print('ready', flush=True); time.sleep(60)"
 _IGNORE = (
     "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
     "print('ready', flush=True); time.sleep(60)"
 )
-
-
-def test_service_exits_normally_and_does_not_touch_sibling(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    marker = home / "completed"
-    code = (
-        "import signal,time,pathlib; "
-        f"signal.signal(signal.SIGTERM,lambda *_: (pathlib.Path({str(marker)!r}).write_text('done'), exit(0))); "
-        "print('ready',flush=True); time.sleep(60)"
-    )
-    proc = launch("ava-agent-host", code)
-    sibling_home = home.with_name(home.name + "-sibling")
-    sibling_home.mkdir()
-    sibling = launch("sibling", f"import os; os.chdir({str(sibling_home)!r}); " + _IGNORE)
-    path = home / "run/sessions/sibling.json"
-    sibling_record = SessionRecord.read(path)
-    assert sibling_record is not None
-    replace(sibling_record, cwd=str(sibling_home)).write(sibling_home / "run/sessions/sibling.json")
-    path.unlink()
-    assert Path(psutil.Process(sibling.pid).cwd()) == sibling_home
-    monkeypatch.setattr(PosixProcSessionBackend, "kill_session", forbidden)
-    assert stop.stop_services(3) == ["ava-agent-host"]
-    assert proc.wait(timeout=1) == 0
-    assert marker.read_text() == "done"
-    assert sibling.poll() is None
-    assert stop.stop_services(1) == []
-
-
-def test_timeout_leaves_both_services_alive_under_one_deadline(launch: Launcher) -> None:
-    first, second = launch("first", _IGNORE), launch("second", _IGNORE)
-    started = time.monotonic()
-    with pytest.raises(TimeoutError, match="kept its hold"):
-        stop.stop_services(0.15)
-    assert time.monotonic() - started < 0.65
-    assert first.poll() is None and second.poll() is None
-
-
-def test_orphaned_captured_descendant_converges_after_leader_exit(launch: Launcher) -> None:
-    # issue #2123: a leader that exits on TERM without closing its children
-    # (the frontend chain's npm / Next.js shape) must not stall the stop until
-    # the deadline. Once the leader is confirmed gone, its captured descendants
-    # receive TERM too — birth-validated, at most once — and the stop converges.
-    code = (
-        "import subprocess,sys,time; "
-        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
-        "print('ready',flush=True); time.sleep(60)"
-    )
-    parent = launch("parent", code)
-    children = psutil.Process(parent.pid).children()
-    assert len(children) == 1
-    child_identity = stop.OwnedProcess.capture(children[0])
-    assert stop.stop_services(3) == ["parent"]
-    assert parent.wait(timeout=1) == -signal.SIGTERM
-    # The stop only returns once the tracked descendant is gone; init may have
-    # reaped it already, so assert on the birth identity, not a stale wait().
-    assert not child_identity.live()
-
-
-def test_each_descendant_receives_term_at_most_once(home: Path, launch: Launcher) -> None:
-    # QA round-1 (#2898): "at most once" was only implicit in the final state —
-    # this counts deliveries directly. The descendant handles TERM, records the
-    # running count, and lives on briefly, so any repeated delivery inside the
-    # escalation loop would be counted and caught.
-    marker = home / "term-count"
-    arm_sentinel = home / "arm-sentinel"
-    child_code = (
-        "import signal,time,pathlib\n"
-        "count=[0]\n"
-        f"mark=pathlib.Path({str(marker)!r})\n"
-        "def handler(*_):\n"
-        "    count[0]+=1\n"
-        "    mark.write_text(str(count[0]))\n"
-        "    time.sleep(0.5)\n"
-        "    raise SystemExit(0)\n"
-        "signal.signal(signal.SIGTERM,handler)\n"
-        f"pathlib.Path({str(arm_sentinel)!r}).touch()\n"
-        "print('ready',flush=True)\n"
-        "time.sleep(60)\n"
-    )
-    code = (
-        "import subprocess,sys,time;"
-        f"subprocess.Popen([sys.executable,'-u','-c',{child_code!r}]);"
-        "print('ready',flush=True);"
-        "time.sleep(60)"
-    )
-    parent = launch("parent", code)
-    # Sync point (task #4299): the stop's escalation must not race the
-    # descendant's handler install — enter it only once the descendant armed.
-    _wait_armed(arm_sentinel)
-    children = psutil.Process(parent.pid).children()
-    assert len(children) == 1
-    child_identity = stop.OwnedProcess.capture(children[0])
-
-    assert stop.stop_services(3) == ["parent"]
-    assert parent.wait(timeout=1) == -signal.SIGTERM
-    # The stop returned only once the descendant exited; exactly one TERM must
-    # have reached it despite the escalation loop having many chances.
-    assert not child_identity.live()
-    assert marker.read_text() == "1"
-
-
-def test_descendant_refusing_term_keeps_hold_and_reports(home: Path, launch: Launcher) -> None:
-    # The convergence is TERM only: a descendant that ignores TERM keeps the
-    # hold until the deadline and is reported by name and pid — never SIGKILL,
-    # never silent success (issue #2123 acceptance: refusing processes report
-    # the real failure and the waiting stage).
-    arm_sentinel = home / "arm-sentinel"
-    child_code = (
-        "import signal,time,pathlib\n"
-        "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
-        f"pathlib.Path({str(arm_sentinel)!r}).touch()\n"
-        "time.sleep(60)\n"
-    )
-    code = (
-        "import subprocess,sys,time; "
-        f"subprocess.Popen([sys.executable,'-u','-c',{child_code!r}]); "
-        "print('ready',flush=True); time.sleep(60)"
-    )
-    parent = launch("parent", code)
-    # Sync point (task #4299): the stop's escalation must not race the
-    # descendant's handler install — enter it only once the descendant armed.
-    _wait_armed(arm_sentinel)
-    children = psutil.Process(parent.pid).children()
-    assert len(children) == 1
-    try:
-        with pytest.raises(TimeoutError, match="did not exit") as excinfo:
-            stop.stop_services(0.15)
-        assert parent.wait(timeout=1) == -signal.SIGTERM
-        assert children[0].is_running()
-        message = str(excinfo.value)
-        assert "surviving tracked descendants" in message
-        assert str(children[0].pid) in message
-    finally:
-        children[0].kill()  # Exact child created by this fixture, not production.
-
-
-def test_retry_converges_dead_leader_surviving_group(home: Path, launch: Launcher) -> None:
-    # Retry close: the leader died before the stop ran (TERM delivered by an
-    # earlier interrupted pass). The listing retains the record while the
-    # recorded process group is occupied, and the retry converges the group
-    # members instead of silently certifying a stopped unit.
-    code = (
-        "import subprocess,sys,time; "
-        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
-        "print('ready',flush=True); time.sleep(60)"
-    )
-    parent = launch("parent", code)
-    children = psutil.Process(parent.pid).children()
-    assert len(children) == 1
-    record_path = home / "run/sessions/parent.json"
-    record = SessionRecord.read(record_path)
-    assert record is not None and record.pgid is not None
-    child_identity = stop.OwnedProcess.capture(children[0])
-    parent.send_signal(signal.SIGTERM)
-    assert parent.wait(timeout=1) == -signal.SIGTERM
-    assert children[0].is_running()
-    from shared.posixproc import list_sessions
-
-    assert "parent" in list_sessions()  # reap gate: occupied group keeps the record
-    assert stop.stop_services(3) == ["parent"]
-    assert not child_identity.live()
-    # The converged record reaps once its group is empty (next listing).
-    assert "parent" not in list_sessions()
-    assert stop.stop_services(1) == []
-
-
-def test_legacy_dead_leader_record_without_group_reaps(home: Path, launch: Launcher) -> None:
-    # A pre-pgid record whose leader is already dead carries no ownership
-    # proof for its survivors — it reaps at listing (the legacy contract) and
-    # no signal is ever derived from an unprovable claim. Records born after
-    # the fix carry pgid, so this shape stops occurring for new sessions.
-    from dataclasses import replace
-
-    code = (
-        "import subprocess,sys,time; "
-        "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
-        "print('ready',flush=True); time.sleep(60)"
-    )
-    parent = launch("parent", code)
-    children = psutil.Process(parent.pid).children()
-    assert len(children) == 1
-    path = home / "run/sessions/parent.json"
-    record = SessionRecord.read(path)
-    assert record is not None
-    replace(record, pgid=None).write(path)
-    parent.send_signal(signal.SIGTERM)
-    assert parent.wait(timeout=1) == -signal.SIGTERM
-    try:
-        assert stop.stop_services(1) == []
-        assert not path.exists()
-        assert children[0].is_running()  # no signal derived from an unprovable claim
-    finally:
-        children[0].kill()  # Exact child created by this fixture, not production.
-
-
-def test_invalid_identity_refuses_every_signal(home: Path, launch: Launcher) -> None:
-    first, other = launch("a-first", _IGNORE), launch("z-invalid", _IGNORE)
-    path = home / "run/sessions/z-invalid.json"
-    record = SessionRecord.read(path)
-    assert record is not None
-    # +60s is a genuinely different start time — not the whole-second move a
-    # live process's create_time reading can make (see the drift test below).
-    replace(record, create_time=record.create_time + 60, starttime=None).write(path)
-    with pytest.raises(RuntimeError, match="identity changed"):
-        stop.stop_services(1)
-    assert first.poll() is None and other.poll() is None
-
-
-def test_whole_second_birth_drift_does_not_refuse_a_live_service(
-    home: Path, launch: Launcher
-) -> None:
-    """A one-second create_time move is the same process; the stop proceeds.
-
-    macOS psutil derives create_time from the wall clock with a boot-time
-    correction quantized to whole seconds: on 2026-09-12 the stop refused a
-    live host over exactly 1.000000s of drift. The record here carries that
-    artifact, and both the preflight validation and the delivery re-check must
-    still accept the process.
-    """
-    proc = launch("drifted", _EXIT)
-    path = home / "run/sessions/drifted.json"
-    record = SessionRecord.read(path)
-    assert record is not None
-    replace(record, create_time=record.create_time - 1.0, starttime=None).write(path)
-
-    assert stop.stop_services(3) == ["drifted"]
-    assert proc.wait(timeout=5) == -signal.SIGTERM
 
 
 def test_persistent_terminals_refuse_before_signalling(
@@ -351,7 +125,7 @@ def test_persistent_terminals_refuse_before_signalling(
 
 
 def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+    home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from shared.sessions.pty import cli as pty
     from shared.sessions.pty._paths import host_identity
@@ -379,18 +153,16 @@ def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
         while psutil.Process(record.pid).children(recursive=True):
             assert time.monotonic() < deadline, "terminal did not reach an idle shell"
             time.sleep(0.05)
-        marker = home / "service-finally"
-        service = launch(
-            "ava-agent-host",
-            "import signal,time,pathlib; "
-            f"signal.signal(signal.SIGTERM,lambda *_: (pathlib.Path({str(marker)!r}).write_text('done'), exit(0))); "
-            "print('ready',flush=True); time.sleep(60)",
+        calls: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            root_driver, "_root_tree_selection", lambda: {"ava-agent-host": "agent-host"}
         )
+        monkeypatch.setattr(root_driver, "_stop_root_service_tree", lambda **kw: calls.append(kw))
         with pytest.raises(RuntimeError, match="will not kill or replay"):
             stop.stop_services(3)
-        assert service.poll() is None
+        assert not calls
         assert stop.stop_services(3, keep_terminals=True) == ["ava-agent-host"]
-        assert service.wait(timeout=1) == 0 and marker.read_text() == "done"
+        assert len(calls) == 1 and calls[0]["force"] is False
         assert SessionRecord.read(path) == record and host_identity(path) == host
         assert shell.live() and terminal_host.live()
         assert PtySessionBackend().list_sessions() == [name]
@@ -399,28 +171,6 @@ def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
         if name in pty.live_sessions():
             pty.session_request(name, {"op": "kill"})
         envfile.unlink(missing_ok=True)
-
-
-def test_replaced_record_is_not_signalled(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    original, replacement = launch("service", _IGNORE), launch("replacement", _IGNORE)
-    replacement_path = home / "run/sessions/replacement.json"
-    record = SessionRecord.read(replacement_path)
-    assert record is not None
-    replacement_path.unlink()
-    actual = PosixProcSessionBackend.graceful_signal
-
-    def replace_then_signal(
-        self: PosixProcSessionBackend, name: str, *, expected: SessionRecord | None = None
-    ) -> bool:
-        record.write(home / "run/sessions/service.json")
-        return actual(self, name, expected=expected)
-
-    monkeypatch.setattr(PosixProcSessionBackend, "graceful_signal", replace_then_signal)
-    with pytest.raises(RuntimeError, match="signal refused"):
-        stop.stop_services(1)
-    assert original.poll() is None and replacement.poll() is None
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
@@ -667,14 +417,14 @@ def test_live_pty_host_with_dead_shell_blocks_stop(home: Path, launch: Launcher)
     assert proc.poll() is None
 
 
-def test_malformed_record_refuses_before_listing(
+def test_malformed_terminal_record_refuses_before_listing(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = home / "run/sessions/unknown.json"
+    path = home / "run/pty/unknown.json"
     path.parent.mkdir(parents=True)
     path.write_text("{")
     monkeypatch.setattr(PosixProcSessionBackend, "list_sessions", forbidden)
-    with pytest.raises(RuntimeError, match="cannot verify service record"):
+    with pytest.raises(RuntimeError, match="cannot verify terminal record"):
         stop.stop_services(1)
     assert path.read_text() == "{"
 
@@ -855,75 +605,6 @@ def test_redis_cleanup_cannot_turn_deadline_into_an_unbounded_wait(
     assert time.monotonic() - started < 0.7
 
 
-@pytest.mark.skipif(
-    shutil.which("node") is None or shutil.which("bash") is None, reason="real shell/node layering"
-)
-def test_bash_node_layered_chain_converges(home: Path) -> None:
-    # The frontend's launch layering (issue #2123): a bash -lc leader whose
-    # node middle layer exits on TERM without closing the node child — the
-    # exact shape npm shows on the WSL chain. bash may exec into the node
-    # leader (single-command optimization) or keep it as a child; either way
-    # the stop must TERM the surviving descendants and converge.
-    leader = home / "leader.js"
-    child = home / "child.js"
-    leader.write_text(
-        "const { spawn } = require('child_process');\n"
-        "const c = spawn(process.execPath, [" + repr(str(child)) + "], { stdio: 'inherit' });\n"
-        "process.on('SIGTERM', () => process.exit(0));\n"
-        "setInterval(() => {}, 1000);\n"
-    )
-    child.write_text("setInterval(() => {}, 1000);\n")
-    proc = subprocess.Popen(  # noqa: S603 — test-owned bash + node, fixed fixture scripts
-        ["bash", "-lc", f"node {leader}"],
-        cwd=home,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-    leader_pid: int | None = None
-    grandchildren: list[psutil.Process] = []
-    try:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            candidates = [proc.pid] + [c.pid for c in psutil.Process(proc.pid).children()]
-            for candidate in candidates:
-                if psutil.Process(candidate).name() == "node":
-                    leader_pid = candidate
-                    break
-            if leader_pid is not None and psutil.Process(leader_pid).children():
-                break
-            time.sleep(0.05)
-        assert leader_pid is not None
-        grandchildren = psutil.Process(leader_pid).children()
-        assert len(grandchildren) == 1
-        grandchild = grandchildren[0]
-        leader_identity = stop.OwnedProcess.capture(psutil.Process(leader_pid))
-        grandchild_identity = stop.OwnedProcess.capture(grandchild)
-        SessionRecord(
-            leader_pid,
-            psutil.Process(leader_pid).create_time(),
-            "layered-test",
-            str(home),
-            time.time(),
-            pid_starttime_ticks(leader_pid),
-            pgid=os.getpgid(leader_pid),
-        ).write(home / "run/sessions" / "layered.json")
-        assert stop.stop_services(3) == ["layered"]
-        assert not leader_identity.live()
-        assert not grandchild_identity.live()
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=5)
-        for pid in (leader_pid, grandchildren[0].pid if grandchildren else None):
-            if pid is not None:
-                # exact private fixtures, post-assertion
-                with contextlib.suppress(psutil.NoSuchProcess):
-                    psutil.Process(pid).kill()
-
-
 def _nonloopback_addr() -> str | None:
     """This machine's default-route address, or None when it has none.
 
@@ -966,7 +647,7 @@ def _launch_incident_shape_pooler(
     monkeypatch.setattr(pb, "ava_home", lambda: home)
     monkeypatch.setattr(pb, "reachable_host", lambda: addr)
     monkeypatch.setattr(plane.instance, "reachable_host", lambda: addr)
-    monkeypatch.setattr(pb, "_live_pg_socket_dir", lambda _port: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
+    monkeypatch.setattr(pb, "_pg_socket_dir", lambda: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
 
     port = _free_port()
     role = "ava_maintenance_test"
@@ -1028,29 +709,20 @@ def _kill_test_poolers(*pids: int | None) -> None:
                 proc.wait(timeout=5)
 
 
-def test_real_ensure_pgbouncer_revives_a_shutdown_wait_pooler(
+def test_real_start_retains_pooler_with_held_client(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The 2026-09-12 half-shut state, end to end on a real pooler.
-
-    SIGTERM (PgBouncer >=1.23 SHUTDOWN WAIT_FOR_CLIENTS) with one idle client
-    connected leaves the pooler alive with its listeners closed — what the
-    failed stop produced (issue #2307). `ensure_pgbouncer`, the step the
-    compensating `ava start` runs, must read it as degraded (missing the
-    reachable listener), terminate it, and come back with a healthy double bind.
-    """
+    """A compensating normal start cannot force a pooler past its held drain."""
     import psycopg
 
     port, role, secret, pid = _launch_incident_shape_pooler(home, monkeypatch)
     old = stop.OwnedProcess.capture(psutil.Process(pid))
-    new_pid: int | None = None
+    config = (pb._ini_path().read_bytes(), pb._userlist_path().read_bytes())
     try:
-        client = psycopg.connect(
+        with psycopg.connect(
             f"postgresql://{role}:{secret}@127.0.0.1:{port}/pgbouncer", autocommit=True
-        )
-        try:
+        ) as client:
             assert client.execute("SHOW VERSION").fetchone() is not None
-            # The pre-#2307 stop signal: WAIT_FOR_CLIENTS with one idle client.
             os.kill(pid, signal.SIGTERM)
             deadline = time.monotonic() + 5.0
             while time.monotonic() < deadline:
@@ -1059,87 +731,51 @@ def test_real_ensure_pgbouncer_revives_a_shutdown_wait_pooler(
                 time.sleep(0.05)
             else:
                 pytest.fail("the pooler never closed its listeners after SIGTERM")
-            assert old.live(), "the held client must keep the pooler in shutdown-wait"
-            assert pb._running_pid() == pid
-
-            rc = pb.ensure_pgbouncer(
-                pg_port=15433,
-                listen_port=port,
-                db_name="ava_maintenance_test",
-                role=role,
-                cluster_secret=secret,
-                db_admin_password=secret,
-                runner_password="",
-            )
-        finally:
-            with contextlib.suppress(Exception):
-                client.close()
-
-        assert rc == 0
-        assert not old.live(), "the degraded pooler must be terminated, not reloaded"
-        new_pid = pb._running_pid()
-        assert new_pid is not None and new_pid != pid
-        assert pb._admin_reachable(port, role, secret)
-        assert pb.pgbouncer_public_listener_reachable(port, role, secret)
+            assert old.live()
+            with pytest.raises(RuntimeError, match="custody retained"):
+                pb.ensure_pgbouncer(
+                    pg_port=15433,
+                    listen_port=port,
+                    db_name="ava_maintenance_test",
+                    role=role,
+                    cluster_secret=secret,
+                    db_admin_password=secret,
+                    runner_password="",
+                )
+            assert old.live(), "normal start must retain a pooler still draining its client"
+            assert pb._running_pid() == pid, "no replacement may be launched"
+            assert (pb._ini_path().read_bytes(), pb._userlist_path().read_bytes()) == config
     finally:
-        _kill_test_poolers(pid, new_pid)
+        _kill_test_poolers(pid)
 
 
-# --- held-stop window -----------------------------------------------------
-
-
-def test_held_stop_marker_brackets_the_stop_window(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+def test_selected_service_stop_delegates_exact_units_to_root(
+    home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The OS watchdog probe must see the stop from its first signal to its
-    return: the marker is published before the first graceful_signal and
-    cleared once the stop returns — this is what keeps a 60s probe tick from
-    reviving the watchdog mid-stop (2026-09-17 wave-2 abort)."""
-    proc = launch("ava-agent-host", _EXIT)
-    marker = home / "state" / "held-stop"
-    assert not marker.exists()
-    seen: list[bool] = []
-    original = PosixProcSessionBackend.graceful_signal
-
-    def recording(
-        self: PosixProcSessionBackend, name: str, *, expected: SessionRecord | None = None
-    ) -> bool:
-        seen.append(marker.exists())
-        return original(self, name, expected=expected)
-
-    monkeypatch.setattr(PosixProcSessionBackend, "graceful_signal", recording)
-    assert stop.stop_services(3) == ["ava-agent-host"]
-    assert seen == [True]
-    assert not marker.exists()
-    assert proc.wait(timeout=1) == -signal.SIGTERM
-    # A follow-up pass over nothing opens and closes its own window too.
-    assert stop.stop_services(1) == []
-    assert not marker.exists()
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        root_driver,
+        "_root_tree_selection",
+        lambda: {"ava-gateway": "gateway", "ava-agent-host": "agent-host"},
+    )
+    monkeypatch.setattr(root_driver, "_stop_root_service_tree", lambda **kw: calls.append(kw))
+    assert stop.stop_services(3, selected=frozenset({"ava-agent-host"})) == ["ava-agent-host"]
+    assert len(calls) == 1
+    assert calls[0]["preserve"] == frozenset({"gateway"})
+    assert calls[0]["selected"] == frozenset({"agent-host"})
+    assert calls[0]["force"] is False
+    timeout = calls[0]["timeout_s"]
+    assert isinstance(timeout, float) and 0 < timeout <= 3
 
 
-def test_held_stop_marker_cleared_when_a_survivor_keeps_the_hold(
-    home: Path, launch: Launcher
+def test_root_stop_failure_is_not_reported_as_success(
+    home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A stop that ends in StopIncompleteError still closes its window in the
-    finally — the probe's suppression must end with the stop, not with the
-    TTL."""
-    launch("ava-agent-host", _IGNORE)
-    with pytest.raises(TimeoutError, match="kept its hold"):
-        stop.stop_services(0.15)
-    assert not (home / "state" / "held-stop").exists()
+    monkeypatch.setattr(root_driver, "_root_tree_selection", lambda: {"ava-gateway": "gateway"})
 
+    def refuse(**_kwargs: object) -> None:
+        raise RuntimeError("root custody unavailable")
 
-def test_held_stop_marker_cleared_on_an_unexpected_error(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Any crash path clears too — a leaked marker would muzzle the probe until
-    its TTL, and the finally is the only clear point."""
-    launch("ava-agent-host", _EXIT)
-
-    def boom(*_a: object, **_k: object) -> None:
-        raise RuntimeError("wait blew up")
-
-    monkeypatch.setattr(stop, "wait_for_exit", boom)
-    with pytest.raises(RuntimeError, match="wait blew up"):
+    monkeypatch.setattr(root_driver, "_stop_root_service_tree", refuse)
+    with pytest.raises(RuntimeError, match="root custody unavailable"):
         stop.stop_services(3)
-    assert not (home / "state" / "held-stop").exists()

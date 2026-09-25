@@ -10,12 +10,8 @@ import os
 import sys
 from pathlib import Path
 
-from cli.commands._orphan_reap import _reap_orphan_step
 from cli.commands._pause_resume import exclusive_resources
-from cli.commands._repo import _repo_root, build_services, session_name
-from cli.commands._session_lifecycle import (
-    _stop_sessions,  # re-export: defined with the other lifecycle helpers
-)
+from cli.commands._repo import _repo_root, session_name
 from shared.rollout_telemetry import updater_stage
 
 # The browser service runs a headed Chrome on a persistent login profile. An
@@ -94,11 +90,7 @@ def _compute_stop_scope(
 
     roles = _ns._roles_or_none()
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
-    service_sessions = [
-        session_name(spec.session)
-        for spec in build_services()
-        if spec.session not in preserve_sessions and _ns._has_session(session_name(spec.session))
-    ]
+    service_sessions = _ns._root_tree_plan(preserve_sessions)
     return service_sessions, runner_only, keep_infra or runner_only
 
 
@@ -112,13 +104,12 @@ def _print_stop_plan(
 ) -> None:
     """The "The following will be stopped" block shown before the confirm gate."""
     # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands as _ns
 
     print("\nThe following will be stopped:")
     print(f"  service sessions: {', '.join(service_sessions) if service_sessions else '(none)'}")
     if reap_agents:
         print("  persistent terminals: closed")
-    if keep_browser and _ns._has_session(session_name(_BROWSER_SESSION)):
+    if keep_browser:
         print(f"  browser: kept up ({session_name(_BROWSER_SESSION)}, login session preserved)")
     if runner_only:
         print("  infra (pg/redis): skipped (agent-runner uses the central node)")
@@ -145,13 +136,10 @@ def _confirm_stop(*, require_confirmation: bool) -> bool:
 
 def _stop_terminals_force() -> None:
     """Close this unit's persistent shells on an explicit full force stop."""
-    from cli.commands._maintenance_stop import _TERMINAL_NAME
-    from shared.session_backend import WinprocSessionBackend, get_shell_backend
+    from shared.session_backend import get_shell_backend
 
     backend = get_shell_backend()
     names = backend.list_sessions()
-    if isinstance(backend, WinprocSessionBackend):
-        names = [name for name in names if _TERMINAL_NAME.match(name)]
     for name in names:
         ok, _ = backend.kill_session(name, graceful=False)
         if not ok:
@@ -159,7 +147,7 @@ def _stop_terminals_force() -> None:
 
 
 def _force_stop(
-    _repo: Path,  # used by the orphan-listener sweep (step 4); kept for call-site stability
+    _repo: Path,  # retained for the common stop call contract
     *,
     require_confirmation: bool = True,
     keep_infra: bool = False,
@@ -167,7 +155,6 @@ def _force_stop(
     keep_browser: bool = True,
     reap_agents: bool = False,
     announce: bool = False,
-    teardown_extras: bool = False,
 ) -> int:
     """Explicit force-only resource stop; normal commands use _temporary_stop.
 
@@ -183,20 +170,13 @@ def _force_stop(
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands as _ns
 
-    service_sessions, runner_only, skip_infra = _compute_stop_scope(
+    _service_sessions, runner_only, skip_infra = _compute_stop_scope(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
-    # Root-driven hosts stop the tree through ava-root instead of the
-    # per-service sessions; the plan names the units that will actually stop
-    # (preserved ones excluded), plus any legacy session a pre-switch start
-    # left behind.
-    root_driven = _ns._root_driven_enabled()
     root_preserve = preserve_sessions | (
         frozenset({_BROWSER_SESSION}) if keep_browser else frozenset[str]()
     )
-    plan_sessions = service_sessions
-    if root_driven:
-        plan_sessions = sorted(set(service_sessions) | set(_ns._root_tree_plan(root_preserve)))
+    plan_sessions = _ns._root_tree_plan(root_preserve)
     _print_stop_plan(
         plan_sessions,
         reap_agents=reap_agents,
@@ -219,18 +199,7 @@ def _force_stop(
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
     # path does not fabricate drain receipts and remains usable offline.
-    if root_driven:
-        # The tree stop carries the whole roster; any legacy session from a
-        # pre-switch start is still swept by the session leg below.
-        _ns._stop_root_service_tree(preserve=root_preserve)
-        if service_sessions:
-            print(
-                f"  (also stopping {len(service_sessions)} service session(s) left by a "
-                "pre-switch start)"
-            )
-            _stop_sessions(service_sessions)
-    else:
-        _stop_sessions(service_sessions)
+    _ns._stop_root_service_tree(preserve=root_preserve, force=True)
 
     # 1.4) a teardown that asked for the browser down finishes the job: kill any
     # Chrome still running on THIS cluster's profile. The session kill above
@@ -248,39 +217,6 @@ def _force_stop(
 
     # 2) stop the data plane (data persists on disk).
     _stop_data_plane(skip_infra=skip_infra, runner_only=runner_only)
-
-    # 3) full-stop extras: tear down what converge registered outside the service roster —
-    # the entry-port gate and the permissions-helper LaunchAgent. After the
-    # sessions are dead nothing can relaunch them (no watchdog survives), so
-    # this is the last step. cmd_update / cmd_restart never come here.
-    if teardown_extras:
-        from cli.commands._stop_extras import (
-            stop_gate_service,
-            stop_lgtm_services,
-            stop_permissions_helper,
-        )
-
-        stop_gate_service(force=True)
-        stop_permissions_helper(force=True)
-        stop_lgtm_services(force=True)
-
-    # 4) orphan-listener sweep (Task #965): a service that escaped its session
-    # (a gateway whose pane died but whose process kept the port, a pidfile
-    # daemon that outlived its stop) is invisible to every leg above and holds
-    # the cluster port against the next start — the new process then dies on
-    # 'address already in use' while the old one keeps serving. Every port this
-    # unit expects to own is scanned; only a listener positively attributable
-    # to this cluster's home is an orphan of this stop and gets a verified kill.
-    # Foreign listeners are identified and left alone. Runs last so it also
-    # catches residuals of the data-plane and extras legs; preserved ports are
-    # skipped.
-    _reap_orphan_step(
-        _repo,
-        keep_browser=keep_browser,
-        keep_infra=keep_infra,
-        preserve_sessions=preserve_sessions,
-        keep_gate=not teardown_extras,
-    )
 
     return 0
 
@@ -316,7 +252,6 @@ def _do_stop(
             keep_browser=keep_browser,
             reap_agents=reap_agents,
             announce=announce,
-            teardown_extras=teardown_extras,
         )
     from cli.commands._temporary_stop import stop
 

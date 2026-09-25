@@ -18,7 +18,7 @@ Ava's infrastructure layer—provides underlying capabilities for agent runtime 
 - **Wake-up mechanism**: Real-time agent wake-up via Redis pub/sub, replacing polling
 - **Caching**: Debug-mode LLM response caching (Redis), reducing API calls
 - **MCP protocol**: One supervised MCP daemon per machine, shared by agent tools
-- **Service daemons**: Background processes such as agent-host, watchdog, heartbeat, labeler, memory-indexer
+- **Service daemons**: Background processes such as agent-host, heartbeat, labeler, memory-indexer
 - **Observability**: LLM token usage logging
 
 ## Key Dependencies
@@ -31,7 +31,7 @@ Ava's infrastructure layer—provides underlying capabilities for agent runtime 
 
 - `ava/_mcps_daemon.py` — shared per-machine MCP service
 - `services/agent_host/daemon.py` — Agent host entry
-- `services/watchdog/daemon.py` — Service liveness monitor entry
+- `services/ava_root_glue/glue.py` — service readiness, root recovery, and diagnostic wiring
 
 ## Notes
 

@@ -20,7 +20,7 @@ Checks (all must pass for exit 0):
    unit* (`cli.commands._probe`: identity where the endpoint carries one, plain
    liveness where it cannot). A daemon of another cluster holding this unit's
    port is the condition this check exists to make visible; it used to satisfy
-   the check with a bare 2xx. The fleet UI entry port (`_gate_probe`) and the
+   the check with a bare 2xx. The fleet UI entry is included in that roster. The
    authenticated private-network Redis relay (`_redis_bridge_probe`) ride here
    too — neither is a service session, and process liveness cannot certify either
    serving path. Alert-only: a failure exits 1 but never
@@ -206,7 +206,7 @@ def _agent_population(min_agents: int) -> bool:
 def _agent_population_failure_class(min_agents: int) -> str | None:
     """Classify observed low population against DB availability and local intent."""
     import shared.db
-    from shared import disabled_services, pause_owner
+    from shared import pause_owner, service_selection
 
     try:
         with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
@@ -222,7 +222,7 @@ def _agent_population_failure_class(min_agents: int) -> str | None:
     if row[0] >= min_agents:
         return None
     current = pause_owner.read()
-    if disabled_services.is_skipped("agent-host", disabled_services.read_skipped()) or (
+    if not service_selection.read_selection().enabled("agent-host") or (
         current.status == "paused" and current.maintenance is not None
     ):
         return "maintenance"
@@ -230,12 +230,12 @@ def _agent_population_failure_class(min_agents: int) -> str | None:
 
 
 def _reset_pending_lkg_streak(home: Path) -> None:
-    """Forget a partial observation window after any rollback-gating failure."""
+    """Forget a partial observation window after any unhealthy observation."""
     (home / PENDING_LKG_PASSES_FILE).unlink(missing_ok=True)
 
 
 def _advance_pending_lkg(home: Path) -> None:
-    """Record a healthy gating pass and promote a mature pending LKG candidate."""
+    """Record a fully healthy pass and promote a mature pending LKG candidate."""
     from shared.cluster_pin import get_pending_known_good, promote_pending_known_good_if_ready
 
     marker = home / PENDING_LKG_PASSES_FILE
@@ -394,10 +394,9 @@ def _service_probes() -> list[str]:
     services, each annotated with why (empty = all responding).
 
     Reuses the `ava status` roster + probe primitives: the role-annotated spec
-    list (gated-out services — no display, no bot token — are absent by design
-    and skipped) and the per-spec probe (identity / HTTP / TCP / pidfile; a
-    probe-less spec reports None and is skipped). Role not resolvable (setup
-    unfinished) probes nothing — checks 1-4 are the fallback signals there.
+    list (gated-out services are intentionally absent and skipped) and the
+    ownership-bound per-spec probe. Unknown evidence or an unresolved roster
+    cannot certify health, even when the gateway responds.
 
     The probe's `detail` rides along into the entry because this list becomes the
     owner's alert text, and that alert is the only thing a human sees. "ava-ops
@@ -405,60 +404,31 @@ def _service_probes() -> list[str]:
     same bare session name and completely different incidents — the second one
     means another unit holds this unit's port and no amount of waiting fixes it."""
     import cli.commands as _ns
+    from shared.service_selection import read_selection
 
     roles = _ns._roles_or_none()
     if roles is None:
-        return []
+        return ["service roster unavailable"]
+    try:
+        selection = read_selection()
+    except (OSError, ValueError, RuntimeError, TypeError) as exc:
+        return [f"service selection unavailable ({exc})"]
     failing: list[str] = []
     for spec, gate_reason in _ns._services_for_roles_annotated(roles):
-        if gate_reason is not None:
+        if gate_reason is not None or not selection.enabled(spec.session):
             continue
         probe = _ns._probe_service(spec)
-        if probe.alive is False:
+        if probe.alive is not True:
             failing.append(f"{spec.session} ({probe.detail})" if probe.detail else spec.session)
     return failing
 
 
-def _gate_probe() -> str | None:
-    """The fleet UI entry port as an alert signal — the failure text, or None.
-
-    Gateway-capable hosts only (a runner owns no entry port). Reported through
-    check 5, which is **alert-only and never feeds the auto-rollback counter** —
-    and that placement is the point, not an accident of where it was easiest to
-    add. A dark entry port is an outage worth waking the owner for and is exactly
-    NOT evidence that the cluster's code is bad: on 2026-08-01 the cause was a
-    converge step that booted the gate's launchd job out and failed to load it
-    back, which rolling the cluster to the previous commit would re-run
-    identically. No rollback puts a supervisor's job back.
-
-    Both halves are alerted on. An unsupervised gate is still serving *now*, so it
-    reads healthy to a user, but nothing will restart it — and with the converge
-    step no longer touching an unchanged job, the bootout window that could make
-    this a false positive is both rare (only a real plist change opens one) and an
-    order of magnitude shorter than the probe's interval.
-    """
-    import cli.commands as _ns
-
-    roles = _ns._roles_or_none()
-    if roles is None or "gateway" not in roles:
-        return None
-    from cli.commands._converge_gate import probe_gate
-
-    status = probe_gate()
-    if not status.serving:
-        return f"gate entry :{status.entry_port} not answering (the fleet UI is dark)"
-    if not status.supervised:
-        return (
-            f"gate entry :{status.entry_port} answering but unsupervised "
-            f"({status.supervisor} is absent — nothing will restart it)"
-        )
-    return None
 
 
 def _redis_bridge_probe() -> str | None:
     """End-to-end Redis relay failure text, or None when healthy/not required.
 
-    Gateway-only and alert-only, like the gate: a failed host listener is an
+    Gateway-only and alert-only: a failed host listener is an
     infrastructure outage, not evidence that rolling application code back is
     safe or useful.  The probe authenticates and PINGs through the off-box
     endpoint; a loaded launchd label or open TCP port alone cannot certify the
@@ -564,26 +534,10 @@ def _editable_install_failure() -> str | None:
 
 
 def _source_tree_failure() -> str | None:
-    """Alert text when the prod source checkout is tampered with, else None.
+    """Report source drift or unavailable inspection without repairing files.
 
-    Reported through check 8, which is **alert-only and never feeds the
-    auto-rollback counter** — the same placement logic as checks 5-7: a
-    tampered tree is the 2026-08-28 outage class (edited source broke
-    ``import ava`` for every agent on the box), but rolling the cluster back
-    does not undo an on-disk edit — the converge guard resets the tree on the
-    next ``ava start`` / ``ava cluster update`` ("source tree reset + clean").
-    The probe only detects and never writes, so it also covers the read-only
-    emergency mode where the guard's repair is skipped.
-
-    Delegates to ``shared.source_tree_guard.source_tree_violations`` — the
-    public read-only twin of the converge guard's repair primitive — with the
-    same whitelist, so the detector and the fixer can never disagree about
-    what is legal.
-
-    A checkout the guard could NOT evaluate (not a git checkout, or a git
-    command failed) yields a distinct "guard skipped" alert instead of a
-    clean pass: a broken git is the state in which tampering becomes
-    invisible, so the probe must name the guard itself as failing.
+    This alert-only check cannot authorize rollback: selecting a release does
+    not repair arbitrary edits. An unreadable checkout is unknown, never healthy.
     """
     import shared.cluster_drift
     import shared.source_tree_guard as stg
@@ -646,6 +600,41 @@ def run_health_probe(
         print(f"health-probe refused: {refusal}", file=sys.stderr)
         return 2
 
+    healthy = False
+    try:
+        result = _observe_cluster_health(
+            home,
+            agent_min=agent_min,
+            crash_loop_max_restarts=crash_loop_max_restarts,
+            crash_loop_window_minutes=crash_loop_window_minutes,
+            check_crash_loops=check_crash_loops,
+            check_schema=check_schema,
+            auto_rollback=auto_rollback,
+            threshold=threshold,
+        )
+        healthy = result == 0
+        if healthy:
+            _advance_pending_lkg(home)
+        return result
+    finally:
+        # An incomplete observation is not a healthy pass. This boundary also
+        # covers malformed local intent and interrupted/raising probe adapters.
+        if not healthy:
+            _reset_pending_lkg_streak(home)
+
+
+def _observe_cluster_health(
+    home: Path,
+    *,
+    agent_min: int | None,
+    crash_loop_max_restarts: int,
+    crash_loop_window_minutes: int,
+    check_crash_loops: bool,
+    check_schema: bool,
+    auto_rollback: bool,
+    threshold: int,
+) -> int:
+    """Observe one round; only the outer complete-round owner can advance LKG."""
     # 1. Gateway liveness (primary signal)
     if not _gateway_liveness_with_retry():
         failure_class = "environment" if _data_plane_abnormal() else "code"
@@ -712,13 +701,17 @@ def run_health_probe(
     # nothing a cold start would not also cost).
     if auto_rollback:
         _reset_failure_count(home)
-    _advance_pending_lkg(home)
+    return _check_alert_only_health(home)
 
-    # 5. Per-service health + host-level gate / Redis bridge — alert-only: fails
+
+def _check_alert_only_health(home: Path) -> int:
+    """Check full readiness without mistaking host failure for rollback evidence."""
+
+    # 5. Per-service health + host-level Redis bridge — alert-only: fails
     # the probe but does NOT feed the auto-rollback counter (see module
     # docstring), so it bypasses _unhealthy and alerts directly.
     failing = _service_probes() + [
-        failure for failure in (_gate_probe(), _redis_bridge_probe()) if failure is not None
+        failure for failure in (_redis_bridge_probe(),) if failure is not None
     ]
     if failing:
         message = f"FAIL: service probe — not healthy: {', '.join(sorted(failing))}"

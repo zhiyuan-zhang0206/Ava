@@ -394,7 +394,7 @@ def test_read_session_record_distinguishes_missing_from_damaged(unit_home: Path)
         spawn_receipt.read_session_record(unit_home, "ava-damaged")
 
 
-def test_record_matches_receipt_exact_starttime_then_tolerance(tmp_path: Path) -> None:
+def test_record_matches_receipt_exact_starttime_without_legacy_adoption(tmp_path: Path) -> None:
     expectation = _expectation(uuid.uuid4(), home=tmp_path)
     receipt = SpawnReceipt(
         kind="birth",
@@ -413,7 +413,12 @@ def test_record_matches_receipt_exact_starttime_then_tolerance(tmp_path: Path) -
     )
     assert not spawn_receipt.record_matches_receipt(wrong_birth, receipt)
     legacy = SessionRecord(pid=10, create_time=101.5, cmd=_SLEEP, cwd=str(tmp_path), started_at=1.0)
-    assert spawn_receipt.record_matches_receipt(legacy, receipt)
+    assert not spawn_receipt.record_matches_receipt(legacy, receipt)
+    stable = SessionRecord(pid=10, create_time=100.0, cmd=_SLEEP, cwd=str(tmp_path), started_at=1.0)
+    assert not spawn_receipt.record_matches_receipt(stable, receipt)
+    assert spawn_receipt.record_matches_receipt(
+        stable, receipt.model_copy(update={"starttime": None})
+    )
     legacy_far = SessionRecord(
         pid=10, create_time=95.0, cmd=_SLEEP, cwd=str(tmp_path), started_at=1.0
     )

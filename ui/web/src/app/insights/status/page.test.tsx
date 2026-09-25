@@ -70,7 +70,7 @@ const STATUS_OK: SystemStatus = {
           disk_pct: 40,
         },
         agent_host_online: null,
-        watchdog_online: true,
+        supervisor_online: true,
       },
       {
         // offline: a failed probe clears HEAD, so head_sha is null + on_pin null
@@ -102,7 +102,7 @@ const STATUS_OK: SystemStatus = {
           disk_pct: 40,
         },
         agent_host_online: null,
-        watchdog_online: null,
+        supervisor_online: null,
       },
       {
         // online but drifted off the pin → the off-pin case
@@ -125,7 +125,7 @@ const STATUS_OK: SystemStatus = {
         agent_groups: [],
         resource: null,
         agent_host_online: true,
-        watchdog_online: false,
+        supervisor_online: false,
       },
     ],
   },
@@ -344,7 +344,7 @@ describe("StatusPage Services and Gateway sections", () => {
       cluster: {
         ...STATUS_OK.cluster,
         machines: [
-          { ...STATUS_OK.cluster.machines[0], watchdog_online: false },
+          { ...STATUS_OK.cluster.machines[0], supervisor_online: false },
         ],
       },
     });

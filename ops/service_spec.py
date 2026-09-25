@@ -32,45 +32,25 @@ class ServiceSpec:
             union. This is the single readable place that says "which machine runs
             this", replacing the old exclusion-set encoding.
         requires_db: whether this service reads or writes the cluster's Postgres.
-            Deliberately REQUIRED (no default): the watchdog holds back exactly the
-            ``True`` services when a controller reports a DB-scoped round block
-            (``BlockScope.DB_DEPENDENT`` — DB unreachable, or applied migrations
-            disagreeing with this checkout), because reviving one of those would
-            spawn a daemon that dies in its own ``assert_schema_current`` and
-            crash-loops once a round. A default would silently classify the next
-            service for the author, which is the coupling this field exists to
-            remove — so a new service states the answer where it is declared, and a
-            DB-free one keeps being revived through a DB outage. This is a fact about
-            the SERVICE, not about its healthcheck, so the two watchdog specs answer
-            it too even though nothing filters on them.
-        pidfile: pidfile path (None = no pidfile, probe via other means).
-        healthcheck_module: the ``services.healthchecks.<x>`` module whose
-            ``main()`` the watchdog imports and runs every 60s to keep this
-            service alive — the keepalive roster is DERIVED from this field. None
-            = not watchdog-monitored (the watchdog daemons themselves).
-        curl_url: HTTP probe URL (2xx/3xx = up); None = no curl probe.
-        tcp_port: TCP-connect probe port for non-HTTP services (milvus gRPC).
-        identity_probe: the probe that answers "is the thing on that port MINE",
-            returning a ``DaemonProbe`` verdict. Set for every service whose
-            endpoint can prove it — the ``/healthz`` daemons (name + home + pid,
-            ``probe_daemon``), the gateway (home only, ``probe_home`` — uvicorn's
-            reload fork makes the pid meaningless), and the browser (profile +
-            listening socket, ``services.browser.probe``, because CDP carries no
-            field we control). **None means the probe can assert liveness and
-            nothing more**, and that is a property of the endpoint, not an
-            oversight: the frontend serves Next.js, milvus speaks gRPC, and a
-            watchdog's only signal is its own pidfile. Consumers show which of the
-            two a row got, so an operator can tell an identity-verified ✓ from a
-            2xx (`cli.commands._probe`). It exists as a field rather than being
-            re-derived per consumer: the alternative let watchdog verify identity
-            while operator surfaces trusted a bare 2xx from an occupant.
+            Required because database-scoped blocks must hold dependent services
+            while leaving independent services available for diagnosis.
+        pidfile: pidfile path (None = no daemon-specific pidfile).
+        healthcheck_module: location of the service's protocol health probes.
+            Presence opts the service into root health monitoring; modules do not
+            launch or recover processes.
+        config_inputs: authoritative external files read at process birth.
+            Their paths and bytes are part of the immutable launch generation.
+        curl_url: HTTP readiness endpoint; None for non-HTTP protocols.
+        tcp_port: listener port for a non-HTTP protocol readiness probe.
+        identity_probe: a protocol readiness callback returning DaemonProbe.
+            The canonical roster binds network callbacks to root's captured
+            process identity. Unix probes validate their connected peer directly.
+            A response from an unrelated generation can never certify readiness.
         gate: optional predicate returning a gate reason (a string = gated OUT of
             the start roster + why, None = will start). When set it OVERRIDES the
             built-in ``_gate_reason`` lookup, so a plugin service carries its own
             domain gate instead of adding a central branch; core services still
             flow through ``_gate_reason``.
-        before_launch: optional preflight run immediately before creating the
-            session, for a service-specific safe takeover.
         profile: explicit ``AVA_PROCESS_PROFILE`` override for this service's
             session (default None = derived, see below). Wins over the
             derivation AND over ``no_profile_marker``. The agent-host uses it:
@@ -88,9 +68,7 @@ class ServiceSpec:
             them): the gateway profile's env-authority pass drops those from
             os.environ at boot, so ``settings.lm.*_api_key`` resolve to None and
             every model build fails (labeler, issue #1128 / task #1230). The
-            labeler's watchdog respawn path already makes the same choice
-            (services/healthchecks/labeler.py) — this field makes the initial
-            ``ava start`` spawn agree with it.
+            root launcher uses this declaration on every service start.
     """
 
     session: str
@@ -103,9 +81,9 @@ class ServiceSpec:
     tcp_port: int | None = None
     gate: Callable[[], str | None] | None = None
     identity_probe: Callable[[], DaemonProbe] | None = None
-    before_launch: Callable[[], None] | None = None
     profile: str | None = None
     no_profile_marker: bool = False
+    config_inputs: tuple[Path, ...] = ()
 
 
 def profile_marker(spec: ServiceSpec) -> str | None:

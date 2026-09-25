@@ -39,7 +39,7 @@ is specified in [[services/agent_runner_side/agent_ops/agent-ops/wire-layer.ava.
 
 ## Key Dependencies
 - [[gateway-cli.ava.okf.md]] — Gateway issues ops commands to agent-runner via this service
-- [[services/watchdog/watchdog.ava.okf.md]] — keeps alive every 60s (HTTP `/healthz`)
+- [[services/ava_root_glue/ava_root_glue.ava.okf.md]] — keeps alive every 60s (HTTP `/healthz`)
 - [[db.ava.okf.md]] — ops directly reads/writes the cluster DB in-process
 
 ## Entry Points

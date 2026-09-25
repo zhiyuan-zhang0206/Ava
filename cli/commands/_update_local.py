@@ -24,8 +24,6 @@ frontend-only fast path and the frontend session relaunch it shares:
   itself early in boot).
 - `_restart_schedule_sessions` — compatibility no-op for an already running
   older updater; persistent schedule terminals remain intact.
-- `_adopt_child_data_plane_credentials` — refresh the surviving orchestrator's
-  credential view after that child returns, before any pin or recovery DB write.
 - `_run_gateway_local_update` — the composed local leg; every failure recovers
   to last-known-good before returning non-zero (a KeyboardInterrupt included).
 
@@ -44,12 +42,10 @@ from pathlib import Path
 from cli.commands import _update_backup_gate as _backup_gate
 from cli.commands import _update_git as _git_mod
 from cli.commands import _update_uv_sync
-from cli.commands._data_plane_admin_secrets import resume_pending_data_plane_admin_secrets
 from cli.commands._repo import session_name
 from cli.commands._update_git import GitPullFailed, GitPullResult
 from cli.commands._update_recover import _recover_rc
 from cli.commands._update_report import _print_local_launch_failure_block
-from shared.config import refresh_data_plane_settings
 from shared.rollout_handoff import child_process_env
 from shared.rollout_telemetry import stage as _stage_telemetry
 
@@ -64,23 +60,6 @@ from shared.rollout_telemetry import stage as _stage_telemetry
 # preflight shares one source of truth.
 
 _FRONTEND_SESSION = "frontend"
-
-
-def _adopt_child_data_plane_credentials() -> None:
-    """Adopt credentials a fresh ``ava start`` materialized in the unit env.
-
-    The rollout interpreter intentionally survives the checkout while the new
-    tree boots in a child process. That child can perform a one-time credential
-    migration and rewrite ``$AVA_HOME/.env``; child environment changes cannot
-    flow back into this parent. Refresh the credential-bearing environment and
-    the shared Settings singleton before the parent writes the cluster pin or
-    enters recovery, both of which open new data-plane connections.
-
-    Only the data-plane sub-model crosses this boundary. General config has no
-    live reload contract and is consumed by the fresh service processes instead.
-    """
-    resume_pending_data_plane_admin_secrets()
-    refresh_data_plane_settings()
 
 
 def _refresh_builtin_skills(repo: Path) -> None:
@@ -342,7 +321,7 @@ def _pitr_restart(origin: str) -> bool:
     return origin.startswith(("pitr-activation:", "pitr-rollback:"))
 
 
-def _run_gateway_local_update(  # noqa: PLR0915 — composed stop -> checkout -> sync -> start leg; each guard is one statement
+def _run_gateway_local_update(
     repo: Path,
     *,
     target_sha: str | None = None,
@@ -460,10 +439,7 @@ def _run_gateway_local_update(  # noqa: PLR0915 — composed stop -> checkout ->
 
         # 4) gateway boots with new code in a FRESH process so start loads the
         #    synced revision rather than this stale interpreter.
-        # Capture the fresh child's outcome, then adopt before acting on it:
-        # every recovery DB dial must see any transition the child journaled.
-        # Adoption itself has a controlled rollback branch so it cannot mask
-        # the child failure and accidentally bypass recovery.
+        # Capture the fresh child's outcome before choosing the recovery path.
         start_interrupted = False
         start_failure: Exception | None = None
         start_rc: int | None = None
@@ -473,17 +449,6 @@ def _run_gateway_local_update(  # noqa: PLR0915 — composed stop -> checkout ->
             start_interrupted = True
         except Exception as exc:
             start_failure = exc
-        try:
-            _adopt_child_data_plane_credentials()
-        except Exception as exc:
-            if pull_recover is None:
-                raise
-            print(
-                f"\n  ✗ failed to adopt child data-plane credentials ({exc}); "
-                "recovering to last-known-good",
-                file=sys.stderr,
-            )
-            return _recover_rc(repo, pull_recover, preserve_frontend)
         if start_interrupted:
             return _recover_interrupted_update(repo, pull_recover, preserve_frontend)
         if start_failure is not None:

@@ -223,37 +223,10 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
         },
     )
 
-    gateway_watchdog_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "gateway-watchdog.pid",
-        alias="AVA_GATEWAY_WATCHDOG_PIDFILE",
-        description="Gateway-capability watchdog daemon pidfile path (the monitor itself, no one monitors it).",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    agent_runner_watchdog_pidfile: Path = Field(
-        default_factory=lambda: _unit_home() / "run" / "agent-runner-watchdog.pid",
-        alias="AVA_AGENT_RUNNER_WATCHDOG_PIDFILE",
-        description="Agent-runner-capability watchdog daemon pidfile path (the monitor itself, no one monitors it).",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     frontend_healthcheck_url: str = Field(
         default="http://localhost:3000",
         alias="AVA_FRONTEND_HEALTHCHECK_URL",
-        description="The fleet UI entry the user reaches — the always-up gate's port (the Next.js app itself binds AVA_APP_PORT and is proxied).",
+        description="The fleet UI entry the user reaches — Gate's port (the Next.js app itself binds AVA_APP_PORT and is proxied).",
         json_schema_extra={
             "restart_required": "",
             "writable": False,
@@ -555,57 +528,6 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
             "sensitive": False,
             "scope": "host",
             "remote_writable": False,
-        },
-    )
-
-    watchdog_interval_seconds: float = Field(
-        default=60.0,
-        alias="AVA_WATCHDOG_INTERVAL_SECONDS",
-        description="Watchdog daemon healthcheck round interval (seconds).",
-        json_schema_extra={
-            "capability": "common",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    watchdog_respawn_backoff_cap_seconds: float = Field(
-        default=1800.0,
-        alias="AVA_WATCHDOG_RESPAWN_BACKOFF_CAP_SECONDS",
-        description=(
-            "Watchdog respawn exponential-backoff ceiling (seconds). After a failed "
-            "respawn, the next attempt is delayed by base * 2^n (base = watchdog round "
-            "interval), capped at this value; a condition a respawn cannot cure stops "
-            "being hammered once the delay exceeds it."
-        ),
-        json_schema_extra={
-            "capability": "common",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    watchdog_respawn_breaker_rounds: int = Field(
-        default=5,
-        alias="AVA_WATCHDOG_RESPAWN_BREAKER_ROUNDS",
-        description=(
-            "Watchdog respawn circuit breaker: consecutive rounds without a probe-alive "
-            "verdict that open the breaker — respawns stop and hold, with one "
-            "respawn_breaker_open alert per episode, until a round probes alive."
-        ),
-        json_schema_extra={
-            "capability": "common",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
         },
     )
 

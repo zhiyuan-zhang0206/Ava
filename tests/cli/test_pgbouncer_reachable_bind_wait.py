@@ -20,6 +20,8 @@ What is asserted here — the decision logic around `ensure_pgbouncer`:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from cli.commands import _pgbouncer as _pb
@@ -30,6 +32,7 @@ _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
 @pytest.fixture()
 def _noop_write(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never touch the real $AVA_HOME/pgbouncer dir from a unit test."""
+    monkeypatch.setattr(_pb.ownership, "require_listener", lambda *_a, **_k: None)
     monkeypatch.setattr(_pb, "_write_config", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "_report_backend_verification", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     # ensure_pgbouncer's binary-exists guard must pass on every runner: the fake
@@ -66,7 +69,7 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
     """The reachable address is not up within the bound: a fresh start must NOT
     birth a pooler that would silently degrade to loopback-only. Fail fast with an
     explicit message; the boot retry re-runs `ava start` once the network is up."""
-    monkeypatch.setattr(_pb, "_running_pid", lambda: None)
+    monkeypatch.setattr(_pb.ownership, "pooler", lambda *_a: None)
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "reachable_host", lambda: "10.0.0.5")
     calls = _fake_start(monkeypatch)
@@ -77,6 +80,7 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
         db_name="ava_main",
         role="ava_main",
         cluster_secret=_SECRET,
+        db_admin_password="owner",  # noqa: S106 — test credential
     )
 
     assert rc == 1
@@ -125,7 +129,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
     listener is missing — the exact silent degradation. The bring-up must abort
     with an explicit error, not print "✓ pgbouncer started"."""
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_pb, "_running_pid", lambda: None)
+    monkeypatch.setattr(_pb.ownership, "pooler", lambda *_a: None)
     monkeypatch.setattr(_pb, "_admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "reachable_host", lambda: "10.0.0.5")
@@ -137,6 +141,7 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
         db_name="ava_main",
         role="ava_main",
         cluster_secret=_SECRET,
+        db_admin_password="owner",  # noqa: S106 — test credential
     )
 
     assert rc == 1
@@ -152,7 +157,7 @@ def test_fresh_start_with_public_listener_is_success(
 ) -> None:
     """Healthy double bind: loopback + reachable both answer → success as before."""
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_pb, "_running_pid", lambda: None)
+    monkeypatch.setattr(_pb.ownership, "pooler", lambda *_a: None)
     monkeypatch.setattr(_pb, "_admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     _fake_start(monkeypatch)
@@ -163,6 +168,7 @@ def test_fresh_start_with_public_listener_is_success(
         db_name="ava_main",
         role="ava_main",
         cluster_secret=_SECRET,
+        db_admin_password="owner",  # noqa: S106 — test credential
     )
 
     assert rc == 0
@@ -181,7 +187,9 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
     killed: list[int] = []
     sighups: list[int] = []
 
-    monkeypatch.setattr(_pb, "_running_pid", lambda: 4242)
+    monkeypatch.setattr(
+        _pb.ownership, "pooler", lambda *_a: SimpleNamespace(pid=4242, live=lambda: True)
+    )
     monkeypatch.setattr(
         _pb,
         "_terminate_verified",
@@ -189,8 +197,10 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
     )
     monkeypatch.setattr(
         _pb,
-        "os",
-        type("_OS", (), {"kill": staticmethod(lambda pid, _sig: sighups.append(pid))})(),  # pyright: ignore[reportUnknownArgumentType]
+        "psutil",
+        SimpleNamespace(
+            Process=lambda pid: SimpleNamespace(send_signal=lambda _sig: sighups.append(pid))
+        ),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
@@ -207,6 +217,7 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
         db_name="ava_main",
         role="ava_main",
         cluster_secret=_SECRET,
+        db_admin_password="owner",  # noqa: S106 — test credential
     )
 
     assert rc == 0
@@ -224,7 +235,9 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
     sighups: list[int] = []
     public_answers = iter([False, True])  # degraded before restart, healthy after
 
-    monkeypatch.setattr(_pb, "_running_pid", lambda: 4242)
+    monkeypatch.setattr(
+        _pb.ownership, "pooler", lambda *_a: SimpleNamespace(pid=4242, live=lambda: True)
+    )
     monkeypatch.setattr(
         _pb,
         "_terminate_verified",
@@ -232,8 +245,10 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
     )
     monkeypatch.setattr(
         _pb,
-        "os",
-        type("_OS", (), {"kill": staticmethod(lambda pid, _sig: sighups.append(pid))})(),  # pyright: ignore[reportUnknownArgumentType]
+        "psutil",
+        SimpleNamespace(
+            Process=lambda pid: SimpleNamespace(send_signal=lambda _sig: sighups.append(pid))
+        ),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         _pb,
@@ -251,6 +266,7 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
         db_name="ava_main",
         role="ava_main",
         cluster_secret=_SECRET,
+        db_admin_password="owner",  # noqa: S106 — test credential
     )
 
     assert rc == 0
@@ -267,11 +283,12 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
     """P7: `_terminate_verified` returning False means the degraded pooler survived
     the force kill — starting a second pooler on the same port would fail
     confusingly. The real cause must be said out loud."""
-    monkeypatch.setattr(_pb, "_running_pid", lambda: 4242)
+    monkeypatch.setattr(
+        _pb.ownership, "pooler", lambda *_a: SimpleNamespace(pid=4242, live=lambda: True)
+    )
     monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "_terminate_verified", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_pb, "os", type("_OS", (), {"kill": staticmethod(lambda *_a: None)})())
     calls = _fake_start(monkeypatch)
 
     rc = _pb.ensure_pgbouncer(
@@ -280,6 +297,7 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
         db_name="ava_main",
         role="ava_main",
         cluster_secret=_SECRET,
+        db_admin_password="owner",  # noqa: S106 — test credential
     )
 
     assert rc == 1

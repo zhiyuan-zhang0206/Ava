@@ -19,7 +19,6 @@ import pytest
 from shared import hold_watchdog as hw
 from shared import pause_owner
 from shared.maintenance_state import MaintenanceHold
-from shared.os_watchdog_probe import HeldStopState
 
 _AT = datetime(2026, 9, 17, 22, 27, 46, tzinfo=UTC)
 _OLD_ENOUGH = _AT.timestamp() + 3600.0
@@ -69,7 +68,6 @@ def armed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hw, "_executing_block", lambda: None)
     monkeypatch.setattr(hw, "_lifecycle_busy", lambda: False)
     monkeypatch.setattr(hw, "_intended_expiry", lambda: None)
-    monkeypatch.setattr("shared.os_watchdog_probe.held_stop_state", lambda: HeldStopState.ABSENT)
 
 
 # --- the hold gate ----------------------------------------------------------
@@ -323,24 +321,6 @@ def test_the_updater_lock_probe_releases_what_it_took(
 
 
 # --- the held-stop and lifecycle gates --------------------------------------
-
-
-@pytest.mark.parametrize(
-    "state", [HeldStopState.STALE, HeldStopState.ABSENT, HeldStopState.UNREADABLE]
-)
-def test_non_fresh_markers_evaluate(
-    state: HeldStopState, armed: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("shared.os_watchdog_probe.held_stop_state", lambda: state)
-    assert hw.evaluate(now=_OLD_ENOUGH).kind is hw.VerdictKind.ELIGIBLE
-
-
-def test_a_fresh_marker_defers(armed: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A stop is mid-flight; it owns its window and clears its own marker."""
-    monkeypatch.setattr("shared.os_watchdog_probe.held_stop_state", lambda: HeldStopState.FRESH)
-    verdict = hw.evaluate()
-    assert verdict.kind is hw.VerdictKind.BACK_OFF
-    assert verdict.code == "held-stop"
 
 
 def test_the_real_lifecycle_probe_sees_a_held_lock(monkeypatch: pytest.MonkeyPatch) -> None:

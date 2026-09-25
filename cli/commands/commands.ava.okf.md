@@ -29,10 +29,7 @@ Most command modules follow these two naming groups:
   (step-table aggregation and execution) / `_converge_spec` (the step contract) /
   `_converge_steps` (early host and data-plane wiring) / `_converge_os_jobs`
   (the OS-scheduled jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
-  `_converge_gate` / `_gate_systemd` (per-home launchd or Linux user-systemd gate),
-  `_converge_redis_bridge` (idempotent host wiring) /
-  `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
-  permission-prompt watcher),
+  `_converge_redis_bridge` (idempotent host wiring),
   `_update_git` / `_update_backup_gate` (the pre-stop backup gate) /
   `_update_orchestration` / `_update_agent_runner` / `_update_bootstrap` /
   `_update_normal_release` / `_update_uv_sync` /
@@ -54,8 +51,10 @@ cannot protect (issue #2307). When the data-plane phase still fails after the
 services phase stopped, `_temporary_stop` compensates with a bounded internal
 `ava start` (restoring the services and reviving a half-shut pooler) instead of
 leaving the unit dark; the stop report and journal record the outcome (issue
-#2307). `_stop_extras` and
-`_stop_supervised` stop home-owned Gate/helper/native LGTM. `_pause_resume`
+#2307). `_stop_extras` uses the same exact-home helper retirement as destroy:
+native job, executable, socket and stopped-root custody are checked before
+native helper exit and removal of its definition. Start recreates that definition.
+Root owns Gate and native LGTM application services. `_pause_resume`
 releases normal startup admission only after readiness.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `_maintenance.py` and `_maintenance_probe`.
@@ -64,10 +63,20 @@ See [the coordinated operator procedure](../../conventions/graceful-maintenance.
 
 Gateway data-plane startup passes separate URL identities to `_cluster_instance`:
 Postgres db/role comes from `db_identity()`, Redis ACL user from `redis_identity()`.
-`_data_plane_admin_secrets` preserves that distinction during credential splitting.
-Installation supplies the same birth identifier for both before `.env` exists.
-Legacy username backfill adopts its committed Redis URL in the same start
-process, including named `nopass` URLs for no-auth homes.
+First-start identity persists each credential before effects; startup refuses
+missing owner credentials and never substitutes the bearer. The identity owner
+writes each URL before bringing up storage; no runtime identity backfill exists.
+`shared.cluster.ownership` is the common startup/maintenance observer: home
+paths, native process birth and all listener PIDs must agree before config,
+reload or ACL effects. Redis ACL and maintenance shutdown each retain one
+observed connection; a reconnect loses authority and fails. PostgreSQL admin
+and pooler dials use only the home's canonical Unix socket directory. Every
+owned provisioning, checkpoint, grant and migration connection verifies its
+actual native backend against the home's postmaster before DDL. Explicit
+remote-managed URLs retain provider authority. PgBouncer starts only after
+schema and runner grants exist. A live pooler with closed listeners retains
+custody: normal start cannot repeat its shutdown signal or escalate to force.
+A graceful stop timeout fails without killing the survivor.
 
 `cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
 it runs as a step of `ava start` / `ava update`, so any restart crossing a
@@ -75,11 +84,9 @@ schema change catches the DB up on its own.
 
 ## Notes
 
-- The fleet UI gate stays outside service-session teardown. Linux uses a
-  per-home user-systemd unit with crash restart; unchanged active units survive
-  updates, while source-hash changes replace them after a completed stop.
-  Full stop and destroy use that same home identity. See
-  [Linux gate supervision](../../conventions/linux-gate-supervision.md).
+- Gate is an ordinary gateway service selected into the root manifest. Planned
+  root downtime includes its entry port; it has no separate OS job or detached
+  launcher. See [[services/gate/gate.ava.okf.md|Fleet UI Gate]].
 
 - `agent_timeline.py` exposes the existing timeline API as `ava agents timeline`
   and its exact `context` alias. `impersonation.py` manages explicit external
@@ -110,8 +117,8 @@ schema change catches the DB up on its own.
   guard: [[editable-install-guard.ava.okf.md]]; the prod source checkout's
   integrity (periodic reset + probe detection) is its sibling guard:
   [[source-tree-guard.ava.okf.md]].
-- `cli/enroll.py` and `cli/preflight.py` are routed **before** settings-gated
-  imports in `main()`, so they work on a host with no usable config yet.
+- `cli/start_intent.py` is routed **before** settings-gated imports in `main()`,
+  so first start records complete home identity before runtime configuration loads.
 - `cli/mcp_server.py` is the third top-level module a verb routes to
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp
@@ -123,9 +130,9 @@ schema change catches the DB up on its own.
 
 ## Key Dependencies
 
-- [[cli.ava.okf.md]] — the CLI domain overview: verbs, cluster identity, install-time birth
+- [[cli.ava.okf.md]] — the CLI domain overview: verbs, cluster identity, idempotent first start
 - [[packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` package surface
 - [[start-readiness.ava.okf.md]] — what `ava start` calls up: the launch guard, the
-  readiness wait, and the waiver over its exit code
+  root-owned readiness wait and failure exit code
 - [[rollout-boundary.ava.okf.md]] — rollout child classification, gateway
   readiness, Phase B, and recovery authentication

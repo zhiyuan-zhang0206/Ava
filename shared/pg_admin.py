@@ -9,10 +9,14 @@ private-storage), so the admin dial lives beside the identity it serves.
 from __future__ import annotations
 
 import getpass
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
-from shared.cluster import home_slug
-from shared.paths import ava_home
+import psycopg
+
+from shared.cluster.derive import home_slug
 from shared.private_storage import ensure_private_dir
 
 
@@ -26,48 +30,32 @@ def pg_socket_dir(socket_root: Path | None = None, *, home: Path | None = None) 
     the cli thin shell passes its own resolution so cli-layer steering (tests
     patch `cli.commands._cluster_instance.ava_home`) keeps flowing."""
     if home is None:
+        from shared.paths import ava_home
+
         home = ava_home()
     root = Path("/tmp") if socket_root is None else socket_root  # noqa: S108 — OS-fixed production socket root
     d = root / f"ava-pg-{home_slug(home)}"
     return ensure_private_dir(d)
 
 
-def live_pg_socket_dir(
-    pg_port: int,
-    probe_root: Path = Path("/tmp"),  # noqa: S108 — the OS-fixed short socket root
-    *,
-    canonical: Path | None = None,
-) -> Path:
-    """The socket dir the RUNNING pg instance on `pg_port` actually listens on.
-
-    Normally the canonical `pg_socket_dir()`. A pg started by pre-path-only code
-    still listens under the old name-keyed `/tmp/ava-pg-<cluster>` until its next
-    restart, so the admin dial probes every `<probe_root>/ava-pg-*` dir for a live
-    `.s.PGSQL.<pg_port>` socket — the port is this cluster's own allocated one,
-    so a match is unambiguous (data, not a name). `canonical` overrides the
-    canonical-dir source (the cli thin shell binds its monkeypatchable
-    `_pg_socket_dir` through it). Falls back to the canonical dir when nothing
-    is listening yet (fresh birth: the socket appears when `_start_pg` starts
-    pg there). `probe_root` is /tmp in production (where the short socket dirs
-    live); tests inject a scratch root."""
-    if canonical is None:
-        canonical = pg_socket_dir()
-    if (canonical / f".s.PGSQL.{pg_port}").exists():
-        return canonical
-    for d in probe_root.glob("ava-pg-*"):
-        if (d / f".s.PGSQL.{pg_port}").exists():
-            return d
-    return canonical
-
-
 def pg_admin_url(pg_port: int) -> str:
-    """The provisioning admin connection for this cluster's instance: the initdb
-    superuser over the local unix socket (trust), so provisioning is passwordless.
-    psycopg reads `host=<socket-dir>` + `port` from the query string. Dials the
-    socket dir the running instance actually listens on (`live_pg_socket_dir`),
-    so an admin call keeps working while a pre-cutover pg is still up on the old
-    name-keyed dir."""
-    return (
-        f"postgresql://{getpass.getuser()}@/postgres"
-        f"?host={live_pg_socket_dir(pg_port)}&port={pg_port}"
-    )
+    """Dial only this home's canonical owner-only Unix socket directory."""
+    return f"postgresql://{getpass.getuser()}@/postgres?host={pg_socket_dir()}&port={pg_port}"
+
+
+@contextmanager
+def connect(
+    url: str, *, expected_data_dir: Path | None = None, **kwargs: Any
+) -> Generator[psycopg.Connection[Any]]:
+    """Open explicit admin authority; owned startup validates the actual connection.
+
+    A caller managing native storage must supply its recorded data directory.
+    Provider-managed provisioning helpers retain their explicit URL authority.
+    Psycopg connections never reconnect, so validated custody lasts until close.
+    """
+    with psycopg.connect(url, **kwargs) as conn:
+        if expected_data_dir is not None:
+            from shared.cluster.ownership import require_postgres_connection
+
+            require_postgres_connection(conn, expected_data_dir)
+        yield conn

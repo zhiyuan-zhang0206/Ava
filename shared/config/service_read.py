@@ -341,11 +341,11 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
                 "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — on a "
                 "remote-managed data plane the runner role is provisioned at the "
                 "provider and its password must be written into the gateway .env "
-                "directly (`ava cluster ensure-db-role` refuses remote planes)."
+                "as the explicit first-start credential."
             )
         raise ValueError(
-            "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
-            "`ava cluster ensure-db-role` on the gateway first, then retry."
+            "AVA_RUNNER_DB_PASSWORD is missing from the gateway initialization; "
+            "restore its recorded credential before serving runner bootstrap."
         )
     db_url = out.get("AVA_DB_URL")
     if not db_url:

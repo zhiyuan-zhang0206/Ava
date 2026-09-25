@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -250,7 +249,7 @@ def test_cmd_start_finalizes_a_paused_deploy_journal(
         assert pause_owner.read().status == "paused", "finalize must wait for readiness"
         return _cli.ReadinessWait((), 0.0, sessions_gone=False)
 
-    monkeypatch.setattr(_cli, "_wait_for_services_ready", ready)
+    monkeypatch.setattr(_cli, "_wait_for_service_tree", ready)
     assert _cli.cmd_start() == 0
 
     snapshot = pause_owner.read()
@@ -271,7 +270,6 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
     mid-transition."""
     from datetime import UTC, datetime
 
-    from cli.commands import _data_plane_admin_secrets as secrets_mod
     from cli.commands import start as start_mod
     from shared import pause_owner
     from shared.cluster_lock import DeployLease
@@ -294,11 +292,6 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
             acquired_at=datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC),
         ),
     )
-    monkeypatch.setattr(
-        secrets_mod,
-        "ensure_data_plane_admin_secrets",
-        lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType]
-    )
     monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
     monkeypatch.setattr(
         _cli.subprocess,
@@ -313,102 +306,6 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
     snapshot = pause_owner.read()
     assert snapshot.status == "paused"
     assert snapshot.matches("rollout:42", datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC))
-
-
-def test_rollout_child_keeps_converging_before_parent_readiness(
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """An old parent has no handoff marker, so its executing lease is the
-    compatibility proof: the fresh internal start must not revive agents."""
-    from cli.commands import _data_plane_admin_secrets as secrets_mod
-    from cli.commands import start as start_mod
-    from shared.cluster_lock import DeployLease
-    from shared.rollout_handoff import ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV
-
-    service, _shell = _fake_session_backends
-    postures: list[str] = []
-    legacy_upgrade: list[bool] = []
-
-    def _record_legacy_upgrade(*, allow_legacy_upgrade: bool) -> bool:
-        legacy_upgrade.append(allow_legacy_upgrade)
-        return False
-
-    monkeypatch.delenv(ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV, raising=False)
-    monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease",
-        lambda: DeployLease(
-            holder="old-parent:42",
-            held_for_s=10,
-            expires_in_s=900,
-            kind="rollout",
-        ),
-    )
-    monkeypatch.setattr("shared.host_deploy_state.set_posture", postures.append)
-    monkeypatch.setattr(
-        secrets_mod,
-        "ensure_data_plane_admin_secrets",
-        _record_legacy_upgrade,
-    )
-    monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
-    monkeypatch.setattr(
-        _cli.subprocess,
-        "run",
-        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    rc = _cli.cmd_start(persist_services=False)
-
-    assert rc == 0
-    assert postures[-1] == "converging"
-    assert _sess("restarter") not in service.created
-    assert legacy_upgrade == [False]
-
-
-def test_handoff_capable_rollout_child_may_commit_credential_transition(
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
-) -> None:
-    """The follow-up rollout carries v1 proof: credential mutation becomes
-    legal while admission remains behind the same resume boundary."""
-    from cli.commands import _data_plane_admin_secrets as secrets_mod
-    from cli.commands import start as start_mod
-    from shared.rollout_handoff import (
-        ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV,
-        ROLLOUT_PARENT_CREDENTIAL_HANDOFF_VERSION,
-    )
-
-    service, _shell = _fake_session_backends
-    legacy_upgrade: list[bool] = []
-
-    def _record_legacy_upgrade(*, allow_legacy_upgrade: bool) -> bool:
-        legacy_upgrade.append(allow_legacy_upgrade)
-        return False
-
-    monkeypatch.setenv(
-        ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV,
-        ROLLOUT_PARENT_CREDENTIAL_HANDOFF_VERSION,
-    )
-    monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease",
-        lambda: pytest.fail("the versioned parent marker is authoritative"),
-    )
-    monkeypatch.setattr(
-        secrets_mod,
-        "ensure_data_plane_admin_secrets",
-        _record_legacy_upgrade,
-    )
-    monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
-    monkeypatch.setattr(
-        _cli.subprocess,
-        "run",
-        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    assert _cli.cmd_start(persist_services=False) == 0
-    assert legacy_upgrade == [True]
-    assert _sess("restarter") not in service.created
-    assert ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV not in os.environ
 
 
 def test_phase_b_pure_runner_restores_idle_posture_and_agent_host(
@@ -500,37 +397,7 @@ def test_rollout_lease_read_failure_is_before_migrations(
     assert service.created == []
 
 
-def test_pending_credential_transition_replays_before_migrations(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A crash journal is adopted before the first schema client is opened."""
-    from cli.commands import _data_plane_admin_secrets as secrets_mod
-    from cli.commands import start as start_mod
-
-    order: list[str] = []
-    monkeypatch.setattr(
-        secrets_mod,
-        "resume_pending_data_plane_admin_secrets",
-        lambda: order.append("resume"),
-    )
-    monkeypatch.setattr(
-        start_mod,
-        "cmd_migrations_apply",
-        lambda: order.append("migrate") or 0,
-    )
-    monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
-    monkeypatch.setattr(
-        _cli.subprocess,
-        "run",
-        _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    assert _cli.cmd_start() == 0
-    assert order[:2] == ["resume", "migrate"]
-
-
-def test_machine_description_setup_field_writes_file(
+def test_machine_description_setup_field_does_not_write_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from cli.commands import _setup
@@ -538,9 +405,9 @@ def test_machine_description_setup_field_writes_file(
     monkeypatch.setattr(settings.general, "machine_description", "")
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
     field = next(f for f in _setup._SETUP_FIELDS if f.name == "machine_description")
-    # arg provided → write file + return value
+    # The durable first-start identity owner alone writes identity.
     assert _setup._resolve_setup_field(field, "voice IO + browser") == "voice IO + browser"
-    assert (tmp_path / "machine_description").read_text() == "voice IO + browser"
+    assert not (tmp_path / "machine_description").exists()
     # no env, no file, no arg → optional field returns None
     no_file_tmp = tmp_path / "subdir_no_file"
     no_file_tmp.mkdir()

@@ -77,27 +77,34 @@ never combine an owner username with the cluster bearer.
 | Path | Role |
 |---|---|
 | `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions; always the default home's cluster (its own pg 5433 / redis 6380 + prod service ports) |
-| `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); each worktree gets its own cluster via `scripts/install.sh --worktree` (home `~/.ava-<worktree-dir>` by default), isolated db/redis/ports/sessions |
+| `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); each worktree gets its own cluster via `ava start --worktree` (home `~/.ava-<worktree-dir>` by default), isolated db/redis/ports/sessions |
 
-Cluster identity is born at **install time** (`scripts/install.sh` →
-`python -m cli.install_cluster`): registry record + port block + the cluster's
-own pg/redis + provisioned db + cluster `.env` (single-machine = NO-AUTH empty;
-gateway-only = minted bearer plus independent data-plane credentials; existing
-credentials never rotate at install). The home
-is resolved **checkout-anchored** (`AVA_HOME` env > prod source → `~/.ava` > the
-checkout's `.ava_home` pointer; a contradicting env refuses outright unless
-`AVA_HOME_OVERRIDE=1`) — never cwd, never a flag. `ava start` is a pure
-bring-up: an uninstalled home fails fast pointing at `install.sh` /
-`install.sh --worktree` / `ava enroll` by role. Machine identity
-(machine-name / serve-gateway / serve-agent-runner / gateway-url) is passed on
-the FIRST start only and persisted to `$AVA_HOME/<field>` files. An enrolled
-agent-runner does NOT birth a cluster; its identity IS the gateway URL +
-cluster secret it enrolled with. Registry: host-level JSON
-`~/.ava/clusters.json`, keyed by home path.
+`ava start` is the single idempotent initialization and startup entry. Before
+runtime Settings or native effects, it persists `start-intent.json`: the home,
+capabilities, checkout, reserved ports and credentials. Repeated start retains
+that identity and the desired service selection; interrupted initialization
+resumes it. An ambiguous existing home or contradictory checkout pointer refuses
+instead of creating a second identity. The home is checkout-anchored: explicit
+`AVA_HOME`, the production source path, or the checkout's `.ava_home` pointer.
+`--worktree` supplies a deterministic development home when none is explicit.
+
+First start takes the machine name, capability flags and reachable host. A
+remote agent-runner joins through the same entry with `--gateway-url` and
+`AVA_CLUSTER_SECRET`; it does not create a gateway or a local data plane.
+Registry records are keyed by absolute home path in `~/.ava/clusters.json`
+(or an explicit private `AVA_CLUSTER_REGISTRY`). First configuration may be
+supplied with `--config-file`; credentials and identity survive retries.
+
+Application processes have one supervisor: `ava-root`. On macOS the ancestry
+is `launchd -> signed permissions helper -> ava-root -> services / agent-host`.
+On Linux it is `systemd/direct launch -> ava-root -> services / agent-host`;
+Linux has no helper layer. Root names the supervisor, not a privileged user.
+Native data-plane custody is separate so application shutdown can retain the
+database for migrations. Readiness requires a real protocol response from the
+captured process generation; missing evidence cannot become success.
 
 Which cluster an `ava` acts on is fixed by **which checkout it belongs to**
-(where its `cli` source lives), not by the current directory. `install.sh
---role gateway` symlinks the prod checkout's `ava` onto PATH at
+(where its `cli` source lives), not by the current directory. The production start converge symlinks its checkout's `ava` onto PATH at
 `~/.local/bin`, so a bare `ava` always means prod; dev work runs
 `.venv/bin/ava` inside the worktree. Host wiring + each plugin's `scaffold()`
 are applied by the converge phase (`cli/commands/_converge.py`) on every
@@ -106,13 +113,11 @@ go through `ava cluster update` (the CLI — the only update entry point),
 never directly `git checkout` on the prod path.
 
 ```bash
-scripts/install.sh --role ... | --worktree   # the ONLY birth (idempotent): registry record +
-              # cluster's own pg/redis + provisioned db + .env (--worktree = dev worktree
-              # cluster, home ~/.ava-<dir>). Secret: single machine = NO-AUTH empty,
-              # gateway-only = minted.
-uv sync       # install deps + the `ava` CLI into .venv/bin/
-ava start     # pure bring-up: ensures the cluster's own pg/redis is up, then brings up this
-              # host's services. No identity flags — the home comes from the checkout-anchored boot.
+uv sync       # prepare the checkout dependencies and CLI; no cluster is created
+ava start --worktree  # initialize or resume a private development cluster
+ava start     # reconcile the established home and desired service roster
+              # --only-service NAME is an allowlist; --disable-service NAME is an exclusion
+              # --all-services explicitly resets selection; omitted flags retain it
 ava pause     # normal agent drain; preserves infrastructure, browser and persistent PTYs.
 ava stop      # normal agent drain, then full local stop including PTYs/browser/private pg+redis.
               # --keep-infra / --keep-service retain resources; --force is explicit escalation.
@@ -121,8 +126,8 @@ ava status    # check status (includes the pg/redis view)
 ava cluster update    # upgrade: a gateway-capable host orchestrates the whole cluster (pause
               # runners -> pull/sync/migrate/restart -> trigger runner self-updates); a pure
               # agent-runner self-updates.
-ava enroll --gateway URL --machine-name NAME --machine-host HOST  # join a cluster (export
-              # AVA_CLUSTER_SECRET first; verifies the runner projection, then run `ava start`)
+ava start --no-serve-gateway --serve-agent-runner --gateway-url URL --machine-name NAME --machine-host HOST
+              # first start of a remote runner; supply AVA_CLUSTER_SECRET in the environment
 ava cluster ls / status             # list all registered clusters (label = home basename) / full multi-machine roster
 ava cluster down --path PATH        # stop the cluster at a home path, keep its slot (data stays on disk)
 ava cluster destroy --path PATH     # stop + free its slot + deregister its OS jobs (refused for ~/.ava)

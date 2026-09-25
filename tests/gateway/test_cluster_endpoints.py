@@ -1811,58 +1811,18 @@ class TestStatusSnapshot:
         assert snap.head_sha == "n3wn3w0bbbb"
         assert snap.running_sha != snap.head_sha
 
-    def test_watchdog_online_requires_only_this_capabilitys_watchdog(
+    @pytest.mark.parametrize("online", [True, False, None])
+    def test_supervisor_status_preserves_unavailable_inspection(
         self,
         fake_flag: Path,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
+        online: bool | None,
     ) -> None:
-        """`watchdog_online` (single bool for the frontend dot) now means "every
-        watchdog this host should run is alive". A split agent-runner has only the
-        agent-runner watchdog — the gateway one is not its concern — so a dead
-        gateway-watchdog pidfile must NOT drag the dot to offline."""
-        from shared.config import settings
-
-        del fake_flag  # unpaused
-        set_machine_identity(role="agent-runner", name="wsl")
-
-        def _fake_check(path: str) -> tuple[bool, int | None]:
-            # The agent-runner watchdog is alive; the gateway one is "dead" (a
-            # split agent-runner never runs it) and must be ignored.
-            if path == str(settings.services.agent_runner_watchdog_pidfile):
-                return True, 123
-            return False, None
-
-        monkeypatch.setattr(cluster_status, "_check_pidfile", _fake_check)
-        assert cluster_mod.status_snapshot().watchdog_online is True
-
-    def test_watchdog_online_single_box_requires_both(
-        self,
-        fake_flag: Path,
-        set_machine_identity,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A single-box host runs BOTH watchdogs, so the dot is online only when
-        both pidfiles are alive."""
-        from shared.config import settings
-
-        del fake_flag  # unpaused
-        set_machine_identity(role="gateway,agent-runner", name="test-host")
-
-        alive = {
-            str(settings.services.gateway_watchdog_pidfile),
-            str(settings.services.agent_runner_watchdog_pidfile),
-        }
-
-        def _fake_check(path: str) -> tuple[bool, int | None]:
-            return (path in alive, 123 if path in alive else None)
-
-        monkeypatch.setattr(cluster_status, "_check_pidfile", _fake_check)
-        assert cluster_mod.status_snapshot().watchdog_online is True
-
-        # gateway watchdog dies → the single-box dot goes offline.
-        alive.discard(str(settings.services.gateway_watchdog_pidfile))
-        assert cluster_mod.status_snapshot().watchdog_online is False
+        del fake_flag
+        set_machine_identity(role="agent-runner", name="test-host")
+        monkeypatch.setattr(cluster_status, "_supervisor_online", lambda: online)
+        assert cluster_mod.status_snapshot().supervisor_online is online
 
 
 # ─── /api/cluster/stop + update endpoints via TestClient ─────────────────────

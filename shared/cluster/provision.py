@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from shared.log import logger
+from shared.pg_admin import connect
 from shared.url_secret import url_with_userinfo
 
 
@@ -26,20 +27,25 @@ def _swap_db(url: str, db_name: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, f"/{db_name}", parts.query, parts.fragment))
 
 
-def _schema_applied(admin_url: str, target: str) -> bool:
+def _schema_applied(admin_url: str, target: str, *, expected_data_dir: Path | None = None) -> bool:
     """True if `target` DB has the schema fully applied — `schema_migrations` is
     the last table created by db/schema.sql, so its presence means the apply did
     not fail partway."""
-    import psycopg
 
-    with psycopg.connect(_swap_db(admin_url, target)) as conn:
+    with connect(_swap_db(admin_url, target), expected_data_dir=expected_data_dir) as conn:
         row = conn.execute(
             "SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_migrations'"
         ).fetchone()
     return row is not None
 
 
-def ensure_cluster_role(identity: str, *, base_admin_url: str, db_admin_password: str) -> None:
+def ensure_cluster_role(
+    identity: str,
+    *,
+    base_admin_url: str,
+    db_admin_password: str,
+    expected_data_dir: Path | None = None,
+) -> None:
     """Create (or re-affirm) the cluster's data-plane role `identity` and make it
     own the database of the same name. Idempotent — safe on every bring-up.
 
@@ -61,10 +67,9 @@ def ensure_cluster_role(identity: str, *, base_admin_url: str, db_admin_password
     base_admin_url must connect as a Postgres superuser — the loopback-`trust`
     bootstrap superuser — to a maintenance db (e.g. `postgres`) on the same instance.
     """
-    import psycopg
     from psycopg import sql as pgsql
 
-    with psycopg.connect(base_admin_url, autocommit=True) as conn:
+    with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         has_role = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (identity,)).fetchone()
         # The initdb bootstrap superuser is the installing OS user. When that user
         # is ALSO the cluster identity (a host user literally named like the fixed
@@ -91,19 +96,24 @@ def ensure_cluster_role(identity: str, *, base_admin_url: str, db_admin_password
             "SELECT 1 FROM pg_database WHERE datname = %s", (identity,)
         ).fetchone()
     if db_exists:
-        _adopt_database(base_admin_url, identity, identity)
+        _adopt_database(base_admin_url, identity, identity, expected_data_dir=expected_data_dir)
 
 
-def _adopt_database(base_admin_url: str, target: str, owner: str) -> None:
+def _adopt_database(
+    base_admin_url: str,
+    target: str,
+    owner: str,
+    *,
+    expected_data_dir: Path | None = None,
+) -> None:
     """Make `owner` own database `target`. Idempotent — safe on every bring-up.
 
     The legacy single shared `ava` role's REASSIGN OWNED migration is retired
     (2026-09-20, batch b5): no live instance still needs it, and the fleet's
     target databases carry no `ava`-owned objects (verified per host)."""
-    import psycopg
     from psycopg import sql as pgsql
 
-    with psycopg.connect(base_admin_url, autocommit=True) as conn:
+    with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         conn.execute(
             pgsql.SQL("ALTER DATABASE {} OWNER TO {}").format(
                 pgsql.Identifier(target), pgsql.Identifier(owner)
@@ -111,7 +121,14 @@ def _adopt_database(base_admin_url: str, target: str, owner: str) -> None:
         )
 
 
-def provision_database(identity: str, *, base_admin_url: str, db_admin_password: str) -> bool:
+def provision_database(
+    identity: str,
+    *,
+    base_admin_url: str,
+    db_admin_password: str,
+    resume_initialization: bool = False,
+    expected_data_dir: Path | None = None,
+) -> bool:
     """Atomically provision a cluster's Postgres database AND its owning role:
     ensure role `identity`, CREATE DATABASE `identity` OWNED BY it, and apply
     db/schema.sql *as that role* so every object is role-owned. `identity` is the
@@ -133,32 +150,44 @@ def provision_database(identity: str, *, base_admin_url: str, db_admin_password:
     Raises:
         RuntimeError: the DB exists but schema_migrations is missing (half-provisioned).
     """
-    import psycopg
     from psycopg import sql as pgsql
 
     ensure_cluster_role(
-        identity, base_admin_url=base_admin_url, db_admin_password=db_admin_password
+        identity,
+        base_admin_url=base_admin_url,
+        db_admin_password=db_admin_password,
+        expected_data_dir=expected_data_dir,
     )
-    with psycopg.connect(base_admin_url, autocommit=True) as conn:
+    with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         exists = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s", (identity,)
         ).fetchone()
     if exists:
-        if _schema_applied(base_admin_url, identity):
+        if _schema_applied(base_admin_url, identity, expected_data_dir=expected_data_dir):
             return False  # role already re-affirmed and ownership adopted
-        raise RuntimeError(
-            f"database {identity!r} exists but its schema is incomplete (a prior "
-            f"provision failed mid-apply). Drop it and retry: "
-            f'DROP DATABASE "{identity}".'
-        )
-
-    with psycopg.connect(base_admin_url, autocommit=True) as conn:
-        # db and role share the identifier; sql.Identifier quotes it.
-        conn.execute(
-            pgsql.SQL("CREATE DATABASE {} OWNER {}").format(
-                pgsql.Identifier(identity), pgsql.Identifier(identity)
+        if not resume_initialization:
+            raise RuntimeError(
+                f"database {identity!r} has an incomplete schema without initialization authority"
             )
-        )
+        # A durable fresh-home intent owns this incomplete baseline. SQL executes
+        # transactionally; resume an empty database, never delete unknown objects.
+        with connect(
+            _swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir
+        ) as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"
+            ).fetchone()
+        if row is None or row[0] != 0:
+            raise RuntimeError("incomplete initialization contains unknown database objects")
+
+    if not exists:
+        with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
+            # db and role share the identifier; sql.Identifier quotes it.
+            conn.execute(
+                pgsql.SQL("CREATE DATABASE {} OWNER {}").format(
+                    pgsql.Identifier(identity), pgsql.Identifier(identity)
+                )
+            )
     schema_sql = (Path(__file__).resolve().parents[2] / "db" / "schema.sql").read_text()
     try:
         # Apply the schema AS the cluster role so every object is owned by the role,
@@ -171,24 +200,28 @@ def provision_database(identity: str, *, base_admin_url: str, db_admin_password:
         role_url = url_with_userinfo(
             _swap_db(base_admin_url, identity), identity, db_admin_password
         )
-        with psycopg.connect(role_url, autocommit=True) as conn:
+        with connect(role_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
             conn.execute(schema_sql)  # type: ignore[arg-type]
     except Exception:
         # Drop the half-built DB so the next provision attempt starts clean
         # rather than tripping the "exists but incomplete" guard above.
-        drop_database(identity, base_admin_url=base_admin_url)
+        if not exists:
+            drop_database(
+                identity, base_admin_url=base_admin_url, expected_data_dir=expected_data_dir
+            )
         raise
-    return True
+    return not bool(exists)
 
 
-def ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
+def ensure_pgvector_extension(
+    identity: str, *, base_admin_url: str, expected_data_dir: Path | None = None
+) -> None:
     """Pre-create the pgvector extension in the cluster database with the
     bootstrap-superuser connection (`base_admin_url`), so the NOSUPERUSER
     runtime roles never need to: pgvector's `vector.control` ships without
     `trusted = true`, which makes `CREATE EXTENSION` superuser-only by
     Postgres' own policy (deliberately not overridden on the injected control
-    file). Idempotent — `ava start` runs it on every bring-up and install
-    birth runs it once, so an existing cluster picks the extension up on its
+    file). Idempotent — normal gateway start prepares it before migration, so a cluster picks the extension up on its
     next start, and the indexer's NOSUPERUSER `CREATE EXTENSION IF NOT
     EXISTS` stays a harmless no-op (verified against a real injected tree).
 
@@ -207,13 +240,15 @@ def ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
     import psycopg
 
     try:
-        with psycopg.connect(base_admin_url, autocommit=True) as conn:
+        with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
             available = conn.execute(
                 "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"
             ).fetchone()
         if available is None:
             return
-        with psycopg.connect(_swap_db(base_admin_url, identity), autocommit=True) as conn:
+        with connect(
+            _swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir, autocommit=True
+        ) as conn:
             conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     except psycopg.OperationalError as exc:
         logger.warning(
@@ -223,7 +258,9 @@ def ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
         )
 
 
-def drop_database(identity: str, *, base_admin_url: str) -> None:
+def drop_database(
+    identity: str, *, base_admin_url: str, expected_data_dir: Path | None = None
+) -> None:
     """DROP DATABASE `identity` + its owning role of the same name — the inverse
     of provision_database, and its half-built rollback. base_admin_url must
     connect as the loopback-`trust` bootstrap superuser to a maintenance db
@@ -235,10 +272,9 @@ def drop_database(identity: str, *, base_admin_url: str) -> None:
     dropped after the database so it owns nothing and the drop cannot fail on a
     dependency.
     """
-    import psycopg
     from psycopg import sql as pgsql
 
-    with psycopg.connect(base_admin_url, autocommit=True) as conn:
+    with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         conn.execute(pgsql.SQL("DROP DATABASE IF EXISTS {}").format(pgsql.Identifier(identity)))
         conn.execute(pgsql.SQL("DROP ROLE IF EXISTS {}").format(pgsql.Identifier(identity)))
 
@@ -319,11 +355,12 @@ def assert_checkpoint_dependency_pinned() -> None:
     _expected_checkpoint_schema_versions()
 
 
-def _checkpoint_schema_versions(db_url: str) -> frozenset[int] | None:
+def _checkpoint_schema_versions(
+    db_url: str, *, expected_data_dir: Path | None = None
+) -> frozenset[int] | None:
     """Return the complete applied set, or ``None`` when no schema exists."""
-    import psycopg
 
-    with psycopg.connect(db_url, autocommit=True) as conn:
+    with connect(db_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         table = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
         if table is None or table[0] is None:
             return None
@@ -331,7 +368,7 @@ def _checkpoint_schema_versions(db_url: str) -> frozenset[int] | None:
     return frozenset(int(row[0]) for row in rows)
 
 
-def assert_checkpoint_schema_current(db_url: str) -> None:
+def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | None = None) -> None:
     """Require the exact approved checkpoint migration set, without mutation.
 
     Every start role calls this after Ava migrations.  A pure runner therefore
@@ -341,7 +378,7 @@ def assert_checkpoint_schema_current(db_url: str) -> None:
     reverse only schema changes represented by paired Ava migrations.
     """
     expected = _expected_checkpoint_schema_versions()
-    actual = _checkpoint_schema_versions(db_url)
+    actual = _checkpoint_schema_versions(db_url, expected_data_dir=expected_data_dir)
     if actual != expected:
         found: frozenset[int] = frozenset() if actual is None else actual
         raise CheckpointSchemaMismatchError(
@@ -359,23 +396,24 @@ def ensure_checkpoint_schema(
     db_admin_password: str,
     database_created: bool = False,
     resume_partial: bool = False,
+    expected_data_dir: Path | None = None,
 ) -> None:
     """Create the LangGraph checkpoint tables (idempotent) AS the cluster role.
 
     Runs `PostgresSaver.setup()` as the cluster's MAIN role, so that role owns
     the tables while runtime readers may use either it or `ava_runner`. Called
-    at install birth BEFORE `ensure_runner_role`: the runner's
+    during first-start initialization BEFORE `ensure_runner_role`: the runner's
     table grants can only target existing tables, and a runner booted as
     `ava_runner` (post-cutover) never runs setup(): Postgres refuses `CREATE
     TABLE IF NOT EXISTS` for a role without CREATE on the schema even when the
     tables exist (the runner holds no CREATE, by design — any DDL must fail
     under it).
 
-    Setup is install-only. ``database_created`` is the exact result of this
+    Setup requires fresh initialization authority. ``database_created`` is the exact result of this
     birth's ``provision_database`` call, not registry state. Upstream setup is
     autocommit, so a failure can leave a contiguous prefix; when this call owns
     the newly-created DB it drops that DB and role, making retry start clean.
-    ``resume_partial`` is separate, explicit install-birth authority: a hard
+    ``resume_partial`` is separate, explicit first-start authority: a hard
     process death cannot run cleanup, so an idempotent birth retry may continue
     only an exact contiguous prefix. Existing cluster/operator paths leave it
     off and never repair, resume, or drop a partial/older/newer schema. Gaps and
@@ -385,34 +423,47 @@ def ensure_checkpoint_schema(
 
     from shared.url_secret import url_with_userinfo
 
-    # Same role-URL pattern as provision_database: connect AS the cluster role
-    # (its own schema objects), over loopback trust or scram with the secret.
-    # from_conn_string owns the connection for the setup (the same construction
-    # shared/pg_tools.py uses for throwaway test clusters).
+    # Connect as the schema owner and retain the validated native connection
+    # throughout setup; PostgresSaver must not open an unchecked second dial.
     role_url = url_with_userinfo(_swap_db(base_admin_url, identity), identity, db_admin_password)
     expected = _expected_checkpoint_schema_versions()
-    actual = _checkpoint_schema_versions(role_url)
+    actual = _checkpoint_schema_versions(role_url, expected_data_dir=expected_data_dir)
     if actual == expected:
         return
     may_setup = database_created or resume_partial
     resumable = actual is None or actual == frozenset(range(len(actual)))
     if not may_setup or not resumable:
-        assert_checkpoint_schema_current(role_url)
+        assert_checkpoint_schema_current(role_url, expected_data_dir=expected_data_dir)
         return
     try:
-        with PostgresSaver.from_conn_string(role_url) as saver:
-            saver.setup()
-        assert_checkpoint_schema_current(role_url)
+        from psycopg.rows import dict_row
+
+        with connect(
+            role_url,
+            expected_data_dir=expected_data_dir,
+            autocommit=True,
+            prepare_threshold=0,
+            row_factory=dict_row,
+        ) as conn:
+            PostgresSaver(conn).setup()
+        assert_checkpoint_schema_current(role_url, expected_data_dir=expected_data_dir)
     except Exception:
         if database_created:
-            drop_database(identity, base_admin_url=base_admin_url)
+            drop_database(
+                identity, base_admin_url=base_admin_url, expected_data_dir=expected_data_dir
+            )
         raise
 
 
-def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: str) -> None:
+def ensure_runner_role(
+    identity: str,
+    *,
+    base_admin_url: str,
+    runner_password: str,
+    expected_data_dir: Path | None = None,
+) -> None:
     """Create (or re-affirm) the cluster's `ava_runner` least-privilege role and
-    its table grants. Idempotent — install birth and `ava cluster
-    ensure-db-role` run the same SQL (Task #1236 design).
+    its table grants. Idempotent — normal gateway start runs this after schema preparation.
 
     The role is `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE` with
     `runner_password` (the gateway `.env` AVA_RUNNER_DB_PASSWORD value,
@@ -475,16 +526,15 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
 
     Re-running this is how an EXISTING cluster picks up tables added since its
     birth: `ava start` calls it on a gateway host after applying a migration,
-    and `ava cluster ensure-db-role` is the manual door. The standing
+    before launching services. The standing
     default privileges only take effect for tables created after they are
     declared, so the re-run is what closes the retroactive half.
     """
-    import psycopg
     from psycopg import sql as pgsql
 
     from shared.cluster.derive import RUNNER_ROLE
 
-    with psycopg.connect(base_admin_url, autocommit=True) as conn:
+    with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         has_role = conn.execute(
             "SELECT 1 FROM pg_roles WHERE rolname = %s", (RUNNER_ROLE,)
         ).fetchone()
@@ -497,7 +547,9 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                 pgsql.Literal(runner_password),
             )
         )
-    with psycopg.connect(_swap_db(base_admin_url, identity), autocommit=True) as conn:
+    with connect(
+        _swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir, autocommit=True
+    ) as conn:
         conn.execute(
             pgsql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(
                 pgsql.Identifier(RUNNER_ROLE)
@@ -531,7 +583,7 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         # They do NOT retroactively grant anything, so an existing cluster
         # still needs the re-run above to cover tables it already has — that
         # is what `ava start` triggers after applying a migration, and what
-        # `ava cluster ensure-db-role` does by hand.
+        # the same start lifecycle also applies after initialization.
         conn.execute(
             pgsql.SQL(
                 "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public GRANT SELECT ON TABLES TO {}"
@@ -709,64 +761,3 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
                     pgsql.Identifier(table), pgsql.Identifier(RUNNER_ROLE)
                 )
             )
-
-
-def ensure_cluster_redis_acl(
-    user: str, *, redis_admin_url: str, runtime_password: str, channel_prefix: str
-) -> None:
-    """Create (or re-affirm) the cluster's redis ACL user `user` — the runtime
-    redis identity, mirroring the per-cluster Postgres role. Idempotent; safe on
-    every bring-up. `user` is names-as-data: read from the cluster's own
-    redis_url (`identity_from_url`) for an existing cluster, `DATA_PLANE_IDENTITY`
-    at birth. The user authenticates with its independent runtime password and is scoped
-    to keys (`~*`) + pub/sub channels (`&<channel_prefix>:*` plus the hosted
-    dispatcher's `&<channel_prefix>:inbound:*` subscription pattern); `-@dangerous` denies
-    FLUSHALL / CONFIG / SHUTDOWN. The secret travels over the redis connection, never
-    a process argv.
-
-    `resetpass` precedes `>runtime_password`: Redis ACL passwords are additive by
-    default (`>password` ADDS a valid password rather than replacing the set), so
-    without it a runtime-password rotation would leave the previous password still
-    authenticating this user indefinitely — confirmed empirically while building
-    `scripts/rotate_cluster_secret.py`. `resetpass` clears the password list first,
-    so re-affirming with an unchanged secret still ends at exactly one valid
-    password (this call is idempotent either way), and re-affirming with a
-    rotated one actually invalidates the old one.
-
-    Empty secret (single-box no-auth): the user is created with `nopass` instead
-    of a password. The runtime URLs still carry the identity as username
-    (names-as-data holds with or without auth), and a URL with a username makes
-    redis-py send AUTH — a missing user would WRONGPASS forever and the wake bus
-    would never deliver. `nopass` lets that AUTH succeed while the posture stays
-    unauthenticated (requirepass is off and the `default` user is nopass too).
-
-    redis_admin_url connects as the Redis `default` user with the independent
-    gateway-only Redis admin password."""
-    import redis
-
-    # redis-py types from_url's **kwargs as Unknown; the call itself is fully typed.
-    client = redis.Redis.from_url(redis_admin_url, decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
-    try:
-        # redis-py types execute_command()'s signature as partially Unknown; the call is fully typed.
-        client.execute_command(  # pyright: ignore[reportUnknownMemberType]
-            "ACL",
-            "SETUSER",
-            user,
-            "on",
-            "resetpass",
-            f">{runtime_password}" if runtime_password else "nopass",
-            "resetkeys",
-            "~*",
-            "resetchannels",
-            f"&{channel_prefix}:*",
-            # The hosted dispatcher PSUBSCRIBEs `<prefix>:inbound:*`. Redis
-            # checks the subscription PATTERN, not the channels it would match,
-            # and `&<prefix>:*` does not cover it (empirically, Redis 8) — the
-            # agent-host reconnect-looped on NoPermissionError without this
-            # grant (2026-08-30 soak startup).
-            f"&{channel_prefix}:inbound:*",
-            "+@all",
-            "-@dangerous",
-        )
-    finally:
-        client.close()

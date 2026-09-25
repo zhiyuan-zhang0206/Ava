@@ -710,7 +710,12 @@ def get_shell_backend() -> SessionBackend:
     """
     global _shell_backend  # noqa: PLW0603
     if _shell_backend is None:
-        _shell_backend = WinprocSessionBackend() if IS_WINDOWS else PtySessionBackend()
+        if IS_WINDOWS:
+            from shared.windows_terminal.backend import WindowsTerminalBackend
+
+            _shell_backend = WindowsTerminalBackend()
+        else:
+            _shell_backend = PtySessionBackend()
     return _shell_backend
 
 

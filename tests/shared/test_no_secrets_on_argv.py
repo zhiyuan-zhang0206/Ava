@@ -160,38 +160,6 @@ def test_launch_record_cannot_reach_a_live_process(
     assert not posixproc.has_session("ava-gateway")
 
 
-@pytest.mark.real_service_respawn
-def test_service_respawn(secret_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The healthcheck respawn every watchdog drives — post-switch it launches
-    through the native supervisor: the reparent helper's argv carries the
-    wrapped command (cd + venv + daemon), never the env values."""
-    import subprocess as _sp
-    import sys
-
-    from shared.service_respawn import respawn_service
-
-    calls: list[list[str]] = []
-
-    def fake_run(args: Any, **_kwargs: Any) -> Any:
-        if isinstance(args, (list, tuple)):
-            calls.append([str(a) for a in args])  # pyright: ignore[reportUnknownArgumentType]
-        if args[:2] == [sys.executable, "-m"] and "shared._reparent" in args:
-            # The helper reports the child pid on stdout; a fake pid's
-            # create_time read is caught by posixproc.
-            pid_line = f"{_FAKE_CHILD_PID}\n"
-            return _sp.CompletedProcess(args, returncode=0, stdout=pid_line, stderr="")  # pyright: ignore[reportUnknownArgumentType]
-        return _sp.CompletedProcess(args, returncode=0, stdout="", stderr="")  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    respawn_service("gateway", ".venv/bin/python -m gateway", Path("/repo"))
-    # The launch shape the backend produces — the reparent helper (native
-    # supervisor) — the env values never ride the argv: the env dict is handed
-    # to the supervisor out-of-band.
-    launches = [a for a in calls if "shared._reparent" in a]
-    assert launches, f"no launch; saw {calls!r}"
-    _assert_clean(launches[-1], label="respawn_service")
-
-
 @pytest.mark.real_cluster_spawn
 def test_cluster_orchestration_session(secret_env: None, captured_argv: list[list[str]]) -> None:
     """update / rollout / cluster-restart all spawn through this one.
@@ -291,43 +259,6 @@ def test_agent_shell_session(
         assert secret not in body, f"{secret!r} leaked into the shell envfile"
     assert "AVA_HOME=" in body and "PATH=" in body
     envfile.unlink(missing_ok=True)
-
-
-@pytest.mark.real_service_respawn
-def test_agent_host_launch(
-    secret_env: None, captured_argv: list[list[str]], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The real host healthcheck forwards its DB credential through env only.
-
-    Exercise the healthcheck, shared service launcher, and native supervisor;
-    only the final subprocess and the post-launch liveness probe are faked.
-    """
-    from services.healthchecks import agent_host
-    from shared.config import settings
-    from shared.daemon_health import DaemonProbe
-
-    captured_env: list[dict[str, str]] = []
-    fake_run = subprocess.run
-
-    def capture_run(args: Any, **kwargs: Any) -> Any:
-        if "shared._reparent" in args:
-            captured_env.append(dict(kwargs["env"]))
-        return fake_run(args, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", capture_run)
-    runner_url = _DB_URL.replace("postgresql://ava:", "postgresql://ava_runner:")
-    monkeypatch.setattr(settings.data_plane, "db_url", runner_url)
-    monkeypatch.setattr(settings.services, "project_root", Path("/repo"))
-    monkeypatch.setattr(agent_host, "_probe", lambda: DaemonProbe.up("test host"))
-
-    assert agent_host._restart_daemon().alive
-
-    launches = [argv for argv in captured_argv if "shared._reparent" in argv]
-    assert len(launches) == len(captured_env) == 1
-    assert "services.agent_host.daemon" in " ".join(launches[0])
-    _assert_clean(launches[0], label="agent_host._restart_daemon")
-    assert captured_env[0]["AVA_DB_URL"] == runner_url
-    assert captured_env[0]["AVA_PROCESS_PROFILE"] == "agent"
 
 
 def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

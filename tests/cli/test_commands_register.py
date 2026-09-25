@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -11,7 +12,6 @@ from cli import commands as _cli
 from cli.commands._setup import SetupValues
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_prechecks
 from tests.cli._commands_helpers import _real_register_machine_or_die
 
 # ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
@@ -52,10 +52,7 @@ def test_probe_gateway_takes_the_identity_path(monkeypatch: pytest.MonkeyPatch) 
     )
     from shared.daemon_health import DaemonProbe
 
-    monkeypatch.setattr(
-        "shared.daemon_health._probe_home",
-        lambda *_a, **_kw: DaemonProbe.up("home /x"),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    spec = replace(spec, identity_probe=lambda: DaemonProbe.up("root-owned gateway"))
     probe = _cli._probe_service(spec)
     assert probe.alive is True
     assert probe.label == "identity"
@@ -68,9 +65,9 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
     spec = _spec_by_service("gateway")
     from shared.daemon_health import DaemonProbe
 
-    monkeypatch.setattr(
-        "shared.daemon_health._probe_home",
-        lambda *_a, **_kw: DaemonProbe.port_taken("identity mismatch: home='/home/ava/.ava'"),  # pyright: ignore[reportUnknownArgumentType]
+    spec = replace(
+        spec,
+        identity_probe=lambda: DaemonProbe.port_taken("identity mismatch: home='/home/ava/.ava'"),
     )
     probe = _cli._probe_service(spec)
     assert probe.alive is False
@@ -92,12 +89,22 @@ def test_probe_survives_an_identity_probe_that_raises() -> None:
 
     spec = dataclasses.replace(_spec_by_service("gateway"), identity_probe=_boom)
     probe = _cli._probe_service(spec)
-    assert probe.alive is False
-    assert probe.label == "identity"
+    assert probe.alive is None
+    assert probe.label == "unavailable"
     # The type AND the message: "the probe is broken" and "the daemon is down" are
     # different problems, and a fixed string would have made them look alike.
     assert "RuntimeError" in probe.detail
     assert "no socket for you" in probe.detail
+
+
+def test_service_without_identity_probe_cannot_claim_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = replace(_spec_by_service("gateway"), identity_probe=None)
+    monkeypatch.setattr(_cli, "_curl_ok", lambda _url: True)
+    result = _cli._probe_service(spec)
+    assert result.alive is None
+    assert result.label == "unavailable"
 
 
 def test_register_gateway_advertises_without_gateway_url(

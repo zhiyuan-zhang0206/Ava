@@ -1,88 +1,49 @@
-# Preview cluster
+# Local branch preview
 
-The **preview** cluster is the pre-release validation environment for `main`:
-a full Ava cluster running the commit that is about to be promoted, so a
-release is exercised end-to-end before production sees it.
-
-## Where it lives
-
-| Fact | Value |
-|---|---|
-| Host | its own machine — **not** the production gateway host. Which machine, and how it is reached, is deployment inventory, not repo content ([`dev-setup.md`](../../conventions/dev-setup.md)) |
-| Home (`$AVA_HOME`) | `~/.ava-preview` |
-| Checkout | `~/.ava-preview/source`, anchored to that home by its `.ava_home` pointer |
-| Data plane | its **own** Postgres + Redis + PgBouncer under `~/.ava-preview`, on its own port block |
-| Auth | preview runs **with** a cluster secret, so every gateway route except `/api/health` and `/api/auth/*` requires `Authorization: Bearer $AVA_CLUSTER_SECRET` |
-
-Preview shares nothing with production — not a Postgres instance, not a Redis
-instance, not a port, not a session. Isolation is home-directory isolation
-([AGENTS.md → Running](../../AGENTS.md)): there is no box-level Postgres or
-Redis for two clusters to collide in, and no box-level admin credential either
-— a cluster's Redis instance is single-tenant and its `requirepass` **is** that
-cluster's secret.
-
-> History, not current advice: before the per-cluster data plane, every cluster
-> on a host shared one Postgres and one Redis, and restarting the box's Redis to
-> "fix" one cluster's wrong password took every cluster on that box down with it
-> (2026-07-14). The shared instance that made that possible no longer exists.
-
-## Operate it
-
-Always through the cluster's **own** `ava`. A bare `ava` on that host's PATH
-belongs to a different checkout and acts on a different home, and
-`AVA_HOME=~/.ava-preview` does not redirect it — the boot refuses an env var
-that contradicts the checkout's own claim
-(`shared/dotenv_boot.py:_assert_env_agrees_with_checkout`).
+`local.py` resolves a local branch, fetched remote ref, or commit to one immutable
+commit before preparing a disposable cluster. It can exercise an unmerged branch
+without waiting for CI or a production gateway. Its result is evidence for that
+revision and profile; it does not replace CI or authorize production promotion.
 
 ```bash
-cd ~/.ava-preview/source
-.venv/bin/ava status           # sessions + probes + this cluster's pg/redis view
-.venv/bin/ava start            # pure bring-up; ensures preview's own pg/redis is up (skip-if-running)
-.venv/bin/ava cluster update   # pull main -> uv sync -> migrate -> restart, preview only
+python3 scripts/preview/local.py run --ref codex/my-change
+python3 scripts/preview/local.py run --ref origin/main --keep
+python3 scripts/preview/local.py check /absolute/path/to/run
+python3 scripts/preview/local.py stop /absolute/path/to/run
 ```
 
-A cron registered for this home runs `ava cluster health-probe --auto-rollback`,
-so a cluster that stays unhealthy for `--threshold` consecutive probes (default
-3) rolls itself back with no operator in the loop.
+The controller records the commit and requested ref under `~/.ava-previews/<run>`.
+It prepares a detached worktree, the candidate's own Python environment and
+frontend dependencies. It then invokes the candidate's normal `ava start` with
+`--worktree`, a private configuration file, and a persisted allowlist of gateway,
+frontend, ops and agent-host. Initialization, retry and stop belong to the normal
+lifecycle; the controller has no alternate service launcher.
 
-## Blast radius
+Each run owns its home, registry, port reservation and native Postgres, Redis and
+PgBouncer. It inherits only a small OS environment allowlist, with no production
+URLs, bearer, provider keys, Python redirection or telemetry export. The model is
+scripted, while agent creation, graph execution and `print(1 + 2)` run through the
+actual gateway and agent-host. Success requires the recorded execution body to be
+`3`, not merely a model response or a timestamp containing that digit.
 
-| Command (as `~/.ava-preview/source/.venv/bin/ava`) | Touches |
-|---|---|
-| `start` / `stop` / `restart` | preview only, **including its own pg/redis** — `stop` takes preview's data plane down with it |
-| `cluster update` / `cluster rollback` | preview only: its checkout, its database, its sessions |
-| `cluster down --path ~/.ava-preview` | stops preview's sessions; its pg/redis instance and its registry slot stay up |
-| `cluster destroy --path ~/.ava-preview` | the above, plus frees its port block and deregisters its OS-scheduled jobs (`--drop-db` also drops its data) |
+On macOS the normal chain is `launchd -> signed helper -> ava-root`. Each run
+uses its own helper artifact directory and home-specific job, preserving the
+stable signing identity without replacing another home's artifact. Signing and
+permission prerequisites must already be available. Linux runs ava-root without
+a helper. This controller uses POSIX process and lock APIs.
 
-Nothing in that table can reach production. What still can: the host itself
-(reboot, disk, network), and anything run against `~/.ava` on the same machine —
-that is a **different** cluster, not preview.
+A run normally stops in `finally`; `--keep` retains only a successful preview.
+Teardown calls normal stop and destroy, then independently checks for surviving
+processes, listeners and registry reservations. A failed cleanup stays failed in
+`run.json`; the observer never deletes evidence to manufacture a clean result.
+Logs and data remain for inspection. Concurrent lifecycle actions on one run are
+rejected by the operation lock.
 
-## Validate a release
+This profile proves source startup and real agent execution. It does not prove
+sealed release update/rollback, multi-machine coordination, real provider behavior,
+browser/computer permissions, or production cutover. Those require their own
+maintained scenarios using the same lifecycle and transition APIs.
 
-`ava cluster update` rolls the code; validation is a separate, agent-driven
-suite:
-
-```bash
-cd ~/.ava-preview/source
-bash scripts/preview/validate.sh        # one validation agent runs validate-tasks/suite.md
-bash scripts/preview/spawn-samples.sh   # optional: mock agents from mock-tasks/, to eyeball FleetView
-```
-
-Both resolve the repo from their own location and dial the gateway through
-`shared/machine.py:gateway_api_base` + `shared/machine.py:gateway_auth_headers`,
-so they carry no hardcoded path or port and work whether or not the cluster has
-a secret. `validate.sh` returns once the task is delivered; the agent writes its
-report to `$AVA_HOME/preview-validation-report.md` — outside the checkout, so a
-validation run can never dirty the git tree — and notifies when it is done.
-
-## Mac updater definition proof
-
-From the candidate worktree, explicitly select an installed non-production home
-and run `python -m scripts.preview.prove_mac_bootstrap_jobs` with that home's
-`AVA_HOME` (and `AVA_HOME_OVERRIDE=1` only for this cross-checkout preview proof).
-The script creates unique unloaded `/usr/bin/true` definitions, crashes its own
-child after one atomic custody move, and restores from serialized originals.
-It never loads or signals a job. Its `result.json` under the chosen home's run
-directory names the proved cases and explicitly excludes complete image-hop
-proof. Existing loaded job definitions remain outside this primitive's authority.
+The `validate.sh` and `spawn-samples.sh` scripts operate an explicitly selected
+already-running preview home. They resolve that checkout's gateway and credentials;
+they are not cluster initialization or release-promotion entrypoints.

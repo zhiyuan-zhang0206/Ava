@@ -17,7 +17,8 @@
 // mirroring the shared-daemon pattern used elsewhere in the system. Calls are
 // served serially (one connection fully handled before the next is accepted):
 // the work is GUI automation against a single desktop, which is inherently
-// serial, so a lock would buy nothing.
+// serial. Child spawning, keeper callbacks and SIGCHLD handling also run on
+// dispatch queues; their shared native ownership is guarded separately below.
 //
 //   Request:  {"id": 1, "method": "ping"}
 //             {"id": 2, "method": "screencapture_region", "x":0,"y":0,"w":800,"h":600,"path":"/tmp/x.png"}
@@ -72,7 +73,6 @@ func writeJSONLine(_ fd: Int32, _ obj: [String: Any]) {
 enum OpError: Error { case bad(String) }
 
 private let maxFileReadBytes: Int64 = 32 * 1024 * 1024
-private let inheritedSocketFDEnvironment = "AVA_PERMISSIONS_HELPER_LISTEN_FD"
 
 /// Skip the first-run permission-list registration when set to "1". A test
 /// affordance, not a runtime switch: the two-section chain smoke boots a
@@ -88,13 +88,18 @@ struct Child {
     let startedAt: Date
 }
 
-private let childTableLock = NSLock()
+// One ownership boundary covers native spawn/publication, signals, and waitpid
+// itself. An exited direct child retains its PID until waitpid reaps it, so a
+// signal under this lock cannot race reaping and target a reused foreign PID.
+// RootKeeper shares this non-recursive lock; its *Locked methods never acquire it.
+private let childOwnershipLock = NSLock()
 private var children: [String: Child] = [:]
+private var helperStopping = false
 private var childReaper: DispatchSourceSignal?
 
-func withChildTable<T>(_ body: () throws -> T) rethrows -> T {
-    childTableLock.lock()
-    defer { childTableLock.unlock() }
+func withChildOwnership<T>(_ body: () throws -> T) rethrows -> T {
+    childOwnershipLock.lock()
+    defer { childOwnershipLock.unlock() }
     return try body()
 }
 
@@ -102,21 +107,23 @@ func childIsAlive(_ pid: pid_t) -> Bool {
     kill(pid, 0) == 0
 }
 
-func startChildReaper() {
-    let source = DispatchSource.makeSignalSource(signal: SIGCHLD)
-    source.setEventHandler {
-        while true {
+func reapExitedChildren() {
+    withChildOwnership {
+        rootKeeper.reapExitedChildLocked()
+        // Do not reap Foundation-owned Process children (e.g. screen capture).
+        // Each owner consumes only the direct children it actually published.
+        for (name, child) in children {
             var status: Int32 = 0
-            let pid = waitpid(-1, &status, WNOHANG)
-            if pid <= 0 { break }
-            if rootKeeper.reapIfOwned(pid: pid, exitStatus: status) { continue }
-            withChildTable {
-                if let name = children.first(where: { $0.value.pid == pid })?.key {
-                    children.removeValue(forKey: name)
-                }
+            if waitpid(child.pid, &status, WNOHANG) == child.pid {
+                children.removeValue(forKey: name)
             }
         }
     }
+}
+
+func startChildReaper() {
+    let source = DispatchSource.makeSignalSource(signal: SIGCHLD)
+    source.setEventHandler(handler: reapExitedChildren)
     source.resume()
     childReaper = source
 }
@@ -199,20 +206,18 @@ func spawnProcess(_ req: [String: Any]) throws -> [String: Any] {
             "spawn needs non-empty name, absolute argv[0]/stdout/stderr, argv, env, cwd"
         )
     }
-    if let existingPID = withChildTable({
-        children[name].flatMap { childIsAlive($0.pid) ? $0.pid : nil }
-    }) {
-        return ["pid": existingPID, "reused": true]
-    }
-    let pid = try withChildTable {
+    return try withChildOwnership {
+        guard !helperStopping else { throw OpError.bad("helper retirement has closed admission") }
+        if let child = children[name], childIsAlive(child.pid) {
+            return ["pid": child.pid, "reused": true]
+        }
         let spawnedPID = try spawnDetachedChild(
             argv: argv, environment: env, cwd: cwd,
             stdoutPath: stdoutPath, stderrPath: stderrPath
         )
         children[name] = Child(pid: spawnedPID, startedAt: Date())
-        return spawnedPID
+        return ["pid": spawnedPID, "reused": false]
     }
-    return ["pid": pid, "reused": false]
 }
 
 /// The shared low-level spawn the session table and the root keeper both use:
@@ -321,7 +326,7 @@ func sessionList(_ req: [String: Any]) throws -> [String: Any] {
     } else {
         prefix = ""
     }
-    let sessions: [[String: Any]] = withChildTable {
+    let sessions: [[String: Any]] = withChildOwnership {
         children
             .filter { $0.key.hasPrefix(prefix) }
             .sorted { $0.key < $1.key }
@@ -336,7 +341,7 @@ func sessionHas(_ req: [String: Any]) throws -> [String: Any] {
     guard let name = req["name"] as? String else {
         throw OpError.bad("session_has needs string name")
     }
-    let alive = withChildTable { children[name].map { childIsAlive($0.pid) } ?? false }
+    let alive = withChildOwnership { children[name].map { childIsAlive($0.pid) } ?? false }
     return ["alive": alive]
 }
 
@@ -350,52 +355,18 @@ func signalSession(_ req: [String: Any]) throws -> [String: Any] {
         throw OpError.bad("signal needs exactly one of name or pid")
     }
 
-    let pid: pid_t
     if let name {
-        guard let child = withChildTable({ children[name] }) else {
-            throw OpError.bad("unknown session: \(name)")
+        return try withChildOwnership {
+            guard let child = children[name] else {
+                throw OpError.bad("unknown session: \(name)")
+            }
+            return ["sent": kill(child.pid, signalValue) == 0]
         }
-        pid = child.pid
-    } else {
-        guard let requestedPID, requestedPID > 0, let exactPID = pid_t(exactly: requestedPID) else {
-            throw OpError.bad("signal pid must be positive")
-        }
-        pid = exactPID
     }
-    return ["sent": kill(pid, signalValue) == 0]
-}
-
-func selfUpgrade(_ req: [String: Any], listeningFD: Int32) throws -> [String: Any] {
-    guard let requestedPath = req["exe_path"] as? String,
-          (requestedPath as NSString).isAbsolutePath
-    else { throw OpError.bad("self_upgrade needs absolute exe_path") }
-
-    let executableURL = URL(fileURLWithPath: requestedPath)
-        .standardizedFileURL.resolvingSymlinksInPath()
-    let bundleURL = Bundle.main.bundleURL.standardizedFileURL.resolvingSymlinksInPath()
-    let bundlePath = bundleURL.path
-    guard executableURL.path == bundlePath || executableURL.path.hasPrefix(bundlePath + "/") else {
-        throw OpError.bad("self_upgrade exe_path is outside helper bundle")
+    guard let requestedPID, requestedPID > 0, let exactPID = pid_t(exactly: requestedPID) else {
+        throw OpError.bad("signal pid must be positive")
     }
-
-    var arguments: [UnsafeMutablePointer<CChar>?] = [strdup(executableURL.path), nil]
-    guard arguments[0] != nil else { throw OpError.bad("could not allocate self_upgrade argv") }
-    defer { free(arguments[0]) }
-    guard setenv(inheritedSocketFDEnvironment, String(listeningFD), 1) == 0 else {
-        throw OpError.bad("could not preserve listening socket")
-    }
-    guard setCloseOnExec(listeningFD, false) else {
-        unsetenv(inheritedSocketFDEnvironment)
-        throw OpError.bad("could not preserve listening socket")
-    }
-
-    arguments.withUnsafeMutableBufferPointer { buffer in
-        _ = execv(buffer[0], buffer.baseAddress)
-    }
-    let execError = errno
-    _ = setCloseOnExec(listeningFD, true)
-    unsetenv(inheritedSocketFDEnvironment)
-    throw OpError.bad("self_upgrade exec failed: \(String(cString: strerror(execError)))")
+    return ["sent": kill(exactPID, signalValue) == 0]
 }
 
 /// Resolve an allowed path or reject it. A bare prefix is insufficient:
@@ -718,9 +689,7 @@ private enum RootKeeperTiming {
     static let baseBackoffS = 0.5
     static let maxBackoffS = 30.0
     static let stableAfterS = 10.0
-    static let stopGraceS = 5.0
     static let conflictPollS = 5.0
-    static let orphanPollS = 0.5
 }
 
 func rootKeeperLog(_ message: String) {
@@ -806,9 +775,8 @@ struct RootSeed {
 /// instance lock (flock; see `services/ava_root/singleton.py`). The lock is
 /// the authority: the kernel releases it with its owner, so acquiring it
 /// proves no live root holds the dir — no pid-reuse window. The pid recorded
-/// in the file is read for reporting only. Only `.held` blocks a spawn;
-/// `.free` and `.unknown` proceed, and root's own flock stays the final
-/// arbiter of single instance (I1).
+/// in the file is read for reporting only. Both held and unknown ownership
+/// block a spawn; root's own flock is the final single-instance arbiter.
 enum RootDirLock {
     case free
     case held(pid: pid_t?)
@@ -833,6 +801,88 @@ func probeRootDirLock(runDir: String) -> RootDirLock {
     return .held(pid: recordedPID)
 }
 
+/// Durable stop intent belongs to the outer owner. A restarted helper must
+/// not revive a root that an acknowledged stop deliberately held down.
+enum StopOwner: String {
+    case root = "root-stopped"
+    case helper = "helper-stopped"
+}
+
+struct StopIntent {
+    static func path(_ runDir: String, owner: StopOwner) -> String {
+        (runDir as NSString).appendingPathComponent(owner.rawValue)
+    }
+
+    static func flushDirectory(_ runDir: String) throws {
+        let fd = open(runDir, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard fd >= 0 else { throw OpError.bad("cannot open root intent directory") }
+        defer { close(fd) }
+        guard fsync(fd) == 0 else { throw OpError.bad("cannot flush root intent directory") }
+    }
+
+    static func exists(_ runDir: String, owner: StopOwner) throws -> Bool {
+        var info = stat()
+        let result = lstat(path(runDir, owner: owner), &info)
+        if result != 0, errno == ENOENT { return false }
+        guard result == 0, (info.st_mode & S_IFMT) == S_IFREG,
+              info.st_uid == getuid(), (info.st_mode & 0o077) == 0,
+              try String(contentsOfFile: path(runDir, owner: owner), encoding: .utf8) == "stopped\n"
+        else { throw OpError.bad("root stop intent is unreadable or invalid") }
+        return true
+    }
+
+    static func store(_ runDir: String, owner: StopOwner) throws {
+        if try exists(runDir, owner: owner) {
+            try flushDirectory(runDir)
+            return
+        }
+        let target = path(runDir, owner: owner)
+        let fd = open(target, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw OpError.bad("cannot retain root stop intent") }
+        defer { close(fd) }
+        let bytes = Array("stopped\n".utf8)
+        let count = bytes.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        guard count == bytes.count, fsync(fd) == 0 else {
+            throw OpError.bad("root stop intent was not durably written")
+        }
+        try flushDirectory(runDir)
+    }
+
+    static func clear(_ runDir: String, owner: StopOwner) throws {
+        if try exists(runDir, owner: owner) {
+            guard unlink(path(runDir, owner: owner)) == 0 else { throw OpError.bad("cannot release root stop intent") }
+        }
+        try flushDirectory(runDir)
+    }
+}
+
+func helperRunDir() throws -> String {
+    guard let path = ProcessInfo.processInfo.environment[rootSeedEnvironment],
+          (path as NSString).isAbsolutePath,
+          (path as NSString).lastPathComponent == "seed.json" else {
+        throw OpError.bad("helper lacks its home-bound root seed path")
+    }
+    return (path as NSString).deletingLastPathComponent
+}
+
+func helperShouldExitBeforeStart() throws -> Bool {
+    try StopIntent.exists(helperRunDir(), owner: .helper)
+}
+
+func requestHelperShutdown(runDir: String) throws -> [String: Any] {
+    try withChildOwnership {
+        guard runDir == (try helperRunDir()) else { throw OpError.bad("helper shutdown home differs") }
+        guard children.isEmpty else { throw OpError.bad("helper still owns execution children") }
+        try rootKeeper.requireStoppedForHelperExitLocked()
+        guard case .free = probeRootDirLock(runDir: runDir) else {
+            throw OpError.bad("root native custody is live or unknown")
+        }
+        try StopIntent.store(runDir, owner: .helper)
+        helperStopping = true
+        return ["stopping": true, "pid": Int(getpid()), "run_dir": runDir]
+    }
+}
+
 /// Owns the life of one ava-root process: seed it, keep it alive, and never
 /// let it fight another instance for the same run dir.
 ///
@@ -846,13 +896,13 @@ func probeRootDirLock(runDir: String) -> RootDirLock {
 /// keeper probes it non-blockingly; a held lock means another live root owns
 /// the run dir, so the keeper rests in `conflict` — the serving tree is left
 /// alone, nothing is killed, and there is no crash loop ("lose attribution,
-/// not service"). Only an explicit `stop(force: true)` disposes a root this
-/// keeper did not seed, and only a free run dir is seeded again.
+/// not service"). Foreign roots are never signalled; only a proven free run
+/// directory permits another spawn.
 ///
 /// An unexpected exit restarts root with bounded exponential backoff; an exit
 /// this keeper requested does not restart. Dormant when no seed is configured.
 final class RootKeeper {
-    private let lock = NSLock()
+    private let lock = childOwnershipLock
     private let queue = DispatchQueue(label: "ava.permissions-helper.root-keeper")
 
     // Everything below is guarded by `lock`.
@@ -880,7 +930,7 @@ final class RootKeeper {
             return
         }
         do {
-            configure(try RootSeed.load(path: path))
+            try configure(try RootSeed.load(path: path), resume: false)
         } catch let OpError.bad(message) {
             lock.lock()
             seedError = message
@@ -897,16 +947,30 @@ final class RootKeeper {
     /// Store `newSeed` (replacing any previous one) and bring root up when
     /// the run dir allows. A seed never disrupts a live or stopping root —
     /// it applies to the next spawn. Re-seeding clears a previous stop intent.
-    func configure(_ newSeed: RootSeed) {
+    func configure(_ newSeed: RootSeed, resume: Bool = true) throws {
         lock.lock()
+        if helperStopping || newSeed.runDir != (try? helperRunDir()) {
+            lock.unlock()
+            throw OpError.bad("helper admission is closed or root seed home differs")
+        }
+        let inFlight = childPID != nil || state == "stopping"
+        if inFlight, seed?.runDir != newSeed.runDir {
+            lock.unlock()
+            throw OpError.bad("cannot replace the home of an owned root")
+        }
+        do {
+            if resume && !inFlight { try StopIntent.clear(newSeed.runDir, owner: .root) }
+            stopRequested = try StopIntent.exists(newSeed.runDir, owner: .root)
+        } catch {
+            lock.unlock()
+            throw error
+        }
         seed = newSeed
         seedError = nil
-        let inFlight = childPID != nil || state == "stopping"
-        if !inFlight {
-            stopRequested = false
-        }
+        if stopRequested { state = "stopped" }
+        let shouldSpawn = !inFlight && !stopRequested
         lock.unlock()
-        guard !inFlight else { return }
+        guard shouldSpawn else { return }
         queue.async { [weak self] in self?.attemptSpawn() }
     }
 
@@ -917,65 +981,43 @@ final class RootKeeper {
         return statusLocked()
     }
 
-    /// Stop the seeded root — or, with `force`, dispose the live root the
-    /// keeper does not own (the conflict case). Without `force` a foreign
-    /// root is refused: stopping it would tear down a serving tree.
-    func requestStop(force: Bool) throws -> [String: Any] {
-        lock.lock()
-        let child = childPID
-        let conflict = conflictPID
-        let inConflict = state == "conflict"
-        let backoffPending = state == "backoff"
-        if child == nil, inConflict, !force {
-            lock.unlock()
-            let pidText = conflict.map { "pid \($0)" } ?? "an unreadable pid"
-            throw OpError.bad(
-                "refusing to stop root (\(pidText)): it was not seeded by this helper; "
-                    + "pass force to dispose it"
-            )
+    func requireStoppedForHelperExitLocked() throws {
+        guard childPID == nil,
+              (state == "stopped" && stopRequested) || (state == "unseeded" && seed == nil) else {
+            throw OpError.bad("helper root custody is active or unknown")
         }
-        if child == nil, inConflict, force, conflict == nil {
-            lock.unlock()
-            throw OpError.bad(
-                "root lock is held but its pid line is unreadable; cannot dispose it safely"
-            )
-        }
-        if child != nil || conflict != nil {
-            stopRequested = true
-            state = "stopping"
-            nextRestartAt = nil
-        } else if backoffPending {
-            stopRequested = true
-            state = "stopped"
-            nextRestartAt = nil
-        }
-        lock.unlock()
+    }
 
+    /// Retain stop intent before signalling the owned child. Unknown custody
+    /// is never converted into authority to signal a foreign PID.
+    func requestStop() throws -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        let child = childPID
+        let inConflict = state == "conflict"
+        if child == nil, inConflict {
+            throw OpError.bad("root custody is foreign or lost; explicit native recovery is required")
+        }
+        guard let seed else {
+            throw OpError.bad("no retained root seed; cannot acknowledge durable stop")
+        }
+        try StopIntent.store(seed.runDir, owner: .root)
+        stopRequested = true
+        nextRestartAt = nil
+        state = child == nil ? "stopped" : "stopping"
         if let child {
             _ = kill(child, SIGTERM)
             rootKeeperLog("stop requested; SIGTERM to root pid \(child)")
-            scheduleEscalation(pid: child)
-        } else if let conflict {
-            _ = kill(conflict, SIGTERM)
-            rootKeeperLog("disposal requested; SIGTERM to foreign root pid \(conflict)")
-            queue.asyncAfter(deadline: .now() + RootKeeperTiming.orphanPollS) { [weak self] in
-                self?.pollOrphanDeath(pid: conflict)
-            }
-            scheduleEscalation(pid: conflict)
-        } else if backoffPending {
-            rootKeeperLog("stop requested; pending restart cancelled")
         }
-        return status()
+        return statusLocked()
     }
 
-    /// Reap `pid` when this keeper owns it; called from the SIGCHLD drain.
-    /// Returns false when the pid belongs to the session table instead.
-    func reapIfOwned(pid: pid_t, exitStatus: Int32) -> Bool {
-        lock.lock()
-        guard pid == childPID else {
-            lock.unlock()
-            return false
-        }
+    /// Called only inside withChildOwnership. Reaping and forgetting this PID
+    /// are indivisible with root_stop's ownership check and signal delivery.
+    func reapExitedChildLocked() {
+        guard let pid = childPID else { return }
+        var exitStatus: Int32 = 0
+        guard waitpid(pid, &exitStatus, WNOHANG) == pid else { return }
         childPID = nil
         let startedAt = childStartedAt
         childStartedAt = nil
@@ -983,9 +1025,8 @@ final class RootKeeper {
         if requested {
             lastExit = ["kind": "stopped", "at": Date().timeIntervalSince1970]
             state = "stopped"
-            lock.unlock()
             rootKeeperLog("root stopped by request")
-            return true
+            return
         }
         let exit = Self.describeExit(exitStatus)
         lastExit = exit
@@ -1001,10 +1042,8 @@ final class RootKeeper {
         restarts += 1
         nextRestartAt = Date().addingTimeInterval(delay)
         state = "backoff"
-        lock.unlock()
         rootKeeperLog("root exited unexpectedly (\(exit["kind"] ?? "?")); restart in \(delay)s")
         queue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.attemptSpawn() }
-        return true
     }
 
     // MARK: Internals
@@ -1012,7 +1051,8 @@ final class RootKeeper {
     /// One spawn attempt: probe the lock, then either rest or launch root.
     private func attemptSpawn() {
         lock.lock()
-        guard let seed = self.seed, !stopRequested, childPID == nil, state != "conflict" else {
+        guard let seed = self.seed, !helperStopping, !stopRequested,
+              childPID == nil, state != "conflict" else {
             lock.unlock()
             return
         }
@@ -1030,8 +1070,14 @@ final class RootKeeper {
             rootKeeperLog("another root owns \(seed.runDir) (\(detail)); waiting, not spawning")
             scheduleConflictPoll()
             return
-        case .free, .unknown:
+        case .free:
             break
+        case .unknown:
+            lock.lock()
+            seedError = "root ownership lock is unreadable; custody is unknown"
+            state = "conflict"
+            lock.unlock()
+            return
         }
 
         var environment = ProcessInfo.processInfo.environment
@@ -1039,14 +1085,26 @@ final class RootKeeper {
             environment[key] = value
         }
         // Spawn and ownership accounting share one lock domain with
-        // `reapIfOwned`: a root that exits before its pid is recorded would
+        // native waitpid and `reapExitedChildLocked`: a root that exits before
+        // its pid is recorded would
         // otherwise be reaped by the SIGCHLD drain against a still-nil
         // `childPID`, dropping that exit and parking the keeper on a dead pid
         // it never restarts. Under one lock, a fast exit drains only after
         // `childPID` is set and is attributed like any other exit (the same
         // discipline the session table's spawn uses; QA #3242).
         lock.lock()
+        guard !helperStopping, !stopRequested, childPID == nil, state != "stopping",
+              self.seed?.runDir == seed.runDir else {
+            lock.unlock()
+            return
+        }
         do {
+            if try StopIntent.exists(seed.runDir, owner: .root) {
+                stopRequested = true
+                state = "stopped"
+                lock.unlock()
+                return
+            }
             let pid = try spawnDetachedChild(
                 argv: seed.argv,
                 environment: environment,
@@ -1119,40 +1177,6 @@ final class RootKeeper {
         }
     }
 
-    /// SIGKILL a stop target that outlives the grace window. The child case
-    /// is settled by its reap; the foreign-root case polls for death.
-    private func scheduleEscalation(pid: pid_t) {
-        queue.asyncAfter(deadline: .now() + RootKeeperTiming.stopGraceS) { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let stillStopping = self.state == "stopping"
-            self.lock.unlock()
-            guard stillStopping, kill(pid, 0) == 0 else { return }
-            _ = kill(pid, SIGKILL)
-            rootKeeperLog("stop grace elapsed; SIGKILL to pid \(pid)")
-        }
-    }
-
-    /// Poll a foreign root until it is gone (it produces no SIGCHLD here).
-    private func pollOrphanDeath(pid: pid_t) {
-        if kill(pid, 0) != 0 {
-            lock.lock()
-            if conflictPID == pid {
-                conflictPID = nil
-                conflictSince = nil
-            }
-            if state == "stopping" {
-                state = "stopped"
-            }
-            lock.unlock()
-            rootKeeperLog("foreign root pid \(pid) is gone")
-            return
-        }
-        queue.asyncAfter(deadline: .now() + RootKeeperTiming.orphanPollS) { [weak self] in
-            self?.pollOrphanDeath(pid: pid)
-        }
-    }
-
     private static func describeExit(_ status: Int32) -> [String: Any] {
         // Decode the BSD wait status by hand: WIFEXITED / WEXITSTATUS and
         // friends are function-like C macros Swift cannot import.
@@ -1176,6 +1200,7 @@ final class RootKeeper {
             "restarts": restarts,
             "stop_requested": stopRequested,
         ]
+        if let seed { out["run_dir"] = seed.runDir }
         if let seedError {
             out["seed_error"] = seedError
         }
@@ -1207,7 +1232,7 @@ private let rootKeeper = RootKeeper()
 // MARK: - Dispatch
 
 
-func dispatch(_ req: [String: Any], listeningFD: Int32) -> [String: Any] {
+func dispatch(_ req: [String: Any]) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
     let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info"]
@@ -1218,7 +1243,7 @@ func dispatch(_ req: [String: Any], listeningFD: Int32) -> [String: Any] {
         let result: Any
         switch method {
         case "ping":
-            result = ["pong": true, "preflight_screen": CGPreflightScreenCaptureAccess(),
+            result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true, "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
         case "file_read": result = try fileRead(req)
@@ -1236,17 +1261,21 @@ func dispatch(_ req: [String: Any], listeningFD: Int32) -> [String: Any] {
         case "session_list": result = try sessionList(req)
         case "session_has": result = try sessionHas(req)
         case "signal": result = try signalSession(req)
-        case "self_upgrade": result = try selfUpgrade(req, listeningFD: listeningFD)
         case "root_seed":
             guard let config = req["config"] as? [String: Any] else {
                 throw OpError.bad("root_seed needs a config object")
             }
-            rootKeeper.configure(try RootSeed.from(config))
+            try rootKeeper.configure(try RootSeed.from(config))
             result = rootKeeper.status()
         case "root_status": result = rootKeeper.status()
         case "root_stop":
-            let force = req["force"] as? Bool ?? false
-            result = try rootKeeper.requestStop(force: force)
+            if req["force"] != nil { throw OpError.bad("root_stop does not accept foreign-PID force") }
+            result = try rootKeeper.requestStop()
+        case "helper_shutdown":
+            guard let runDir = req["run_dir"] as? String else {
+                throw OpError.bad("helper_shutdown needs its bound run_dir")
+            }
+            result = try requestHelperShutdown(runDir: runDir)
         default:
             return ["id": id as Any, "ok": false, "error": "unknown method: \(method)"]
         }
@@ -1685,41 +1714,40 @@ func registerPermissions() {
 /// the socket file to mode 0700, and `getpeereid` admits only this process's
 /// uid; same-uid processes remain the documented residual threat surface.
 func serve() {
+    let path = socketPath()
+    do {
+        if try helperShouldExitBeforeStart() { exit(0) }
+    } catch {
+        FileHandle.standardError.write(Data("helper stop intent is unknown: \(error)\n".utf8))
+        exit(1)
+    }
     reportResponsiblePID()
     registerPermissions()
-    let path = socketPath()
-    let fd: Int32
-    if let inherited = ProcessInfo.processInfo.environment[inheritedSocketFDEnvironment],
-       let inheritedFD = Int32(inherited), inheritedFD >= 0 {
-        fd = inheritedFD
-        unsetenv(inheritedSocketFDEnvironment)
-    } else {
-        unlink(path)
-        fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        if fd < 0 { perror("socket"); exit(1) }
+    unlink(path)
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    if fd < 0 { perror("socket"); exit(1) }
 
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        let pathBytes = Array(path.utf8)
-        guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
-            FileHandle.standardError.write(Data("socket path too long: \(path)\n".utf8)); exit(1)
-        }
-        withUnsafeMutablePointer(to: &addr.sun_path) { p in
-            p.withMemoryRebound(to: UInt8.self, capacity: pathBytes.count) { dst in
-                for (i, b) in pathBytes.enumerated() { dst[i] = b }
-            }
-        }
-        let len = socklen_t(MemoryLayout<sockaddr_un>.size)
-        let bindRC = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) }
-        }
-        if bindRC < 0 { perror("bind"); exit(1) }
-        // This helper holds TCC-granted desktop access, so the socket must be
-        // owner-only: a foreign local process must not drive screenshots or clicks.
-        // Same-uid processes are the documented residual threat surface.
-        if chmod(path, mode_t(0o700)) != 0 { perror("chmod"); exit(1) }
-        if listen(fd, 16) < 0 { perror("listen"); exit(1) }
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    let pathBytes = Array(path.utf8)
+    guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
+        FileHandle.standardError.write(Data("socket path too long: \(path)\n".utf8)); exit(1)
     }
+    withUnsafeMutablePointer(to: &addr.sun_path) { p in
+        p.withMemoryRebound(to: UInt8.self, capacity: pathBytes.count) { dst in
+            for (i, b) in pathBytes.enumerated() { dst[i] = b }
+        }
+    }
+    let len = socklen_t(MemoryLayout<sockaddr_un>.size)
+    let bindRC = withUnsafePointer(to: &addr) { ptr in
+        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) }
+    }
+    if bindRC < 0 { perror("bind"); exit(1) }
+    // This helper holds TCC-granted desktop access, so the socket must be
+    // owner-only: a foreign local process must not drive screenshots or clicks.
+    // Same-uid processes are the documented residual threat surface.
+    if chmod(path, mode_t(0o700)) != 0 { perror("chmod"); exit(1) }
+    if listen(fd, 16) < 0 { perror("listen"); exit(1) }
     guard setCloseOnExec(fd, true) else {
         perror("fcntl"); exit(1)
     }
@@ -1748,7 +1776,13 @@ func serve() {
         while let line = readLine(conn) {
             let req = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
             if let req = req {
-                writeJSONLine(conn, dispatch(req, listeningFD: fd))
+                writeJSONLine(conn, dispatch(req))
+                if withChildOwnership({ helperStopping }) {
+                    close(conn)
+                    close(fd)
+                    unlink(path)
+                    exit(0)
+                }
             } else {
                 writeJSONLine(conn, ["id": NSNull(), "ok": false, "error": "JSON parse error"])
             }

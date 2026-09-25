@@ -99,34 +99,6 @@ def test_gateway_update_makes_pth_writable_only_while_uv_sync_runs(
     assert _read_mode(pth) == 0o444
 
 
-def test_start_source_integrity_sync_restores_read_only_pth(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Start's direct auto-heal sync shares the same protected write window."""
-    repo = tmp_path / "source"
-    pth = _read_only_pth(repo)
-    modes_during_sync: list[int] = []
-    installed: list[str] = []
-
-    def run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        assert args == ["git", "rev-parse", "HEAD"]
-        return SimpleNamespace(returncode=0, stdout=_FULL_SHA + "\n")
-
-    def sync_run(args: list[str], **_kwargs: object) -> SimpleNamespace:
-        _uv_step(args)
-        modes_during_sync.append(_read_mode(pth))
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(_start.subprocess, "run", run)
-    monkeypatch.setattr(_native_sync, "run_bounded", sync_run)
-    monkeypatch.setattr("shared.source_integrity.get", lambda: "installed-sha")
-    monkeypatch.setattr("shared.source_integrity.set_installed", installed.append)
-
-    assert _start._verify_source_integrity(repo) == 0
-
-    assert modes_during_sync == [0o644, 0o644]
-    assert _read_mode(pth) == 0o444
-    assert installed == [_FULL_SHA]
 
 
 def test_gateway_recovery_restores_pth_before_start(

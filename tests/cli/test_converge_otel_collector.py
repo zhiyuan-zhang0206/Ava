@@ -640,75 +640,22 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
     assert installed[0][1] == home
 
 
-def test_non_lgtm_gateway_reaps_orphan_collector_session(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+def test_collector_preparation_never_controls_a_running_service_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    home = tmp_path / ".ava-preview"
+    home = tmp_path / "home"
     home.mkdir()
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[2],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
+        repo=Path(__file__).resolve().parents[2], ava_home=home, roles=frozenset({"gateway"})
     )
-    killed: list[str] = []
-    expected_flags: list[bool] = []
+
+    def no_root_control() -> None:
+        pytest.fail("Preparation cannot independently reconcile a live root")
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-
-    def _collector_session_exists(session: str) -> bool:
-        return session == "ava-otel-collector"
-
-    monkeypatch.setattr("cli.commands._has_session", _collector_session_exists)
-
-    def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
-        killed.append(session)
-        expected_flags.append(expected)
-        return True, "graceful"
-
-    monkeypatch.setattr("cli.commands._session_lifecycle._graceful_kill_session", _record_kill)
-
+    monkeypatch.setattr("cli.commands._root_driver._root_client", no_root_control)
     oc.ensure_otel_collector_step(ctx)
-
-    assert killed == ["ava-otel-collector"]
-    assert expected_flags == [True]
-    assert "reaped orphan session ava-otel-collector" in capsys.readouterr().err
-
-
-def test_non_lgtm_gateway_without_session_skips_reap(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    home = tmp_path / ".ava-preview"
-    home.mkdir()
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[2],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
-    )
-    killed: list[str] = []
-
-    monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-
-    def _no_session(_session: str) -> bool:
-        return False
-
-    monkeypatch.setattr("cli.commands._has_session", _no_session)
-
-    def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
-        killed.append(session)
-        return True, "graceful"
-
-    monkeypatch.setattr("cli.commands._session_lifecycle._graceful_kill_session", _record_kill)
-
-    oc.ensure_otel_collector_step(ctx)
-
-    assert killed == []
-    assert "reaped orphan session" not in capsys.readouterr().err
 
 
 def test_non_lgtm_gateway_reports_and_preserves_residual_config(

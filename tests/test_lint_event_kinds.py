@@ -43,7 +43,6 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # Positional emit calls from daemon alert paths, with no `event=` literal.
         "delivery_stalled",  # services/delivery_watchdog/daemon.py:_alert_stalled
         "loki_write_path_probe_failed",  # services/healthchecks/lgtm.py write-path probe
-        "loki_write_path_probe_throttled",  # services/healthchecks/lgtm.py sustained 429
         "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
         "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
         "billing_resurrect_run",  # ops/billing_recovery.py:_record_run_event telemetry.emit("telemetry", ...)
@@ -67,14 +66,11 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # Dynamic emit: positional-argument form, no `event=` literal.
         "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
         "task_escalation",  # task_maintenance/daemon.py:_run_escalate
-        "watchdog_tick",  # services/watchdog/daemon.py:_TickProgress.record_completed (positional emit)
-        "schema_mismatch_blocked",  # services/watchdog/daemon.py:_tick (positional emit)
         "heartbeat_paused",  # ava/self.py:258 telemetry.emit("telemetry", ...)
         "shell_ttl_renewed",  # ava/shell/sessions.py:_record_renewal telemetry.emit("telemetry", ...)
         "chrome_page_ttl_expired",  # services/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)
         "chrome_page_ttl_renewed",  # services/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
-        "pgbouncer_repaired",  # services/healthchecks/pgbouncer.py:_emit_repaired
         "editable_pth_repaired",  # shared/editable_install.py:repair_editable_ava_pth
         "editable_direct_url_repaired",  # shared/editable_install.py:repair_editable_direct_url
         "exec_editable_install_poisoned",  # shared/editable_install.py:guard_editable_install

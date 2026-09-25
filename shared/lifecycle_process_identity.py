@@ -55,8 +55,7 @@ def target_process_ended(payload: dict[str, Any], machine: str) -> bool:
         if record.starttime is not None:
             matches = record.identifies(record.pid)
             return matches is False
-        # Within tolerance the pid is still the same live process; only a
-        # reading beyond it proves the exit/reuse this observer reports.
+        # Compare the same stable native birth captured at application.
         return not create_time_matches(stable_create_time(process), record.create_time)
     except psutil.NoSuchProcess:
         return True

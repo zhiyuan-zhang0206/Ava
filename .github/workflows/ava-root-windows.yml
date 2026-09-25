@@ -1,0 +1,39 @@
+name: Native Windows root ownership
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'services/ava_root/**'
+      - 'services/ava_root_glue/**'
+      - 'shared/winjob*.py'
+      - 'shared/session_backend.py'
+      - 'shared/windows_terminal*.py'
+      - 'tests/native_root/**'
+      - '.github/workflows/ava-root-windows.yml'
+permissions:
+  contents: read
+jobs:
+  native-windows-root:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
+        with:
+          version: 0.10.2
+      - run: uv sync --frozen
+      - name: Native pipe, singleton and Job custody evidence
+        shell: bash
+        run: |
+          mkdir -p proof
+          git rev-parse HEAD > proof/head-sha.txt
+          uv run pyright --pythonplatform Windows services/ava_root/windows shared/winjob.py shared/winjob_spawn.py
+          uv run pytest --confcutdir=tests/native_root tests/native_root -q --junitxml=proof/windows-root.xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: windows-root-${{ github.event.pull_request.head.sha }}
+          path: proof/
+          if-no-files-found: error

@@ -47,7 +47,7 @@ PORT_OFFSETS: dict[str, int] = {
     "pgbouncer": 13,
     "events_maintenance": 14,
     # The Next.js app the gate proxies to — a separate slot because the entry
-    # port (offset 1, "frontend") is owned by the always-up gate.
+    # port (offset 1, "frontend") is owned by the root-owned Gate.
     "app": 15,
     # The IM bridge + delivery watchdog — the two daemons added AFTER the
     # per-unit health-port decision (decisions/2026-07-31-a-health-port-

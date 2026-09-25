@@ -6,7 +6,7 @@ import `ava.*`. Audience is ops / developers, not the agent. Entry point
 `uv sync`.
 
 Sub-module layout:
-- private helpers: `_repo`, `_compose`, `_session_lifecycle`, `_probe`, `_setup`
+- private helpers: `_repo`, `_compose`, `_probe`, `_setup`
 - one module per command: `start`, `stop`, `status`, `update`, `cluster`,
   `plugins`, `skill`, `auth`, `machine`
 - `migrations`: not a command — `cmd_migrations_apply` is called as a step of
@@ -34,19 +34,9 @@ from cli.commands._cluster_boot_unit import (
 from cli.commands._cluster_cancel import cmd_cluster_cancel
 from cli.commands._cluster_cron import cmd_cron_register, cmd_cron_unregister
 from cli.commands._cluster_health import cmd_health_probe
-from cli.commands._cluster_hold_watchdog import (
-    cmd_hold_watchdog,
-    cmd_hold_watchdog_register,
-    cmd_hold_watchdog_unregister,
-)
 from cli.commands._cluster_recover import cmd_cluster_recover
 from cli.commands._cluster_recover_pending import cmd_cluster_recover_pending
 from cli.commands._cluster_rollback import cmd_rollback
-from cli.commands._cluster_watchdog_probe import (
-    cmd_watchdog_probe,
-    cmd_watchdog_probe_register,
-    cmd_watchdog_probe_unregister,
-)
 from cli.commands._converge import cmd_converge, converge_host
 from cli.commands._firewall import cmd_firewall_status, cmd_firewall_sync
 from cli.commands._gateway_ready import (
@@ -66,19 +56,14 @@ from cli.commands._probe import (
     _cluster_pin_status,
     _curl_ok,
     _detect_prod_source_drift,
-    _husk_session_reason,
     _notify_non_critical_unready_services,
     _occupied_health_ports,
-    _pid_alive,
-    _pidfile_path,
     _print_non_critical_unready_services,
     _print_service_row,
     _print_unready_services,
     _probe_service,
     _recovered_non_critical_specs,
     _resolve_recovered_non_critical_alerts,
-    _tcp_alive,
-    _wait_for_services_ready,
 )
 from cli.commands._repo import (
     GATEWAY_PROBE_PATH,
@@ -100,21 +85,13 @@ from cli.commands._repo import (
 from cli.commands._root_driver import (
     _ensure_root_service_tree,
     _launch_service_tree,
-    _root_driven_enabled,
     _root_tree_plan,
     _root_tree_roster,
     _start_roster,
     _stop_root_service_tree,
     _wait_for_root_services_ready,
     _wait_for_service_tree,
-)
-from cli.commands._session_lifecycle import (
-    _graceful_kill_session,
-    _has_session,
-    _kill_session,
-    _launch_roster,
-    _launch_sessions,
-    _new_session,
+    admit_live_start,
 )
 from cli.commands._setup import (
     _SETUP_FIELDS,
@@ -139,7 +116,6 @@ from cli.commands.cluster_lifecycle import (
     cmd_cluster_ls,
 )
 from cli.commands.config import cmd_config_get, cmd_config_set, cmd_config_unset
-from cli.commands.ensure_db_role import cmd_ensure_db_role
 from cli.commands.logs import cmd_logs_retention, cmd_logs_rotate
 from cli.commands.mcp import (
     cmd_mcp_add,
@@ -246,6 +222,7 @@ from cli.commands.update import (
 from shared.config import settings
 
 __all__ = [
+    "admit_live_start",
     "GATEWAY_PROBE_PATH",
     "POLL_CONVERGING",
     "POLL_NO_PROGRESS",
@@ -282,19 +259,10 @@ __all__ = [
     "_ensure_frontend_deps",
     "_ensure_root_service_tree",
     "_fan_out",
-    "_graceful_kill_session",
-    "_has_session",
-    "_husk_session_reason",
-    "_kill_session",
-    "_launch_roster",
     "_launch_service_tree",
-    "_launch_sessions",
     "_list_agent_runners",
-    "_new_session",
     "_notify_non_critical_unready_services",
     "_occupied_health_ports",
-    "_pid_alive",
-    "_pidfile_path",
     "_poll_until_unpaused",
     "_preflight_probes",
     "_preflight_start_readiness",
@@ -317,7 +285,6 @@ __all__ = [
     "_resolve_setup_field",
     "_restart_frontend_session",
     "_roles_or_none",
-    "_root_driven_enabled",
     "_root_tree_plan",
     "_root_tree_roster",
     "_run_agent_runner_self_update",
@@ -328,10 +295,8 @@ __all__ = [
     "_services_for_roles_annotated",
     "_start_roster",
     "_stop_root_service_tree",
-    "_tcp_alive",
     "_wait_for_root_services_ready",
     "_wait_for_service_tree",
-    "_wait_for_services_ready",
     "apply_pending_migrations",
     "build_services",
     "cmd_boot_unit_install",
@@ -354,14 +319,10 @@ __all__ = [
     "cmd_converge",
     "cmd_cron_register",
     "cmd_cron_unregister",
-    "cmd_ensure_db_role",
     "cmd_firewall_status",
     "cmd_firewall_sync",
     "cmd_grafana_render",
     "cmd_health_probe",
-    "cmd_hold_watchdog",
-    "cmd_hold_watchdog_register",
-    "cmd_hold_watchdog_unregister",
     "cmd_lgtm_off",
     "cmd_lgtm_on",
     "cmd_lgtm_status",
@@ -420,9 +381,6 @@ __all__ = [
     "cmd_stop",
     "cmd_trace_ship",
     "cmd_update",
-    "cmd_watchdog_probe",
-    "cmd_watchdog_probe_register",
-    "cmd_watchdog_probe_unregister",
     "converge_host",
     "dry_run_checks",
     "estimate_maintenance_window",

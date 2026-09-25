@@ -139,8 +139,9 @@ class TestSettingsAppliesDataPlanePasswords:
             db_url=_pg("STALE", host="localhost:5432", user="ava", db="ava"),
             redis_url=_redis("STALE", host="localhost:6379", user="ava"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — isolated test credential
         )
-        assert s.db_url == _pg(_SECRET, host="localhost:5432", user="ava", db="ava")
+        assert s.db_url == _pg("owner-value", host="localhost:5432", user="ava", db="ava")
         assert s.redis_url == _redis("STALE", host="localhost:6379", user="ava")
 
     def test_redis_url_stays_verbatim(self) -> None:
@@ -193,9 +194,10 @@ class TestSettingsAppliesDataPlanePasswords:
             db_url=_pg("STALE", host="127.0.0.1:5432", user="ava"),
             redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — isolated test credential
         )
 
-        assert s.db_url.startswith(f"postgresql://ava:{_SECRET}@127.0.0.1:5432/ava")
+        assert s.db_url.startswith("postgresql://ava:owner-value@127.0.0.1:5432/ava")
 
     def test_gateway_profile_keeps_local_owner_url_password_refresh(
         self, monkeypatch: pytest.MonkeyPatch
@@ -206,9 +208,10 @@ class TestSettingsAppliesDataPlanePasswords:
             db_url=_pg("STALE", host="127.0.0.1:5432", user="ava"),
             redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — isolated test credential
         )
 
-        assert s.db_url.startswith(f"postgresql://ava:{_SECRET}@127.0.0.1:5432/ava")
+        assert s.db_url.startswith("postgresql://ava:owner-value@127.0.0.1:5432/ava")
 
     def test_agent_profile_keeps_projected_runner_url(
         self, monkeypatch: pytest.MonkeyPatch
@@ -286,12 +289,13 @@ class TestSelfHostDialsLoopback:
             db_url=_pg("STALE", host="gw.host:5433"),
             redis_url=_redis("STALE", host="gw.host:6380"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — test fixture
         )
         # Host -> loopback; identity (as carried by the URL) / port / db untouched.
         # db_url also picks up ?hostaddr=127.0.0.1 (_pin_ipv4_hostaddr): the
         # loopback host IS an IPv4 literal, so libpq's own resolution-bypass
         # applies here too, same as any other literal host.
-        assert s.db_url == _pg(_SECRET, host="127.0.0.1:5433") + "?hostaddr=127.0.0.1"
+        assert s.db_url == _pg("owner-value", host="127.0.0.1:5433") + "?hostaddr=127.0.0.1"
         assert s.redis_url == _redis("STALE", host="127.0.0.1:6380")
 
     def test_foreign_host_is_untouched(self, tmp_path: Path) -> None:
@@ -301,6 +305,7 @@ class TestSelfHostDialsLoopback:
             db_url=_pg("STALE", host="gw.host:5433"),
             redis_url=_redis("STALE", host="gw.host:6380"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — test fixture
         )
         assert urlsplit(s.db_url).hostname == "gw.host"
         assert urlsplit(s.redis_url).hostname == "gw.host"
@@ -313,11 +318,12 @@ class TestSelfHostDialsLoopback:
             AVA_DB_URL=_pg("STALE", host="gw.host:6433"),
             AVA_REDIS_URL=_redis("STALE", host="gw.host:6380"),
             AVA_CLUSTER_SECRET=_SECRET,
+            AVA_DB_ADMIN_PASSWORD="owner-value",  # noqa: S106 — test fixture
             AVA_PGBOUNCER_ENABLED=True,
         )
         # ?hostaddr= survives (url_with_host preserves the query string) — see the
         # note in test_self_host_rewrites_to_loopback.
-        assert s.db_url == _pg(_SECRET, host="127.0.0.1:6433") + "?hostaddr=127.0.0.1"
+        assert s.db_url == _pg("owner-value", host="127.0.0.1:6433") + "?hostaddr=127.0.0.1"
 
     def test_localhost_machine_host_default_is_noop(self, tmp_path: Path) -> None:
         # The zero-config single box (machine host resolves to `localhost`): an
@@ -327,6 +333,7 @@ class TestSelfHostDialsLoopback:
             db_url=_pg("STALE", host="localhost:5433"),
             redis_url=_redis("STALE", host="gw.host:6380"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — test fixture
         )
         assert urlsplit(s.db_url).hostname == "localhost"
         assert urlsplit(s.redis_url).hostname == "gw.host"
@@ -339,8 +346,9 @@ class TestSelfHostDialsLoopback:
             db_url=_pg("STALE", host="localhost:5433"),
             redis_url=_redis("STALE", host="localhost:6380"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — test fixture
         )
-        assert s.db_url == _pg(_SECRET, host="localhost:5433")
+        assert s.db_url == _pg("owner-value", host="localhost:5433")
         assert s.redis_url == _redis("STALE", host="localhost:6380")
 
     def test_machine_host_file_fallback_matches(self, tmp_path: Path) -> None:
@@ -351,6 +359,7 @@ class TestSelfHostDialsLoopback:
             db_url=_pg("STALE", host="gw.host:5433"),
             redis_url=_redis("STALE", host="gw.host:6380"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — test fixture
         )
         assert urlsplit(s.db_url).hostname == "127.0.0.1"
         assert urlsplit(s.redis_url).hostname == "127.0.0.1"
@@ -361,6 +370,7 @@ class TestSelfHostDialsLoopback:
             db_url=UNANCHORED_DB_SENTINEL,
             redis_url=_redis("STALE", host="h:6379"),
             secret=_SECRET,
+            db_admin_password="owner-value",  # noqa: S106 — test fixture
         )
         assert s.db_url == UNANCHORED_DB_SENTINEL
 
@@ -481,3 +491,12 @@ class TestRedactedUrl:
         # single-quoted .env line the parser has not yet decoded (#2046).
         raw = "'redis://ava:FICTIONAL_CREDENTIAL_DO_NOT_USE@127.0.0.1:20028/0'"
         assert "FICTIONAL_CREDENTIAL_DO_NOT_USE" not in redacted_url(raw)
+
+
+def test_local_owner_without_admin_password_does_not_substitute_bearer() -> None:
+    with pytest.raises(ValueError, match="AVA_DB_ADMIN_PASSWORD"):
+        _settings_with(
+            db_url=_pg("explicit-old-owner", host="127.0.0.1:5432", user="ava"),
+            redis_url=_redis("runtime-value", host="127.0.0.1:6379", user="ava"),
+            secret=_SECRET,
+        )

@@ -348,27 +348,66 @@ def test_resolution_status_uses_latest_value_gauges(otlp_backend) -> None:
     assert _attrs_of(warning.data.data_points[0])["window"] == "6h"
 
 
-def test_watchdog_tick_uses_latest_timestamp_gauge(otlp_backend) -> None:
+def test_root_health_tick_uses_latest_timestamp_gauge(otlp_backend) -> None:
     """A newer completed tick replaces the old timestamp; a watchdog's age is
     absolute state, not an event count or a duration distribution."""
     backend, _, metric_reader = otlp_backend
     backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
             _event(
-                event_name="watchdog_tick",
+                event_name="root_health_tick",
                 attributes={"last_tick_timestamp_seconds": 1_725_000_000.0},
             ),
             _event(
-                event_name="watchdog_tick",
+                event_name="root_health_tick",
                 attributes={"last_tick_timestamp_seconds": 1_725_000_060.0},
             ),
         ]
     )
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
 
-    tick = _metrics(metric_reader)["ava_watchdog_tick_last_tick_timestamp"]
+    tick = _metrics(metric_reader)["ava_root_health_tick_last_tick_timestamp"]
     assert tick.unit == "s"
     assert tick.data.data_points[0].value == 1_725_000_060.0
+
+
+def test_root_health_gauges_keep_separate_home_identity_and_expected_only(otlp_backend) -> None:
+    """A completed sibling cluster cannot supply the missing first sample."""
+    backend, _, metric_reader = otlp_backend
+    backend.export_batch(
+        [
+            _event(
+                event_name="root_health_expected",
+                attributes={
+                    "home_id": "a" * 64,
+                    "expected_since_timestamp_seconds": 100.0,
+                },
+            ),
+            _event(
+                event_name="root_health_expected",
+                attributes={
+                    "home_id": "b" * 64,
+                    "expected_since_timestamp_seconds": 120.0,
+                },
+            ),
+            _event(
+                event_name="root_health_tick",
+                attributes={
+                    "home_id": "a" * 64,
+                    "last_tick_timestamp_seconds": 150.0,
+                },
+            ),
+        ]
+    )
+    backend.flush()
+    metrics = _metrics(metric_reader)
+    expected = metrics["ava_root_health_expected_expected_since_timestamp"]
+    assert {point.attributes["home_id"] for point in expected.data.data_points} == {
+        "a" * 64,
+        "b" * 64,
+    }
+    ticks = metrics["ava_root_health_tick_last_tick_timestamp"]
+    assert {point.attributes["home_id"] for point in ticks.data.data_points} == {"a" * 64}
 
 
 def test_metric_disposition_cost_counter_price_excluded(otlp_backend) -> None:

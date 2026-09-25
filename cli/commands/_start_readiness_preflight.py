@@ -144,12 +144,14 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     import cli.commands as _ns
     from cli.commands._converge_spec import ConvergeCtx
     from cli.commands._port_preflight import collect_port_conflicts
+    from cli.commands._root_driver import _root_tree_roster
     from shared import cluster
-    from shared.disabled_services import resolve_launch_skip
     from shared.port_preflight import env_port_drift
+    from shared.service_selection import resolve_selection
 
     try:
-        roster = _ns._launch_roster(roles, resolve_launch_skip(set(), persist=False))
+        available = {s.session for s in _ns.build_services()}
+        roster = _root_tree_roster(roles, resolve_selection(available, persist=False))
         occupied = _ns._occupied_health_ports(roster)
     except Exception as exc:  # a preflight must not fail the update
         return [], [f"health-port check skipped: {exc}"]
@@ -157,7 +159,7 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     fatal = [
         f"{port.spec.session}: health port answered by {port.detail} — `ava start` "
         "refuses the whole launch on this (#977); after the stop that refusal leaves "
-        "no host serving. Free the port, or move this unit's block: `ava enroll "
+        "no host serving. Free the port, or move this unit's block: `ava start "
         "--gateway <url> --machine-name <name> --machine-host <host> "
         "--health-port-base <N>`"
         for port in occupied

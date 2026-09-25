@@ -1,4 +1,4 @@
-"""Exec-owner recovery: a whole-second create_time move is not death evidence."""
+"""Exec-owner recovery compares exact captured native birth, not a nearby PID occupant."""
 
 from __future__ import annotations
 
@@ -8,19 +8,17 @@ import psutil
 
 from shared.exec_owner_recovery import process_ended
 from shared.incarnation_resources import ResourceProcess
+from shared.proc_tree import stable_create_time
 
 
 def _self_identity(offset: float) -> ResourceProcess:
-    # The recorded birth is re-derived from the wall clock and moves by whole
-    # seconds while the process stays alive (macOS psutil).
-    return ResourceProcess(pid=os.getpid(), birth=psutil.Process().create_time() + offset)
+    return ResourceProcess(pid=os.getpid(), birth=stable_create_time(psutil.Process()) + offset)
 
 
-def test_live_process_within_the_tolerance_has_not_ended() -> None:
-    assert not process_ended(_self_identity(-1.0))
-    assert not process_ended(_self_identity(1.0))
+def test_exact_native_process_has_not_ended() -> None:
+    assert not process_ended(_self_identity(0))
 
 
-def test_birth_beyond_the_tolerance_is_positive_evidence_of_an_end() -> None:
-    assert process_ended(_self_identity(-3.0))
-    assert process_ended(_self_identity(60.0))
+def test_nearby_birth_is_positive_evidence_of_reuse() -> None:
+    assert process_ended(_self_identity(-0.0001))
+    assert process_ended(_self_identity(0.0001))

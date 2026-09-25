@@ -23,20 +23,13 @@ from shared.session_record import pid_starttime_ticks
 # macOS value re-derives from the wall clock with a boot-time correction
 # quantized to whole seconds (measured 2026-09-12: one live process read
 # 1.000000s apart by two import epochs), and WSL wall-clock steps move the
-# Linux value too. Records written before the stable key existed — and any
-# platform without one — still compare with a 2.0s tolerance; new records read
-# back exactly. Pid reuse cannot land inside a couple of seconds.
-_CREATE_TIME_TOLERANCE_S = 2.0
+# Linux value too. Linux uses its starttime tick; other native birth readings
+# compare exactly. Legacy records are not silently adopted across this boundary.
 
 
 def create_time_matches(live: float, birth: float) -> bool:
-    """Whether a live create_time reading still claims the recorded birth.
-
-    Every comparison of a re-read create_time must carry the tolerance a
-    reading moves by for one live process (see `_CREATE_TIME_TOLERANCE_S`);
-    comparing persisted values that were never re-derived stays exact.
-    """
-    return abs(live - birth) <= _CREATE_TIME_TOLERANCE_S
+    """Whether two stable native birth readings identify exactly the same process."""
+    return live == birth
 
 
 def stable_create_time(process: psutil.Process) -> float:
@@ -74,8 +67,8 @@ class OwnedProcess:
 
         The exact identity is the Linux `starttime` tick, which `live()` checks
         first; this is the fallback where the platform has none, reading the
-        stable start time (`stable_create_time`) and keeping the 2.0s
-        tolerance for records written before it existed.
+        stable start time (`stable_create_time`) exactly. An old wall-clock
+        reading cannot authorize custody over a newly captured native process.
         """
         return create_time_matches(stable_create_time(process), self.birth)
 

@@ -27,6 +27,7 @@ class ConvergeCtx:
     repo: Path
     ava_home: Path
     roles: MachineRoles | None  # None = unit not configured yet (fresh install)
+    services: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -40,3 +41,6 @@ class ConvergeStep:
     # for a dev / non-default cluster so a worktree's `ava start` never repoints
     # the host's prod `ava` or rewrites the shell rc.
     host_global: bool = False
+    # Empty means shared host/cluster preparation. Otherwise one selected
+    # consumer is required; role membership alone does not select a service.
+    services: frozenset[str] = frozenset()

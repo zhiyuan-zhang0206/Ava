@@ -136,14 +136,14 @@ def test_runner_projection_without_credential_fails_loud(
     """A runner request on a cluster that never provisioned the role gets the
     operator fix, not a URL that would fail at first connect."""
     _write_gateway_env(tmp_path, runner_pw=None)
-    with pytest.raises(ValueError, match="ensure-db-role"):
+    with pytest.raises(ValueError, match="AVA_RUNNER_DB_PASSWORD"):
         _projected(monkeypatch, tmp_path)
 
 
 def test_runner_projection_without_credential_on_remote_plane_names_the_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """On a remote-managed data plane the ensure-db-role self-heal path is
+    """On a remote-managed data plane the local first-start provisioning path is
     unavailable (the command refuses remote planes), so the missing-credential
     error must point the operator at the provider-provisioned role instead of a
     command that cannot run (QA P2, Task #1752)."""

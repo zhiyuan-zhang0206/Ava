@@ -61,10 +61,9 @@ instead of experimenting on the data plane.
 ## Start / Stop / Status
 
 ```bash
-ava start     # pure bring-up (idempotent). Ensures this cluster's own pg/redis
-              # instance, then brings up the union of this host's services. The
-              # cluster is born at install time (scripts/install.sh), not here;
-              # the home resolves from the checkout, never a flag.
+ava start     # initialize or resume this checkout's home, provision owned storage,
+              # and wait for the selected root services to become ready.
+ava start --worktree  # first start of an isolated dev checkout
 ava pause     # normal agent drain; keep infrastructure, browser and persistent PTYs
 ava stop      # normal drain, then full local stop; durable data and agent IDs survive
               # --keep-infra / --keep-service retain resources; --force is explicit
@@ -92,7 +91,7 @@ ava cluster destroy --path <home>     # stop + free registry slot + deregister i
                                       # add --drop-db to also remove its pg/redis data dirs
 ```
 
-### Split deployments (`ava enroll`)
+### Split deployments
 
 A pure agent-runner on another box **enrolls** into an existing cluster instead
 of birthing one of its own — it inherits the cluster's identity (db / redis /
@@ -103,12 +102,12 @@ printf 'Cluster secret: ' >&2
 IFS= read -rs AVA_CLUSTER_SECRET
 printf '\n' >&2
 export AVA_CLUSTER_SECRET
-ava enroll --gateway <URL> --machine-name <NAME> --machine-host <HOST>
+ava start --serve-agent-runner --no-serve-gateway --gateway-url <URL> \
+  --machine-name <NAME> --machine-host <HOST>
 unset AVA_CLUSTER_SECRET
-# then: ava start
 ```
 
-Enrollment presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
+First start presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
 authenticated `/api/bootstrap`, which returns the cluster's connection bundle
 (db / redis URLs, channels). The runner's database URL carries a separately
 minted least-privilege `ava_runner` password and its Redis URL carries the

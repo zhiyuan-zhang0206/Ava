@@ -8,11 +8,18 @@ fails fast on timeout. A loopback-only single box never waits.
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from cli.commands import _cluster_instance as _ci
 from shared.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _native_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_ci.ownership, "require_listener", lambda *_a, **_k: None)
+    monkeypatch.setattr(_ci.ownership, "require_postgres", lambda *_a, **_k: None)
 
 
 def _pg_socket_path(root: Path, home: Path) -> Path:
@@ -408,7 +415,7 @@ def test_start_probes_receive_the_url_hosts(
 
     assert _ci._start_pg(15433, "") == 0
     assert _ci._start_redis(16380, "admin", "runtime", "", "ava") == 0
-    assert seen == {"pg": (15433, "10.0.0.7"), "redis": (16380, "10.0.0.7")}
+    assert seen == {"redis": (16380, "10.0.0.7")}
 
 
 def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -458,6 +465,11 @@ def _wire_pg_start(
     """Common mocks for _start_pg: a not-running pg on a scratch data dir, with
     subprocess.run captured."""
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(
+        _ci.ownership,
+        "require_postgres",
+        lambda *_a, **_k: SimpleNamespace(pid=123, live=lambda: True) if running else None,
+    )
     monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: running)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []

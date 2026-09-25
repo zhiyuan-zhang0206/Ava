@@ -23,6 +23,7 @@ from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root.supervisor import Supervisor
 from shared.daemon_health import DaemonProbe
+from shared.proc_tree import OwnedProcess
 
 
 class _Recorder:
@@ -64,12 +65,18 @@ class StubSupervisor:
         self.deferrals: dict[str, str] = dict(deferrals or {})
         self.unknown_units: set[str] = set(unknown_units or ())
         self.on_restart: Callable[[], None] | None = None
+        self.generation = (OwnedProcess(42, 100.0, None), 0.0)
 
     async def restart(self, unit_id: str) -> dict[str, object]:
         self.restart_calls.append(unit_id)
         if self.on_restart is not None:
             self.on_restart()
         return {"verb": "restart", "units": []}
+
+    def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float]:
+        if unit_id in self.unknown_units:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        return self.generation
 
     def revival_deferral(self, unit_id: str) -> str | None:
         if unit_id in self.unknown_units:
@@ -117,6 +124,7 @@ def _registry(unit_id: str, probe: Callable[[], DaemonProbe]) -> ProbeRegistry:
 def _config(**overrides: Any) -> HealthConfig:
     values: dict[str, Any] = {
         "interval_s": 0.01,
+        "startup_grace_s": 0.0,  # Existing policy cases begin after startup grace.
         "verify_deadline_s": 0.05,
         "verify_interval_s": 0.001,
         "failures_before_restart": 1,
@@ -250,7 +258,7 @@ async def test_terminal_verdict_reports_and_resets(
     assert "NOT REVIVABLE" in caplog.text
 
 
-async def test_probe_raise_is_down_and_round_continues(
+async def test_probe_raise_is_unavailable_and_round_continues(
     clock: FakeClock, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="services.ava_root.health")
@@ -265,7 +273,8 @@ async def test_probe_raise_is_down_and_round_continues(
     monitor = HealthMonitor(stub, registry, config=_config(breaker_rounds=5))
     await monitor.run_round()
     snapshot = monitor.snapshot()
-    assert stub.restart_calls == ["unit-a"]  # fail-closed: a raise reads as down
+    assert stub.restart_calls == []  # no observed failure: no restart authority
+    assert snapshot["unit-a"].last_verdict == "unavailable"
     assert snapshot["unit-a"].last_detail.startswith("probe raised RuntimeError")
     assert snapshot["unit-b"].last_verdict == "alive"  # the round continued
     assert "probe raised" in caplog.text
@@ -536,3 +545,109 @@ async def test_health_snapshot_exposes_the_status_view(clock: FakeClock) -> None
     assert entry["breaker_open"] is True
     age = entry["breaker_for_s"]
     assert age is not None and cast(float, age) >= 0.0
+
+
+async def test_initial_down_observation_does_not_replace_starting_generation(
+    tmp_path: Path,
+) -> None:
+    unit = UnitManifest(
+        "starting",
+        (sys.executable, "-c", "import time; time.sleep(60)"),
+        RestartPolicy.ALWAYS,
+        "root",
+    )
+    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path)
+    await owner.start()
+    original = cast("list[dict[str, object]]", (await owner.status())["units"])[0]["pid"]
+    probe = CellProbe(DaemonProbe.down("frontend is still building"))
+    monitor = HealthMonitor(owner, _registry("starting", probe), config=_config(startup_grace_s=30))
+    try:
+        await monitor.run_round()
+        current = cast("list[dict[str, object]]", (await owner.status())["units"])[0]["pid"]
+        assert current == original, "an unready first observation replaced the initial generation"
+        assert monitor.snapshot()["starting"].last_verdict == "down"
+        assert monitor.snapshot()["starting"].consecutive_failures == 0
+    finally:
+        await owner.shutdown()
+
+
+async def test_first_alive_ends_generation_startup_grace(clock: FakeClock) -> None:
+    stub = StubSupervisor()
+    stub.generation = (OwnedProcess(42, 100.0, None), clock.now)
+    probe = CellProbe(DaemonProbe.up("ready"))
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(startup_grace_s=180))
+    await monitor.run_round()
+    assert monitor.snapshot()["svc"].generation_ready
+    probe.verdict = DaemonProbe.down("failed after readiness")
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"]
+
+
+async def test_each_new_generation_has_bounded_startup_grace(
+    clock: FakeClock, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="services.ava_root.health")
+    stub = StubSupervisor()
+    stub.generation = (OwnedProcess(42, 100.0, None), clock.now)
+    probe = CellProbe(DaemonProbe.down("building"))
+    monitor = HealthMonitor(stub, _registry("svc", probe), config=_config(startup_grace_s=45))
+    await monitor.run_round()
+    assert not stub.restart_calls
+    assert monitor.snapshot()["svc"].consecutive_failures == 0
+    clock.now += 46
+
+    def replace_generation() -> None:
+        stub.generation = (OwnedProcess(42 + len(stub.restart_calls), clock.now, None), clock.now)
+
+    stub.on_restart = replace_generation
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"]
+    # Existing restart backoff expires, but this newborn generation is still initializing.
+    clock.now += 31
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc"]
+    assert monitor.snapshot()["svc"].consecutive_failures == 1
+    clock.now += 16
+    await monitor.run_round()
+    assert stub.restart_calls == ["svc", "svc"]
+    assert not monitor.snapshot()["svc"].generation_ready
+    assert "replacement is initializing" in caplog.text
+    assert "restart FAILED" not in caplog.text
+
+
+async def test_observation_cannot_arm_another_generation(clock: FakeClock) -> None:
+    stub = StubSupervisor()
+    stub.generation = (OwnedProcess(42, 100.0, None), clock.now)
+
+    def changed_during_probe() -> DaemonProbe:
+        stub.generation = (OwnedProcess(43, 101.0, None), clock.now)
+        return DaemonProbe.up("response from the preceding generation")
+
+    monitor = HealthMonitor(
+        stub, _registry("svc", changed_during_probe), config=_config(startup_grace_s=180)
+    )
+    await monitor.run_round()
+    state = monitor.snapshot()["svc"]
+    assert state.last_verdict == "unavailable"
+    assert not state.generation_ready
+    assert not stub.restart_calls
+
+
+async def test_startup_budgets_are_per_unit(clock: FakeClock) -> None:
+    stub = StubSupervisor()
+    stub.generation = (OwnedProcess(42, 100.0, None), clock.now - 60)
+    registry = ProbeRegistry()
+    registry.register("core", lambda: DaemonProbe.down("starting"))
+    registry.register("extra", lambda: DaemonProbe.down("starting"))
+    monitor = HealthMonitor(
+        stub, registry, config=_config(), startup_graces={"core": 180, "extra": 45}
+    )
+    await monitor.run_round()
+    assert stub.restart_calls == ["extra"]
+    assert monitor.snapshot()["core"].consecutive_failures == 0
+
+
+def test_startup_grace_rejects_unbounded_or_negative_values() -> None:
+    for invalid in (-1.0, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="startup_grace"):
+            _config(startup_grace_s=invalid)

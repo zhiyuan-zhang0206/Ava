@@ -1,185 +1,78 @@
-"""`ava lgtm on|off|status` — the native observability-stack toggle.
+"""Observability toggles change intent through the sole start lifecycle."""
 
-Under test is the marker lifecycle (on writes it, off removes it BEFORE
-stopping — else the gateway watchdog would resurrect local backends), script
-wiring, and the native status view.
-"""
-
-from __future__ import annotations
-
-import shutil
 from pathlib import Path
 
 import pytest
 
-import cli.commands as commands_ns
-from cli.commands import _lgtm, _lgtm_native
-
-
-class _Result:
-    returncode = 0
-
-
-def _fail_on_docker_query(_name: str) -> None:
-    pytest.fail("native lifecycle must not query the Docker CLI")
-
-
-def _fake_backend_pids(_native_dir: Path) -> dict[str, str | None]:
-    return {"loki": "101", "prometheus": None}
-
-
-def _fail_run(*_args: object, **_kwargs: object) -> None:
-    pytest.fail("native status must not run a container command")
+from cli.commands import _lgtm
+from shared.service_selection import ServiceSelection
 
 
 def _wire(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> tuple[Path, list[tuple[list[str], Path]]]:
-    """Point marker + deploy dir at tmp, record subprocess invocations."""
-    marker = tmp_path / "home" / "lgtm-host"
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    deploy_dir = tmp_path / "repo" / "deploy" / "lgtm"
-    deploy_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, selection: ServiceSelection
+) -> tuple[Path, list[dict[str, object]]]:
+    marker = tmp_path / "lgtm-host"
     monkeypatch.setattr(_lgtm, "lgtm_host_marker", lambda: marker)
-    monkeypatch.setattr(_lgtm.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr("shared.paths.ava_home", lambda: marker.parent)
-    monkeypatch.setattr(_lgtm, "lgtm_deploy_dir", lambda _repo: deploy_dir)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(commands_ns, "_repo_root", lambda: tmp_path / "repo")
+    monkeypatch.setattr("shared.service_selection.read_selection", lambda: selection)
+    calls: list[dict[str, object]] = []
 
-    def noop_native(_repo: Path, _home: Path) -> None:
-        return None
+    def start(**kwargs: object) -> int:
+        calls.append(kwargs)
+        return 0
 
-    monkeypatch.setattr(_lgtm_native, "ensure_lgtm_native", noop_native)
-
-    calls: list[tuple[list[str], Path]] = []
-
-    def fake_run(cmd: list[str], **kw: object) -> _Result:
-        calls.append((cmd, Path(str(kw["cwd"]))))
-        return _Result()
-
-    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
+    monkeypatch.setattr("cli.commands.start.cmd_start", start)
     return marker, calls
 
 
-def test_on_writes_marker_and_runs_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    marker, calls = _wire(monkeypatch, tmp_path)
-
-    assert _lgtm.cmd_lgtm_on() == 0
-    assert marker.exists()
-    assert [c[0] for c in calls] == [["bash", "start.sh"]]
-    assert calls[0][1].name == "lgtm"
-
-
-def test_on_is_idempotent_with_existing_marker(
+def test_on_preserves_explicit_other_service_choices(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    marker, calls = _wire(monkeypatch, tmp_path)
-    marker.touch()
-
+    marker, calls = _wire(monkeypatch, tmp_path, ServiceSelection("only", frozenset({"ops"})))
     assert _lgtm.cmd_lgtm_on() == 0
     assert marker.exists()
-    assert [c[0] for c in calls] == [["bash", "start.sh"]]
+    assert calls == [{"only_services": ("grafana", "loki", "ops", "prometheus")}]
 
 
-def test_on_installs_native_backends_before_starting(
+def test_off_disables_backends_even_on_role_declared_station(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    marker, _calls = _wire(monkeypatch, tmp_path)
-    events: list[str] = []
-    native_home = tmp_path / "home"
-
-    def record_native(repo: Path, home: Path) -> None:
-        events.append(f"native:{repo}:{home}")
-
-    monkeypatch.setattr(
-        _lgtm_native,
-        "ensure_lgtm_native",
-        record_native,
-    )
-
-    def fake_run(_cmd: list[str], **_kw: object) -> _Result:
-        events.append("start")
-        return _Result()
-
-    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: native_home)
-
-    assert _lgtm.cmd_lgtm_on() == 0
-    assert marker.exists()
-    assert events == [f"native:{tmp_path / 'repo'}:{native_home}", "start"]
-
-
-def test_off_removes_marker_then_stops(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The marker must be gone by the time stop.sh runs — with it still in
-    place the gateway watchdog brings local backends back within a minute."""
-    marker, calls = _wire(monkeypatch, tmp_path)
+    marker, calls = _wire(monkeypatch, tmp_path, ServiceSelection("except", frozenset({"browser"})))
     marker.touch()
-    monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
-
-    marker_present_at_stop: list[bool] = []
-
-    def stop(home: Path) -> None:
-        assert home == marker.parent
-        marker_present_at_stop.append(marker.exists())
-
-    monkeypatch.setattr(_lgtm_native, "bootout_native_jobs", stop)
-
+    data = tmp_path / "loki-data"
+    data.write_bytes(b"durable history")
     assert _lgtm.cmd_lgtm_off() == 0
     assert not marker.exists()
-    assert not calls
-    assert marker_present_at_stop == [False]
+    assert calls == [
+        {"disabled_services": ("browser", "grafana", "loki", "prometheus"), "all_services": False}
+    ]
+    assert data.read_bytes() == b"durable history"
 
 
-def test_off_without_marker_still_stops(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    marker, calls = _wire(monkeypatch, tmp_path)
-    stopped: list[Path] = []
-    monkeypatch.setattr(_lgtm_native, "bootout_native_jobs", stopped.append)
-
-    assert _lgtm.cmd_lgtm_off() == 0
-    assert not calls
-    assert stopped == [marker.parent]
-
-
-def test_on_without_docker_starts_native_backends(
+def test_off_only_backend_allowlist_does_not_enable_all_services(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    marker, calls = _wire(monkeypatch, tmp_path)
-    monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
+    from types import SimpleNamespace
 
-    assert _lgtm.cmd_lgtm_on() == 0
-    assert marker.exists()
-    assert [command for command, _cwd in calls] == [["bash", "start.sh"]]
-
-
-def test_status_without_marker_says_so(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _wire(monkeypatch, tmp_path)
-    monkeypatch.setattr(_lgtm, "is_lgtm_host", lambda: False)
-
-    assert _lgtm.cmd_lgtm_status() == 0
-    assert "not the LGTM host" in capsys.readouterr().out
-
-
-def test_status_reports_native_jobs_without_docker(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The native PID helper is the status source; no container query remains."""
-    _wire(monkeypatch, tmp_path)
-    monkeypatch.setattr(_lgtm, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(_lgtm_native, "backend_pids", _fake_backend_pids)
-    monkeypatch.setattr(
-        _lgtm,
-        "probe_statuses",
-        lambda: [("loki", True), ("prometheus", True), ("grafana", False)],
+    _marker, calls = _wire(
+        monkeypatch, tmp_path, ServiceSelection("only", frozenset(_lgtm.BACKENDS))
     )
-    monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
-    monkeypatch.setattr(_lgtm.subprocess, "run", _fail_run)
+    monkeypatch.setattr(
+        "ops.roster.build_services",
+        lambda: tuple(
+            SimpleNamespace(session=n) for n in ("gateway", "loki", "prometheus", "grafana")
+        ),
+    )
+    assert _lgtm.cmd_lgtm_off() == 0
+    assert calls == [{"disabled_services": ("gateway", "loki", "prometheus", "grafana")}]
 
-    assert _lgtm.cmd_lgtm_status() == 0
-    output = capsys.readouterr().out
-    assert "com.ava.loki      101" in output
-    assert "com.ava.prometheus not-running" in output
-    assert "✓ loki readiness" in output
-    assert "✗ grafana readiness" in output
-    assert "docker" not in output.lower()
+
+def test_normal_start_refusal_is_not_reported_as_toggle_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _wire(monkeypatch, tmp_path, ServiceSelection("except", frozenset()))
+
+    def refuse(**_kwargs: object) -> int:
+        return 1
+
+    monkeypatch.setattr("cli.commands.start.cmd_start", refuse)
+    assert _lgtm.cmd_lgtm_on() == 1

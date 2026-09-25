@@ -1,46 +1,16 @@
-"""Build, sign, and launchd-manage the macOS permissions helper.
+"""Prepare immutable signed macOS helper artifacts and register one home job.
 
-This is the bring-up the converge phase runs on an agent-runner. It exists
-because the helper has a hard requirement the session-supervised services do not:
-to hold its own Screen Recording / Accessibility grants it must be launched by
-launchd (so it is its own responsible process, not a child of the terminal that
-borrows the terminal's grants), and signed by a STABLE certificate (so the grant
-is keyed on an identity that survives every rebuild). The steps, all idempotent:
-
-  1. ensure a stable self-signed code-signing certificate in the login keychain
-  2. compile main.swift and codesign the .app bundle with that certificate
-  3. write a per-cluster LaunchAgent plist and (re)load it under launchd
-  4. retire any old-layout helper job still bound to this cluster's socket
-
-Granting the helper its desktop permissions once, in System Settings, is a
-manual one-time operator step (the OS gates it behind a human); after that the
-stable identity means rebuilds never re-prompt.
-
-Step 4 exists because the launchd label used to be the fixed
-``com.ava.permissions-helper.main``; once labels became per-cluster home slugs,
-converge wrote ``com.ava.permissions-helper.<home-slug>`` but nothing removed a
-``main`` job already loaded on a host. Two KeepAlive jobs then raced for the
-same socket and which one a client reached depended on the last bind. Any
-loaded plist pinning this cluster's socket under a different label is that
-leftover, so it is booted out and deleted.
-
-Ad-hoc signing (`codesign --sign -`) is never a substitute for step 1's
-certificate: it mints a throwaway identity per build, so TCC stops recognizing
-the helper and the operator has to re-authorize by hand every time. The one
-situation that tempts it -- a locked login keychain, the norm over SSH -- is
-therefore reported as a build failure naming the unlock, not signed around.
-
-Every step shells out to a fixed system tool, and every one of those calls is
-bounded (`_TIMEOUTS_S`). Converge runs headless, so a tool that stops to ask a
-human is a hang with no answer coming rather than a slow success -- and the two
-prompts that reach for a human, a locked keychain and a key whose access control
-demands confirmation, are both checked for before any signing starts.
+A stable certificate preserves desktop permission identity. First start may
+build and register a helper; repeated start observes an unchanged loaded job.
+Replacing its artifact or job requires external stop and exact-home unregister
+first. Normal converge never unloads its own possible permission ancestor.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import plistlib
 import re
 import shutil
@@ -55,10 +25,12 @@ from typing import TypedDict, cast
 import shared.paths
 from services.permissions_helper.launchd_job import (
     HELPER_BUNDLE_ID,
+    clear_helper_stop_intent,
     helper_job_agents_dir,
     helper_job_domain,
     helper_job_label,
     helper_job_plist_path,
+    helper_stop_intent,
 )
 from shared.config import settings
 from shared.paths import logs_dir, permissions_helper_socket
@@ -71,7 +43,6 @@ _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
 _LOCALES = _SERVICE_DIR / "helper" / "locales"
 _BUILD_DIR = shared.paths.permissions_helper_app_dir()
-_LEGACY_BUILD_DIR = _SERVICE_DIR / "build"
 _BUILD_STATE_NAME = "build-state.json"
 _HELPER_PING_ATTEMPTS = 10
 _HELPER_PING_SETTLE_S = 0.5
@@ -399,9 +370,9 @@ def _build_state_path() -> Path:
     return _BUILD_DIR / _BUILD_STATE_NAME
 
 
-def _read_build_state() -> _BuildState | None:
+def _read_build_state(path: Path | None = None) -> _BuildState | None:
     try:
-        raw: object = json.loads(_build_state_path().read_text())
+        raw: object = json.loads((path if path is not None else _build_state_path()).read_text())
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         return None
     if not isinstance(raw, dict):
@@ -422,14 +393,15 @@ def _read_build_state() -> _BuildState | None:
     return _BuildState(source_hash=source_hash, dr=dr, signed_at=signed_at)
 
 
-def _write_build_state(source_hash: str, dr: str) -> None:
-    _BUILD_DIR.mkdir(parents=True, exist_ok=True)
+def _write_build_state(source_hash: str, dr: str, path: Path | None = None) -> None:
+    target = path if path is not None else _build_state_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
     state = _BuildState(
         source_hash=source_hash,
         dr=dr,
         signed_at=datetime.now(UTC).isoformat(),
     )
-    _build_state_path().write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    target.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
 
 
 def _app_executable(app: Path) -> Path:
@@ -449,25 +421,6 @@ def _remove_app(app: Path) -> None:
         app.unlink(missing_ok=True)
     else:
         shutil.rmtree(app, ignore_errors=True)
-
-
-def _migrate_checkout_build(source_hash: str) -> tuple[Path, bool] | None:
-    """Move one valid checkout-era bundle into the stable install directory."""
-    app = _BUILD_DIR / "AvaPermissionsHelper.app"
-    old_app = _LEGACY_BUILD_DIR / app.name
-    if _is_valid_stable_app(app):
-        shutil.rmtree(_LEGACY_BUILD_DIR, ignore_errors=True)
-        return None
-    if not _is_valid_stable_app(old_app):
-        shutil.rmtree(_LEGACY_BUILD_DIR, ignore_errors=True)
-        return None
-
-    _BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    _remove_app(app)
-    shutil.move(str(old_app), str(app))
-    shutil.rmtree(_LEGACY_BUILD_DIR, ignore_errors=True)
-    _write_build_state(source_hash, _read_dr(app))
-    return app, False
 
 
 def _installed_build_is_current(app: Path, state: _BuildState | None, source_hash: str) -> bool:
@@ -550,30 +503,52 @@ def ensure_signing_cert() -> None:
         )
 
 
-def build_and_sign() -> tuple[Path, bool]:
+def _build_directory(destination: Path | None) -> Path:
+    """Choose an immutable artifact destination outside the installed bundle tree."""
+    from shared.cluster import default_home
+
+    build_dir = _BUILD_DIR if destination is None else destination
+    protected = {_BUILD_DIR.resolve(), (default_home() / "helper").resolve()}
+    if destination is not None and (
+        not destination.is_absolute()
+        or destination.resolve() != destination
+        or any(
+            destination == path or path in destination.parents or destination in path.parents
+            for path in protected
+        )
+    ):
+        raise PermissionsHelperBuildError(
+            "isolated helper destination must be canonical and outside the installed bundle directory"
+        )
+    return build_dir
+
+
+def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     """Compile and sign the helper; return (app bundle path, rebuilt).
 
     Skips the compile + sign only when the installed bundle is valid and its
     recorded content hash matches all source and identity inputs. Checkout
     mtimes therefore cannot churn the binary or its TCC identity."""
-    app = _BUILD_DIR / "AvaPermissionsHelper.app"
+    build_dir = _build_directory(destination)
+    state_path = build_dir / _BUILD_STATE_NAME
+    app = build_dir / "AvaPermissionsHelper.app"
     exe = _app_executable(app)
     source_hash = _source_content_hash()
     expected_dr = _expected_dr()
-    state = _read_build_state()
+    state = _read_build_state(state_path)
     if state is not None and state["dr"] != expected_dr:
         sys.stderr.write(
             "  ! permissions-helper: code-signing identity changed — "
             "macOS permissions may need re-granting\n"
         )
 
-    migrated = _migrate_checkout_build(source_hash)
-    if migrated is not None:
-        return migrated
-
-    state = _read_build_state()
     if _installed_build_is_current(app, state, source_hash):
         return app, False
+    if _app_executable(app).exists():
+        raise PermissionsHelperBuildError(
+            "signed helper artifacts are immutable; prepare a new AVA_PERMISSIONS_HELPER_ARTIFACT_DIR "
+            "and activate it after the home-specific helper job has been stopped and unregistered"
+        )
 
     # Only a real rebuild needs the signing key, so neither check below can fail a
     # converge on a host whose helper is already current -- the common SSH case.
@@ -591,8 +566,8 @@ def build_and_sign() -> tuple[Path, bool]:
         )
     preflight_signing_smoke()
 
-    _BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    binary = _BUILD_DIR / "AvaPermissionsHelper"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    binary = build_dir / "AvaPermissionsHelper"
     _run(["swiftc", "-O", str(_SOURCE), "-o", str(binary)])
 
     _remove_app(app)
@@ -625,7 +600,7 @@ def build_and_sign() -> tuple[Path, bool]:
     except PermissionsHelperBuildError as exc:
         raise PermissionsHelperBuildError(f"{exc}. {_AD_HOC_REFUSAL}") from exc
     actual_dr = _verify_dr(app)
-    _write_build_state(source_hash, actual_dr)
+    _write_build_state(source_hash, actual_dr, state_path)
     return app, True
 
 
@@ -646,7 +621,9 @@ def _domain() -> str:
 
 
 def _is_loaded() -> bool:
-    return _probe(["launchctl", "print", f"{_domain()}/{_label()}"]).returncode == 0
+    from services.permissions_helper.launchd_job import _retirement_query
+
+    return _retirement_query(f"{_domain()}/{_label()}", time.monotonic() + 30.0) is not None
 
 
 def _stale_plists() -> list[Path]:
@@ -671,47 +648,32 @@ def _stale_plists() -> list[Path]:
     return stale
 
 
-def _retire_stale_jobs() -> None:
-    """Boot out and delete old-layout helper jobs bound to this socket.
-
-    Idempotent: bootout is best-effort (the job may already be gone) and the
-    plist deletion is the durable step."""
-    domain = _domain()
-    for plist in _stale_plists():
-        try:
-            label = plistlib.loads(plist.read_bytes())["Label"]
-        except (plistlib.InvalidFileException, OSError):
-            continue
-        _probe(["launchctl", "bootout", f"{domain}/{label}"])
-        plist.unlink(missing_ok=True)
-
-
-def repair_unresponsive_helper() -> bool:
-    """Reload the current launchd job once and return whether it answers ping.
-
-    Bootout is best-effort because an unresponsive job may already be absent;
-    bootstrap remains strict so a malformed or missing plist fails visibly.
-    """
-    _probe(["launchctl", "bootout", f"{_domain()}/{_label()}"])
-    _run(["launchctl", "bootstrap", _domain(), str(_plist_path())])
-    return _helper_answers_ping()
+def _refuse_stale_jobs() -> None:
+    stale = _stale_plists()
+    if stale:
+        raise PermissionsHelperBuildError(
+            "foreign helper labels bind this home's socket; reconcile them externally before start: "
+            + ", ".join(str(path) for path in stale)
+        )
 
 
 def install_and_load(app: Path, *, rebuilt: bool) -> None:
     """Write the LaunchAgent plist and ensure launchd is running this binary.
 
-    Bootstraps the job when it is not loaded. A rebuilt loaded helper first
-    upgrades itself in place; kickstart is the compatibility fallback. A final
-    ping repairs one launchd spawn-failed state before converge gives up."""
-    _retire_stale_jobs()
+    A loaded helper is only observed. Replacement requires an external stop
+    and exact-home unregister first, so a descendant cannot unload its parent."""
+    _refuse_stale_jobs()
     exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
     log = logs_dir() / "permissions-helper.log"
     plist = {
         "Label": _label(),
         "ProgramArguments": [str(exe)],
-        "EnvironmentVariables": {"AVA_PERMISSIONS_HELPER_SOCKET": str(permissions_helper_socket())},
+        "EnvironmentVariables": {
+            "AVA_PERMISSIONS_HELPER_SOCKET": str(permissions_helper_socket()),
+            "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(shared.paths.root_run_dir() / "seed.json"),
+        },
         "RunAtLoad": True,
-        "KeepAlive": True,  # launchd respawns the helper if it crashes
+        "KeepAlive": {"SuccessfulExit": False},
         "StandardOutPath": str(log),
         "StandardErrorPath": str(log),
     }
@@ -719,29 +681,25 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     new_bytes = plistlib.dumps(plist)
     plist_changed = not path.exists() or path.read_bytes() != new_bytes
-    path.write_bytes(new_bytes)
-
     loaded = _is_loaded()
-    if loaded and plist_changed:
-        # kickstart restarts the process but reuses launchd's in-memory job
-        # definition; a changed plist (socket / log / env) only takes effect on a
-        # bootout + bootstrap.
-        _probe(["launchctl", "bootout", f"{_domain()}/{_label()}"])
-        loaded = False
-    healthy = False
-    if not loaded:
-        _run(["launchctl", "bootstrap", _domain(), str(path)])
-    elif rebuilt:
-        healthy = _request_running_helper_upgrade(exe)
-        if not healthy:
-            _run(["launchctl", "kickstart", "-k", f"{_domain()}/{_label()}"])
-
-    if healthy or _helper_answers_ping():
-        return
-    if not repair_unresponsive_helper():
+    if loaded and helper_stop_intent(shared.paths.ava_home()):
         raise PermissionsHelperBuildError(
-            "permissions helper did not answer after one launchd bootout/bootstrap repair; "
-            "the job may be stuck in the LWCR/EX_CONFIG spawn-failed state"
+            "helper retirement is incomplete; finish ava stop externally before starting"
+        )
+    if loaded and (plist_changed or rebuilt):
+        raise PermissionsHelperBuildError(
+            "loaded helper differs from the requested artifact or job; stop and unregister "
+            "this home's helper from outside its process tree before activating the replacement"
+        )
+    if not loaded:
+        shared.paths.root_run_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
+        clear_helper_stop_intent(shared.paths.ava_home())
+        path.write_bytes(new_bytes)
+        _run(["launchctl", "bootstrap", _domain(), str(path)])
+    if not _helper_answers_ping():
+        raise PermissionsHelperBuildError(
+            "permissions helper is unresponsive; custody is unknown. Diagnose the native job "
+            "externally; start will not bootout or kickstart its possible ancestor"
         )
 
 
@@ -750,29 +708,38 @@ def _helper_answers_ping() -> bool:
 
     for attempt in range(_HELPER_PING_ATTEMPTS):
         try:
-            healthy = client.ping().get("pong") is True
+            reply = client.ping()
         except Exception:
-            healthy = False
-        if healthy:
+            reply = None
+        if reply is not None and reply.get("pong") is True:
+            if (
+                reply.get("root_stop_intent_v1") is not True
+                or reply.get("helper_shutdown_v1") is not True
+            ):
+                raise PermissionsHelperBuildError(
+                    "helper lacks the durable stop/shutdown protocol; upgrade its signed artifact "
+                    "after external exact-home retirement before starting"
+                )
             return True
         if attempt < _HELPER_PING_ATTEMPTS - 1:
             time.sleep(_HELPER_PING_SETTLE_S)
     return False
 
 
-def _request_running_helper_upgrade(exe: Path) -> bool:
-    from services.permissions_helper import client
-
-    try:
-        if not client.request_self_upgrade(str(exe)):
-            return False
-    except Exception:
-        return False
-    return _helper_answers_ping()
+def _require_usable_socket_paths() -> None:
+    """Refuse impossible macOS IPC names before signing or registering jobs."""
+    paths = (permissions_helper_socket(), shared.paths.root_run_dir() / "ava-root.sock")
+    for path in paths:
+        # Darwin sockaddr_un.sun_path has 104 bytes, including the terminating NUL.
+        if len(os.fsencode(path)) >= 104:
+            raise PermissionsHelperBuildError(
+                f"macOS IPC path exceeds 103 bytes: {path}; choose a shorter cluster home"
+            )
 
 
 def converge() -> None:
     """Idempotent full bring-up: cert, build+sign, load. Raises on any failure."""
+    _require_usable_socket_paths()
     ensure_signing_cert()
-    app, rebuilt = build_and_sign()
+    app, rebuilt = build_and_sign(destination=settings.services.permissions_helper_artifact_dir)
     install_and_load(app, rebuilt=rebuilt)

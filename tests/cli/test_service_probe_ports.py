@@ -112,8 +112,6 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "memory-search",
         "memory-indexer",
         "frontend",
-        "gateway-watchdog",
-        "agent-runner-watchdog",
         "ops",
         "browser",
         "browser-mcp",

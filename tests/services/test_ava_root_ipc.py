@@ -51,7 +51,7 @@ class TestParseRequest:
             "name": "gateway",
         }
 
-    @pytest.mark.parametrize("verb", ["status", "upgrade"])
+    @pytest.mark.parametrize("verb", ["status", "shutdown"])
     def test_unnamed_verb(self, verb: str) -> None:
         assert parse_request(encode({"verb": verb})) == {"verb": verb}
 
@@ -75,11 +75,19 @@ class TestParseRequest:
             b'{"verb": "status", "name": "x"}',
             b'{"verb": "status", "name": null}',
             b'{"verb": "up", "name": "x", "extra": 1}',
+            b'{"verb": "up", "name": "x", "payload": {}}',
+            b'{"verb": "resource", "name": "terminal.start"}',
+            b'{"verb": "resource", "name": "", "payload": {}}',
+            b'{"verb": "resource", "name": "terminal.start", "payload": []}',
         ],
     )
     def test_shape_violations_rejected(self, raw: bytes) -> None:
         with pytest.raises(ProtocolError):
             parse_request(raw)
+
+    def test_resource_requires_its_explicit_operation_and_payload(self) -> None:
+        request = {"verb": "resource", "name": "terminal.start", "payload": {"name": "shell"}}
+        assert parse_request(encode(request)) == request
 
 
 class TestParseResponse:

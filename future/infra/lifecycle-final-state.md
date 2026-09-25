@@ -1,5 +1,10 @@
 # Process / service lifecycle final state — design record (task #3195)
 
+> Superseded implementation plan: follow
+> [Unified cluster lifecycle](unified-cluster-lifecycle.md) for the September 25
+> revision. This earlier proposal is retained for its link to the frozen decision
+> and measured permission-ancestry evidence, not as a parallel runtime design.
+
 > Status: **decided (2026-09-12)** — user rulings G1–G6 + the fallback are in, the design
 > surface is closed, and the implementation phase has started (task #3195, slices P1–P7).
 > Migration is a one-shot cutover; the window is booked with the user directly, and the

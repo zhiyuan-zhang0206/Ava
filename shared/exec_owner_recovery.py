@@ -29,8 +29,7 @@ def process_ended(identity: ResourceProcess) -> bool:
         process = psutil.Process(identity.pid)
         # PID reuse means the exact old process ended, not permission to signal
         # the replacement. This helper never signals or scans descendants.
-        # Within the create_time tolerance the pid is still the same process
-        # (macOS whole-second moves), so only a reading beyond it proves an end.
+        # Both producer and observer use the exact stable native birth.
         ended = not create_time_matches(stable_create_time(process), identity.birth)
         return ended or process.status() in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}
     except psutil.NoSuchProcess:

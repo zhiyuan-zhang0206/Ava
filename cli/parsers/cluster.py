@@ -1,7 +1,7 @@
 """`ava cluster` — whole-cluster verbs: argparse builder + its `_h_*` handlers.
 
 Every verb here operates on the cluster as a whole (roster, rollout, rollback,
-health/watchdog probes, registry lifecycle) rather than a single host — the
+health probes, registry lifecycle) rather than a single host — the
 host-level set lives in ``cli.parsers.host``. Handlers lazy-import their
 `cmd_*` implementation from ``cli.commands`` so parser building never loads
 Settings (see ``cli.main`` module docstring)."""
@@ -165,12 +165,6 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
     )
 
 
-def _h_cluster_ensure_db_role(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_ensure_db_role
-
-    return cmd_ensure_db_role()
-
-
 def _h_cluster_rollback(args: argparse.Namespace) -> int:
     from cli.commands import cmd_rollback
 
@@ -197,49 +191,12 @@ def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
     return cmd_cron_unregister()
 
 
-def _h_cluster_watchdog_probe(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_watchdog_probe
-
-    return cmd_watchdog_probe(args.role)
-
-
-def _h_cluster_watchdog_probe_register(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_watchdog_probe_register
-
-    return cmd_watchdog_probe_register(args.role)
-
-
-def _h_cluster_watchdog_probe_unregister(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_watchdog_probe_unregister
-
-    return cmd_watchdog_probe_unregister(args.role)
-
-
-def _h_cluster_hold_watchdog(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_hold_watchdog
-
-    return cmd_hold_watchdog()
-
-
-def _h_cluster_hold_watchdog_register(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_hold_watchdog_register
-
-    return cmd_hold_watchdog_register()
-
-
-def _h_cluster_hold_watchdog_unregister(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_hold_watchdog_unregister
-
-    return cmd_hold_watchdog_unregister()
-
-
 def _h_cluster_boot_unit_install(args: argparse.Namespace) -> int:
     from cli.commands import cmd_boot_unit_install
 
     return cmd_boot_unit_install(
         enable=not args.no_enable,
         start=args.start,
-        proxy_wait_url=args.proxy_wait_url,
     )
 
 
@@ -263,13 +220,9 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         _h_cluster_cancel,
         _h_cluster_destroy,
         _h_cluster_down,
-        _h_cluster_ensure_db_role,
         _h_cluster_health_probe,
         _h_cluster_health_probe_register,
         _h_cluster_health_probe_unregister,
-        _h_cluster_hold_watchdog,
-        _h_cluster_hold_watchdog_register,
-        _h_cluster_hold_watchdog_unregister,
         _h_cluster_ls,
         _h_cluster_pause,
         _h_cluster_pitr_activate,
@@ -282,9 +235,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         _h_cluster_rollback,
         _h_cluster_status,
         _h_cluster_update,
-        _h_cluster_watchdog_probe,
-        _h_cluster_watchdog_probe_register,
-        _h_cluster_watchdog_probe_unregister,
     )
 
     # `ava cluster status` — list machines table + per-agent-runner status_probe op
@@ -586,26 +536,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     )
     cluster_health_probe_p.set_defaults(func=_h_cluster_health_probe)
 
-    # --- `ava cluster ensure-db-role` ---
-    # The one-shot legacy-cluster counterpart of install-time provisioning: the
-    # SAME idempotent SQL a birth runs (ava_runner Postgres role + grants), plus
-    # the AVA_RUNNER_DB_PASSWORD credential and a live pooler userlist refresh.
-    # Named for the Postgres account it provisions (issue #217) — "runner role"
-    # elsewhere means the machine capability; this verb has nothing to do with
-    # machine capabilities. The old name stays as an alias for anything that
-    # scripts it.
-    cluster_ensure_db_role_p = cluster_sub.add_parser(
-        "ensure-db-role",
-        aliases=["ensure-runner-role"],
-        help="[cluster] provision the least-privilege ava_runner Postgres role "
-        "on THIS cluster (idempotent; runs the same SQL as install birth). For "
-        "clusters born before the runner-role cutover — a fresh install does "
-        "this automatically. Also writes AVA_RUNNER_DB_PASSWORD to the gateway "
-        ".env and refreshes the pooler userlist when the pooler is running. "
-        "Postgres must be up (`ava start` first).",
-    )
-    cluster_ensure_db_role_p.set_defaults(func=_h_cluster_ensure_db_role)
-
     # --- `ava cluster rollback` ---
     cluster_rollback_p = cluster_sub.add_parser(
         "rollback",
@@ -662,65 +592,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     )
     cluster_health_probe_unregister_p.set_defaults(func=_h_cluster_health_probe_unregister)
 
-    # --- `ava cluster watchdog-probe` ---
-    # The command the OS scheduler runs every minute; also useful by hand to
-    # check "would the probe revive this watchdog right now?".
-    cluster_watchdog_probe_p = cluster_sub.add_parser(
-        "watchdog-probe",
-        help="respawn this capability's watchdog if its session is dead",
-    )
-    cluster_watchdog_probe_p.add_argument(
-        "--role",
-        required=True,
-        choices=["gateway", "agent-runner"],
-        help="which capability's watchdog to probe",
-    )
-    cluster_watchdog_probe_p.set_defaults(func=_h_cluster_watchdog_probe)
-
-    # --- `ava cluster watchdog-probe-register` / `-unregister` ---
-    # Manual counterparts to the converge step, for debugging a host whose job
-    # went missing without re-running a full `ava start`.
-    cluster_wp_register_p = cluster_sub.add_parser(
-        "watchdog-probe-register",
-        help="register the OS-scheduled watchdog probe for one capability",
-    )
-    cluster_wp_register_p.add_argument("--role", required=True, choices=["gateway", "agent-runner"])
-    cluster_wp_register_p.set_defaults(func=_h_cluster_watchdog_probe_register)
-
-    cluster_wp_unregister_p = cluster_sub.add_parser(
-        "watchdog-probe-unregister",
-        help="remove the OS-scheduled watchdog probe for one capability",
-    )
-    cluster_wp_unregister_p.add_argument(
-        "--role", required=True, choices=["gateway", "agent-runner"]
-    )
-    cluster_wp_unregister_p.set_defaults(func=_h_cluster_watchdog_probe_unregister)
-
-    # --- `ava cluster hold-watchdog` ---
-    # The command the OS scheduler runs; completes a provably orphaned
-    # maintenance hold once (task #3887), without depending on the database.
-    # Also useful by hand to check "would the watchdog act on this host
-    # right now?".
-    cluster_hold_watchdog_p = cluster_sub.add_parser(
-        "hold-watchdog",
-        help="complete this host's orphaned maintenance hold, once, when provably orphaned",
-    )
-    cluster_hold_watchdog_p.set_defaults(func=_h_cluster_hold_watchdog)
-
-    # Manual counterparts to the converge step, for debugging a host whose
-    # job went missing without re-running a full `ava start`.
-    cluster_hw_register_p = cluster_sub.add_parser(
-        "hold-watchdog-register",
-        help="register the OS-scheduled hold watchdog for this home",
-    )
-    cluster_hw_register_p.set_defaults(func=_h_cluster_hold_watchdog_register)
-
-    cluster_hw_unregister_p = cluster_sub.add_parser(
-        "hold-watchdog-unregister",
-        help="remove the OS-scheduled hold watchdog for this home",
-    )
-    cluster_hw_unregister_p.set_defaults(func=_h_cluster_hold_watchdog_unregister)
-
     # --- `ava cluster boot-unit` — the distro-level boot unit (Linux) ---
     # The systemd unit that owns the boot convergence path on Linux hosts
     # (`shared.os_boot_unit`). A staged install rides the crontab fallback
@@ -733,7 +604,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 
     boot_unit_install_p = boot_unit_sub.add_parser(
         "install",
-        help="install the boot unit + convergence script (enabled by default)",
+        help="install the boot unit (enabled by default)",
     )
     boot_unit_install_p.add_argument(
         "--no-enable",
@@ -745,12 +616,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         action="store_true",
         help="start the unit once after installing",
     )
-    boot_unit_install_p.add_argument(
-        "--proxy-wait-url",
-        default="",
-        help="http(s) URL the convergence script waits on for a real round trip "
-        "before converging (the proxy entrypoint); empty disables the wait",
-    )
     boot_unit_install_p.set_defaults(func=_h_cluster_boot_unit_install)
 
     boot_unit_uninstall_p = boot_unit_sub.add_parser(
@@ -761,6 +626,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 
     boot_unit_status_p = boot_unit_sub.add_parser(
         "status",
-        help="read-only report of the boot unit, convergence script and boot-pass ownership",
+        help="read-only report of the boot unit and application-root ownership",
     )
     boot_unit_status_p.set_defaults(func=_h_cluster_boot_unit_status)

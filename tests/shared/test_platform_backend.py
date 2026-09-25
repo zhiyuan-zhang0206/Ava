@@ -80,7 +80,6 @@ def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatc
         ("shared.os_autostart", "autostart"),
         ("shared.os_cron", "cron"),
         ("shared.os_logs_job", "logs"),
-        ("shared.os_watchdog_probe", "watchdog"),
     ]:
         monkeypatch.setattr(f"{mod}._register_windows", lambda *_a, _n=name: calls.append(_n) or 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
@@ -92,8 +91,7 @@ def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatc
     backend.register_autostart()
     backend.register_cron()
     backend.register_logs_job()
-    backend.register_watchdog_probe("gateway")
-    assert calls == ["autostart", "cron", "logs", "watchdog"]
+    assert calls == ["autostart", "cron", "logs"]
 
     # Unregister stays silent-on-absent, like the launchd / crontab paths — and
     # carries the caller's slug instead of resolving one from this process, so
@@ -101,13 +99,11 @@ def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatc
     backend.unregister_autostart("ava-target")
     backend.unregister_cron("ava-target")
     backend.unregister_logs_job("ava-target")
-    backend.unregister_watchdog_probe("gateway", "ava-target")
 
     assert unregistered == [
         ("autostart", ("ava-target",)),
         ("cron", ("ava-target",)),
         ("logs", ("ava-target",)),
-        ("watchdog", ("gateway", "ava-target")),
     ]
 
 
@@ -123,7 +119,6 @@ def test_windows_scheduling_failure_degrades_to_a_warning(
         ("shared.os_autostart", "autostart"),
         ("shared.os_cron", "health probe"),
         ("shared.os_logs_job", "logs maintenance"),
-        ("shared.os_watchdog_probe", "watchdog probe"),
     ]:
         monkeypatch.setattr(f"{mod}._register_windows", lambda *_a: "ERROR: Access is denied.")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -131,18 +126,16 @@ def test_windows_scheduling_failure_degrades_to_a_warning(
     backend.register_autostart()
     backend.register_cron()
     backend.register_logs_job()
-    backend.register_watchdog_probe("gateway")  # no exception
 
     err = capsys.readouterr().err
     assert "autostart" in err
     assert "health probe" in err
     assert "logs maintenance" in err
-    assert "watchdog probe" in err
     # And each says WHY, on stderr. The loguru record alone never reached disk on
     # the fleet's Windows box — a converge under the updater chain has its stderr
     # captured into the updater log but no sink configured — so "registration
     # failed" with nothing after it is all nine months of logs ever showed.
-    assert err.count("ERROR: Access is denied.") == 4
+    assert err.count("ERROR: Access is denied.") == 3
 
 
 def test_windows_pg_binary_path() -> None:

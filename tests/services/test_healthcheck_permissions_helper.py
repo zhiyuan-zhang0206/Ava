@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 
 import pytest
@@ -68,11 +67,7 @@ _RUNNING_JOB = """gui/501/com.ava.test.f5-lwcr-stub = {
 @pytest.fixture(autouse=True)
 def _macos_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hc, "IS_MACOS", True)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "_consecutive_failures", 0)
     monkeypatch.setattr(hc, "_reported_unhealthy", False)
-    monkeypatch.setattr(hc, "_repair_attempts", 0)
-    monkeypatch.setattr(hc, "_next_repair_at", 0.0)
 
 
 class _Recorder:
@@ -100,26 +95,6 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     return rec
 
 
-class _Clock:
-    """The `_monotonic` seam: advance explicitly so backoff windows elapse fast."""
-
-    def __init__(self, start: float = 1000.0) -> None:
-        self.now = start
-
-    def __call__(self) -> float:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        self.now += seconds
-
-
-@pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
-    clk = _Clock()
-    monkeypatch.setattr(hc, "_monotonic", clk)
-    return clk
-
-
 def _unhealthy_ping() -> bool:
     raise client.PermissionsHelperError("socket unavailable")
 
@@ -145,20 +120,11 @@ class _FakeSocket:
         self.closed = True
 
 
-def _error_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [
-        record
-        for record in caplog.records
-        if record.name == "services.healthchecks.permissions_helper"
-        and record.levelno == logging.ERROR
-    ]
-
-
 def test_ping_uses_short_timeout_and_helper_wire_protocol(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     sock = _FakeSocket(
-        b'{"id":0,"ok":true,"result":{"pong":true,"preflight_screen":true,"ax_trusted":true}}\n'
+        b'{"id":0,"ok":true,"result":{"pong":true,"pid":42,"preflight_screen":true,"ax_trusted":true}}\n'
     )
     paths: list[str] = []
 
@@ -169,6 +135,8 @@ def test_ping_uses_short_timeout_and_helper_wire_protocol(
     socket_path = tmp_path / "helper.sock"
     monkeypatch.setattr(client, "_connect", connect)
     monkeypatch.setattr(hc, "permissions_helper_socket", lambda: socket_path)
+    monkeypatch.setattr(hc, "_helper_parent", lambda _: (object(), object()))
+    monkeypatch.setattr(hc, "_parent_still_live", lambda _root, _parent, pid: pid == 42)
 
     assert hc._ping()
     assert paths == [str(socket_path)]
@@ -221,161 +189,18 @@ def test_ping_alive_short_circuits_to_healthy() -> None:
 # -- the watchdog round (era 1) ------------------------------------------------
 
 
-def test_repair_backoff_doubles_then_caps() -> None:
-    assert hc._repair_backoff_s(1) == 300.0
-    assert hc._repair_backoff_s(2) == 600.0
-    assert hc._repair_backoff_s(3) == 1200.0
-    assert hc._repair_backoff_s(4) == 2400.0
-    assert hc._repair_backoff_s(5) == 3600.0  # 4800 clamped to the cap
-    assert hc._repair_backoff_s(7) == 3600.0  # stays clamped
+def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
+    from shared.daemon_health import DaemonProbe
 
-
-def test_unhealthy_reports_once_and_escalates_with_backoff(
-    monkeypatch: pytest.MonkeyPatch,
-    recorder: _Recorder,
-    clock: _Clock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Detection reports once; a failed repair escalates and retries under backoff."""
-    repairs: list[None] = []
-
-    def fail_repair() -> bool:
-        repairs.append(None)
-        return False
-
-    monkeypatch.setattr(hc, "_ping", _unhealthy_ping)
-    monkeypatch.setattr(hc, "read_helper_job", lambda: _STUCK_JOB)
-    monkeypatch.setattr(hc, "repair_unresponsive_helper", fail_repair)
-
-    with caplog.at_level(logging.ERROR, logger="services.healthchecks.permissions_helper"):
-        hc.main()  # 1: report once, no repair yet
-        hc.main()  # 2: still counting
-        assert repairs == []
-        assert len(recorder.events("permissions_helper_unhealthy")) == 1
-
-        hc.main()  # 3: first repair attempt, fails
-        assert repairs == [None]
-        assert len(recorder.events("permissions_helper_repair_failed")) == 1
-
-        hc.main()  # 4: inside the backoff window, no retry
-        assert repairs == [None]
-
-    clock.advance(301.0)
-    hc.main()  # 5: the retry is due — attempted again, not sealed
-    assert repairs == [None, None]
-    assert len(recorder.events("permissions_helper_repair_failed")) == 2
-    # One detection event for the whole episode — repeats never re-report.
+    bad = DaemonProbe.down("lwcr-stuck; needs LWCR update")
+    hc.report(bad)
+    hc.report(bad)
     assert len(recorder.events("permissions_helper_unhealthy")) == 1
-
-    first = recorder.events("permissions_helper_repair_failed")[0]
-    assert first["attempt"] == 1
-    assert first["retry_s"] == 300
-    assert first["classification"] == hc.LWCR_STUCK
-    assert "needs LWCR update" in str(first["detail"])
-    second = recorder.events("permissions_helper_repair_failed")[1]
-    assert second["retry_s"] == 600  # doubled
-    unhealthy = recorder.events("permissions_helper_unhealthy")[0]
-    assert unhealthy["classification"] == hc.LWCR_STUCK
-    assert "job state=spawn failed" in str(unhealthy["detail"])
-    assert unhealthy["job_state"] == "spawn failed"
-    assert unhealthy["last_exit_code"] == "78: EX_CONFIG"
-    assert unhealthy["btm_uuid"] == "2F5F25DF-BFD3-474F-B9DF-8EBF83A685AA"
-    assert hc._consecutive_failures == 5
-
-
-def test_repair_that_raises_escalates_and_never_propagates(
-    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
-) -> None:
-    def raising_repair() -> bool:
-        raise OSError("launchctl gone")
-
-    monkeypatch.setattr(hc, "_ping", _unhealthy_ping)
-    monkeypatch.setattr(hc, "read_helper_job", lambda: _STUCK_JOB)
-    monkeypatch.setattr(hc, "repair_unresponsive_helper", raising_repair)
-
-    hc.main()
-    hc.main()
-    hc.main()  # must not raise; escalates instead
-
-    assert len(recorder.events("permissions_helper_repair_failed")) == 1
-    assert hc._repair_attempts == 1
-
-
-def test_repair_success_is_verified_and_clears_on_the_next_round(
-    monkeypatch: pytest.MonkeyPatch, clock: _Clock
-) -> None:
-    replies = iter((False, False, False, True))
-
-    def ping() -> bool:
-        return next(replies)
-
-    monkeypatch.setattr(hc, "_ping", ping)
-    monkeypatch.setattr(hc, "read_helper_job", lambda: _STUCK_JOB)
-    monkeypatch.setattr(hc, "repair_unresponsive_helper", lambda: True)
-
-    hc.main()
-    hc.main()
-    hc.main()  # repair answers ping
-
-    assert hc._consecutive_failures == 3
-    assert hc._reported_unhealthy is True
-    assert hc._repair_attempts == 1
-
-    hc.main()  # healthy round: the whole episode resets
-
-    assert hc._consecutive_failures == 0
-    assert hc._reported_unhealthy is False
-    assert hc._repair_attempts == 0
-    assert hc._next_repair_at == 0.0
-
-
-def test_repair_success_then_regression_stays_one_episode(
-    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder, clock: _Clock
-) -> None:
-    """A repair that answered ping but regressed does not re-report; the retry ladder continues."""
-    replies = iter((False, False, False, False, False))
-    repairs: list[bool] = [True, False]
-
-    def ping() -> bool:
-        return next(replies)
-
-    def repair() -> bool:
-        return repairs.pop(0)
-
-    monkeypatch.setattr(hc, "_ping", ping)
-    monkeypatch.setattr(hc, "read_helper_job", lambda: _STUCK_JOB)
-    monkeypatch.setattr(hc, "repair_unresponsive_helper", repair)
-
-    hc.main()
-    hc.main()
-    hc.main()  # repair 1 answers ping
-    hc.main()  # ping regresses — same episode, backoff holds the retry
-    clock.advance(301.0)
-    hc.main()  # repair 2 fails → escalation
-
-    assert len(recorder.events("permissions_helper_unhealthy")) == 1
-    failures = recorder.events("permissions_helper_repair_failed")
-    assert len(failures) == 1
-    assert failures[0]["attempt"] == 2
-    assert hc._repair_attempts == 2
-
-
-def test_non_macos_returns_without_ping_or_repair(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "IS_MACOS", False)
-    monkeypatch.setattr(hc, "_ping", lambda: pytest.fail("non-macOS must not ping the helper"))
-    monkeypatch.setattr(
-        hc,
-        "repair_unresponsive_helper",
-        lambda: pytest.fail("non-macOS must not repair launchd"),
-    )
-    monkeypatch.setattr(
-        hc, "read_helper_job", lambda: pytest.fail("non-macOS must not read launchd")
-    )
-
-    hc.main()
-
-
-# -- the root-era probe (era 2) ------------------------------------------------
+    hc.report(DaemonProbe.up("ping answered"))
+    hc.report(bad)
+    assert len(recorder.events("permissions_helper_unhealthy")) == 2
+    assert not hasattr(hc, "repair_unresponsive_helper")
+    assert not hasattr(hc, "main")
 
 
 def test_probe_alive_and_classified_down(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -407,3 +232,28 @@ def test_probe_is_total_and_non_macos_is_up(monkeypatch: pytest.MonkeyPatch) -> 
     verdict = hc.probe()  # never raises
     assert not verdict.alive
     assert "probe error" in verdict.detail
+
+
+def test_unverifiable_helper_parent_never_reports_protocol_health(monkeypatch):
+    def missing_parent():
+        raise hc._ParentEvidenceError("root parent is not observable")
+
+    monkeypatch.setattr(hc, "_ping", missing_parent)
+    monkeypatch.setattr(hc, "read_helper_job", lambda: _RUNNING_JOB)
+    assert hc.probe().verdict.value == "unavailable"
+
+
+def test_connected_helper_peer_must_be_root_native_parent(monkeypatch):
+    from types import SimpleNamespace
+
+    from services.ava_root import client as root_client
+    from services.healthchecks import owned_service
+
+    root = SimpleNamespace(pid=10, live=lambda: True)
+    parent = SimpleNamespace(pid=20, live=lambda: True)
+    monkeypatch.setattr(root_client, "root_process", lambda: root)
+    monkeypatch.setattr(hc.psutil, "Process", lambda _: SimpleNamespace(parent=object))
+    monkeypatch.setattr(hc.OwnedProcess, "capture", lambda _: parent)
+    monkeypatch.setattr(owned_service, "_peer_pid", lambda _: 30)
+    with pytest.raises(hc._ParentEvidenceError, match="not the captured root parent"):
+        hc._helper_parent(object())

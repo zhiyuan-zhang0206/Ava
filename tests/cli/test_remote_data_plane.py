@@ -1,7 +1,7 @@
 """Remote-managed data plane (Task #1752): start / stop / status degrade to
 reachability probes and clear skips instead of managing a foreign service.
 
-The local instance management surface (`ensure_cluster_instance`,
+The local instance management surface (`ensure_cluster_storage`,
 `stop_cluster_instance`, the `ava status` data-plane section) must never run
 against a data plane whose URLs name another host — the URL is the switch, and
 the management plane keys off `settings.data_plane.is_remote`.
@@ -75,10 +75,10 @@ def test_start_remote_skips_local_instance_and_probes(
     calls: list[str] = []
 
     def _no_local_instance(*_args: object, **_kwargs: object) -> int:
-        calls.append("ensure_cluster_instance")
+        calls.append("ensure_cluster_storage")
         return 0
 
-    monkeypatch.setattr(ci, "ensure_cluster_instance", _no_local_instance)
+    monkeypatch.setattr(ci, "ensure_cluster_storage", _no_local_instance)
     monkeypatch.setattr(dp, "remote_pg_reachable", lambda: (True, "postgres (10.9.8.7:5432)"))
     monkeypatch.setattr(dp, "remote_redis_reachable", lambda: (True, "redis (10.9.8.7:6380)"))
 
@@ -97,7 +97,7 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
     def _no_local_instance(*_args: object, **_kwargs: object) -> int:
         raise AssertionError("local bring-up must not run against a remote data plane")
 
-    monkeypatch.setattr(ci, "ensure_cluster_instance", _no_local_instance)
+    monkeypatch.setattr(ci, "ensure_cluster_storage", _no_local_instance)
     monkeypatch.setattr(
         dp,
         "remote_pg_reachable",

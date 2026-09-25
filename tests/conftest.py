@@ -233,11 +233,12 @@ os.environ["AVA_OS_JOBS_ENABLED"] = "false"
 os.environ["AVA_DB_URL"] = "postgresql://unprovisioned@127.0.0.1:1/unprovisioned"
 os.environ["AVA_REDIS_URL"] = "redis://127.0.0.1:1/0"
 
-# The cluster secret is always required (it authenticates bootstrap / /ops and is
-# the pg/redis password), so the suite must carry one — a URL-safe token that
+# The cluster secret authenticates bootstrap / /ops. Data-plane credentials
+# are independent, including in the private test bootstrap. Use a URL-safe token that
 # passes the cluster_secret validator. Individual auth tests monkeypatch it (incl.
 # to "" for the unset-fail-closed paths).
 os.environ["AVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — test fixture
+os.environ["AVA_DB_ADMIN_PASSWORD"] = "test-db-owner-password"  # noqa: S105 — test fixture
 # The suite's secret-bearing servers include the e2e ops daemon, which binds
 # non-loopback. The deployment precondition requires a declared mode; overlay
 # records the suite's private-network posture.
@@ -351,22 +352,10 @@ os.environ["AVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
 # `settings.telegram` explicitly (tests/cli/test_cluster_health.py does).
 os.environ["AVA_TELEGRAM_BOT_TOKEN"] = ""
 os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
-# ── macOS permissions helper: the suite spawns on the legacy route ──
-#
-# Same leak class as the OTLP switch above: the login shell exports the real
-# ~/.ava/.env into every child, and on a helper-spawn gray-rollout host
-# (macmini, 2026-09-12) a test's `{**os.environ}` child inherits
-# AVA_PERMISSIONS_HELPER_SPAWN=true. The child then routes every process
-# creation through a permissions helper resolved against ITS OWN sandboxed
-# $AVA_HOME — a helper that cannot exist there, reached over a tmp-home
-# socket path past the AF_UNIX 104-byte sun_path bound; the route is a
-# spawn-identity commitment that fails loud by design, never falling back
-# (shared/session_backend.py::helper_spawn_enabled). tests/cli/
-# test_maintenance_stop.py went red exactly this way on stock main. Pinned
-# OFF in the ENVIRONMENT, not just on the settings singleton, exactly because
-# the leak is in subprocesses; the suite exercises the legacy POSIX spawn
-# route everywhere, as CI does. A test that needs the helper route patches
-# `helper_spawn_enabled` / the settings explicitly (tests/test_helperproc.py).
+# Terminal/execution transport tests have no inherited desktop-helper route.
+# This switch does not disable mandatory macOS application-root ancestry:
+# _guard_permissions_helper_native_io forbids those native effects separately.
+# A terminal transport test can deliberately patch its own helper capability.
 os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # The spawn-attribution marker rides a second channel the pin above cannot
 # close: the signed helper stamps AVA_PERMISSIONS_HELPER_PID (its own pid)
@@ -437,6 +426,7 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
             f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
             f"AVA_EVENTS_CHANNEL={_TEST_EVENTS_CHANNEL}",
             f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
+            f"AVA_DB_ADMIN_PASSWORD={os.environ['AVA_DB_ADMIN_PASSWORD']}",
             "AVA_RUNNER_DB_PASSWORD=test-runner-db-password",
             f"AVA_TRANSPORT_ENCRYPTION={os.environ['AVA_TRANSPORT_ENCRYPTION']}",
             f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
@@ -500,7 +490,6 @@ _assert_env_precedes_project_imports()
 # ava / shared.config read AVA_DB_URL + AVA_HOME at import — must come after the
 # env block above, which is what the assertion just enforced.
 import ava
-import shared.service_respawn
 from shared.config import set_field, settings
 from shared.daemon_health import _HEALTH_PORT_OVERRIDES
 
@@ -1181,8 +1170,8 @@ def workspace(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _fail_on_leaked_os_jobs(session: pytest.Session) -> None:
     """Fail the run when it armed a job in the host's OS scheduler.
 
-    The counterpart to `AVA_OS_JOBS_ENABLED=false`: the switch keeps the suite out
-    of `~/Library/LaunchAgents` / the crontab / `\\Ava\\`, and this proves it did.
+    The counterpart to OS_JOBS_ENABLED and the helper native-effect guard:
+    these keep ordinary unit tests out of the native scheduler, and this proves it.
     A new job here means some path reached the scheduler anyway — a subprocess
     that lost the env, or a registrar added without the gate — and that job is now
     firing on the developer's machine on its own schedule, which is why this is a
@@ -1203,8 +1192,8 @@ def _fail_on_leaked_os_jobs(session: pytest.Session) -> None:
         f"{len(leaked)} job(s) on the host:\n  "
         + "\n  ".join(leaked)
         + "\nThe suite runs with AVA_OS_JOBS_ENABLED=false (see "
-        "shared.os_cron.os_jobs_enabled); a job appearing anyway means a "
-        "registrar bypassed the gate or a subprocess did not inherit the env. "
+        "shared.os_cron.os_jobs_enabled), and the helper native-effect guard is on. "
+        "A new test-owned job means a test bypassed one of these boundaries. "
         "Jobs under this suite's own homes were removed; any others were left "
         "for you to check.",
         file=sys.stderr,
@@ -1423,10 +1412,6 @@ def spawn_agent(
     return agent_id
 
 
-# Same, for the daemon-respawn guard -> `respawned_services`.
-_RESPAWN_RECORDER: pytest.StashKey[list[tuple[str, str]]] = pytest.StashKey()
-
-
 def _stub_everywhere(
     monkeypatch: pytest.MonkeyPatch, module: object, name: str, stub: object
 ) -> None:
@@ -1485,57 +1470,39 @@ def _refuse_spawn(name: str, effect: str = "spawn a real long-running process"):
 
 
 @pytest.fixture(autouse=True)
-def _guard_service_respawn(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Autouse safety net: `shared.service_respawn.respawn_service` is replaced by a
-    recording no-op, so a test that reaches a healthcheck's restart path never forks
-    a real long-running daemon.
+def _guard_permissions_helper_native_io(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Helper ancestry is mandatory at runtime, never an implicit test effect.
 
-    Daemon spawns were previously kept out of the suite purely by every
-    test author remembering to monkeypatch — no structural enforcement — and a
-    leaked daemon is the more expensive kind of escape: it binds a health port and
-    answers /healthz, which is exactly how a pytest-spawned restarter stood in for
-    prod's for 98 minutes on 2026-07-24. Port pinning at the top of this module
-    keeps such a leak off prod's ports; this keeps it from happening at all.
-
-    Patching the definition site alone would be a half-guard: `from
-    shared.service_respawn import respawn_service` binds the function object into
-    the importing module at ITS import time, and that alias is what gets called
-    (`services/healthchecks/frontend.py` still holds one). So every already-loaded
-    alias of the real function is rebound as well — no module is imported to find
-    them, only the ones the test run already pulled in are touched.
-
-    Opt out with `@pytest.mark.real_service_respawn` when the test exercises the
-    real function — argv-shape assertions against a faked `subprocess.run`, or the
-    venv-activation test that genuinely wants the real launch."""
-    if request.node.get_closest_marker("real_service_respawn"):
+    OS_JOBS_ENABLED does not gate the permission ancestor. Caller tests must
+    explicitly mock helper converge; helper unit tests may exercise real logic
+    with their native command seam mocked. Only an intentional native proof may
+    opt out, and remains responsible for its exact-home artifact/job cleanup.
+    """
+    if request.node.get_closest_marker("native_permissions_helper") is not None:
         return
+    from types import SimpleNamespace
 
-    calls: list[tuple[str, str]] = []
+    from services import permissions_helper
+    from services.permissions_helper import launchd_job, lifecycle
+    from services.permissions_helper.windows import lifecycle as windows_lifecycle
 
-    def _spy(service: str, cmd: str, _repo: object, **_kwargs: object) -> bool:
-        # Swallow the keyword-only arguments (`checkout`, `extra_env`) so the net
-        # keeps standing in for the real signature as callers gain them.
-        calls.append((service, cmd))
-        return True
+    def forbidden(*_args: object, **_kwargs: object) -> Any:
+        pytest.fail(
+            "permissions helper native effect forbidden in unit tests: mock the helper "
+            "caller or its native command boundary explicitly. Only an isolated native "
+            "proof with exact-home cleanup may use @pytest.mark.native_permissions_helper"
+        )
 
-    _stub_everywhere(monkeypatch, shared.service_respawn, "respawn_service", _spy)
-    request.node.stash[_RESPAWN_RECORDER] = calls
-
-
-@pytest.fixture(autouse=True)
-def _reset_keepalive_state() -> Iterator[None]:
-    """`run_keepalive` keeps per-label state (failure count, backoff deadline +
-    exponent, breaker hold) in module globals, modeling the long-lived watchdog
-    process. Tests drive `main()` with fake probes, so without a reset one test's
-    failed respawn leaves a backoff window that silently skips the next test's
-    respawn — the shard-6/8 failure of task #1941's PR. Reset around every test;
-    the per-test cost is four dict clears under one lock."""
-    with shared.service_respawn._keepalive_state_lock:
-        shared.service_respawn._consecutive_probe_failures.clear()
-        shared.service_respawn._respawn_attempts.clear()
-        shared.service_respawn._next_respawn_at.clear()
-        shared.service_respawn._breaker_hold_since.clear()
-    yield
+    _stub_everywhere(monkeypatch, permissions_helper, "converge", forbidden)
+    monkeypatch.setattr(lifecycle, "run_bounded", forbidden)
+    monkeypatch.setattr(launchd_job, "run_bounded", forbidden)
+    # Module-local proxy: guard Windows helper commands without replacing the
+    # shared subprocess module used by unrelated tests or disposable processes.
+    native = SimpleNamespace(**vars(windows_lifecycle.subprocess))
+    native.run = forbidden
+    monkeypatch.setattr(windows_lifecycle, "subprocess", native)
 
 
 @pytest.fixture(autouse=True)
@@ -1594,15 +1561,6 @@ def _guard_cluster_spawn(
     # clears it; the retired flag files need no cleanup.
 
 
-@pytest.fixture
-def respawned_services(
-    request: pytest.FixtureRequest, _guard_service_respawn: None
-) -> list[tuple[str, str]]:
-    """The `(service, cmd)` pairs the guard recorded. Request this to assert a
-    healthcheck tried to respawn something."""
-    return request.node.stash[_RESPAWN_RECORDER]
-
-
 @pytest.fixture(autouse=True)
 def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     """Autouse safety net: the gateway lifespan's ScheduleManager touches the real
@@ -1642,7 +1600,7 @@ def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
 def _guard_service_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Autouse safety net: `cli.commands._wait_for_services_ready` reports every
+    """Autouse safety net: `cli.commands._wait_for_service_tree` reports every
     service ready without polling anything.
 
     The start path's readiness wait is bounded by `SERVICE_READY_TIMEOUT_S` (180 s),
@@ -1660,7 +1618,7 @@ def _guard_service_readiness(
 
     ready = ReadinessWait((), 0.0, sessions_gone=False)
     monkeypatch.setattr(
-        "cli.commands._wait_for_services_ready",
+        "cli.commands._wait_for_service_tree",
         lambda *_a, **_kw: ready,
     )
     # The root-driven path's wait has the same bound and the same reason to be

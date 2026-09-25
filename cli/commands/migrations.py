@@ -51,6 +51,12 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
     # ceiling (large-table rebuilds, partition backfills); the applier must
     # stay unbounded (shared/db.py PG_STATEMENT_TIMEOUT_*).
     with shared.db.connect(direct=True, unbounded=True) as conn:
+        from shared.cluster.ownership import require_postgres_connection
+        from shared.config import settings
+        from shared.paths import ava_home
+
+        if not settings.data_plane.is_remote:
+            require_postgres_connection(conn, ava_home() / "pg")
         if release is None:
             done = apply_pending_migrations(conn)
         else:

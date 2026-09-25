@@ -13,7 +13,7 @@ It does not test normal forward migration success in isolation.
 
 ## Prerequisites
 
-- Use a worktree/dev cluster installed with `scripts/install.sh --worktree`, or
+- Use a worktree/dev cluster initialized with `.venv/bin/ava start --worktree`, or
   use staging with explicit approval.
 - Have a real local Postgres plus working `pg_dump` and `pg_restore` binaries.
 - Run from the checkout branch under test.

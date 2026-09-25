@@ -1,25 +1,12 @@
-"""`ava cluster boot-unit install|uninstall|status` -- the Linux systemd boot unit.
-
-Thin CLI wrappers that delegate to `shared.os_boot_unit`, mirroring
-`_cluster_cron.py` for the health-probe cron job. The unit is the Linux host's
-boot owner once enabled: `install` renders + installs the unit and its
-convergence script (`--no-enable` stages the files without switching),
-`uninstall` removes both, and `status` reports the unit, script, proxy wait,
-cron entry and last recorded convergence -- read-only.
-
-The unit exists on Linux + systemd hosts only; every subcommand fails
-actionably everywhere else.
-"""
+"""Linux boot-unit CLI: ordinary start hands systemd the verified app root."""
 
 from __future__ import annotations
 
 import sys
 
 
-def cmd_boot_unit_install(
-    *, enable: bool = True, start: bool = False, proxy_wait_url: str = ""
-) -> int:
-    """Install the boot unit and convergence script; enable by default.
+def cmd_boot_unit_install(*, enable: bool = True, start: bool = False) -> int:
+    """Install the boot unit; enable by default.
 
     `--no-enable` is the staged form (drills, reviewed rollouts): the files
     land, the crontab entry stays the live boot path until a later enable.
@@ -27,7 +14,7 @@ def cmd_boot_unit_install(
     from shared.os_boot_unit import install
 
     try:
-        steps = install(enable=enable, start=start, proxy_wait_url=proxy_wait_url)
+        steps = install(enable=enable, start=start)
     except (RuntimeError, ValueError) as e:
         print(f"  * boot-unit install failed: {e}", file=sys.stderr)
         return 1
@@ -41,7 +28,7 @@ def cmd_boot_unit_install(
 
 
 def cmd_boot_unit_uninstall() -> int:
-    """Remove this home's boot unit and convergence script (best-effort safe).
+    """Remove this home's boot unit after a successful native stop.
 
     The crontab path re-arms on the next `ava start` (converge registers it
     once the unit is gone) -- that is the rollback.

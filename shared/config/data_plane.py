@@ -534,9 +534,9 @@ class DataPlaneSettings(EnvSettings):
                 "at the default home"
             )
         if self.cluster_secret and local_owner_url:
-            self.db_url = url_with_password(
-                self.db_url, self.db_admin_password or self.cluster_secret
-            )
+            if not self.db_admin_password:
+                raise ValueError("authenticated local owner requires AVA_DB_ADMIN_PASSWORD")
+            self.db_url = url_with_password(self.db_url, self.db_admin_password)
         return self
 
     @model_validator(mode="after")

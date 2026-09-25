@@ -254,7 +254,7 @@ def launchd_env_block(indent: str = "    ", extra: dict[str, str] | None = None)
 
     `extra` is rendered in the caller's own order, so one caller's dict always
     produces the same bytes — a plist that is compared against the one on disk to
-    decide whether the job needs replacing (`cli/commands/_converge_gate.py`)
+    decide whether the job needs replacing
     cannot afford a fragment that reshuffles between runs.
     """
     entries = {"AVA_HOME": job_home(), "PATH": launchd_path_env(), **(extra or {})}

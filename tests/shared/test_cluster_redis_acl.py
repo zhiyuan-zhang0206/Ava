@@ -10,11 +10,14 @@ pub/sub.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 import redis
 from redis.exceptions import AuthenticationError, NoPermissionError
 
-from shared.cluster import ensure_cluster_redis_acl
+from shared.cluster import ensure_cluster_redis_acl, ownership
 from shared.url_secret import url_with_userinfo
 from tests._containers import redis_server
 
@@ -28,11 +31,14 @@ def _acl_users(admin_url: str) -> list[str]:
 
 def test_ensure_creates_enabled_channel_scoped_user() -> None:
     with redis_server() as admin_url:
+        with redis.Redis.from_url(admin_url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
+            directory = Path(str(admin.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
         ensure_cluster_redis_acl(
             "ava_feat_x",
             redis_admin_url=admin_url,
             runtime_password=_SECRET,
             channel_prefix="ava:feat-x",
+            expected_data_dir=directory,
         )
         users = _acl_users(admin_url)
         line = next((u for u in users if "ava_feat_x" in u), None)
@@ -48,6 +54,41 @@ def test_ensure_creates_enabled_channel_scoped_user() -> None:
             )  # delivered to 0 subscribers, allowed
             with pytest.raises(NoPermissionError):
                 r.publish("ava:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_owned_acl_refuses_reconnect_before_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+    with redis_server() as url:
+        with redis.Redis.from_url(url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
+            directory = Path(str(admin.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
+        before = _acl_users(url)
+        original = redis.Redis.from_url  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
+        clients: list[redis.Redis] = []
+
+        def capture_client(url: str, **kwargs: Any) -> redis.Redis:
+            client = original(url, **kwargs)
+            clients.append(client)
+            return client
+
+        observe = ownership.require_listener
+
+        def disconnect_after_observation(owner: ownership.OwnedProcess, port: int) -> None:
+            observe(owner, port)
+            connection = clients[-1].connection
+            assert connection is not None
+            connection.disconnect()  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
+
+        with monkeypatch.context() as patch:
+            patch.setattr(redis.Redis, "from_url", capture_client)
+            patch.setattr(ownership, "require_listener", disconnect_after_observation)
+            with pytest.raises(RuntimeError, match="connection changed"):
+                ensure_cluster_redis_acl(
+                    "ava_unverified",
+                    redis_admin_url=url,
+                    runtime_password=_SECRET,
+                    channel_prefix="ava:test",
+                    expected_data_dir=directory,
+                )
+        assert _acl_users(url) == before
 
 
 def test_ensure_grants_the_hosted_dispatcher_psubscribe_pattern() -> None:

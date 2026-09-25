@@ -4837,8 +4837,8 @@ export interface components {
             shell_count: number;
             /** Agent Host Online */
             agent_host_online?: boolean | null;
-            /** Watchdog Online */
-            watchdog_online?: boolean | null;
+            /** Supervisor Online */
+            supervisor_online?: boolean | null;
             /**
              * Agent Count
              * @default 0
@@ -6153,8 +6153,8 @@ export interface components {
             shell_count: number;
             /** Agent Host Online */
             agent_host_online?: boolean | null;
-            /** Watchdog Online */
-            watchdog_online?: boolean | null;
+            /** Supervisor Online */
+            supervisor_online?: boolean | null;
             /**
              * Agent Count
              * @default 0

@@ -170,7 +170,7 @@ class MachineStatus(BaseModel):
     # liveness. All default to the "unknown" value used when a probe times out.
     shell_count: int = 0
     agent_host_online: bool | None = None
-    watchdog_online: bool | None = None
+    supervisor_online: bool | None = None
     # Agent-runner detail surfaced on the Status Page.
     agent_count: int = 0
     session_count: int = 0

@@ -29,7 +29,6 @@ from cli.commands._maintenance_stop_report import (
     live_identities,
 )
 from cli.commands._repo import _repo_root, build_services, session_name
-from cli.commands._retired_services import stop_retired_services
 from ops import pty_close_notices
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause_probe import ops_quiescent
@@ -38,7 +37,7 @@ from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.lifecycle_status import begin, finish, phase, status_path
 from shared.machine import MachineRoles, machine_name, machine_role
 from shared.paths import run_dir
-from shared.session_backend import WinprocSessionBackend, get_shell_backend
+from shared.session_backend import get_shell_backend
 from shared.session_record import SessionRecord
 
 
@@ -51,11 +50,11 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     """
     backend = get_shell_backend()
     names = backend.list_sessions()
-    if isinstance(backend, WinprocSessionBackend):
-        from cli.commands._maintenance_stop import _TERMINAL_NAME
-
-        names = [name for name in names if _TERMINAL_NAME.match(name)]
-        stop_services(remaining(deadline), keep_terminals=True, selected=frozenset(names))
+    if sys.platform == "win32":
+        for name in names:
+            ok, _mode = backend.kill_session(name, graceful=True, timeout=remaining(deadline))
+            if not ok:
+                raise RuntimeError(f"terminal {name!r} lacks a native Job closure receipt")
         return
     # Capture identities before signalling anything.
     shells: list[OwnedProcess] = []
@@ -178,15 +177,9 @@ def _stop_browser(deadline: float) -> None:
 
 
 def _stop_extras(deadline: float) -> None:
-    from cli.commands._stop_extras import (
-        stop_gate_service,
-        stop_lgtm_services,
-        stop_permissions_helper,
-    )
+    from cli.commands._stop_extras import stop_permissions_helper
 
-    stop_gate_service(timeout_s=remaining(deadline))
     stop_permissions_helper(timeout_s=remaining(deadline))
-    stop_lgtm_services(timeout_s=remaining(deadline))
 
 
 # The compensating `ava start` gets its own budget: the failed stop already spent
@@ -275,7 +268,11 @@ def _compensate_services_restore(preserved: frozenset[str]) -> bool:
 
 
 def _compensate_data_plane_failure(
-    phases: list[tuple[str, float]], *, data_plane_stopped: bool, preserved: frozenset[str]
+    phases: list[tuple[str, float]],
+    *,
+    data_plane_stopped: bool,
+    preserved: frozenset[str],
+    unstarted: bool = False,
 ) -> bool | None:
     """Run the services restore when (and only when) the data-plane phase failed.
 
@@ -288,7 +285,7 @@ def _compensate_data_plane_failure(
     work is already done: both stay report-only. Returns the `compensated`
     verdict for the stop report; None when nothing was attempted.
     """
-    if data_plane_stopped or "data-plane" not in {label for label, _ in phases}:
+    if unstarted or data_plane_stopped or "data-plane" not in {label for label, _ in phases}:
         return None
     try:
         return _compensate_services_restore(preserved)
@@ -402,24 +399,50 @@ def _stop_plan(
     return roles, selected, preserved
 
 
-def _services_phase_action(
-    *, preserved: frozenset[str], selected: frozenset[str], deadline: float
-) -> Callable[[], object]:
-    """The "services" phase's action: root-driven tree stop, or the session stop.
-
-    Root-driven hosts stop the tree through ava-root; `preserved` (pause's
-    browser, --keep-service) becomes a selective unit stop, and an empty
-    preserve set stops the tree and the root together. The choice is read at
-    call time, like every other phase, so it sees the settings of the process
-    actually running the stop.
-    """
+def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Callable[[], object]:
+    """Stop services through their root owner, preserving explicitly retained units."""
     import cli.commands as _ns
 
-    if _ns._root_driven_enabled():
-        return lambda: _ns._stop_root_service_tree(
-            preserve=preserved, timeout_s=remaining(deadline)
-        )
-    return lambda: stop_services(remaining(deadline), keep_terminals=True, selected=selected)
+    return lambda: _ns._stop_root_service_tree(preserve=preserved, timeout_s=remaining(deadline))
+
+
+def _require_unstarted_initialization() -> bool:
+    """Positive first-start evidence that no application could have admitted work."""
+    from cli.commands._maintenance_stop import require_no_terminals
+    from cli.commands._root_driver import _require_root_absent
+    from cli.start_identity import read_intent
+    from shared.paths import ava_home, root_manifests_path
+
+    intent = read_intent(ava_home())
+    if intent is None or intent["phase"] != "configured":
+        return False
+    if "gateway" not in intent["roles"]:
+        return False  # A joined runner may refer to already-existing external work.
+    if start_serving.state_path().exists() or root_manifests_path().exists():
+        raise RuntimeError("initialization journal conflicts with application launch evidence")
+    _require_root_absent()
+    require_no_terminals()
+    return True
+
+
+def _stop_initialization(
+    phases: list[tuple[str, float]],
+    deadline: float,
+    *,
+    keep_infra: bool,
+    keep_browser: bool,
+    teardown_extras: bool,
+) -> None:
+    """Close a proven pre-application attempt through the existing native owners."""
+    _timed_phase(
+        phases, "services", _services_phase_action(preserved=frozenset(), deadline=deadline)
+    )
+    if not keep_browser:
+        _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
+    if teardown_extras:
+        _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
+    if not keep_infra:
+        _timed_phase(phases, "data-plane", lambda: stop_data_plane(remaining(deadline), save=True))
 
 
 def stop(
@@ -458,7 +481,7 @@ def stop(
         )
     if hosting_supervised_session() is not None:
         raise RuntimeError("pause/stop must run outside the work it drains; use a login shell")
-    roles, selected, preserved = _stop_plan(
+    roles, _selected, preserved = _stop_plan(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
     print(
@@ -478,9 +501,19 @@ def stop(
     # (agent drain vs services vs terminals) — never a bare timeout (#2045).
     phases: list[tuple[str, float]] = []
     data_plane_stopped = False
+    unstarted = False
 
     try:
-        _timed_phase(phases, "retired", lambda: stop_retired_services(remaining(deadline)))
+        unstarted = _require_unstarted_initialization()
+        if unstarted:
+            _stop_initialization(
+                phases,
+                deadline,
+                keep_infra=keep_infra,
+                keep_browser=keep_browser,
+                teardown_extras=teardown_extras,
+            )
+            return _finish_stop(owns_journal=owns_journal)
         # Task #3270: an operator's own stop/pause binds the hold to this
         # command's shepherding process; daemon-driven pauses stay unbound.
         from shared.hold_driver import mint_driver
@@ -506,7 +539,7 @@ def stop(
         _timed_phase(
             phases,
             "services",
-            _services_phase_action(preserved=preserved, selected=selected, deadline=deadline),
+            _services_phase_action(preserved=preserved, deadline=deadline),
         )
         if not keep_browser and "browser" not in preserved:
             _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
@@ -530,10 +563,17 @@ def stop(
             phases,
             owns_journal=owns_journal,
             compensated=_compensate_data_plane_failure(
-                phases, data_plane_stopped=data_plane_stopped, preserved=preserved
+                phases,
+                data_plane_stopped=data_plane_stopped,
+                preserved=preserved,
+                unstarted=unstarted,
             ),
         )
         return 1
+    return _finish_stop(owns_journal=owns_journal)
+
+
+def _finish_stop(*, owns_journal: bool) -> int:
     if owns_journal:
         finish(0)
     return 0

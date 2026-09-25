@@ -29,7 +29,6 @@
     "tests/skills": 22
   },
   "files": {
-    "scripts/ava_root_switch_drill.py": 997,
     "scripts/ci_utils.py": 2022,
     "scripts/prove_normal_release.py": 1588,
     "scripts/prove_updater_bootstrap.py": 827,
@@ -283,10 +282,6 @@
     "ops/ops_cluster.py::cluster_recover_op": 20,
     "ops/ops_config.py::config_write_op": 24,
     "ops/spec.py::_gate_reason": 22,
-    "scripts/ava_root_dry_run.py::main": 76,
-    "scripts/ava_root_e2_drill.py::_frontend_substance": 21,
-    "scripts/ava_root_switch_drill.py::_phase_start_root": 19,
-    "scripts/ava_root_switch_drill.py::_phase_teardown": 18,
     "scripts/check_doc_references.py::check_doc": 16,
     "scripts/check_doc_references.py::check_flags": 15,
     "scripts/check_model_updates.py::_load_state": 18,

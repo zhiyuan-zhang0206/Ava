@@ -1,77 +1,17 @@
-"""Settings-free `ava start` preflight — the installed-home gate.
+"""Settings-free home anchoring and reservation validation for lifecycle commands.
 
-`ava start` is a pure bring-up (identity is the home path; birth happens at
-install). This gate refuses a home the registry does not corroborate — never
-installed, or claiming a port block the registry allocated to someone else —
-with a role-appropriate pointer instead of birthing anything. It must run BEFORE
-any `cli.commands` import, because that package import instantiates Settings,
-which on an uninstalled home fails with a generic validation error instead of
-the actionable message. Mirrors `cli.enroll`'s settings-free posture: stdlib +
-`shared.dotenv_boot` + dotenv file reads only.
-
-Ordering: `cli.main` runs this gate before the settings-loading command
-imports. An enrolled runner's `.env` (written by `ava enroll`) carries the
-bootstrap env — gateway URL + identity — and the cluster's connection facts
-arrive at Settings build via the gateway fetch, so the gate checks only that
-the runner was enrolled, never for cached connection facts (the 2026-08-01
-config refactor deleted the `.env` materialization).
+First start publishes identity through cli.start_intent before Settings loads.
+Other lifecycle commands require an existing checkout or explicit home anchor.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import sys
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from dotenv import dotenv_values
-
 from shared.port_block import LEGACY_AVA_PORTS
-
-_TRUE = frozenset({"1", "true", "yes", "on"})
-_FALSE = frozenset({"0", "false", "no", "off"})
-
-
-def _serve_flag(
-    file_name: str, env_key: str, home: Path, env_vals: dict[str, str | None]
-) -> bool | None:
-    """Settings-free mirror of one capability flag's resolution: process env >
-    the home's `.env` value (what the env is loaded FROM at boot) >
-    `$AVA_HOME/<file>` > None. A malformed value reads as None here — the real
-    resolver raises loudly on it later; the gate only needs the role shape."""
-    raw: str | None = os.environ.get(env_key) or env_vals.get(env_key)
-    if raw is None or not raw.strip():
-        p = home / file_name
-        raw = p.read_text() if p.exists() else None
-    if raw is None or not raw.strip():
-        return None
-    v = raw.strip().lower()
-    if v in _TRUE:
-        return True
-    if v in _FALSE:
-        return False
-    return None
-
-
-def _home_record(home: Path, env_vals: dict[str, str | None]) -> dict[str, object] | None:
-    """The host registry's record for `home`, or None — settings-free read of
-    `clusters.json` (env/.env `AVA_CLUSTER_REGISTRY` > the default path),
-    tolerating both the home-keyed and the legacy name-keyed file shape by
-    matching each record's own `gateway_home`. A corrupt registry raises — the
-    gate must not read "unparseable" as "not installed"."""
-    reg = (
-        os.environ.get("AVA_CLUSTER_REGISTRY")
-        or env_vals.get("AVA_CLUSTER_REGISTRY")
-        or "~/.ava/clusters.json"
-    )
-    p = Path(reg).expanduser()
-    if not p.exists():
-        return None
-    raw = json.loads(p.read_text())
-    key = str(Path(home).expanduser())
-    return next((rec for rec in raw.values() if str(rec.get("gateway_home", "")) == key), None)
 
 
 def _env_port_block(env_vals: dict[str, str | None]) -> dict[str, int]:
@@ -93,7 +33,14 @@ def _env_port_block(env_vals: dict[str, str | None]) -> dict[str, int]:
         if not url:
             continue
         try:
-            port = urlsplit(url).port
+            from shared.netutil import is_loopback_host
+
+            parts = urlsplit(url)
+            host = parts.hostname or ""
+            own_host = (env_vals.get("AVA_MACHINE_HOST") or "").lower().strip("[]")
+            if host and not is_loopback_host(host) and host != own_host:
+                continue  # Foreign resources do not claim this host's port block.
+            port = parts.port
         except ValueError:
             continue  # unparseable port — Settings will reject it far more loudly
         if port is not None:
@@ -105,7 +52,7 @@ def _record_pgbouncer_port(rec: dict[str, object], rec_ports: dict[str, object])
     """This record's PgBouncer listener port, settings-free.
 
     Mirror of `shared.cluster.record_pgbouncer_port` (the gate must not import
-    shared.cluster — it loads Settings): the saved `pgbouncer` key wins; a
+    runtime Settings): the saved `pgbouncer` key wins; a
     record for the default home may fall back to the fixed legacy 6433. The
     pooler port is part of this cluster's OWN block, so AVA_DB_URL legitimately
     carries it whenever pooling is enabled (the one-URL design)."""
@@ -163,10 +110,9 @@ def require_anchored_home(verb: str) -> int | None:
     ones. `ava start` has been gated on this since it was written; every other verb in
     that family was not.
 
-    Only the ANCHORING is checked here, deliberately — not the registry record or the
-    port block `require_installed_home` also demands. Those answer "may this home bring
-    a data plane UP on these ports", which is a start-time question; a home whose
-    record was destroyed must still be able to stop itself and clean up.
+    This validates only the anchor. First-start identity owns reservation and
+    port validation; stop must remain available to finish exact cleanup after
+    a failed initialization or a recorded destroy intent.
     """
     from shared.dotenv_boot import resolve_ava_home
 
@@ -178,85 +124,12 @@ def require_anchored_home(verb: str) -> int | None:
         f"source, no .ava_home pointer), so it resolves to the default home {home} — "
         f"`ava {verb}` from here would act on THAT cluster, not on this checkout. "
         "Birth this checkout's own cluster first:\n"
-        "  scripts/install.sh --worktree   # from this checkout\n"
+        "  ava start --worktree   # from this checkout\n"
         f"To act on {home} deliberately, run ITS `ava` (the one on PATH), not this "
         "checkout's.",
         file=sys.stderr,
     )
     return 1
-
-
-def require_installed_home() -> int | None:
-    """Refuse `ava start` for a home that was never installed, pointing at the
-    right birth path for this host's role.
-
-    Returns None when the home is installed (proceed); an error rc otherwise.
-    Discrimination:
-    - unanchored checkout (no AVA_HOME / prod-source match / `.ava_home`
-      pointer): a dev worktree that never ran the install — point at
-      `scripts/install.sh --worktree`.
-    - anchored, pure agent-runner: its enrolled `.env` must exist AND carry
-      AVA_GATEWAY_URL (the marker of a completed enroll; connection facts are
-      fetched from that gateway at every start, never cached in `.env`) — else
-      point at `ava enroll`.
-    - anchored, gateway-capable (or role unknown), no registry record for the
-      home: point at `scripts/install.sh --role ...`.
-    - anchored, registered, but the home's `.env` claims ports its record did not
-      allocate: refuse rather than bring a data plane up on someone else's block.
-    """
-    from shared.dotenv_boot import resolve_ava_home
-
-    rc = require_anchored_home("start")
-    if rc is not None:
-        return rc
-    home, _anchored = resolve_ava_home()
-
-    env_path = home / ".env"
-    env_vals: dict[str, str | None] = dotenv_values(env_path) if env_path.exists() else {}
-    serve_gateway = _serve_flag(
-        "machine_serve_gateway", "AVA_MACHINE_SERVE_GATEWAY", home, env_vals
-    )
-    serve_runner = _serve_flag(
-        "machine_serve_agent_runner", "AVA_MACHINE_SERVE_AGENT_RUNNER", home, env_vals
-    )
-    runner_only = serve_runner is True and serve_gateway is not True
-    if runner_only:
-        if (env_vals.get("AVA_GATEWAY_URL") or "").strip():
-            return None
-        print(
-            f"✗ ava start: {env_path} carries no gateway URL (no AVA_GATEWAY_URL) "
-            "— this agent-runner was never enrolled, or the enroll did not complete. Run:\n"
-            "  ava enroll --gateway <url> --machine-name <name> --machine-host "
-            "<this-host-addr> with AVA_CLUSTER_SECRET set from a non-echoing prompt",
-            file=sys.stderr,
-        )
-        return 1
-
-    rec = _home_record(home, env_vals)
-    if rec is None:
-        print(
-            f"✗ ava start: home {home} has no cluster (not in the registry) — `ava start` "
-            "is a pure bring-up; install births the cluster. Run:\n"
-            "  scripts/install.sh --role gateway,agent-runner   # prod host, from $AVA_HOME/source\n"
-            "  scripts/install.sh --worktree                    # dev worktree, from its checkout",
-            file=sys.stderr,
-        )
-        return 1
-
-    conflicts = _port_block_conflicts(rec, env_vals)
-    if conflicts:
-        print(
-            f"✗ ava start: home {home} would bind ports its registry record does not own:\n"
-            + "".join(f"    {c}\n" for c in conflicts)
-            + "  The registry is what makes port ownership true, and another cluster may "
-            "already hold the ports\n  this .env names. Re-run the install for this home to "
-            "re-derive .env from the record:\n"
-            "  scripts/install.sh --worktree --path "
-            f"{home}   # or --role ... for a prod/gateway home",
-            file=sys.stderr,
-        )
-        return 1
-    return None
 
 
 def unit_already_stopped() -> bool:

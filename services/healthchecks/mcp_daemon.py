@@ -1,29 +1,15 @@
-"""ava-mcp-daemon healthcheck — called every 60s by the watchdog.
-
-Probe the shared MCP daemon over its Unix socket with a lock-free `ping`
-(connect + reply proves the accept/read loop is alive). On death, respawn the
-daemon via `shared.service_respawn.respawn_and_verify` (same pattern as the
-browser / browser-mcp healthchecks) and report success only once the probe
-confirms the daemon answers again.
-"""
+"""Read-only health probes for mcp daemon; the root supervisor owns recovery."""
 
 import json
 import logging
 import socket
-import sys
-from pathlib import Path
 
-from shared.config import settings
-from shared.daemon_health import DaemonProbe
-from shared.log import init_gateway_process
 from shared.paths import mcp_daemon_shared_socket
 from shared.platform_probes import unix_sockets_available
-from shared.service_respawn import respawn_and_verify
 
 _log = logging.getLogger("services.healthchecks.mcp_daemon")
 
 _TIMEOUT_S = 5.0
-_CMD = ".venv/bin/python -m ava._mcps_daemon"
 
 
 def _probe() -> bool:
@@ -68,42 +54,3 @@ def _is_alive() -> bool:
     except Exception:
         _log.exception("[mcp-daemon healthcheck] probe raised unexpectedly; treating as dead")
         return False
-
-
-def _restart_daemon() -> bool:
-    project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
-
-    def _verify() -> DaemonProbe:
-        if _is_alive():
-            return DaemonProbe.up("socket ping ok")
-        return DaemonProbe.down("socket ping failed")
-
-    # Verify by the probe, not by the launch: the respawned daemon refuses to
-    # start over a live socket (Task #1142), so a launch can be accepted while
-    # the previous instance is still serving — which is fine, and the probe
-    # says so.
-    probe = respawn_and_verify(
-        "mcp-daemon",
-        _CMD,
-        project_root,
-        verify=_verify,
-        extra_env={"AVA_PROCESS_PROFILE": "runner"},
-    )
-    return probe.alive
-
-
-def main() -> None:
-    init_gateway_process(name="mcp-daemon-healthcheck")
-    if _is_alive():
-        _log.debug("[mcp-daemon healthcheck] alive, no-op")
-        return
-    _log.info("[mcp-daemon healthcheck] dead, restarting...")
-    if _restart_daemon():
-        _log.info("[mcp-daemon healthcheck] daemon restarted")
-    else:
-        _log.error("[mcp-daemon healthcheck] restart FAILED — manual intervention needed")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

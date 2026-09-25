@@ -20,44 +20,28 @@ mechanism differs, because only some schedulers can retry a job on our behalf:
 - **Linux with systemd** — the distro-level boot unit (`shared.os_boot_unit`,
   installed with `ava cluster boot-unit install`) states the same policy in
   restart keys: `Restart=on-failure`, `RestartSec` = the interval,
-  `StartLimitIntervalSec=0` for the no-cap half, and `RuntimeMaxSec` killing a
-  wedged attempt so a hang cannot block retries. systemd is a supervisor like
-  launchd, so it too covers the died-rather-than-exited case.
+  `StartLimitIntervalSec=0` for the no-cap half. `TimeoutStartSec` bounds the
+  initial readiness attempt. On success, the ordinary start tail transfers
+  MainPID to the verified application root with an acknowledged notification;
+  systemd then owns root lifetime without a resident wrapper or runtime cap.
 - **Linux without the unit / Windows** — these schedulers cannot repeat a boot
   trigger: a cron `@reboot` line fires exactly once, and `schtasks /RI` is
   documented as "not applicable for schedule types: MINUTE, HOURLY, ONSTART,
   ONLOGON, ONIDLE, and ONEVENT". So the loop is ours — `cli.boot_retry`
   (`ava boot`).
 
-**Why no attempt cap.** An earlier draft capped the owned loop at ~30 attempts,
-on the theory that the 60 s OS watchdog probe was the real long-run net and
-`ava boot` only had to cover the first few minutes. That theory is false, and a
-cap would have reintroduced this same outage with a longer fuse: a box that
-boots while its VPN is down for 45 minutes would recover on macOS and stay down
-forever on Linux/Windows. The probe
-(`cli/commands/_cluster_watchdog_probe.py`) repairs exactly one thing — a dead
-watchdog session — and says so: "It does NOT run `ava start`, and it does
-not touch any other service." Neither it nor the watchdog it revives ever runs
-the gateway env refresh, the converge phase, or this cluster's pg/redis
-bring-up (`ensure_cluster_instance` has no caller outside `cli/`). So on a host
-whose boot `ava start` never succeeded, the probe cannot finish the job and the
-retry has to keep going. It costs one child process per minute, and the first
-success ends it.
+**Why no attempt cap.** Dependencies can recover after an arbitrary outage.
+The first successful start ends the boot attempt; later service health belongs
+to ava-root. Repeating start reconciles persisted identity and owned services;
+it must not replace a healthy generation just because another unit is unready.
 
-**What the retry may see.** The policy is safe only because the codes it retries
-are codes a retry can fix. `ava start` also exits
-`SERVICES_NOT_READY_EXIT_CODE` when every step succeeded but a launched service
-never passed its liveness probe, and an unbounded retry on *that* is the outage
-this module's own reasoning forbids in the other direction: a box whose headed
-Chrome will never launch would re-run `ava start` every 60 s forever while
-otherwise serving perfectly. So the boot path — the owned loop AND the launchd
-plist, since `SuccessfulExit` is a boolean and cannot distinguish codes — runs
-start with `--no-readiness-gate`, and the retried set stays "a step failed"
-(1). Reviving a service that launched and then died is the watchdog keepalive's
-job, and that watchdog is one of the services the start just launched.
+**Readiness is required.** Every boot mechanism runs the ordinary start entry.
+Unready critical services keep a nonzero result and remain visible in the boot
+log. Root owns service revival, so retries do not create another service owner
+or claim readiness before the application's probes pass.
 
 Deliberately import-free: `cli.boot_retry` is dispatched by `cli.main` before
-the settings-gated `cli.commands` import (the `ava enroll` slot), so anything it
+the settings-gated `cli.commands` import (the first-start dispatch slot), so anything it
 reaches must not build `Settings()`.
 """
 

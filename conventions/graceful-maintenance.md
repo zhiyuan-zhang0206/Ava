@@ -90,8 +90,8 @@ start can measure real readiness before opening business requests or native
 admission. Public health still verifies identity and database access; status
 and resume retain their existing authentication requirements.
 The existing exact-generation `cluster_resume` RPC is reachable but refuses
-resume before readiness or after a recorded continuation failure. Neither
-`--no-readiness-gate` nor a waived update exit code certifies readiness.
+resume before readiness or after a recorded continuation failure. Every selected
+service must pass readiness; normal start exposes no readiness waiver.
 Normal commands manage their own operation identity; there is no operation ID
 or timestamp to copy between machines.
 

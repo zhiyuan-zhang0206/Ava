@@ -100,7 +100,7 @@ def signalled(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Every pid the stop path would signal. Replaces the SIGTERM/SIGKILL seam so
     a regression shows up as a recorded pid, not as a dead process."""
     calls: list[int] = []
-    monkeypatch.setattr(pgb, "_terminate_verified", lambda pid, **_: calls.append(pid))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pgb, "_terminate_verified", lambda pid, **_: calls.append(pid) or True)  # pyright: ignore[reportUnknownArgumentType]
     return calls
 
 
@@ -160,39 +160,16 @@ def test_sibling_home_sharing_a_path_prefix_is_not_ours(
 
 
 def test_start_does_not_reload_a_recycled_pid(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ava start` reloads an already-running pooler with SIGHUP, which for most
-    processes that are not pgbouncer is a kill — and start runs far more often
-    than stop. A recycled pid must take the launch branch instead."""
+    """A foreign live PID leaves custody unresolved; start neither signals nor writes."""
     _write_pidfile(home, os.getpid())
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")  # loopback-only render
-    monkeypatch.setattr(pgb, "pgbouncer_bin", lambda: str(Path(__file__)))  # exists; never run
-    monkeypatch.setattr(pgb, "_admin_reachable", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(pgb, "_report_backend_verification", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    signals: list[tuple[int, int]] = []
-
-    def record_kill(pid: int, sig: int) -> None:
-        if sig != 0:  # signal 0 is the liveness probe behind shared.proc.process_alive
-            signals.append((pid, sig))
-
-    monkeypatch.setattr(pgb.os, "kill", record_kill)
-
-    launched: list[list[str]] = []
-
-    def record_run(cmd: list[str], **_: object) -> _CompletedOk:
-        launched.append(cmd)
-        return _CompletedOk()
-
-    monkeypatch.setattr(pgb.subprocess, "run", record_run)
-
-    rc = pgb.ensure_pgbouncer(
-        pg_port=15433,
-        listen_port=16433,
-        db_name="ava_scratch",
-        role="ava_scratch",
-        cluster_secret=_SECRET,
-    )
-
-    assert rc == 0
-    assert signals == [], "no signal may reach a pid this home does not own"
-    assert launched, "with the stale pidfile discarded, start must launch its own pooler"
+    monkeypatch.setattr(pgb, "pgbouncer_bin", lambda: str(Path(__file__)))
+    monkeypatch.setattr(pgb, "_write_config", lambda **_k: pytest.fail("foreign PID"))
+    with pytest.raises(RuntimeError, match="cannot verify this home's PgBouncer"):
+        pgb.ensure_pgbouncer(
+            pg_port=15433,
+            listen_port=16433,
+            db_name="ava_scratch",
+            role="ava_scratch",
+            cluster_secret="",
+            runner_password="",
+        )

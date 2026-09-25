@@ -26,8 +26,8 @@ from typing import NotRequired, TypedDict, cast
 MAX_MESSAGE_BYTES = 64 * 1024
 
 # The verbs that name a target unit; the others take no name.
-_NAMED_VERBS = frozenset({"up", "down", "restart"})
-_REQUEST_FIELDS = frozenset({"verb", "name"})
+_NAMED_VERBS = frozenset({"up", "down", "force-down", "restart"})
+_REQUEST_FIELDS = frozenset({"verb", "name", "payload"})
 _RESPONSE_FIELDS = frozenset({"ok", "result", "error", "code"})
 
 
@@ -36,9 +36,11 @@ class Verb(StrEnum):
 
     UP = "up"
     DOWN = "down"
+    FORCE_DOWN = "force-down"
     RESTART = "restart"
     STATUS = "status"
-    UPGRADE = "upgrade"
+    SHUTDOWN = "shutdown"
+    RESOURCE = "resource"
 
 
 class ErrorCode(StrEnum):
@@ -55,6 +57,7 @@ class RequestPayload(TypedDict):
 
     verb: str
     name: NotRequired[str]
+    payload: NotRequired[dict[str, object]]
 
 
 class ResponsePayload(TypedDict):
@@ -90,6 +93,15 @@ def parse_request(raw: bytes) -> RequestPayload:
     if not isinstance(verb_raw, str):
         raise ProtocolError("request must carry a string 'verb'")
     name_raw = document.get("name")
+    if verb_raw == Verb.RESOURCE:
+        if not isinstance(name_raw, str) or not name_raw:
+            raise ProtocolError("resource requires a non-empty 'name'")
+        payload = document.get("payload")
+        if not isinstance(payload, dict):
+            raise ProtocolError("resource requires an object 'payload'")
+        return {"verb": verb_raw, "name": name_raw, "payload": payload}
+    if "payload" in document:
+        raise ProtocolError(f"verb {verb_raw!r} takes no 'payload'")
     if verb_raw in _NAMED_VERBS:
         if not isinstance(name_raw, str) or not name_raw:
             raise ProtocolError(f"verb {verb_raw!r} requires a non-empty 'name'")

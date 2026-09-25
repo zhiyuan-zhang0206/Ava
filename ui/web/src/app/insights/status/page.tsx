@@ -187,9 +187,9 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: "runn
 // probes alive = healthy; any dead = degraded; unknown probes = "—".
 function healthVerdict(m: MachineStatus): { label: "none" | "degraded" | "healthy"; tone: StatusTone } {
   if (!m.online) return { label: "none", tone: "muted" };
-  if ((m.serve_agent_runner && m.agent_host_online === false) || m.watchdog_online === false)
+  if ((m.serve_agent_runner && m.agent_host_online === false) || m.supervisor_online === false)
     return { label: "degraded", tone: "warn" };
-  if ((!m.serve_agent_runner || m.agent_host_online === true) && m.watchdog_online === true)
+  if ((!m.serve_agent_runner || m.agent_host_online === true) && m.supervisor_online === true)
     return { label: "healthy", tone: "ok" };
   return { label: "none", tone: "muted" };
 }
@@ -584,7 +584,7 @@ function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: 
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("health")}</div>
-          <div className={`mt-0.5 text-sm font-medium ${TONE_TEXT[health.tone]}`} title={t("daemonHealth", { agentHost: daemonMark(m.agent_host_online), watchdog: daemonMark(m.watchdog_online) })}>
+          <div className={`mt-0.5 text-sm font-medium ${TONE_TEXT[health.tone]}`} title={t("daemonHealth", { agentHost: daemonMark(m.agent_host_online), supervisor: daemonMark(m.supervisor_online) })}>
             {health.label === "none" ? "—" : t(health.label)}
           </div>
         </div>

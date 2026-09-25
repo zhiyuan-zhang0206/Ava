@@ -190,7 +190,7 @@ Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blas
 
 Two producers of the same fact, pinned against each other, feel like a test of
 something nobody would get wrong. `tests/shared/test_cluster_env.py:test_health_port_env_matches_derive_env_for_the_same_base`
-pins `derive_env` (install-time) against `health_port_env` (enroll-time) for one
+pins `derive_env` (first-start) against `health_port_env` (runner-join) for one
 base — and what it caught was not the original bug but the FIX for it: adding
 `agent_host` to the late-health-slot set made the two producers disagree, and
 the guard said so immediately.

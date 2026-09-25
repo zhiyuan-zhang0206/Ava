@@ -1,13 +1,4 @@
-"""The distro-level systemd boot unit (`shared.os_boot_unit`).
-
-On a Linux host whose service manager is systemd, the boot path's retry lives
-in systemd itself -- `Restart=on-failure`, no attempt cap, `RuntimeMaxSec`
-bounding one attempt -- instead of an unsupervised child loop. These tests pin
-the retry contract in the two rendered artifacts (the unit and the one-attempt
-convergence script), the strictly-one-owner install semantics (enabling swaps
-the crontab entry out in the same call; a staged install leaves it live), and
-that uninstall / status touch only this home's paths.
-"""
+"""Linux native boot ownership, rendering and acknowledged root handoff."""
 
 from __future__ import annotations
 
@@ -21,12 +12,10 @@ from shared import os_boot_unit
 from shared.boot_policy import BOOT_RETRY_INTERVAL_S
 from shared.cluster import home_slug
 from shared.os_boot_unit import (
-    CONVERGE_RUNTIME_MAX_S,
-    GENERATE_204_URL,
+    START_TIMEOUT_S,
     BootUnitContext,
     boot_unit_owns_boot_path,
     install,
-    render_script,
     render_unit,
     status,
     systemd_running,
@@ -34,6 +23,14 @@ from shared.os_boot_unit import (
     unit_enabled,
     unit_name,
 )
+
+
+def _no_binary(_name: str) -> None:
+    return None
+
+
+def _systemctl_binary(_name: str) -> str:
+    return "/usr/bin/systemctl"
 
 
 def _context(tmp_path: Path) -> BootUnitContext:
@@ -61,7 +58,11 @@ def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
     assert "Restart=on-failure" in unit
     assert f"RestartSec={BOOT_RETRY_INTERVAL_S}" in unit
     assert "StartLimitIntervalSec=0" in unit
-    assert f"RuntimeMaxSec={CONVERGE_RUNTIME_MAX_S}" in unit
+    assert f"TimeoutStartSec={START_TIMEOUT_S}" in unit
+    assert "RuntimeMaxSec" not in unit
+    assert "Type=notify" in unit and "NotifyAccess=all" in unit
+    assert "KillMode=process" in unit and "SendSIGKILL=no" in unit
+    assert "PIDFile" not in unit
     # Boot ordering + identity: the unit runs as the cluster's user, in the
     # checkout, with the checkout venv on PATH.
     assert "After=network-online.target tailscaled.service mihomo.service" in unit
@@ -75,55 +76,22 @@ def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
     assert f'Environment="HOME={ctx.home_dir}"' in unit
     assert f'Environment="PATH={ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"' in unit
     # `:` disables $-expansion in the Exec line; the script path is quoted.
-    assert f'ExecStart=:"{os_boot_unit.script_path(ctx.home)}"' in unit
+    assert f'ExecStart=:"{ctx.repo}/.venv/bin/python" -m cli.main start' in unit
 
 
-def test_render_unit_carries_the_proxy_wait_only_when_configured(ctx: BootUnitContext) -> None:
-    assert "AVA_BOOT_PROXY_WAIT" not in render_unit(ctx)
-    unit = render_unit(ctx, proxy_wait_url="http://127.0.0.1:7897")
-    assert 'Environment="AVA_BOOT_PROXY_WAIT=http://127.0.0.1:7897"' in unit
+def test_render_unit_quotes_without_shell_expansion(ctx: BootUnitContext) -> None:
+    odd = BootUnitContext(ctx.home, Path('/repo "odd" % $x'), ctx.user, ctx.group, ctx.home_dir)
+    unit = render_unit(odd)
+    assert 'ExecStart=:"/repo \\"odd\\" %% $x/.venv/bin/python" -m cli.main start' in unit
+    assert "AVA_BOOT_PROXY_WAIT" not in unit
 
 
-def test_render_unit_refuses_a_metacharacter_proxy_url(ctx: BootUnitContext) -> None:
-    with pytest.raises(ValueError, match="shell metacharacters"):
-        render_unit(ctx, proxy_wait_url="http://127.0.0.1:7897/$(oops)")
-
-
-def test_render_script_is_one_attempt_and_the_rc_is_the_contract(ctx: BootUnitContext) -> None:
-    script = render_script(ctx)
-    assert script.startswith("#!/bin/bash")
-    # The retry is the unit's; the script states the rc contract and returns a
-    # failure so the unit restarts it after RestartSec.
-    assert "Restart=on-failure" in script
-    assert 'if [ "$rc" != 0 ]' in script and 'exit "$rc"' in script
-    assert "start --no-readiness-gate" in script
-    # One attempt truncates the per-attempt log; the state file is the terse
-    # operator surface `status` reads.
-    assert '>"$log" 2>&1' in script
-    assert 'log="$AVA_HOME/logs/boot.log"' in script
-    assert 'state="$AVA_HOME/logs/boot-converge.state"' in script
-    # A fresh home must not turn the missing logs/ dir into a failed redirect
-    # (an attempt that never ran ava start but asks the unit to retry forever).
-    assert 'mkdir -p "$AVA_HOME/logs"' in script
-    # Proxy readiness is a real round trip through the unit's URL.
-    assert "AVA_BOOT_PROXY_WAIT" in script and GENERATE_204_URL in script
-    # Readiness resolves the gateway URL like every client does (env / .env
-    # AVA_GATEWAY_URL > the legacy file), never a bare file read -- the wsl
-    # gateway carries its URL in .env, so the file read alone recorded nothing.
-    assert "from shared.machines import gateway_url" in script
-    assert 'cat "$AVA_HOME/gateway_url"' in script
-
-
-def test_render_script_refuses_metacharacter_paths(tmp_path: Path) -> None:
+def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
     bad = BootUnitContext(
-        home=tmp_path / 'ho"me',
-        repo=tmp_path / "repo",
-        user="u",
-        group="g",
-        home_dir=tmp_path,
+        ctx.home, Path("/repo\nExecStart=/bad"), ctx.user, ctx.group, ctx.home_dir
     )
-    with pytest.raises(ValueError, match="metacharacters"):
-        render_script(bad)
+    with pytest.raises(ValueError, match="control characters"):
+        render_unit(bad)
 
 
 # --- detection ---------------------------------------------------------------
@@ -135,9 +103,9 @@ def test_systemd_running_requires_linux_systemctl_and_the_runtime_dir(
     monkeypatch.setattr(os_boot_unit, "IS_LINUX", False)
     assert systemd_running() is False
     monkeypatch.setattr(os_boot_unit, "IS_LINUX", True)
-    monkeypatch.setattr(os_boot_unit.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(os_boot_unit.shutil, "which", _no_binary)
     assert systemd_running() is False
-    monkeypatch.setattr(os_boot_unit.shutil, "which", lambda _name: "/usr/bin/systemctl")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(os_boot_unit.shutil, "which", _systemctl_binary)
 
     # /run/systemd/system is the booted-with-systemd marker; pin the path probe
     # rather than the host so the test reads the same on macOS and in CI.
@@ -228,7 +196,7 @@ def _install_seams(
     return recorded, installed
 
 
-def test_install_enable_writes_both_artifacts_and_swaps_the_boot_path(
+def test_install_enable_writes_unit_and_swaps_the_boot_path(
     ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorded, installed = _install_seams(monkeypatch, tmp_path, enabled=False)
@@ -244,21 +212,17 @@ def test_install_enable_writes_both_artifacts_and_swaps_the_boot_path(
     monkeypatch.setattr("shared.os_autostart._unregister_linux", unregister_linux)
     monkeypatch.setattr(os_boot_unit, "_crontab_has_autostart", crontab_present)
 
-    steps = install(context=ctx, proxy_wait_url="http://127.0.0.1:7897")
+    steps = install(context=ctx)
 
-    script = os_boot_unit.script_path(ctx.home)
-    assert script.read_text() == render_script(ctx)
-    assert script.stat().st_mode & 0o777 == 0o755
     destination = os_boot_unit.unit_path(ctx.home)
     assert installed["destination"] == str(destination)
-    assert installed["content"] == render_unit(ctx, proxy_wait_url="http://127.0.0.1:7897")
+    assert installed["content"] == render_unit(ctx)
     argv = recorded
     assert ["systemctl", "daemon-reload"] in argv
     assert ["systemctl", "enable", unit_name(ctx.home)] in argv
     # Enabling swaps the live boot path in the same call: exactly one owner.
     assert removed == [home_slug(ctx.home)]
     assert "removed the crontab autostart entry" in steps
-    assert f"wrote convergence script {script}" in steps
     assert f"enabled {unit_name(ctx.home)}" in steps
 
 
@@ -268,7 +232,7 @@ def test_install_enable_skips_the_crontab_step_without_a_crontab_binary(
     """With no crontab binary there is no entry to remove: the enable flow must
     report no cron step and must not shell out to a missing binary at all."""
     _install_seams(monkeypatch, tmp_path, enabled=False)
-    monkeypatch.setattr(os_boot_unit.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(os_boot_unit.shutil, "which", _no_binary)
 
     def unregister_must_not_run(_slug: str) -> int:
         pytest.fail("no crontab binary: there is no entry to remove")
@@ -281,7 +245,7 @@ def test_install_enable_skips_the_crontab_step_without_a_crontab_binary(
 def test_crontab_probes_degrade_without_a_crontab_binary(
     ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(os_boot_unit.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(os_boot_unit.shutil, "which", _no_binary)
     assert os_boot_unit._crontab_lines() == []
     assert os_boot_unit._crontab_has_autostart(ctx.home) is False
 
@@ -306,7 +270,7 @@ def test_install_staged_leaves_the_crontab_entry_live(
     assert ["systemctl", "enable", unit_name(ctx.home)] not in argv
     assert ["systemctl", "daemon-reload"] in argv  # the unit file is staged
     assert not any("crontab" in str(item) for item in argv)
-    assert f"wrote convergence script {os_boot_unit.script_path(ctx.home)}" in steps
+    assert f"installed system unit {os_boot_unit.unit_path(ctx.home)}" in steps
 
 
 def test_install_refuses_without_systemd(
@@ -315,23 +279,6 @@ def test_install_refuses_without_systemd(
     monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
     with pytest.raises(RuntimeError, match="systemd"):
         install(context=ctx)
-
-
-def test_install_restores_a_drifted_executable_mode(
-    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Content-identical but not executable is a dead ExecStart: the mode is
-    repaired (and reported), not silently accepted."""
-    _install_seams(monkeypatch, tmp_path, enabled=False)
-    script = os_boot_unit.script_path(ctx.home)
-    script.parent.mkdir(parents=True)
-    script.write_text(render_script(ctx))
-    script.chmod(0o644)
-
-    steps = install(context=ctx, enable=False)
-
-    assert script.stat().st_mode & 0o777 == 0o755
-    assert f"fixed {script} mode to 0755" in steps
 
 
 def test_uninstall_removes_only_this_homes_paths(
@@ -355,10 +302,6 @@ def test_uninstall_removes_only_this_homes_paths(
     unit.write_text(render_unit(ctx))
     foreign = units / "unrelated.service"
     foreign.write_text("y")
-    script = os_boot_unit.script_path(ctx.home)
-    script.parent.mkdir(parents=True)
-    script.write_text("#!/bin/bash\n")
-
     steps = uninstall(ctx.home)
 
     assert ["systemctl", "disable", "--now", unit_name(ctx.home)] in recorded
@@ -367,8 +310,7 @@ def test_uninstall_removes_only_this_homes_paths(
     # Only this home's exact paths; a sibling unit is in no command.
     assert str(foreign) not in str(recorded)
     assert foreign.exists()
-    assert not script.exists()
-    assert steps == [f"removed {unit}", f"removed {script}"]
+    assert steps == [f"removed {unit}"]
 
     # Nothing left to remove -> a no-op (the mocked `rm -f` never ran for real).
     unit.unlink()
@@ -390,7 +332,7 @@ def test_privileged_translates_a_missing_sudo(monkeypatch: pytest.MonkeyPatch) -
         raise FileNotFoundError(2, "No such file or directory", "sudo")
 
     monkeypatch.setattr(os_boot_unit.os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(os_boot_unit.subprocess, "run", run_missing)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(os_boot_unit.subprocess, "run", run_missing)
 
     with pytest.raises(RuntimeError, match="passwordless sudo"):
         os_boot_unit._privileged(["true"])
@@ -413,28 +355,15 @@ def test_status_reports_the_read_only_surface(
     rows = dict(status(ctx.home))
     assert rows["unit"] == unit_name(ctx.home)
     assert rows["unit file"] == f"{os_boot_unit.unit_path(ctx.home)} (missing)"
-    assert rows["script"] == f"{os_boot_unit.script_path(ctx.home)} (missing)"
-    assert rows["proxy wait"] == "disabled"
     assert rows["cron entry"] == "absent"
-    assert rows["last convergence"] == "none"
     assert rows["systemd state"] == "not running (the boot unit needs systemd)"
 
     # The installed+enabled state is all visible without a single write.
     unit_file = os_boot_unit.unit_path(ctx.home)
-    unit_file.write_text(render_unit(ctx, proxy_wait_url="http://127.0.0.1:7897"))
-    script = os_boot_unit.script_path(ctx.home)
-    script.parent.mkdir(parents=True)
-    script.write_text(render_script(ctx))
-    state = os_boot_unit.state_path(ctx.home)
-    state.parent.mkdir(parents=True)
-    state.write_text("state=ready\n")
-
+    unit_file.write_text(render_unit(ctx))
     rows = dict(status(ctx.home))
     assert rows["unit file"] == f"{unit_file} (present)"
     assert rows["unit content"] == "matches rendered"
-    assert rows["proxy wait"] == "http://127.0.0.1:7897"
-    assert rows["script content"] == "matches rendered"
-    assert rows["last convergence"] == "state=ready\n"
 
 
 def test_status_does_not_compare_a_foreign_home(
@@ -459,22 +388,13 @@ def test_status_does_not_compare_a_foreign_home(
 
     monkeypatch.setattr(os_boot_unit, "_crontab_has_autostart", crontab_absent)
 
-    other_script = os_boot_unit.script_path(other)
-    other_script.parent.mkdir(parents=True)
-    other_script.write_text(render_script(foreign))
-
     rows = dict(status(other))
     assert rows["unit content"] == "not compared (not this process's home)"
-    assert rows["script content"] == "not compared (not this process's home)"
 
     # The own home still compares (and matches the renders this code produces).
     (units / unit_name(ctx.home)).write_text(render_unit(ctx))
-    own_script = os_boot_unit.script_path(ctx.home)
-    own_script.parent.mkdir(parents=True, exist_ok=True)
-    own_script.write_text(render_script(ctx))
     own_rows = dict(status(ctx.home))
     assert own_rows["unit content"] == "matches rendered"
-    assert own_rows["script content"] == "matches rendered"
 
 
 def test_paths_and_names_are_home_scoped(tmp_path: Path) -> None:
@@ -482,5 +402,102 @@ def test_paths_and_names_are_home_scoped(tmp_path: Path) -> None:
     assert unit_name(first) == f"ava-boot.{home_slug(first)}.service"
     assert unit_name(first) != unit_name(second)
     assert os_boot_unit.unit_path(first) == os_boot_unit.SYSTEM_UNIT_DIR / unit_name(first)
-    assert os_boot_unit.script_path(first) == first / "bin" / "ava-boot-converge.sh"
-    assert os_boot_unit.state_path(first) == first / "logs" / "boot-converge.state"
+
+
+def test_interactive_start_never_notifies(
+    ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.proc_tree import OwnedProcess
+
+    monkeypatch.setattr(os_boot_unit, "IS_LINUX", True)
+
+    def interactive(_pid: int) -> str:
+        return "/user.slice/interactive.scope"
+
+    def no_manager(_home: Path) -> dict[str, str]:
+        pytest.fail("interactive")
+
+    monkeypatch.setattr(os_boot_unit, "_process_cgroup", interactive)
+    monkeypatch.setattr(os_boot_unit, "_manager_properties", no_manager)
+    os_boot_unit.notify_root_ready(ctx.home, OwnedProcess(123, 1.0, 1))
+
+
+@pytest.mark.parametrize("fault", ["dead", "foreign", "manager", "reused", "not_adopted", "none"])
+def test_root_notification_binds_native_custody(
+    ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    from shared.proc_tree import OwnedProcess
+
+    owner = OwnedProcess(123, 1.0, 1)
+    expected = f"/system.slice/{unit_name(ctx.home)}"
+
+    def in_unit(_home: Path) -> bool:
+        return True
+
+    def cgroup(_pid: int) -> str:
+        return "/foreign" if fault == "foreign" else expected
+
+    monkeypatch.setattr(os_boot_unit, "in_boot_unit", in_unit)
+    monkeypatch.setattr(os_boot_unit, "_process_cgroup", cgroup)
+    alive = iter([False] if fault == "dead" else [True, fault != "reused"])
+
+    def live(_self: OwnedProcess) -> bool:
+        return next(alive)
+
+    monkeypatch.setattr(OwnedProcess, "live", live)
+    snapshots = iter(
+        [
+            {
+                "MainPID": "999" if fault == "manager" else str(os_boot_unit.os.getpid()),
+                "ControlGroup": expected,
+                "ActiveState": "activating",
+            },
+            {
+                "MainPID": "999" if fault == "not_adopted" else str(owner.pid),
+                "ControlGroup": expected,
+                "ActiveState": "active",
+            },
+        ]
+    )
+
+    def properties(_home: Path) -> dict[str, str]:
+        return next(snapshots)
+
+    monkeypatch.setattr(os_boot_unit, "_manager_properties", properties)
+    calls: list[list[str]] = []
+
+    def notify(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(os_boot_unit.subprocess, "run", notify)
+    if fault == "none":
+        os_boot_unit.notify_root_ready(ctx.home, owner)
+    else:
+        with pytest.raises(RuntimeError, match=r"custody|retain"):
+            os_boot_unit.notify_root_ready(ctx.home, owner)
+    assert calls == (
+        []
+        if fault in {"dead", "foreign", "manager"}
+        else [["systemd-notify", "--pid=123", "--ready"]]
+    )
+
+
+def test_uninstall_failed_stop_preserves_unit(
+    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(os_boot_unit, "IS_LINUX", True)
+    monkeypatch.setattr(os_boot_unit, "SYSTEM_UNIT_DIR", tmp_path)
+    target = os_boot_unit.unit_path(ctx.home)
+    target.write_text(render_unit(ctx))
+    calls: list[list[str]] = []
+
+    def fail_stop(argv: list[str], *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, "", "stop failed")
+
+    monkeypatch.setattr(os_boot_unit, "_privileged", fail_stop)
+    with pytest.raises(RuntimeError, match="stop failed"):
+        uninstall(ctx.home)
+    assert target.exists()
+    assert calls == [["systemctl", "disable", "--now", unit_name(ctx.home)]]

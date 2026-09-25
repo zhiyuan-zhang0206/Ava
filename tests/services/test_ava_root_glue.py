@@ -14,11 +14,11 @@ import pytest
 
 from services.ava_root.health import HealthMonitor
 from services.ava_root.manifest import ROOT_ID, RestartPolicy, UnitManifest, UnitRegistry
-from services.ava_root.probes import Probe
+from services.ava_root.probes import Probe, ProbeError
 from services.ava_root.supervisor import Supervisor
 from services.ava_root.wiring import WiringContext
 from services.ava_root_glue import drill, glue
-from shared.config import settings
+from services.ava_root_glue.diagnostics import Diagnostic, RootHealthRounds
 from shared.daemon_health import DaemonProbe
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(60)"]
@@ -55,10 +55,11 @@ def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
 
 
 @pytest.fixture(autouse=True)
-def _helper_gate_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the helper gate's platform input to a non-macOS value so tests are
-    deterministic on every host; tests that exercise the helper opt back in."""
-    monkeypatch.setattr(glue, "IS_MACOS", False)
+def _no_host_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    def empty(_requested: set[str]) -> list[Diagnostic]:
+        return []
+
+    monkeypatch.setattr(glue, "build_diagnostics", empty)
 
 
 async def test_reference_wiring_registers_gated_specs(
@@ -77,60 +78,16 @@ async def test_reference_wiring_registers_gated_specs(
         participants = glue.build_wiring(context)
         assert len(participants) == 2
         monitor = participants[0]
-        assert isinstance(monitor, HealthMonitor)
+        assert isinstance(monitor, RootHealthRounds)
         await monitor.run_round()
         health = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
-        # svc-b (no healthcheck module) and svc-c (no identity probe) are skipped.
-        assert set(health) == {"svc-a"}
+        # Only svc-a is requested by this exact root manifest.
+        assert set(health) == {"svc-a", "observer:root-health"}
+        assert health["observer:root-health"]["expected_since"] is None
+        assert isinstance(health["observer:root-health"]["last_completed_at"], float)
         assert health["svc-a"]["last_verdict"] == "alive"
         status = await context.supervisor.status()
         assert "health" in status and "metrics" in status
-    finally:
-        await context.supervisor.shutdown()
-
-
-def test_helper_probe_gate_needs_macos_and_the_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(glue, "IS_MACOS", True)
-    monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
-    assert glue._helper_probe_enabled() is True
-    monkeypatch.setattr(glue, "IS_MACOS", False)
-    assert glue._helper_probe_enabled() is False
-    monkeypatch.setattr(glue, "IS_MACOS", True)
-    monkeypatch.setattr(settings.services, "permissions_helper_enabled", False)
-    assert glue._helper_probe_enabled() is False
-
-
-async def test_helper_probe_seam_is_gated_and_held(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The helper rides the static path; a down verdict is surfaced and held —
-    the unit sits outside the supervisor's tree, so nothing ever restarts it."""
-    registry = _registry(("svc-a",))
-    context = _context(tmp_path, registry)
-    monkeypatch.setattr(glue, "build_services", lambda: ())
-    await context.supervisor.start()
-    try:
-        # Gate off (the autouse default): no helper entry in the roster.
-        monitor = glue.build_wiring(context)[0]
-        assert isinstance(monitor, HealthMonitor)
-        await monitor.run_round()
-        health = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
-        assert glue.HELPER_PROBE_UNIT_ID not in health
-
-        # Gate on: registered through the static ref; the round surfaces the
-        # down verdict and the round completes (no crash on the out-of-tree
-        # deferral, no restart verb reached).
-        monkeypatch.setattr(glue, "IS_MACOS", True)
-        monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
-        monkeypatch.setattr(glue, "HELPER_PROBE_REF", "wiring_fixture_helper_probe:probe")
-        module = types.ModuleType("wiring_fixture_helper_probe")
-        setattr(module, "probe", lambda: DaemonProbe.down("lwcr-stuck: job state=spawn failed"))  # noqa: B010 - dynamic module attr
-        monkeypatch.setitem(sys.modules, "wiring_fixture_helper_probe", module)
-        monitor = glue.build_wiring(context)[0]
-        assert isinstance(monitor, HealthMonitor)
-        await monitor.run_round()
-        health = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
-        assert "lwcr-stuck" in cast("str", health[glue.HELPER_PROBE_UNIT_ID]["last_detail"])
     finally:
         await context.supervisor.shutdown()
 
@@ -149,7 +106,7 @@ async def test_static_probe_seam_resolves_lazily(
     try:
         participants = glue.build_wiring(context)
         monitor = participants[0]
-        assert isinstance(monitor, HealthMonitor)
+        assert isinstance(monitor, RootHealthRounds)
         await monitor.run_round()
         health = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
         assert health["svc-host"]["last_verdict"] == "alive"
@@ -168,10 +125,10 @@ async def test_unresolvable_static_probe_yields_no_verdict(
     try:
         participants = glue.build_wiring(context)
         monitor = participants[0]
-        assert isinstance(monitor, HealthMonitor)
+        assert isinstance(monitor, RootHealthRounds)
         await monitor.run_round()  # no crash; no verdict, no action
         health = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
-        assert health["svc-host"]["last_verdict"] is None
+        assert health["svc-host"]["last_verdict"] == "unavailable"
     finally:
         await context.supervisor.shutdown()
 
@@ -263,3 +220,39 @@ def test_drill_heartbeat_probe_requires_freshness(tmp_path: Path) -> None:
 
     beat.unlink()
     assert probe().verdict.value == "alive"  # no heartbeat published -> liveness only
+
+
+def test_reference_wiring_refuses_unobserved_manifest_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = _context(tmp_path, _registry(("svc-a",)))
+    monkeypatch.setattr(glue, "build_services", lambda: ())
+    with pytest.raises(ProbeError, match="lack readiness probes: svc-a"):
+        glue.build_wiring(context)
+
+
+async def test_glue_uses_shared_readiness_tiers_for_native_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared.deploy_timing import NON_CRITICAL_SERVICE_READY_TIMEOUT_S, SERVICE_READY_TIMEOUT_S
+
+    context = _context(tmp_path, _registry(("gate", "labeler")))
+    specs = tuple(
+        _Spec(name, "probe", lambda: DaemonProbe.down("starting")) for name in ("gate", "labeler")
+    )
+    monkeypatch.setattr(glue, "build_services", lambda: specs)
+    await context.supervisor.start()
+    try:
+        rounds = glue.build_wiring(context)[0]
+        assert isinstance(rounds, RootHealthRounds)
+        await rounds.run_round()
+        health = cast("dict[str, dict[str, object]]", rounds.health_snapshot())
+        for name, budget in (
+            ("gate", SERVICE_READY_TIMEOUT_S),
+            ("labeler", NON_CRITICAL_SERVICE_READY_TIMEOUT_S),
+        ):
+            assert budget - 5 < cast(float, health[name]["startup_remaining_s"]) <= budget
+            assert health[name]["last_verdict"] == "down"
+            assert health[name]["consecutive_failures"] == 0
+    finally:
+        await context.supervisor.shutdown()

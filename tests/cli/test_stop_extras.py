@@ -1,8 +1,8 @@
 """Full-stop extras plus the existing explicit-force process helper tests.
 
-The normal path drains home-owned Gate/helper/LGTM through _stop_supervised;
-its real OS/process regressions live in test_stop_supervised.py. These cases
-also retain the portable _terminate_verified coverage used by force teardown.
+The helper uses shared exact-home retirement; Gate and LGTM belong to root.
+These cases also retain the portable _terminate_verified coverage used by
+data-plane teardown.
 
 **The `_terminate_verified` cases drive REAL child processes.** They used to run
 against a fake `os.kill` table, and that is precisely how this function shipped
@@ -28,7 +28,7 @@ import psutil
 import pytest
 
 from cli.commands._pgbouncer import _terminate_verified
-from cli.commands._stop_extras import stop_gate_service, stop_permissions_helper
+from cli.commands._stop_extras import stop_permissions_helper
 
 # -- _terminate_verified ------------------------------------------------------
 
@@ -123,8 +123,18 @@ def test_terminate_verified_forced(tmp_path: Path, capsys: pytest.CaptureFixture
     and reported as forced — the caller must be able to tell the two apart."""
     pid = _detached_sleeper(tmp_path, ignores_term=True)
     try:
-        assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.3) is True
+        assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.3, force=True) is True
         assert "⚠ pgbouncer stopped (forced kill)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        _reap(pid)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no catchable SIGTERM")
+def test_normal_terminate_retains_process_ignoring_term(tmp_path: Path) -> None:
+    pid = _detached_sleeper(tmp_path, ignores_term=True)
+    try:
+        assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.1) is False
+        assert psutil.pid_exists(pid), "ordinary recovery has no force authority"
     finally:
         _reap(pid)
 
@@ -148,7 +158,7 @@ def test_terminate_verified_survivor_is_never_reported_as_stopped(
         # Patched where it is looked up: `_pgbouncer` imports the name at module
         # scope, so patching `shared.proc` would leave that binding untouched.
         monkeypatch.setattr("cli.commands._pgbouncer.process_alive", _never_gone)
-        assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.1) is False
+        assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.1, force=True) is False
         assert "survived the force kill" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     finally:
         _reap(pid)
@@ -170,7 +180,7 @@ def test_terminate_verified_uses_no_raw_posix_signal_calls() -> None:
         assert spelling not in body, f"{spelling} is back on the stop path"
 
 
-# -- stop_gate_service --------------------------------------------------------
+# -- helper stop --------------------------------------------------------------
 
 
 def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
@@ -180,86 +190,17 @@ def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return home
 
 
-def test_gate_macos_stops_home_label(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    home = _home(monkeypatch, tmp_path)
-    monkeypatch.setattr("shared.platform.IS_MACOS", True)
-    calls: list[tuple[str, bool, float]] = []
-
-    def stopped(label: str, *, force: bool, timeout_s: float) -> None:
-        calls.append((label, force, timeout_s))
-
-    monkeypatch.setattr("cli.commands._stop_extras.stop_launchd", stopped)
-    stop_gate_service(timeout_s=7)
-    from cli.commands._converge_gate import gate_label
-
-    assert calls == [(gate_label(home), False, 7)]
-
-
-def _posix_gate(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pid: str
-) -> tuple[Path, list[int]]:
-    home = _home(monkeypatch, tmp_path)
-    (home / "run").mkdir()
-    (home / "run/gate.pid").write_text(pid)
-    monkeypatch.setattr("shared.platform.IS_MACOS", False)
-    # The detached POSIX leg is independent of Linux's user systemd manager.
-    monkeypatch.setattr("cli.commands._stop_extras.sys.platform", "freebsd")
-    killed: list[int] = []
-
-    def stopped(pid: int, *, force: bool, timeout_s: float) -> None:
-        killed.append(pid)
-
-    monkeypatch.setattr("cli.commands._stop_extras.stop_detached", stopped)
-    return home, killed
-
-
-def test_gate_posix_pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    home, killed = _posix_gate(monkeypatch, tmp_path, "1234")
-    monkeypatch.setattr("cli.commands._converge_gate.gate_pid_is_ours", lambda _pid, _repo: True)  # pyright: ignore[reportUnknownArgumentType]
-    stop_gate_service()
-    assert killed == [1234]
-    assert not (home / "run/gate.pid").exists()
-
-
-def test_gate_refusal_retains_pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    home, killed = _posix_gate(monkeypatch, tmp_path, str(os.getpid()))
-    with pytest.raises(RuntimeError, match="not signalling it"):
-        stop_gate_service()
-    assert killed == []
-    assert (home / "run/gate.pid").exists()
-
-
-def test_gate_timeout_retains_pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    home, _ = _posix_gate(monkeypatch, tmp_path, "1234")
-    monkeypatch.setattr("cli.commands._converge_gate.gate_pid_is_ours", lambda _pid, _repo: True)  # pyright: ignore[reportUnknownArgumentType]
-
-    def timeout(pid: int, *, force: bool, timeout_s: float) -> None:
-        raise TimeoutError("still alive")
-
-    monkeypatch.setattr("cli.commands._stop_extras.stop_detached", timeout)
-    with pytest.raises(TimeoutError, match="still alive"):
-        stop_gate_service()
-    assert (home / "run/gate.pid").exists()
-
-
-def test_gate_posix_unparseable_pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    home, killed = _posix_gate(monkeypatch, tmp_path, "not-a-pid")
-    stop_gate_service()
-    assert killed == []
-    assert not (home / "run/gate.pid").exists()
-
-
 def test_helper_macos_stop_failure_propagates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _home(monkeypatch, tmp_path)
+    home = _home(monkeypatch, tmp_path)
     monkeypatch.setattr("shared.platform.IS_MACOS", True)
 
-    def failed(label: str, *, force: bool, timeout_s: float) -> None:
-        assert label.startswith("com.ava.permissions-helper.")
+    def failed(target: Path, *, helper_port: int, force: bool, timeout_s: float) -> None:
+        assert target == home and helper_port > 0
         raise RuntimeError("job survived")
 
-    monkeypatch.setattr("cli.commands._stop_extras.stop_launchd", failed)
+    monkeypatch.setattr("services.permissions_helper.launchd_job.unregister_helper", failed)
     with pytest.raises(RuntimeError, match="job survived"):
         stop_permissions_helper()
 
@@ -268,49 +209,11 @@ def test_helper_non_macos_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     _home(monkeypatch, tmp_path)
     monkeypatch.setattr("shared.platform.IS_MACOS", False)
 
-    def unexpected(label: str, *, force: bool, timeout_s: float) -> None:
+    def unexpected(target: Path, *, helper_port: int, force: bool, timeout_s: float) -> None:
         pytest.fail("a user-wide Windows helper must not be stopped by one home")
 
-    monkeypatch.setattr("cli.commands._stop_extras.stop_launchd", unexpected)
+    monkeypatch.setattr("services.permissions_helper.launchd_job.unregister_helper", unexpected)
     stop_permissions_helper()
-
-
-def test_lgtm_stop_preserves_desired_state_and_data(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from cli.commands._lgtm_native import native_label
-    from cli.commands._stop_extras import stop_lgtm_services
-    from shared.lgtm_local import BACKENDS
-
-    home = _home(monkeypatch, tmp_path)
-    marker = home / "lgtm-host"
-    marker.write_text("enabled")
-    store = home / "lgtm/native/data/loki/wal"
-    store.parent.mkdir(parents=True)
-    store.write_bytes(b"unflushed-wal")
-    monkeypatch.setattr("shared.platform.IS_MACOS", True)
-    labels: list[str] = []
-
-    def stopped(label: str, *, force: bool, timeout_s: float) -> None:
-        labels.append(label)
-
-    monkeypatch.setattr("cli.commands._stop_extras.stop_launchd", stopped)
-    stop_lgtm_services()
-    assert labels == [native_label(name, home) for name in reversed(BACKENDS)]
-    assert marker.read_text() == "enabled"
-    assert store.read_bytes() == b"unflushed-wal"
-
-
-def test_gate_teardown_not_used_by_update(monkeypatch: pytest.MonkeyPatch) -> None:
-    """cmd_update reaches _do_stop with teardown_extras=False — the gate must
-    survive updates by construction. Pin the default so a future call site
-    cannot silently flip the full-stop extras on."""
-    import inspect
-
-    from cli.commands.stop import _do_stop
-
-    sig = inspect.signature(_do_stop)
-    assert sig.parameters["teardown_extras"].default is False
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="PermissionError on signal is the POSIX shape")
@@ -338,7 +241,7 @@ def test_a_pid_this_user_may_not_signal_is_reported_as_a_survivor(
         monkeypatch.setattr(sp.os, "kill", _refuse)
 
         assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.2) is False
-        assert "survived the force kill" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+        assert "custody retained" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
         assert psutil.pid_exists(pid), "the stop must not have killed it by another route"
     finally:
         _reap(pid)
