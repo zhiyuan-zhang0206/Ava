@@ -4,6 +4,63 @@ The **preview** cluster is the pre-release validation environment for `main`:
 a full Ava cluster running the commit that is about to be promoted, so a
 release is exercised end-to-end before production sees it.
 
+## Preview an unmerged local branch
+
+On macOS or Linux, from a developer checkout:
+
+```bash
+python3 -m scripts.preview.local run --ref my-local-branch
+python3 -m scripts.preview.local run --ref origin/my-remote-branch --keep
+python3 -m scripts.preview.local check ~/.ava-previews/<run-directory>
+python3 -m scripts.preview.local stop ~/.ava-previews/<run-directory>
+```
+
+`--repo /path/to/repo` selects another local repository; fetch remote branches
+there first. A ref resolves once to an exact commit. Uncommitted working files
+are not included, and a running preview does not follow later branch movement.
+Repeat `run --ref ...` to test the next commit. Neither merge nor green CI is a
+prerequisite. The target revision must support the existing worktree installer,
+core service roster and scripted `message_flow` scenario; incompatible revisions
+fail visibly rather than silently switching to another revision.
+
+The standard-library controller creates a detached worktree and private home
+under a new `~/.ava-previews/<run-directory>` (override the parent with `--root`).
+It pins Python 3.12, calls the existing `install.sh --worktree --no-seed`, installs
+frontend dependencies, then runs that checkout's own `ava start` and `ava stop`.
+Git, uv, Node/npm and the normal native install prerequisites must be available.
+Run trusted branches: home isolation is not a sandbox for arbitrary source code.
+
+This bounded profile starts gateway, frontend, ops and agent-host with private
+Postgres, Redis, PgBouncer and allocated ports. It disables OS jobs, GUI handover,
+desktop/browser services and remote memory synchronization. The launch environment
+omits inherited Ava settings, Python overrides and provider credentials; it never
+seeds a production `.env`. Use the printed **frontend app URL** directly; the
+OS-managed gate is deliberately absent in this profile.
+
+Verification requires identity probes for all four services, a frontend HTTP
+response and a real agent turn: a scripted model asks `execute_code` to run
+`print(1 + 2)`, and the committed timeline must contain exactly that code and the
+output body `3`. The scripted reply alone cannot pass. This checks source boot
+and execution; it does not prove installed release update/rollback, multiple
+machines, browser rendering, real model providers or production readiness.
+CI, merge and production promotion gates remain separate.
+
+By default, success and failure both stop the preview. `--keep` retains only a
+successful run for inspection; use `check` and `stop` with its printed directory.
+Foreground build processes are reaped on timeout or interruption. An install
+that failed before writing `.env` uses a narrowly scoped native-daemon cleanup.
+SIGKILL/power loss cannot execute cleanup: run `stop` on the recorded directory
+when resuming. Concurrent operations on one run are refused.
+
+`run.json` records the requested ref, resolved commit, controller/adapter hashes,
+verification scope, each phase's command, log, duration and result, and cleanup
+status. `config.json`, `check.json`, `smoke.json` and `cleanup.json` carry the
+resolved ports, probes, timeline and closure evidence. Registry ports are released
+only after sessions, owned processes and listeners are confirmed gone. Source,
+dependencies, data and logs remain on disk for diagnosis; after confirmed cleanup,
+remove the worktree with `git worktree remove --force <run-directory>/source` and
+remove the retained run directory when its evidence is no longer needed.
+
 ## Where it lives
 
 | Fact | Value |

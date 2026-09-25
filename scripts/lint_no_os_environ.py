@@ -107,6 +107,7 @@ _LIVE_READ_ENV_VARS = frozenset(
 # include a one-line inline comment explaining why.
 _ALLOWED_FILES = frozenset(
     {
+        "scripts/preview/local.py",  # Settings-free cross-checkout controller: allowlist the live child environment before target Settings exist.
         "scripts/legacy_lkg/prepare.py",  # CI fixed-base reconstruction, before either app Settings exists; never a production entry.
         "scripts/legacy_lkg/cold_boot.py",  # CI private normal-process env and pre-Settings home rejection proof.
         "shared/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
