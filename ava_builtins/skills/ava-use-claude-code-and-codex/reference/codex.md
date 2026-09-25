@@ -58,13 +58,24 @@ Verify the banner before trusting the session (`model: <model> <effort>` and
 the directory), and decline any "upgrade codex" prompt — a session must not
 self-upgrade.
 
+A hand launch is **not canonical**: no generation is registered, no task or
+work files are created, and no supervisor starts — the ownership and
+supervision the spawn script provides are yours to reproduce. Run it under
+the same file-driven discipline as Mode A (task file + work file +
+`watch_work.py` to wake you), and keep to one live Codex per workspace so a
+second launch cannot race the first.
+
 When the default `~/.codex` home should stay untouched entirely, give the
 session a private home: create the directory with mode `0700`, symlink `auth.json` in from
 `~/.codex/`, copy `config.toml` and append the workspace trust row
 (`[projects."<workspace-dir>"]` / `trust_level = "trusted"`), then run with
-`CODEX_HOME=<dir>`. Nothing in the global home changes.
+`CODEX_HOME=<dir>`. This isolates configuration and session state; auth
+stays shared by design — a token refresh is written through the symlink, so
+both homes see the same account (a frozen copy would go stale on rotation).
 
 Before a large session, check the account's remaining quota at zero token
-cost — `/status` in the TUI, or the app-server `account/rateLimits/read`
-request. If the quota is nearly exhausted and no reset is imminent, report
-that before launching instead of parking a session that will die mid-task.
+cost — the app-server `account/rateLimits/read` request, or `/status` where
+the TUI surfaces it. This is a ChatGPT-account surface: a plain
+`OPENAI_API_KEY` session has no plan quota to read. If the quota is nearly
+exhausted and no reset is imminent, report that before launching instead of
+parking a session that will die mid-task.
