@@ -72,6 +72,9 @@ terminal rather than another permanent per-home broker.
 Root records custody before spawning and preserves captured native births before
 signals. Normal stop is bounded TERM and exact observed closure; only explicit
 force permits KILL. Failed closure retains custody and blocks a replacement.
+Root also keeps its control transport alive after failed ordinary shutdown;
+new service or resource birth remains closed. An operator can inspect the same
+owner, explicitly close its captured domains, then request shutdown again.
 Native birth checks reject PID reuse. Missing IPC is unknown, never proof of
 absence or readiness. Terminal and execution resources keep their own existing
 ownership contracts and are not renamed application service sessions.

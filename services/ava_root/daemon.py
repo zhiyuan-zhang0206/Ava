@@ -106,10 +106,18 @@ async def run(options: DaemonOptions) -> int:
     participants = load_wiring(options.wiring, context)
     socket_path = options.run_dir / _SOCKET_NAME
     stop = asyncio.Event()
+    retiring = False
+
+    def request_stop() -> None:
+        nonlocal retiring
+        retiring = True
+        stop.set()
 
     async def dispatch(request: RequestPayload) -> ResponsePayload:
         if request["verb"] == Verb.SHUTDOWN:
             return ok_response({"shutdown_requested": True})
+        if retiring and request["verb"] in {Verb.UP, Verb.RESTART, Verb.RESOURCE}:
+            return error_response(ErrorCode.INVALID_REQUEST, "root is stopping; admission closed")
         if request["verb"] == Verb.RESOURCE:
             if "name" not in request or "payload" not in request:
                 return error_response(ErrorCode.INVALID_REQUEST, "resource fields missing")
@@ -124,20 +132,20 @@ async def run(options: DaemonOptions) -> int:
 
     def after_response(request: RequestPayload) -> None:
         if request["verb"] == Verb.SHUTDOWN:
-            stop.set()
+            request_stop()
 
     server = ControlServer(socket_path, dispatch, after_response=after_response)
     loop = asyncio.get_running_loop()
 
     def stop_signal(_signum: int, _frame: FrameType | None) -> None:
-        loop.call_soon_threadsafe(stop.set)
+        loop.call_soon_threadsafe(request_stop)
 
     if sys.platform == "win32":
         for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGBREAK):
             signal.signal(signum, stop_signal)
     else:
         for signum in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(signum, stop.set)
+            loop.add_signal_handler(signum, request_stop)
     # SIGHUP does not reload anything; ignoring it keeps a stray terminal
     # hangup from killing the tree; release replacement is an outer-owner action.
     if sys.platform != "win32":
@@ -147,21 +155,13 @@ async def run(options: DaemonOptions) -> int:
         await supervisor.start()
         await server.start()
         started = await start_participants(participants)
-        if started:
-            _log.info(
-                "ava-root ready: %d unit(s), socket %s, %d wired participant(s)",
-                len(registry.units),
-                socket_path,
-                len(started),
-            )
-        else:
-            _log.info(
-                "ava-root ready: %d unit(s), socket %s",
-                len(registry.units),
-                socket_path,
-            )
-        await stop.wait()
-        _log.info("stop signal received; stopping the tree")
+        _log.info(
+            "ava-root ready: %d unit(s), socket %s, %d wired participant(s)",
+            len(registry.units),
+            socket_path,
+            len(started),
+        )
+        await _close_tree(stop, started, supervisor)
     finally:
         # Participants first: their loops touch the tree, so they stop while it
         # (and the control server) still exist. A failing stop never blocks the
@@ -171,6 +171,30 @@ async def run(options: DaemonOptions) -> int:
         await supervisor.shutdown()
         release_instance_lock(lock_fd)
     return 0
+
+
+async def _close_tree(
+    stop: asyncio.Event,
+    started: list[WiringParticipant],
+    supervisor: Supervisor,
+) -> None:
+    """Keep original native custody and control alive when graceful closure fails.
+
+    Exiting root would strand POSIX custody or implicitly force native Job
+    members. Admission stays closed; only another explicit operator request
+    attempts closure again. No retry timer or alternate service owner exists.
+    """
+    while True:
+        await stop.wait()
+        stop.clear()
+        await stop_participants(started)
+        started.clear()
+        try:
+            await supervisor.shutdown()
+        except Exception:
+            _log.exception("root retains custody after failed shutdown")
+        else:
+            return
 
 
 def main(argv: Sequence[str] | None = None) -> int:

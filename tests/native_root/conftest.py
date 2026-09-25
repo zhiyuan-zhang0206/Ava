@@ -43,18 +43,18 @@ def native_env(tmp_path: Path) -> dict[str, str]:
 def pytest_configure(config: pytest.Config) -> None:
     # Before any Ava import, including optional parent-conftest-free native CI.
     # The normal repo conftest already provides a private home during local runs.
-    if "AVA_HOME_OVERRIDE" not in os.environ:
-        import tempfile
+    # Do not trust a caller's existing AVA_HOME_OVERRIDE as test isolation.
+    import tempfile
 
-        isolated = tempfile.TemporaryDirectory(prefix="ava-native-root-")
-        config.add_cleanup(isolated.cleanup)
-        os.environ.update(
-            AVA_HOME=str(Path(isolated.name) / "home"),
-            AVA_CLUSTER_REGISTRY=str(Path(isolated.name) / "registry" / "clusters.json"),
-            AVA_HOME_OVERRIDE="1",
-            AVA_CONFIG_FETCH="skip",
-            AVA_DB_URL="postgresql://unused@127.0.0.1:1/unused",
-            AVA_REDIS_URL="redis://127.0.0.1:1/0",
-            AVA_OS_JOBS_ENABLED="0",
-            AVA_TELEMETRY_OTLP_ENABLED="0",
-        )
+    isolated = tempfile.TemporaryDirectory(prefix="ava-native-root-")
+    config.add_cleanup(isolated.cleanup)
+    os.environ.update(
+        AVA_HOME=str(Path(isolated.name) / "home"),
+        AVA_CLUSTER_REGISTRY=str(Path(isolated.name) / "registry" / "clusters.json"),
+        AVA_HOME_OVERRIDE="1",
+        AVA_CONFIG_FETCH="skip",
+        AVA_DB_URL="postgresql://unused@127.0.0.1:1/unused",
+        AVA_REDIS_URL="redis://127.0.0.1:1/0",
+        AVA_OS_JOBS_ENABLED="0",
+        AVA_TELEMETRY_OTLP_ENABLED="0",
+    )

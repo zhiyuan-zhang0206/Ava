@@ -1,8 +1,7 @@
 """The K1 control-plane wire protocol (one JSON object per line).
 
-The root supervisor speaks this protocol over a unix socket (the per-platform
-transport is an OS-edge concern; a named pipe is the equivalent there and
-lands with the platform adapter work). The two ends of this module are
+The root supervisor speaks this protocol over a Unix socket or a private native
+Windows pipe. The two ends of this module are
 transport-only: `server.py` binds the socket, `client.py` dials it, and both
 validate shapes fail-fast so a drifting peer is rejected at the boundary
 instead of being carried into the supervisor.

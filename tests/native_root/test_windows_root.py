@@ -45,7 +45,7 @@ def root_fixture(
     ignore_break: bool = False,
     terminal_broker: bool = False,
 ):
-    from services.ava_root.client import RootClient
+    from services.ava_root.client import RootClient, native_identity
 
     run = Path(env["AVA_HOME"]) / "run" / "ava-root"
     manifest = tmp_path / "manifest.json"
@@ -77,12 +77,16 @@ def root_fixture(
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     client = RootClient(run / "ava-root.sock", timeout=2)
+    captured_root = None
 
     def ready():
+        nonlocal captured_root
         if proc.poll() is not None:
             raise AssertionError((tmp_path / "root.log").read_text())
         try:
-            return client.status()["ok"]
+            response = client.status()
+            captured_root = native_identity(response["result"]["root"])
+            return response["ok"]
         except Exception:
             return False
 
@@ -97,7 +101,10 @@ def root_fixture(
                 client.shutdown()
                 proc.wait(timeout=15)
             if proc.poll() is None:
-                proc.kill()
+                if captured_root is not None and captured_root.live():
+                    psutil.Process(captured_root.pid).kill()
+                else:
+                    proc.kill()
                 proc.wait(timeout=5)
         log.close()
 
@@ -240,3 +247,29 @@ time.sleep(120)
         )
         assert second.returncode != 0
         assert "another root supervisor" in second.stderr
+
+
+def test_failed_graceful_shutdown_retains_root_control_and_job(tmp_path, native_env):
+    receipt = tmp_path / "member"
+    with root_fixture(
+        tmp_path,
+        native_env,
+        sleeping_service(receipt, ignore=True),
+        ignore_break=True,
+    ) as (root, client, run, _):
+        wait_for(receipt.exists, "service grandchild did not start")
+        member = psutil.Process(int(receipt.read_text()))
+        assert client.shutdown()["ok"]
+        wait_for(
+            lambda: "retains custody after failed shutdown" in (tmp_path / "root.log").read_text(),
+            "failed graceful closure did not retain a controllable root",
+            timeout=20,
+        )
+        assert root.poll() is None
+        assert client.status()["ok"]
+        assert member.is_running()
+        assert (run / "custody/svc.json").exists()
+        assert client.force_down("svc")["ok"]
+        wait_for(lambda: ended(member), "explicit force did not close the retained Job")
+        assert client.shutdown()["ok"]
+        assert root.wait(timeout=10) == 0

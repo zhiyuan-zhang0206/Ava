@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import hashlib
+import math
 import os
 import time
 from collections.abc import Awaitable, Callable
@@ -116,6 +117,8 @@ def _deadline(deadline: float) -> None:
 
 
 def roundtrip(path: Path, payload: bytes, timeout: float) -> tuple[bytes, int]:
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("root pipe timeout must be finite and positive")
     deadline = time.monotonic() + timeout
     api = _api()
     handle = None

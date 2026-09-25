@@ -34,14 +34,19 @@ class ApplicationProcess:
         self.returncode: int | None = None
 
     async def wait(self) -> int:
-        if self.returncode is None:
-            self.returncode = await asyncio.to_thread(self._wait)
-            self._handles.close()
+        while self.returncode is None:
+            self.returncode = self._poll()
+            if self.returncode is None:
+                await asyncio.sleep(0.02)
+        self._handles.close()
         return self.returncode
 
-    def _wait(self) -> int:
+    def _poll(self) -> int | None:
         api = _process_api()
-        if api.WaitForSingleObject(self._handle, 0xFFFFFFFF) != 0:
+        outcome = api.WaitForSingleObject(self._handle, 0)
+        if outcome == 258:  # WAIT_TIMEOUT: no blocked executor thread outlives cancellation.
+            return None
+        if outcome != 0:
             raise _last_error("wait application generation")
         code = ctypes.c_uint32()
         if not api.GetExitCodeProcess(self._handle, ctypes.byref(code)):

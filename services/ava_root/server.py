@@ -1,4 +1,4 @@
-"""The K1 control-plane server: one unix socket, one JSON line per request.
+"""The K1 local control server: one JSON line per request over a socket or pipe.
 
 The handler passed in owns all business semantics (the supervisor's
 `dispatch`); this class owns the transport — read one line, validate it,
@@ -39,7 +39,7 @@ RequestHandler = Callable[[RequestPayload], Awaitable[ResponsePayload]]
 
 
 class ControlServer:
-    """Serves the control protocol on a unix socket."""
+    """Serves the control protocol over the platform's private local transport."""
 
     def __init__(
         self,

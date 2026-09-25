@@ -704,7 +704,7 @@ _shell_backend: SessionBackend | None = None
 def get_shell_backend() -> SessionBackend:
     """Return the backend for AGENT interactive shells and watchers —
     ``PtySessionBackend`` on POSIX (one detached host per session), the
-    native supervisor on Windows; distinct from ``get_backend()``
+    root-brokered durable terminal resources on Windows; distinct from ``get_backend()``
     (service/daemon + orchestration sessions). ``ava.shell.sessions`` and
     watcher sessions use this PTY backend — never the service backend.
     """
