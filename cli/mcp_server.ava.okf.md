@@ -45,6 +45,9 @@ Search matches a label substring or exact agent ID, and each call reads at most
 `get_messages` projects transcript rows to role, text, and the `execute_code`
 argument of each turn. Ava agents act by writing Python, so dropping the code
 would show an agent that talks and never acts.
+The projection, common server instructions, and seven tool descriptions live in
+`shared/api_contracts/mcp_tool_contract.py`; stdio adds its cluster-specific
+instruction ending. Tool schemas still come from the local function signatures.
 
 ## Invariants
 

@@ -13,6 +13,7 @@ gateway, no cluster.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any
@@ -23,6 +24,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 
 from cli import mcp_server
+from shared.api_contracts.mcp_tool_contract import message_text, project_message
 
 # The tools an external agent (Claude Code / Codex) sees. Pinned as a set: adding
 # one is a deliberate widening of what a third party can do to the fleet, and
@@ -126,6 +128,45 @@ async def _call(name: str, args: dict[str, Any]) -> Any:
 async def test_advertises_exactly_the_control_tools() -> None:
     tools = await mcp_server.build_server().list_tools()
     assert {t.name for t in tools} == _EXPECTED_TOOLS
+
+
+async def test_stdio_contract_matches_pre_extraction_golden(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    server = mcp_server.build_server()
+    tools = await server.list_tools()
+    contract = {
+        "instructions": server.instructions,
+        "tools": [
+            {"name": t.name, "description": t.description, "inputSchema": t.input_schema}
+            for t in sorted(tools, key=lambda t: t.name)
+        ],
+    }
+    encoded = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    assert hashlib.sha256(encoded.encode()).hexdigest() == (
+        "b0caa6530c966602fb64cbf2e51a8aba6ed1ff075edf21d4a37ddd8cca7ca8ef"
+    )
+    assert mcp_server.project_message is project_message
+    assert (
+        message_text([{"type": "text", "text": "one"}, {"type": "thinking", "text": "hidden"}])
+        == "one"
+    )
+    assert project_message(
+        {
+            "type": "ai",
+            "content": [
+                {"type": "text", "text": "first"},
+                {"type": "image"},
+                {"type": "text", "text": 42},
+            ],
+            "tool_calls": [{"args": {"code": "print(1)"}}, {"args": {"other": 1}}],
+        }
+    ) == {"role": "ai", "text": "first\n42", "code": ["print(1)"]}
+    assert project_message({"type": "human", "content": "plain"}) == {
+        "role": "human",
+        "text": "plain",
+    }
+    assert capsys.readouterr().out == ""
 
 
 async def test_tool_arguments_match_the_gateway_surface() -> None:
