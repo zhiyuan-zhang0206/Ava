@@ -18,8 +18,7 @@ A shared headed Chrome management service on agent-runner — a three-component 
 - **Shared MCP upstream**: `mcp_daemon.py` shares one `chrome-devtools-mcp` across agents. `gateway_session.py` logs in to the gateway, injects the opaque server session into Chrome over CDP, and refreshes it every six hours.
 - **Invariants**: serial lock (machine-wide, one browser operation at a time, no interleaving of multi-step sequences) + per-connection page affinity (each connection remembers its own current page; page-scoped calls first re-select before forwarding, so A's click won't land on B's tab) + bounded page lifetime (every page this stack creates carries a hard TTL deadline — 24h default, `renew_page` extends at most 24h per call)
 - **Automatic upstream reconnection** (#457): when upstream dies, the daemon automatically reconnects and lets clients retry, rather than exiting
-- **Per-agent MCP bridge**: `mcp_wrapper.py` provides each agent with a stdio MCP server, forwarding to the shared upstream via Unix socket (SDK v2 lowlevel `Server` — constructor-handler API `on_list_tools` / `on_call_tool`; raw arguments pass through unvalidated, the upstream does its own validation)
-- **Memory optimization**: reduced from N upstreams (each buffering all tab network/console traffic) to 1
+- **Per-agent MCP bridge**: `mcp_wrapper.py` exposes stdio tools from the shared upstream. SDK v2 lowlevel `Server` forwards raw arguments; the upstream validates them. `mcp_socket_bridge.py` shares socket framing and retry code with the computer wrapper; browser sets its own rejection and close policies. P1 safety change: write/drain errors surface without retry because delivery may be unknown and a browser action could repeat.
 - **Strongly-typed line protocol**: `protocol.py` defines `Request`/`Response` (`OkResponse | ErrResponse`, discriminated by `ok`) TypedDict — three processes, daemon (server), wrapper (client), `healthchecks/browser_mcp.py` (probe), share the same wire types, no longer hand-writing dict shapes individually.
 
 ## Gating
@@ -33,6 +32,7 @@ See [[services/agent_runner_side/browser/browser/gating.ava.okf.md]].
 - `services/browser/daemon.py` — Chrome launch (`AVA_BROWSER_ENABLED` **defaults to True**; `browser_incapability()` auto-gates machines lacking display/Chrome/npx)
 - `services/browser/mcp_daemon.py` — shared MCP upstream
 - `services/browser/mcp_wrapper.py` — per-agent MCP bridge
+- `services/browser/mcp_socket_bridge.py` — socket client shared by browser and computer wrappers
 - `services/browser/protocol.py` — line-protocol types shared by three processes
 - `services/browser/orphan.py` — identify + reap a Chrome on this cluster's profile that left the session tree (called from `_do_stop(keep_browser=False)`)
 - `services/browser/probe.py` — is the Chrome on this cluster's CDP port OURS (`DaemonProbe` verdict); the roster's `ServiceSpec.identity_probe` and `healthchecks/browser.py` both run it
@@ -45,4 +45,3 @@ See [[services/agent_runner_side/browser/browser/gating.ava.okf.md]].
 - `AVA_BROWSER_ENABLED` **defaults to True** (not opt-in) — auto-detects host capability (display + Chrome + npx); if unavailable, `browser_incapability()` automatically skips (`shared/platform_probes.py:123`; applied as a service gate in `ops/spec.py`)
 - Chrome profile is persistent, retaining login state
 - **no data plane**: neither daemon opens a Postgres connection at boot or at runtime (their whole data plane is CDP + the Unix socket), so both specs declare `requires_db=False` and the watchdog keeps reviving them through a DB outage or a schema mismatch — a DB-scoped round block holds back only the DB's users ([[services/watchdog/watchdog.ava.okf.md]])
-- mcp_wrapper transparently passes the tool list; upstream version upgrades automatically reflect
