@@ -12,10 +12,13 @@ from collections.abc import AsyncIterator
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
+import ava._mcp_computer as computer_mod
 from ava._mcp_computer import connect_computer_direct
+from shared import resilience
 
 
 class FakeServer:
@@ -116,3 +119,42 @@ async def test_daemon_error_surfaces(session_and_server: tuple[Any, FakeServer])
     server.error = "quota exceeded"
     with pytest.raises(RuntimeError, match="quota exceeded"):
         await session.call_tool("click", {"x": 1})
+
+
+@pytest.mark.parametrize("failure", [FileNotFoundError, ConnectionRefusedError])
+async def test_dial_computer_exhaustion_has_no_trailing_sleep(
+    monkeypatch: pytest.MonkeyPatch, failure: type[OSError]
+) -> None:
+    sleeps: list[float] = []
+    calls = 0
+
+    async def fail(*, path: str, limit: int) -> None:
+        nonlocal calls
+        calls += 1
+        assert (path, limit) == ("test.sock", computer_mod._LINE_LIMIT)
+        raise failure("offline")
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(computer_mod.asyncio, "open_unix_connection", fail)
+    monkeypatch.setattr(computer_mod.asyncio, "sleep", sleep)
+    monkeypatch.setattr(resilience, "_asleep", sleep)
+    with pytest.raises(ConnectionError) as error:
+        await computer_mod._dial_computer_mcp("test.sock")
+    assert str(error.value) == "computer-mcp daemon not reachable at test.sock: offline"
+    assert error.value.__context__ is None
+    assert calls == 10
+    assert sleeps == [0.5] * 9
+
+
+async def test_dial_computer_non_retryable_error_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = PermissionError("forbidden")
+    call = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(computer_mod.asyncio, "open_unix_connection", call)
+    with pytest.raises(PermissionError) as error:
+        await computer_mod._dial_computer_mcp("test.sock")
+    assert error.value is failure
+    assert call.await_count == 1

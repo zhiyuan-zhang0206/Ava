@@ -29,6 +29,7 @@ from typing import Any, NotRequired, TypedDict
 from shared.host.converge.accessibility import AccessibilityState, AccessibilityStatus
 from shared.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
 from shared.paths import permissions_helper_socket
+from shared.resilience import Policy, retry
 
 # Transport selection: named pipe on Windows, Unix socket elsewhere. A module
 # constant (not a live os.name check) so tests can flip the transport without
@@ -56,16 +57,40 @@ class PermissionsHelperError(RuntimeError):
 
 
 def _connect(path: str) -> socket.socket:
-    last: OSError | None = None
-    for _ in range(_CONNECT_ATTEMPTS):
+    phase = ["socket"]
+    policy = Policy(
+        max_attempts=_CONNECT_ATTEMPTS,
+        backoff=lambda attempt: _CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda exc: (
+            phase[0] == "connect" and isinstance(exc, (FileNotFoundError, ConnectionRefusedError))
+        ),
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
+    )
+
+    def once() -> socket.socket:
+        phase[0] = "socket"
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        phase[0] = "connect"
         try:
             s.connect(path)
             return s
-        except (FileNotFoundError, ConnectionRefusedError) as e:
-            last = e
+        except (FileNotFoundError, ConnectionRefusedError):
+            phase[0] = "close"
             s.close()
-            time.sleep(_CONNECT_DELAY_S)
+            phase[0] = "connect"
+            raise
+
+    last: OSError | None = None
+    try:
+        return retry(policy)(once)
+    except (FileNotFoundError, ConnectionRefusedError) as exc:
+        if phase[0] != "connect":
+            raise
+        last = exc
     raise PermissionsHelperError(f"permissions helper not reachable at {path}: {last}")
 
 
@@ -114,17 +139,27 @@ def _call_pipe(req: dict[str, object], *, disconnect_is_success: bool = False) -
     """Windows transport: named-pipe file I/O (see services.permissions_helper._win_pipe)."""
     from services.permissions_helper import _win_pipe
 
-    conn = handle = None
-    for _ in range(_CONNECT_ATTEMPTS):
-        try:
-            conn, handle = _win_pipe.connect()
-            break
-        except (ConnectionError, OSError):
-            time.sleep(_CONNECT_DELAY_S)
-    if conn is None:
+    policy = Policy(
+        max_attempts=_CONNECT_ATTEMPTS,
+        backoff=lambda attempt: _CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda exc: isinstance(exc, (ConnectionError, OSError)),
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
+    )
+    pair: tuple[Any, Any] | None = None
+    failure: OSError | None = None
+    try:
+        pair = retry(policy)(_win_pipe.connect)
+    except (ConnectionError, OSError) as exc:
+        failure = exc
+    if failure is not None or pair is None or pair[0] is None:
         raise PermissionsHelperError(
             f"permissions helper not reachable at pipe {_win_pipe.PIPE_NAME!r}"
         )
+    conn, handle = pair
     try:
         conn.write((json.dumps(req) + "\n").encode())
         conn.flush()

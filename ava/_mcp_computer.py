@@ -16,6 +16,8 @@ import json
 from contextlib import AsyncExitStack, suppress
 from typing import Any
 
+from shared.resilience import Policy, aretry
+
 # Snapshot results stay small (PNG metadata), but keep the same generous line
 # cap as the browser direct-dial so a future inline-image tier fits.
 _LINE_LIMIT = 64 * 1024 * 1024
@@ -116,13 +118,25 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
 async def _dial_computer_mcp(
     sock: str,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    last: Exception | None = None
-    for _ in range(_CONNECT_ATTEMPTS):
-        try:
-            return await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
-        except (FileNotFoundError, ConnectionRefusedError) as e:
-            last = e
-            await asyncio.sleep(_CONNECT_DELAY_S)
+    policy = Policy(
+        max_attempts=_CONNECT_ATTEMPTS,
+        backoff=lambda attempt: _CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda exc: isinstance(exc, (FileNotFoundError, ConnectionRefusedError)),
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
+    )
+
+    async def once() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        return await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
+
+    last: OSError | None = None
+    try:
+        return await aretry(policy)(once)
+    except (FileNotFoundError, ConnectionRefusedError) as exc:
+        last = exc
     raise ConnectionError(f"computer-mcp daemon not reachable at {sock}: {last}")
 
 
