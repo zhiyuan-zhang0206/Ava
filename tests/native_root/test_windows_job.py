@@ -62,8 +62,6 @@ time.sleep(120)
         await process.close(custody, timeout=5, force=True)
         assert process.job.active_processes() == 0
         assert all(not member.live() for member in captured)
-        if child is not None:
-            assert ended(child)
         assert unrelated.poll() is None
         custody.clear()
     finally:
@@ -74,3 +72,29 @@ time.sleep(120)
             child.wait(timeout=5)
         unrelated.kill()
         unrelated.wait(timeout=5)
+
+
+def test_exited_process_is_dead_while_its_original_handle_remains_open(tmp_path, native_env):
+    from shared.proc_tree import OwnedProcess
+
+    release = tmp_path / "release"
+    code = f"""import os,pathlib,time
+while not pathlib.Path({str(release)!r}).exists(): time.sleep(0.01)
+os._exit(259)
+"""
+    child = subprocess.Popen(  # noqa: S603 -- fixed fixture code, private native home.
+        [sys.executable, "-c", code], env=native_env
+    )
+    try:
+        identity = OwnedProcess.capture(psutil.Process(child.pid))
+        assert identity.live()
+        release.write_text("exit")
+        # Popen waits on its original native handle and retains it afterward.
+        # Exit 259 is also STILL_ACTIVE: exit-code comparison is not liveness.
+        assert child.wait(timeout=5) == 259
+        assert int(child._handle) > 0
+        assert not identity.live()
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)

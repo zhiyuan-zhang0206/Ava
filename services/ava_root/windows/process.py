@@ -70,12 +70,14 @@ class ApplicationProcess:
             self.job.terminate()
         elif self.job.active_processes():
             await self._graceful(custody, members, deadline)
-        while self.job.active_processes():
-            custody.retain(self.members())
+        while self.job.active_processes() or any(member.live() for member in members):
+            members |= self.members()
+            custody.retain(members)
             if time.monotonic() >= deadline:
                 raise TimeoutError("application Job still has members; custody retained")
             await asyncio.sleep(0.02)
-        # The original native Job is still open at the empty observation.
+        # The original Job remains open through zero accounting and observed
+        # native exits; retained PID objects are not mistaken for running code.
 
     async def _graceful(
         self, custody: ServiceCustody, members: set[OwnedProcess], deadline: float

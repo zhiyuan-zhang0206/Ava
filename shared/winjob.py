@@ -109,6 +109,10 @@ def _kernel32() -> Any:
     api.AssignProcessToJobObject.restype = _BOOL
     api.CloseHandle.argtypes = [wintypes.HANDLE]
     api.CloseHandle.restype = _BOOL
+    api.OpenProcess.argtypes = [_DWORD, _BOOL, _DWORD]
+    api.OpenProcess.restype = wintypes.HANDLE
+    api.WaitForSingleObject.argtypes = [wintypes.HANDLE, _DWORD]
+    api.WaitForSingleObject.restype = _DWORD
     api.TerminateJobObject.argtypes = [wintypes.HANDLE, _DWORD]
     api.TerminateJobObject.restype = _BOOL
     api.QueryInformationJobObject.argtypes = [

@@ -44,7 +44,9 @@ an immutable running release or seal ignored dependency directories.
   and home. No direct-spawn fallback exists. Helper stop intent survives helper
   restart; an explicit seed resumes the root.
 - Linux: `systemd/direct caller -> ava-root -> application services`. There is
-  no permissions helper, and “root” does not mean UID 0. A systemd unit invokes
+  no permissions helper, and “root” does not mean UID 0. Automatic boot uses
+  only systemd; ordinary convergence registers/enables the exact home unit with
+  its checkout and registry. Registration never recursively starts it. The unit invokes
   ordinary start with `Type=forking`. Its final successful dispatch tail publishes
   the exact root PID after checking native birth, home and cgroup. Systemd reads
   that private PIDFile only after the starter exits successfully, when root has
@@ -60,7 +62,11 @@ an immutable running release or seal ignored dependency directories.
   stop sends Ctrl-Break only to consoles whose complete membership matches the
   captured Job births. A native no-console observation on one member permits
   checking the remaining consoles; it never proves delivery or closure. Stop
-  still requires zero native Job members; force terminates that
+  still requires zero native Job members and native exit signals for every
+  observed birth; an exited Windows process object can retain its PID while
+  another handle remains open. Birth checks hold a native process handle and
+  test its exit signal rather than infer liveness from that PID's presence.
+  Force terminates that
   original Job. Root death closes the handles and kills members but leaves
   unresolved custody. The desktop helper is separate and is not an ancestor.
   The implementation and native Windows CI fixtures exist; ordinary Windows

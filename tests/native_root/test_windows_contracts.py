@@ -13,6 +13,7 @@ from services.ava_root import client
 from services.ava_root.ipc import encode, ok_response
 from services.ava_root.windows import console, process, transport
 from services.ava_root_glue.windows_terminal_owner import TerminalOwner
+from shared import proc_tree, winjob
 from shared.proc_tree import OwnedProcess
 
 
@@ -97,3 +98,83 @@ async def test_consoleless_live_member_never_becomes_a_closure_receipt(tmp_path,
     with pytest.raises(TimeoutError, match="Job still has members"):
         await application.close(custody, timeout=0.1, force=False)
     assert json.loads(custody.path.read_text())["processes"][0]["pid"] == member.pid
+
+
+@pytest.mark.parametrize("wait_result,expected", [(0, False), (258, True)])
+def test_windows_liveness_observes_exit_signal_with_retained_pid(
+    monkeypatch, wait_result, expected
+):
+    closed = []
+    api = SimpleNamespace(
+        OpenProcess=lambda *_: 123,
+        WaitForSingleObject=lambda *_: wait_result,
+        CloseHandle=lambda handle: closed.append(handle.value) or 1,
+    )
+    retained = SimpleNamespace(create_time=lambda: 42.0, status=lambda: psutil.STATUS_RUNNING)
+    monkeypatch.setattr(proc_tree, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(proc_tree.psutil, "Process", lambda _pid: retained)
+    monkeypatch.setattr(winjob, "_kernel32", lambda: api)
+    assert OwnedProcess(100, 42.0, None).live() is expected
+    assert closed == [123]
+
+
+def test_windows_liveness_binds_birth_while_native_handle_is_open(monkeypatch):
+    closed = []
+    api = SimpleNamespace(
+        OpenProcess=lambda *_: 123,
+        WaitForSingleObject=lambda *_: 258,
+        CloseHandle=lambda handle: closed.append(handle.value) or 1,
+    )
+
+    def birth():
+        assert not closed
+        return 43.0  # PID was reused before OpenProcess acquired this new object.
+
+    retained = SimpleNamespace(create_time=birth, status=lambda: psutil.STATUS_RUNNING)
+    monkeypatch.setattr(proc_tree, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(proc_tree.psutil, "Process", lambda _pid: retained)
+    monkeypatch.setattr(winjob, "_kernel32", lambda: api)
+    assert not OwnedProcess(100, 42.0, None).live()
+    assert closed == [123]
+
+
+@pytest.mark.parametrize("open_result,error", [(0, 5), (123, 6)])
+def test_windows_liveness_keeps_native_observation_errors_unknown(
+    monkeypatch, open_result, error
+):
+    closed = []
+    api = SimpleNamespace(
+        OpenProcess=lambda *_: open_result,
+        WaitForSingleObject=lambda *_: 0xFFFFFFFF,
+        CloseHandle=lambda handle: closed.append(handle.value) or 1,
+    )
+    monkeypatch.setattr(proc_tree, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(winjob, "_kernel32", lambda: api)
+    monkeypatch.setattr(winjob, "_get_last_error", lambda: error)
+    with pytest.raises(OSError, match=f"Win32 error {error}"):
+        OwnedProcess(100, 42.0, None).live()
+    assert closed == ([123] if open_result else [])
+
+
+async def test_job_zero_count_still_waits_for_every_observed_native_exit(tmp_path, monkeypatch):
+    from services.ava_root.custody import ServiceCustody
+
+    native_exited = False
+    observed = OwnedProcess(100, 42.0, None)
+    job = SimpleNamespace(active_processes=lambda: 0, terminate=lambda: None)
+    application = process.ApplicationProcess(100, 123, job, contextlib.ExitStack())
+    snapshots = iter([{observed}, set()])
+    monkeypatch.setattr(application, "members", lambda: next(snapshots))
+    monkeypatch.setattr(OwnedProcess, "live", lambda _: not native_exited)
+
+    async def finish_exit(_delay):
+        nonlocal native_exited
+        native_exited = True
+
+    monkeypatch.setattr(process, "asyncio", SimpleNamespace(sleep=finish_exit))
+    custody = ServiceCustody(tmp_path / "run", "application")
+    await application.close(custody, timeout=0.1, force=True)
+    assert native_exited
+    assert json.loads(custody.path.read_text())["processes"] == [
+        {"pid": 100, "birth": 42.0, "starttime": None}
+    ]
