@@ -20,7 +20,7 @@ auto-resurrected; `resurrect` reopens it.
 `ava.shell.run_background` and watcher exit notices are generated command lines
 ending in `ava agents send ... --source shell:N|watcher:N`, and a host operator
 can message any agent directly. A `send` that cannot reach the gateway is not
-lost: the deferred-delivery outbox (`shared/delivery_outbox`) records it on this
+lost: the deferred-delivery outbox (`shared.agents.messages.delivery_outbox`) records it on this
 machine and the ops daemon redelivers it once the gateway returns — the same
 coverage the SDK send path has. Richer capabilities (spawn an agent, inspect its
 events) stay in the `ava.*` SDK and the web UI.
@@ -170,7 +170,7 @@ def cmd_agents_send(
     (gateway behavior, same as the SDK path).
 
     A failed send is not lost: the deferred-delivery outbox
-    (`shared/delivery_outbox`) records a transport failure or a transient HTTP
+    (`shared.agents.messages.delivery_outbox`) records a transport failure or a transient HTTP
     response (429/5xx) on this machine under the message's idempotency key, and
     the machine's ops daemon redelivers it once the gateway returns. 4xx stay
     loud and unrecorded — the wire reason is application semantics, replay
