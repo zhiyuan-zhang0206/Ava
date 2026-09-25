@@ -122,8 +122,12 @@ def replace_crontab_entry(
     *,
     skip_phrase: str,
     update_failure: Callable[[str], None],
+    owns_line: Callable[[str], bool] | None = None,
 ) -> int:
-    """Replace matching lines; let the caller report a failed write in its own channel."""
+    """Replace owned lines, defaulting to a marker substring match.
+
+    The caller reports a failed write in its own channel.
+    """
     with crontab_lock():
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
         # Only benign "no crontab" means empty; other read failures must block a clobbering rewrite.
@@ -135,7 +139,11 @@ def replace_crontab_entry(
             )
             return 1
         current = result.stdout if result.returncode == 0 else ""
-        lines = [line for line in current.splitlines() if marker not in line]
+        lines = [
+            line
+            for line in current.splitlines()
+            if not (owns_line(line) if owns_line is not None else marker in line)
+        ]
         lines.append(entry)
         result = subprocess.run(
             ["crontab", "-"],
@@ -151,15 +159,33 @@ def replace_crontab_entry(
 
 
 def remove_crontab_entry(
-    marker: str, *, write_failure_rc: int, on_removed: Callable[[], None] | None
+    marker: str,
+    *,
+    write_failure_rc: int,
+    on_removed: Callable[[], None] | None,
+    owns_line: Callable[[str], bool] | None = None,
+    on_read_failed: Callable[[], None] | None = None,
+    on_absent: Callable[[], None] | None = None,
 ) -> int:
-    """Remove matching lines; notify the caller only after a successful write."""
+    """Remove owned lines, defaulting to a marker substring match.
+
+    Read failure and absent callbacks run before their no-op return. Removal is
+    reported only after a successful write.
+    """
     with crontab_lock():
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
         if result.returncode != 0:
+            if on_read_failed is not None:
+                on_read_failed()
             return 0
-        lines = [line for line in result.stdout.splitlines() if marker not in line]
+        lines = [
+            line
+            for line in result.stdout.splitlines()
+            if not (owns_line(line) if owns_line is not None else marker in line)
+        ]
         if len(lines) == len(result.stdout.splitlines()):
+            if on_absent is not None:
+                on_absent()
             return 0
         result = subprocess.run(
             ["crontab", "-"],
@@ -463,86 +489,58 @@ def _register_linux(interval_s: int, threshold: int) -> int:
     way converge degrades on an absent browser / permissions-helper. A real long-lived
     gateway has cron and registers normally; an actual registration error (cron
     present but the write fails) still returns non-zero below."""
-    import shutil
-
-    if shutil.which("crontab") is None:
-        print(  # noqa: T201
-            "  ! health probe cron: crontab not installed on this host (skipping); "
-            "cluster runs without a health-probe cron"
-        )
-        return 0
+    missing = require_crontab(
+        "  ! health probe cron: crontab not installed on this host (skipping); "
+        "cluster runs without a health-probe cron",
+        missing_returncode=0,
+        missing_stream=sys.stdout,
+    )
+    if missing is not None:
+        return missing
 
     ava_path = ava_binary_path()
+    slug = _home_slug()
+    minutes = max(1, interval_s // 60)
+    entry = (
+        f"*/{minutes} * * * * {cron_env_prefix()}{ava_path} cluster health-probe "
+        f"--auto-rollback --threshold {threshold} {_cron_marker(slug)}"
+    )
 
-    # Read current crontab. A non-zero rc is only safe to treat as "no crontab
-    # yet" when it IS that case — any other failure (permissions, a broken cron)
-    # would make the rewrite below clobber the user's real crontab from "".
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0 and "no crontab" not in (result.stderr or "").lower():
-            print(  # noqa: T201
-                f"  * crontab -l failed ({result.stderr.strip() or result.returncode}); "
-                "skipping health-probe registration to avoid clobbering the crontab",
-                file=sys.stderr,
-            )
-            return 1
-        current = result.stdout if result.returncode == 0 else ""
+    def report_update_failure(err: str) -> None:
+        print(f"  * crontab update failed: {err}", file=sys.stderr)  # noqa: T201
 
-        # Drop this cluster's own entry (and any pre-marker one, see _is_ava_health_probe_line),
-        # leaving a co-located cluster's marked line alone.
-        slug = _home_slug()
-        lines = [line for line in current.splitlines() if not _owns_health_probe_line(line, slug)]
-
-        # Add the new entry, marker-tagged so a later unregister can tell whose it is.
-        minutes = max(1, interval_s // 60)
-        new_entry = (
-            f"*/{minutes} * * * * {cron_env_prefix()}{ava_path} cluster health-probe "
-            f"--auto-rollback --threshold {threshold} {_cron_marker(slug)}"
-        )
-        lines.append(new_entry)
-
-        # Write the new crontab.
-        new_crontab = "\n".join(lines) + "\n"
-        result = subprocess.run(
-            ["crontab", "-"],
-            input=new_crontab,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            print(f"  * crontab update failed: {result.stderr}", file=sys.stderr)  # noqa: T201
-            return 1
+    rc = replace_crontab_entry(
+        _cron_marker(slug),
+        entry,
+        skip_phrase="health-probe registration",
+        update_failure=report_update_failure,
+        owns_line=lambda line: _owns_health_probe_line(line, slug),
+    )
+    if rc == 0:
         print(f"  . crontab entry added (every {minutes} min, threshold={threshold})")  # noqa: T201
-        return 0
+    return rc
 
 
 def _unregister_linux(slug: str) -> int:
     """Remove one cluster's health-probe entry from the user's crontab."""
-    with crontab_lock():
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            print("  . no crontab to unregister")  # noqa: T201
-            return 0
 
-        lines = [
-            line for line in result.stdout.splitlines() if not _owns_health_probe_line(line, slug)
-        ]
+    def report_read_failure() -> None:
+        print("  . no crontab to unregister")  # noqa: T201
 
-        if len(lines) == len(result.stdout.splitlines()):
-            print("  . no Ava health-probe entry found in crontab")  # noqa: T201
-            return 0
+    def report_absent() -> None:
+        print("  . no Ava health-probe entry found in crontab")  # noqa: T201
 
-        new_crontab = "\n".join(lines) + "\n"
-        subprocess.run(
-            ["crontab", "-"],
-            input=new_crontab,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+    def report_removed() -> None:
         print("  . crontab entry removed")  # noqa: T201
-    return 0
+
+    return remove_crontab_entry(
+        _cron_marker(slug),
+        write_failure_rc=0,
+        on_removed=report_removed,
+        owns_line=lambda line: _owns_health_probe_line(line, slug),
+        on_read_failed=report_read_failure,
+        on_absent=report_absent,
+    )
 
 
 # Windows-only: how long ONE health-probe invocation may run before Task Scheduler
