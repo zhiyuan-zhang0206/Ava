@@ -21,8 +21,8 @@ non-True attribute refuses entry):
   lands with the checked-activation change that replaces the release fence
   (task #4117 S5).
 - ``MANAGED_WRITER_WIRING_COMPLETE`` in ``cli/commands/_update_publication.py``:
-  set by the final wiring slice (task #4122 E2) as the completion declaration
-  in the module still describing its seats as inert.
+  set by the final wiring slice (task #4128 E2-e) as the completion declaration,
+  after every seat's production caller landed.
 
 Read-once semantics: `decide_managed_writer_mode` reads the switch at most once
 per process and caches the decision; a re-entry reuses it, so every call site
