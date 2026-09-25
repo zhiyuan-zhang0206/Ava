@@ -101,6 +101,8 @@ class TerminalOwner:
     async def observe(self) -> None:
         while not self.done.is_set():
             async with self._lock:
+                if self.done.is_set():
+                    return
                 if not self.process.job.active_processes():
                     await self.finish()
                     return

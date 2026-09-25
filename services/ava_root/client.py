@@ -111,7 +111,7 @@ class RootClient:
         request: dict[str, object] = {"verb": verb}
         if name is not None:
             request["name"] = name
-        raw = self._roundtrip(encode(request))
+        raw = self._roundtrip(encode(request), status=verb == "status")
         try:
             return parse_response(raw)
         except ProtocolError as exc:
@@ -158,7 +158,7 @@ class RootClient:
         except ProtocolError as exc:
             raise RootClientError(f"malformed resource response: {exc}") from exc
 
-    def _roundtrip(self, payload: bytes) -> bytes:
+    def _roundtrip(self, payload: bytes, *, status: bool = False) -> bytes:
         """One connect/send/read cycle; OSErrors become RootClientError."""
         try:
             if sys.platform == "win32":
@@ -167,12 +167,12 @@ class RootClient:
                 raw, peer = roundtrip(self._socket_path, payload, self._timeout)
                 response = parse_response(raw)
                 body = response.get("result")
-                if (
-                    isinstance(body, dict)
-                    and "root" in body
-                    and native_identity(cast("dict[str, object]", body)["root"]).pid != peer
-                ):
-                    raise RootClientError("root status does not name the native pipe peer")
+                if status and response["ok"]:
+                    if not isinstance(body, dict):
+                        raise RootClientError("root status omitted its native identity")
+                    root = native_identity(cast("dict[str, object]", body).get("root"))
+                    if root.pid != peer:
+                        raise RootClientError("root status does not name the native pipe peer")
                 return raw
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.settimeout(self._timeout)

@@ -43,14 +43,26 @@ def _console_members(kernel: Any, births: dict[int, float], pid: int) -> set[int
     return members
 
 
-def deliver(path: Path, digest: str, pid: int, deadline: float) -> None:
+def _attach_console(kernel: Any, pid: int) -> bool:
+    kernel.FreeConsole()
+    if kernel.AttachConsole(pid):
+        return True
+    code = cast(Any, ctypes).get_last_error()
+    if code == 6:  # ERROR_INVALID_HANDLE: this captured member has no console.
+        return False
+    raise OSError(code, f"AttachConsole({pid}) failed with Win32 error {code}")
+
+
+def deliver(path: Path, digest: str, pid: int, deadline: float) -> dict[str, object]:
     if sys.platform != "win32":
         raise RuntimeError("application console delivery requires Windows")
     content, births = _custody(path, digest, pid)
     kernel = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
-    kernel.FreeConsole()
-    if not kernel.AttachConsole(pid):
-        raise OSError("cannot attach the captured application console")
+    if not _attach_console(kernel, pid):
+        # Job members include console hosts and processes that detached. Their
+        # absence from a console is not delivery or closure: the owner must
+        # still signal the other captured consoles and observe an empty Job.
+        return {"delivered_pids": [], "consoleless_pid": pid}
     handled = threading.Event()
     callback_type = cast(Any, ctypes).WINFUNCTYPE(ctypes.c_int32, ctypes.c_uint32)
 
@@ -69,10 +81,11 @@ def deliver(path: Path, digest: str, pid: int, deadline: float) -> None:
             raise OSError("application Ctrl-Break was rejected")
         if not handled.wait(min(1.0, max(0.0, deadline - time.monotonic()))):
             raise TimeoutError("console sender did not observe its own event")
-        sys.stdout.write(json.dumps({"delivered_pids": sorted(members)}) + "\n")
+        return {"delivered_pids": sorted(members)}
     finally:
         kernel.FreeConsole()
 
 
 if __name__ == "__main__":
-    deliver(Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), float(sys.argv[4]))
+    result = deliver(Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), float(sys.argv[4]))
+    sys.stdout.write(json.dumps(result) + "\n")

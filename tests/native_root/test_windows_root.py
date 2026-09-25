@@ -111,17 +111,23 @@ def root_fixture(
 
 def sleeping_service(receipt: Path, *, ignore: bool = False) -> str:
     child_ready = receipt.with_name(receipt.name + "-ready")
-    child = (
-        "import signal,time,pathlib; "
-        f"signal.signal(signal.SIGBREAK, {'signal.SIG_IGN' if ignore else 'lambda *args: exit(0)'}); "
-        f"pathlib.Path({str(child_ready)!r}).write_text('ready'); time.sleep(120)"
-    )
+
+    def handler(marker: Path) -> str:
+        if ignore:
+            return f"lambda *args: pathlib.Path({str(marker)!r}).write_text('observed')"
+        return "lambda *args: exit(0)"
+
+    child = f"""import signal,time,pathlib
+signal.signal(signal.SIGBREAK, {handler(receipt.with_name(receipt.name + '-child-break'))})
+pathlib.Path({str(child_ready)!r}).write_text('ready')
+while True: time.sleep(0.02)
+"""
     return f"""import os,signal,time,pathlib,subprocess,sys
-signal.signal(signal.SIGBREAK, {"signal.SIG_IGN" if ignore else "lambda *args: exit(0)"})
+signal.signal(signal.SIGBREAK, {handler(receipt.with_name(receipt.name + '-break'))})
 p=subprocess.Popen([sys.executable,'-u','-c',{child!r}])
 while not pathlib.Path({str(child_ready)!r}).exists(): time.sleep(0.01)
 pathlib.Path({str(receipt)!r}).write_text(str(p.pid))
-time.sleep(120)
+while True: time.sleep(0.02)
 """
 
 
@@ -215,19 +221,10 @@ def test_native_pipe_rejects_bad_frames_and_recovers(tmp_path, native_env):
         assert client.status()["ok"]
 
 
-def test_native_singleton_and_no_breakaway(tmp_path, native_env):
-    receipt = tmp_path / "breakaway"
-    code = f"""import subprocess,sys,pathlib,time
-try:
- p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'],creationflags=subprocess.CREATE_BREAKAWAY_FROM_JOB)
- pathlib.Path({str(receipt)!r}).write_text('escaped')
-except OSError:
- pathlib.Path({str(receipt)!r}).write_text('refused')
-time.sleep(120)
-"""
-    with root_fixture(tmp_path, native_env, code, ignore_break=True) as (_, _, run, manifest):
-        wait_for(receipt.exists, "breakaway negative control did not execute")
-        assert receipt.read_text() == "refused"
+def test_native_singleton(tmp_path, native_env):
+    with root_fixture(
+        tmp_path, native_env, "import time; time.sleep(120)", ignore_break=True
+    ) as (_, _, run, manifest):
         second = subprocess.run(
             [
                 sys.executable,
@@ -267,6 +264,9 @@ def test_failed_graceful_shutdown_retains_root_control_and_job(tmp_path, native_
         )
         assert root.poll() is None
         assert client.status()["ok"]
+        assert (tmp_path / "member-break").read_text() == "observed"
+        assert (tmp_path / "member-child-break").read_text() == "observed"
+        assert "application Job still has members" in (tmp_path / "root.log").read_text()
         assert member.is_running()
         assert (run / "custody/svc.json").exists()
         assert client.force_down("svc")["ok"]

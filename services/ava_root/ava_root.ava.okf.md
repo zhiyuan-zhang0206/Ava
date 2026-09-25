@@ -45,16 +45,22 @@ an immutable running release or seal ignored dependency directories.
   restart; an explicit seed resumes the root.
 - Linux: `systemd/direct caller -> ava-root -> application services`. There is
   no permissions helper, and “root” does not mean UID 0. A systemd unit invokes
-  ordinary start with `Type=notify`. Only its successful readiness tail sends
-  acknowledged `READY=1` and `MAINPID`, after checking root birth and matching
-  native cgroup; it rechecks manager adoption before returning. No resident boot
-  wrapper or root runtime deadline exists. Interactive start has no notify tail.
+  ordinary start with `Type=forking`. Its final successful dispatch tail publishes
+  the exact root PID after checking native birth, home and cgroup. Systemd reads
+  that private PIDFile only after the starter exits successfully, when root has
+  become its child; native stop therefore waits for root closure. The retained
+  child handle prevents early reaping and PID reuse before adoption. PIDFile is
+  an adoption hint, never replacement custody. Failed start cannot become ready.
+  No resident boot wrapper or root runtime deadline exists; interactive start
+  writes no PIDFile. `KillMode=process` preserves independent data-plane siblings.
 - Windows: `caller -> ava-root -> application Jobs`. A current-user-only local
   named pipe carries control, an exclusive native file handle owns the singleton,
   and custody publication uses flushed bytes plus write-through rename. Every
   application is created atomically in a retained, non-breakaway Job. Normal
   stop sends Ctrl-Break only to consoles whose complete membership matches the
-  captured Job births, then observes zero native members; force terminates that
+  captured Job births. A native no-console observation on one member permits
+  checking the remaining consoles; it never proves delivery or closure. Stop
+  still requires zero native Job members; force terminates that
   original Job. Root death closes the handles and kills members but leaves
   unresolved custody. The desktop helper is separate and is not an ancestor.
   The implementation and native Windows CI fixtures exist; ordinary Windows

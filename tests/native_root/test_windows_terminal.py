@@ -39,7 +39,7 @@ from shared.windows_terminal.backend import WindowsTerminalBackend
 signal.signal(signal.SIGBREAK, lambda *args: exit(0))
 WindowsTerminalBackend().new_session('native-terminal', {command!r}, pathlib.Path({str(tmp_path)!r}), env=dict(os.environ))
 pathlib.Path({str(birth_receipt)!r}).write_text('ready')
-time.sleep(120)
+while True: time.sleep(0.02)
 """
     try:
         with root_fixture(tmp_path, native_env, service_code, terminal_broker=True) as (
