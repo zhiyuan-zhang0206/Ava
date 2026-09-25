@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import psutil
 import pytest
@@ -272,6 +273,75 @@ def test_kill_process_tree_on_an_absent_pid_is_a_noop() -> None:
     """Killing a pid that is already gone must not raise — every caller reaches
     this racing the process's own exit."""
     kill_process_tree(2_000_000_000)
+
+
+def test_kill_process_tree_skips_stale_ancestry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stale children() map must not authorize signalling an unrelated PID."""
+    argv, pid_file = _fixture(tmp_path, _PARENT_SRC)
+    real_children = psutil.Process.children
+    with (
+        subprocess.Popen(argv) as parent,  # noqa: S603 - test-owned interpreter and script
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"]) as unrelated,
+    ):
+        try:
+            deadline = time.monotonic() + 5
+            while not pid_file.exists():
+                assert time.monotonic() < deadline, "fixture did not start"
+                time.sleep(0.01)
+            grandchild_pid = _grandchild_pid(pid_file)
+
+            def stale_children(
+                process: psutil.Process, recursive: bool = False
+            ) -> list[psutil.Process]:
+                children = real_children(process, recursive=recursive)
+                if process.pid == parent.pid:
+                    children.append(psutil.Process(unrelated.pid))
+                return children
+
+            monkeypatch.setattr(psutil.Process, "children", stale_children)
+            kill_process_tree(parent.pid, grace_s=0.1)
+            assert _dead(parent.pid)
+            assert _wait_dead(grandchild_pid), "real descendant survived cleanup"
+            assert unrelated.poll() is None, "stale ancestry authorized an unrelated process signal"
+        finally:
+            parent.kill()
+            unrelated.kill()
+            if pid_file.exists():
+                kill_process_tree(_grandchild_pid(pid_file), grace_s=0.1)
+
+
+@pytest.mark.parametrize("changed_before", ["terminate", "kill"])
+def test_kill_process_tree_skips_changed_identity(
+    monkeypatch: pytest.MonkeyPatch, changed_before: str
+) -> None:
+    """A PID with different birth evidence is spared at either signal boundary."""
+    parent = Mock(spec=psutil.Process, pid=100)
+    captured = Mock(spec=psutil.Process, pid=200)
+    captured.create_time.return_value = 1.0
+    current = Mock(spec=psutil.Process, pid=200)
+    current.create_time.return_value = 2.0 if changed_before == "terminate" else 1.0
+    current.is_running.return_value = True
+    current.parents.return_value = [parent]
+    parent.children.return_value = [captured]
+
+    def process_at_pid(pid: int) -> Mock:
+        return parent if pid == 100 else current
+
+    monkeypatch.setattr(psutil, "Process", process_at_pid)
+
+    def wait_procs(
+        processes: list[psutil.Process], *, timeout: float
+    ) -> tuple[list[psutil.Process], list[psutil.Process]]:
+        current.create_time.return_value = 2.0  # PID reused during the grace wait.
+        return [], processes
+
+    monkeypatch.setattr(psutil, "wait_procs", wait_procs)
+    kill_process_tree(100, include_root=False)
+    assert captured.terminate.call_count == (0 if changed_before == "terminate" else 1)
+    captured.kill.assert_not_called()
+    parent.terminate.assert_not_called()
 
 
 # --- the subprocess.run-shaped surface -----------------------------------

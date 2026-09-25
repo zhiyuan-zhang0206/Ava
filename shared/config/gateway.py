@@ -8,12 +8,19 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import Field, HttpUrl, field_validator
+from pydantic import Field, HttpUrl, JsonValue, field_validator
 from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
 from shared.config.managed_writer_fields import ManagedWriterFields
 from shared.config.update_spawn_fields import UpdateSpawnFields
+
+_SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
+    "restart_required": "schedule",
+    "writable": True,
+    "sensitive": False,
+    "scope": "cluster-pinned",
+}
 
 
 class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
@@ -477,28 +484,23 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
     schedule_stall_timeout_seconds: float = Field(
         default=1200.0,
         alias="AVA_SCHEDULE_STALL_TIMEOUT_SECONDS",
-        description="How long a schedule runner's main thread may sit in one "
-        "frame before the stall guard records last_error and hard-exits (the "
-        "ScheduleManager then relaunches with backoff). Guards against a hung "
-        "gateway / DB call silently eating a schedule's fire window.",
-        json_schema_extra={
-            "restart_required": "schedule",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
+        description="How long a schedule runner may stall in one frame before child cleanup, bounded failure recording and hard exit. Guards against hung gateway / DB calls; ScheduleManager relaunches with backoff.",
+        json_schema_extra=_SCHEDULE_RESTART_METADATA,
     )
-
     schedule_stall_check_interval_seconds: float = Field(
         default=30.0,
         alias="AVA_SCHEDULE_STALL_CHECK_INTERVAL_SECONDS",
         description="How often the schedule runner's stall guard samples the main thread's frame.",
-        json_schema_extra={
-            "restart_required": "schedule",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
+        json_schema_extra=_SCHEDULE_RESTART_METADATA,
+    )
+
+    schedule_stall_exit_record_deadline_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        allow_inf_nan=False,
+        alias="AVA_SCHEDULE_STALL_EXIT_RECORD_DEADLINE_SECONDS",
+        description="Total seconds allowed for both failure-record writes after stall child cleanup. The 10-second default allows ordinary DB latency while bounding exit when the DB is wedged; tune for cluster latency.",
+        json_schema_extra=_SCHEDULE_RESTART_METADATA,
     )
 
     work_failed_retry_grace_seconds: float = Field(
