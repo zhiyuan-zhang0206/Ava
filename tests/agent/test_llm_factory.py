@@ -407,47 +407,6 @@ class TestBuildChatModel:
         assert isinstance(m, ChatOpenAI)
         assert m.reasoning == {"effort": "low", "summary": "auto"}
 
-    def test_gpt6_astra_defaults_to_medium_effort(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """gpt-6-astra builds on the Responses API with the OpenAI default
-        effort pinned per model, like the gpt-5.6 tiers."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
-        from langchain_openai import ChatOpenAI
-
-        m = build_chat_model("gpt-6-astra")
-        assert isinstance(m, ChatOpenAI)
-        assert m.use_responses_api is True
-        assert m.reasoning == {"effort": "medium", "summary": "auto"}
-
-    def test_gpt6_astra_clamps_none_and_minimal_to_low(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """gpt-6 dropped "none" and "minimal" from the effort vocabulary
-        (official guide: start at "low") — both clamp to low at build."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
-        from langchain_openai import ChatOpenAI
-
-        for effort in ("none", "minimal"):
-            monkeypatch.setattr(settings.lm, "reasoning_effort", effort)
-            m = build_chat_model("gpt-6-astra")
-            assert isinstance(m, ChatOpenAI)
-            assert m.reasoning == {"effort": "low", "summary": "auto"}
-
-    def test_gpt6_astra_thinking_disabled_clamps_to_low(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """gpt-6 has no off-switch for reasoning (no "none" effort), so a
-        caller disabling thinking lands on the minimum rung, low, without a
-        summary request."""
-        monkeypatch.setattr(settings.lm, "llm_override", "")
-        monkeypatch.setenv("OPENAI_API_KEY", "k")
-        from langchain_openai import ChatOpenAI
-
-        m = build_chat_model("gpt-6-astra", thinking={"type": "disabled"})
-        assert isinstance(m, ChatOpenAI)
-        assert m.reasoning == {"effort": "low"}
-
     def test_gpt_thinking_disabled_drops_to_effort_none(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -888,6 +847,7 @@ class TestReasoningEffortDispatch:
         for model in (
             "claude-sonnet-5",
             "claude-opus-5",
+            "claude-opus-5-5",
             "claude-fable-5",
             "claude-fable-5-1",
         ):

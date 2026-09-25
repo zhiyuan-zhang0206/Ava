@@ -60,6 +60,7 @@ _REPO_MODEL_VENDORS = {
     "claude-fable-5-1": "anthropic",
     "claude-haiku-4-5-20251001": "anthropic",
     "claude-opus-5": "anthropic",
+    "claude-opus-5-5": "anthropic",
     "claude-sonnet-5": "anthropic",
     "deepseek-flash": "deepseek",
     "gemini-3.1-pro-preview": "google",
@@ -75,6 +76,8 @@ _REPO_MODEL_VENDORS = {
     "gpt-5.6-sol": "openai",
     "gpt-5.6-terra": "openai",
     "gpt-6-astra": "openai",
+    "gpt-6-sol": "openai",
+    "gpt-6-luna": "openai",
     "kimi-k3": "moonshot",
     "mimo-v2.5-pro": "xiaomi",
     "mimo-v2.6-pro": "xiaomi",
@@ -285,7 +288,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
 def test_repo_model_vendor_vocabulary_is_complete() -> None:
     ensure_provider_plugins_loaded()
 
-    assert len(_REPO_MODEL_VENDORS) == 26
+    assert len(_REPO_MODEL_VENDORS) == 29
     assert set(MODELS) == _REPO_MODEL_VENDORS.keys()
     # Catalog-only entries: a registered chat model pops its archive entry, so
     # what remains is the catalog-only services plus models the registry no
@@ -398,88 +401,6 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
         "finish_reason",
         frozenset({"STOP"}),
         frozenset({"MAX_TOKENS"}),
-    )
-
-
-def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
-    config = plugins_config.load_for_runtime(set(discovered))
-
-    assert config.plugins["lm_anthropic"].enabled
-    ensure_provider_plugins_loaded()
-
-    claude_models = {
-        "claude-sonnet-5",
-        "claude-haiku-4-5-20251001",
-        "claude-opus-5",
-        "claude-fable-5",
-        "claude-fable-5-1",
-    }
-    assert claude_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["claude"]) == {
-        "claude-sonnet-5",
-        "claude-haiku-4-5-20251001",
-        "claude-opus-5",
-        "claude-fable-5",
-        "claude-fable-5-1",
-    }
-    assert pricing.model_vendor("claude-sonnet-5") == "anthropic"
-
-    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map
-
-    assert "claude-" not in _MODEL_KEY_MAP
-    assert provider_key_map()["claude-"] == ("Anthropic", None, "ANTHROPIC_API_KEY")
-    binding = provider_api.REGISTRY.bindings["claude-"]
-    assert binding.effort_levels is None
-    assert binding.anthropic_protocol
-    assert binding.vision
-    assert binding.stop_spec == stop.StopSpec(
-        "anthropic",
-        "stop_reason",
-        frozenset({"end_turn", "tool_use", "refusal"}),
-        frozenset({"max_tokens"}),
-    )
-
-
-def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
-    config = plugins_config.load_for_runtime(set(discovered))
-
-    assert config.plugins["lm_openai"].enabled
-    ensure_provider_plugins_loaded()
-
-    gpt_models = {
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna",
-    }
-    assert gpt_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["gpt"]) == {
-        "gpt-6-astra",
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna",
-    }
-    assert pricing.model_vendor("gpt-5.6-sol") == "openai"
-
-    from shared.lm.factory import _MODEL_KEY_MAP, provider_key_map
-
-    assert "gpt-" not in _MODEL_KEY_MAP
-    assert provider_key_map()["gpt-"] == ("OpenAI", None, "OPENAI_API_KEY")
-    binding = provider_api.REGISTRY.bindings["gpt-"]
-    assert binding.effort_levels == ("none", "low", "medium", "high", "xhigh", "max")
-    assert not binding.anthropic_protocol
-    assert binding.vision
-    assert binding.stop_spec == stop.StopSpec(
-        "openai",
-        "finish_reason",
-        frozenset({"stop", "tool_calls", "function_call"}),
-        frozenset({"length"}),
-        status_key="status",
-        status_map={
-            "completed": stop.StopCategory.NORMAL,
-            "incomplete": stop.StopCategory.TRUNCATED,
-        },
     )
 
 

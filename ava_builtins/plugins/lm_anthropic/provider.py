@@ -68,6 +68,16 @@ def claude_extended_thinking_kwarg(
     return None
 
 
+def _effective_thinking(ctx: BuildContext, spec: ModelSpec) -> Mapping[str, Any] | None:
+    thinking = ctx.thinking
+    if thinking is not None and thinking.get("type") == "disabled" and spec.thinking_always_on:
+        logger.warning(
+            f"{ctx.model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored"
+        )
+        return None
+    return thinking
+
+
 def build(ctx: BuildContext) -> BaseChatModel:
     """claude-* branch: ThinkingTokensChatAnthropic, pinned max_tokens.
 
@@ -84,12 +94,6 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # (or not) and hangs rather than surfacing a clear error.
     api_key = require_key("ANTHROPIC_API_KEY")
 
-    extra_kwargs: dict[str, Any] = {}
-    if ctx.thinking is not None:
-        extra_kwargs["thinking"] = ctx.thinking
-    if ctx.disable_streaming:
-        extra_kwargs["disable_streaming"] = True
-
     # Per-model output cap (ModelSpec.max_output_tokens). Same fail-fast
     # posture as the deepseek branch — an unregistered claude model raises
     # rather than falling back to langchain's stale profile table (4096
@@ -101,7 +105,13 @@ def build(ctx: BuildContext) -> BaseChatModel:
             f"max_output_tokens) in `shared/lm/registry.py:MODELS`"
         )
 
-    thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
+    thinking = _effective_thinking(ctx, spec)
+    thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
+    extra_kwargs: dict[str, Any] = {}
+    if thinking is not None:
+        extra_kwargs["thinking"] = thinking
+    if ctx.disable_streaming:
+        extra_kwargs["disable_streaming"] = True
 
     # Reasoning effort rides ChatAnthropic's `effort` field
     # (output_config.effort on the wire), gated per model — extended-
@@ -125,7 +135,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # onto their thinking on/off binary.
     extended_thinking = claude_extended_thinking_kwarg(
         ctx.model,
-        thinking=ctx.thinking,
+        thinking=thinking,
         budget_tokens=resolve_setting("claude_thinking_budget_tokens", model=ctx.model),
         reasoning_effort=effort,
     )
@@ -141,7 +151,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         # Opt into summarized thinking text explicitly; a caller-passed
         # config keeps its own `display` when it set one.
         wire_thinking: dict[str, Any] = (
-            dict(ctx.thinking) if ctx.thinking is not None else {"type": "adaptive"}
+            dict(thinking) if thinking is not None else {"type": "adaptive"}
         )
         wire_thinking.setdefault("display", "summarized")
         extra_kwargs["thinking"] = wire_thinking
@@ -226,6 +236,10 @@ register(
         "claude-opus-5": ModelSpec(
             provider="claude",
             spawnable=True,
+            # Anthropic lists Opus 5 as Legacy and provides a 5.5 migration guide;
+            # display only, config remains valid.
+            # https://www.anthropic.com/pricing (checked 2026-09-25).
+            superseded_by="claude-opus-5-5",
             context_window=1_000_000,
             max_output_tokens=128_000,
             knowledge_cutoff="2026-01",
@@ -239,6 +253,22 @@ register(
             ),
             media_types=frozenset({"image", "pdf"}),
         ),
+        "claude-opus-5-5": ModelSpec(
+            provider="claude",
+            spawnable=True,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            knowledge_cutoff="2026-06",
+            effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
+            # Live-checked 2026-09-25: thinking.type.disabled 400s; adaptive is always on.
+            # https://docs.claude.com/en/docs/models/opus-5-5/overview
+            thinking_always_on=True,
+            tuning=ModelTuning(
+                reasoning_effort="medium",  # Anthropic's documented Opus 5.5 default.
+                prompt_user_tone_enabled=False,
+            ),
+            media_types=frozenset({"image", "pdf"}),
+        ),
         "claude-fable-5": ModelSpec(
             provider="claude",
             spawnable=True,
@@ -247,6 +277,8 @@ register(
             max_output_tokens=128_000,
             knowledge_cutoff="2026-01",
             effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
+            # Live-checked 2026-09-25: thinking.type.disabled 400s; adaptive is always on.
+            thinking_always_on=True,
             tuning=ModelTuning(
                 # Pinned 2026-08-01 (task #568): Anthropic documents `high` as the
                 # family default (see claude-sonnet-5).
@@ -273,6 +305,8 @@ register(
             max_output_tokens=128_000,
             knowledge_cutoff="2026-06",
             effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
+            # Live-checked 2026-09-25: thinking.type.disabled 400s; adaptive is always on.
+            thinking_always_on=True,
             tuning=ModelTuning(
                 # Pinned 2026-08-01 (task #568): Anthropic documents `high` as the
                 # family default (see claude-sonnet-5).
@@ -363,6 +397,30 @@ register(
                             cache_miss="5.0",
                             cache_hit="0.50",
                             output="25.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "claude-opus-5-5": PriceRates(
+            cache_miss=4.0,
+            cache_hit=0.20,
+            output=20.0,
+            source_url="https://www.anthropic.com/pricing",
+            source_checked_at="2026-09-25",
+            vendor="anthropic",
+            # Cache writes cost $5/M for 5m or $8/M for 1h; no cache-write field.
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="4.0",
+                            cache_hit="0.20",
+                            output="20.0",
                         ),
                     ),
                 ),
