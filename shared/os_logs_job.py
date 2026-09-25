@@ -9,6 +9,7 @@ accepts one Ava argv rather than a shell pipeline.
 from __future__ import annotations
 
 import shlex
+import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -100,6 +101,7 @@ def _register_linux() -> int:
         "  * logs maintenance: crontab not installed; daily rotation and "
         "retention cannot be registered",
         missing_returncode=1,
+        missing_stream=sys.stderr,
     )
     if missing_rc is not None:
         return missing_rc
@@ -110,14 +112,21 @@ def _register_linux() -> int:
         f"{_MINUTE} {_HOUR} * * * {shared.os_cron.cron_env_prefix()}"
         f"/bin/sh -c {shlex.quote(_shell_command())}  {marker}"
     )
-    if shared.os_cron.replace_crontab_entry(marker, entry, registration_name="logs-maintenance"):
+    if shared.os_cron.replace_crontab_entry(
+        marker,
+        entry,
+        skip_phrase="logs-maintenance registration",
+        update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
+    ):
         return 1
     logger.info("crontab logs-maintenance entry added ({})", marker)
     return 0
 
 
 def _unregister_linux(slug: str) -> int:
-    return shared.os_cron.remove_crontab_entry(_cron_marker(slug))
+    return shared.os_cron.remove_crontab_entry(
+        _cron_marker(slug), write_failure_rc=1, on_removed=None
+    )
 
 
 def _register_windows() -> str | None:

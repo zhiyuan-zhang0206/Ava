@@ -13,11 +13,11 @@ registration path) and the CLI converge step (belt-and-suspenders fallback) can
 call the same functions without violating the import layering (shared < ava <
 agent < gateway < cli).
 
-It also carries what all four OS-scheduled job kinds share, because they share
-the same launchd / crontab mechanics and `os_autostart` / `os_watchdog_probe`
-already import from here: the label prefix, the binary + `$AVA_HOME` a job spec
-is anchored to (`ava_binary_path` / `job_home` / `launchd_env_block` /
-`cron_env_prefix`), and the `os_jobs_enabled()` gate every registrar consults.
+It also carries the shared launchd / crontab mechanics used by the OS jobs:
+the label prefix, the binary + `$AVA_HOME` a job spec is anchored to
+(`ava_binary_path` / `job_home` / `launchd_env_block` / `cron_env_prefix`),
+the crontab read-modify-write primitives, and the `os_jobs_enabled()` gate
+every registrar consults.
 """
 
 from __future__ import annotations
@@ -26,7 +26,9 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import TextIO
 
 from loguru import logger
 
@@ -104,22 +106,31 @@ def remove_launchd_job(label: str, plist_path: Path) -> None:
     plist_path.unlink(missing_ok=True)
 
 
-def require_crontab(missing_message: str, *, missing_returncode: int) -> int | None:
+def require_crontab(
+    missing_message: str, *, missing_returncode: int, missing_stream: TextIO
+) -> int | None:
     """Report a missing crontab with the caller's existing message and policy."""
     if shutil.which("crontab") is None:
-        print(missing_message, file=sys.stderr)  # noqa: T201
+        print(missing_message, file=missing_stream)
         return missing_returncode
     return None
 
 
-def replace_crontab_entry(marker: str, entry: str, *, registration_name: str) -> int:
-    """Replace all matching lines while preserving every other crontab line."""
+def replace_crontab_entry(
+    marker: str,
+    entry: str,
+    *,
+    skip_phrase: str,
+    update_failure: Callable[[str], None],
+) -> int:
+    """Replace matching lines; let the caller report a failed write in its own channel."""
     with crontab_lock():
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+        # Only benign "no crontab" means empty; other read failures must block a clobbering rewrite.
         if result.returncode != 0 and "no crontab" not in (result.stderr or "").lower():
             print(  # noqa: T201
                 f"  * crontab -l failed ({result.stderr.strip() or result.returncode}); "
-                f"skipping {registration_name} registration to avoid clobbering the crontab",
+                f"skipping {skip_phrase} to avoid clobbering the crontab",
                 file=sys.stderr,
             )
             return 1
@@ -134,13 +145,15 @@ def replace_crontab_entry(marker: str, entry: str, *, registration_name: str) ->
             check=False,
         )
         if result.returncode != 0:
-            print(f"  * crontab update failed: {result.stderr}", file=sys.stderr)  # noqa: T201
+            update_failure(result.stderr)
             return 1
     return 0
 
 
-def remove_crontab_entry(marker: str) -> int:
-    """Remove matching lines, leaving an absent entry or table untouched."""
+def remove_crontab_entry(
+    marker: str, *, write_failure_rc: int, on_removed: Callable[[], None] | None
+) -> int:
+    """Remove matching lines; notify the caller only after a successful write."""
     with crontab_lock():
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
         if result.returncode != 0:
@@ -156,7 +169,9 @@ def remove_crontab_entry(marker: str) -> int:
             check=False,
         )
         if result.returncode != 0:
-            return 1
+            return write_failure_rc
+        if on_removed is not None:
+            on_removed()
     return 0
 
 

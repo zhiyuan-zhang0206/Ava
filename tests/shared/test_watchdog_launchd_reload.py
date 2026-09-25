@@ -31,6 +31,33 @@ def _never_descendant(_label: str) -> bool:
     return False
 
 
+def test_public_launchctl_uses_bounded_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], object]] = []
+
+    def run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((cmd, kwargs["timeout"]))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(probe.subprocess, "run", run)
+    assert probe.launchctl("print", "gui/1/com.ava.test").returncode == 0
+    assert calls == [(["launchctl", "print", "gui/1/com.ava.test"], probe.LAUNCHCTL_TIMEOUT_S)]
+
+
+@pytest.mark.parametrize("missing_rc", [3, 113])
+def test_public_unload_accepts_missing_service(
+    monkeypatch: pytest.MonkeyPatch, missing_rc: int
+) -> None:
+    commands: list[str] = []
+
+    def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(cmd[1])
+        return subprocess.CompletedProcess(cmd, missing_rc, "", "")
+
+    monkeypatch.setattr(probe.subprocess, "run", run)
+    probe.unload_launchd_job_before_bootstrap("gui/1/com.ava.test")
+    assert commands == ["bootout", "print"]
+
+
 def test_unchanged_loaded_job_is_not_unloaded(plist: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plist.write_text("new spec")
     before = plist.stat().st_mtime_ns
@@ -87,7 +114,11 @@ def test_unload_timeout_preserves_old_spec(plist: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(
         probe, "time", SimpleNamespace(monotonic=lambda: next(clock)), raising=False
     )
-    with pytest.raises(RuntimeError, match="did not unload"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"launchd job gui/\d+/com\.ava\.test\.watchdog-probe\.agent-runner "
+        r"did not unload within 10\.0s",
+    ):
         probe._register_macos("agent-runner", 90)
     assert plist.read_text() == "old spec"
 

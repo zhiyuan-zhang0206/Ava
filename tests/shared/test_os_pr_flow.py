@@ -122,9 +122,8 @@ def test_linux_crontab_failures_and_empty_table(
 
     monkeypatch.setattr(os_cron.shutil, "which", missing)
     assert job._register_linux() == 1
-    assert (
-        "PR flow: crontab not installed; the daily sampler job cannot be registered"
-        in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "  * PR flow: crontab not installed; the daily sampler job cannot be registered\n"
     )
 
     monkeypatch.setattr(os_cron.shutil, "which", available)
@@ -144,7 +143,10 @@ def test_linux_crontab_failures_and_empty_table(
     monkeypatch.setattr(os_cron.subprocess, "run", run)
     assert job._register_linux() == 1
     assert writes == []
-    assert "skipping PR-flow registration to avoid clobbering" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "  * crontab -l failed (permission denied); "
+        "skipping PR-flow registration to avoid clobbering the crontab\n"
+    )
 
     read.stderr = "no crontab for user"
     assert job._register_linux() == 0
@@ -166,7 +168,7 @@ def test_linux_crontab_failures_and_empty_table(
     read.stdout = writes[0]
     write_failure = True
     assert job._register_linux() == 1
-    assert "crontab update failed: write denied" in capsys.readouterr().err
+    assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
     assert job._unregister_linux("ava-deadbeef") == 1
     assert len(writes) == 2
 
