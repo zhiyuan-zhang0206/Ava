@@ -7,6 +7,12 @@ conventional local checkout on this machine — both dev clones and each home's
 form the converge warning step runs.
 """
 
+# `language: system` runs this under whatever `python3` the committer's PATH
+# resolves to — the macOS system one is still 3.9, where `Path | None` in a
+# signature raises at import time (and the warn-only hook then fails the commit
+# it was meant to leave alone).
+from __future__ import annotations
+
 import argparse
 import os
 import shlex

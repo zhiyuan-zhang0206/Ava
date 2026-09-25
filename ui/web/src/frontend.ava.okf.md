@@ -55,6 +55,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 - **Fold owner** (`useFoldOwner`, inside `EventStreamProvider`): the SOLE root writer — one subscriber folds every global-broadcast event into the query caches (`["agents", "live"]` + `["agents", "terminated"]` — both scopes always seeded, / `["notices"]` / `["agent-pages"]` / `["tasks"]` / `["fleet-graph"]` families, debounced per family) and runs the central reconnect reconcile. Hooks only read their keys now.
 - **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).
 - **OpenTasksNoticeHost** (#3374): root-level renderer for the store's open-tasks notice slot — a terminate response carrying `open_tasks` (wire #2488) raises a dialog (count + up to five rows + "and N more"); dismissal is explicit; lazily imported.
+- **VisualViewportHeightSync** (#4779): with the on-screen keyboard up, pins `<html>` to `visualViewport.height` so the composer stays above it — the iOS half of the contract whose Android half is the `interactive-widget=resizes-content` viewport export.
 - **AppConnectionBanner** (#648): root-mounted; drives cluster health polling (`useClusterHealth`), mirrors SSE status into store (`ConnectionNotice`), stranded-cluster recovery banner (the only root banner, requires operator action); self-gated by `useAuth().status`. All Providers self-gate on auth state—no outer auth guard layer.
 
 ## Core principles

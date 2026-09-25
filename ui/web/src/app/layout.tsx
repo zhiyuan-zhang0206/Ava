@@ -4,6 +4,7 @@ import { Inter, Geist_Mono } from "next/font/google";
 import { connection } from "next/server";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { VisualViewportHeightSync } from "@/components/visual-viewport-height-sync";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 import { FLEX, FLEX_COL } from "@/lib/layout";
@@ -32,6 +33,12 @@ export const metadata: Metadata = {
 // what the palette shows (task #2695 — Dark Reader reads the same signals).
 export const viewport: Viewport = {
   colorScheme: "dark light",
+  // Android Chrome shrinks the LAYOUT viewport (and with it the h-full shell)
+  // for the on-screen keyboard when asked to; the default `resizes-visual`
+  // would leave the composer under the keyboard. iOS Safari ignores this meta
+  // — the `VisualViewportHeightSync` component below is the iOS half of the
+  // same contract (task #4779).
+  interactiveWidget: "resizes-content",
 };
 
 export default async function RootLayout({
@@ -67,6 +74,10 @@ export default async function RootLayout({
         suppressHydrationWarning
         className={cn("min-h-full h-full bg-background text-foreground", FLEX, FLEX_COL)}
       >
+        {/* On-screen keyboard contract (task #4779): the Android half is the
+            `interactiveWidget` viewport export above; this is the iOS half,
+            which Safari needs because it ignores the meta. Renders nothing. */}
+        <VisualViewportHeightSync />
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-background focus:px-4 focus:py-2 focus:text-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
