@@ -22,6 +22,8 @@ import json
 from contextlib import AsyncExitStack, suppress
 from typing import Any
 
+from shared.resilience import Policy, aretry
+
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
 # line; lift the stream buffer cap well above StreamReader's 64KiB default
 # (same limit as the wrapper and the browser daemon).
@@ -158,13 +160,25 @@ async def _dial_browser_mcp(
     supervised daemon that should already be up; a fresh agent may still race
     it on a cold cluster start — mirrors the wrapper's connect retry).
     """
-    last: Exception | None = None
-    for _ in range(_CONNECT_ATTEMPTS):
-        try:
-            return await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
-        except (FileNotFoundError, ConnectionRefusedError) as e:
-            last = e
-            await asyncio.sleep(_CONNECT_DELAY_S)
+    policy = Policy(
+        max_attempts=_CONNECT_ATTEMPTS,
+        backoff=lambda attempt: _CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
+        jitter="none",
+        jitter_span=1.0,
+        classify=lambda exc: isinstance(exc, (FileNotFoundError, ConnectionRefusedError)),
+        idempotent=True,
+        respect_retry_after=False,
+        on_final_failure=None,
+    )
+
+    async def once() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        return await asyncio.open_unix_connection(path=sock, limit=_LINE_LIMIT)
+
+    last: OSError | None = None
+    try:
+        return await aretry(policy)(once)
+    except (FileNotFoundError, ConnectionRefusedError) as exc:
+        last = exc
     raise ConnectionError(f"browser-mcp daemon not reachable at {sock}: {last}")
 
 

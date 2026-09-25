@@ -15,10 +15,12 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
 import ava._mcp_browser as browser_mod
+from shared import resilience
 
 
 class _FakeWriter:
@@ -318,6 +320,45 @@ async def test_connect_browser_direct_retries_until_socket_appears(
             await task
         with contextlib.suppress(OSError):
             sock_path.unlink()
+
+
+@pytest.mark.parametrize("failure", [FileNotFoundError, ConnectionRefusedError])
+async def test_dial_browser_exhaustion_has_no_trailing_sleep(
+    monkeypatch: pytest.MonkeyPatch, failure: type[OSError]
+) -> None:
+    sleeps: list[float] = []
+    calls = 0
+
+    async def fail(*, path: str, limit: int) -> None:
+        nonlocal calls
+        calls += 1
+        assert (path, limit) == ("test.sock", browser_mod._LINE_LIMIT)
+        raise failure("offline")
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(browser_mod.asyncio, "open_unix_connection", fail)
+    monkeypatch.setattr(browser_mod.asyncio, "sleep", sleep)
+    monkeypatch.setattr(resilience, "_asleep", sleep)
+    with pytest.raises(ConnectionError) as error:
+        await browser_mod._dial_browser_mcp("test.sock")
+    assert str(error.value) == "browser-mcp daemon not reachable at test.sock: offline"
+    assert error.value.__context__ is None
+    assert calls == 10
+    assert sleeps == [0.5] * 9
+
+
+async def test_dial_browser_non_retryable_error_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = PermissionError("forbidden")
+    call = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(browser_mod.asyncio, "open_unix_connection", call)
+    with pytest.raises(PermissionError) as error:
+        await browser_mod._dial_browser_mcp("test.sock")
+    assert error.value is failure
+    assert call.await_count == 1
 
 
 async def test_call_tool_wire_carries_agent_id() -> None:

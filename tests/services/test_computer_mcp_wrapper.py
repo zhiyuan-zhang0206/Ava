@@ -10,11 +10,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from types import ModuleType, SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
 from services.computer.mcp_wrapper import _Link, _ReconnectingLink
+from services.permissions_helper import client
+from services.permissions_helper.client import PermissionsHelperError
+from shared import resilience
 from shared.config import settings
 
 
@@ -75,6 +81,7 @@ def no_retry_delay(monkeypatch: pytest.MonkeyPatch) -> None:
         pass
 
     monkeypatch.setattr("services.computer.mcp_wrapper.asyncio.sleep", _sleep)
+    monkeypatch.setattr(resilience, "_asleep", _sleep)
 
 
 async def test_request_returns_result_on_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,3 +278,171 @@ async def test_reconnecting_link_times_out_without_retry(monkeypatch: pytest.Mon
     assert attempts == 1
     assert len(writer.written) == 1
     assert writer.closed
+
+
+# The computer MCP daemon uses this helper; pin its nested connection budgets here.
+
+
+def test_connect_exhaustion_closes_every_socket_without_trailing_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sockets: list[Mock] = []
+    sleeps: list[float] = []
+
+    def make_socket(*_args: object) -> Mock:
+        sock = Mock()
+        sock.connect.side_effect = FileNotFoundError("absent")
+        sockets.append(sock)
+        return sock
+
+    monkeypatch.setattr(client.socket, "socket", make_socket)
+    monkeypatch.setattr(client.time, "sleep", sleeps.append)
+    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
+    with pytest.raises(PermissionsHelperError) as error:
+        client._connect("test.sock")
+    assert str(error.value) == "permissions helper not reachable at test.sock: absent"
+    assert error.value.__context__ is None
+    assert len(sockets) == 5
+    assert all(sock.close.call_count == 1 for sock in sockets)
+    assert sleeps == [0.2] * 4
+
+
+def test_helper_connect_non_retryable_error_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sock = Mock()
+    failure = PermissionError("forbidden")
+    sock.connect.side_effect = failure
+    factory = Mock(return_value=sock)
+    monkeypatch.setattr(client.socket, "socket", factory)
+    with pytest.raises(PermissionError) as error:
+        client._connect("test.sock")
+    assert error.value is failure
+    assert factory.call_count == 1
+    sock.close.assert_not_called()
+
+
+def test_helper_socket_creation_failure_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = FileNotFoundError("socket factory failed")
+    factory = Mock(side_effect=failure)
+    monkeypatch.setattr(client.socket, "socket", factory)
+    with pytest.raises(FileNotFoundError) as error:
+        client._connect("test.sock")
+    assert error.value is failure
+    assert factory.call_count == 1
+
+
+def test_helper_failed_socket_close_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    sock = Mock()
+    sock.connect.side_effect = FileNotFoundError("socket absent")
+    failure = ConnectionRefusedError("close failed")
+    sock.close.side_effect = failure
+    factory = Mock(return_value=sock)
+    monkeypatch.setattr(client.socket, "socket", factory)
+    with pytest.raises(ConnectionRefusedError) as error:
+        client._connect("test.sock")
+    assert error.value is failure
+    assert factory.call_count == 1
+
+
+def test_pipe_outer_connect_exhaustion_has_no_trailing_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from services.permissions_helper import _win_pipe
+
+    sleeps: list[float] = []
+    connect = Mock(side_effect=ConnectionError("pipe absent"))
+    monkeypatch.setattr(_win_pipe, "connect", connect)
+    monkeypatch.setattr(client.time, "sleep", sleeps.append)
+    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
+    with pytest.raises(PermissionsHelperError) as error:
+        client._call_pipe({"id": 1, "method": "ping"})
+    assert str(error.value) == (f"permissions helper not reachable at pipe {_win_pipe.PIPE_NAME!r}")
+    assert error.value.__context__ is None
+    assert connect.call_count == 5
+    assert sleeps == [0.2] * 4
+
+
+def test_pipe_outer_non_retryable_error_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    from services.permissions_helper import _win_pipe
+
+    failure = RuntimeError("bad pipe API")
+    connect = Mock(side_effect=failure)
+    monkeypatch.setattr(_win_pipe, "connect", connect)
+    with pytest.raises(RuntimeError) as error:
+        client._call_pipe({"id": 1, "method": "ping"})
+    assert error.value is failure
+    assert connect.call_count == 1
+
+
+@pytest.mark.parametrize("errno,attempts", [(2, 5), (121, 5), (5, 1)])
+def test_win_pipe_wait_retry_errno_and_terminal_message(
+    monkeypatch: pytest.MonkeyPatch, errno: int, attempts: int
+) -> None:
+    from services.permissions_helper import _win_pipe
+
+    wait = Mock(return_value=False)
+    kernel32 = SimpleNamespace(WaitNamedPipeW=wait, CreateFileW=Mock())
+    sleeps: list[float] = []
+    monkeypatch.setitem(sys.modules, "msvcrt", ModuleType("msvcrt"))
+
+    def fake_windll(_name: str, *, use_last_error: bool) -> SimpleNamespace:
+        assert use_last_error
+        return kernel32
+
+    monkeypatch.setattr(_win_pipe.ctypes, "WinDLL", fake_windll, raising=False)
+    monkeypatch.setattr(_win_pipe.ctypes, "get_last_error", lambda: errno, raising=False)
+    monkeypatch.setattr(_win_pipe.time, "sleep", sleeps.append)
+    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
+    with pytest.raises(ConnectionError) as error:
+        _win_pipe.connect("test-pipe")
+    assert str(error.value) == "permissions helper not reachable at pipe 'test-pipe'"
+    assert error.value.__context__ is None
+    assert wait.call_count == attempts
+    assert sleeps == [0.2] * (attempts - 1)
+    kernel32.CreateFileW.assert_not_called()
+
+
+def test_pipe_outer_retry_waits_for_each_inner_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    from services.permissions_helper import _win_pipe
+
+    wait = Mock(return_value=False)
+    kernel32 = SimpleNamespace(WaitNamedPipeW=wait, CreateFileW=Mock())
+    sleeps: list[float] = []
+    monkeypatch.setitem(sys.modules, "msvcrt", ModuleType("msvcrt"))
+
+    def fake_windll(_name: str, *, use_last_error: bool) -> SimpleNamespace:
+        assert use_last_error
+        return kernel32
+
+    monkeypatch.setattr(_win_pipe.ctypes, "WinDLL", fake_windll, raising=False)
+    monkeypatch.setattr(_win_pipe.ctypes, "get_last_error", lambda: 2, raising=False)
+    monkeypatch.setattr(_win_pipe, "_CONNECT_ATTEMPTS", 3)
+    monkeypatch.setattr(_win_pipe, "_CONNECT_DELAY_S", 0.3)
+    monkeypatch.setattr(client, "_CONNECT_ATTEMPTS", 2)
+    monkeypatch.setattr(_win_pipe.time, "sleep", sleeps.append)
+    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
+    with pytest.raises(PermissionsHelperError):
+        client._call_pipe({"id": 1, "method": "ping"})
+    assert wait.call_count == 6
+    assert sleeps == [0.3, 0.3, 0.2, 0.3, 0.3]
+
+
+def test_win_pipe_open_failure_keeps_its_errno_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    from services.permissions_helper import _win_pipe
+
+    wait = Mock(return_value=True)
+    create = Mock(return_value=_win_pipe.wintypes.HANDLE(-1).value)
+    kernel32 = SimpleNamespace(WaitNamedPipeW=wait, CreateFileW=create)
+    monkeypatch.setitem(sys.modules, "msvcrt", ModuleType("msvcrt"))
+
+    def fake_windll(_name: str, *, use_last_error: bool) -> SimpleNamespace:
+        assert use_last_error
+        return kernel32
+
+    monkeypatch.setattr(_win_pipe.ctypes, "WinDLL", fake_windll, raising=False)
+    monkeypatch.setattr(_win_pipe.ctypes, "get_last_error", lambda: 6, raising=False)
+    with pytest.raises(ConnectionError) as error:
+        _win_pipe.connect("test-pipe")
+    assert str(error.value) == "permissions helper pipe 'test-pipe' open failed: 6"
+    assert wait.call_count == create.call_count == 1
