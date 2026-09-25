@@ -367,10 +367,11 @@ def run(schedule_id: int) -> int:
 
     # Run history: one row per process execution, opened in-progress (ok=NULL)
     # here and closed with the outcome on every exit path below — including the
-    # stall guard, which receives run_id and closes the row ok=false before its
-    # hard exit. Only a kill that leaves no code path to close (SIGTERM/SIGHUP/
-    # SIGKILL) leaves the row in-progress; the manager's reconcile sweep closes
-    # it as 'interrupted' once the process is gone.
+    # stall guard, which receives run_id and closes the row ok=false within its
+    # bounded record deadline before hard exit; a deadline that expires abandons
+    # the write. Both an abandoned write and a kill that leaves no code path to
+    # close (SIGTERM/SIGHUP/SIGKILL) leave the row in-progress; the manager's
+    # reconcile sweep closes it as 'interrupted' once the process is gone.
     run_id = _record_run_start(schedule_id)
 
     try:
