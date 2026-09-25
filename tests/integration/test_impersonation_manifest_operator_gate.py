@@ -20,19 +20,23 @@ from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation_manifest import (
     LocalParticipant,
+    alert_if_participant_still_open,
     bind_local_participant,
     capture_local_event,
     certify,
     close_local_participant_admission,
+    monitor_manifest_health,
     open_local_participant,
     seal_local_participant,
     stage_central_expected_event,
     unbind_local_participant,
 )
+from shared.alerts import upsert_alert
 from shared.audit_events import prepare_event_log
 from shared.config import settings
 from shared.db import create_agent
 from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+from shared.loki_index_labels import EVENT_STREAM_RETENTION
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.runtime_release import VerifiedRelease
@@ -66,6 +70,211 @@ def v1_lease(owner: RuntimeIncarnation, monkeypatch: pytest.MonkeyPatch) -> dict
         _CERTIFICATION_SECRET,
     )
     return history_cases.start(owner)
+
+
+def test_slow_manifest_receipt_reuses_one_episode_from_detach_and_monitor(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    v1_lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.general, "impersonation_event_manifest_seal_wait_seconds", 0)
+    lease_id = str(v1_lease["id"])
+    first = LocalParticipant(lease_id, owner.agent_id, 0, "slow-first")
+    second = LocalParticipant(lease_id, owner.agent_id, 0, "slow-second")
+    for participant in (first, second):
+        assert open_local_participant(
+            lease_id, agent_id=owner.agent_id, source_key=participant.source_key
+        )
+    oldest_row = db_conn.execute(
+        "SELECT min(opened_at) FROM agent_impersonation_event_participants "
+        "WHERE lease_id=%s AND state='open'",
+        (lease_id,),
+    ).fetchone()
+    assert oldest_row is not None
+    oldest = oldest_row[0]
+
+    alert_if_participant_still_open(first)
+    monitor_manifest_health(machine=machine_name())
+    monitor_manifest_health(machine=machine_name())
+
+    rows = db_conn.execute(
+        "SELECT starts_at,status FROM alerts WHERE labels->>'lease_id'=%s "
+        "AND alertname='ImpersonationManifestSealSlow' ORDER BY starts_at",
+        (lease_id,),
+    ).fetchall()
+    assert rows == [(oldest, "unresolved")]
+
+
+def test_slow_manifest_episode_resolves_after_seal_only_on_its_machine(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    v1_lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.general, "impersonation_event_manifest_seal_wait_seconds", 0)
+    lease_id = str(v1_lease["id"])
+    participant = LocalParticipant(lease_id, owner.agent_id, 0, "slow-to-sealed")
+    assert open_local_participant(
+        lease_id, agent_id=owner.agent_id, source_key=participant.source_key
+    )
+    monitor_manifest_health(machine=machine_name())
+    with db_conn.transaction():
+        upsert_alert(
+            db_conn,
+            {
+                "status": "firing",
+                "labels": {
+                    "alertname": "ImpersonationManifestSealSlow",
+                    "severity": "warning",
+                    "machine": "another-machine",
+                    "lease_id": lease_id,
+                },
+                "annotations": {"sentinel": "other-machine"},
+                "starts_at": datetime.now(UTC).isoformat(),
+            },
+            source="machine-probe",
+        )
+    seal_local_participant(participant)
+    monitor_manifest_health(machine=machine_name())
+
+    rows = db_conn.execute(
+        "SELECT labels->>'machine',status,ends_at FROM alerts "
+        "WHERE labels->>'lease_id'=%s AND alertname='ImpersonationManifestSealSlow'",
+        (lease_id,),
+    ).fetchall()
+    assert len(rows) == 2
+    by_machine = {machine: (status, ends_at) for machine, status, ends_at in rows}
+    assert by_machine[machine_name()][0] == "resolved"
+    assert by_machine[machine_name()][1] is not None
+    assert by_machine["another-machine"] == ("unresolved", None)
+
+
+def test_old_slow_manifest_episode_resolves_when_newer_open_receipt_takes_over(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    v1_lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.general, "impersonation_event_manifest_seal_wait_seconds", 0)
+    lease_id = str(v1_lease["id"])
+    oldest = LocalParticipant(lease_id, owner.agent_id, 0, "superseded-oldest")
+    newer = LocalParticipant(lease_id, owner.agent_id, 0, "superseding-newer")
+    for participant in (oldest, newer):
+        assert open_local_participant(
+            lease_id, agent_id=owner.agent_id, source_key=participant.source_key
+        )
+    opened = dict(
+        db_conn.execute(
+            "SELECT source_key,opened_at FROM agent_impersonation_event_participants "
+            "WHERE lease_id=%s",
+            (lease_id,),
+        ).fetchall()
+    )
+    monitor_manifest_health(machine=machine_name())
+    seal_local_participant(oldest)
+    monitor_manifest_health(machine=machine_name())
+
+    rows = db_conn.execute(
+        "SELECT starts_at,status,ends_at FROM alerts WHERE labels->>'lease_id'=%s "
+        "AND alertname='ImpersonationManifestSealSlow' ORDER BY starts_at",
+        (lease_id,),
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0][0] == opened[oldest.source_key]
+    assert rows[0][1] == "resolved"
+    assert rows[0][2] is not None
+    assert rows[1] == (opened[newer.source_key], "unresolved", None)
+
+
+def test_delivery_pending_episode_resolves_when_manifest_completes(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    v1_lease: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.general, "impersonation_event_delivery_alert_age_seconds", 60)
+    lease_id = str(v1_lease["id"])
+    leases.release(lease_id, attested_caller(v1_lease), "Empty manifest")
+    db_conn.execute(
+        "UPDATE agent_impersonations SET ended_at=clock_timestamp()-interval '61 seconds' "
+        "WHERE id=%s",
+        (lease_id,),
+    )
+    db_conn.commit()
+    ended_at = history.resolve(owner.agent_id, 0)["ended_at"]
+    monitor_manifest_health(machine=machine_name())
+    assert certify(lease_id)
+    monitor_manifest_health(machine=machine_name())
+
+    rows = db_conn.execute(
+        "SELECT starts_at,status,ends_at FROM alerts WHERE labels->>'lease_id'=%s "
+        "AND alertname='ImpersonationEventDeliveryPending'",
+        (lease_id,),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == ended_at + timedelta(seconds=60)
+    assert rows[0][1] == "resolved"
+    assert rows[0][2] is not None
+
+
+def test_retention_loss_episode_starts_when_the_frozen_floor_ages_out(
+    db_conn: psycopg.Connection[Any],
+    v1_lease: dict[str, Any],
+) -> None:
+    lease_id = str(v1_lease["id"])
+    leases.release(lease_id, attested_caller(v1_lease), "Empty manifest")
+    db_conn.execute(
+        "UPDATE agent_impersonations SET manifest_envelope_floor_at="
+        "clock_timestamp()-interval '7 days' WHERE id=%s",
+        (lease_id,),
+    )
+    db_conn.commit()
+    floor_row = db_conn.execute(
+        "SELECT manifest_envelope_floor_at FROM agent_impersonations WHERE id=%s",
+        (lease_id,),
+    ).fetchone()
+    assert floor_row is not None
+    floor = floor_row[0]
+    monitor_manifest_health(machine=machine_name())
+    monitor_manifest_health(machine=machine_name())
+
+    rows = db_conn.execute(
+        "SELECT starts_at,status FROM alerts WHERE labels->>'lease_id'=%s "
+        "AND alertname='ImpersonationEventRetentionLoss'",
+        (lease_id,),
+    ).fetchall()
+    assert rows == [(floor + EVENT_STREAM_RETENTION, "unresolved")]
+
+
+def test_orphan_manifest_alert_resolves_from_stored_lease_absence(
+    db_conn: psycopg.Connection[Any],
+) -> None:
+    orphan_id = str(uuid4())
+    with db_conn.transaction():
+        upsert_alert(
+            db_conn,
+            {
+                "status": "firing",
+                "labels": {
+                    "alertname": "ImpersonationManifestCaptureFailed",
+                    "severity": "warning",
+                    "machine": machine_name(),
+                    "lease_id": orphan_id,
+                },
+                "annotations": {"sentinel": "orphan"},
+                "starts_at": datetime.now(UTC).isoformat(),
+            },
+            source="machine-probe",
+        )
+    monitor_manifest_health(machine=machine_name())
+    row = db_conn.execute(
+        "SELECT status,annotations,ends_at FROM alerts WHERE labels->>'lease_id'=%s",
+        (orphan_id,),
+    ).fetchone()
+    assert row is not None
+    assert row[:2] == ("resolved", {"sentinel": "orphan"})
+    assert row[2] is not None
 
 
 def _central_send_event(actor_id: int, target_id: int) -> Event:
@@ -346,6 +555,18 @@ def test_closed_direct_audit_capture_refuses_and_vetoes_manifest_certification(
             "AND source_key=%s",
             (participant.lease_id, participant.source_key),
         ).fetchone() == ("failed",)
+        assert (
+            db_conn.execute(
+                "SELECT starts_at FROM alerts WHERE labels->>'lease_id'=%s "
+                "AND alertname='ImpersonationManifestCaptureFailed'",
+                (participant.lease_id,),
+            ).fetchone()
+            == db_conn.execute(
+                "SELECT opened_at FROM agent_impersonation_event_participants "
+                "WHERE lease_id=%s AND source_key=%s",
+                (participant.lease_id, participant.source_key),
+            ).fetchone()
+        )
         with pytest.raises(
             RuntimeError, match="Failed local impersonation event receipt cannot seal"
         ):
@@ -389,7 +610,6 @@ def test_transient_capture_failure_stays_sticky_until_the_failed_receipt_persist
         _conn: psycopg.Connection[Any],
         _lease: dict[str, Any],
         _alertname: str,
-        _now: datetime,
     ) -> None:
         raise OSError("alert down")
 
