@@ -50,7 +50,7 @@ _SPAWN_TIMEOUT_S = 90.0
 # Provenance of everything this server creates. `spawner` is free-form and
 # groups these agents under their own root in the fleet views, so an operator
 # can see at a glance which agents an external tool created. `source` must be
-# one of the envelope's legal kinds (shared/envelope.py:validate_source), and
+# one of the envelope's legal kinds (shared/agents/messages/envelope.py:validate_source), and
 # `user` is the honest one: an MCP client acts for the human driving it, and the
 # receiving agent should read the message exactly as it reads one typed into the
 # web UI.

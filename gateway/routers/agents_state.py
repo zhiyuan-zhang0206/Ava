@@ -41,7 +41,10 @@ from shared.agents.history.checkpoint import (
     load_checkpoint_messages,
     load_checkpoint_messages_by_trace,
 )
-from shared.chat_delivery import ClientMessageConflictError
+from shared.agents.messages.chat_delivery import ClientMessageConflictError
+from shared.agents.messages.inbound import InboundKind
+from shared.agents.messages.inbound_images import inbound_image_urls
+from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.config import settings
 from shared.daemon.schedules.completion_notices import (
     CompletionNotice,
@@ -52,9 +55,6 @@ from shared.daemon.schedules.completion_notices import (
 )
 from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
 from shared.db_transaction import write_transaction
-from shared.inbound import InboundKind
-from shared.inbound_images import inbound_image_urls
-from shared.inbound_provenance import InboundProvenance
 from shared.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 
 router = APIRouter()

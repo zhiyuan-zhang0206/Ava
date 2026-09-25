@@ -8,11 +8,13 @@ import uuid as _uuid
 
 import ava
 from shared.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
+from shared.agents.messages.delivery_outbox import (
+    TRANSIENT_HTTP_STATUSES as _TRANSIENT_HTTP_STATUSES,
+)
 from shared.api_contracts import contracts
 from shared.api_contracts.contracts import Idempotency
 from shared.cluster_auth import bearer_header
 from shared.config import settings
-from shared.delivery_outbox import TRANSIENT_HTTP_STATUSES as _TRANSIENT_HTTP_STATUSES
 
 # Singleton: process-wide shared connection pool. Connect/read timeout is a
 # guard against a stuck gateway line. Most gateway ops are near-instant,
@@ -69,7 +71,7 @@ _RETRY_DELAY_S = settings.gateway.gateway_client_retry_delay_seconds
 
 # ── Transient-failure retry policy ──
 # The status set (429/500/502/503/504) lives with the deferred-delivery outbox
-# — `shared.delivery_outbox.TRANSIENT_HTTP_STATUSES` — so this transport's
+# — `shared.agents.messages.delivery_outbox.TRANSIENT_HTTP_STATUSES` — so this transport's
 # retry policy and the outbox interception on both send paths (SDK
 # `send_message` + the `ava agents send` CLI) classify failures identically.
 

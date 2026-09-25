@@ -28,8 +28,8 @@ from shared.agents import (
     ResurrectAlreadyAlive,
     ResurrectError,
 )
+from shared.agents.messages.envelope import wrap_inbound
 from shared.config import settings
-from shared.envelope import wrap_inbound
 from shared.machine import machine_name
 
 

@@ -394,7 +394,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     # plus the context notes) is laid down by `init_context` before claim runs.
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], HumanMessage)
-    # User envelope: a bare "[ts]" header (shared/envelope.py).
+    # User envelope: a bare "[ts]" header (shared/agents/messages/envelope.py).
     assert msgs[0].content.startswith("[")  # pyright: ignore[reportUnknownMemberType]
     assert "hello" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     assert cmd.update["halted"] is False  # type: ignore[index]

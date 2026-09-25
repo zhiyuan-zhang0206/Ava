@@ -66,7 +66,7 @@ CATEGORY_ORDER: tuple[str, ...] = (
 
 def _inbound_bucket(source: str) -> str:
     """Bucket an inbound HumanMessage by its envelope `ava_source` (the taxonomy
-    in `shared/envelope.py`): a peer agent (`agent:N`) -> `agent_messages`; a
+    in `shared/agents/messages/envelope.py`): a peer agent (`agent:N`) -> `agent_messages`; a
     machine- or framework-originated wakeup / notice (`watcher:N` / `shell:N` /
     `schedule:N` / `system` / `system:<subtype>`) -> `automation`; everything else
     — a human turn (`user`, `ui:page:<name>`) or a legacy inbound with no recorded

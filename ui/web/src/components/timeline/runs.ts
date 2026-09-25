@@ -52,7 +52,7 @@ const EN_TURN: TurnTranslator = (key, values) => {
 
 // Which side of the "is this an inbound message a human would read" line an
 // inbound_chat source falls on. Mirrors the envelope source model
-// (shared/envelope.py): `agent:N` is another agent talking; `user` / `ui:page:*`
+// (shared/agents/messages/envelope.py): `agent:N` is another agent talking; `user` / `ui:page:*`
 // is a person (a page post "reads as User"); everything else — `system`,
 // `system:*`, `watcher:N`, `shell:N`, `schedule:N`, `self:update` — is a
 // framework-generated wake-up / notice. card.tsx branches on the same split.

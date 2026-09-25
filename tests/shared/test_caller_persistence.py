@@ -5,8 +5,8 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from shared.agents.messages.chat_delivery import insert_chat_inbound_once, reconcile_chat_inbound
 from shared.audit_events import insert_event_log, insert_event_log_many
-from shared.chat_delivery import insert_chat_inbound_once, reconcile_chat_inbound
 from shared.db import create_agent, insert_inbound_message
 
 _SOURCE = "external_agent:codex:run-42"
@@ -27,7 +27,9 @@ def test_chat_insert_and_reconcile_persist_same_structured_identity(
 ) -> None:
     # Exercise future admitted-write storage separately from today's closed
     # rollout fence; the tests below assert the real fence rejects every write.
-    monkeypatch.setattr("shared.chat_delivery.require_caller_protocol", _admit_future_chat)
+    monkeypatch.setattr(
+        "shared.agents.messages.chat_delivery.require_caller_protocol", _admit_future_chat
+    )
     agent_id = create_agent(db_conn)
     key = str(uuid4())
     receipt = insert_chat_inbound_once(
@@ -58,7 +60,9 @@ def test_lifecycle_insert_persists_structured_identity(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("shared.envelope.reject_unnegotiated_caller", _admit_future_protocol)
+    monkeypatch.setattr(
+        "shared.agents.messages.envelope.reject_unnegotiated_caller", _admit_future_protocol
+    )
     agent_id = create_agent(db_conn)
     inbound_id = insert_inbound_message(db_conn, agent_id, "", _SOURCE, kind="restart")
     with db_conn.cursor() as cur:

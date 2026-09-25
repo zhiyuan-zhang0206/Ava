@@ -57,7 +57,7 @@ def _outbox_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     """Send tests exercise the real outbox glue against a throwaway $AVA_HOME —
     never the operator's live journal — with the knobs stubbed so no config or
     dotenv read is involved."""
-    from shared import delivery_outbox
+    from shared.agents.messages import delivery_outbox
     from shared.config import settings
 
     monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
@@ -385,8 +385,8 @@ def test_agents_send_transport_failure_is_recorded(monkeypatch: pytest.MonkeyPat
         seen.update(kwargs)
         raise httpx.ConnectError("gateway down")
 
-    monkeypatch.setattr("shared.delivery_outbox.logical_key", fake_logical_key)
-    monkeypatch.setattr("shared.delivery_outbox.record_failed_send", fake_record)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.logical_key", fake_logical_key)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.record_failed_send", fake_record)
     monkeypatch.setattr(httpx, "post", fail_post)
     with pytest.raises(httpx.ConnectError):
         _agents.cmd_agents_send(5, "notice", "shell:3")
@@ -420,8 +420,8 @@ def test_agents_send_transient_http_is_recorded(
     def fake_post(*_a: object, **_k: object) -> _FakeResp:
         return _FakeResp({"detail": "backend down"}, status_code=503)
 
-    monkeypatch.setattr("shared.delivery_outbox.logical_key", fake_logical_key)
-    monkeypatch.setattr("shared.delivery_outbox.record_failed_send", fake_record)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.logical_key", fake_logical_key)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.record_failed_send", fake_record)
     monkeypatch.setattr(httpx, "post", fake_post)
     with pytest.raises(httpx.HTTPStatusError):
         _agents.cmd_agents_send(5, "notice", "shell:3")
@@ -440,8 +440,8 @@ def test_agents_send_success_retires_the_pending_record(monkeypatch: pytest.Monk
     def fake_retire(**kw: object) -> None:
         retired.append(kw)
 
-    monkeypatch.setattr("shared.delivery_outbox.logical_key", fake_logical_key)
-    monkeypatch.setattr("shared.delivery_outbox.note_send_succeeded", fake_retire)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.logical_key", fake_logical_key)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.note_send_succeeded", fake_retire)
     seen = _patch_post(monkeypatch, {"status": "delivered"})
     assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
     assert retired == [
@@ -474,9 +474,9 @@ def test_agents_send_client_error_records_nothing(
     def fake_post(*_a: object, **_k: object) -> _FakeResp:
         return _FakeResp({"detail": "Unrecognized inbound source"}, status_code=422)
 
-    monkeypatch.setattr("shared.delivery_outbox.logical_key", fake_logical_key)
-    monkeypatch.setattr("shared.delivery_outbox.record_failed_send", fake_call)
-    monkeypatch.setattr("shared.delivery_outbox.note_send_succeeded", fake_call)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.logical_key", fake_logical_key)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.record_failed_send", fake_call)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.note_send_succeeded", fake_call)
     monkeypatch.setattr(httpx, "post", fake_post)
     with pytest.raises(httpx.HTTPStatusError):
         _agents.cmd_agents_send(5, "msg", "external_agent:codex")
@@ -492,7 +492,7 @@ def test_agents_send_degrades_to_unkeyed_when_outbox_fails(
     def boom(**_kw: object) -> str:
         raise RuntimeError("outbox broken")
 
-    monkeypatch.setattr("shared.delivery_outbox.logical_key", boom)
+    monkeypatch.setattr("shared.agents.messages.delivery_outbox.logical_key", boom)
     seen = _patch_post(monkeypatch, {"status": "delivered"})
     assert _agents.cmd_agents_send(5, "build done", "shell:3") == 0
     assert "unkeyed" in capsys.readouterr().err

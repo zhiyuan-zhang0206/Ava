@@ -20,14 +20,14 @@ from psycopg_pool import ConnectionPool
 from ops import ops_lifecycle as _ops
 from ops.agents import get_agent_status
 from shared.agents import AgentStatus
-from shared.caller_protocol import CallerProtocolUnavailableError
-from shared.chat_delivery import (
+from shared.agents.messages.chat_delivery import (
     ChatInboundReceipt,
     insert_chat_inbound_once,
     reconcile_chat_inbound,
 )
+from shared.agents.messages.inbound_provenance import InboundProvenance
+from shared.caller_protocol import CallerProtocolUnavailableError
 from shared.db import publish_inbound_wake
-from shared.inbound_provenance import InboundProvenance
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 

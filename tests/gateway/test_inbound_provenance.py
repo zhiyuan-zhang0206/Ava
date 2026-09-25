@@ -11,10 +11,10 @@ from starlette.requests import Request
 
 from gateway.app import app
 from gateway.inbound_provenance import request_inbound_provenance
-from shared.chat_delivery import insert_chat_inbound_once
+from shared.agents.messages.chat_delivery import insert_chat_inbound_once
+from shared.agents.messages.inbound_provenance import InboundProvenance, source_assertion_match
 from shared.config import settings
 from shared.db import create_agent, insert_inbound_message
-from shared.inbound_provenance import InboundProvenance, source_assertion_match
 
 _SECRET = "inbound-provenance-secret"  # noqa: S105 -- isolated test credential
 

@@ -219,7 +219,7 @@ def send_message(
     `Idempotency-Key`, so it returns that row's stable id instead of duplicating
     the message even if the first HTTP response was lost.
 
-    Deferred delivery (`shared.delivery_outbox`, task #3757): all attempts of
+    Deferred delivery (`shared.agents.messages.delivery_outbox`, task #3757): all attempts of
     one logical message — this call's own retries and a caller's later re-sends
     of the same (target, source, content) within the dedup window — share one
     key while the message is undelivered, and a final failure is recorded
@@ -231,7 +231,7 @@ def send_message(
     """
     import httpx
 
-    from shared import delivery_outbox
+    from shared.agents.messages import delivery_outbox
 
     body = {
         "content": content,

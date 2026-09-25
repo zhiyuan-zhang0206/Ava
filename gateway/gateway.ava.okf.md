@@ -29,7 +29,7 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 - **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; cluster-authenticated `/api/mcp/clients` manages them
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
 - **Authentication and browser-origin policy**: server-side `web_sessions` + bearer-secret auth, exact-origin CORS checks, and the Secure cookie policy — [[web-sessions.ava.okf.md]].
-- **Inbound provenance**: gateway-created inbounds persist the server-verified credential kind, ingress transport, exact-content SHA-256, and a nullable agent source/token comparison. These are audit facts only and never reject delivery — [[shared/inbound-provenance.ava.okf.md]].
+- **Inbound provenance**: gateway-created inbounds persist the server-verified credential kind, ingress transport, exact-content SHA-256, and a nullable agent source/token comparison. These are audit facts only and never reject delivery — [[shared/agents/messages/inbound-provenance.ava.okf.md]].
 
 ## Architecture
 

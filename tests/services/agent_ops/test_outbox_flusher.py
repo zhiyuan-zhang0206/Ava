@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 
 from services.agent_ops import outbox_flusher
-from shared import delivery_outbox as outbox
 from shared import maintenance
+from shared.agents.messages import delivery_outbox as outbox
 
 
 def _limits(interval: float) -> outbox.DeliveryOutboxLimits:

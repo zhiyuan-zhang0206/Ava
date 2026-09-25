@@ -76,7 +76,7 @@ def inbound_message(
     created_at: datetime | None = None,
     image_urls: list[str] | None = None,
 ) -> HumanMessage:
-    """Envelope-wrapped inbound message (product of `shared/envelope.py:wrap_inbound`).
+    """Envelope-wrapped inbound message (product of `shared/agents/messages/envelope.py:wrap_inbound`).
 
     `content` is a plain string for a text inbound, or a list of content blocks
     for a multimodal one (a leading text block carrying the envelope-wrapped

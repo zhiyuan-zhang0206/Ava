@@ -14,7 +14,7 @@ import sys
 
 def _validated_source(value: str) -> str:
     """Argparse type for `--source`: reject an unknown source before any command runs."""
-    from shared.envelope import validate_source
+    from shared.agents.messages.envelope import validate_source
 
     try:
         validate_source(value)

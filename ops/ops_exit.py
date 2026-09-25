@@ -9,10 +9,10 @@ from ops.ops_events import publish_page_closed as publish_page_closed
 from ops.pages import list_open_page_names
 from shared import telemetry
 from shared.agents import AgentNotFound, AgentStatus
+from shared.agents.messages.envelope import validate_writable_source
 from shared.audit_events import prepare_event_log
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.envelope import validate_writable_source
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 

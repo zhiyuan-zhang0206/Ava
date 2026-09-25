@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from shared.envelope import validate_source, wrap_inbound
+from shared.agents.messages.envelope import validate_source, wrap_inbound
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
@@ -29,7 +29,7 @@ _TS = _TIMESTAMP  # shorthand
 @pytest.fixture(autouse=True)
 def _freeze_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock now_timestamp to a fixed value for all tests."""
-    monkeypatch.setattr("shared.envelope.now_timestamp", lambda: _TIMESTAMP)
+    monkeypatch.setattr("shared.agents.messages.envelope.now_timestamp", lambda: _TIMESTAMP)
 
 
 class TestUserSource:
@@ -360,7 +360,7 @@ class TestWeekdayFlag:
 
         from shared.config import now_timestamp, settings
 
-        monkeypatch.setattr("shared.envelope.now_timestamp", now_timestamp)
+        monkeypatch.setattr("shared.agents.messages.envelope.now_timestamp", now_timestamp)
         for weekday in (True, False):
             monkeypatch.setattr(settings.general, "message_timestamp_weekday", weekday)
             day = r"[A-Z][a-z]{2} " if weekday else ""

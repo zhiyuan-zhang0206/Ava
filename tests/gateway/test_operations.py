@@ -32,7 +32,7 @@ class TestSpawnAgentRequestSourceValidation:
     """F1: an illegal prompt_source must be rejected at the schema boundary,
     not silently accepted and deferred to the agent claim node — where an
     unrecognized envelope source raises ValueError and kills the just-spawned
-    process. The schema reuses shared.envelope.validate_source so the legal set
+    process. The schema reuses shared.agents.messages.envelope.validate_source so the legal set
     stays single-sourced with the claim-side wrap."""
 
     def test_rejects_unrecognized_source(self) -> None:

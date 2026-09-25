@@ -457,7 +457,7 @@ async def post_notice_resolve(
     # Delivery channel: every notice resolution rides the notice-system source —
     # a user reply as `system:notice-reply`, a bare dismiss as
     # `system:notice-dismiss`. The claim node envelope-wraps both as "[system] ..."
-    # (shared/envelope.py), so no User-role message is consumed and nothing is
+    # (shared/agents/messages/envelope.py), so no User-role message is consumed and nothing is
     # shaped like a reply request; read-without-reply still delivers nothing.
     deliver_source = "system:notice-reply" if reply is not None else "system:notice-dismiss"
     delivery = await deliver_chat_inbound(

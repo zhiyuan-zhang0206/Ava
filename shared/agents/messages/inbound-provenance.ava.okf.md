@@ -10,7 +10,7 @@ tags:
 
 # Inbound provenance facts
 
-`shared/inbound_provenance.py` defines the audit facts that a gateway boundary
+`shared/agents/messages/inbound_provenance.py` defines the audit facts that a gateway boundary
 passes to the durable inbound insert:
 
 - `source_verified_by` names the credential kind and stable subject, never the

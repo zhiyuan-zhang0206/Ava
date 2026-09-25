@@ -6,8 +6,8 @@ from psycopg.rows import dict_row
 
 from shared.agents.history.timeline import TimelineItem
 from shared.agents.impersonation.impersonation_history import ImpersonationMetadata
+from shared.agents.messages.inbound_images import inbound_image_urls
 from shared.db import connect
-from shared.inbound_images import inbound_image_urls
 
 
 def hydrate(

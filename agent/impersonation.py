@@ -26,8 +26,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
+from shared.agents.messages.envelope import wrap_inbound
 from shared.context import AvaContext, agent_id_from_config
-from shared.envelope import wrap_inbound
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from shared.turn_identity import hosted_resources_settled
 
