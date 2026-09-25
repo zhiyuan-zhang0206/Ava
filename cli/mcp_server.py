@@ -36,6 +36,12 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
+from shared.api_contracts.mcp_tool_contract import (
+    project_message,
+    server_instructions,
+    tool_description,
+)
+
 # Read calls are a single gateway round-trip; a spawn additionally launches a
 # process on the target machine, so it gets its own longer budget.
 _TIMEOUT_S = 30.0
@@ -53,20 +59,6 @@ _MESSAGE_SOURCE = "user"
 
 # How many of an agent's most recent messages `get_messages` returns by default.
 _DEFAULT_MESSAGE_LIMIT = 20
-
-_INSTRUCTIONS = """\
-Ava runs a fleet of long-lived autonomous agents. An agent is a persistent
-process with its own conversation history that keeps working after you stop
-talking to it — not a request/response endpoint.
-
-The normal loop: `spawn_agent` with a goal (returns immediately, before the
-agent has done anything), then `get_agent` / `get_messages` to watch it work,
-`send_message` to steer or answer it, `terminate_agent` when it is done. Because
-agents work asynchronously, a transcript read right after a spawn is usually
-still empty; poll rather than assume failure.
-
-Every tool here acts on one cluster — the one this server was launched from.
-There is no cluster argument."""
 
 
 def _detail_item(item: Any) -> str:
@@ -137,49 +129,6 @@ async def _request(
     return resp.json()
 
 
-def _message_text(content: Any) -> str:
-    """Flatten one message's content to text.
-
-    A model message is either a plain string or a list of typed blocks
-    (text / thinking / tool_use / image). Only the text blocks are readable
-    prose; the rest is either rendered separately (tool calls, below) or not
-    representable in a transcript read.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        blocks: list[Any] = content
-        return "\n".join(
-            str(cast(dict[str, Any], b)["text"])
-            for b in blocks
-            if isinstance(b, dict) and cast(dict[str, Any], b).get("type") == "text"
-        )
-    return str(content)
-
-
-def _project_message(msg: dict[str, Any]) -> dict[str, Any]:
-    """One transcript entry, reduced to role + text + the code the agent ran.
-
-    Ava agents act by writing Python (`execute_code` is their only tool), so the
-    code of a turn *is* what the agent did — dropping it would leave a reader
-    seeing an agent that talks and never acts. Everything else in the raw
-    message (ids, provider metadata, token accounting) is machinery.
-    """
-    projected: dict[str, Any] = {
-        "role": msg["type"],
-        "text": _message_text(msg.get("content", "")),
-    }
-    calls: list[Any] = msg.get("tool_calls") or []
-    code = [
-        str(c["args"]["code"])
-        for c in calls
-        if isinstance(c.get("args"), dict) and "code" in c["args"]
-    ]
-    if code:
-        projected["code"] = code
-    return projected
-
-
 def build_server() -> MCPServer:
     """Assemble the MCP server: one tool per gateway control route.
 
@@ -192,58 +141,31 @@ def build_server() -> MCPServer:
     `terminate_agent` ends a running process — and never how the proxy reaches
     the gateway.
     """
-    server = MCPServer("ava", instructions=_INSTRUCTIONS)
+    server = MCPServer("ava", instructions=server_instructions("stdio"))
 
-    @server.tool()
+    @server.tool(description=tool_description("list_agents", "stdio"))
     async def list_agents(
         scope: Literal["live", "terminated", "all"] = "live",
         query: Annotated[str, Field(max_length=200)] = "",
         before_id: Annotated[int | None, Field(ge=1, le=9223372036854775807)] = None,
         limit: Annotated[int, Field(ge=1, le=200)] = 100,
     ) -> dict[str, Any]:
-        """Read one agent directory page, newest IDs first.
-
-        `live` includes all nonterminated agents; use `terminated` for history
-        or `all` for both. `query` matches a label substring or an exact agent
-        ID. Returns `agents` and `next_cursor`: pass that cursor as `before_id`
-        with the same filters to continue. None means no further results.
-        Each call reads at most `limit` agents (1 through 200).
-        """
         params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
         if before_id is not None:
             params["before_id"] = before_id
         return await _request("GET", "/api/agents", params=params)
 
-    @server.tool()
+    @server.tool(description=tool_description("get_agent", "stdio"))
     async def get_agent(agent_id: int) -> dict[str, Any]:
-        """Read the full state of one agent by id.
-
-        Includes lifecycle details, what the agent is doing right now, and any
-        questions it is blocked on waiting for an answer —
-        answer those with `send_message`.
-        """
         return await _request("GET", f"/api/agents/{agent_id}")
 
-    @server.tool()
+    @server.tool(description=tool_description("spawn_agent", "stdio"))
     async def spawn_agent(
         prompt: str,
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Start a new Ava agent and give it a goal. Returns its id immediately.
-
-        The agent begins working asynchronously and keeps running until it
-        finishes or is terminated, so write `prompt` as a standing objective
-        with whatever context the agent needs, not as a single question. Watch
-        its progress with `get_messages`.
-
-        `label` is a short human-readable name shown in the fleet views (one is
-        generated if omitted). `machine` picks which host runs it — omit it for
-        the default host; a name that is not an agent-runner is rejected.
-        `config_overlay` overrides per-agent settings, currently
-        `{"llm_model": "<model id>"}`.
-        """
         body: dict[str, Any] = {
             "prompt": prompt,
             "prompt_source": _MESSAGE_SOURCE,
@@ -254,73 +176,34 @@ def build_server() -> MCPServer:
         }
         return await _request("POST", "/api/agents", json_body=body, timeout=_SPAWN_TIMEOUT_S)
 
-    @server.tool()
+    @server.tool(description=tool_description("send_message", "stdio"))
     async def send_message(agent_id: int, content: str) -> dict[str, Any]:
-        """Send a message to a running agent — a new instruction, more context,
-        or the answer to a question it is blocked on.
-
-        The message is queued and picked up when the agent finishes its current
-        step, so this returns before the agent has read it; it does not return
-        the agent's reply. Read the reply with `get_messages`. Messaging an
-        agent that has already terminated brings it back with its history
-        intact.
-        """
         body = {"content": content, "source": _MESSAGE_SOURCE}
         return await _request("POST", f"/api/agents/{agent_id}/messages", json_body=body)
 
-    @server.tool()
+    @server.tool(description=tool_description("get_messages", "stdio"))
     async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:
-        """Read an agent's conversation history — what it was told and what it
-        has said and done.
-
-        Returns the newest `limit` messages, oldest first. Each entry has a
-        `role` (human / ai / system), the message `text`, and — for a turn where
-        the agent acted — the Python `code` it ran, which is how an Ava agent
-        does everything. `total` is the full history length, so a caller can see
-        how much was left out.
-        """
         payload = await _request("GET", f"/api/agents/{agent_id}/messages", params={"limit": limit})
         return {
-            "messages": [_project_message(m) for m in payload["messages"]],
+            "messages": [project_message(m) for m in payload["messages"]],
             "total": payload["msg_count"],
         }
 
-    @server.tool()
+    @server.tool(description=tool_description("terminate_agent", "stdio"))
     async def terminate_agent(
         agent_id: int,
         *,
         message: str | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
-        """DESTRUCTIVE. End an agent: it stops working and its process exits.
-
-        The agent finishes its current step first, so work in flight is not cut
-        off mid-way. `force=True` requests interruption instead; an `enqueued`
-        result means accepted, not that the agent or its owned work has exited.
-        Use force only when a clean stop cannot progress.
-
-        The agent's history survives either way, and `send_message` revives it,
-        so this is reversible; it is destructive in that it stops running work.
-        `message` saves a final instruction for that later revival without
-        asking the agent to respond before exiting. The result also reports
-        `open_tasks` — the tasks the agent still owns as it goes down (at most
-        five, most recently updated first; null when it owns none).
-        """
         return await _request(
             "POST",
             f"/api/agents/{agent_id}/terminate",
             json_body={"message": message, "force": force},
         )
 
-    @server.tool()
+    @server.tool(description=tool_description("cluster_status", "stdio"))
     async def cluster_status() -> dict[str, Any]:
-        """Report the health of the Ava cluster itself — which host answered,
-        what it is capable of running, and whether it is paused.
-
-        A paused cluster is mid-maintenance: agents are stopped and spawns will
-        not run until it resumes. Check this first when the agent tools start
-        failing.
-        """
         return await _request("GET", "/api/cluster/status")
 
     return server

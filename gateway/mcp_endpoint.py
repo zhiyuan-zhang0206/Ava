@@ -53,6 +53,11 @@ from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
 from shared import agent_roster, agent_snapshot
 from shared.agents import AvaAgentError
 from shared.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
+from shared.api_contracts.mcp_tool_contract import (
+    project_message,
+    server_instructions,
+    tool_description,
+)
 from shared.audit_events import insert_event_log
 from shared.caller_identity import CallerIdentity
 from shared.chat_delivery import ClientMessageConflictError
@@ -73,55 +78,6 @@ _DEFAULT_MESSAGE_LIMIT = 20
 _CURRENT_MCP_CLIENT: ContextVar[dict[str, Any] | None] = ContextVar(
     "current_mcp_client", default=None
 )
-
-_INSTRUCTIONS = """
-Ava runs a fleet of long-lived autonomous agents. An agent is a persistent
-process with its own conversation history that keeps working after you stop
-talking to it — not a request/response endpoint.
-
-The normal loop: `spawn_agent` with a goal (returns immediately, before the
-agent has done anything), then `get_agent` / `get_messages` to watch it work,
-`send_message` to steer or answer it, `terminate_agent` when it is done. Because
-agents work asynchronously, a transcript read right after a spawn is usually
-still empty; poll rather than assume failure.
-
-Every tool here acts on one cluster — the one this gateway belongs to.
-There is no cluster argument."""
-
-
-def _message_text(content: Any) -> str:
-    """Flatten one message's content to text (str, or list of typed blocks)."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            str(cast(dict[str, Any], block)["text"])
-            for block in content
-            if isinstance(block, dict) and cast(dict[str, Any], block).get("type") == "text"
-        )
-    return str(content)
-
-
-def _project_message(msg: dict[str, Any]) -> dict[str, Any]:
-    """One transcript entry, reduced to role + text + the code the agent ran.
-
-    Ava agents act by writing Python (`execute_code` is their only tool), so
-    the code of a turn *is* what the agent did — dropping it would leave a
-    reader seeing an agent that talks and never acts.
-    """
-    projected: dict[str, Any] = {
-        "role": msg["type"],
-        "text": _message_text(msg.get("content", "")),
-    }
-    calls: list[Any] = msg.get("tool_calls") or []
-    code = [
-        str(c["args"]["code"])
-        for c in calls
-        if isinstance(c.get("args"), dict) and "code" in c["args"]
-    ]
-    if code:
-        projected["code"] = code
-    return projected
 
 
 def _json_type(value: Any) -> str:
@@ -276,21 +232,13 @@ def _register_read_tools(
 
     typed_server = cast(MCPServer, server)
 
-    @typed_server.tool()
+    @typed_server.tool(description=tool_description("list_agents", "gateway"))
     async def list_agents(
         scope: Literal["live", "terminated", "all"] = "live",
         query: Annotated[str, Field(max_length=200)] = "",
         before_id: Annotated[int | None, Field(ge=1, le=9223372036854775807)] = None,
         limit: Annotated[int, Field(ge=1, le=200)] = 100,
     ) -> dict[str, Any]:
-        """Read one agent directory page, newest IDs first.
-
-        `live` includes all nonterminated agents; use `terminated` for history
-        or `all` for both. `query` matches a label substring or an exact agent
-        ID. Returns `agents` and `next_cursor`: pass that cursor as `before_id`
-        with the same filters to continue. None means no further results.
-        Each call reads at most `limit` agents (1 through 200).
-        """
         page = await asyncio.to_thread(
             _select_directory_blocking,
             pool,
@@ -301,27 +249,15 @@ def _register_read_tools(
         )
         return page.model_dump(mode="json")
 
-    @typed_server.tool()
+    @typed_server.tool(description=tool_description("get_agent", "gateway"))
     async def get_agent(agent_id: int) -> dict[str, Any]:
-        """Read the full state of one agent by id.
-
-        Includes lifecycle details, what the agent is doing right now, and any
-        questions it is blocked on waiting for an answer — answer those with `send_message`.
-        """
         snap = await asyncio.to_thread(_select_one_blocking, pool, agent_id)
         if snap is None:
             raise ToolError(f"agent {agent_id} does not exist")
         return AgentRow.model_validate(snap.model_dump()).model_dump(mode="json")
 
-    @typed_server.tool()
+    @typed_server.tool(description=tool_description("cluster_status", "gateway"))
     async def cluster_status() -> dict[str, Any]:
-        """Report the health of the Ava cluster itself — which host answered,
-        what it is capable of running, and whether it is paused.
-
-        A paused cluster is mid-maintenance: agents are stopped and spawns
-        will not run until it resumes. Check this first when the agent tools
-        start failing.
-        """
         from gateway.routers.cluster import get_cluster_status
 
         snapshot = await get_cluster_status()
@@ -402,26 +338,13 @@ def _register_fleet_tools(
 
     typed_server = cast(MCPServer, server)
 
-    @typed_server.tool()
+    @typed_server.tool(description=tool_description("spawn_agent", "gateway"))
     async def spawn_agent(
         prompt: str,
         label: str | None = None,
         machine: str | None = None,
         config_overlay: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Start a new Ava agent and give it a goal. Returns its id immediately.
-
-        The agent begins working asynchronously and keeps running until it
-        finishes or is terminated, so write `prompt` as a standing objective
-        with whatever context the agent needs, not as a single question. Watch
-        its progress with `get_messages`.
-
-        `label` is a short human-readable name shown in the fleet views (one
-        is generated if omitted). `machine` picks which host runs it — omit it
-        for the default host; a name that is not an agent-runner is rejected.
-        `config_overlay` overrides per-agent settings, currently
-        `{"llm_model": "<model id>"}`.
-        """
         _require_write_scope("spawn_agent")
         body = SpawnAgentRequest(
             prompt=prompt,
@@ -452,31 +375,13 @@ def _register_fleet_tools(
             raise ToolError(str(exc)) from exc
         return spawned.model_dump(mode="json")
 
-    @typed_server.tool()
+    @typed_server.tool(description=tool_description("send_message", "gateway"))
     async def send_message(
         agent_id: int,
         content: str,
         caller_protocol: Literal["v1"] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        """Send a message to a running agent — a new instruction, more context,
-        or the answer to a question it is blocked on.
-
-        The message is queued and picked up when the agent finishes its
-        current step, so this returns before the agent has read it; it does
-        not return the agent's reply. Read the reply with `get_messages`.
-        Messaging an agent that has already terminated brings it back with its
-        history intact.
-
-        Explicit caller_protocol='v1' labels the authenticated MCP client as an
-        external caller. It adds no permissions and requires an already-live
-        target with negotiated v1 support; legacy/default and bootstrap behavior
-        are unchanged. Do not supply source or instance: the server owns them.
-
-        An optional idempotency_key identifies a retry of this exact message.
-        The server always scopes it to your authenticated MCP client identity;
-        another token client using the same key cannot retrieve your receipt.
-        """
         _require_write_scope("send_message")
         return await _mcp_deliver_send_message(
             pool,
@@ -486,17 +391,8 @@ def _register_fleet_tools(
             idempotency_key=idempotency_key,
         )
 
-    @typed_server.tool()
+    @typed_server.tool(description=tool_description("get_messages", "gateway"))
     async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:
-        """Read an agent's conversation history — what it was told and what it
-        has said and done.
-
-        Returns the newest `limit` messages, oldest first. Each entry has a
-        `role` (human / ai / system), the message `text`, and — for a turn
-        where the agent acted — the Python `code` it ran, which is how an Ava
-        agent does everything. `total` is the full history length, so a caller
-        can see how much was left out.
-        """
         from shared.db import agent_exists
 
         def _exists() -> bool:
@@ -511,31 +407,17 @@ def _register_fleet_tools(
             raise ToolError(f"checkpoint read failed; retry or check store health: {exc}") from exc
         window = messages[-limit:]
         return {
-            "messages": [_project_message(m.model_dump()) for m in window],
+            "messages": [project_message(m.model_dump()) for m in window],
             "total": len(messages),
         }
 
-    @typed_server.tool()
+    @typed_server.tool(description=tool_description("terminate_agent", "gateway"))
     async def terminate_agent(
         agent_id: int,
         *,
         message: str | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
-        """DESTRUCTIVE. End an agent: it stops working and its process exits.
-
-        The agent finishes its current step first, so work in flight is not
-        cut off mid-way. `force=True` requests interruption instead; an
-        `enqueued` result means accepted, not that the agent or its owned work
-        has exited. Use force only when a clean stop cannot progress.
-
-        The agent's history survives either way, and `send_message` revives
-        it, so this is reversible; it is destructive in that it stops running
-        work. `message` saves a final instruction for that later revival
-        without asking the agent to respond before exiting. The result also
-        reports `open_tasks` — the tasks the agent still owns as it goes down
-        (at most five, most recently updated first; null when it owns none).
-        """
         _require_write_scope("terminate_agent")
         try:
             result = await terminate_agent_with_open_tasks(
@@ -557,7 +439,9 @@ def _build_server(pool: Any):  # noqa: ANN202 — inferred from the lazy import
     """
     from mcp.server.mcpserver import MCPServer
 
-    server = MCPServer("ava", instructions=_INSTRUCTIONS, middleware=[_AuditMiddleware()])
+    server = MCPServer(
+        "ava", instructions=server_instructions("gateway"), middleware=[_AuditMiddleware()]
+    )
     _register_read_tools(server, pool)
     _register_fleet_tools(server, pool)
     return server

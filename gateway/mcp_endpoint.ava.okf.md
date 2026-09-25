@@ -54,6 +54,10 @@ endpoint replaces over time.
   as REST and stdio MCP. Scope defaults to live; historical search and cursor
   traversal are explicit, with at most 200 rows per call. `get_agent` remains
   the full single-agent diagnostic view.
+- **Advertised contract**: `shared/api_contracts/mcp_tool_contract.py` owns the
+  common instructions, seven tool description bodies, and message projection.
+  The gateway appends its `caller_protocol` / `idempotency_key` guidance to
+  `send_message`; local tool signatures still generate the input schemas.
 - **Audit**: a `_AuditMiddleware` on the MCPServer records every `tools/call`
   as a `mcp_tool_call` event with client id/name and outcome. Each argument is
   represented only by its JSON type, character size, and SHA-256; raw values
