@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+from pydantic import ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
@@ -33,6 +35,25 @@ from shared.config_registry import _build_registry, _schema_extra, field_alias
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _READER = _REPO_ROOT / "shared" / "config_lite_table.py"
 _INDEX = _REPO_ROOT / "shared" / "config_lite_table.json"
+
+
+def test_stall_exit_record_deadline_contract() -> None:
+    from shared.config.gateway import GatewaySettings
+
+    name = "schedule_stall_exit_record_deadline_seconds"
+    alias = "AVA_SCHEDULE_STALL_EXIT_RECORD_DEADLINE_SECONDS"
+    info = _build_registry()[name].info
+    assert cast(FieldInfo, info).default == 10.0
+    assert FIELD_ALIASES[name] == alias
+    assert FIELD_DOMAINS[name] == FIELD_CAPABILITIES[name] == "gateway"
+    assert FIELD_SCOPES[name] == "cluster-pinned"
+    assert _schema_extra(info)["restart_required"] == "schedule"
+    assert _schema_extra(info)["writable"] is True
+    configured = GatewaySettings.model_validate({alias: 4.5})
+    assert configured.schedule_stall_exit_record_deadline_seconds == 4.5
+    for value in (0, -1, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            GatewaySettings.model_validate({alias: value})
 
 
 def test_generated_index_matches_the_generator_output() -> None:
