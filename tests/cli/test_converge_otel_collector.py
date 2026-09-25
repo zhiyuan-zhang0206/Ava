@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from cli.commands import _otel_collector as oc
+from shared import resilience
 
 
 def _fail_ensure_otel_collector(*_args: object, **_kwargs: object) -> None:
@@ -1224,45 +1225,43 @@ def test_stream_download_honors_socket_timeout(
     assert seen["timeout"] == oc._DOWNLOAD_SOCKET_TIMEOUT_S
 
 
-def test_download_with_retry_exhausts_and_names_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("failures", [1, 3])
+def test_download_with_retry_preserves_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    failures: int,
 ) -> None:
-    """All attempts fail -> RuntimeError naming the URL; each attempt is
-    announced, and the retry sleeps between attempts."""
-    calls = {"n": 0}
+    errors = [OSError(f"reset {i}") for i in range(1, failures + 1)]
+    calls = 0
+    sleeps: list[float] = []
 
-    def _always_fail(_url: str, _dest: Path) -> None:
-        calls["n"] += 1
-        raise OSError("connection reset")
-
-    monkeypatch.setattr(oc, "_stream_download", _always_fail)
-    monkeypatch.setattr(oc.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]  # no real backoff wait
-
-    with pytest.raises(RuntimeError) as ei:
-        oc._download_with_retry("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
-
-    assert calls["n"] == oc._DOWNLOAD_ATTEMPTS
-    assert "https://example.invalid/t.tar.gz" in str(ei.value)
-    assert "after 3 attempts" in str(ei.value)
-    err = capsys.readouterr().err
-    assert "attempt 1/3" in err and "attempt 3/3" in err
-
-
-def test_download_with_retry_succeeds_on_second_attempt(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A transient first failure is retried and the second attempt wins."""
-    calls = {"n": 0}
-
-    def _fail_then_win(_url: str, dest: Path) -> None:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise OSError("connection reset")
+    def download(_url: str, dest: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls <= failures:
+            raise errors[calls - 1]
         dest.write_bytes(b"ok")
 
-    monkeypatch.setattr(oc, "_stream_download", _fail_then_win)
-    monkeypatch.setattr(oc.time, "sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    oc._download_with_retry("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
-    assert calls["n"] == 2
-    assert (tmp_path / "t.tar.gz").read_bytes() == b"ok"
+    monkeypatch.setattr(oc, "_stream_download", download)
+    monkeypatch.setattr(oc.time, "sleep", sleeps.append)
+    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
+    monkeypatch.setattr(oc.time, "monotonic", lambda: 10.0)
+    url = "https://example.invalid/t.tar.gz"
+    if failures == 3:
+        with pytest.raises(RuntimeError) as caught:
+            oc._download_with_retry(url, tmp_path / "t.tar.gz")
+        assert (
+            str(caught.value)
+            == f"failed to download otel-collector from {url} after 3 attempts (0s total): reset 3"
+        )
+        assert caught.value.__cause__ is errors[-1]
+    else:
+        oc._download_with_retry(url, tmp_path / "t.tar.gz")
+        assert (tmp_path / "t.tar.gz").read_bytes() == b"ok"
+    assert calls == min(failures + 1, 3)
+    assert sleeps == [5.0 * i for i in range(1, calls)]
+    assert capsys.readouterr().err == "".join(
+        f"  ! otel-collector: download attempt {i}/3 failed after 0s: reset {i}\n"
+        for i in range(1, failures + 1)
+    )

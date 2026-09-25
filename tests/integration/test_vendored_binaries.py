@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import pg_tools
+from shared import pg_tools, resilience
 from shared import runtime_binaries as rb
 from shared.config import settings
 
@@ -82,6 +82,7 @@ def _patch_urlopen(
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     monkeypatch.setattr("time.sleep", sleeps.append)
+    monkeypatch.setattr(resilience, "_sleep", sleeps.append)
     return calls, sleeps
 
 
@@ -99,8 +100,8 @@ def test_download_retries_transient_answers_then_succeeds(
     assert sleeps == [2, 4, 8]
 
 
-@pytest.mark.parametrize("status", [403, 404])
-def test_download_retries_403_or_404_then_succeeds(
+@pytest.mark.parametrize("status", [403, 404, 429, 500, 502, 503, 504])
+def test_download_retries_transient_http_then_succeeds(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(status), _FakeResponse(b"jar")])
@@ -109,13 +110,29 @@ def test_download_retries_403_or_404_then_succeeds(
     assert sleeps == [2]
 
 
+def test_download_ignores_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = _http_error(429)
+    error.headers["Retry-After"] = "60"
+    _, sleeps = _patch_urlopen(monkeypatch, [error, _FakeResponse(b"jar")])
+    assert rb._download("https://repo1.invalid/x.jar") == b"jar"
+    assert sleeps == [2]
+
+
+@pytest.mark.parametrize("status", [400, 401])
 def test_download_fails_fast_on_a_permanent_http_answer(
     monkeypatch: pytest.MonkeyPatch,
+    status: int,
 ) -> None:
     """A non-transient 4xx (bad request) fails without retry."""
-    calls, sleeps = _patch_urlopen(monkeypatch, [_http_error(400)])
-    with pytest.raises(RuntimeError, match="400"):
+    error = _http_error(status)
+    calls, sleeps = _patch_urlopen(monkeypatch, [error])
+    with pytest.raises(RuntimeError) as caught:
         rb._download("https://repo1.invalid/x.jar")
+    assert (
+        str(caught.value)
+        == f"failed to download vendored Postgres from https://repo1.invalid/x.jar: {error}"
+    )
+    assert caught.value.__cause__ is error
     assert len(calls) == 1
     assert sleeps == []
 
@@ -129,6 +146,31 @@ def test_download_gives_up_after_bounded_retries(
         rb._download("https://repo1.invalid/x.jar")
     assert len(calls) == rb._DOWNLOAD_ATTEMPTS
     assert sleeps == [2, 4, 8]
+
+
+def test_download_preserves_transient_warning_and_final_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "https://repo1.invalid/x.jar"
+    errors: list[urllib.error.URLError | _FakeResponse] = [
+        urllib.error.URLError(f"reset {i}") for i in range(1, 5)
+    ]
+    calls, sleeps = _patch_urlopen(monkeypatch, errors.copy())
+    warnings: list[str] = []
+    monkeypatch.setattr(rb.logger, "warning", warnings.append)
+
+    with pytest.raises(RuntimeError) as caught:
+        rb._download(url)
+
+    assert calls == [url] * 4
+    assert sleeps == [2, 4, 8]
+    assert warnings == [
+        f"[runtime] transient error fetching {url} (<urlopen error reset {i}>); "
+        f"retry {i}/3 in {2**i}s"
+        for i in range(1, 4)
+    ]
+    assert str(caught.value) == f"failed to download vendored Postgres from {url}: {errors[-1]}"
+    assert caught.value.__cause__ is errors[-1]
 
 
 def _synthetic_pg_jar(artifact_name: str) -> bytes:
