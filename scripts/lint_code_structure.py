@@ -627,6 +627,7 @@ def _check_ast_and_quality(
 ) -> list[str]:
     files, _ = _budget_targets(targets)
     ast_files = _ast_rule_files(argv)
+    locality.reset_caches()
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality.QUALITY_SECTIONS}
     sites: dict[str, locality.Sites] = {kind: {} for kind in locality.SECTIONS}
     scanned: set[str] = set()

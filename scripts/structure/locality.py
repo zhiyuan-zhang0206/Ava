@@ -53,6 +53,12 @@ def _entries(directory: Path, mtime_ns: int) -> frozenset[str]:
     return frozenset(entry.name for entry in directory.iterdir())
 
 
+def reset_caches() -> None:
+    """Forget cached directory listings. Each gate run starts here: two writes in
+    one coarse mtime tick would otherwise leave a long-lived caller a stale listing."""
+    _entries.cache_clear()
+
+
 def _exists_exact(path: Path, *, directory: bool) -> bool:
     """Case-exact existence, so a case-folding filesystem (macOS) agrees with CI."""
     found = path.is_dir() if directory else path.is_file()
