@@ -14,6 +14,8 @@ or pass the fixed `DATA_PLANE_IDENTITY` at birth, never from a cluster name.
 Every dial is the administrator (`shared.pg_admin`): as itself for roles,
 databases, extensions and grants, and acting as the owner (`owner_session`)
 for the objects the owner must own. The owner's own login is never used.
+`shared.pg_admin` loads psycopg, so each function imports it: `shared.cluster`
+is on the `import ava` path, which stays driver-free (task #3816).
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from shared.log import logger
-from shared.pg_admin import connect, owner_conninfo, owner_session
 
 
 def _swap_db(url: str, db_name: str) -> str:
@@ -34,6 +35,8 @@ def _schema_applied(admin_url: str, target: str, *, expected_data_dir: Path | No
     """True if `target` DB has the schema fully applied — `schema_migrations` is
     the last table created by db/schema.sql, so its presence means the apply did
     not fail partway."""
+
+    from shared.pg_admin import connect
 
     with connect(_swap_db(admin_url, target), expected_data_dir=expected_data_dir) as conn:
         row = conn.execute(
@@ -71,6 +74,8 @@ def ensure_cluster_role(
     bootstrap superuser — to a maintenance db (e.g. `postgres`) on the same instance.
     """
     from psycopg import sql as pgsql
+
+    from shared.pg_admin import connect
 
     with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         has_role = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (identity,)).fetchone()
@@ -116,6 +121,8 @@ def _adopt_database(
     target databases carry no `ava`-owned objects (verified per host)."""
     from psycopg import sql as pgsql
 
+    from shared.pg_admin import connect
+
     with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         conn.execute(
             pgsql.SQL("ALTER DATABASE {} OWNER TO {}").format(
@@ -155,6 +162,8 @@ def provision_database(
         RuntimeError: the DB exists but schema_migrations is missing (half-provisioned).
     """
     from psycopg import sql as pgsql
+
+    from shared.pg_admin import connect, owner_session
 
     ensure_cluster_role(
         identity,
@@ -243,6 +252,8 @@ def ensure_pgvector_extension(
     """
     import psycopg
 
+    from shared.pg_admin import connect
+
     try:
         with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
             available = conn.execute(
@@ -277,6 +288,8 @@ def drop_database(
     dependency.
     """
     from psycopg import sql as pgsql
+
+    from shared.pg_admin import connect
 
     with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         conn.execute(pgsql.SQL("DROP DATABASE IF EXISTS {}").format(pgsql.Identifier(identity)))
@@ -364,6 +377,8 @@ def _checkpoint_schema_versions(
 ) -> frozenset[int] | None:
     """Return the complete applied set, or ``None`` when no schema exists."""
 
+    from shared.pg_admin import connect
+
     with connect(db_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         table = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
         if table is None or table[0] is None:
@@ -424,6 +439,8 @@ def ensure_checkpoint_schema(
     unknown versions are never resumable.
     """
     from langgraph.checkpoint.postgres import PostgresSaver
+
+    from shared.pg_admin import owner_conninfo, owner_session
 
     # Act as the schema owner and retain the validated native connection
     # throughout setup; PostgresSaver must not open an unchecked second dial.
@@ -537,6 +554,7 @@ def ensure_runner_role(
     from psycopg import sql as pgsql
 
     from shared.cluster.derive import RUNNER_ROLE
+    from shared.pg_admin import connect
 
     with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         has_role = conn.execute(
