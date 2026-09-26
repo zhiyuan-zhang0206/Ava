@@ -54,8 +54,11 @@ through the owner's `__init__.py`, or promote the name into the owner's contract
 on purpose (export it / drop the underscore) so the widened contract is visible in
 the diff. No per-site allowlist: a name another package needs is contract by
 definition. `locality.FRAMEWORK_TIERS` names the packages whose `_` marks another
-axis by documented convention (today `ava/_*.py`: hidden from agents, open to the
-framework). Files under a tests/ directory are exempt.
+axis by documented convention: a private module or package directly under one
+(today `ava/_*.py`: hidden from agents, open to the framework) is exempt, while a
+private name inside an agent-facing module (`ava.files._x`) is not. A module
+alias rebound anywhere in the file (a parameter such as `self`, a local) is not
+followed. Files under a tests/ directory are exempt.
 
 ### Rule 5: single decision owners (locality)
 

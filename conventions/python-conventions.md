@@ -64,10 +64,12 @@ section covers fixing a violation and maintaining its baseline.
   per-site allowlist: a name another package genuinely needs is, by
   definition, part of that package's contract, so the fix is to make the
   contract honest rather than to excuse the reach-in. The one package-level
-  exception is `locality.FRAMEWORK_TIERS`: `ava/_*.py` modules are the
-  framework / plugin-author tier by [SDK convention](sdk-docstring-discipline.md)
-  — their underscore hides them from agents, not from other packages. Files
-  under a `tests/` directory are exempt.
+  exception is `locality.FRAMEWORK_TIERS`: `ava/_*.py` modules (and `ava/_*/`
+  packages) are the framework / plugin-author tier by
+  [SDK convention](sdk-docstring-discipline.md) — their underscore hides them
+  from agents, not from other packages. A private name inside an agent-facing
+  module (`ava.files._x`, a `_helper` in `ava/__init__.py`) is not part of the
+  tier. Files under a `tests/` directory are exempt.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`shared/db_connections.py`). Any other module making that

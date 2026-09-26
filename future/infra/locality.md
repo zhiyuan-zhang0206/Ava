@@ -41,7 +41,7 @@ boundaries, already carried by codegen, and not debt.
    one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
    cover (`scripts/`, and any async pool left in `allowed`), or retire it if
    nothing remains.
-2. **Reach-in burn-down** (`private_imports`, 294 keys / 306 sites / 108
+2. **Reach-in burn-down** (`private_imports`, 305 keys / 321 sites / 111
    files), highest yield first: `cli/main.py` re-exports 121 private
    `cli.parsers.*._h_*` handlers so tests have one namespace to patch (a
    hand-maintained registry — bind handlers in their parser modules and patch

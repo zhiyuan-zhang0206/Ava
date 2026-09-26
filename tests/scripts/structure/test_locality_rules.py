@@ -235,6 +235,143 @@ def test_a_nested_package_under_the_tier_is_not_itself_a_tier(tmp_path: pathlib.
     assert sites == {"gateway/x.py::ava.shell._x": [1]}
 
 
+def test_framework_tier_covers_a_private_package_too(tmp_path: pathlib.Path) -> None:
+    _write(tmp_path, "ava/_pkg/__init__.py", "x = 1\n")
+    tree = _parse("from ava import _pkg\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path) == {}
+
+
+def test_framework_tier_requires_the_private_name_to_be_a_real_module(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`_private_fn` is only a function defined inside `ava/__init__.py` — there is
+    no `ava/_private_fn.py` or `ava/_private_fn/` on disk, so it is not itself a
+    module or package and the tier exemption (which only covers a module/package
+    directly under `ava`) does not apply."""
+    _write(tmp_path, "ava/__init__.py", "def _private_fn(): ...\n")
+    tree = _parse("from ava import _private_fn\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path)
+
+    assert sites == {"gateway/x.py::ava._private_fn": [1]}
+
+
+def test_framework_tier_does_not_cover_a_name_private_one_level_deeper(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`_x` is owned by `ava.files` (a module-level private name, per the
+    module-vs-directory owner rule), not directly by the tier root `ava` — the
+    narrowed exemption only covers a private component sitting directly under
+    `ava` itself."""
+    _write(tmp_path, "ava/files.py", "x = 1\n")
+    tree = _parse("from ava.files import _x\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path)
+
+    assert sites == {"gateway/x.py::ava.files._x": [1]}
+
+
+def test_framework_tier_narrowing_applies_to_the_attribute_form_too(
+    tmp_path: pathlib.Path,
+) -> None:
+    _write(tmp_path, "ava/files.py", "def _resolve(): ...\n")
+    tree = _parse("import ava.files\nava.files._resolve()\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path)
+
+    assert sites == {"gateway/x.py::ava.files._resolve": [2]}
+
+
+# --- private_imports: shadowed aliases (the `rebound` set) ------------------
+
+
+def test_an_alias_shadowed_by_a_function_parameter_is_not_followed(
+    tmp_path: pathlib.Path,
+) -> None:
+    _write(tmp_path, "shared/telemetry/__init__.py", "x = 1\n")
+    tree = _parse("from shared import telemetry\ndef f(telemetry): return telemetry._state\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
+
+
+def test_an_alias_shadowed_by_reassignment_is_not_followed(tmp_path: pathlib.Path) -> None:
+    _write(tmp_path, "shared/telemetry/__init__.py", "x = 1\n")
+    tree = _parse("from shared import telemetry\ntelemetry = object()\ntelemetry._state\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
+
+
+def test_an_alias_literally_named_self_is_not_followed_inside_a_method(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`self` is an extremely common parameter name; if a module alias happens to
+    share it, the scope-free rebound check must still suppress it rather than
+    flooding every method with a bogus reach-in."""
+    _write(tmp_path, "shared/self.py", "x = 1\n")
+    tree = _parse("from shared import self\nclass C:\n    def m(self): return self._x\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
+
+
+def test_an_unshadowed_alias_is_still_flagged(tmp_path: pathlib.Path) -> None:
+    """Control case: with no rebinding anywhere in the module, the same alias
+    form as the tests above is flagged normally."""
+    _write(tmp_path, "shared/telemetry/__init__.py", "x = 1\n")
+    tree = _parse("from shared import telemetry\ntelemetry._state\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path)
+
+    assert sites == {"gateway/x.py::shared.telemetry._state": [2]}
+
+
+# --- private_imports: case-exact filesystem checks --------------------------
+
+
+def test_an_attribute_of_a_module_level_class_is_not_matched_by_case_folding(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`Registry` (capital R) must not resolve as a module just because a
+    case-folding filesystem (macOS) would make `Registry.py` and the real
+    `registry.py` collide — `_exists_exact` checks the directory listing, not
+    just `Path.is_file()`, so this must hold on macOS and Linux alike."""
+    _write(tmp_path, "shared/pkg/__init__.py", "x = 1\n")
+    _write(tmp_path, "shared/pkg/registry.py", "class Registry: pass\n")
+    tree = _parse("from shared import pkg\npkg.Registry._cache.clear()\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
+
+
+def test_a_wrong_case_module_path_does_not_resolve_to_the_real_module(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`shared.Mod` (capital M) does not exist case-exactly even though
+    `shared/mod.py` does — the owner must resolve to the non-existent
+    `shared.Mod` "package", not silently fold onto the real module, so the
+    importer (which is not inside that non-existent package) is flagged."""
+    _write(tmp_path, "shared/mod.py", "x = 1\n")
+    tree = _parse("from shared.Mod import _x\n")
+
+    sites = locality.private_imports(tree, "shared/other.py", ("shared",), tmp_path)
+
+    assert sites == {"shared/other.py::shared.Mod._x": [1]}
+
+
+def test_exists_exact_cache_does_not_go_stale_after_a_file_is_created(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`_entries` is keyed on the directory's mtime; creating a new file bumps
+    that mtime, so a previously-cached "not found" listing must not linger."""
+    target = tmp_path / "shared" / "fresh.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    assert locality._exists_exact(target, directory=False) is False
+
+    target.write_text("x = 1\n", encoding="utf-8")
+
+    assert locality._exists_exact(target, directory=False) is True
+
+
 # --- owner_bypasses: the postgres-dial single decision owner ----------------
 
 _POSITIVE_DIALS = {
@@ -460,6 +597,27 @@ def test_site_errors_new_site_on_a_renamed_file_gets_a_migration_hint(
     assert len(errors) == 1
     assert "renamed file: migrate the baseline key from gateway/db_old.py" in errors[0]
     assert "grew above" not in errors[0]
+
+
+def test_growth_errors_are_emitted_in_line_order_even_when_recorded_out_of_order(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Attribute-based reach-ins are recorded in a separate pass after every
+    import-based one (see private_imports), so a later import line can land in
+    `sites` before an earlier attribute line — confirmed below: [5, 2], not
+    [2, 5]. site_errors must still report the errors in line order regardless."""
+    _write(tmp_path, "a/_priv/mod.py", "x = 1\n")
+    source = "import a\na._priv.x\n\n\nimport a._priv\n"
+
+    sites = locality.private_imports(_parse(source), "gateway/x.py", ("a", "gateway"), tmp_path)
+
+    assert sites == {"gateway/x.py::a._priv": [5, 2]}
+
+    errors = _site_errors(tmp_path, measured=sites, frozen={}, scanned={"gateway/x.py"})
+
+    assert len(errors) == 2
+    assert errors[0].startswith("gateway/x.py:2:")
+    assert errors[1].startswith("gateway/x.py:5:")
 
 
 # --- allowlist_errors / missing_allowlist_errors -----------------------------

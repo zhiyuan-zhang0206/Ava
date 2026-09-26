@@ -9,6 +9,7 @@ scripts/lint_code_structure.py header (Rules 4 and 5).
 from __future__ import annotations
 
 import ast
+import functools
 import re
 from collections import defaultdict
 from collections.abc import Callable
@@ -44,9 +45,25 @@ def _package_of(rel_path: str) -> list[str]:
     return rel_path.removesuffix(".py").split("/")[:-1]
 
 
+@functools.cache
+def _entries(directory: Path, mtime_ns: int) -> frozenset[str]:
+    """Names in a directory; keyed on its mtime, so adding or removing an entry
+    invalidates the cached listing."""
+    del mtime_ns  # cache key only
+    return frozenset(entry.name for entry in directory.iterdir())
+
+
+def _exists_exact(path: Path, *, directory: bool) -> bool:
+    """Case-exact existence, so a case-folding filesystem (macOS) agrees with CI."""
+    found = path.is_dir() if directory else path.is_file()
+    return found and path.name in _entries(path.parent, path.parent.stat().st_mtime_ns)
+
+
 def _is_module(dotted: str, repo_root: Path) -> bool:
     path = repo_root / dotted.replace(".", "/")
-    return path.with_name(f"{path.name}.py").is_file() or path.is_dir()
+    return _exists_exact(path.with_name(f"{path.name}.py"), directory=False) or _exists_exact(
+        path, directory=True
+    )
 
 
 def _import_base(node: ast.ImportFrom, rel_path: str) -> str | None:
@@ -123,7 +140,7 @@ def _private_target(dotted: str, roots: tuple[str, ...], repo_root: Path) -> tup
         if _is_private(part):
             prefix = parts[:index]
             module_file = repo_root / f"{'/'.join(prefix)}.py"
-            owner = prefix[:-1] if module_file.is_file() else prefix
+            owner = prefix[:-1] if _exists_exact(module_file, directory=False) else prefix
             return ".".join(parts[: index + 1]), ".".join(owner)
     return None
 
@@ -144,8 +161,17 @@ class _Reach:
         }
         for target, owner in sorted(targets):
             inside = self.importer == owner or self.importer.startswith(f"{owner}.")
-            if not inside and owner not in FRAMEWORK_TIERS:
+            if not inside and not self._framework_tier(target, owner):
                 self.sites.setdefault(f"{self.rel_path}::{target}", []).append(lineno)
+
+    def _framework_tier(self, target: str, owner: str) -> bool:
+        """A private module or package owned by the tier package itself (`ava._boot`).
+
+        An owner of `ava` plus a target that is a module means the private component
+        sits directly under `ava`; a private name inside an agent-facing module
+        (`ava.files._x`, a `_helper` in `ava/__init__.py`) is not a module.
+        """
+        return owner in FRAMEWORK_TIERS and _is_module(target, self.repo_root)
 
 
 def private_imports(
@@ -155,6 +181,7 @@ def private_imports(
     outside the package that owns it."""
     reach = _Reach(rel_path, ".".join(_package_of(rel_path)), roots, repo_root)
     aliases: dict[str, str] = {}
+    rebound: set[str] = set()
     attributes: list[ast.Attribute] = []
     inner: set[int] = set()
     for node in ast.walk(tree):
@@ -164,6 +191,13 @@ def private_imports(
         elif isinstance(node, ast.Import | ast.ImportFrom):
             aliases.update(_module_aliases(node, rel_path, repo_root))
             reach.record(node.lineno, _import_candidates(node, rel_path))
+        elif isinstance(node, ast.arg) or (
+            isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+        ):
+            rebound.add(node.arg if isinstance(node, ast.arg) else node.id)
+    # Scope-free: a name rebound anywhere in the module (a parameter such as
+    # `self`, a local, a loop target) may shadow the import, so it is skipped.
+    aliases = {name: dotted for name, dotted in aliases.items() if name not in rebound}
     for node in attributes:
         if id(node) not in inner:  # outermost link of each chain only
             target = _attribute_target(node, aliases, repo_root)
@@ -364,7 +398,7 @@ def _growth_errors(
             detail += f" (grew above its frozen count {frozen[key]})"
         elif path in sources:
             detail += f" (renamed file: migrate the baseline key from {sources[path]})"
-        errors.extend(f"{path}:{line}: {detail}" for line in lines)
+        errors.extend(f"{path}:{line}: {detail}" for line in sorted(lines))
     return errors
 
 
