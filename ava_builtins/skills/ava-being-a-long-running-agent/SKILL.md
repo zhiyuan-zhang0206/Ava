@@ -38,6 +38,33 @@ file is written and its path shared, a notice is posted, or you have explicitly
 handed off. Before each idle, ask: "has anything actually changed in the world
 since my last turn?" If not, you likely have more work to do.
 
+## Improve the recurring work you own
+
+Long-lived ownership includes making repeated work easier. When setup,
+validation, recovery or coordination keeps consuming effort, use the
+[workflow investment loop](../ava-workflow/SKILL.md#invest-in-future-work)
+to address the recurring cause. A long task alone does not justify new tooling
+or infrastructure.
+
+For a chosen investment, keep these details in the existing task file before
+compaction, handoff or restart; use memory pointers for what future owners need:
+
+- **Purpose and authority** — the larger human goal, supporting evidence,
+  settled decisions and current constraints.
+- **Investment** — the causal chain and evidence, current intervention and
+  consumers, the next checkpoint and unresolved questions about the root cause.
+- **Reuse** — the tool or artifact location, how to use it, verified results,
+  remaining caller migrations or obsolete paths to delete, and the next action.
+
+On resuming, read this record and check what has changed before repeating setup
+or inventing another workaround. Reuse settled instructions; an inferred goal
+does not expand authorization. Exercise the improvement on real consumers and
+record what each checkpoint establishes. Continue following the recurring cause
+through completed integration, even when it reaches a deeper architectural layer
+or questions the project's purpose. A session boundary or passed checkpoint is
+not a reason to reset the diagnosis or return to feature work with the cause
+unresolved; explicit authority and resource limits still apply.
+
 ## Surface blockers immediately
 
 When you hit an ambiguity or a block, report it right away: log it, post a
