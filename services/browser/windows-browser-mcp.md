@@ -56,7 +56,7 @@ if a second consumer ever needs to reach the daemon off-box.
   (and `browser_mcp_incapability` itself, if the gate then equals browser's).
 - `"unix_socket": true` from `ava_builtins/mcps/chrome/.mcp.json`, and — if no
   other server declares it — the `unix_socket` entry in
-  `ava/_mcp_config.py:_REQUIREMENT_PROBES`.
+  `ava/mcp_config.py:_REQUIREMENT_PROBES`.
 - The POSIX-only rows in `services/agent_runner_side/browser/browser/browser.ava.okf.md`,
   `ava_builtins/mcps/chrome/chrome.ava.okf.md`, and
   `conventions/windows-setup.md`.

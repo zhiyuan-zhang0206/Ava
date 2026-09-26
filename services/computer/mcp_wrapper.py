@@ -11,7 +11,7 @@ Wired in ava_builtins/mcps/computer_use/.mcp.json as the local-fallback command
 (the MCP daemon's primary path dials the service directly — see
 ava/_mcp_computer.py). Takes no arguments (the socket path is derived from
 settings, matching the daemon). The MCP daemon spawns it with cwd pinned to the
-repo root (`ava/_mcp_config.py:server_cwd`), so the relative interpreter path
+repo root (`ava/mcp_config.py:server_cwd`), so the relative interpreter path
 resolves there:
 
     .venv/bin/python -m services.computer.mcp_wrapper

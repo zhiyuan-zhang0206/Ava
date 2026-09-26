@@ -16,7 +16,7 @@ onto Ava as a single installed plugin under `<dest_root>/<name>/` that contribut
   to `<dest_root>/<name>/skills/<name>/`.
 - its **MCP servers** (when the plugin ships a root `.mcp.json`): the file is
   copied to `<dest_root>/<name>/.mcp.json`, where the shared MCP config loader
-  (`ava/_mcp_config.py`, scanning `~/.ava/plugins/*/.mcp.json`) merges it in —
+  (`ava/mcp_config.py`, scanning `~/.ava/plugins/*/.mcp.json`) merges it in —
   so the bundled servers connect on next use, no extra wiring.
 - its **commands** (when the plugin ships `commands/`): the directory is copied
   to `<dest_root>/<name>/commands/`, where `ava/composer_commands.py:discover_commands`
@@ -219,10 +219,10 @@ def _mcp_server_names(mcp_path: Path) -> list[str]:
     Raises:
         ClaudeCodePluginError: the file is not valid JSON or its `mcpServers` is not an object.
     """
-    from ava._mcp_config import MCPError, _read_servers
+    from ava.mcp_config import MCPError, read_servers
 
     try:
-        return sorted(_read_servers(mcp_path))
+        return sorted(read_servers(mcp_path))
     except MCPError as e:
         raise ClaudeCodePluginError(f"bad .mcp.json: {e}") from e
 

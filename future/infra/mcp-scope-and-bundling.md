@@ -4,7 +4,7 @@
 > remaining work is **formalizing per-machine scope** as a first-class category.
 >
 > Landed — all three **sources**, merged by one loader
-> (`ava/_mcp_config.py:load_mcp_config`, read by both the in-process tool surface
+> (`ava/mcp_config.py:load_mcp_config`, read by both the in-process tool surface
 > and the connection daemon): built-in `ava_builtins/mcps/<name>/.mcp.json`,
 > plugin-bundled `.mcp.json`, the installed registry package (`type="mcp"`,
 > `ava mcp install` → `$AVA_HOME/mcps/<name>/`), and the machine `mcp.json` on top
@@ -104,7 +104,7 @@ An MCP declaration carries `{source, scope}` — not just a config dict:
 
 - **source** — where the config comes from. **Landed:** the machine `mcp.json`
   and plugin-bundled `.mcp.json` (declared like CC's, at the plugin root) are
-  merged by `ava/_mcp_config.py:load_mcp_config` — machine overrides a plugin's
+  merged by `ava/mcp_config.py:load_mcp_config` — machine overrides a plugin's
   same-named default — which both `ava/mcps.py:_load_config` (in-process) and
   `ava/_mcps_daemon.py:_load_config` (the daemon) now delegate to. **Also
   landed:** `ava plugins install` can now *deliver* a plugin-bundled `.mcp.json`
@@ -191,7 +191,7 @@ above relies on.
     auto-scanned by `load_mcp_config` as the lowest-precedence source (symmetric
     with built-in `skills/` + `plugins/`). converge no longer writes it; it just
     sheds the legacy file. A declarative **`requires`** precondition on a server
-    entry (e.g. `{"display": true}`, `ava/_mcp_config.py:assert_requirements`) is
+    entry (e.g. `{"display": true}`, `ava/mcp_config.py:assert_requirements`) is
     checked before connect and yields a clear capability error on incapable hosts
     instead of an opaque "connection refused". The runtime **`register_mcp_source`**
     leg (plugins contributing MCP configs at runtime, symmetric with Layer H

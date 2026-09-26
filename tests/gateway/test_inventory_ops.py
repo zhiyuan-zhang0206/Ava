@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import ava._mcp_config as mcp_cfg_mod
+import ava.mcp_config as mcp_cfg_mod
 from ops import ops_inventory as ops
 from ops.ops_inventory import inventory_read_op, inventory_write_op
 from ops.rpc_schemas import FieldWriteResult
@@ -39,7 +39,7 @@ def _machine_only_mcp(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     builtin `mcps/` and plugin `.mcp.json` sources are stubbed empty. Also pins
     the host role to agent-runner (the ops' precondition): inventory ops run only
     there, and the test env has no AVA_MACHINE_SERVE_* set."""
-    monkeypatch.setattr(mcp_cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(mcp_cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(mcp_cfg_mod, "_plugin_config_paths", list)
     # is_agent_runner() (the ops precondition) reads shared.machine.machine_role;
     # ops.machine_role is only used to format the rejection message. Pin both.

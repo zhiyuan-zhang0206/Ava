@@ -10,7 +10,7 @@ one Chrome client is shared instead of one per agent.
 
 Wired in ava_builtins/mcps/chrome/.mcp.json; takes no arguments (the socket path is derived
 from settings, matching the daemon). The MCP daemon spawns it with cwd pinned to
-the repo root (`ava/_mcp_config.py:server_cwd`), so the relative interpreter path
+the repo root (`ava/mcp_config.py:server_cwd`), so the relative interpreter path
 resolves there — launched directly rather than through `uv run`, which would hang
 one resident wrapper process per agent:
 
