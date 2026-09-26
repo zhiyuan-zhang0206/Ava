@@ -9,19 +9,14 @@
 // cost of this component). React's default shallow comparator handles
 // string + bool, so no custom areEqual is needed.
 
-import dynamic from "next/dynamic";
 import { memo } from "react";
-import type { PrismTheme } from "prism-react-renderer";
+import { Highlight, type PrismTheme } from "prism-react-renderer";
 
 import { CopyButton } from "@/components/copy-button";
 
-// prism-react-renderer is ~30KB gzipped — lazy-load it, only fetched
-// when the timeline actually has a python code block. While loading,
-// fall back to a plain text <pre>.
-const Highlight = dynamic(
-  () => import("prism-react-renderer").then((mod) => mod.Highlight),
-  { ssr: false },
-);
+// Code is a core timeline surface. Keep its highlighter in the initial bundle:
+// a click-triggered low-priority chunk can queue behind long-lived SSE requests
+// on Chromium's slow-network scheduler, leaving an expanded card blank.
 
 // The theme references CSS variables — actual colors live in globals.css
 // under :root / .dark. next-themes toggles the .dark class on system
