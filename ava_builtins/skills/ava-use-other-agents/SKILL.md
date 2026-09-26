@@ -1,9 +1,9 @@
 ---
-name: ava-use-claude-code-and-codex
-description: Drives Claude Code or Codex CLI as supervised long-running coding agents. Use when outsourcing multi-step implementation or review, choosing between the two CLIs, resuming a coding session, monitoring delegated coding work, or launching either CLI or DeepSeek Harness to impersonate the launching Ava agent.
+name: ava-use-other-agents
+description: Drives other coding agents — Claude Code or Codex CLI as supervised long-running workers, and Codex, Claude Code or DeepSeek Harness as a takeover that impersonates the launching Ava agent. Use when outsourcing multi-step implementation or review, choosing between the tools, resuming a coding session, monitoring delegated coding work, or launching a takeover.
 ---
 
-# Use Claude Code and Codex
+# Use other agents
 
 Both `claude` (Anthropic) and `codex` (OpenAI) are coding-agent CLIs you can hand
 a task to and let plan + execute. Treat either as "another agent". A session

@@ -17,11 +17,7 @@ import pytest
 from shared import coding_session_owner
 
 _REFERENCE = (
-    Path(__file__).parents[2]
-    / "ava_builtins"
-    / "skills"
-    / "ava-use-claude-code-and-codex"
-    / "reference"
+    Path(__file__).parents[2] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
 )
 
 

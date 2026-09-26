@@ -1,16 +1,16 @@
 ---
 type: doc
-title: ava-use-claude-code-and-codex skill — Drive external coding CLI
-description: Treat claude (Anthropic) / codex (OpenAI) as "another agent", give it tasks, and let it plan+execute. Carries the judgment of when to outsource, to which one, its two modes (a supervised file-driven worker, or a file-less takeover of the launching agent), and the collaboration patterns for both; the session primitives themselves are left to ava.shell, not repeated here.
+title: ava-use-other-agents skill — Drive external coding agents
+description: Treat claude (Anthropic) / codex (OpenAI) / dsh (DeepSeek Harness) as "another agent", give it tasks, and let it plan+execute. Carries the judgment of when to outsource, to which one, its two modes (a supervised file-driven worker, or a file-less takeover of the launching agent), and the collaboration patterns for both; the session primitives themselves are left to ava.shell, not repeated here.
 tags:
 - extensions
 - agent-instruction
 ---
 
-# ava-use-claude-code-and-codex skill — Drive external coding CLI
+# ava-use-other-agents skill — Drive external coding agents
 
 ## What it is
-`claude` and `codex` are both coding-agent CLIs that can be given tasks and let them plan+execute (`$AVA_HOME/skills/ava-use-claude-code-and-codex/`). Treat either as "another agent". This skill carries **judgment**: when to outsource, to which one, and the **two modes** a session can run in — Mode A, a supervised file-driven worker, and Mode B, a file-less takeover that replaces the launching agent (inline briefing, no task/work files, no supervisor). The session primitives themselves (`ava.shell`'s run / sessions, `ava.watcher`) are **not repeated here** — it explicitly points to those, not re-derives.
+`claude` and `codex` are both coding-agent CLIs that can be given tasks and let them plan+execute (`$AVA_HOME/skills/ava-use-other-agents/`); DeepSeek Harness (`dsh`) joins them as a takeover-only executor (`reference/spawn_dsh.py`, relay plugin `reference/ava-relay-dsh/`). Treat each as "another agent". This skill carries **judgment**: when to outsource, to which one, and the **two modes** a session can run in — Mode A, a supervised file-driven worker, and Mode B, a file-less takeover that replaces the launching agent (inline briefing, no task/work files, no supervisor). The session primitives themselves (`ava.shell`'s run / sessions, `ava.watcher`) are **not repeated here** — it explicitly points to those, not re-derives.
 
 ## Judgments carried
 - **When to outsource**: single file read/write / grep / git / a single command → do it yourself; multi-step coding tasks that can be fully described (write+test+fix), expected >10 files with multiple rounds of trial and error → outsource.
