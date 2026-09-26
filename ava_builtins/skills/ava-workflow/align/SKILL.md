@@ -19,6 +19,25 @@ When a user says "build me an X," roughly 80% is still in their head: why, who i
 
 Inspired by Matt Pocock's ["grill me" skills](https://github.com/mattpocock/skills): the agent shouldn't passively accept vague instructions. Instead, actively question the user — challenge assumptions, uncover context, expose risks. This applies to **any** task — coding, research, writing, analysis, ops changes, even personal decisions. The technique is the same; only the domain vocabulary changes.
 
+### Infer the purpose behind the request
+
+Step back from the requested artifact. Read the conversation, ongoing role and
+prior failures to infer what the human is trying to improve over time. For
+example, "fix the updater" may serve the larger goal "make maintaining my daily
+production system reliable and inexpensive." Completing a patch while leaving
+every future validation just as difficult may miss that goal.
+
+State the supported inference and carry it into priorities and success criteria.
+Ask about a remaining uncertainty only when its answer changes the goal, a
+material trade-off or authority; do not ask the user to repeat settled context.
+An inference guides a recommendation, not permission for unrelated work.
+Use the workflow's [investment loop](../SKILL.md#invest-in-future-work) to decide
+what recurring cause to address, following the evidence through architecture
+and even the project's purpose. Distinguish explicit user constraints from
+boundaries inherited from the current code. Resolve genuine changes in purpose,
+priorities or authority; do not use alignment to impose a maximum refactoring
+depth or automatically defer necessary infrastructure as "not this task."
+
 ## Process
 
 ### 0. Explore the environment before asking
@@ -29,7 +48,7 @@ Before firing any question at the user, ask yourself: **can I answer this by loo
 - Is it in the project docs? (AGENTS.md, CONTEXT.md, conventions/, memory pool)
 - Is it an observable fact? (Check running processes, config files, deployed state)
 
-**Facts come from the environment. Decisions come from the user.** Don't ask "what database do we use?" when you can grep the connection string. Do ask "should we use the existing table or create a new one?" — that's a decision only the user can make.
+**Facts come from the environment. Material goals and trade-offs come from the user.** Don't ask "what database do we use?" when you can inspect the configuration. Make routine implementation choices within the agreed scope; ask when a choice changes user-visible guarantees, scope or authority.
 
 **When the user's model of the subject itself is off**, that's not an Align problem — it's a Calibrate problem. Stop aligning, run a quick calibration slice on the contested fact, then resume. Align on top of a wrong model produces a confident alignment document that is wrong anyway.
 
@@ -37,6 +56,7 @@ Before firing any question at the user, ask yourself: **can I answer this by loo
 
 After reading the task description and exploring the environment, immediately ask yourself:
 - Do I know **why** we're doing this? (What's the underlying problem?)
+- Do I know **what this enables next**? (Which recurring work should become easier?)
 - Do I know **who** the end user / beneficiary is?
 - Do I know what **success** looks like? (Concrete, verifiable criteria)
 - Do I know the **constraints**? (Time, resources, tools, platform, things not to do)
@@ -85,6 +105,11 @@ After questioning, output a concise alignment document:
 ## Goal
 [One sentence: what are we trying to achieve]
 
+## Larger Purpose and Investment
+[What ongoing goal this serves; evidence for any inferred intent; the recurring
+cause to address, current consumers and the next concrete checkpoint. Omit when
+the task has no meaningful reusable investment.]
+
 ## Success Criteria
 - [ ] Concrete, verifiable condition 1
 - [ ] Concrete, verifiable condition 2
@@ -118,7 +143,12 @@ For a heavyweight alignment that settles a **load-bearing design decision** (cho
 
 ### 5. Confirm, then proceed
 
-Send the alignment document to the user for confirmation. **Do not enter the Plan phase, write code, or take any action until the user explicitly confirms you have reached a shared understanding.** "Looks roughly right" is not confirmation — press until the user signs off on the document as written, or corrects it. If the user corrects anything, update the document and reconfirm. Your own confidence that you understand is never a substitute for their explicit go-ahead.
+Use the user's existing instructions and confirmed decisions as authorization;
+do not demand another sign-off because you wrote an alignment document. When
+material choices remain open, present those choices and your recommendation for
+confirmation before dependent work. Continue useful work that does not depend
+on the answer. If the user corrects the scope, update the alignment and clarify
+only what remains unsettled; an inferred purpose never grants new authority.
 
 **The alignment document is the input to the Plan phase — or straight to execution.** After confirmation, if the task is small or serial, start executing directly; only very large or parallel tasks need a Plan phase (see `plan/SKILL.md`).
 
@@ -139,10 +169,10 @@ Align can be used independently — any time you feel the task isn't clear enoug
 
 ## Don't
 
-- Don't accept "just start and we'll see" — question until there are clear success criteria
+- Don't use "just start and we'll see" to hide material uncertainty — propose concrete success criteria from the context and clarify what remains open
 - Don't dump 20 questions in one round — keep each round compact (≤5-8), but keep running rounds until the frontier is empty. A tight round cap is not a total-question cap; no branch gets silently assumed to stay under some number.
 - Don't ask a question without your recommended answer attached — if you can't recommend one, you haven't explored enough to be asking it yet
-- Don't stop questioning when the user says "roughly okay is fine" — ask "what's the worst acceptable outcome?"
+- Don't reopen settled choices; clarify the worst acceptable outcome when that unresolved trade-off would change the work
 - Don't ask the user for facts you can look up — explore the environment first, and spin up a sub-agent for facts that surface mid-grilling
 - Don't skip branches in the decision tree — each unresolved branch is a future rework waiting to happen
 - Don't align on top of an uncalibrated model — if the user's picture of the subject is wrong, calibrate that slice first
