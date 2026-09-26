@@ -281,7 +281,7 @@ def create(
         brief, description, remind_interval_seconds, priority
     )
     token_budget, usd_budget = _validate_budgets(token_budget, usd_budget)
-    actor = ava.agent_identity.agent_id()
+    actor = ava.agent_identity.require_agent_id()
     effective_owner = owner if owner is not None else actor
     with ava.DB.transaction(), ava.DB.cursor() as cur:
         # parent is required: only the system root task (id 1) may parent the
@@ -484,7 +484,7 @@ def update(
     # agent auto-wakes it, so keep it out of the transaction. System tooling
     # has no actor for a task note or TaskUpdated; like gateway PATCH, its
     # committed write relies on the board's normal poll.
-    if actor is not None:  # pyright: ignore[reportUnnecessaryComparison] -- agent_id() is None before bootstrap.
+    if actor is not None:  # agent_id() is None before bootstrap; system tooling has no actor.
         _notify_after_update(
             task_id,
             title,

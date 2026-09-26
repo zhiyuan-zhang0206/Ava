@@ -140,7 +140,7 @@ def _publish_self_inbound_wake() -> None:
     from shared.cluster import inbound_channel
     from shared.log import logger
 
-    channel = inbound_channel(agent_identity.agent_id())
+    channel = inbound_channel(agent_identity.require_agent_id())
     try:
         ava.REDIS.publish(channel, "0")
     except ResponseError as exc:
@@ -323,7 +323,7 @@ def compact(summary: str) -> NoReturn:
     publish_best_effort_sync(
         settings.data_plane.events_channel,
         CompactRequest(
-            agent_id=agent_identity.agent_id(),
+            agent_id=agent_identity.require_agent_id(),
             content=f"[compact requested, {len(summary)} chars]",
         ).model_dump_json(),
         context="compact_request",

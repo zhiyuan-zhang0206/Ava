@@ -88,7 +88,7 @@ def _watchers_dir() -> _pl.Path:
 def _agent_id() -> int:
     import ava.agent_identity
 
-    return int(ava.agent_identity.agent_id())
+    return ava.agent_identity.require_agent_id()
 
 
 _SCRIPT_FILE_RE = _re.compile(r"^watcher_(\d+)\.py$")
