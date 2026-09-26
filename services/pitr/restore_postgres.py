@@ -26,6 +26,7 @@ from services.pitr.restore_proof import (
     _same_live,
     update_restore_owner,
 )
+from shared.pg_foreground import start_foreground_postgres
 from shared.pg_tools import pg_start_env
 
 
@@ -223,15 +224,16 @@ def _log_tail(path: Path, limit: int = 4000) -> str:
 def _spawn_sandbox_postgres(
     postgres: Path, pgdata: Path, config_file: Path, log_path: Path
 ) -> subprocess.Popen[bytes]:
-    """Launch a foreground postmaster in the operation worker's group."""
-    with log_path.open("ab", buffering=0) as log:
-        return subprocess.Popen(  # noqa: S603 -- trusted foreground postmaster.
-            [str(postgres), "-D", str(pgdata), "-c", f"config_file={config_file}"],
-            stdin=subprocess.DEVNULL,
-            stdout=log.fileno(),
-            stderr=log.fileno(),
-            env=pg_start_env(),
-        )
+    """Launch a foreground postmaster in the operation worker's group.
+
+    Inside an operation worker it is receipted in the controls, so the
+    controller can close the children that setsid() puts outside the group.
+    """
+    return start_foreground_postgres(
+        [str(postgres), "-D", str(pgdata), "-c", f"config_file={config_file}"],
+        log=log_path,
+        env=pg_start_env(),
+    )
 
 
 def _capture_sandbox(process: subprocess.Popen[bytes], pgdata: Path) -> SandboxPostgresIdentity:

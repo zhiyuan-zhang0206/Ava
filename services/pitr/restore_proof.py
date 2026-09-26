@@ -24,7 +24,7 @@ from services.pitr.base_restore_crypto import (
 )
 from services.pitr.crypto import MAGIC, decrypt_archive
 from services.pitr.object_store import RemoteObjectAck
-from services.pitr.operation_custody import NativeProcess, OperationWorker, claims_receipt
+from services.pitr.operation_custody import NativeProcess, OperationWorker, owned_receipts
 from services.pitr.restore_manifest import (
     PROTECTED_SCHEMA_VERSION,
     ProtectedManifest,
@@ -334,7 +334,7 @@ def reconcile_restore_runtime(root: Path) -> None:
         raise RestoreProofError(
             "interrupted restore requires native operation retirement "
             "(`ava pitr operations retire`); persisted receipts do not authorize "
-            "process-group adoption"
+            f"process-group adoption: {sorted(path.name for path in owner_paths | partials)}"
         )
     reconcile_restore_pending(root)
 
@@ -348,10 +348,8 @@ def quarantine_restore_staging(root: Path, work: Path, worker: OperationWorker |
     configuration move into the quarantined controls.
     """
     owners = root / "restore-owners"
-    for owner in sorted(owners.glob("*.owner.json")) if owners.is_dir() else []:
-        evidence = _require_owner_object(json.loads(owner.read_text()))
-        if not claims_receipt(evidence["native"], worker):
-            continue
+    receipts = sorted(owners.glob("*.owner.json")) if owners.is_dir() else []
+    for owner, evidence in owned_receipts(receipts, work, worker):
         partial = Path(str(evidence["partial"]))
         if partial.parent != root / "restore":
             raise RestoreProofError("restore owner escaped the restore root")

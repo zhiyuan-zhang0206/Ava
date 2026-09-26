@@ -4,8 +4,11 @@ Each operation kind owns a private control root: a lock plus at most the
 controls of operations whose custody is not settled. A control directory's
 records decide what happens next:
 
-- `closure.json` alone: the controller proved group closure and died before
+- `closure.json` alone: the controller proved closure (the group and every
+  receipted postgres family that setsid() put outside it) and died before
   quarantine; the next admission finishes the quarantine.
+- `quarantine-failed.json` beside it: that quarantine failed; the kind is
+  blocked, and admission and retirement retry it.
 - `committed.json`: the business commit happened; the controls just retire.
 - `unresolved.json`, or no closure proof at all: custody is unproven. The kind
   is blocked until `ava pitr operations retire` re-proves closure.
@@ -34,6 +37,8 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -47,7 +52,8 @@ from shared.exec_process_domain import (
 )
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess
-from shared.platform import file_lock
+from shared.pg_foreground import POSTMASTER_SHUTDOWN_S, FamilyCustody, family_refusal
+from shared.platform import LockTimeoutError, file_lock
 
 _log = logging.getLogger(__name__)
 
@@ -57,10 +63,15 @@ TERMINATE_GRACE_S = 3.0
 # A controller that still holds an unresolved leader re-attempts closure this
 # long at each later admission of the same kind.
 RETRY_CLOSE_DEADLINE_S = 5.0
-# Quarantine bound per root: the newest entry always survives, then at most
-# this many entries and bytes are kept.
+# Quarantine bound per kind (each kind owns its quarantine root): the newest
+# entry always survives, then at most this many entries and bytes are kept.
 QUARANTINE_KEEP = 10
 QUARANTINE_MAX_BYTES = 8 * 1024**3
+# Left in controls whose proven-closed quarantine failed; status and retire
+# report it, admission and retirement retry the quarantine.
+QUARANTINE_FAILED = "quarantine-failed.json"
+# Receipts a sanitizer could not read, kept in place for operator review.
+UNCLAIMED_RECEIPTS = "unclaimed-receipts.txt"
 
 
 @dataclass(frozen=True)
@@ -167,6 +178,39 @@ def claims_receipt(value: object, worker: OperationWorker | None) -> bool:
     return recorded.process.pid == worker.pid
 
 
+def owned_receipts(
+    owners: list[Path], work: Path, worker: OperationWorker | None
+) -> list[tuple[Path, dict[str, object]]]:
+    """The closed worker's own receipts among `owners`, parsed.
+
+    A receipt that cannot be read, or names no valid birth, is claimed by
+    nobody: it stays in place for review and is listed in the controls'
+    `unclaimed-receipts.txt`, never failing this worker's quarantine.
+    """
+    owned: list[tuple[Path, dict[str, object]]] = []
+    unreadable: list[str] = []
+    for owner in owners:
+        try:
+            evidence = _receipt(owner)
+            claimed = claims_receipt(evidence["native"], worker)
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            unreadable.append(f"{owner}: {exc!r}")
+            continue
+        if claimed:
+            owned.append((owner, evidence))
+    if unreadable:
+        _log.error("[backup-operation] unreadable receipts kept for review: %s", unreadable)
+        write_text_atomic(work / UNCLAIMED_RECEIPTS, "\n".join(unreadable) + "\n", mode=0o600)
+    return owned
+
+
+def _receipt(path: Path) -> dict[str, object]:
+    value: object = json.loads(path.read_text())
+    if not isinstance(value, dict):
+        raise TypeError("receipt is not an object")
+    return cast("dict[str, object]", value)
+
+
 def no_business_staging(_work: Path, _worker: OperationWorker | None) -> None:
     """The kind keeps all of its staging inside the operation's controls."""
 
@@ -195,6 +239,10 @@ class OperationDeferred(RuntimeError):  # noqa: N818 -- a clean outcome, not an 
         super().__init__(f"operation deferred ({reason}): {detail}")
         self.reason = reason
         self.detail = detail
+
+
+class OperationBusyError(LockTimeoutError):
+    """Another controller, or an operator's retirement, holds this kind's lock."""
 
 
 class OperationBlockedError(RuntimeError):
@@ -351,18 +399,41 @@ def _leader_status(pid: int) -> str:
         return psutil.STATUS_DEAD
 
 
+def close_operation(
+    work: Path,
+    process: subprocess.Popen[bytes],
+    close_group: Callable[[float], None],
+    deadline_s: float,
+) -> int:
+    """Stop receipted postgres cleanly, close the group and every family, then reap.
+
+    Only then is closure proven: the group is empty, every recorded birth is
+    dead, and no process works inside a receipted data directory.
+    """
+    deadline = time.monotonic() + deadline_s
+    worker = recorded_worker(work)
+    leader = None if worker is None or worker.native is None else worker.native.process
+    family = FamilyCustody(work, process.pid, leader)
+    family.stop_postgres(min(deadline, time.monotonic() + POSTMASTER_SHUTDOWN_S))
+    close_group(deadline)
+    family.close(deadline)
+    return process.wait(timeout=1)
+
+
 def _retry_held(kind: OperationKind) -> None:
     """Re-attempt closure of this kind's held leaders; release stays explicit."""
     with _HELD_LOCK:
         held = [item for item in _HELD if item.kind == kind.name]
     for item in held:
         try:
-            deadline = time.monotonic() + RETRY_CLOSE_DEADLINE_S
-            if item.domain is not None:
-                item.domain.close_confirmed(deadline)
-            else:
-                close_unowned_launch(item.process, deadline)
-            returncode = item.process.wait(timeout=1)
+            close_group = (
+                partial(close_unowned_launch, item.process)
+                if item.domain is None
+                else item.domain.close_confirmed
+            )
+            returncode = close_operation(
+                item.work, item.process, close_group, RETRY_CLOSE_DEADLINE_S
+            )
         except Exception as exc:
             _log.warning("[backup-operation] %s closure is still unresolved: %r", kind.name, exc)
             continue
@@ -387,50 +458,35 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
-def sweep_closed_partials(directory: Path) -> None:
-    """Remove intermediates whose writers closed; the caller excludes new writers.
-
-    Only a process holding a partial open can still extend it, so a partial no
-    process holds open has a closed writer and is removed. One still open (a
-    killed run's orphaned tool) stays, is reported, and goes on a later run.
-    """
-    stale = [
-        path
-        for path in directory.iterdir()
-        if path.is_file()
-        and (path.name.endswith(".partial") or path.name.startswith(".backup-key-"))
-    ]
-    if not stale:
-        return
-    held = _held_open({str(path.resolve()) for path in stale})
-    for path in stale:
-        if str(path.resolve()) in held:
-            _log.error("[backup] %s is still held open by a live writer; kept for now", path.name)
-        else:
-            path.unlink(missing_ok=True)
-
-
-def _held_open(paths: set[str]) -> set[str]:
-    held: set[str] = set()
-    for process in psutil.process_iter():
-        with suppress(psutil.Error):
-            held.update(item.path for item in process.open_files() if item.path in paths)
-    return held
-
-
 def quarantine(
     kind: OperationKind, work: Path, failure: str, *, custody: str = "quarantined"
 ) -> Path:
-    """Sanitize proven-closed controls and move them into the kind's quarantine."""
-    kind.sanitize(work, recorded_worker(work))
-    write_text_atomic(work / "failure.txt", failure, mode=0o600)
-    kind.quarantine_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    entry = kind.quarantine_root / f"{stamp}-{kind.name}-{work.name.removeprefix('.operation-')}"
-    work.rename(entry)
-    _fsync_dir(work.parent)
-    _fsync_dir(entry.parent)
-    _prune_quarantine(kind.quarantine_root, entry)
+    """Sanitize proven-closed controls and move them into the kind's quarantine.
+
+    Callers hold the kind lock, which serializes each kind's quarantine and
+    pruning. A failure before the move leaves `quarantine-failed.json` in the
+    controls: status reports the kind blocked, and admission and retirement
+    retry. Bookkeeping after the move never undoes it.
+    """
+    try:
+        kind.sanitize(work, recorded_worker(work))
+        write_text_atomic(work / "failure.txt", failure, mode=0o600)
+        kind.quarantine_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        entry = (
+            kind.quarantine_root / f"{stamp}-{kind.name}-{work.name.removeprefix('.operation-')}"
+        )
+        work.rename(entry)
+    except Exception as exc:
+        with suppress(OSError):
+            publish_result(work / QUARANTINE_FAILED, {"at": _now(), "error": repr(exc)[:4000]})
+        raise
+    try:
+        _fsync_dir(work.parent)
+        _fsync_dir(entry.parent)
+        _prune_quarantine(kind.quarantine_root, entry)
+    except Exception as exc:
+        _log.error("[backup-operation] %s pruning after %s failed: %r", kind.name, entry.name, exc)
     report(kind, custody, f"{entry.name}: {failure.splitlines()[0] if failure else ''}")
     return entry
 
@@ -490,7 +546,7 @@ def report(kind: OperationKind, custody: str, detail: str) -> None:
 
 
 def _custody_state(work: Path) -> tuple[str, str]:
-    """(`committed` | `closed` | `blocked`, reason) for one control directory."""
+    """(`committed` | `closed` | `quarantine-failed` | `blocked`, reason) for controls."""
     if (work / "unresolved.json").exists():
         later = (work / "closure.json").exists()
         return "blocked", "closure was unresolved at failure" + (
@@ -499,8 +555,17 @@ def _custody_state(work: Path) -> tuple[str, str]:
     if (work / "committed.json").exists():
         return "committed", "business commit completed"
     if (work / "closure.json").exists():
+        if (work / QUARANTINE_FAILED).exists():
+            return "quarantine-failed", f"closure proven; {_quarantine_failure(work)}"
         return "closed", "closure proven before the controller stopped"
     return "blocked", "the controller stopped before proving closure"
+
+
+def _quarantine_failure(work: Path) -> str:
+    try:
+        return f"quarantine failed: {json.loads((work / QUARANTINE_FAILED).read_text())['error']}"
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return f"quarantine failed (its note is unreadable: {exc!r})"
 
 
 def _operation_dirs(root: Path) -> list[tuple[Path, str, str]]:
@@ -526,7 +591,7 @@ def blocked_operations(kind: OperationKind) -> list[tuple[Path, str]]:
     return [
         (path, reason)
         for path, state, reason in _operation_dirs(kind.control_root)
-        if state == "blocked"
+        if state in {"blocked", "quarantine-failed"}
     ]
 
 
@@ -539,7 +604,7 @@ def admit(kind: OperationKind) -> None:
             shutil.rmtree(path)
         elif state == "committed":
             retire_controls(path)
-        elif state == "closed":
+        elif state in {"closed", "quarantine-failed"}:
             try:
                 quarantine(kind, path, f"controller stopped after proving closure ({reason})")
             except Exception as exc:
@@ -552,48 +617,115 @@ def admit(kind: OperationKind) -> None:
         raise error
 
 
-def prove_closure(work: Path) -> tuple[bool, str]:
-    """Re-prove group closure without the original controller, or say why not.
+class Refusal(StrEnum):
+    """Why a retirement did not release an operation."""
+
+    NOT_AN_OPERATION = "not-an-operation"
+    NO_RECORD = "no-operation-record"
+    LAUNCH_UNRECORDED = "launch-unrecorded"
+    WORKER_PRESENT = "worker-present"
+    BIRTH_UNRECORDED = "birth-unrecorded"
+    GROUP_MEMBERS = "group-members"
+    FAMILY_ALIVE = "postgres-family-alive"
+    UNVERIFIABLE = "unverifiable"
+    QUARANTINE_FAILED = "quarantine-failed"
+
+
+@dataclass(frozen=True)
+class ClosureProof:
+    reason: str
+    refusal: Refusal | None = None
+
+    @property
+    def proven(self) -> bool:
+        return self.refusal is None
+
+
+# The controller records a worker's PID right after its birth. A process at
+# that PID born this long after the record cannot be the worker; the margin
+# absorbs wall-clock slew between the two readings.
+_REUSE_MARGIN_S = 2.0
+
+
+def prove_closure(work: Path) -> ClosureProof:
+    """Re-prove closure without the original controller, or say why not.
 
     The group number stays reserved while any member exists, so an empty
     group, or a different process born under the recorded worker PID, proves
-    that every inherited member has exited. A process that called setsid
-    escaped the group and is outside this proof, as it is outside the
-    controller's own closure.
+    that every inherited member has exited. Members that escaped the group
+    (PostgreSQL's children) are proven by `family_refusal`, as the controller
+    proves them. Evidence that cannot be verified refuses; it never raises.
     """
     if (work / "closure.json").exists():
-        return True, "its controller confirmed group closure"
+        return ClosureProof("its controller confirmed closure")
+    try:
+        return _prove(work)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, psutil.Error) as exc:
+        return ClosureProof(f"closure evidence cannot be verified: {exc!r}", Refusal.UNVERIFIABLE)
+
+
+def _prove(work: Path) -> ClosureProof:
     try:
         operation = json.loads((work / "operation.json").read_text())
     except FileNotFoundError:
-        return False, "no operation record exists"
+        return ClosureProof("no operation record exists", Refusal.NO_RECORD)
     if operation["boot_id"] != native_boot_id():
-        return True, "the host rebooted after the operation launched"
+        return ClosureProof("the host rebooted after the operation launched")
+    group = _group_closure(work)
+    if not group.proven:
+        return group
+    refusal = family_refusal(work)
+    return group if refusal is None else ClosureProof(refusal, Refusal.FAMILY_ALIVE)
+
+
+def _group_closure(work: Path) -> ClosureProof:
     worker = recorded_worker(work)
     if worker is None:
-        return False, "the controller stopped while launching; only a reboot proves closure"
-    if worker.native is not None and worker.native.present() is not None:
-        return False, f"worker {worker.pid} is still present (running or held by its controller)"
+        return ClosureProof(
+            "the controller stopped while launching; only a reboot proves closure",
+            Refusal.LAUNCH_UNRECORDED,
+        )
     if worker.native is None and psutil.pid_exists(worker.pid):
-        return False, f"PID {worker.pid} exists and its birth was never recorded"
+        return _reused_pid(work, worker.pid)
+    if worker.native is not None and worker.native.present() is not None:
+        return ClosureProof(
+            f"worker {worker.pid} is still present (running or held by its controller)",
+            Refusal.WORKER_PRESENT,
+        )
     try:
         os.killpg(worker.pid, 0)
     except ProcessLookupError:
-        return True, f"process group {worker.pid} is empty"
+        return ClosureProof(f"process group {worker.pid} is empty")
     except PermissionError:
-        return False, f"process group {worker.pid} still has members"
+        return ClosureProof(f"process group {worker.pid} still has members", Refusal.GROUP_MEMBERS)
     if worker.native is not None and psutil.pid_exists(worker.pid):
         # The kernel reuses the worker's number only after its group emptied.
-        return True, f"PID {worker.pid} now names a later process; the group had emptied"
-    return False, f"process group {worker.pid} still has members"
+        return ClosureProof(f"PID {worker.pid} now names a later process; the group had emptied")
+    return ClosureProof(f"process group {worker.pid} still has members", Refusal.GROUP_MEMBERS)
+
+
+def _reused_pid(work: Path, pid: int) -> ClosureProof:
+    """An unrecorded birth: only a process born after the launch record proves reuse."""
+    recorded = (work / "worker.json").stat().st_mtime
+    born = psutil.Process(pid).create_time()
+    if born > recorded + _REUSE_MARGIN_S:
+        return ClosureProof(
+            f"PID {pid} now names a process born after the launch record; the group had emptied"
+        )
+    return ClosureProof(
+        f"PID {pid} exists (born {born:.0f}, launch recorded {recorded:.0f}) and the worker's "
+        "birth was never recorded; only its exit or a reboot proves closure",
+        Refusal.BIRTH_UNRECORDED,
+    )
 
 
 @dataclass(frozen=True)
 class RetireReport:
     work: Path
-    proven: bool
     reason: str
-    entry: Path | None
+    entry: Path | None = None
+    refusal: Refusal | None = None
+    proven: bool = False
 
 
 def retire_blocked(kind: OperationKind, *, confirm: bool) -> list[RetireReport]:
@@ -605,22 +737,33 @@ def retire_blocked(kind: OperationKind, *, confirm: bool) -> list[RetireReport]:
         return []
     reports: list[RetireReport] = []
     with file_lock(kind.control_root / ".lock", timeout_s=0):
-        for work, _reason in blocked_operations(kind):
+        for work, blocked in blocked_operations(kind):
             if not work.name.startswith(".operation-") or work.is_symlink():
                 reports.append(
-                    RetireReport(work, proven=False, reason="not an operation", entry=None)
+                    RetireReport(work, "not an operation", refusal=Refusal.NOT_AN_OPERATION)
                 )
                 continue
-            proven, reason = prove_closure(work)
-            entry = None
-            if proven and confirm:
-                if not (work / "closure.json").exists():
-                    record_closure(work, "retire", None)
-                entry = quarantine(
-                    kind,
-                    work,
-                    f"retired by operator after closure proof: {reason}",
-                    custody="retired",
-                )
-            reports.append(RetireReport(work, proven, reason, entry))
+            reports.append(_retire(kind, work, blocked, confirm=confirm))
     return reports
+
+
+def _retire(kind: OperationKind, work: Path, blocked: str, *, confirm: bool) -> RetireReport:
+    proof = prove_closure(work)
+    reason = proof.reason
+    if (work / QUARANTINE_FAILED).exists():
+        reason = f"{reason}; {blocked}"
+    if not proof.proven or not confirm:
+        return RetireReport(work, reason, refusal=proof.refusal, proven=proof.proven)
+    if not (work / "closure.json").exists():
+        record_closure(work, "retire", None)
+    try:
+        entry = quarantine(
+            kind,
+            work,
+            f"retired by operator after closure proof: {proof.reason}",
+            custody="retired",
+        )
+    except Exception as exc:
+        failed = f"{proof.reason}; quarantine failed: {exc!r}"
+        return RetireReport(work, failed, refusal=Refusal.QUARANTINE_FAILED, proven=True)
+    return RetireReport(work, proof.reason, entry=entry, proven=True)

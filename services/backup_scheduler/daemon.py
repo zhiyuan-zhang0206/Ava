@@ -26,6 +26,7 @@ from services.backup_scheduler.recovery_drill import (
     record_local_dump_restore_success,
 )
 from services.backup_scheduler.worker import run_job
+from services.pitr.operation_custody import OperationBusyError
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
@@ -152,6 +153,8 @@ async def _run_due_local_dump_restore(now: datetime) -> None:
             return
         await run_job("restore")
         record_local_dump_restore_success(now)
+    except OperationBusyError as exc:
+        _log.info("[pg-backup] local restore drill deferred: %s", exc)
     except Exception as exc:
         telemetry.emit(
             "telemetry",

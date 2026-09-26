@@ -422,3 +422,26 @@ def test_commit_defers_pruning_while_another_backup_holds_the_lock(
     target = worker.commit_scheduled_backup(staged, digest)
     assert target.parent == published and target.read_bytes() == b"encrypted"
     assert pruned == []
+
+
+def test_cross_filesystem_copy_survives_a_concurrent_sweep_until_linked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The private copy stays open until it is linked: a backup run sweeping the
+    directory at that moment never takes it, and nothing is left behind."""
+    from services.backup_scheduler import worker
+    from services.gateway_side.backup.intermediates import sweep_closed_partials
+
+    staged, published, digest = _staged_dump(tmp_path, monkeypatch)
+    link = os.link
+
+    def cross_device_with_sweep(source: Path, target: Path) -> None:
+        if Path(source) == staged:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        sweep_closed_partials(published)  # another run holds the backup lock now
+        link(source, target)
+
+    monkeypatch.setattr(worker.os, "link", cross_device_with_sweep)
+    target = worker.commit_scheduled_backup(staged, digest)
+    assert target.read_bytes() == b"encrypted"
+    assert [path.name for path in published.iterdir()] == [target.name]

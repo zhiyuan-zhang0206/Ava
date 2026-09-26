@@ -63,6 +63,12 @@ def _h_pitr_operations_retire(args: argparse.Namespace) -> int:
     return cmd_pitr_operations_retire(confirm=args.confirm)
 
 
+def _h_pitr_operations_discard_candidate(args: argparse.Namespace) -> int:
+    from cli.commands.pitr import cmd_pitr_operations_discard_candidate
+
+    return cmd_pitr_operations_discard_candidate(chain=args.chain, confirm=args.confirm)
+
+
 def _h_pitr_retention_inspect(_args: argparse.Namespace) -> int:
     from cli.commands.pitr import cmd_pitr_retention_inspect
 
@@ -135,6 +141,17 @@ def _add_operations_parser(
         help="quarantine every proven operation; without it the command only previews",
     )
     operations_retire.set_defaults(func=retire)
+    discard = operations_sub.add_parser(
+        "discard-candidate",
+        help="remove one unfinished base capture that blocks activation or keeps failing",
+    )
+    discard.add_argument("chain", metavar="CHAIN", help="the unfinished capture's chain id")
+    discard.add_argument(
+        "--confirm",
+        action="store_true",
+        help="remove the capture; without it the command only checks it",
+    )
+    discard.set_defaults(func=_h_pitr_operations_discard_candidate)
 
 
 def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

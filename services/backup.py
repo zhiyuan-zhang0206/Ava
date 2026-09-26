@@ -60,6 +60,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from services.gateway_side.backup.intermediates import sweep_closed_partials
 from services.pitr.logical_dump_names import (
     ACTIVATION_MARKER,
     DUMP_NAME_RE,
@@ -68,7 +69,6 @@ from services.pitr.logical_dump_names import (
     TS_FORMAT,
     stamp_utc,
 )
-from services.pitr.operation_custody import sweep_closed_partials
 from shared.config import settings
 from shared.db import connect, direct_db_url
 from shared.pg_tools import pg_tool
@@ -86,11 +86,9 @@ ACTIVATION_KEEP = 2
 # checkpoint history takes about 6.3 min.
 _DUMP_TIMEOUT_S = 60 * 60
 # Heartbeat cadence while a dump or an encryption runs with a progress sink
-# attached. A pre-update snapshot runs inside a rollout whose stall watchdog
-# reclaims `shared.deploy_timing.NO_PROGRESS_TIMEOUT_S` (900 s) of log silence,
-# while the snapshot itself is allowed 20 min — so a healthy but silent dump
-# read as a hung rollout (2026-09-14 incident). 60 s keeps fifteen missed beats
-# of headroom inside the stall window.
+# attached. An in-process snapshot (the PITR activation's logical floor) may run
+# for many minutes without writing anything; a beat every 60 s keeps its
+# operator's view alive instead of reading a healthy dump as a hung one.
 _PROGRESS_INTERVAL_S = 60.0
 # Bound the composition-sample connection (a dead DB must stall the backup log
 # line only this long before degrading to "unavailable", never hang it).
@@ -481,10 +479,8 @@ def _run_with_progress(
 
     With `progress=None` this is exactly `subprocess.run`. With a sink, one line
     names the child's bound and one every `_PROGRESS_INTERVAL_S` carries the
-    elapsed time and the bytes `size_path` holds. A pre-update snapshot runs
-    inside a rollout whose stall watchdog reclaims 900 s of log silence while
-    the dump alone may take 20 min (2026-09-14 incident): heartbeats let a live
-    child ride to its own `timeout_s` instead.
+    elapsed time and the bytes `size_path` holds, so a caller's operator sees a
+    long silent dump or encryption alive until its own `timeout_s`.
 
     Like `subprocess.run`, expiry or any interruption kills and reaps the child
     before raising, so its output never has a live writer afterwards.
@@ -550,16 +546,22 @@ def run_backup(
     tighter ceiling than the daily backup default. `pre_update` names the
     artifact `<db>-<ts>.pre-update.dump.enc` so prune keeps it in its own
     retention slot (newest one) instead of consuming a daily-dump slot.
-    `publish=False` keeps the completed artifact local; the rollout prepare
-    phase uses it so off-site network latency cannot extend maintenance.
+    `publish=False` keeps the completed artifact local, so off-site network
+    latency cannot extend a pre-update snapshot.
 
     `progress` narrates the stages that may run for minutes without writing
     anything (`pg_dump` and the encryption pass) — see `_run_with_progress`.
     """
     with backup_lock():
+        directory = backup_dir() if staging is None else staging
+        # Every run, the scheduled worker's staged one included, first clears
+        # the backup directory of intermediates whose writers closed: a killed
+        # in-process snapshot's plaintext never waits for another snapshot.
+        for swept in dict.fromkeys((backup_dir(), directory)):
+            sweep_closed_partials(ensure_private_dir(swept))
         target = _run_backup(
             now,
-            directory=backup_dir() if staging is None else staging,
+            directory=directory,
             db_url=db_url,
             timeout_s=timeout_s,
             pre_update=pre_update,
@@ -661,7 +663,6 @@ def _run_backup(
     # meaningless and breaks. Admin plane bypasses PgBouncer.
     db_url = db_url if db_url is not None else direct_db_url()
     directory = ensure_private_dir(directory)
-    sweep_closed_partials(directory)
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
     _log.info("[backup] db composition: %s", _db_size_breakdown(db_url))

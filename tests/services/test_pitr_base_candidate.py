@@ -531,3 +531,59 @@ def test_resumed_candidate_records_its_worker_before_verification(
             replication_db_url="postgresql://unused",
         )
     assert json.loads(owner.read_text())["chain_id"] == candidate.chain_id
+
+
+@pytest.mark.parametrize("outcome", ["failure", "stop"])
+def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    """A resumable `.ready` that fails verification would fail every retry: the
+    worker rejects it and quarantine discards it. A stop keeps it resumable."""
+    import json
+    import os
+
+    import psutil
+
+    from services.pitr.base_candidate import CandidateFacts
+    from services.pitr.operation_custody import NativeProcess, OperationWorker
+    from services.pitr.space_budget import CandidateSpaceBudget
+
+    root, ready, candidate = _prepared(tmp_path)
+    owner = root / "base-facts" / f"{candidate.chain_id}.owner.json"
+    raised = (
+        BaseCandidateError("pg_verifybackup exited 1")
+        if outcome == "failure"
+        else KeyboardInterrupt()
+    )
+
+    def verify(_path: Path, _stop: object) -> None:
+        raise raised
+
+    def no_reconcile(_root: Path, *, key: bytes, key_id: str) -> None:
+        return None
+
+    def load_facts(_root: Path, _chain: str) -> CandidateFacts:
+        return CandidateFacts(17, "1", 16 << 20, 1, "migrations", "ava")
+
+    monkeypatch.setattr(base_candidate, "reconcile_runtime_state", no_reconcile)
+    monkeypatch.setattr(base_candidate, "_load_facts", load_facts)
+    monkeypatch.setattr(base_candidate, "_verify_candidate", verify)
+    with pytest.raises(type(raised)):
+        base_candidate.prepare_base_candidate(
+            root=root,
+            prefix="pitr",
+            key=b"k" * 32,
+            key_id="key",
+            store=object(),  # type: ignore[arg-type]  # verification ends first
+            budget=CandidateSpaceBudget(0, 0, 0, 0),
+            db_url="postgresql://unused",
+            replication_db_url="postgresql://unused",
+        )
+    rejected = json.loads(owner.read_text())["state"] == "rejected"
+    assert rejected is (outcome == "failure")
+    work = tmp_path / "work"
+    work.mkdir()
+    worker = OperationWorker(os.getpid(), NativeProcess.capture(psutil.Process()))
+    base_candidate.quarantine_candidate_staging(root, work, worker)
+    assert ready.exists() is (outcome == "stop")
+    assert (root / "base-facts" / f"{candidate.chain_id}.json").exists() is (outcome == "stop")

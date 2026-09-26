@@ -451,7 +451,7 @@ def test_interrupted_snapshot_dump_leaves_no_plaintext(
 def test_stale_partial_waits_for_its_orphaned_writer_to_close(tmp_path: Path) -> None:
     """A killed run's orphaned tool may still hold its partial: it stays until
     that writer exits, then the next run removes it."""
-    from services.pitr.operation_custody import sweep_closed_partials
+    from services.gateway_side.backup.intermediates import sweep_closed_partials
 
     held = tmp_path / "ava-20260926T000000Z.dump.partial"
     closed = tmp_path / "ava-20260925T000000Z.dump.enc.partial"
@@ -477,3 +477,47 @@ def test_stale_partial_waits_for_its_orphaned_writer_to_close(tmp_path: Path) ->
         writer.wait(timeout=10)
     sweep_closed_partials(tmp_path)
     assert not held.exists()
+
+
+def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A killed in-process snapshot's plaintext partial never outlives the next
+    run: the scheduled (staged) worker run sweeps the backup directory too, and
+    the same sweep removes key files and an abandoned cross-filesystem copy."""
+    from datetime import UTC, datetime
+
+    published = tmp_path / "db"
+    published.mkdir(mode=0o700)
+    monkeypatch.setattr(backup, "backup_dir", lambda: published)
+
+    def composition(_db_url: str | None = None) -> str:
+        return "test"
+
+    monkeypatch.setattr(backup, "_db_size_breakdown", composition)
+    script = tmp_path / "pg_dump"
+    script.write_text(
+        f"#!{sys.executable}\nimport sys\n"
+        "open(sys.argv[sys.argv.index('--file')+1],'wb').write(b'DUMP')\n"
+    )
+    script.chmod(0o700)
+
+    def dump_tool(_tool: str) -> Path:
+        return script
+
+    monkeypatch.setattr(backup, "pg_tool", dump_tool)
+    activation = "00000000-0000-0000-0000-000000000000"
+    stale = [
+        published / f"ava-20260920T030000Z.pitr-activation-{activation}.dump.partial",
+        published / ".backup-key-stale",
+        published / ".ava-20260925T030000Z.dump.enc.k3y9.copy",
+    ]
+    for path in stale:
+        path.write_bytes(b"PLAINTEXT")
+    staging = tmp_path / "controls" / "artifact"
+    artifact = backup.run_backup(
+        datetime(2026, 9, 26, 3, tzinfo=UTC), db_url="dbname=ava", publish=False, staging=staging
+    )
+    assert artifact.parent == staging
+    assert [path.name for path in stale if path.exists()] == []
+    assert list(published.iterdir()) == []

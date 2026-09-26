@@ -1,15 +1,17 @@
 """One directly owned worker process group per backup or PITR operation.
 
 The controller launches a fixed worker module in a new session, retains the
-unreaped direct child, and alone signals that group. Trusted tools inherit it.
+unreaped direct child, and alone signals that group. Trusted tools inherit it;
+each postmaster the worker starts is receipted, because its children setsid()
+out of the group and close as a recorded family instead.
 A bootstrap puts the controller's own code root first on the worker's path and
 refuses any other import origin. Secrets reach the worker on stdin, never in a
 retained control file.
 
 Every outcome settles custody (`services.pitr.operation_custody`):
 
-- **accepted**: confirmed group closure, a zero exit, a valid result and the
-  caller's commit; the controls retire.
+- **accepted**: confirmed closure, a zero exit, a valid result and the
+  caller's commit under the kind lock; the controls retire.
 - **deferred**: the worker declined before creating evidence (a busy lock,
   missing space); the controls retire and the caller reschedules.
 - **quarantined**: any other outcome whose group closure the controller
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import signal
@@ -36,8 +39,8 @@ import tempfile
 import time
 import types
 from collections.abc import Callable, Mapping
-from contextlib import suppress
-from dataclasses import dataclass
+from contextlib import ExitStack, suppress
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -46,9 +49,11 @@ import psutil
 
 from services.pitr.operation_custody import (
     NativeProcess,
+    OperationBusyError,
     OperationDeferred,
     OperationKind,
     admit,
+    close_operation,
     close_unowned_launch,
     hold,
     is_stop,
@@ -60,8 +65,10 @@ from services.pitr.operation_custody import (
 )
 from shared.exec_process_domain import ExecDomainBirthError, ExecProcessDomain
 from shared.native_process import native_boot_id
-from shared.platform import file_lock
+from shared.pg_foreground import record_postmasters_in
+from shared.platform import LockTimeoutError, file_lock
 
+_log = logging.getLogger(__name__)
 CLOSE_DEADLINE_S = 20.0
 _FAILURE_TEXT_LIMIT = 16_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
@@ -102,6 +109,9 @@ def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
     signal.signal(signal.SIGTERM, _interrupt)
     if len(argv) != 3:
         raise SystemExit("usage: python -m <operation worker> REQUEST RESULT")
+    # Every postmaster this worker starts is receipted in its controls, so the
+    # controller can close the family that setsid() puts outside this group.
+    record_postmasters_in(Path(argv[2]).parent)
     value = json.loads(Path(argv[1]).read_text())
     if not isinstance(value, dict):
         raise TypeError("operation request must be an object")
@@ -145,27 +155,42 @@ def _operation_tail(path: Path) -> str:
 
 
 class _Tail:
-    """Forward the worker's complete stderr lines to an operator sink."""
+    """Forward the worker's complete stderr lines to an operator sink.
+
+    Progress is a courtesy: a sink that fails (an operator's closed stderr
+    pipe) is dropped and never fails, cancels or loses the operation.
+    """
 
     def __init__(self, path: Path, sink: Callable[[str], None]) -> None:
         self._path = path
-        self._sink = sink
+        self._sink: Callable[[str], None] | None = sink
         self._offset = 0
         self._pending = b""
 
+    def _emit(self, line: bytes) -> None:
+        if self._sink is None:
+            return
+        try:
+            self._sink(line.decode(errors="replace"))
+        except Exception as exc:
+            _log.warning("[backup-operation] progress sink dropped: %r", exc)
+            self._sink = None
+
     def pump(self) -> None:
+        if self._sink is None:
+            return
         with self._path.open("rb") as log:
             log.seek(self._offset)
             chunk = log.read()
         self._offset += len(chunk)
         *lines, self._pending = (self._pending + chunk).split(b"\n")
         for line in lines:
-            self._sink(line.decode(errors="replace"))
+            self._emit(line)
 
     def flush(self) -> None:
         self.pump()
         if self._pending:
-            self._sink(self._pending.decode(errors="replace"))
+            self._emit(self._pending)
             self._pending = b""
 
 
@@ -224,9 +249,16 @@ async def run_operation(
         raise RuntimeError("backup operation workers require POSIX")
     for root in (kind.control_root, kind.quarantine_root):
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with file_lock(kind.control_root / ".lock", timeout_s=0):
+    with ExitStack() as lock:
+        try:
+            lock.enter_context(file_lock(kind.control_root / ".lock", timeout_s=0))
+        except LockTimeoutError as exc:
+            raise OperationBusyError(f"{kind.name} operations are held elsewhere") from exc
         _complete(*await _to_completion(lambda: admit(kind)))
-        return await _run_owned(module, request, kind, env, secrets, stop, timeout_s, progress)
+        completed = await _run_owned(module, request, kind, env, secrets, stop, timeout_s, progress)
+        # The commit keeps the kind lock: until `committed.json` exists another
+        # controller's admission would read these controls as a stopped one.
+        return replace(completed, held=lock.pop_all())
 
 
 async def _run_owned(
@@ -344,11 +376,11 @@ async def _request_stop(domain: ExecProcessDomain, grace_s: float) -> None:
         await asyncio.sleep(0.05)
 
 
-def _close_and_reap(domain: ExecProcessDomain, process: subprocess.Popen[bytes]) -> int:
+def _close_and_reap(domain: ExecProcessDomain, process: subprocess.Popen[bytes], work: Path) -> int:
     # No census authorizes release: signal the actual launch-owned group while
-    # its direct child still pins the native number, then observe.
-    domain.close_confirmed(time.monotonic() + CLOSE_DEADLINE_S)
-    return process.wait(timeout=1)
+    # its direct child still pins the native number, then observe. Receipted
+    # postgres families, which left the group, close by recorded birth.
+    return close_operation(work, process, domain.close_confirmed, CLOSE_DEADLINE_S)
 
 
 async def _abort(
@@ -362,26 +394,29 @@ async def _abort(
     """Close an aborted operation, then quarantine it or block its kind.
 
     A stop that arrives during the cooperative grace or the close still reaches
-    the confirmed close, then propagates so the awaiting task stays stopped.
-    Returns the exception the caller raises.
+    the confirmed close, then propagates so the awaiting task stays stopped;
+    the quarantine still records the original failure. Returns the exception
+    the caller raises.
     """
-    failure = original
+    stopped: BaseException | None = None
     try:
         await _request_stop(domain, kind.grace_s)
     except Exception as exc:  # The courtesy signal never replaces confirmed closure.
         original.add_note(f"cooperative stop failed: {exc!r}")
     except BaseException as exc:
-        failure = exc
-    future, stopped = await _to_completion(lambda: _close_and_reap(domain, process))
-    if stopped is not None and not is_stop(failure):
-        failure = stopped
+        stopped = exc
+    future, more = await _to_completion(lambda: _close_and_reap(domain, process, work))
+    stopped = stopped or more
+    if stopped is not None and stopped is not original:
+        stopped.add_note(f"stopped while closing after: {original!r}")
     cleanup = future.exception()
     if cleanup is not None:
+        failure = original if stopped is None or is_stop(original) else stopped
         return hold(kind, work, process, domain, cleanup, failure)
     record_closure(work, "controller", future.result())
     if tail is not None:
         tail.flush()
-    return await _quarantined(kind, work, failure)
+    return await _quarantined(kind, work, original, stopped)
 
 
 async def _accept(
@@ -392,7 +427,7 @@ async def _accept(
     worker: NativeProcess,
     tail: _Tail | None,
 ) -> CompletedOperation:
-    future, stopped = await _to_completion(lambda: _close_and_reap(domain, process))
+    future, stopped = await _to_completion(lambda: _close_and_reap(domain, process, work))
     cleanup = future.exception()
     if cleanup is not None:
         raise hold(kind, work, process, domain, cleanup, stopped)
@@ -434,9 +469,11 @@ async def _settle_unowned_birth(
         with suppress(OSError):
             process.stdin.close()
 
+    def close_group(deadline: float) -> None:
+        close_unowned_launch(process, deadline)
+
     def close() -> int:
-        close_unowned_launch(process, time.monotonic() + CLOSE_DEADLINE_S)
-        return process.wait(timeout=1)
+        return close_operation(work, process, close_group, CLOSE_DEADLINE_S)
 
     future, more = await _to_completion(close)
     stopped = stopped or more
@@ -486,13 +523,19 @@ class CompletedOperation:
     work: Path
     worker: NativeProcess
     result: dict[str, object]
+    held: ExitStack = field(default_factory=ExitStack, compare=False, repr=False)
 
     async def commit[T](self, accept: Callable[[], T]) -> T:
         """Validate and commit off the event loop; success retires the controls.
 
         Any failure quarantines the controls: the group is already closed. A
-        stop that arrives meanwhile waits for the commit, then propagates.
+        stop that arrives meanwhile waits for the commit, then propagates. The
+        kind lock `run_operation` handed over is released once custody settles.
         """
+        with self.held:
+            return await self._commit(accept)
+
+    async def _commit[T](self, accept: Callable[[], T]) -> T:
 
         def committed() -> T:
             value = accept()

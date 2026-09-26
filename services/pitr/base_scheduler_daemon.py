@@ -25,7 +25,7 @@ from services.pitr.base_operation_runtime import (
 )
 from services.pitr.base_scheduler_health import components as _components
 from services.pitr.base_worker import run_candidate
-from services.pitr.operation_custody import OperationDeferred
+from services.pitr.operation_custody import OperationBusyError, OperationDeferred
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.restore_proof import reconcile_restore_pending
 from services.pitr.retention_scheduler import (
@@ -294,6 +294,9 @@ async def _restore_job(state: BaseCandidateState) -> None:
             candidate = CandidateManifest.from_json(inputs.candidate_json)
             publish(candidate, outcome)
         _record_protected(state, candidate)
+    except OperationBusyError as exc:
+        state.restore_error = str(exc)
+        _log.info("restore proof deferred: %s", exc)
     except OperationDeferred as exc:
         state.restore_error = str(exc)
         _log.info("restore proof deferred: %s", exc.detail)
@@ -320,6 +323,8 @@ async def _base_job(state: BaseCandidateState, now: datetime) -> None:
             await run_candidate()  # async-blocking-ok: ownership lock spans candidate child
         state.last_success = time.time()
         state.base_error = None
+    except OperationBusyError as exc:
+        _log.info("base candidate deferred: %s", exc)
     except LockTimeoutError:
         state.deferred_for_logical_backup = True
         _log.info("base candidate deferred while logical backup owns backup lock")

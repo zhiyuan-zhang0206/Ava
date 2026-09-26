@@ -30,7 +30,7 @@ from services.pitr.base_manifest import (
 from services.pitr.base_object_store import RestartableStreamingObjectStore
 from services.pitr.base_stream import BASE_MAGIC, load_or_create_source, snapshot_candidate
 from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
-from services.pitr.operation_custody import NativeProcess, OperationWorker, claims_receipt
+from services.pitr.operation_custody import NativeProcess, OperationWorker, owned_receipts
 from services.pitr.space_budget import CandidateSpaceBudget, require_candidate_space
 from services.pitr.worker_process import StopSignal
 from shared.db import direct_db_url
@@ -39,6 +39,11 @@ from shared.pg_tools import pg_tool
 
 class BaseCandidateError(RuntimeError):
     pass
+
+
+# The owner state of a completed capture that failed its own verification or
+# loading: quarantine discards it instead of keeping it for resumption.
+REJECTED = "rejected"
 
 
 @dataclass(frozen=True)
@@ -196,7 +201,8 @@ def _recover_owned_partials(root: Path) -> None:
     if partials or owners:
         raise BaseCandidateError(
             "base candidate has unresolved operation evidence; `ava pitr operations "
-            "retire` must prove its worker closed, never receipt-based adoption"
+            "retire` must prove its worker closed, never receipt-based adoption: "
+            f"{sorted(path.name for path in partials + owners)}"
         )
 
 
@@ -205,22 +211,24 @@ def quarantine_candidate_staging(root: Path, work: Path, worker: OperationWorker
 
     An incomplete `.partial` copy of PGDATA never survives its writer. A
     completed `.ready` capture keeps its facts and plan so the next worker can
-    resume it without another multi-hour capture; its owner receipt moves into
-    the quarantined controls, which frees the chain for that resumption.
+    resume it without another multi-hour capture, unless its worker rejected
+    it: a tree that failed its own verification or loading would fail every
+    resumption. The owner receipt moves into the quarantined controls, which
+    frees the chain for the next worker.
     """
     facts = root / "base-facts"
     owners = sorted(facts.glob("*.owner.json")) if facts.is_dir() else []
-    for owner in owners:
-        evidence = json.loads(owner.read_text())
-        if not claims_receipt(evidence["native"], worker):
-            continue
+    for owner, evidence in owned_receipts(owners, work, worker):
         chain_id = str(evidence["chain_id"])
         if not re.fullmatch(r"[0-9A-Za-z-]+", chain_id):
             raise BaseCandidateError("base candidate owner names an invalid chain")
         partial = root / "base-candidates" / f".{chain_id}.partial"
         if partial.exists() or partial.is_symlink():
             _remove_tree(partial)
-        if not (root / "base-candidates" / f"{chain_id}.ready").exists():
+        ready = root / "base-candidates" / f"{chain_id}.ready"
+        if evidence["state"] == REJECTED and (ready.exists() or ready.is_symlink()):
+            _remove_tree(ready)
+        if not ready.exists():
             (facts / f"{chain_id}.json").unlink(missing_ok=True)
             (root / "base-plans" / f"{chain_id}.plan.json").unlink(missing_ok=True)
         receipts = work / "business"
@@ -328,7 +336,7 @@ def _birth_candidate(
     return ready, facts
 
 
-def _record_owner(root: Path, chain_id: str) -> None:
+def _record_owner(root: Path, chain_id: str, state: str = "running") -> None:
     """Bind candidate staging to this worker; the controller commits only its own."""
     owner = root / "base-facts" / f"{chain_id}.owner.json"
     if owner.exists() or owner.is_symlink():
@@ -336,12 +344,53 @@ def _record_owner(root: Path, chain_id: str) -> None:
     _atomic_json(
         owner,
         {
-            "state": "running",
+            "state": state,
             "native": NativeProcess.capture(psutil.Process()).value(),
             "pgid": os.getpgrp(),
             "chain_id": chain_id,
         },
     )
+
+
+def _set_owner_state(root: Path, chain_id: str, state: str) -> None:
+    owner = root / "base-facts" / f"{chain_id}.owner.json"
+    evidence = json.loads(owner.read_text())
+    if not NativeProcess.from_value(evidence["native"]).same_birth(
+        NativeProcess.capture(psutil.Process())
+    ):
+        raise BaseCandidateError("base candidate owner belongs to another worker")
+    _atomic_json(owner, {**evidence, "state": state})
+
+
+def _loaded_capture(
+    root: Path, chain_id: str, ready: Path, facts: CandidateFacts | None, stop: StopSignal
+) -> CandidateFacts:
+    """Verify and load a completed capture; a failure rejects the tree for good.
+
+    A stop is not a verdict on the tree, so it stays resumable. Any other
+    failure here (corruption, missing or contradicting facts) would fail
+    every resumption, so the worker marks the capture rejected before raising.
+    """
+    try:
+        if facts is None:
+            facts = _load_facts(root, chain_id)
+            _verify_candidate(ready, stop)
+        _check_capture(ready, facts)
+    except Exception:
+        _set_owner_state(root, chain_id, REJECTED)
+        raise
+    return facts
+
+
+def _check_capture(ready: Path, facts: CandidateFacts) -> None:
+    native_manifest = ready / "backup_manifest"
+    if not native_manifest.is_file():
+        raise BaseCandidateError("pg_basebackup omitted backup_manifest")
+    system_id, _start_lsn, wal_ranges = parse_native_manifest(native_manifest)
+    if system_id != facts.system_identifier:
+        raise BaseCandidateError("backup manifest system identifier changed during capture")
+    if wal_ranges[0].timeline != facts.timeline:
+        raise BaseCandidateError("backup manifest starts on a different live timeline")
 
 
 def _verify_candidate(path: Path, stop: StopSignal) -> None:
@@ -470,6 +519,28 @@ def _resumable_candidate(root: Path, forced_chain_id: str | None) -> Path | None
     return resumable[0] if resumable else None
 
 
+def discard_resumable_candidate(root: Path, chain_id: str, *, confirm: bool) -> Path:
+    """Remove one unfinished capture an operator judged stale; without `confirm`, check.
+
+    The caller holds the base-candidate kind lock with no blocked operation,
+    so no worker can own the tree. A committed chain (reconciliation removes
+    its tree) and one that an unsettled owner receipt still claims refuse.
+    """
+    if not re.fullmatch(r"[0-9A-Za-z-]+", chain_id):
+        raise BaseCandidateError(f"invalid chain id {chain_id!r}")
+    ready = root / "base-candidates" / f"{chain_id}.ready"
+    if ready.is_symlink() or not ready.is_dir():
+        raise BaseCandidateError(f"no unfinished capture at {ready}")
+    if (root / "base-manifests" / f"{chain_id}.candidate.json").exists():
+        raise BaseCandidateError(f"{chain_id} is committed; reconciliation removes its tree")
+    if (root / "base-facts" / f"{chain_id}.owner.json").exists():
+        raise BaseCandidateError(f"an unsettled operation still owns {chain_id}; retire it first")
+    if confirm:
+        _remove_tree(ready)
+        _remove_commit_staging(root, chain_id)
+    return ready
+
+
 def prepare_base_candidate(
     *,
     root: Path,
@@ -494,10 +565,9 @@ def prepare_base_candidate(
     if resumable is not None:
         ready = resumable
         chain_id = ready.name.removesuffix(".ready")
-        facts = _load_facts(root, chain_id)
         # Operator retirement removed the prior owner; this worker now owns it.
-        _record_owner(root, chain_id)
-        _verify_candidate(ready, stop)
+        _record_owner(root, chain_id, "verifying")
+        facts = _loaded_capture(root, chain_id, ready, None, stop)
     else:
         chain_id = forced_chain_id or now.strftime("%Y%m%dT%H%M%SZ")
         if forced_chain_id is not None and not re.fullmatch(
@@ -512,25 +582,23 @@ def prepare_base_candidate(
             replication_db_url=replication_db_url,
             stop=stop,
         )
-    native_manifest = ready / "backup_manifest"
-    if not native_manifest.is_file():
-        raise BaseCandidateError("pg_basebackup omitted backup_manifest")
-    system_id, start_lsn, wal_ranges = parse_native_manifest(native_manifest)
-    if system_id != facts.system_identifier:
-        raise BaseCandidateError("backup manifest system identifier changed during capture")
-    if wal_ranges[0].timeline != facts.timeline:
-        raise BaseCandidateError("backup manifest starts on a different live timeline")
+        _loaded_capture(root, chain_id, ready, facts, stop)
+    system_id, start_lsn, wal_ranges = parse_native_manifest(ready / "backup_manifest")
     end_lsn = wal_ranges[-1].end_lsn
-    _, candidate_sha = snapshot_candidate(ready)
-    object_name = f"{prefix.rstrip('/')}/base/{chain_id}/{candidate_sha}/base.tar.zst.enc"
     plan_path = root / "base-plans" / f"{chain_id}.plan.json"
-    source, plan = load_or_create_source(
-        ready,
-        plan_path=plan_path,
-        key=key,
-        key_id=key_id,
-        object_name=object_name,
-    )
+    try:  # A tree that cannot be hashed or planned is rejected like one that fails verification.
+        _, candidate_sha = snapshot_candidate(ready)
+        object_name = f"{prefix.rstrip('/')}/base/{chain_id}/{candidate_sha}/base.tar.zst.enc"
+        source, plan = load_or_create_source(
+            ready,
+            plan_path=plan_path,
+            key=key,
+            key_id=key_id,
+            object_name=object_name,
+        )
+    except Exception:
+        _set_owner_state(root, chain_id, REJECTED)
+        raise
     metadata = {
         "ava-candidate-sha256": plan.candidate_sha256,
         "ava-ciphertext-size": str(plan.ciphertext_size),

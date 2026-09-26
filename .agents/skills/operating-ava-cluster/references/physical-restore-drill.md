@@ -31,9 +31,11 @@ acceptance criteria, no ad-hoc driver.
 - Egress where the store needs it (WSL to OSS requires
   `HTTPS_PROXY=http://127.0.0.1:7897`); the command inherits the invoking
   shell's environment, so export the proxy variables there.
-- The command owns the drill worker's process group; the sandbox postmaster is
-  a member, so a stopped drill closes it. Run it under `setsid nohup` only so
-  a long drill survives the terminal closing.
+- The command owns the drill worker's process group and receipts the sandbox
+  postmaster. The postmaster is a member of that group, but each of its
+  children calls `setsid`. A stopped drill therefore closes the whole family:
+  an immediate shutdown first, then every recorded birth proven dead. Run it
+  under `setsid nohup` only so a long drill survives the terminal closing.
 
 ## Pick the target
 
@@ -102,7 +104,7 @@ relative `--scratch` is resolved against the invoking shell's directory.
   before anything starts.
 - A failed or stopped drill's operation record (request, worker logs, failure
   note; no database material) moves to
-  `$AVA_HOME/physical-backup/quarantine/<stamp>-pitr-drill-*` and the next
+  `$AVA_HOME/physical-backup/quarantine/pitr-drill/<stamp>-pitr-drill-*` and the next
   drill starts normally. A stopped drill gets 45 s to stop its sandbox and
   write its evidence; the failure line says whether the evidence was kept.
 - If the drill's group closure could not be proven, the failure names the
@@ -111,11 +113,12 @@ relative `--scratch` is resolved against the invoking shell's directory.
   `ava pitr operations retire` (preview) and `--confirm`.
 - Identity mismatch, a missing segment or a base-authentication failure are
   chain-integrity findings: report them before any cleanup and keep the tree.
-- A surviving sandbox postmaster is reported by the residue scan; the
-  confirmed group close already kills every member, so a survivor escaped the
-  group. Stop it manually before re-running (`<pg_ctl> -D
-  <scratch>/sandbox/data -m fast stop`), then verify no listener remains on
-  the recorded port.
+- A sandbox process that the residue scan reports survived the drill's own
+  stop. The controller's closure still stops the postmaster and proves every
+  recorded child dead, and one it cannot prove blocks `pitr-drill` with the
+  PIDs named. Stop any listed process manually (`<pg_ctl> -D
+  <scratch>/sandbox/data -m fast stop` for a postmaster), verify no listener
+  remains on the recorded port, then retire.
 - A non-zero exit means at least one acceptance criterion failed; the
   evidence file says which.
 

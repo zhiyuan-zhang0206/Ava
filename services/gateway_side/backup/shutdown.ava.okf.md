@@ -26,18 +26,24 @@ Cancellation never advances scheduler success or the weekly restore marker.
 
 Dumps and weekly logical restore drills have separate control roots under
 `$AVA_HOME/backups/operations/`, so a failed drill never stops the dumps. A
-failed or cancelled job whose closure was proven is quarantined under
-`$AVA_HOME/backups/quarantine/`: request, logs and failure note, plus a complete
-encrypted artifact when the off-site upload was interrupted; plaintext dump
-output and key files are removed even when the worker was killed. The next
+failed or cancelled job whose closure was proven is quarantined under its
+kind's `$AVA_HOME/backups/quarantine/<kind>/`: request, logs and failure note,
+plus a complete encrypted artifact when the off-site upload was interrupted;
+plaintext dump output and key files are removed even when the worker was
+killed, and a killed drill's restored throwaway cluster is reaped. The next
 scheduled run proceeds. Closure doubt keeps the unreaped worker, blocks that
 kind and alerts until `ava pitr operations retire` re-proves closure; a killed
 scheduler leaves the same block.
 
 Scheduled restore drills opt into `throwaway_postgres(foreground=True)`.
-`shared/pg_foreground.py` starts Postgres directly in the worker group and
-verifies its data directory before readiness. The caller owns its handle before
-readiness checks can fail. A stop that cannot confirm the postmaster exited
-retains PGDATA and its registration. Other throwaway callers keep the default
+`shared/pg_foreground.py` starts Postgres directly in the worker group,
+receipts it in the operation's controls and verifies its data directory before
+readiness. The caller owns its handle before readiness checks can fail. Every
+postmaster child calls `setsid`, so the group close alone never reaches them:
+the owner's stop is an immediate shutdown that reaps them, a postmaster that
+outlives it is killed with every descendant recorded by exact birth, and the
+controller proves that family gone before closure (see
+[[services/pitr/operation-custody.ava.okf.md|Operation custody]]). A stop that
+cannot confirm the postmaster exited retains PGDATA and its registration. Other throwaway callers keep the default
 pg_ctl behavior; orphaned throwaway directories are handled by their own sweep.
 Retained backup deletion and PITR upload are independent.

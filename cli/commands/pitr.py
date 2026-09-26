@@ -412,9 +412,9 @@ def cmd_pitr_operations_status() -> int:
         print(f"{kind.name}: {'BLOCKED' if blocked else 'ready'} ({kind.control_root})")
         for work, reason in blocked:
             print(f"  {work.name}: {reason}")
-    for root in dict.fromkeys(kind.quarantine_root for kind in kinds):
-        entries = quarantine_entries(root)
-        print(f"quarantine {root}: {len(entries)} entries")
+    for kind in kinds:
+        entries = quarantine_entries(kind.quarantine_root)
+        print(f"quarantine {kind.quarantine_root}: {len(entries)} entries")
         for entry in entries[-5:]:
             print(f"  {entry.name}")
     if blocked_any:
@@ -437,10 +437,11 @@ def cmd_pitr_operations_retire(*, confirm: bool) -> int:
             continue
         for report in reports:
             found = True
-            if not report.proven:
+            if report.refusal is not None:
                 refused = True
+                verdict = "retirement NOT finished" if report.proven else "closure NOT proven"
                 print(
-                    f"{kind.name} {report.work.name}: closure NOT proven: {report.reason}",
+                    f"{kind.name} {report.work.name}: {verdict} [{report.refusal}]: {report.reason}",
                     file=sys.stderr,
                 )
             elif report.entry is not None:
@@ -452,6 +453,44 @@ def cmd_pitr_operations_retire(*, confirm: bool) -> int:
     elif found and not confirm:
         print("preview only: re-run with --confirm to quarantine every proven operation")
     return 1 if refused else 0
+
+
+def cmd_pitr_operations_discard_candidate(*, chain: str, confirm: bool) -> int:
+    """Discard one unfinished base capture an operator judged stale.
+
+    A leftover weekly `.ready` refuses activation's forced candidate and is
+    never resumed while activation holds the schedule. `--confirm` removes it;
+    it refuses while a base-candidate operation runs or its kind is blocked.
+    """
+    from services.pitr.base_candidate import BaseCandidateError, discard_resumable_candidate
+    from services.pitr.base_worker import candidate_kind
+    from services.pitr.operation_custody import blocked_operations
+    from shared.platform import LockTimeoutError, file_lock
+
+    root = ava_home() / "physical-backup"
+    kind = candidate_kind(root)
+    try:
+        with file_lock(kind.control_root / ".lock", timeout_s=0):
+            blocked = blocked_operations(kind)
+            if blocked:
+                print(
+                    f"{kind.name} is blocked ({blocked[0][0].name}: {blocked[0][1]}); "
+                    "run `ava pitr operations retire` first",
+                    file=sys.stderr,
+                )
+                return 1
+            ready = discard_resumable_candidate(root, chain, confirm=confirm)
+    except LockTimeoutError:
+        print(f"{kind.name}: an operation is running; retry once it settles", file=sys.stderr)
+        return 1
+    except BaseCandidateError as exc:
+        print(f"pitr operations discard-candidate refused: {exc}", file=sys.stderr)
+        return 1
+    if not confirm:
+        print(f"would discard {ready}; re-run with --confirm to remove it")
+    else:
+        print(f"discarded {ready}")
+    return 0
 
 
 def _resolve_drill_candidate(chain: str | None, candidate: str | None) -> CandidateManifest:

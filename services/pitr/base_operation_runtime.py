@@ -44,7 +44,7 @@ def restore_kind(root: Path) -> OperationKind:
     return OperationKind(
         "restore-proof",
         root / "restore-control",
-        root / "quarantine",
+        root / "quarantine" / "restore-proof",
         partial(quarantine_restore_staging, root),
     )
 
@@ -52,7 +52,10 @@ def restore_kind(root: Path) -> OperationKind:
 def drill_kind(root: Path) -> OperationKind:
     """Operator drills keep their evidence in the operator's scratch tree."""
     return OperationKind(
-        "pitr-drill", root / "drill-control", root / "quarantine", grace_s=DRILL_GRACE_S
+        "pitr-drill",
+        root / "drill-control",
+        root / "quarantine" / "pitr-drill",
+        grace_s=DRILL_GRACE_S,
     )
 
 

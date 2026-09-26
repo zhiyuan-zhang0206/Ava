@@ -49,8 +49,10 @@ def _kind(tmp_path: Path, **changes: Any) -> OperationKind:
     return OperationKind("test", tmp_path / "controls", tmp_path / "quarantine", **changes)
 
 
-def _entries(tmp_path: Path) -> list[Path]:
-    return custody.quarantine_entries(tmp_path / "quarantine")
+def _entries(tmp_path: Path, kind: str | None = None) -> list[Path]:
+    """Quarantined operations of the test kind, or of one production kind."""
+    root = tmp_path / "quarantine"
+    return custody.quarantine_entries(root if kind is None else root / kind)
 
 
 def _worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str):
@@ -344,7 +346,9 @@ async def test_scheduled_commit_failure_keeps_the_staged_artifact(
         assert pruned == []
         prior = published / _DUMP
         assert (prior.read_bytes() == b"prior") if failure == "collision" else not prior.exists()
-        holder = "operations/dump/.operation-*" if failure == "closure" else "quarantine/*"
+        holder = (
+            "operations/dump/.operation-*" if failure == "closure" else "quarantine/logical-dump/*"
+        )
         (staged,) = (tmp_path / "backups").glob(f"{holder}/artifact/*")
         assert staged.read_bytes() == b"encrypted"
         assert (staged.parents[1] / "request.json").is_file()
@@ -617,7 +621,7 @@ async def test_deferred_base_candidate_retires_clean_controls(
     with pytest.raises(LockTimeoutError):
         await base_worker.run_candidate()
     assert not _operation_dirs(tmp_path / "physical-backup" / "base-control")
-    assert not _entries(tmp_path / "physical-backup")
+    assert not _entries(tmp_path / "physical-backup", "base-candidate")
 
 
 async def test_space_deferral_is_clean_and_never_quarantined(
@@ -630,7 +634,8 @@ async def test_space_deferral_is_clean_and_never_quarantined(
     with pytest.raises(custody.OperationDeferred) as caught:
         await base_operation_runtime.run_restore_input(_restore_inputs(tmp_path))
     assert (caught.value.reason, caught.value.detail) == ("space", detail)
-    assert not _operation_dirs(tmp_path / "restore-control") and not _entries(tmp_path)
+    assert not _operation_dirs(tmp_path / "restore-control")
+    assert not _entries(tmp_path, "restore-proof")
 
 
 async def test_base_commit_failure_after_closure_quarantines_candidate_evidence(
@@ -650,7 +655,7 @@ async def test_base_commit_failure_after_closure_quarantines_candidate_evidence(
     with pytest.raises(RuntimeError, match="another operation worker"):
         await base_worker.run_candidate()
     assert not _operation_dirs(root / "base-control")
-    (entry,) = _entries(root)
+    (entry,) = _entries(root, "base-candidate")
     assert json.loads((entry / "result.json").read_text())["candidate_json"]
     # Another worker's receipt is never claimed by this operation's quarantine.
     assert owner.is_file() and not (root / "base-manifests").exists()
@@ -691,7 +696,7 @@ async def test_restore_retirement_failure_after_closure_quarantines_controls(
     with pytest.raises(FileNotFoundError):  # the pending proof it names does not exist
         await base_operation_runtime.run_restore_input(_restore_inputs(tmp_path))
     assert not _operation_dirs(tmp_path / "restore-control")
-    (entry,) = _entries(tmp_path)
+    (entry,) = _entries(tmp_path, "restore-proof")
     assert json.loads((entry / "result.json").read_text()) == outcome
     assert "live_db_url" not in json.loads((entry / "request.json").read_text())
 
@@ -724,11 +729,11 @@ async def test_drill_accepts_only_passing_evidence_for_the_candidate(
     )
     if outcome == "pass":
         assert await run == evidence
-        assert not _entries(tmp_path)
+        assert not _entries(tmp_path, "pitr-drill")
     else:
         with pytest.raises(RuntimeError, match="did not complete"):
             await run
-        assert len(_entries(tmp_path)) == 1  # the drill's outcome is data, not a block
+        assert len(_entries(tmp_path, "pitr-drill")) == 1  # the outcome is data, not a block
     assert not _operation_dirs(tmp_path / "drill-control")
     assert json.loads((scratch / "drill-evidence.json").read_text()) == evidence
 

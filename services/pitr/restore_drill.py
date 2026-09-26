@@ -21,10 +21,11 @@ invariants here:
 
 The restricted operation worker owns this flow and reports progress on stderr,
 which the controller streams to the operator. Trusted tools and the sandbox
-inherit its group; the controller refuses operator input mistakes before launch
-and confirms group closure before accepting the retained drill evidence. A
-controller crash leaves the drill kind blocked until `ava pitr operations
-retire` re-proves closure.
+postmaster inherit its group, and the postmaster is receipted because its
+children setsid() out of it. The controller refuses operator input mistakes
+before launch and confirms closure of the group and of that family before
+accepting the retained drill evidence. A controller crash leaves the drill kind
+blocked until `ava pitr operations retire` re-proves closure.
 """
 
 from __future__ import annotations

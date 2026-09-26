@@ -34,6 +34,7 @@ import pytest
 
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from services.backup_scheduler import daemon, worker
+from shared.config import settings
 from shared.exec_process_domain import ExecProcessDomain
 from tests.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
@@ -174,6 +175,7 @@ def _exercise_daemon(root: Path, mode: str, postgres_base: Path) -> None:
         patch.object(daemon, "stop_health_server", AsyncMock()),
         patch.object(daemon, "is_due", return_value=True),
         patch.object(worker, "ava_home", return_value=root),
+        patch.object(settings.data_plane, "pg_throwaway_base", str(postgres_base)),
         patch.object(ExecProcessDomain, "launch_posix", _launch_harness(root, mode, postgres_base)),
         patch.object(daemon, "load_local_dump_restore_success", return_value=None),
         patch.object(daemon, "local_dump_restore_due", return_value=True),
@@ -235,9 +237,11 @@ def _assert_backup_artifacts(tmp_path: Path, artifacts: Path, mode: str) -> None
     # one. Nothing is committed; no plaintext or key survives, even when the
     # worker was killed after the grace; an upload-interrupted artifact stays.
     assert not list((tmp_path / "backups" / "operations").glob("*/.operation-*"))
-    (entry,) = (tmp_path / "backups" / "quarantine").iterdir()
+    restore = mode.startswith("restore")
+    kind = "logical-restore-drill" if restore else "logical-dump"
+    (entry,) = (tmp_path / "backups" / "quarantine" / kind).iterdir()
     assert json.loads((entry / "request.json").read_text())["kind"] == (
-        "restore" if mode.startswith("restore") else "dump"
+        "restore" if restore else "dump"
     )
     assert (entry / "closure.json").is_file() and not (entry / "result.json").exists()
     assert [path.name for path in artifacts.iterdir()] == ["retained.dump.enc"]
@@ -306,6 +310,9 @@ def test_killed_restore_uses_parent_owned_postgres_base(
 ) -> None:
     _assert_sigterm_reaps_job_before_scheduler_exits(tmp_path, "restore-stubborn", postgres_base)
     assert Path((tmp_path / "pgdata").read_text()).is_relative_to(postgres_base)
+    # The killed worker never tore down its throwaway cluster: the drill's
+    # sanitizer reaps the restored database once closure is proven.
+    assert not list(postgres_base.glob("ava-pg-*"))
 
 
 async def test_restore_job_accepts_clean_foreground_postgres_exit(
@@ -381,7 +388,7 @@ def test_stop_during_group_close_stops_the_scheduler(tmp_path: Path) -> None:
     }
     backups = tmp_path / "backups"
     assert not list(backups.glob("operations/dump/.operation-*"))
-    (entry,) = (backups / "quarantine").iterdir()
+    (entry,) = (backups / "quarantine" / "logical-dump").iterdir()
     assert json.loads((entry / "closure.json").read_text())["proven_by"] == "controller"
 
 

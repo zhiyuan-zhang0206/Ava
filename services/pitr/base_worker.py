@@ -36,7 +36,7 @@ def candidate_kind(root: Path | None = None) -> OperationKind:
     return OperationKind(
         "base-candidate",
         root / "base-control",
-        root / "quarantine",
+        root / "quarantine" / "base-candidate",
         partial(quarantine_candidate_staging, root),
     )
 

@@ -1,9 +1,10 @@
 """Fixed logical-backup operations in one launch-owned trusted process group.
 
 Daily dumps and the weekly logical restore drill are separate operation kinds
-with separate control roots, so a failed drill never stops the dumps. Both
-quarantine into `$AVA_HOME/backups/quarantine/`, which keeps only complete
-encrypted artifacts: plaintext dump output never survives a closed worker.
+with separate control roots, so a failed drill never stops the dumps. Each
+quarantines into its own `$AVA_HOME/backups/quarantine/<kind>/`, which keeps
+only complete encrypted artifacts: plaintext dump output never survives a
+closed worker.
 """
 
 from __future__ import annotations
@@ -50,16 +51,28 @@ def _complete_artifact(path: Path) -> bool:
 
 
 def _sanitize_restore_drill(work: Path, _worker: OperationWorker | None) -> None:
-    """The drill's decrypted dump lives only in its private scratch."""
+    """Remove the drill's decrypted dump and its restored throwaway cluster.
+
+    The decrypted dump lives only in the private scratch. A worker killed
+    before its own teardown leaves the restored database in its throwaway
+    cluster; after proven closure its owner lock is released, so the
+    throwaway sweep reaps it now instead of at the next throwaway start.
+    """
+    from shared.pg_tools import sweep_orphaned_throwaway_clusters
+
     scratch = work / "scratch"
     if scratch.is_dir() and not scratch.is_symlink():
         shutil.rmtree(scratch)
+    sweep_orphaned_throwaway_clusters()
 
 
 def dump_kind() -> OperationKind:
     root = ava_home() / "backups"
     return OperationKind(
-        "logical-dump", root / "operations" / "dump", root / "quarantine", _sanitize_dump
+        "logical-dump",
+        root / "operations" / "dump",
+        root / "quarantine" / "logical-dump",
+        _sanitize_dump,
     )
 
 
@@ -68,7 +81,7 @@ def restore_drill_kind() -> OperationKind:
     return OperationKind(
         "logical-restore-drill",
         root / "operations" / "restore-drill",
-        root / "quarantine",
+        root / "quarantine" / "logical-restore-drill",
         _sanitize_restore_drill,
     )
 
@@ -139,18 +152,27 @@ def commit_scheduled_backup(staged: Path, digest: str) -> Path:
 
 
 def _publish_copy(staged: Path, target: Path, digest: str) -> None:
-    """Cross-filesystem publication with the same exclusive, verified result."""
+    """Cross-filesystem publication with the same exclusive, verified result.
+
+    The copy stays open until it is linked, so a backup run sweeping this
+    directory (it removes only intermediates no process holds open) never
+    takes it mid-publication; a controller killed meanwhile leaves a closed
+    copy that the next backup run sweeps.
+    """
     fd, raw = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".copy", dir=target.parent)
     copy = Path(raw)
     try:
         os.fchmod(fd, 0o600)
-        with staged.open("rb") as source, os.fdopen(fd, "wb") as output:
+        with staged.open("rb") as source, os.fdopen(fd, "w+b") as output:
             shutil.copyfileobj(source, output, 8 * 1024 * 1024)
             output.flush()
             os.fsync(output.fileno())
-        if _sha256(copy) != digest:
-            raise RuntimeError("scheduled backup copy differs from the closed worker's artifact")
-        os.link(copy, target)
+            output.seek(0)
+            if hashlib.file_digest(output, "sha256").hexdigest() != digest:
+                raise RuntimeError(
+                    "scheduled backup copy differs from the closed worker's artifact"
+                )
+            os.link(copy, target)
         dirfd = os.open(target.parent, os.O_RDONLY)
         try:
             os.fsync(dirfd)
