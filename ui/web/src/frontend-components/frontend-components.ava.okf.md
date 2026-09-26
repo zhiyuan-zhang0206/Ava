@@ -21,6 +21,14 @@ Three layers: `HomePage` (read-only toast) → `HomeShell` (`useAgents`, activeI
 
 `PageDock` removed—open pages now carried by InspectorPanel's `useAgentPages`.
 
+## Code blocks
+
+`PythonCode` ships its highlighter with the initial timeline code, so expanding
+an action shows highlighted source, the copy control, and the streaming cursor
+without a new JavaScript request. This avoids Chromium's low-priority chunk
+queue behind long-lived SSE connections on a slow-network estimate. Tokenization
+still only runs when a code block renders or its source changes.
+
 ## Fleet View
 
 The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) — relationship graph, task graph, task board, unified Inbox queue, shared force controls — has its own node: [[ui/web/src/frontend-components/fleet-view.ava.okf.md|Fleet View]].
