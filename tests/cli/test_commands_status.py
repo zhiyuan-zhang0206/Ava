@@ -398,7 +398,7 @@ def test_cmd_status_prints_no_frozen_cluster_pin(
     """The cluster pin has no writer; a historical value must not be presented
     as the current target, nor a bare `ava cluster update` offered as a remedy."""
     _quiet_status(monkeypatch, tmp_path)
-    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda **_kw: "a" * 40)
+    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda **_kw: "a" * 40)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _status_commands.cmd_status() == 0
     out = capsys.readouterr().out
@@ -424,7 +424,7 @@ def test_cmd_status_names_the_source_checkout_it_runs(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     _quiet_status(monkeypatch, tmp_path)
-    monkeypatch.setattr("shared.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)
+    monkeypatch.setattr("shared.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _status_commands.cmd_status() == 0
     out = capsys.readouterr().out
@@ -464,7 +464,7 @@ def test_cmd_status_shows_an_incomplete_home_operation(
     )
     monkeypatch.setattr(
         "cli.release_transition.journal.read_operation",
-        lambda path: operation if path == journal else pytest.fail(str(path)),
+        lambda path: operation if path == journal else pytest.fail(str(path)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert _status_commands.cmd_status() == 0

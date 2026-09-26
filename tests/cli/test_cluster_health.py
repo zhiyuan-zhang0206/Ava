@@ -190,7 +190,7 @@ def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     # the real prod checkout, which a tmp-patched `ava_home` resolves to a
     # non-git path. Every pass-all fixture stubs it; the source-tree tests
     # below stub it themselves with specific outcomes.
-    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: None)
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture(autouse=True)
@@ -399,7 +399,7 @@ def test_source_tree_failure_alerts(
     not undo an on-disk edit (the 2026-08-28 outage class: edited source broke
     `import ava` for every agent on the box)."""
     message = "prod source tree tampered: untracked outside whitelist: junk.txt"
-    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: message)
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: message)  # pyright: ignore[reportUnknownArgumentType]
     _write_aged_alert_state(_home, f"FAIL: source tree — {message}")
 
     rc = _cluster_health.run_health_probe()
@@ -418,7 +418,7 @@ def test_source_tree_clean_passes(
     """A clean tree must not fail the probe — the whitelist exists so the
     routine frontend/ build output never fires a false alarm. The check is
     patched so the test does not depend on this host's prod tree state."""
-    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: None)
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cluster_health.run_health_probe()
 
@@ -1765,7 +1765,7 @@ def test_run_health_probe_allowed_from_prod_checkout(
     # Check 8 reads the real anchored checkout — whose git state varies by
     # host (the CI runner has no prod tree). Stub it like the other checks;
     # the source-tree behavior is pinned by the dedicated tests below.
-    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: None)
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cluster_health.run_health_probe()
 
@@ -2059,7 +2059,7 @@ def test_editable_install_healthy_records_keep_probe_green(
     # The throwaway `_prod_source` is not a git checkout; check 8 is not this
     # test's subject (the editable-install check is), so stub it rather than
     # depend on the host's real prod tree.
-    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: None)
+    monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _cluster_health.run_health_probe() == 0
 

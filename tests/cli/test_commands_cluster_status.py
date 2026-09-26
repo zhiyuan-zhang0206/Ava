@@ -424,7 +424,7 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
     monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
     monkeypatch.setattr(
         "shared.http_dial.post",
-        lambda *_a, **_kw: _FakeResponse({"name": "wsl", "resumed": True}),
+        lambda *_a, **_kw: _FakeResponse({"name": "wsl", "resumed": True}),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert _cluster_commands.cmd_cluster_resume("wsl") == 0
     out = capsys.readouterr().out
