@@ -9,27 +9,17 @@ import time
 from pathlib import Path
 from typing import BinaryIO
 
-import psutil
-
-from shared.exec_process_domain import ExecProcessDomain, _process_group_has_live_member
+from shared.exec_process_domain import ExecProcessDomain
+from shared.process_group_closure import wait_group_finished
 
 _CLOSE_SECONDS = 5.0
-_POLL_SECONDS = 0.05
 
 
 def _wait_for_completion(process: subprocess.Popen[bytes], timeout: float) -> None:
     # Never poll/wait/reap the leader here: its retained native pid pins the group
     # even when its children have already been reparented to PID 1.
-    identity = psutil.Process(process.pid)
-    deadline = time.monotonic() + timeout
-    while True:
-        ended = identity.status() in {psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD}
-        if ended and not _process_group_has_live_member(process.pid):
-            return
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise subprocess.TimeoutExpired(process.args, timeout)
-        time.sleep(min(_POLL_SECONDS, remaining))
+    if not wait_group_finished(process, time.monotonic() + timeout):
+        raise subprocess.TimeoutExpired(process.args, timeout)
 
 
 def _close_and_reap(domain: ExecProcessDomain) -> int:

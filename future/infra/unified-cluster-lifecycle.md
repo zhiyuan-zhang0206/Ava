@@ -221,9 +221,12 @@ group with no subgroups
 ([PITR operation custody](../../services/pitr/operation-custody.ava.okf.md)).
 The remaining custody gaps: controller death on plain POSIX/macOS has no
 platform owner (for example a Linux cgroup) able to prove closure without the
-original controller, so retirement past that point still needs a human; and a
-macOS late-fork race in `shared/exec_process_domain.py` is being qualified
-separately. Do not add another restart or cleanup fallback, or infer closure
+original controller, so retirement past that point still needs a human. Group
+closure itself (exec domain, PITR custody, release preparation) runs through one
+core, `shared/process_group_closure.py`, which accepts only a kernel group
+listing of the exited leader alone after a group SIGKILL, so a macOS member
+forked during the signal forces another round. Do not add another restart or
+cleanup fallback, or infer closure
 from another process census.
 
 ## Remaining: macOS finite executor

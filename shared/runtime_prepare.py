@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from shared.process_group_closure import close_unadmitted, group_members, wait_leader_exit
+from shared.process_group_closure import close_unadmitted, wait_group_finished
 from shared.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
@@ -57,7 +57,6 @@ def _write_json(path: Path, value: object) -> None:
 
 
 _CLOSE_SECONDS = 5.0
-_POLL_SECONDS = 0.05
 
 
 def _run(argv: list[str], cwd: Path, *, timeout: int = 180) -> str:
@@ -91,7 +90,7 @@ def _run(argv: list[str], cwd: Path, *, timeout: int = 180) -> str:
         )
         finished = False
         try:
-            finished = _finished(process, time.monotonic() + timeout)
+            finished = wait_group_finished(process, time.monotonic() + timeout)
         finally:
             code = close_unadmitted(process, time.monotonic() + _CLOSE_SECONDS)
         name = Path(argv[0]).name
@@ -102,18 +101,6 @@ def _run(argv: list[str], cwd: Path, *, timeout: int = 180) -> str:
             raise ReleaseRejectedError(f"preparation command failed: {name} rc={code}")
         stdout.seek(0)
         return stdout.read().decode("utf-8", errors="replace")
-
-
-def _finished(process: subprocess.Popen[bytes], deadline: float) -> bool:
-    """Natural completion: the leader exited and its group lists nothing else."""
-    if not wait_leader_exit(process, deadline):
-        return False
-    while group_members(process.pid) != [process.pid]:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return False
-        time.sleep(min(_POLL_SECONDS, remaining))
-    return True
 
 
 def _copy_python(source: Path, target: Path) -> None:

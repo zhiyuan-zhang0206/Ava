@@ -28,9 +28,7 @@ import logging
 import math
 import os
 import shutil
-import signal
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -45,15 +43,12 @@ from typing import cast
 import psutil
 
 from shared.atomic_io import write_text_atomic
-from shared.exec_process_domain import (
-    ExecProcessDomain,
-    _darwin_group_listing,
-    _process_group_has_live_member,
-)
+from shared.exec_process_domain import ExecProcessDomain
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess
 from shared.pg_foreground import POSTMASTER_SHUTDOWN_S, FamilyCustody, family_refusal
 from shared.platform import LockTimeoutError, file_lock
+from shared.process_group_closure import confirm_closure
 
 _log = logging.getLogger(__name__)
 
@@ -355,50 +350,6 @@ def held_operations() -> list[Path]:
         return [item.work for item in _HELD]
 
 
-def close_unowned_launch(process: subprocess.Popen[bytes], deadline: float) -> None:
-    """Confirm closure of a group whose exec domain was never admitted.
-
-    The unreaped direct child pins its PID and group number, so signalling
-    that group reaches only this launch. Closure is confirmed as the exec
-    domain confirms it: no live member, and on macOS a kernel listing of the
-    exited leader alone.
-    """
-    if process.returncode is not None:
-        raise RuntimeError("the launched leader was already reaped")
-    group = process.pid
-    while True:
-        try:
-            os.killpg(group, signal.SIGKILL)
-        except PermissionError:
-            # XNU returns EPERM for a group whose members are all zombies.
-            if sys.platform != "darwin":
-                raise
-        if not _process_group_has_live_member(group) and _only_leader_listed(group, deadline):
-            return
-        if time.monotonic() >= deadline:
-            raise TimeoutError("the launched group still has live members")
-        time.sleep(0.05)
-
-
-def _only_leader_listed(group: int, deadline: float) -> bool:
-    if sys.platform != "darwin":
-        return True
-    # Observe the signalled leader's exit without reaping it, so no fork is in
-    # flight, then read the kernel's atomic group listing.
-    while _leader_status(group) not in {psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD}:
-        if time.monotonic() >= deadline:
-            raise TimeoutError("the launched leader is still live after its group signal")
-        time.sleep(0.05)
-    return _darwin_group_listing(group) == [group]
-
-
-def _leader_status(pid: int) -> str:
-    try:
-        return psutil.Process(pid).status()
-    except psutil.NoSuchProcess:
-        return psutil.STATUS_DEAD
-
-
 def close_operation(
     work: Path,
     process: subprocess.Popen[bytes],
@@ -427,7 +378,7 @@ def _retry_held(kind: OperationKind) -> None:
     for item in held:
         try:
             close_group = (
-                partial(close_unowned_launch, item.process)
+                partial(confirm_closure, item.process)
                 if item.domain is None
                 else item.domain.close_confirmed
             )

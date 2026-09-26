@@ -13,6 +13,7 @@ import psutil
 import pytest
 
 from agent.graph import _exec_process
+from shared import process_group_closure
 from shared.platform import IS_WINDOWS
 from shared.winjob import WindowsJob, _kernel32
 from shared.winjob_pipes import PipedJobChild, start_piped_job_process
@@ -171,15 +172,11 @@ def test_live_group_after_signal_is_not_closed(monkeypatch: pytest.MonkeyPatch) 
     original_signal = os.killpg
     try:
 
-        def live(_pid: int) -> bool:
-            return True
-
         def submitted(_pid: int, _sig: int) -> None:
             return None
 
-        monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", live)
         monkeypatch.setattr(os, "killpg", submitted)
-        with pytest.raises(TimeoutError, match="live managed members"):
+        with pytest.raises(TimeoutError, match="still live after its group signal"):
             domain.close_confirmed(time.monotonic() - 1)
         assert process.returncode is None
     finally:
@@ -233,17 +230,18 @@ def test_group_signal_precedes_any_absence_sample(monkeypatch: pytest.MonkeyPatc
     )
     events: list[str] = []
     original = os.killpg
+    listing = process_group_closure.group_members
 
     def signal_group(pid: int, sig: int) -> None:
         events.append("signal")
         original(pid, sig)
 
-    def empty(_pid: int) -> bool:
+    def sample(pgid: int) -> list[int]:
         events.append("sample")
-        return False
+        return listing(pgid)
 
     monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", empty)
+    monkeypatch.setattr(process_group_closure, "group_members", sample)
     try:
         domain.close_confirmed(time.monotonic() + 5)
         assert events == ["signal", "sample"]
@@ -379,13 +377,12 @@ def test_confirmed_domain_does_not_reobserve_reused_numeric_group(
         raise AssertionError("terminal domain cannot inspect a new numeric group")
 
     monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", unknown)
+    monkeypatch.setattr(process_group_closure, "group_members", unknown)
     domain.close_confirmed(time.monotonic() + 5)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="XNU kernel group listing")
 def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> None:
-    from shared.exec_process_domain import _darwin_group_listing
-
     receipt = tmp_path / "child"
     code = (
         "import subprocess,sys,pathlib; "
@@ -402,9 +399,9 @@ def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> N
             time.sleep(0.01)
         child = int(receipt.read_text())
         # The unreaped leader stays listed after exit, alongside its live member.
-        assert sorted(_darwin_group_listing(root.pid)) == sorted([root.pid, child])
+        assert process_group_closure.group_members(root.pid) == sorted([root.pid, child])
         domain.close_confirmed(time.monotonic() + 5)
-        assert _darwin_group_listing(root.pid) == [root.pid]
+        assert process_group_closure.group_members(root.pid) == [root.pid]
     finally:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(root.pid, 9)
@@ -441,7 +438,7 @@ def _late_listing_domain(
 
     monkeypatch.setattr(os, "killpg", signal_group)
     monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", empty)
-    monkeypatch.setattr("shared.exec_process_domain._darwin_group_listing", listing)
+    monkeypatch.setattr(process_group_closure, "group_members", listing)
     return root, domain, events
 
 

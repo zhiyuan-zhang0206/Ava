@@ -54,7 +54,6 @@ from services.pitr.operation_custody import (
     OperationKind,
     admit,
     close_operation,
-    close_unowned_launch,
     hold,
     is_stop,
     publish_result,
@@ -67,6 +66,7 @@ from shared.exec_process_domain import ExecDomainBirthError, ExecProcessDomain
 from shared.native_process import native_boot_id
 from shared.pg_foreground import record_postmasters_in
 from shared.platform import LockTimeoutError, file_lock
+from shared.process_group_closure import confirm_closure
 
 _log = logging.getLogger(__name__)
 CLOSE_DEADLINE_S = 20.0
@@ -470,7 +470,7 @@ async def _settle_unowned_birth(
             process.stdin.close()
 
     def close_group(deadline: float) -> None:
-        close_unowned_launch(process, deadline)
+        confirm_closure(process, deadline)
 
     def close() -> int:
         return close_operation(work, process, close_group, CLOSE_DEADLINE_S)

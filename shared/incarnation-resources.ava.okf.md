@@ -103,9 +103,8 @@ Fresh host and ready-handshake captures compare native births; database CAS and
 terminal receipts retain exact model equality, including the original timestamp.
 Same-host admission preserves the stored receipt rather than rewriting its facts.
 
-The dedicated owner's `ExecProcessDomain.close_confirmed` retains the POSIX
-unreaped root until no group member is live and, on macOS, the kernel group
-listing names only the exited root.
+The dedicated owner's `ExecProcessDomain.close_confirmed` keeps the POSIX root
+unreaped until [[process-group-closure.ava.okf.md|group closure]] is proven.
 It is distinct from successful signal submission. On Windows,
 `WindowsJob.terminate_and_confirm` retains the original Job handle through
 termination and a zero `ActiveProcesses` readback, then closes it. Query failure

@@ -1,17 +1,22 @@
-"""Standard-library closure of a process group whose leader this process launched.
+"""The one closure core for a process group whose leader this process launched.
 
 A bare interpreter can import this module (no psutil, no pydantic), so the
-checkout-retiring runtime proof and the release-store contract use it too.
+checkout-retiring runtime proof and the release-store contract use it; the exec
+domain, PITR operation custody and ava-root unit stop build on it too.
 
-The direct child launched with `process_group=0` leads its group and stays
-UNREAPED until closure is proven: its zombie keeps the group number reserved, so
-every `killpg` reaches only this launch. Its exit is observed without reaping
-(kqueue NOTE_EXIT on macOS, `waitid(WNOWAIT)` on Linux). Closure is a group
-listing that names nothing but the leader, read after a group-wide SIGKILL:
-XNU's `proc_listpids(PROC_PGRP_ONLY)` snapshot on macOS, a `/proc` scan on
-Linux, where a fork racing the group SIGKILL either fails or hands the pending
-signal to the new child. Any other listed member, live or zombie, forces another
-round. Only then is the leader reaped. An unresolved closure leaves it unreaped.
+The direct child launched as its own group's leader (`process_group=0` or a new
+session) stays UNREAPED until closure is proven: its zombie keeps the group
+number reserved, so every group signal reaches only this launch. Its exit is
+observed without reaping (kqueue NOTE_EXIT on macOS, `waitid(WNOWAIT)` on
+Linux). Closure is a kernel group listing that names nothing but the exited
+leader, read after a group-wide SIGKILL: XNU's `proc_listpids(PROC_PGRP_ONLY)`
+snapshot on macOS, a `/proc` scan on Linux, where a fork racing the group
+SIGKILL either fails or hands the pending signal to the new child. XNU instead
+lets a member inside fork() when the signal lands complete it, and that child
+never receives the signal. So any other listed member, live or zombie, forces
+another round. `confirm_closure` proves closure and leaves the leader to its
+caller's custody; `close_unadmitted` also reaps it. An unresolved closure
+leaves the leader unreaped.
 """
 
 from __future__ import annotations
@@ -25,9 +30,10 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from functools import cache
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
 
 _PROC_PGRP_ONLY = 2  # <sys/proc_info.h>: list PIDs by process-group id.
 _POLL_S = 0.05
@@ -38,8 +44,8 @@ _UNRESOLVED: list[subprocess.Popen[bytes]] = []
 _UNRESOLVED_LOCK = threading.Lock()
 
 
-class GroupClosureUnresolvedError(RuntimeError):
-    """Closure was not proven; the leader stays unreaped and keeps its group."""
+class GroupClosureUnresolvedError(TimeoutError):
+    """Closure was not proven by its deadline; the leader stays unreaped."""
 
 
 def wait_leader_exit(process: subprocess.Popen[bytes], deadline: float) -> bool:
@@ -82,7 +88,12 @@ def _darwin_exit(pid: int, deadline: float) -> bool:
 
 
 def group_members(pgid: int) -> list[int]:
-    """Every PID in group `pgid`, zombies included."""
+    """Every PID in group `pgid`, zombies included.
+
+    macOS reads one kernel snapshot. Linux scans `/proc`, so a member can exit
+    or appear during the scan: only after a group SIGKILL does a listing of the
+    leader alone prove closure there (`confirm_closure`).
+    """
     if sys.platform == "darwin":
         return _darwin_group_listing(pgid)
     members: list[int] = []
@@ -100,6 +111,25 @@ def group_members(pgid: int) -> list[int]:
     return sorted(members)
 
 
+def group_empty(pgid: int) -> bool:
+    """Whether no process, live or zombie, remains in group `pgid`.
+
+    Only meaningful once the group's leader was reaped: the number stays
+    reserved while any member exists, so no other group can take it. macOS
+    reads the kernel group listing. Linux sends the group a null signal, which
+    walks the group under the tasklist lock that fork holds to add a child to
+    it, so a member mid-fork keeps the answer false. Neither is an
+    enumerate-then-read scan.
+    """
+    if sys.platform == "darwin":
+        return not _darwin_group_listing(pgid)
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
 @cache
 def _proc_listpids() -> Any:
     listpids = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True).proc_listpids
@@ -109,6 +139,13 @@ def _proc_listpids() -> Any:
 
 
 def _darwin_group_listing(pgid: int) -> list[int]:
+    """Every PID XNU files under `pgid`, zombies included, as one snapshot.
+
+    `proc_listpids(PROC_PGRP_ONLY)` walks allproc then zombproc under the
+    proc-list lock that fork, exit and reap take to change those lists, unlike
+    an enumerate-then-read scan. A result filling the buffer may be truncated;
+    it already names more than the leader, which never confirms closure.
+    """
     listpids = _proc_listpids()
     ctypes.set_errno(0)
     size = listpids(_PROC_PGRP_ONLY, pgid, None, 0)
@@ -125,34 +162,82 @@ def _darwin_group_listing(pgid: int) -> list[int]:
     return sorted(buffer[: filled // width])
 
 
-def close_unadmitted(process: subprocess.Popen[bytes], deadline: float) -> int:
-    """Kill the group `process` leads, prove it closed, then reap the leader.
+def wait_group_finished(process: subprocess.Popen[bytes], deadline: float) -> bool:
+    """Natural completion by `deadline`: the leader exited and its group lists nothing else.
 
-    Returns the leader's exit status. Raises `GroupClosureUnresolvedError` at
-    `deadline`, retaining the unreaped leader. This is trusted-tool cleanup, not
-    a fence: a member that calls setsid() or setpgid() leaves the group.
+    Never signals or reaps. It is not a closure proof (on Linux an unsignalled
+    member can fork past the scan), so the caller closes the group afterwards.
+    """
+    if not wait_leader_exit(process, deadline):
+        return False
+    while group_members(process.pid) != [process.pid]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(_POLL_S, remaining))
+    return True
+
+
+def confirm_closure(
+    process: subprocess.Popen[bytes],
+    deadline: float,
+    signal_group: Callable[[], None] | None = None,
+) -> None:
+    """Kill the group `process` leads and prove it closed; the leader stays unreaped.
+
+    Each round sends one group-wide SIGKILL, waits for the leader's exit and
+    lists the group; it returns once the listing names only the leader. The
+    default signal refuses a reaped leader and accepts XNU's EPERM for an
+    all-zombie group, since the listing decides. A caller with its own signal
+    authority passes `signal_group`; whatever it raises propagates. Raises
+    `GroupClosureUnresolvedError` at `deadline`. This is trusted-tool cleanup,
+    not a fence: a member that calls setsid() or setpgid() leaves the group.
     """
     group = process.pid
     while True:
-        try:
-            os.killpg(group, signal.SIGKILL)
-        except PermissionError:
-            # XNU refuses to signal a group whose members are all zombies.
-            if sys.platform != "darwin":
-                raise
+        if signal_group is None:
+            _kill_group(process)
+        else:
+            signal_group()
         if not wait_leader_exit(process, deadline):
-            _unresolved(process, f"group {group} leader is still live after SIGKILL")
+            raise GroupClosureUnresolvedError(
+                f"group {group} leader is still live after its group signal"
+            )
         members = group_members(group)
         if group not in members:
-            _unresolved(process, f"group {group} listing {members} lost its unreaped leader")
-        if members == [group]:
-            return process.wait()
+            raise RuntimeError(f"group {group} listing {members} lost its unreaped leader")
+        others = [pid for pid in members if pid != group]
+        if not others:
+            return
         if time.monotonic() >= deadline:
-            _unresolved(process, f"group {group} still lists members {members}")
+            raise GroupClosureUnresolvedError(
+                f"group {group} still lists members {others} besides its leader"
+            )
         time.sleep(_POLL_S)
 
 
-def _unresolved(process: subprocess.Popen[bytes], reason: str) -> NoReturn:
-    with _UNRESOLVED_LOCK:
-        _UNRESOLVED.append(process)
-    raise GroupClosureUnresolvedError(reason)
+def _kill_group(process: subprocess.Popen[bytes]) -> None:
+    if process.returncode is not None:
+        raise RuntimeError("the group leader was already reaped")
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except PermissionError:
+        # XNU refuses to signal a group whose members are all zombies.
+        if sys.platform != "darwin":
+            raise
+
+
+def close_unadmitted(process: subprocess.Popen[bytes], deadline: float) -> int:
+    """Close the group of a launch no owner admitted, then reap its leader.
+
+    Returns the leader's exit status. Any failure, including
+    `GroupClosureUnresolvedError` at `deadline`, keeps the unreaped leader
+    referenced for the life of this process.
+    """
+    try:
+        confirm_closure(process, deadline)
+    except BaseException:
+        with _UNRESOLVED_LOCK:
+            _UNRESOLVED.append(process)
+        raise
+    return process.wait()

@@ -47,7 +47,8 @@ CI exercises real temporary-file transitions on Linux, macOS and Windows without
 starting a cluster or installing the project environment, so `runtime_release.py`
 and `runtime_prepare.py` import only the standard library
 (`tests/lifecycle/images/test_stdlib_boundary.py` guards the chain and runs a
-tool). Preparation tools run through `process_group_closure.py`: each leads its
+tool). Preparation tools run through the stdlib-only
+[[process-group-closure.ava.okf.md|group-closure core]]: each leads its
 own process group, and its leader stays unreaped until a group-wide SIGKILL and a
 kernel listing of only that leader prove closure. The builder-embedded
 application identity and its verified read live in `release_identity.py`.

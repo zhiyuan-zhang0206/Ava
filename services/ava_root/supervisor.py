@@ -35,9 +35,9 @@ from shared.env_registry import (
     MANIFEST_CERTIFICATION_SECRET_ENV,
     manifest_certification_secret_env,
 )
-from shared.exec_process_domain import process_group_closed, process_group_pids
 from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from shared.process_env import inherited_process_env
+from shared.process_group_closure import group_empty, group_members
 from shared.root_control.ipc import (
     ErrorCode,
     RequestPayload,
@@ -538,7 +538,7 @@ class Supervisor:
             living = {item for item in generation.tracked if item.live()}
             if not living:
                 await generation.exited.wait()
-                if process_group_closed(identity.pid):
+                if group_empty(identity.pid):
                     custody.clear()
                     runtime.generation = None
                     runtime.state = UnitState.STOPPED
@@ -595,14 +595,14 @@ class Supervisor:
 
 
 def _ownership_retained(unit_id: str, living: set[OwnedProcess], pgid: int) -> RuntimeError:
-    survivors = sorted(item.pid for item in living) or process_group_pids(pgid)
+    survivors = sorted(item.pid for item in living) or group_members(pgid)
     return RuntimeError(f"unit {unit_id} did not stop; ownership retained (pids {survivors})")
 
 
 def _capture_group(tracked: set[OwnedProcess], pgid: int) -> set[OwnedProcess]:
     """Retain the named members of an occupied unit group; return the live ones."""
     members: set[OwnedProcess] = set()
-    for pid in process_group_pids(pgid):
+    for pid in group_members(pgid):
         with contextlib.suppress(psutil.NoSuchProcess):
             members.add(OwnedProcess.capture(psutil.Process(pid)))
     retain_processes(tracked, members)
