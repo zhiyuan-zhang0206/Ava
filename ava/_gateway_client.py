@@ -59,7 +59,7 @@ from __future__ import annotations
 from typing import Any, NamedTuple
 
 import ava
-import ava._boot
+import ava.agent_identity
 from ava._gateway_transport import (
     _MEMORY_SEARCH_MAX_RETRIES,
     _TRANSIENT_HTTP_STATUSES,
@@ -433,7 +433,7 @@ def terminate(
     if source is not None:
         body["source"] = source
     else:
-        body["source"] = ava._boot.default_actor()
+        body["source"] = ava.agent_identity.default_actor()
     if message is not None:
         body["message"] = message
     if force:
@@ -456,7 +456,7 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
     if source is not None:
         body["source"] = source
     else:
-        body["source"] = ava._boot.default_actor()
+        body["source"] = ava.agent_identity.default_actor()
     resp = _post(f"/api/agents/{agent_id}/restart", body)
     _raise_from_response(resp)
     return resp.json()["status"]
@@ -476,7 +476,7 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
     if resurrected_by is not None:
         body["resurrected_by"] = resurrected_by
     else:
-        body["resurrected_by"] = ava._boot.default_actor()
+        body["resurrected_by"] = ava.agent_identity.default_actor()
     resp = _post(f"/api/agents/{agent_id}/resurrect", body)
     _raise_from_response(resp)
     return resp.json()["status"]

@@ -36,7 +36,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
-import ava._boot
+import ava.agent_identity
 from agent.corpse_reap import ReapedCorpse
 from agent.hosted_ownership import TurnFatalStamp, TurnSettlement
 from services.agent_host import dispatcher, settlement
@@ -239,7 +239,7 @@ class _FakeGraph:
     async def _observe(self, _agent_id: int, context: AvaContext) -> _Observation:
         plugin_cfg = cast(_HostPluginConfig, turn_plugin_config("hostplug"))
         return _Observation(
-            agent_id=ava._boot.agent_id(),
+            agent_id=ava.agent_identity.agent_id(),
             model=turn_settings.lm.llm_model,
             plugin_marker=plugin_cfg.marker,
             llm=cast(_Model, context.llm),
@@ -651,7 +651,7 @@ class TestConcurrentAgentIsolation:
         how a process-per-agent assumption would sneak through.
         """
         # Ids 11/22, never 1: tests/conftest.py pins the session-global process
-        # slot `ava._boot._agent_id = 1` as a placeholder, so an agent numbered 1
+        # slot `ava.agent_identity._agent_id = 1` as a placeholder, so an agent numbered 1
         # would read back correctly even if the turn bind did nothing at all.
         rows = {
             11: _Row(overlay={"llm_model": "model-for-11", "marker": "plug-for-11"}),
@@ -689,7 +689,7 @@ class TestConcurrentAgentIsolation:
         stats route, the daemon's own logging) would attribute itself to whoever
         ran last.
 
-        Asserted on the turn contextvar rather than `ava._boot.agent_id()`,
+        Asserted on the turn contextvar rather than `ava.agent_identity.agent_id()`,
         because that read legitimately falls through to the process bootstrap
         slot — which tests/conftest.py pins to 1 for the whole session, and which
         the real host never sets at all (it never calls `establish`).

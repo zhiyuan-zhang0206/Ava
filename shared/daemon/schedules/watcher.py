@@ -285,7 +285,7 @@ def session_deadline(
 
 # Shared preamble for both generated scripts: `_wake(message)` delivers a
 # `watcher:N`-tagged chat inbound to the launching agent (identity comes from
-# the bootstrap's inlined AVA_AGENT_ID — `_boot.agent_id()` reads it lazily;
+# the bootstrap's inlined AVA_AGENT_ID — `agent_identity.agent_id()` reads it lazily;
 # N from the session-id env var the run command sets). Inlined into the
 # generated script — the SDK deliberately has no public remind primitive, and
 # a generated script may use internal plumbing. Delivery retries 3x with
@@ -298,7 +298,7 @@ import os as _os
 import sys as _sys
 import time as _time
 
-import ava._boot as _boot
+from ava import agent_identity
 from ava import _gateway_client as _gateway_client
 
 # A wake must survive a gateway restart: until 2026-09-15 the bare
@@ -315,7 +315,7 @@ def _wake(message):
     for _attempt in range(_WAKE_ATTEMPTS):
         try:
             _gateway_client.send_message(
-                _boot.agent_id(),
+                agent_identity.agent_id(),
                 content=message,
                 source="watcher:" + _os.environ["AVA_WATCHER_SESSION_ID"],
             )

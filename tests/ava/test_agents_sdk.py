@@ -139,7 +139,7 @@ def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple]:
 class TestSpawn:
     def test_spawn_no_prompt_just_lifecycle(self, db_conn: psycopg.Connection) -> None:
         """ava.agents.spawn() without prompt — only starts lifecycle, no inbound posted."""
-        ava._boot._agent_id = _spawn_agent()  # self identity
+        ava.agent_identity._agent_id = _spawn_agent()  # self identity
 
         child_id = ava.agents.spawn()
 
@@ -150,7 +150,7 @@ class TestSpawn:
         self, db_conn: psycopg.Connection
     ) -> None:
         """spawn(prompt=...) together INSERT chat inbound (source='agent:{ava.self.AGENT_ID}')."""
-        ava._boot._agent_id = _spawn_agent()  # self identity
+        ava.agent_identity._agent_id = _spawn_agent()  # self identity
 
         child_id = ava.agents.spawn(prompt="\u53bb\u67e5 X")
 
@@ -247,7 +247,7 @@ class TestSpawnFork:
     def test_fork_resolves_latest_checkpoint(self, db_conn: psycopg.Connection) -> None:
         """ava.agents.spawn(fork_from=N) internally resolves latest checkpoint
         (done by gateway, SDK unaware of ckpt id)."""
-        ava._boot._agent_id = _spawn_agent()  # self identity
+        ava.agent_identity._agent_id = _spawn_agent()  # self identity
         source = ava.agents.spawn()
         # construct chain a < b < c (lex order corresponds to time order)
         with db_conn.cursor() as cur:
@@ -277,7 +277,7 @@ class TestSpawnFork:
         ForkSourceEmpty → handler converts to 409 + reason="fork_source_empty" → SDK
         `_raise_from_response` reverse lookup rebuild.
         """
-        ava._boot._agent_id = _spawn_agent()  # self identity
+        ava.agent_identity._agent_id = _spawn_agent()  # self identity
         empty_source = ava.agents.spawn()  # spawn without checkpoint
         _ = db_conn  # truncate side-effect via fixture
 
@@ -290,7 +290,7 @@ class TestSpawnFork:
         """ava.agents.spawn(prompt=..., fork_from=source) first posts fork identity inbound
         (kind='fork', source=f"agent:{source}"), then prompt's chat inbound —
         claim side first dispatches identity marker to fix "who am I", then processes prompt."""
-        ava._boot._agent_id = _spawn_agent()  # self identity
+        ava.agent_identity._agent_id = _spawn_agent()  # self identity
         source = ava.agents.spawn()
         # give source a checkpoint
         with db_conn.cursor() as cur:
@@ -315,7 +315,7 @@ class TestTerminate:
     def test_message_is_queued_before_terminate_with_agent_source(
         self, db_conn: psycopg.Connection
     ) -> None:
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
         result = ava.agents.terminate(peer_id, message="record the partial result")
@@ -334,7 +334,7 @@ class TestTerminate:
     def test_final_terminate_closes_the_peer_for_good(self, db_conn: psycopg.Connection) -> None:
         """`final=True` rides the SDK body end to end: the termination is
         accepted and the agent is closed (never auto-resurrected)."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
         result = ava.agents.terminate(peer_id, final=True)
@@ -349,7 +349,7 @@ class TestTerminate:
     ) -> None:
         """`open_tasks` rides the SDK result: the agent's open tasks (newest
         first), truncated to five rows plus `more`; done/cancelled excluded."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
         with db_conn.cursor() as cur:
             cur.execute(
@@ -432,7 +432,7 @@ class TestSendMessage:
         self, db_conn: psycopg.Connection
     ) -> None:
         """send_message purely INSERT inbound — no status check, no wait, no SendResult return."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
         result = ava.agents.send_message(peer_id, "you got mail")
@@ -445,7 +445,7 @@ class TestSendMessage:
     def test_send_message_to_terminated_is_fine(self, db_conn: psycopg.Connection) -> None:
         """send_message to terminated agent also INSERT inbound.
         SDK doesn't care about target state — purely send message, auto-resurrect is gateway-side detail."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
@@ -468,7 +468,7 @@ class TestSendMessage:
         self, db_conn: psycopg.Connection
     ) -> None:
         """send_message only INSERT inbound, doesn't modify agents.status."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
         ava.agents.send_message(peer_id, "hi")
 
@@ -558,7 +558,7 @@ class TestSendMessage:
     ) -> None:
         """End-to-end: the trailing-comma tuple lands as the string it wraps,
         never as a JSON array (which the gateway would reject 422)."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
         # Runtime value of `("you got " "mail",)`: implicit concatenation plus
@@ -577,7 +577,7 @@ class TestSendSystemNote:
     ) -> None:
         """send_system_note posts a kind='system_note' inbound (agent source +
         task note tag) — never a peer chat row."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
         inbound_id = ava.agents.send_system_note(
@@ -599,7 +599,7 @@ class TestSendSystemNote:
         assert payload == {"note_tag": "task"}
 
     def test_send_system_note_preserves_explicit_task_id(self, db_conn: psycopg.Connection) -> None:
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
         with db_conn.cursor() as cur:
             cur.execute(
@@ -626,7 +626,7 @@ class TestSendSystemNote:
         """A note with resurrect=True (task assignment) reaches a terminated
         agent — auto-resurrect is the gateway delivery detail, the SDK just
         posts the note and returns its id."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
@@ -642,7 +642,7 @@ class TestSendSystemNote:
     def test_send_system_note_normalizes_tuple_content(self, db_conn: psycopg.Connection) -> None:
         """Same trailing-comma class as send_message — a one-element tuple
         unwraps to the note text instead of 422ing the gateway."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
         # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
@@ -660,7 +660,7 @@ class TestSendSystemNote:
         self, db_conn: psycopg.Connection
     ) -> None:
         """A multi-element tuple is a coding mistake — TypeError, never joined."""
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
 
         content: object = ("Task #1 is now ", "assigned to you.")
@@ -668,7 +668,7 @@ class TestSendSystemNote:
             ava.agents.send_system_note(peer_id, content)  # pyright: ignore[reportArgumentType]
 
     def test_send_system_note_to_nonexistent_raises(self, db_conn: psycopg.Connection) -> None:
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         with pytest.raises(AgentNotFound):
             ava.agents.send_system_note(9999, "ghost")
 
@@ -988,7 +988,7 @@ class TestListAgents:
         assert row.spawner == "agent:8"
 
     def test_agent_row_keeps_domain_fields(self, db_conn: psycopg.Connection) -> None:
-        ava._boot._agent_id = _spawn_agent()
+        ava.agent_identity._agent_id = _spawn_agent()
         agent_id = ava.agents.spawn()
         db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
         db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))

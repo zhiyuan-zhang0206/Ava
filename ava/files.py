@@ -14,7 +14,7 @@ import glob as _glob
 import os
 from pathlib import Path
 
-from ava import _boot
+from ava import agent_identity
 from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import is_flagged, scan_content
 from shared.log import logger
@@ -43,13 +43,13 @@ def _resolve(path: str | Path) -> Path:
     # prepend the per-agent workspace. The workspace is a framework
     # concept, so it lives here in the SDK core — plugins may layer cwd
     # *tracking* on top, but the no-plugin baseline must not silently
-    # fall back to `$HOME` (issue #1008). Before `ava._boot.establish`
+    # fall back to `$HOME` (issue #1008). Before `ava.agent_identity.establish`
     # binds an identity (test / dev REPL without a bootstrap) there is
     # no workspace; `Path.home()` is the documented pre-bootstrap base
     # (per-call live, so test fixture mock env takes effect immediately).
     p = Path(path).expanduser()
     if not p.is_absolute():
-        aid = _boot.agent_id()
+        aid = agent_identity.agent_id()
         # agent id is typed int but is None until a bootstrap establishes it.
         base = workspace_dir(aid) if aid is not None else Path.home()  # pyright: ignore[reportUnnecessaryComparison]
         p = base / p

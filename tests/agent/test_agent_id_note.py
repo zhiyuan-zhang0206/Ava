@@ -26,7 +26,7 @@ from shared.turn_identity import bind_turn_identity
 def _agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """The note opts out without an established process identity, like every
     other framework note; give it one so the content is what is under test."""
-    monkeypatch.setattr("ava._boot._agent_id", 29)
+    monkeypatch.setattr("ava.agent_identity._agent_id", 29)
 
 
 def _no_label(_agent_id: int) -> str | None:
@@ -119,9 +119,9 @@ def test_workspace_clause_respects_the_section_gate(
 
 def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hosted runner pins the identity in a turn contextvar and leaves the
-    process slot None; the note must resolve through `ava._boot.agent_id()`
+    process slot None; the note must resolve through `ava.agent_identity.agent_id()`
     (task #3939)."""
-    monkeypatch.setattr("ava._boot._agent_id", None)
+    monkeypatch.setattr("ava.agent_identity._agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
     with bind_turn_identity(31):
@@ -133,7 +133,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
 
 def test_opts_out_without_any_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot renders / dev REPL: no slot, no turn, no env — decline."""
-    monkeypatch.setattr("ava._boot._agent_id", None)
+    monkeypatch.setattr("ava.agent_identity._agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     assert agent_id_note() is None
 

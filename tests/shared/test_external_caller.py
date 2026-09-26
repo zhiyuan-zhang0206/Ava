@@ -54,21 +54,21 @@ def test_invalid_profile_fails_without_fallback(
 def test_sdk_external_profile_overrides_inherited_agent_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ava import _boot
+    from ava import agent_identity
 
-    monkeypatch.setattr(_boot, "current_turn_agent_id", lambda: None)
-    monkeypatch.setattr(_boot, "_agent_id", 405)
+    monkeypatch.setattr(agent_identity, "current_turn_agent_id", lambda: None)
+    monkeypatch.setattr(agent_identity, "_agent_id", 405)
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
-    assert _boot.require_actor() == "external_agent:codex"
-    assert _boot.default_actor() == "external_agent:codex"
+    assert agent_identity.require_actor() == "external_agent:codex"
+    assert agent_identity.default_actor() == "external_agent:codex"
 
 
 def test_actual_hosted_turn_context_remains_authoritative(monkeypatch: pytest.MonkeyPatch) -> None:
-    from ava import _boot
+    from ava import agent_identity
 
-    monkeypatch.setattr(_boot, "current_turn_agent_id", lambda: 405)
+    monkeypatch.setattr(agent_identity, "current_turn_agent_id", lambda: 405)
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
-    assert _boot.require_actor() == "agent:405"
+    assert agent_identity.require_actor() == "agent:405"
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude_code"])

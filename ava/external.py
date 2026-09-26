@@ -15,7 +15,7 @@ from shared.machine import machine_name
 from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 from shared.proc_tree import process_metadata
 
-from . import _boot
+from . import agent_identity
 from ._external_state import (
     apply_plugin_delta,
     decode_plugin_delta,
@@ -68,10 +68,10 @@ class Attachment:
         import ava
 
         global _active_attachment  # noqa: PLW0603 — one process attachment, guarded by _attachment_lock
-        if _boot._external_identity is not None:
+        if agent_identity._external_identity is not None:
             raise RuntimeError("this process already has an external attachment")
-        if _boot.current_turn_agent_id() is not None or (
-            _boot._agent_id is not None and _boot._owns_loop
+        if agent_identity.current_turn_agent_id() is not None or (
+            agent_identity._agent_id is not None and agent_identity._owns_loop
         ):
             raise RuntimeError("a native agent runtime cannot attach an external controller")
         self.lease_id = lease_id
@@ -89,8 +89,8 @@ class Attachment:
             self.session_id = int(lease["session_id"])
             _active_attachment = self
             self._version = int(lease["delta_version"])
-            _boot._external_identity = self._validate
-            _boot._external_agent_id = self.agent_id
+            agent_identity._external_identity = self._validate
+            agent_identity._external_agent_id = self.agent_id
             # Native load: load_snapshot below rebuilds the checkpoint state
             # (build_agent_state().model_validate), which needs the plugins'
             # state fields registered — the surface-only default would silently
@@ -265,8 +265,8 @@ class Attachment:
 
                 unbind_local_participant(self._manifest_participant)
                 self._manifest_participant = None
-            _boot._external_identity = None
-            _boot._external_agent_id = None
+            agent_identity._external_identity = None
+            agent_identity._external_agent_id = None
             ava.state, ava.state_update = self._prior_state, self._prior_update
             self._stack.close()
         finally:

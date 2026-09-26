@@ -165,22 +165,22 @@ def test_default_cwd_is_workspace_when_bootstrapped(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """In bootstrapped process, cwd default = own workspace dir (and already created)."""
-    import ava._boot as boot
+    from ava import agent_identity
     from ava_builtins.plugins.ava_code.agent_runtime import _default_cwd
 
-    monkeypatch.setattr(boot, "_agent_id", boot._agent_id)
-    monkeypatch.setattr(boot, "_owns_loop", boot._owns_loop)
-    boot.establish(5, owns_loop=True)
+    monkeypatch.setattr(agent_identity, "_agent_id", agent_identity._agent_id)
+    monkeypatch.setattr(agent_identity, "_owns_loop", agent_identity._owns_loop)
+    agent_identity.establish(5, owns_loop=True)
     assert _default_cwd() == str(unit_home / "workspaces" / "5")
     assert (unit_home / "workspaces" / "5").is_dir()
 
 
 def test_default_cwd_home_without_bootstrap(monkeypatch: pytest.MonkeyPatch):
     """No process identity (test/REPL directly construct state) → keep $HOME placeholder behavior."""
-    import ava._boot as boot
+    from ava import agent_identity
     from ava_builtins.plugins.ava_code.agent_runtime import _default_cwd
 
-    monkeypatch.setattr(boot, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     assert _default_cwd() == str(Path.home())
 

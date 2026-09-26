@@ -323,8 +323,8 @@ def _label_of(db_conn: psycopg.Connection, agent_id: int) -> str | None:
 
 def test_set_label_sticky(_load_activity_plugin: None, db_conn: psycopg.Connection):
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         assert _label_of(db_conn, agent_id) is None
 
@@ -343,7 +343,7 @@ def test_set_label_sticky(_load_activity_plugin: None, db_conn: psycopg.Connecti
         ava.self.set_label("")  # type: ignore[attr-defined]
         assert _label_of(db_conn, agent_id) is None
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_plugin_registers_ui_notice_members(_load_activity_plugin: None):
@@ -370,8 +370,8 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
     _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         # require_response defaults False -> these are FYI notices.
         nid = ava.ui.notify("migration done", content="14k rows", priority="P1")  # type: ignore[attr-defined]
@@ -405,15 +405,15 @@ def test_notify_inserts_fyi_and_snapshot_counts_unread(
         assert snap.unread_notice_count == 1
         assert snap.notices_awaiting_response == []
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_notify_require_response_rides_awaiting_worklist(
     _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         ava.ui.notify(  # type: ignore[attr-defined]
             "Send the release email?",
@@ -436,7 +436,7 @@ def test_notify_require_response_rides_awaiting_worklist(
         assert awaiting[0].content is None
         assert awaiting[0].blocking is False  # blocking defaults False
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def _seed_task(db: psycopg.Connection, owner: int) -> int:
@@ -470,8 +470,8 @@ def test_notify_records_task_id_and_rides_snapshot(
     it out on the snapshot's notices_awaiting_response."""
     agent_id = _seed_agent(db_conn)
     tid = _seed_task(db_conn, agent_id)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         ava.ui.notify("stalled on a decision", require_response=True, task=tid)  # type: ignore[attr-defined]
         db_conn.rollback()  # notify committed via its own cursor; refresh our view
@@ -480,32 +480,32 @@ def test_notify_records_task_id_and_rides_snapshot(
         assert snap is not None
         assert [n.task_id for n in snap.notices_awaiting_response] == [tid]
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_notify_without_task_leaves_task_id_null(
     _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         ava.ui.notify("fyi, no task")  # type: ignore[attr-defined]
         db_conn.rollback()
         assert _notice_task_id(db_conn, agent_id) is None
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_notify_nonexistent_task_raises(_load_activity_plugin: None, db_conn: psycopg.Connection):
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         with pytest.raises(ValueError, match="task 999999 does not exist"):
             ava.ui.notify("names a ghost task", task=999999)  # type: ignore[attr-defined]
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_notify_validates_title_priority_and_blocking(_load_activity_plugin: None):
@@ -520,8 +520,8 @@ def test_notify_validates_title_priority_and_blocking(_load_activity_plugin: Non
 
 def test_edit_notice_partial_update(_load_activity_plugin: None, db_conn: psycopg.Connection):
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         nid = ava.ui.notify("draft title", content="old body", priority="P2")  # type: ignore[attr-defined]
         # change only title + priority; content is left as-is (omitted != cleared).
@@ -552,7 +552,7 @@ def test_edit_notice_partial_update(_load_activity_plugin: None, db_conn: psycop
             row = cur.fetchone()
         assert row is not None and row[0] is None
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_response_notice_content_edits_publish_refreshed_snapshot(
@@ -580,8 +580,8 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     )
 
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         ava.ui.notify(  # type: ignore[attr-defined]
             "decision needed",
@@ -608,15 +608,15 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
         assert notice.priority == "P1"
         assert notice.blocking is True
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_edit_notice_validation_and_guards(
     _load_activity_plugin: None, db_conn: psycopg.Connection
 ):
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         ava.ui.notify("fyi notice")  # type: ignore[attr-defined]
 
@@ -633,13 +633,13 @@ def test_edit_notice_validation_and_guards(
         ava.ui.dismiss_notice()  # type: ignore[attr-defined]
         ava.ui.edit_notice(title="too late")  # type: ignore[attr-defined]
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_dismiss_notice_withdraws(_load_activity_plugin: None, db_conn: psycopg.Connection):
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         nid = ava.ui.notify("stale fyi")  # type: ignore[attr-defined]
         ava.ui.dismiss_notice()  # type: ignore[attr-defined]
@@ -663,7 +663,7 @@ def test_dismiss_notice_withdraws(_load_activity_plugin: None, db_conn: psycopg.
         # dismissing again is idempotent (no-op).
         ava.ui.dismiss_notice()  # type: ignore[attr-defined]
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
@@ -688,8 +688,8 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
     monkeypatch.setattr(ops_mod, "publish_notice_resolved", _fake_publish)
 
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         ava.ui.notify("Q1?", require_response=True)  # type: ignore[attr-defined]
         assert resolved == []  # the first post resolves nothing
@@ -701,7 +701,7 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
         ava.ui.dismiss_notice()  # type: ignore[attr-defined]
         assert len(resolved) == 2
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_dismissing_response_notice_refreshes_inspector_snapshot(
@@ -724,8 +724,8 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     )
 
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         ava.ui.notify("decision needed", require_response=True)  # type: ignore[attr-defined]
         ava.ui.dismiss_notice()  # type: ignore[attr-defined]
@@ -734,7 +734,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
         # must publish a second, now-empty snapshot for the inspector.
         assert published_awaiting == [["decision needed"], []]
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
@@ -767,8 +767,8 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     monkeypatch.setattr(notices_router._ops, "publish_notice_resolved", _capture_resolved)
 
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         ava.ui.notify("FYI old")  # type: ignore[attr-defined]
         ava.ui.notify("question", require_response=True)  # type: ignore[attr-defined]
@@ -793,7 +793,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
         ]
         assert published_awaiting == [["question"], []]
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_notice_return_int_and_edit_dismiss_take_no_id(
@@ -802,8 +802,8 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     """notify returns a Notice (int subclass); edit/dismiss act on the single
     open notice with no id argument."""
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         notice = ava.ui.notify("hold this", content="body", priority="P2")  # type: ignore[attr-defined]
         assert isinstance(notice, int)
@@ -831,15 +831,15 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
         assert nid2.pending_count == 1  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
         assert nid2.pending_notices[0]["id"] == nid2  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_notify_with_expire_at_valid(_load_activity_plugin: None, db_conn: psycopg.Connection):
     from datetime import datetime, timedelta
 
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         # timedelta
         nid1 = ava.ui.notify("expires in 1h", expire_at=timedelta(hours=1))  # type: ignore[attr-defined]
@@ -863,7 +863,7 @@ def test_notify_with_expire_at_valid(_load_activity_plugin: None, db_conn: psyco
             row = cur.fetchone()
         assert row is not None
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
 
 
 def test_notify_with_expire_at_in_past_raises_value_error(
@@ -872,11 +872,11 @@ def test_notify_with_expire_at_in_past_raises_value_error(
     from datetime import datetime, timedelta
 
     agent_id = _seed_agent(db_conn)
-    original = ava._boot._agent_id
-    ava._boot._agent_id = agent_id
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = agent_id
     try:
         past = datetime.now(UTC) - timedelta(minutes=5)
         with pytest.raises(ValueError, match="expire_at is in the past"):
             ava.ui.notify("past notice", expire_at=past)  # type: ignore[attr-defined]
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original

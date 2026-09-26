@@ -21,18 +21,18 @@ from typing import Any
 import pytest
 
 import ava
-import ava._boot as boot
+from ava import agent_identity
 
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    # Each test drives _plugins_loaded + boot identity explicitly; snapshot-restore
+    # Each test drives _plugins_loaded + agent identity explicitly; snapshot-restore
     # so nothing leaks between tests. Save existing plugin namespace objects before
     # clearing so they can be re-registered — never permanently wipe namespaces
     # registered by other plugins during import ava (ava.memory, ava.tasks, ava.cwd).
     monkeypatch.setattr(ava, "_plugins_loaded", False)
-    monkeypatch.setattr(boot, "_agent_id", boot._agent_id)
-    monkeypatch.setattr(boot, "_owns_loop", boot._owns_loop)
+    monkeypatch.setattr(agent_identity, "_agent_id", agent_identity._agent_id)
+    monkeypatch.setattr(agent_identity, "_owns_loop", agent_identity._owns_loop)
     # Save existing namespace objects before clearing
     _saved_ns: dict[str, Any] = {}
     for _name in list(ava._REGISTERED_NAMESPACES):
@@ -70,8 +70,8 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
 
 
 def _as_launched_child(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(boot, "_agent_id", None)
-    monkeypatch.setattr(boot, "_owns_loop", True)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
     monkeypatch.setenv("AVA_AGENT_ID", "42")
 
 
@@ -100,8 +100,8 @@ def test_lazy_load_latches_once(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_no_lazy_load_without_agent_id(monkeypatch: pytest.MonkeyPatch) -> None:
     # gateway / cli: no AVA_AGENT_ID -> behavior byte-identical to before the fix
     # (same AttributeError message, loader never touched).
-    monkeypatch.setattr(boot, "_agent_id", None)
-    monkeypatch.setattr(boot, "_owns_loop", True)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     calls = _spy_loader(monkeypatch, register=None)
 
@@ -115,7 +115,7 @@ def test_no_lazy_load_in_agent_process(monkeypatch: pytest.MonkeyPatch) -> None:
     # not re-run _load_extensions — which clears all hooks and would drop the
     # built-in ones build_graph registers after it.
     monkeypatch.setenv("AVA_AGENT_ID", "7")
-    boot.establish(7, owns_loop=True)
+    agent_identity.establish(7, owns_loop=True)
     calls = _spy_loader(monkeypatch, register=None)
 
     with pytest.raises(AttributeError):
@@ -301,8 +301,8 @@ def test_member_lazy_load_on_ava_ui(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_member_fail_fast_outside_child(monkeypatch: pytest.MonkeyPatch) -> None:
     # No AVA_AGENT_ID: gateway/cli semantics — missing members on ava.self /
     # ava.ui stay a fail-fast AttributeError and the loader never runs.
-    monkeypatch.setattr(boot, "_agent_id", None)
-    monkeypatch.setattr(boot, "_owns_loop", True)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     calls = _spy_member_loader(monkeypatch, namespace="self", member="lazylog")
 

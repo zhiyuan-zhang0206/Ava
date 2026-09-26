@@ -225,9 +225,9 @@ def test_relative_path_resolves_to_home_before_identity(
     import os
     from unittest.mock import patch
 
-    import ava._boot
+    import ava.agent_identity
 
-    monkeypatch.setattr(ava._boot, "_agent_id", None)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", None)
     (tmp_path / "h.txt").write_text("home material", encoding="utf-8")
     with patch.dict(os.environ, {"HOME": str(tmp_path)}):
         assert Path.home() == tmp_path  # mock lock-in
@@ -521,11 +521,11 @@ def test_paths_auto_save_source_labels_list(
     mock_gemini: dict[str, Any], fake_image: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Auto-saved output carries the paths list as its source label."""
-    from ava import _boot
+    from ava import agent_identity
 
     ws = tmp_path / "paths_ws"
     ws.mkdir(parents=True)
-    monkeypatch.setattr(_boot, "_agent_id", 2139)
+    monkeypatch.setattr(agent_identity, "_agent_id", 2139)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -775,7 +775,7 @@ def test_single_result_saved_to_exec_output(
     mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Single-call understand saves result to .exec_output/ in workspace."""
-    from ava import _boot
+    from ava import agent_identity
 
     # Use a temp workspace dir so we can inspect it
     agent_id = 2139
@@ -783,7 +783,7 @@ def test_single_result_saved_to_exec_output(
     ws.mkdir(parents=True)
 
     # Monkeypatch workspace_dir and agent_id
-    monkeypatch.setattr(_boot, "_agent_id", agent_id)
+    monkeypatch.setattr(agent_identity, "_agent_id", agent_id)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -806,12 +806,12 @@ def test_batch_results_saved_to_exec_output(
     mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Batch understand saves each result individually."""
-    from ava import _boot
+    from ava import agent_identity
 
     agent_id = 2139
     ws = tmp_path / "batch_ws"
     ws.mkdir(parents=True)
-    monkeypatch.setattr(_boot, "_agent_id", agent_id)
+    monkeypatch.setattr(agent_identity, "_agent_id", agent_id)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -835,12 +835,12 @@ def test_auto_save_prunes_old_files(
     mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Old understand output files are pruned, keeping the _OVERFLOW_KEEP most recent."""
-    from ava import _boot
+    from ava import agent_identity
 
     agent_id = 2139
     ws = tmp_path / "prune_ws"
     ws.mkdir(parents=True)
-    monkeypatch.setattr(_boot, "_agent_id", agent_id)
+    monkeypatch.setattr(agent_identity, "_agent_id", agent_id)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -881,10 +881,10 @@ def test_auto_save_noop_without_agent_id(
     mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When no agent identity is established, auto-save is skipped gracefully."""
-    from ava import _boot
+    from ava import agent_identity
 
     # Set agent_id to None — simulate non-agent process
-    monkeypatch.setattr(_boot, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
     # Also ensure env var doesn't re-establish
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 

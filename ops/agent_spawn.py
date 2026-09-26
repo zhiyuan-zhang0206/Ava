@@ -403,7 +403,7 @@ def create_agent_row(
         raise ValueError(
             f"spawner has agent: prefix but the id part is not a valid agent id: "
             f"{spawner!r}. This is often caused by an un-bootstrapped process "
-            f"(ava._boot.establish never called) — the process's own agent id "
+            f"(ava.agent_identity.establish never called) — the process's own agent id "
             f"was None, producing 'agent:None'. Fix the caller to establish "
             f"identity before spawning."
         )

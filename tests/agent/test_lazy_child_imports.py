@@ -49,7 +49,7 @@ from typing import cast
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Agent-launch markers: with AVA_AGENT_ID forwarded, `import ava` self-loads
-# plugin namespaces (`_boot.is_launched_child`), inflating the import by ~13MB
+# plugin namespaces (`agent_identity.is_launched_child`), inflating the import by ~13MB
 # and adding plugin modules (recon #3586 §2.6). A boot measurement must strip
 # them — mirroring measure-boot.sh's clean env.
 _CLEAN_ENV_STRIP = frozenset(

@@ -279,7 +279,7 @@ def test_building_the_prompt_records_no_skill_attribution(
     # Stub the ONE write path, so any regression that routes prompt assembly
     # (or an index render) into a skill_invoked write fails this test.
     monkeypatch.setattr(skills_mod, "_insert_skill_events", _fake_write)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("ava._boot.require_agent_id", lambda: 1)
+    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
     prompt = build_system_prompt()
 

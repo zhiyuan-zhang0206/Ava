@@ -216,8 +216,12 @@ def test_a_long_attribute_chain_counts_the_site_once(tmp_path: pathlib.Path) -> 
 @pytest.mark.parametrize(
     ("files", "source", "key"),
     [
-        ({"ava/_boot.py": "x = 1\n"}, "from ava import _boot\n", "ava._boot"),
-        ({"ava/_boot.py": "def f(): ...\n"}, "import ava\nava._boot.f()\n", "ava._boot"),
+        ({"ava/_internal.py": "x = 1\n"}, "from ava import _internal\n", "ava._internal"),
+        (
+            {"ava/_internal.py": "def f(): ...\n"},
+            "import ava\nava._internal.f()\n",
+            "ava._internal",
+        ),
         ({"ava/_pkg/__init__.py": "x = 1\n"}, "from ava import _pkg\n", "ava._pkg"),
         ({"ava/__init__.py": "def _fn(): ...\n"}, "from ava import _fn\n", "ava._fn"),
         ({"ava/files.py": "x = 1\n"}, "from ava.files import _x\n", "ava.files._x"),
@@ -237,9 +241,9 @@ def test_ava_privates_are_flagged_from_outside_ava(
 
 
 def test_ava_privates_are_open_inside_ava(tmp_path: pathlib.Path) -> None:
-    _write(tmp_path, "ava/_boot.py", "x = 1\n")
+    _write(tmp_path, "ava/_internal.py", "x = 1\n")
 
-    tree = _parse("from ava import _boot\n")
+    tree = _parse("from ava import _internal\n")
 
     assert locality.private_imports(tree, "ava/files.py", ("ava",), tmp_path) == {}
 
