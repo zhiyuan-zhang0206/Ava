@@ -31,7 +31,7 @@ to avoid one stdio child per agent connection. `"shared": "browser"`
 at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one daemon-wide child for every connection, serialized per server
 (only safe for stateless servers; stateful servers stay per-connection).
 
-**Remote servers**: a `url` entry (validated by `ava/_mcp_config.py:server_url`) is an http(s) Streamable HTTP endpoint — mutually exclusive with `command` — with one auth mode: static `headers` (str → str, API-key style) or `"oauth": true`, a full OAuth 2.1 authorization-code + PKCE browser flow ([[oauth.ava.okf.md]]).
+**Remote servers**: a `url` entry (validated by `ava/mcp_config.py:server_url`) is an http(s) Streamable HTTP endpoint — mutually exclusive with `command` — with one auth mode: static `headers` (str → str, API-key style) or `"oauth": true`, a full OAuth 2.1 authorization-code + PKCE browser flow ([[oauth.ava.okf.md]]).
 
 
 ## See Also
@@ -53,7 +53,7 @@ at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one da
 
 ## Where Servers Come From
 
-The server set is determined by config (not enumerated in `ava/` source code). `ava/_mcp_config.py:load_mcp_config` **four-layer merge** (later overwrites same name):
+The server set is determined by config (not enumerated in `ava/` source code). `ava/mcp_config.py:load_mcp_config` **four-layer merge** (later overwrites same name):
 1. builtin `<repo>/ava_builtins/mcps/*/.mcp.json` (builtin layer, symmetric with builtin skills/plugins);
 2. bundled `.mcp.json` under each plugin root (`mcpServers` section);
 3. installed `$AVA_HOME/mcps/*/.mcp.json` (installed outside core via `ava mcp install`, gated by `install_registry` rows of `type="mcp"`);
@@ -62,7 +62,7 @@ On top of this, per-host **disabled overlay** (`shared/mcp_enabled.py:read_enabl
 
 Installed server spawn cwd is given by `installed_mcp_dir(name)` (its package directory), allowing its relative `.venv/bin/python` command to resolve to an isolated venv; builtin/plugin/machine returns None (keeping daemon cwd).
 
-Server entries may carry `requires` host-capability pre-checks; when unmet, an actionable capability error is returned rather than an opaque failure from the underlying tool. Two keys are recognized (`ava/_mcp_config.py:assert_requirements`): `display` and `unix_socket`; an unknown key fails fast, so a typo can never silently disable a gate. `chrome` declares both — its wrapper reaches the `browser-mcp` daemon over a Unix socket, so the entry is gated off on Windows exactly where that daemon is. Builtin server currently includes only **chrome** (drives a logged-in browser: navigate/click/fill forms/screenshot/read DOM); other servers are installed outside core via `ava mcp install`; rest come from machine-level `mcp.json`.
+Server entries may carry `requires` host-capability pre-checks; when unmet, an actionable capability error is returned rather than an opaque failure from the underlying tool. Two keys are recognized (`ava/mcp_config.py:assert_requirements`): `display` and `unix_socket`; an unknown key fails fast, so a typo can never silently disable a gate. `chrome` declares both — its wrapper reaches the `browser-mcp` daemon over a Unix socket, so the entry is gated off on Windows exactly where that daemon is. Builtin server currently includes only **chrome** (drives a logged-in browser: navigate/click/fill forms/screenshot/read DOM); other servers are installed outside core via `ava mcp install`; rest come from machine-level `mcp.json`.
 
 ## Key Dependencies
 - [[mcp-daemon.ava.okf.md]] — MCP subprocess manager (long-lived serial connection process)

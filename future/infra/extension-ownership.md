@@ -171,7 +171,7 @@ matcher. Candidate initial set:
   a TCC-granted helper): modeled as a capability, never as an install
 
 A machine's capability set = **probed** (os/arch/display/unix-socket/docker are
-computed at `ava start`, the way `ava/_mcp_config.py` probes `display` today) ∪
+computed at `ava start`, the way `ava/mcp_config.py` probes `display` today) ∪
 **declared** (`login-session:*` and anything unprobeable, set by an operator
 verb and persisted beside the machine's identity files). `register_self`
 publishes the union to a `machine_capabilities` column/table beside
@@ -185,7 +185,7 @@ currently mixes:
 - **host requirements** (`display: required`, `unixSocket: required`, os/arch
   constraints, `login-session:<app>`) — matched against the machine capability
   set by the one matcher. The MCP per-entry `requires` check
-  (`ava/_mcp_config.py`) becomes a consumer of the same vocabulary and matcher.
+  (`ava/mcp_config.py`) becomes a consumer of the same vocabulary and matcher.
 - **resource access declarations** (`db: none|ro|rw`, `network`, `shell`) —
   these are context-model gates on what the extension may *touch*, not on
   where it can run; they stay in S5's context model unchanged.

@@ -22,7 +22,7 @@ from typing import Any
 
 from shared.config import settings
 
-from ._mcp_config import MCPCallError, MCPConnectError, ToolInfo
+from .mcp_config import MCPCallError, MCPConnectError, ToolInfo
 
 
 class _RemoteMCPClient:

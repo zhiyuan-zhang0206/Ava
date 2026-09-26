@@ -28,12 +28,12 @@ from shared.config import settings
 def fake_config(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point ava_home() to tmpdir, drop mcp.json in it, do not touch user's real ~/.ava/mcp.json.
 
-    Patches _builtin_mcp_paths to list so tests that expect empty-or-known
+    Patches builtin_mcp_paths to list so tests that expect empty-or-known
     configs are not surprised by the repo's mcps/chrome/.mcp.json built-in.
     """
-    import ava._mcp_config as _cfg
+    import ava.mcp_config as _cfg
 
-    monkeypatch.setattr(_cfg, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(_cfg, "builtin_mcp_paths", list)
     return unit_home / "mcp.json"
 
 
