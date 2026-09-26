@@ -261,7 +261,7 @@ class _LazyStateSlot:
             return
         # The faces register the plugins' state fields — in place before the
         # dynamic class is built.
-        ava._ensure_plugins_loaded(surface=False)
+        ava.ensure_plugins_loaded(surface=False)
         payload: RequestPayload = object.__getattribute__(self, "_payload")
         snapshot = payload.materialize_state()
         from agent.state import build_agent_state
@@ -327,7 +327,7 @@ def _run_code(code: str, payload: Any) -> None:
         format_full_traceback,
         register_agent_source,
     )
-    from ava._exports.help import HelpRouter
+    from ava.sdk_surface.help import HelpRouter
     from shared import sdk_telemetry
 
     # Register the source so `<agent_code>` frames resolve their offending
@@ -455,8 +455,8 @@ def _run(request_path: str, result_path: str) -> None:
     code, write the result envelope."""
     _import_runtime()
     from agent.graph._exec_protocol import ResultPayload, read_request, write_result
-    from ava._exports.discovery import _hidden_surface_members
     from ava.attachment_transport import media_gated_members, take_attachments
+    from ava.sdk_surface.discovery import hidden_surface_members
     from ava.security import take_findings
 
     _line_buffered_output()
@@ -489,13 +489,13 @@ def _run(request_path: str, result_path: str) -> None:
     # A text-only agent gets no attach contract anywhere in its SDK docs —
     # including interactive `ava.help(ava.self)` (user ruling 2026-08-28).
     # Set for the child's whole lifetime; the token is deliberately held.
-    _hidden_surface_members.set(media_gated_members())
+    hidden_surface_members.set(media_gated_members())
     # Load plugin namespaces (ava.tasks etc.) + wraps into this process — the
     # same explicit load a watcher child runs. Idempotent, surface-only: a
     # request carrying a state snapshot arms a lazy slot whose first use
     # upgrades to the agent-runtime faces (state fields feed the state schema)
     # — the child start stays off the agent runtime either way (task #3633).
-    ava._ensure_plugins_loaded()
+    ava.ensure_plugins_loaded()
     _apply_overlay_scope(birth, overlay, scope="plugin")
     from agent._process_boot import _apply_per_agent_eval_isolation
 

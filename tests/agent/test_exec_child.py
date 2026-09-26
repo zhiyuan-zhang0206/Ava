@@ -345,7 +345,7 @@ print("__HELP_OUTPUTS__" + json.dumps(outputs, sort_keys=True))
 
 
 def test_help_is_ava_target_accepts_only_agent_visible_sdk_objects() -> None:
-    from ava._exports.help import is_ava_target
+    from ava.sdk_surface.help import is_ava_target
     from ava.skills import _NS, _Namespace
 
     def foreign_function() -> None:
@@ -541,7 +541,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(_exec_protocol, "write_result", fake_write_result)
-    monkeypatch.setattr("ava._ensure_plugins_loaded", fake_ensure_plugins_loaded)
+    monkeypatch.setattr("ava.ensure_plugins_loaded", fake_ensure_plugins_loaded)
     monkeypatch.setattr("ava.security.take_findings", list)
     monkeypatch.setattr("ava.attachment_transport.take_attachments", list)
 
@@ -657,7 +657,7 @@ def test_child_overlay_phases_framework_then_plugin(
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(_exec_protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava.security.take_findings", fake_take_findings)
-    monkeypatch.setattr("ava._ensure_plugins_loaded", fake_plugins_loaded)
+    monkeypatch.setattr("ava.ensure_plugins_loaded", fake_plugins_loaded)
 
     def fake_apply_scope(
         birth: dict[str, object] | None,

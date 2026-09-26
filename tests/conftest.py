@@ -936,7 +936,7 @@ def _restore_sdk_metering() -> Iterator[None]:
     a side effect, which replaces every public `ava.*` callable — plus the
     `ava.mcps._call_raw` MCP funnel — with a recording proxy, and nothing ever put
     them back. `_load_extensions()` is reached directly *and* lazily, via
-    `ava/__init__.py:_ensure_plugins_loaded` on an `ava.*` miss, so merely touching
+    `ava/__init__.py:ensure_plugins_loaded` on an `ava.*` miss, so merely touching
     the namespace permanently swapped out the callables every later test in that
     xdist worker would see.
 

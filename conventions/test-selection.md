@@ -68,7 +68,7 @@ services, shared, ava_builtins, evals, ui, scripts, and schedules.
 
 This is intentionally a direct static map, not a coverage claim. About 280 of
 roughly 970 source files have no static test reachability, including
-agent/nodes.py, agent/mcp_daemon.py, and ava/_exports/ files. A changed blind
+agent/nodes.py, agent/mcp_daemon.py, and ava/sdk_surface/ files. A changed blind
 file is unmapped and forces FULL; it never silently produces an empty or
 optimistic subset. Dynamic imports, reflection, subprocess boundaries, and test
 helpers are also reasons to prefer the full net.

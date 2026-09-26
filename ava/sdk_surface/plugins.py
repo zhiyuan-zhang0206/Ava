@@ -109,7 +109,7 @@ _REGISTERED_MEMBERS: list[tuple[str, str]] = []
 # framework list (a plugin promotes its own highest-frequency surface, e.g.
 # ava_code's cwd leads the coding namespaces). Torn down on reload alongside
 # the other plugin registrations.
-_REGISTERED_SDK_EXPANSIONS: list[str] = []
+REGISTERED_SDK_EXPANSIONS: list[str] = []
 
 
 def _current_plugin_name() -> str:
@@ -286,8 +286,8 @@ def register_sdk_expand(*paths: str) -> None:
                 f"register_sdk_expand path {path!r} is invalid — dotted identifiers "
                 "without underscore prefixes (e.g. 'cwd', 'shell.sessions')."
             )
-        if path not in _REGISTERED_SDK_EXPANSIONS:
-            _REGISTERED_SDK_EXPANSIONS.append(path)
+        if path not in REGISTERED_SDK_EXPANSIONS:
+            REGISTERED_SDK_EXPANSIONS.append(path)
             _record("sdkExpansions", path, detail="expanded ahead of the framework list")
 
 
@@ -394,7 +394,7 @@ def clear_registered_namespaces() -> None:
             _remove_from_surface(getattr(parent, "__all_for_ava__", None), name)
     _REGISTERED_MEMBERS.clear()
 
-    _REGISTERED_SDK_EXPANSIONS.clear()
+    REGISTERED_SDK_EXPANSIONS.clear()
 
 
 def _remove_attr(obj: Any, name: str) -> None:
