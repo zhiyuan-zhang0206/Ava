@@ -63,13 +63,12 @@ section covers fixing a violation and maintaining its baseline.
   contract shows up in the diff. There is no inline escape hatch and no
   per-site allowlist: a name another package genuinely needs is, by
   definition, part of that package's contract, so the fix is to make the
-  contract honest rather than to excuse the reach-in. The one package-level
-  exception is `locality.FRAMEWORK_TIERS`: `ava/_*.py` modules (and `ava/_*/`
-  packages) are the framework / plugin-author tier by
-  [SDK convention](sdk-docstring-discipline.md) — their underscore hides them
-  from agents, not from other packages. A private name inside an agent-facing
-  module (`ava.files._x`, a `_helper` in `ava/__init__.py`) is not part of the
-  tier. Files under a `tests/` directory are exempt.
+  contract honest rather than to excuse the reach-in. `ava` is no exception:
+  what the agent sees is the `__all_for_ava__` whitelist
+  ([SDK surface](sdk-docstring-discipline.md)), not the underscore, so an
+  `ava/_*.py` module another package needs is promoted to a public module name
+  without becoming agent-visible. Files under a `tests/` directory are
+  exempt.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`shared/db_connections.py`). Any other module making that
