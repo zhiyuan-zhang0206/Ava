@@ -64,7 +64,7 @@ def _active(home: Path) -> Operation | None:
 
 
 def _rollback(operation: Operation) -> PitrRequest:
-    from cli.release_transition.launcher_linux import retire_current
+    from cli.release_transition import native
     from cli.release_transition.pitr_inputs import read_record
 
     if not isinstance(operation.request, PitrRequest):
@@ -74,7 +74,7 @@ def _rollback(operation: Operation) -> PitrRequest:
             raise ValueError("PITR executor has no retained launch receipt")
         # The shared retirement adapter proves the whole domain closed first,
         # including replay after an earlier caller already removed the unit.
-        retire_current(operation.launch)
+        native.for_launch(operation.launch).retire_current(operation.launch)
     with exclusive(operation.request.path) as journal:
         record = read_record(journal.operation)
         if record is None:

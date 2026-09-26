@@ -18,7 +18,7 @@ import pytest
 
 from cli.release_transition import journal
 from cli.release_transition import launcher_macos as macos
-from cli.release_transition.launchd_print import LaunchdFormatError
+from cli.release_transition.launchd_print import LaunchdPendingSpawnError
 from cli.release_transition.request import PitrRequest
 from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import (
@@ -71,7 +71,9 @@ def test_unsupported_macos_or_changed_boot_refuses_readback(
         macos.readback(harness.plan)
     monkeypatch.setattr(macos, "_macos", lambda: ("26.6.2", "25G83"))
     monkeypatch.setattr(macos, "_boot_id", lambda: "boot-b")
-    with pytest.raises(ValueError, match="durable intent in this boot"):
+    # The earlier boot's job cannot be custody, but a job loaded under its
+    # label in this boot is unknown, never that attempt's evidence.
+    with pytest.raises(RuntimeError, match="loaded in a later boot"):
         macos.readback(harness.plan)
 
 
@@ -243,7 +245,7 @@ def test_settle_observes_through_launchd_startup(harness: Harness) -> None:
     harness.fake.on_command = bootstrap
     with pytest.raises(RuntimeError, match="not yet observable") as refused:
         macos.launch(harness.plan)
-    assert isinstance(refused.value.__cause__, LaunchdFormatError)
+    assert isinstance(refused.value.__cause__, LaunchdPendingSpawnError)
     # The retained attempt is observed later, without another bootstrap.
     harness.executor = None
     harness.running()

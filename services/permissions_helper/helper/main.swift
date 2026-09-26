@@ -1685,15 +1685,30 @@ func runPanelMode() -> Never {
 // MARK: - Finite release-executor mode
 
 // One launchd job per release-operation attempt runs this same signed binary as
-// `AvaPermissionsHelper --finite-executor v1 --cwd DIR [--env KEY=VALUE]... --
-// EXECUTABLE [ARG]...`. The mode is entered before any desktop-helper setup:
-// no permission registration, socket, session table, root keeper or restart.
+// `AvaPermissionsHelper --finite-executor v1 --cwd DIR --group-receipt PATH
+// [--env KEY=VALUE]... -- EXECUTABLE [ARG]...`. The mode is entered before any
+// desktop-helper setup: no permission registration, socket, session table, root
+// keeper or restart.
+//
+// launchd starts every job with its session environment, which can carry DYLD_*
+// injection into this custody process. The mode first re-executes this same
+// image with an empty environment (exec keeps the PID, the job process group
+// and pending signals); the executor environment is built only from `--env`.
 //
 // It spawns exactly one executor in launchd's job process group (no SETSID or
-// SETPGROUP), so launchd's documented same-group cleanup covers the executor
-// and every finite descendant that stays in the group. The executor environment
-// is built only from the explicit `--env` pairs: launchd supplements a job's
-// environment from its session domain, and none of that may reach the executor.
+// SETPGROUP). Before that spawn it publishes the group receipt (helper PID, PGID
+// and audit session) at PATH through an exclusive rename: without that file
+// nothing was ever spawned, and with it the adapter can prove the group empty
+// even when the executor recorded no receipt.
+//
+// launchd's own cleanup is only a SIGTERM to the job group when this helper
+// exits; a member that ignores or handles it survives the job. So after reaping
+// the executor the helper closes its group itself while it still leads it:
+// SIGTERM, a bounded grace, then SIGKILL to every remaining member, and it exits
+// only once the group holds nothing but itself. A helper killed from outside
+// cannot do this; the adapter then proves the group empty, escalates only
+// against a still-live recorded executor, or refuses with evidence.
+//
 // The direct child is observed with WNOWAIT and reaped under the same lock that
 // forwards signals, so a forwarded signal can never reach a reused PID. The mode
 // makes no release decision; its exit code only names the executor's outcome.
@@ -1703,20 +1718,26 @@ func runPanelMode() -> Never {
 
 let finiteExecutorFlag = "--finite-executor"
 let finiteExecutorVersion = "v1"
+private let finiteTermGraceSeconds = 5.0
+private let finiteKillGraceSeconds = 5.0
 
 enum FiniteExit: Int32 {
     case executorSucceeded = 0
     case usage = 64
     case notJobLeader = 65
+    case environmentScrubFailed = 70
     case spawnFailed = 71
+    case groupReceiptFailed = 73
     case interruptedBeforeSpawn = 75
     case executorFailed = 80
     case executorSignaled = 81
     case custodyLost = 82
+    case groupNotClosed = 83
 }
 
 struct FiniteSpec {
     let cwd: String
+    let groupReceipt: String
     let environment: [String: String]
     let argv: [String]
 }
@@ -1729,18 +1750,57 @@ private var finiteInterrupted = false
 private var finiteSignalSources: [DispatchSourceSignal] = []
 private let finiteForwardedSignals: [Int32] = [SIGTERM, SIGINT, SIGHUP]
 
+/// Write all bytes to one descriptor; false on any error other than EINTR.
+private func finiteWriteAll(_ descriptor: Int32, _ data: Data) -> Bool {
+    data.withUnsafeBytes { raw -> Bool in
+        guard let base = raw.baseAddress else { return true }
+        var offset = 0
+        while offset < raw.count {
+            let written = write(descriptor, base + offset, raw.count - offset)
+            if written > 0 {
+                offset += written
+            } else if written < 0, errno == EINTR {
+                continue
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+}
+
+/// Diagnostics only: a full or failing private log never aborts custody
+/// (FileHandle.write raises an Objective-C exception on a write error).
 func finiteLog(_ fields: [String: Any]) {
     var record = fields
     record["finite_executor"] = finiteExecutorVersion
     guard var data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
     else { return }
     data.append(0x0A)
-    FileHandle.standardError.write(data)
+    _ = finiteWriteAll(STDERR_FILENO, data)
 }
 
 func finiteRefuse(_ code: FiniteExit, _ message: String) -> Never {
     finiteLog(["refused": message, "exit": Int(code.rawValue)])
     exit(code.rawValue)
+}
+
+/// Re-execute this image once with an empty environment before any other work.
+/// The check reads the kernel's exec-time envp (the array after argv's NULL),
+/// not `environ`: CoreFoundation adds __CF_USER_TEXT_ENCODING to `environ` at
+/// startup, so the current environment is never empty and would loop.
+private func finiteScrubEnvironment() {
+    let execEnvironment = CommandLine.unsafeArgv.advanced(by: Int(CommandLine.argc) + 1)
+    if execEnvironment.pointee == nil { return }
+    guard let image = CommandLine.arguments.first, image.hasPrefix("/") else {
+        finiteRefuse(.environmentScrubFailed, "finite helper argv[0] is not an absolute image path")
+    }
+    var empty: [UnsafeMutablePointer<CChar>?] = [nil]
+    execve(image, CommandLine.unsafeArgv, &empty)
+    finiteRefuse(
+        .environmentScrubFailed,
+        "cannot re-execute with an empty environment: \(String(cString: strerror(errno)))"
+    )
 }
 
 private func validEnvironmentKey(_ key: Substring) -> Bool {
@@ -1752,6 +1812,12 @@ private func validEnvironmentKey(_ key: Substring) -> Bool {
     }
 }
 
+private func isDirectory(_ path: String) -> Bool {
+    var isDirectory = ObjCBool(false)
+    return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+        && isDirectory.boolValue
+}
+
 /// Parse the complete argv grammar; anything else refuses before a spawn.
 func parseFiniteSpec(_ arguments: [String]) throws -> FiniteSpec {
     guard arguments.first == finiteExecutorVersion else {
@@ -1759,6 +1825,7 @@ func parseFiniteSpec(_ arguments: [String]) throws -> FiniteSpec {
     }
     var index = 1
     var cwd: String?
+    var groupReceipt: String?
     var environment: [String: String] = [:]
     while index < arguments.count, arguments[index] != "--" {
         guard index + 1 < arguments.count else { throw OpError.bad("option lacks a value") }
@@ -1769,6 +1836,11 @@ func parseFiniteSpec(_ arguments: [String]) throws -> FiniteSpec {
                 throw OpError.bad("--cwd must be one absolute directory")
             }
             cwd = value
+        case "--group-receipt":
+            guard groupReceipt == nil, (value as NSString).isAbsolutePath,
+                  isDirectory((value as NSString).deletingLastPathComponent)
+            else { throw OpError.bad("--group-receipt must be one absolute path in a directory") }
+            groupReceipt = value
         case "--env":
             let parts = value.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             guard parts.count == 2, validEnvironmentKey(parts[0]),
@@ -1780,18 +1852,15 @@ func parseFiniteSpec(_ arguments: [String]) throws -> FiniteSpec {
         }
         index += 2
     }
-    guard index < arguments.count, let directory = cwd else {
-        throw OpError.bad("finite executor needs --cwd and a -- separated command")
+    guard index < arguments.count, let directory = cwd, let receipt = groupReceipt else {
+        throw OpError.bad("finite executor needs --cwd, --group-receipt and a -- separated command")
     }
     let argv = Array(arguments[(index + 1)...])
     guard let executable = argv.first, (executable as NSString).isAbsolutePath,
           argv.allSatisfy({ !$0.isEmpty })
     else { throw OpError.bad("executor argv needs an absolute executable and no empty argument") }
-    var isDirectory = ObjCBool(false)
-    guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory),
-          isDirectory.boolValue
-    else { throw OpError.bad("executor cwd is not an existing directory") }
-    return FiniteSpec(cwd: directory, environment: environment, argv: argv)
+    guard isDirectory(directory) else { throw OpError.bad("executor cwd is not an existing directory") }
+    return FiniteSpec(cwd: directory, groupReceipt: receipt, environment: environment, argv: argv)
 }
 
 private func finiteForward(_ signalValue: Int32) {
@@ -1806,17 +1875,55 @@ private func finiteForward(_ signalValue: Int32) {
     }
 }
 
-/// kqueue records every delivery even while the disposition is SIG_IGN, so
-/// installing the sources before spawning loses no termination request.
+/// Register every kqueue source while the default disposition still ends this
+/// helper, then ignore the signal. A request before registration terminates the
+/// helper before any spawn; one after it is recorded by kqueue even under
+/// SIG_IGN. Ignoring first would discard a request in the registration gap.
 private func installFiniteSignalForwarding() {
     let queue = DispatchQueue(label: "ava.permissions-helper.finite-signals")
+    let registered = DispatchSemaphore(value: 0)
     for signalValue in finiteForwardedSignals {
-        _ = signal(signalValue, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: signalValue, queue: queue)
         source.setEventHandler { finiteForward(signalValue) }
+        source.setRegistrationHandler { registered.signal() }
         source.resume()
         finiteSignalSources.append(source)
     }
+    for _ in finiteForwardedSignals {
+        if registered.wait(timeout: .now() + 5) != .success {
+            finiteRefuse(.interruptedBeforeSpawn, "signal forwarding did not register")
+        }
+    }
+    for signalValue in finiteForwardedSignals {
+        _ = signal(signalValue, SIG_IGN)
+    }
+}
+
+/// Publish this helper's job group before any spawn: complete bytes under a
+/// staging name, then an exclusive rename. The file exists only if whole.
+private func publishGroupReceipt(_ path: String) -> Bool {
+    var audit = auditinfo_addr()
+    guard getaudit_addr(&audit, Int32(MemoryLayout<auditinfo_addr>.size)) == 0 else { return false }
+    let record: [String: Any] = [
+        "finite_executor": finiteExecutorVersion,
+        "helper_pid": Int(getpid()),
+        "pgid": Int(getpgrp()),
+        "asid": Int(audit.ai_asid),
+    ]
+    guard var data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+    else { return false }
+    data.append(0x0A)
+    let staging = path + ".staging"
+    let descriptor = open(staging, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    guard descriptor >= 0 else { return false }
+    let written = finiteWriteAll(descriptor, data) && fsync(descriptor) == 0
+    guard close(descriptor) == 0, written,
+          renamex_np(staging, path, UInt32(RENAME_EXCL)) == 0
+    else {
+        unlink(staging)
+        return false
+    }
+    return true
 }
 
 private func withCStrings<T>(
@@ -1895,8 +2002,70 @@ private func waitFiniteExecutor(_ child: pid_t) -> Int32 {
     return status
 }
 
+/// Live members of this helper's process group other than itself, or nil when
+/// the kernel process table cannot be read. Zombies await their reaper.
+private func finiteGroupMembers() -> [pid_t]? {
+    let group = getpgrp()
+    let helper = getpid()
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PGRP, group]
+    let stride = MemoryLayout<kinfo_proc>.stride
+    for _ in 0..<8 {
+        var size = 0
+        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return nil }
+        let capacity = size / stride + 16
+        var table = [kinfo_proc](repeating: kinfo_proc(), count: capacity)
+        size = capacity * stride
+        if sysctl(&mib, 4, &table, &size, nil, 0) != 0 {
+            if errno == ENOMEM { continue }
+            return nil
+        }
+        return table[0..<(size / stride)].compactMap { entry in
+            let pid = entry.kp_proc.p_pid
+            return pid == helper || Int32(entry.kp_proc.p_stat) == SZOMB ? nil : pid
+        }
+    }
+    return nil
+}
+
+private func finiteAwaitGroup(until deadline: Date) -> [pid_t]? {
+    while true {
+        guard let members = finiteGroupMembers() else { return nil }
+        if members.isEmpty || Date() >= deadline { return members }
+        usleep(50_000)
+    }
+}
+
+/// Close the job group while this helper still leads it, so its PGID cannot be
+/// reused: SIGTERM (ignored here; forwarding finds the executor reaped), a
+/// bounded grace, then SIGKILL to each remaining member of this group.
+private func finiteCloseGroup() -> Bool {
+    let group = getpgrp()
+    guard let initial = finiteGroupMembers() else { return false }
+    if initial.isEmpty { return true }
+    _ = killpg(group, SIGTERM)
+    guard var members = finiteAwaitGroup(until: Date().addingTimeInterval(finiteTermGraceSeconds))
+    else { return false }
+    if members.isEmpty { return true }
+    finiteLog(["group_members_after_term": members.map { Int($0) }])
+    let deadline = Date().addingTimeInterval(finiteKillGraceSeconds)
+    while !members.isEmpty {
+        for pid in members where getpgid(pid) == group {
+            _ = kill(pid, SIGKILL)
+        }
+        if Date() >= deadline { return false }
+        usleep(50_000)
+        guard let current = finiteGroupMembers() else { return false }
+        members = current
+    }
+    return true
+}
+
 /// Entered from main.swift before `serve()`; never returns.
 func runFiniteExecutor(_ arguments: [String]) -> Never {
+    finiteScrubEnvironment()
+    // A closed log pipe must fail a diagnostic write, not end custody. The
+    // executor's dispositions are reset by SETSIGDEF.
+    _ = signal(SIGPIPE, SIG_IGN)
     let spec: FiniteSpec
     do {
         spec = try parseFiniteSpec(arguments)
@@ -1905,12 +2074,15 @@ func runFiniteExecutor(_ arguments: [String]) -> Never {
     } catch {
         finiteRefuse(.usage, "\(error)")
     }
-    // launchd's job cleanup is keyed on the job's own process group. A helper
-    // started any other way cannot offer that boundary to its executor.
+    // The job's own process group is the only boundary this helper can close.
+    // A helper started any other way cannot offer it to its executor.
     guard getppid() == 1, getpgrp() == getpid() else {
         finiteRefuse(.notJobLeader, "finite mode requires a launchd job process-group leader")
     }
     installFiniteSignalForwarding()
+    guard publishGroupReceipt(spec.groupReceipt) else {
+        finiteRefuse(.groupReceiptFailed, "cannot publish the job group receipt before spawn")
+    }
     finiteLock.lock()
     if finiteInterrupted {
         finiteLock.unlock()
@@ -1931,13 +2103,19 @@ func runFiniteExecutor(_ arguments: [String]) -> Never {
     finiteLog(["helper_pid": Int(getpid()), "executor_pid": Int(child), "pgid": Int(getpgrp())])
     let status = waitFiniteExecutor(child)
     let signalValue = status & 0x7f
+    let outcome: FiniteExit
     if signalValue == 0 {
         let code = (status >> 8) & 0xff
         finiteLog(["executor_pid": Int(child), "exit_code": Int(code)])
-        exit(code == 0 ? FiniteExit.executorSucceeded.rawValue : FiniteExit.executorFailed.rawValue)
+        outcome = code == 0 ? .executorSucceeded : .executorFailed
+    } else {
+        finiteLog(["executor_pid": Int(child), "signal": Int(signalValue)])
+        outcome = .executorSignaled
     }
-    finiteLog(["executor_pid": Int(child), "signal": Int(signalValue)])
-    exit(FiniteExit.executorSignaled.rawValue)
+    guard finiteCloseGroup() else {
+        finiteRefuse(.groupNotClosed, "job process group kept members after SIGKILL")
+    }
+    exit(outcome.rawValue)
 }
 
 // MARK: - Socket server

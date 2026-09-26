@@ -43,6 +43,9 @@ Phase = Literal[
 Direction = Literal["candidate", "previous"]
 _MAX_JOURNAL_BYTES = 256 * 1024
 _DARWIN_KIND = "darwin-launchd-v1"
+# Terminal evidence when launchd holds no facts: the recorded boot or login
+# domain ended (see cli/release_transition/launcher_macos.py::_current).
+_DARWIN_ENDED = frozenset({"boot-changed", "domain-lost"})
 _NEXT: dict[str, str] = {
     "prepared": "quiescing",
     "quiescing": "stopping",
@@ -280,24 +283,43 @@ def _require_linux_closure(
         raise ValueError("closure changed the recorded executor identity")
 
 
+def _darwin_terminal(terminal: dict[str, JsonValue]) -> bool:
+    """Not running, no live owner, and facts matching the terminal's evidence source.
+
+    A boot or login domain that ended leaves launchd no facts: no run count, exit
+    code or signal is claimed, and domain loss needs a recorded audit session.
+    """
+    ended = (terminal["kind"], terminal["state"], terminal["helper"], terminal["executor"])
+    if ended != (_DARWIN_KIND, "not running", None, None):
+        return False
+    evidence = terminal["evidence"]
+    if evidence == "launchd":
+        return terminal["runs"] == 1
+    facts = (terminal["runs"], terminal["exit_code"], terminal["signal"])
+    return (
+        evidence in _DARWIN_ENDED
+        and facts == (None, None, None)
+        and (evidence != "domain-lost" or terminal["asid"] is not None)
+    )
+
+
 def _require_darwin_closure(
     launch: dict[str, JsonValue],
     native: dict[str, JsonValue] | None,
     terminal: dict[str, JsonValue],
 ) -> None:
     """Terminal launchd facts plus recorded births closed; helper and executor stay distinct."""
-    ended = (terminal["kind"], terminal["state"], terminal["runs"])
-    if ended != (_DARWIN_KIND, "not running", 1) or (terminal["helper"], terminal["executor"]) != (
-        None,
-        None,
-    ):
+    if not _darwin_terminal(terminal):
         raise ValueError("a living or unknown executor cannot be replaced")
     if any(terminal[key] != launch[key] for key in ("label", "domain", "boot_id")):
         raise ValueError("closure belongs to a different native executor")
     closed = (
         None if native is None else {"helper": native["helper"], "executor": native["executor"]}
     )
-    if terminal["closed"] != closed or (native is not None and terminal["asid"] != native["asid"]):
+    if terminal["closed"] != closed or (
+        native is not None
+        and (terminal["asid"], terminal["pgid"]) != (native["asid"], native["pgid"])
+    ):
         raise ValueError("closure changed the recorded executor identity")
 
 
@@ -439,12 +461,17 @@ class Journal:
         return self._replace(launch_attempted=True)
 
     def record_native(self, record: dict[str, JsonValue]) -> Operation:
-        if not self.operation.launch_attempted:
+        launch = self.operation.launch
+        if not self.operation.launch_attempted or launch is None:
             raise ValueError("native birth cannot precede native dispatch")
+        if _darwin(launch) and any(
+            key not in record or record[key] != launch[key]
+            for key in ("kind", "label", "domain", "boot_id")
+        ):
+            # A stale attempt's executor may reach the lock after a relaunch;
+            # its receipt never becomes the current attempt's custody.
+            raise ValueError("native receipt belongs to a different executor attempt")
         if self.operation.native is not None:
-            launch = self.operation.launch
-            if launch is None:
-                raise ValueError("native identity requires retained launch intent")
             if self.operation.native != record and not _same_native_receipt(
                 launch, self.operation.native, record
             ):

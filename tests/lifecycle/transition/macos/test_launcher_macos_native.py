@@ -35,8 +35,10 @@ from pydantic import JsonValue
 
 from cli.release_transition import journal
 from cli.release_transition import launcher_macos as macos
+from cli.release_transition.launchd_print import read_job
 from cli.release_transition.request import ReleaseRef, Request
 from services.permissions_helper import finite_artifact, lifecycle
+from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
 from shared.runtime_release import file_sha256
 
@@ -49,7 +51,7 @@ pytestmark = [
     pytest.mark.native_permissions_helper,
 ]
 
-_ENTRY = """import argparse, json, os, subprocess, sys, time
+_ENTRY = """import argparse, json, os, signal, subprocess, sys, time
 from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument('--operation', type=Path, required=True)
@@ -59,11 +61,22 @@ def note(name, value):
     fd = os.open(directory / f'{tag}-{name}.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as stream:
         json.dump(value, stream)
+if (directory / 'fixture-executor-ignoring').exists():
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 note('started', {'pid': os.getpid(), 'ppid': os.getppid(), 'pgid': os.getpgrp(),
                  'sid': os.getsid(0), 'argv': sys.argv, 'cwd': os.getcwd()})
 sleeper = [sys.executable, '-I', '-B', '-c', 'import time; time.sleep(120)']
+ignoring = [sys.executable, '-I', '-B', '-c',
+            'import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); '
+            'open(sys.argv[1], "w").write("1"); time.sleep(120)',
+            str(directory / f'{tag}-ignoring')]
 if (directory / 'fixture-child').exists():
     note('child', {'pid': subprocess.Popen(sleeper).pid})
+if (directory / 'fixture-child-ignoring').exists():
+    child = subprocess.Popen(ignoring)
+    while not (directory / f'{tag}-ignoring').exists():
+        time.sleep(0.01)
+    note('child', {'pid': child.pid})
 escaped = False
 deadline = time.monotonic() + 90
 while not (directory / 'fixture-finish').exists():
@@ -209,9 +222,14 @@ def _operation(tmp_path: Path) -> Request:
 
 
 def _bind_helper(monkeypatch: pytest.MonkeyPatch, app: Path) -> None:
-    """Replace only the live home-helper lookup; signature checks stay real."""
+    """Replace only the live home-helper lookup; signature checks stay real.
+
+    The fixture artifact directory is this home's configured helper artifact
+    directory, so the home binding, directory checks and `codesign -R` run.
+    """
     executable = app / "Contents/MacOS/AvaPermissionsHelper"
-    monkeypatch.setattr(finite_artifact, "home_helper_executable", lambda: executable)
+    monkeypatch.setattr(finite_artifact, "home_helper_executable", lambda _home: executable)
+    monkeypatch.setattr(settings.services, "permissions_helper_artifact_dir", app.parent)
     if os.environ.get("AVA_NATIVE_SIGNED_HELPER") != "1":
         monkeypatch.setattr(lifecycle, "_expected_dr", lambda: _BUNDLE_REQUIREMENT)
 
@@ -266,15 +284,16 @@ def _require_exec_environment(pid: int, expected: dict[str, str]) -> list[str]:
     raw = buffer.raw[: size.value]
     argc = int.from_bytes(raw[:4], sys.byteorder)
     _executable, _, rest = raw[4:].partition(b"\0")
-    strings = [item.decode() for item in rest.lstrip(b"\0").split(b"\0")[argc:]]
+    # NUL padding separates envp from apple[]; it is layout, not a string.
+    strings = [item.decode() for item in rest.lstrip(b"\0").split(b"\0")[argc:] if item]
     pairs = [f"{key}={expected[key]}" for key in sorted(expected)]
     assert strings[: len(pairs)] == pairs
     trailing: list[str] = []
     for item in strings[len(pairs) :]:
-        if not item:
-            break
         assert re.fullmatch(r"[a-z][a-z0-9_]*=.*", item), f"non-apple exec string: {item!r}"
         trailing.append(item.split("=", 1)[0])
+    # The apple[] vector itself must be visible, or this check proved nothing.
+    assert "executable_cdhash" in trailing, trailing
     return trailing
 
 
@@ -287,6 +306,16 @@ def _running_facts(request: Request, job: macos.DarwinJob) -> dict[str, Any]:
     assert helper.ppid() == 1 and os.getpgid(helper.pid) == helper.pid
     assert helper.cmdline() == launch.program_arguments()
     assert executor.ppid() == helper.pid and os.getpgid(executor.pid) == helper.pid
+    # The helper re-executed itself without launchd's session environment, and
+    # published its group (PID, PGID, audit session) before spawning.
+    helper_apple = _require_exec_environment(helper.pid, {})
+    group = json.loads(Path(launch.group_receipt).read_text())
+    assert group == {
+        "asid": job.asid,
+        "finite_executor": "v1",
+        "helper_pid": helper.pid,
+        "pgid": helper.pid,
+    }
     # The kernel's exec-time environment: exactly the explicit pairs, none of
     # launchd's session supplements (SSH_AUTH_SOCK, XPC_SERVICE_NAME, ...).
     apple = _require_exec_environment(executor.pid, launch.environment)
@@ -296,6 +325,8 @@ def _running_facts(request: Request, job: macos.DarwinJob) -> dict[str, Any]:
         "launch": launch.label,
         "job": job.model_dump(mode="json"),
         "started": started,
+        "group_receipt": group,
+        "helper_apple_keys_after_empty_envp": helper_apple,
         "exec_environment": sorted(launch.environment),
         "apple_keys_after_envp": apple,
     }
@@ -421,6 +452,118 @@ def _escaped(
     return {"terminal": terminal.model_dump(mode="json"), "escaped_survived_terminal": True}
 
 
+def _launchd_terminal(plan: dict[str, JsonValue], timeout: float = 20) -> str:
+    """launchd's own terminal answer, while adapter closure may still refuse."""
+    launch = macos.DarwinLaunch.model_validate(plan)
+    deadline = time.monotonic() + timeout
+    while True:
+        text = macos._query(launch)
+        if text is not None and read_job(text, launch.target).state == "not running":
+            return text
+        if time.monotonic() >= deadline:
+            raise TimeoutError("fixture executor job did not become terminal in launchd")
+        time.sleep(0.1)
+
+
+def _gone(process: OwnedProcess, timeout: float = 10) -> bool:
+    deadline = time.monotonic() + timeout
+    while process.live():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def _child(request: Request, job: macos.DarwinJob, births: list[OwnedProcess]) -> OwnedProcess:
+    assert job.executor is not None and job.helper is not None
+    child = _capture(_note(request.path.parent, job.executor.pid, "child")["pid"])
+    births.append(child)
+    assert os.getpgid(child.pid) == job.helper.pid
+    return child
+
+
+def _refused_until_operator_kill(
+    request: Request, plan: dict[str, JsonValue], child: OwnedProcess
+) -> dict[str, Any]:
+    """No recorded owner pins the group: closure refuses, names the survivor, signals nothing."""
+    refusals: dict[str, str] = {}
+    for name, action in (
+        ("readback", macos.readback),
+        ("retire", macos.retire_current),
+        ("resume", macos.resume),
+    ):
+        with pytest.raises(RuntimeError, match="still has live group members") as refused:
+            action(plan)
+        assert f"pid {child.pid}" in str(refused.value) and "kill -KILL" in str(refused.value)
+        refusals[name] = str(refused.value)
+    assert child.live(), "an unpinned job group member must never be signalled"
+    current = journal.read_operation(request.path)
+    assert current.retirement is None and current.attempt == 0
+    # The operator action the refusal names, performed on the exact birth.
+    assert child.send_signal(signal.SIGKILL) and _gone(child)
+    terminal = _terminal(plan)
+    assert macos.retire_current(plan) == terminal
+    return {"refusals": refusals, "terminal": terminal.model_dump(mode="json")}
+
+
+def _helper_kill_ignoring(
+    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+) -> dict[str, Any]:
+    """Review P1-2/P2-3: launchd's cleanup is SIGTERM only; a TERM-ignoring member survives."""
+    child = _child(request, job, births)
+    assert job.helper is not None and job.executor is not None
+    assert job.helper.owned().send_signal(signal.SIGKILL)
+    terminal_print = _launchd_terminal(plan)
+    assert _gone(job.executor.owned()), "default-disposition executor survived launchd SIGTERM"
+    time.sleep(1)
+    assert child.live(), "fixture child did not ignore launchd's group SIGTERM"
+    evidence = _refused_until_operator_kill(request, plan, child)
+    return {"launchd_terminal": terminal_print, **evidence}
+
+
+def _exit_ignoring(
+    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+) -> dict[str, Any]:
+    """The helper itself closes its group after the executor: TERM, grace, then KILL."""
+    child = _child(request, job, births)
+    (request.path.parent / "fixture-finish").touch()
+    terminal = _terminal(plan, timeout=40)
+    assert terminal.exit_code == 0 and terminal.signal is None
+    assert not child.live(), "helper left a TERM-ignoring member in its closed group"
+    log = Path(macos.DarwinLaunch.model_validate(plan).stderr).read_text()
+    assert f'"group_members_after_term":[{child.pid}]' in log
+    assert macos.retire_current(plan) == terminal
+    return {"terminal": terminal.model_dump(mode="json"), "helper_log": log}
+
+
+def _executor_ignoring(
+    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+) -> dict[str, Any]:
+    """A live recorded executor pins the group, so the adapter's bounded SIGKILL is exact."""
+    child = _child(request, job, births)
+    assert job.helper is not None and job.executor is not None
+    assert job.helper.owned().send_signal(signal.SIGKILL)
+    terminal_print = _launchd_terminal(plan)
+    time.sleep(1)
+    assert job.executor.owned().live() and child.live()
+    terminal = macos.readback(plan)
+    assert terminal.finished and terminal.signal == 9
+    assert not child.live() and not job.executor.owned().live()
+    assert macos.retire_current(plan) == terminal
+    return {"launchd_terminal": terminal_print, "terminal": terminal.model_dump(mode="json")}
+
+
+def _signaled(plan: dict[str, JsonValue], job: macos.DarwinJob, number: int) -> dict[str, Any]:
+    """Review P2-2: launchd's strsignal text for the helper's own death parses."""
+    assert job.helper is not None
+    assert job.helper.owned().send_signal(number)
+    terminal = _terminal(plan)
+    assert (terminal.signal, terminal.exit_code) == (number, None)
+    text = macos._query(macos.DarwinLaunch.model_validate(plan))
+    assert macos.retire_current(plan) == terminal
+    return {"terminal": terminal.model_dump(mode="json"), "print": text}
+
+
 def _retire_fixture(request: Request, births: list[OwnedProcess]) -> dict[str, Any]:
     current = journal.read_operation(request.path)
     records = [retired["launch"] for retired in current.retired_executors]
@@ -456,9 +599,51 @@ def _retire_fixture(request: Request, births: list[OwnedProcess]) -> dict[str, A
     return cleanup
 
 
+_IGNORING = {"helper-kill-ignoring", "helper-kill-unrecorded", "exit-ignoring", "executor-ignoring"}
+
+
+def _exercise(
+    mode: str,
+    request: Request,
+    plan: dict[str, JsonValue],
+    job: macos.DarwinJob,
+    births: list[OwnedProcess],
+) -> dict[str, Any]:
+    match mode:
+        case "executor-kill":
+            return _executor_kill(request, plan, job, births)
+        case "helper-kill":
+            return _helper_kill(request, plan, job, births)
+        case "escaped":
+            return _escaped(request, plan, job, births)
+        case "helper-kill-ignoring" | "helper-kill-unrecorded":
+            return _helper_kill_ignoring(request, plan, job, births)
+        case "exit-ignoring":
+            return _exit_ignoring(request, plan, job, births)
+        case "executor-ignoring":
+            return _executor_ignoring(request, plan, job, births)
+        case "signal-30" | "signal-31":
+            return _signaled(plan, job, int(mode.removeprefix("signal-")))
+        case _:
+            return _finish(request, plan)
+
+
 @pytest.mark.parametrize(
     "mode",
-    ["finish", "lost-bootstrap", "concurrent", "executor-kill", "helper-kill", "escaped"],
+    [
+        "finish",
+        "lost-bootstrap",
+        "concurrent",
+        "executor-kill",
+        "helper-kill",
+        "escaped",
+        "helper-kill-ignoring",
+        "helper-kill-unrecorded",
+        "exit-ignoring",
+        "executor-ignoring",
+        "signal-30",
+        "signal-31",
+    ],
 )
 def test_native_finite_helper_executor_custody(
     tmp_path: Path, helper_app: Path, monkeypatch: pytest.MonkeyPatch, mode: str
@@ -471,25 +656,22 @@ def test_native_finite_helper_executor_custody(
         current.record_launch(plan)
     if mode in {"executor-kill", "helper-kill"}:
         (request.path.parent / "fixture-child").touch()
+    if mode in _IGNORING:
+        (request.path.parent / "fixture-child-ignoring").touch()
+    if mode == "executor-ignoring":
+        (request.path.parent / "fixture-executor-ignoring").touch()
     births: list[OwnedProcess] = []
     evidence: dict[str, Any] = {"scope": "native launchd transport and custody only", "mode": mode}
     try:
         job = _launch(mode, plan, monkeypatch)
         assert isinstance(job, macos.DarwinJob) and job.executor is not None
         births.extend(birth.owned() for birth in (job.helper, job.executor) if birth)
-        with journal.exclusive(request.path) as current:
-            current.record_native(job.identity)
+        if mode != "helper-kill-unrecorded":
+            with journal.exclusive(request.path) as current:
+                current.record_native(job.identity)
         evidence["helper"] = macos.DarwinLaunch.model_validate(plan).helper.model_dump()
         evidence["running"] = _running_facts(request, job)
-        match mode:
-            case "executor-kill":
-                evidence.update(_executor_kill(request, plan, job, births))
-            case "helper-kill":
-                evidence.update(_helper_kill(request, plan, job, births))
-            case "escaped":
-                evidence.update(_escaped(request, plan, job, births))
-            case _:
-                evidence.update(_finish(request, plan))
+        evidence.update(_exercise(mode, request, plan, job, births))
         evidence["journal"] = journal.read_operation(request.path).model_dump(mode="json")
         evidence["result"] = "passed"
     except BaseException as exc:
@@ -500,3 +682,29 @@ def test_native_finite_helper_executor_custody(
         (request.path.parent / "fixture-finish").touch()
         evidence["cleanup"] = _retire_fixture(request, births)
         (tmp_path / "native-proof.json").write_text(json.dumps(evidence, indent=2) + "\n")
+
+
+def test_failed_diagnostic_log_write_does_not_end_the_helper(
+    helper_app: Path, tmp_path: Path
+) -> None:
+    """Review P3-7: a failing private log must not abort custody (EPIPE, ENOSPC...)."""
+    executable = helper_app / "Contents/MacOS/AvaPermissionsHelper"
+    read, write = os.pipe()
+    os.close(read)  # every diagnostic write now fails with EPIPE
+    receipt = tmp_path / "group.json"
+    argv = [str(executable), "--finite-executor", "v1", "--cwd", str(tmp_path)]
+    try:
+        result = subprocess.run(  # noqa: S603 — fixture helper binary, fixed argv
+            [*argv, "--group-receipt", str(receipt), "--", "/usr/bin/true"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=write,
+            timeout=30,
+            check=False,
+        )
+    finally:
+        os.close(write)
+    # Not a launchd job leader: its own refusal code, not death by SIGPIPE or
+    # an Objective-C exception from FileHandle.write.
+    assert result.returncode == 65
+    assert not receipt.exists()

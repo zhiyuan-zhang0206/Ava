@@ -2,9 +2,11 @@
 
 The persistent home helper keeps owning ava-root; this job owns only the retained
 executor and the finite tools that stay in the job's process group. launchd's
-documented cleanup covers that group, not descendants that create their own
-group or session, so escape observed while it is still traceable refuses and a
-terminal job or empty group never certifies closure beyond that scope.
+own cleanup is a single SIGTERM to that group; the finite helper closes the
+group itself (TERM, then KILL) while it leads it and publishes the group before
+any spawn, so every terminal closure proves the group empty. Descendants that
+create their own group or session are outside that scope: escape observed while
+it is still traceable refuses, and closure never certifies beyond the group.
 
 The operation journal records the complete launch before launchd is called.
 Recovery reads that same labelled job; missing evidence never authorizes another
@@ -19,19 +21,29 @@ import plistlib
 import subprocess
 import time
 from pathlib import Path
-from typing import Literal
 
 import psutil
-from pydantic import Field, JsonValue
+from pydantic import JsonValue
 
 from cli.release_transition.journal import Journal, exclusive, read_operation
+from cli.release_transition.launchd_custody import (
+    Birth,
+    DarwinJob,
+    DarwinLaunch,
+    Evidence,
+    NativeReceipt,
+    prove_group_closed,
+    read_group_receipt,
+    require_consistent,
+)
 from cli.release_transition.launchd_print import (
     SUPPORTED_PRODUCT_MAJORS,
     LaunchdJob,
+    read_domain_asid,
     read_job,
 )
-from cli.release_transition.native import DARWIN, require_private_operation
-from cli.release_transition.request import PitrRequest, Record, Request
+from cli.release_transition.native import require_private_operation
+from cli.release_transition.request import PitrRequest, Request
 from services.permissions_helper import finite_artifact
 from services.permissions_helper.finite_artifact import HelperArtifact
 from shared.native_process import native_boot_id
@@ -51,130 +63,22 @@ FINITE_EXIT = {
     0: "executor-succeeded",
     64: "usage",
     65: "not-job-leader",
+    70: "environment-scrub-failed",
     71: "spawn-failed",
+    73: "group-receipt-failed",
     75: "interrupted-before-spawn",
     80: "executor-failed",
     81: "executor-signaled",
     82: "custody-lost",
+    83: "group-not-closed",
 }
 _QUERY_TIMEOUT_S = 30.0
 _SETTLE_S = 30.0
-_CLOSURE_WAIT_S = 5.0
 _POLL_S = 0.05
+# launchd's structural not-found codes (no such domain, no such service).
+_NOT_LOADED = (112, 113)
 
-
-class Birth(Record):
-    """One captured native process birth (psutil monotonic start on macOS)."""
-
-    pid: int = Field(gt=1)
-    birth: float
-    starttime: int | None
-
-    @classmethod
-    def of(cls, process: OwnedProcess) -> Birth:
-        return cls(pid=process.pid, birth=process.birth, starttime=process.starttime)
-
-    def owned(self) -> OwnedProcess:
-        return OwnedProcess(self.pid, self.birth, self.starttime)
-
-
-class DarwinLaunch(Record):
-    kind: Literal["darwin-launchd-v1"] = DARWIN
-    operation: str
-    attempt: int = Field(ge=0)
-    home: str
-    registry: str
-    label: str
-    domain: str
-    uid: int = Field(ge=0)
-    boot_id: str
-    macos_product: str
-    macos_build: str
-    plist: str
-    plist_sha256: str
-    stdout: str
-    stderr: str
-    helper: HelperArtifact
-    artifact_digest: str
-    manifest_digest: str
-    runtime_root: str
-    interpreter: str
-    cwd: str
-    argv: list[str]
-    environment: dict[str, str]
-    exit_timeout: int = Field(gt=0)
-
-    @property
-    def target(self) -> str:
-        return f"{self.domain}/{self.label}"
-
-    def program_arguments(self) -> list[str]:
-        """Fixed helper argv; the helper builds the executor environment from it alone."""
-        pairs = [
-            part
-            for key in sorted(self.environment)
-            for part in ("--env", f"{key}={self.environment[key]}")
-        ]
-        return [
-            self.helper.executable,
-            "--finite-executor",
-            "v1",
-            "--cwd",
-            self.cwd,
-            *pairs,
-            "--",
-            *self.argv,
-        ]
-
-
-class NativeReceipt(Record):
-    """Recorded by the executor before any effect: attempt, helper and executor births."""
-
-    kind: Literal["darwin-launchd-v1"] = DARWIN
-    label: str
-    domain: str
-    boot_id: str
-    asid: int
-    pgid: int = Field(gt=1)
-    helper: Birth
-    executor: Birth
-
-
-class DarwinJob(Record):
-    """Native readback, not a declaration that the release transition succeeded."""
-
-    kind: Literal["darwin-launchd-v1"] = DARWIN
-    label: str
-    domain: str
-    boot_id: str
-    asid: int
-    state: Literal["running", "not running"]
-    runs: int
-    helper: Birth | None
-    executor: Birth | None
-    pgid: int | None
-    exit_code: int | None
-    signal: int | None
-    closed: dict[str, Birth] | None
-
-    @property
-    def finished(self) -> bool:
-        return self.state == "not running" and self.helper is None
-
-    @property
-    def identity(self) -> dict[str, JsonValue]:
-        """Helper and executor births stay distinct; neither substitutes for the other."""
-        if self.helper is None or self.executor is None or self.pgid is None:
-            raise RuntimeError("only a running executor can supply a native birth receipt")
-        return NativeReceipt(
-            label=self.label,
-            domain=self.domain,
-            boot_id=self.boot_id,
-            asid=self.asid,
-            pgid=self.pgid,
-            helper=self.helper,
-            executor=self.executor,
-        ).model_dump(mode="json")
+__all__ = ["Birth", "DarwinJob", "DarwinLaunch", "NativeReceipt"]
 
 
 def plist_document(launch: DarwinLaunch) -> bytes:
@@ -196,7 +100,10 @@ def plist_document(launch: DarwinLaunch) -> bytes:
 
 
 def _boot_id() -> str:
-    boot = native_boot_id()
+    try:
+        boot = native_boot_id()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError) as exc:
+        raise RuntimeError("cannot read the native boot identity; custody retained") from exc
     if boot is None:
         raise RuntimeError("macOS release launch requires a native boot identity")
     return boot
@@ -297,6 +204,7 @@ def _plan(
         "plist_sha256": "0" * 64,
         "stdout": str(directory / "stdout.log"),
         "stderr": str(directory / "stderr.log"),
+        "group_receipt": str(directory / "group.json"),
         "helper": helper,
         "artifact_digest": runtime.digest,
         "manifest_digest": runtime.manifest_digest,
@@ -322,7 +230,7 @@ def _plan(
 
 def plan_launch(operation: Path, runtime: VerifiedRelease) -> dict[str, JsonValue]:
     """Plan the next attempt with the verified signed helper of every earlier attempt."""
-    helper = finite_artifact.capture()
+    helper = finite_artifact.capture(Path(read_operation(operation).request.home))
     retired = read_operation(operation).retired_executors
     if retired and DarwinLaunch.model_validate(retired[-1]["launch"]).helper != helper:
         raise RuntimeError(
@@ -332,24 +240,26 @@ def plan_launch(operation: Path, runtime: VerifiedRelease) -> dict[str, JsonValu
 
 
 def _admitted(
-    record: dict[str, JsonValue], *, verify: bool, retired_replay: bool = False
+    record: dict[str, JsonValue], *, verify: bool, recovery: bool = False
 ) -> DarwinLaunch:
     launch = DarwinLaunch.model_validate(record)
     operation = read_operation(Path(launch.operation))
     request = operation.request
     require_private_operation(request.path, Path(request.home))
+    if operation.launch != record:
+        raise ValueError("native launch lacks matching durable intent")
     settled = (
-        retired_replay
-        and operation.terminal
+        operation.terminal
         and operation.retirement is not None
         and operation.retirement.state == "absent"
     )
-    if operation.launch != record or (launch.boot_id != _boot_id() and not settled):
-        raise ValueError("native launch lacks matching durable intent in this boot")
-    if settled:
-        # Completed absence is durable history, not custody in a later boot or
-        # OS build. Retirement only re-proves exact label absence.
+    if recovery and (settled or launch.boot_id != _boot_id()):
+        # Completed absence is durable history, and a job of an earlier boot
+        # ended with that boot: neither is custody to re-plan. Callers prove
+        # only that the label is not loaded now.
         return launch
+    if launch.boot_id != _boot_id():
+        raise ValueError("native launch lacks matching durable intent in this boot")
     if verify:
         runtime = request.executor.verify(Path(request.home), request.platform_tag)
         expected = plan_launch(request.path, runtime)
@@ -367,17 +277,21 @@ def _admitted(
     return launch
 
 
-def _query(launch: DarwinLaunch) -> str | None:
-    """Absence is one exact launchd answer; every other failure is unknown."""
+def _print(target: str) -> subprocess.CompletedProcess[str]:
     try:
-        result = run_bounded(
-            [LAUNCHCTL, "print", launch.target],
+        return run_bounded(
+            [LAUNCHCTL, "print", target],
             timeout=_QUERY_TIMEOUT_S,
             capture_output=True,
             text=True,
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("launchd query timed out; native custody retained") from exc
+
+
+def _query(launch: DarwinLaunch) -> str | None:
+    """Absence is one exact launchd answer; every other failure is unknown."""
+    result = _print(launch.target)
     absent = (
         f'Bad request.\nCould not find service "{launch.label}" in domain for user gui: '
         f"{launch.uid}\n"
@@ -389,8 +303,34 @@ def _query(launch: DarwinLaunch) -> str | None:
     return result.stdout
 
 
-def _job(launch: DarwinLaunch) -> LaunchdJob:
-    text = _query(launch)
+def _not_loaded(launch: DarwinLaunch) -> bool:
+    """Settled or earlier-boot history needs only launchd's not-found code.
+
+    The exact absence wording is version text; after an OS update a replay
+    must still recognise launchd's structural "no such service/domain" answer.
+    Any loaded description is False; any other failure is unknown custody.
+    """
+    result = _print(launch.target)
+    if result.returncode == 0:
+        return False
+    if result.returncode in _NOT_LOADED and result.stdout == "":
+        return True
+    raise RuntimeError(f"cannot read native executor job: {result.stderr.strip()!r}")
+
+
+def _domain_asid(launch: DarwinLaunch) -> int:
+    """The audit session of the login domain that now owns ``gui/<uid>``."""
+    result = _print(launch.domain)
+    if result.returncode:
+        raise RuntimeError(
+            f"cannot read the login domain; custody retained: {result.stderr.strip()!r}"
+        )
+    return read_domain_asid(result.stdout, launch.uid)
+
+
+def _job(launch: DarwinLaunch, text: str | None = None) -> LaunchdJob:
+    """Parse one observation; ``text`` is an already-read first query."""
+    text = _query(launch) if text is None else text
     if text is None:
         raise RuntimeError("native executor job is absent before retirement; custody retained")
     job = read_job(text, launch.target)
@@ -444,6 +384,11 @@ def _helper(launch: DarwinLaunch, pid: int) -> OwnedProcess:
         or not helper.live()
     ):
         raise RuntimeError("finite helper is outside its captured signed launch identity")
+    # The running image, not only the file at its path, must satisfy the
+    # captured requirement (kernel code-signing state of this very process).
+    finite_artifact.require_running_identity(pid, launch.helper.requirement)
+    if not helper.live():
+        raise RuntimeError("finite helper changed during signature verification")
     return helper
 
 
@@ -480,37 +425,27 @@ def _require_group_tree(helper: OwnedProcess) -> None:
             )
 
 
-def _group_alive(pgid: int) -> bool:
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 def _receipt(launch: DarwinLaunch) -> NativeReceipt | None:
     native = read_operation(Path(launch.operation)).native
     return None if native is None else NativeReceipt.model_validate(native)
 
 
-def _closed(launch: DarwinLaunch) -> dict[str, Birth] | None:
-    """Recorded births closed and the job group empty; nothing about escaped groups."""
+def _closed(launch: DarwinLaunch) -> tuple[int | None, dict[str, Birth] | None]:
+    """Recorded births closed and the job group empty; nothing about escaped groups.
+
+    The helper publishes its group before its only spawn, so a missing group
+    receipt proves nothing was spawned. Otherwise the group must be proven
+    empty, with or without an executor receipt: the executor spawns tools
+    (sysctl, launchctl, git) before it can record one.
+    """
     receipt = _receipt(launch)
-    if receipt is None:
-        # The executor records both births before any effect or child, so a
-        # job that ended first only ever held the helper and the executor.
-        return None
-    births = {"helper": receipt.helper, "executor": receipt.executor}
-    deadline = time.monotonic() + _CLOSURE_WAIT_S
-    while any(birth.owned().live() for birth in births.values()) or _group_alive(receipt.pgid):
-        if time.monotonic() >= deadline:
-            raise RuntimeError(
-                "terminal executor job still has live group members; custody retained"
-            )
-        time.sleep(_POLL_S)
-    return births
+    group = read_group_receipt(launch)
+    require_consistent(receipt, group)
+    if group is None:
+        return None, None
+    births = None if receipt is None else {"helper": receipt.helper, "executor": receipt.executor}
+    prove_group_closed(group.pgid, births)
+    return group.pgid, births
 
 
 def _running(launch: DarwinLaunch, pid: int) -> tuple[OwnedProcess, OwnedProcess | None]:
@@ -528,16 +463,32 @@ def _running(launch: DarwinLaunch, pid: int) -> tuple[OwnedProcess, OwnedProcess
     return helper, executor
 
 
-def _observe(launch: DarwinLaunch) -> DarwinJob:
-    first = _job(launch)
+def _require_running_group(
+    launch: DarwinLaunch, helper: OwnedProcess, executor: OwnedProcess | None, asid: int
+) -> None:
+    """A spawned executor implies the helper's published group receipt for this job."""
+    group = read_group_receipt(launch)
+    if group is None:
+        if executor is not None:
+            raise RuntimeError("executor runs without the helper's group receipt; custody retained")
+        return
+    if (group.helper_pid, group.asid) != (helper.pid, asid):
+        raise RuntimeError("finite helper group receipt differs from the running job")
+
+
+def _observe(launch: DarwinLaunch, text: str | None = None) -> DarwinJob:
+    first = _job(launch, text)
     helper = executor = None
     closed = None
+    pgid = None
     if first.state == "running":
         if first.pid is None:
             raise RuntimeError("running executor job has no native owner")
         helper, executor = _running(launch, first.pid)
+        _require_running_group(launch, helper, executor, first.asid)
+        pgid = helper.pid
     else:
-        closed = _closed(launch)
+        pgid, closed = _closed(launch)
     second = _job(launch)
     facts = ("state", "pid", "runs", "exit_code", "signal", "asid")
     if any(getattr(first, key) != getattr(second, key) for key in facts):
@@ -548,18 +499,73 @@ def _observe(launch: DarwinLaunch) -> DarwinJob:
         label=launch.label,
         domain=launch.domain,
         boot_id=launch.boot_id,
+        evidence="launchd",
         asid=first.asid,
         state=first.state,
         runs=first.runs,
         helper=None if helper is None else Birth.of(helper),
         executor=None if executor is None else Birth.of(executor),
-        pgid=None if helper is None else helper.pid,
+        pgid=pgid,
         exit_code=first.exit_code,
         signal=first.signal,
         closed=closed,
     )
     _require_captured_identity(launch, job)
     return job
+
+
+def _lost(launch: DarwinLaunch, evidence: Evidence) -> DarwinJob:
+    """A terminal whose boot or login domain ended; launchd holds no facts about it."""
+    receipt = _receipt(launch)
+    group = read_group_receipt(launch)
+    require_consistent(receipt, group)
+    asid = receipt.asid if receipt is not None else None if group is None else group.asid
+    return DarwinJob(
+        label=launch.label,
+        domain=launch.domain,
+        boot_id=launch.boot_id,
+        evidence=evidence,
+        asid=asid,
+        state="not running",
+        runs=None,
+        helper=None,
+        executor=None,
+        pgid=None if group is None else group.pgid,
+        exit_code=None,
+        signal=None,
+        closed=None
+        if receipt is None
+        else {"helper": receipt.helper, "executor": receipt.executor},
+    )
+
+
+def _domain_lost(launch: DarwinLaunch) -> DarwinJob:
+    """Exact absence in this boot is closure only after the login session changed.
+
+    Logout tears down ``gui/<uid>`` and its jobs; a new login gets a new audit
+    session. Absence under the recorded session (a lost bootstrap response, an
+    external bootout) stays unknown custody. The recorded owners must still be
+    gone and the job group empty.
+    """
+    job = _lost(launch, "domain-lost")
+    if job.asid is None or job.pgid is None or _domain_asid(launch) == job.asid:
+        raise RuntimeError("native executor job is absent before retirement; custody retained")
+    prove_group_closed(job.pgid, job.closed)
+    return job
+
+
+def _current(launch: DarwinLaunch) -> DarwinJob:
+    """launchd's facts for this boot, or proof that the job ended with its boot or domain."""
+    if launch.boot_id != _boot_id():
+        # A reboot ended every process of the recorded boot. Only a job loaded
+        # under this label in the current boot would still be custody.
+        if not _not_loaded(launch):
+            raise RuntimeError("the executor label is loaded in a later boot; custody unknown")
+        return _lost(launch, "boot-changed")
+    text = _query(launch)
+    if text is None:
+        return _domain_lost(launch)
+    return _observe(launch, text)
 
 
 def _require_captured_identity(launch: DarwinLaunch, job: DarwinJob) -> None:
@@ -575,13 +581,15 @@ def _require_captured_identity(launch: DarwinLaunch, job: DarwinJob) -> None:
         raise RuntimeError("native executor job changed from captured custody")
     if job.helper is not None and (prior.helper != job.helper or prior.pgid != job.pgid):
         raise RuntimeError("finite helper birth changed from captured custody")
+    if job.pgid is not None and prior.pgid != job.pgid:
+        raise RuntimeError("native executor job group changed from captured custody")
     if job.executor is not None and prior.executor != job.executor:
         raise RuntimeError("native executor birth changed from captured custody")
 
 
 def readback(record: dict[str, JsonValue]) -> DarwinJob:
     """Observe the retained job; absence or ambiguity refuses instead of respawning."""
-    return _observe(_admitted(record, verify=False))
+    return _current(_admitted(record, verify=False, recovery=True))
 
 
 def executor_receipt(record: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -624,12 +632,23 @@ def _command(argv: list[str]) -> subprocess.CompletedProcess[str]:
         raise RuntimeError(f"launchd command outcome unknown: {argv[1]}") from exc
 
 
+def _require_launchable(planned: DarwinLaunch) -> None:
+    """A missing program makes launchd hold a deferred spawn instead of failing."""
+    try:
+        digest = _sha256(Path(planned.helper.executable))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("signed helper artifact is missing; refusing before bootstrap") from exc
+    if digest != planned.helper.sha256 or not Path(planned.cwd).is_dir():
+        raise RuntimeError("finite job program or working directory changed before bootstrap")
+
+
 def _dispatch(journal: Journal, planned: DarwinLaunch) -> None:
     """The caller holds the operation lock across admission and bootstrap."""
     if journal.operation.launch_attempted:
         raise RuntimeError("executor launch was already attempted; recover only by readback")
     if _query(planned) is not None:
         raise RuntimeError("executor job already exists; recover by readback, never duplicate")
+    _require_launchable(planned)
     _write_plist(planned)
     journal.mark_launch_attempted()
     result = _command([LAUNCHCTL, "bootstrap", planned.domain, planned.plist])
@@ -677,17 +696,22 @@ def _await_absent(launch: DarwinLaunch, detail: str) -> None:
 
 def _retire(journal: Journal, launch: DarwinLaunch) -> DarwinJob:
     """The lock owner records deletion intent before removing a closed native job."""
-    receipt = journal.operation.retirement
-    if receipt is None:
-        terminal = _observe(launch)
+    retirement = journal.operation.retirement
+    if retirement is not None and retirement.state == "absent":
+        if not _not_loaded(launch):
+            raise RuntimeError("retired executor job reappeared; native custody is unknown")
+        return DarwinJob.model_validate(retirement.terminal)
+    if retirement is None:
+        terminal = _current(launch)
         if not terminal.finished:
             raise RuntimeError("executor is not positively closed; retain current native custody")
         journal.request_retirement(terminal.model_dump(mode="json"))
     else:
-        terminal = DarwinJob.model_validate(receipt.terminal)
-    if _query(launch) is not None:
-        if receipt is not None and receipt.state == "absent":
-            raise RuntimeError("retired executor job reappeared; native custody is unknown")
+        terminal = DarwinJob.model_validate(retirement.terminal)
+    if terminal.evidence != "launchd":
+        if not _not_loaded(launch):
+            raise RuntimeError("executor label is loaded after its boot or domain ended")
+    elif _query(launch) is not None:
         if _observe(launch) != terminal:
             raise RuntimeError("executor changed after closure; retain unresolved retirement")
         result = _command([LAUNCHCTL, "bootout", launch.target])
@@ -700,7 +724,7 @@ def retire_current(record: dict[str, JsonValue]) -> DarwinJob:
     """A living caller retires a closed executor; an executor cannot retire itself."""
     parsed = DarwinLaunch.model_validate(record)
     with exclusive(Path(parsed.operation)) as journal:
-        return _retire(journal, _admitted(record, verify=False, retired_replay=True))
+        return _retire(journal, _admitted(record, verify=False, recovery=True))
 
 
 def resume(record: dict[str, JsonValue]) -> DarwinJob:
@@ -708,13 +732,13 @@ def resume(record: dict[str, JsonValue]) -> DarwinJob:
     parsed = DarwinLaunch.model_validate(record)
     path = Path(parsed.operation)
     with exclusive(path) as journal:
-        current = _admitted(record, verify=False)
+        current = _admitted(record, verify=False, recovery=True)
         if journal.operation.terminal:
             raise RuntimeError("a completed release operation cannot launch another executor")
         terminal = _retire(journal, current)
         request = journal.operation.request
         runtime = request.executor.verify(Path(parsed.home), request.platform_tag)
-        if finite_artifact.capture() != current.helper:
+        if finite_artifact.capture(Path(parsed.home)) != current.helper:
             raise RuntimeError(
                 "signed helper changed between executor attempts; upgrade it only outside "
                 "an operation"

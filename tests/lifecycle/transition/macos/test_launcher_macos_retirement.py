@@ -137,7 +137,7 @@ def test_resume_refuses_a_changed_signed_helper_before_relaunch(
     harness.record_native(harness.launched())
     harness.terminal(exit_code=81)
     upgraded = HELPER.model_copy(update={"sha256": "b" * 64})
-    monkeypatch.setattr(finite_artifact, "capture", lambda: upgraded)
+    monkeypatch.setattr(finite_artifact, "capture", lambda _home: upgraded)
     with pytest.raises(RuntimeError, match="signed helper changed"):
         macos.resume(harness.plan)
     current = journal.read_operation(harness.path)
@@ -170,8 +170,10 @@ def test_completed_operation_never_resumes_and_settled_history_survives_reboot(
     monkeypatch.setattr(macos, "_macos", lambda: ("27.0", "27A100"))
     assert macos.retire_current(harness.plan) == terminal
     assert len(harness.fake.commands) == before
-    with pytest.raises(ValueError, match="durable intent in this boot"):
-        macos.readback(harness.plan)
+    # Readback of that history reports only that the boot ended; it never
+    # re-plans or re-reads launchd facts of the earlier boot.
+    ended = macos.readback(harness.plan)
+    assert (ended.evidence, ended.finished, ended.exit_code) == ("boot-changed", True, None)
     harness.terminal(exit_code=0)
     with pytest.raises(RuntimeError, match="reappeared"):
         macos.retire_current(harness.plan)

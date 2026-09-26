@@ -67,10 +67,12 @@ def execute(path: Path) -> None:
     )
     if operation.launch is None or not operation.launch_attempted:
         raise RuntimeError("release executor has no recorded native launch attempt")
-    receipt = _executor_receipt(operation.launch)
     with exclusive(path) as journal:
-        # Both native births are durable before any release effect or child.
-        journal.record_native(receipt)
+        # The receipt is computed and recorded under the lock for the launch
+        # this process was started for; a relaunch in between refuses.
+        if journal.operation.launch != operation.launch:
+            raise RuntimeError("release executor belongs to a retired native launch attempt")
+        journal.record_native(_executor_receipt(operation.launch))
         if isinstance(request, PitrRequest):
             from cli.release_transition.pitr_inputs import require_inputs
             from shared.release_operation import authorized_pitr
@@ -86,7 +88,7 @@ def _executor_receipt(launch: dict[str, JsonValue]) -> dict[str, JsonValue]:
     """Prove this process is the recorded executor of its own native adapter kind."""
     from cli.release_transition import native
 
-    if launch["kind"] == native.DARWIN:
+    if native.recorded_kind(launch) == native.DARWIN:
         from cli.release_transition.launcher_macos import executor_receipt
 
         return executor_receipt(launch)

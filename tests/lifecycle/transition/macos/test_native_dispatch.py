@@ -25,8 +25,13 @@ def test_recorded_launch_selects_its_own_adapter_kind() -> None:
     assert native.for_launch({"kind": native.DARWIN}) is macos
     with pytest.raises(ValueError, match="unknown native executor kind"):
         native.for_launch({"kind": "windows-job-v1"})
-    with pytest.raises(KeyError):
-        native.for_launch({"unit": "unlabelled"})
+    # A record without a kind is the journal's systemd contract, never a KeyError;
+    # that adapter then validates the record itself (typed refusal).
+    assert native.for_launch({"unit": "unlabelled"}) is linux
+    with pytest.raises((RuntimeError, ValueError)):
+        linux.retire_current({"unit": "unlabelled"})
+    with pytest.raises(ValueError, match="unknown native executor kind"):
+        native.for_launch({"kind": None})
 
 
 def test_host_adapter_has_no_fallback(monkeypatch: pytest.MonkeyPatch, harness: Harness) -> None:

@@ -17,8 +17,9 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
-from cli.release_transition import journal
+from cli.release_transition import journal, launchd_custody
 from cli.release_transition import launcher_macos as macos
+from cli.release_transition.launchd_print import _DARWIN_STRSIGNAL
 from cli.release_transition.request import ReleaseRef, Request
 from services.permissions_helper import finite_artifact
 from services.permissions_helper.finite_artifact import HelperArtifact
@@ -33,6 +34,37 @@ HELPER = HelperArtifact(
 )
 HELPER_BIRTH = OwnedProcess(900, 1.5, None)
 EXECUTOR_BIRTH = OwnedProcess(901, 2.5, None)
+ASID = 100023
+
+
+def domain_print(uid: int, asid: int) -> str:
+    """The measured login-domain header shape; the services list is elided."""
+    return (
+        f"gui/{uid} = {{\n\ttype = login\n\thandle = {asid}\n\tactive count = 474\n"
+        "\tsession = Aqua\n\tsecurity context = {\n"
+        f"\t\tuid = {uid}\n\t\tasid = {asid}\n\t}}\n\n\tservices = {{\n"
+        "\t\t    3621      - \tapplication.fixture\n\t}\n}\n"
+    )
+
+
+def write_group_receipt(
+    launch: macos.DarwinLaunch, helper_pid: int, asid: int = ASID, *, pgid: int | None = None
+) -> None:
+    """What the finite helper publishes before its only spawn."""
+    path = Path(launch.group_receipt)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "asid": asid,
+                "finite_executor": "v1",
+                "helper_pid": helper_pid,
+                "pgid": helper_pid if pgid is None else pgid,
+            }
+        )
+    )
+    path.chmod(0o600)
 
 
 def render(
@@ -43,7 +75,7 @@ def render(
     exit_code: int | None = None,
     signal: int | None = None,
     runs: int = 1,
-    asid: int = 100023,
+    asid: int = ASID,
     properties: tuple[str, ...] = macos.POLICY,
     arguments: list[str] | None = None,
 ) -> str:
@@ -51,7 +83,7 @@ def render(
     if running:
         outcome = [f"\tpid = {pid}", "\tlast exit code = (never exited)"]
     elif signal is not None:
-        outcome = [f"\tlast terminating signal = Killed: {signal}"]
+        outcome = [f"\tlast terminating signal = {_DARWIN_STRSIGNAL[signal]}: {signal}"]
     else:
         outcome = [f"\tlast exit code = {exit_code}"]
     lines = [
@@ -110,6 +142,7 @@ class FakeLaunchd:
             None
         )
         self.print_error: subprocess.CompletedProcess[str] | None = None
+        self.domain_asid = ASID
 
     def __call__(self, argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         if argv[0] == "/usr/sbin/sysctl":
@@ -119,6 +152,9 @@ class FakeLaunchd:
             if self.print_error is not None:
                 return self.print_error
             target = argv[2]
+            if target.count("/") == 1:
+                uid = int(target.removeprefix("gui/"))
+                return subprocess.CompletedProcess(argv, 0, domain_print(uid, self.domain_asid), "")
             if target in self.jobs:
                 return subprocess.CompletedProcess(argv, 0, self.jobs[target], "")
             domain, label = target.rsplit("/", 1)
@@ -186,7 +222,7 @@ def operation(
 
     monkeypatch.setattr(ReleaseRef, "verify", verified)
     monkeypatch.setattr(macos, "_boot_id", lambda: "boot-a")
-    monkeypatch.setattr(finite_artifact, "capture", lambda: HELPER)
+    monkeypatch.setattr(finite_artifact, "capture", lambda _home: HELPER)
     plan = macos.plan_launch(request.path, runtime)
     journal.Journal(current).record_launch(plan)
     return plan
@@ -217,13 +253,25 @@ class Harness:
         monkeypatch.setattr(macos, "_helper", helper)
         monkeypatch.setattr(macos, "_executor", lambda _launch, _helper: harness.executor)
         monkeypatch.setattr(macos, "_require_group_tree", lambda _helper: None)
-        monkeypatch.setattr(macos, "_group_alive", lambda _pgid: harness.group_alive)
+        # The fixture artifact path does not exist; the pre-bootstrap program
+        # check has its own test against real files.
+        monkeypatch.setattr(macos, "_require_launchable", lambda _planned: None)
+        monkeypatch.setattr(
+            launchd_custody, "group_empty", lambda _pgid, _helper: not harness.group_alive
+        )
+        # Escalation and evidence never touch the host's real process groups here.
+        self.pinned = False
+        monkeypatch.setattr(launchd_custody, "_pinned", lambda _executor, _pgid: harness.pinned)
+        monkeypatch.setattr(launchd_custody, "group_members", lambda _pgid: (set(), set()))
         monkeypatch.setattr(macos, "_SETTLE_S", 0.3)
-        monkeypatch.setattr(macos, "_CLOSURE_WAIT_S", 0.1)
+        monkeypatch.setattr(launchd_custody, "_CLOSURE_WAIT_S", 0.1)
+        monkeypatch.setattr(launchd_custody, "_KILL_WAIT_S", 0.1)
 
     def running(self, launch: macos.DarwinLaunch | None = None, **kwargs: Any) -> None:
+        """The helper runs and has published its group receipt before spawning."""
         launch = launch or self.launch
         kwargs.setdefault("pid", self.helper.pid)
+        write_group_receipt(launch, kwargs["pid"], kwargs.get("asid", ASID))
         self.fake.jobs[launch.target] = render(launch, **kwargs)
 
     def terminal(self, launch: macos.DarwinLaunch | None = None, **kwargs: Any) -> None:

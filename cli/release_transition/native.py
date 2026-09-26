@@ -40,9 +40,18 @@ def require_private_operation(path: Path, home: Path) -> None:
         raise ValueError("release launch journal must be a private owner-only file")
 
 
+def recorded_kind(record: Mapping[str, JsonValue]) -> JsonValue:
+    """A launch record's adapter kind, classified exactly as the journal does.
+
+    macOS records always carry their kind; a record without one keeps the
+    original systemd contract (journal ``_darwin``), whose adapter validates it.
+    """
+    return record.get("kind", LINUX)
+
+
 def for_launch(record: Mapping[str, JsonValue]) -> ModuleType:
     """The adapter that owns an already recorded launch; unknown kinds refuse."""
-    kind = record["kind"]
+    kind = recorded_kind(record)
     if kind == LINUX:
         from cli.release_transition import launcher_linux
 

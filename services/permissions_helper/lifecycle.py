@@ -326,15 +326,38 @@ def _verify_dr(app: Path) -> str:
     return actual
 
 
+def expected_requirement() -> str:
+    """The stable designated requirement every admitted helper must satisfy."""
+    return _expected_dr()
+
+
 def verified_signed_requirement(app: Path) -> str:
-    """Return `app`'s designated requirement only if it verifies as the stable identity.
+    """Return `app`'s designated requirement only if it satisfies the stable identity.
 
     A finite release-executor job runs the same signed artifact as the home
     helper; admission re-checks the signature instead of trusting a path.
+    `codesign --verify` alone accepts code that does not satisfy the requirement
+    it embeds (whoever signs chooses that text), so the expected requirement is
+    tested cryptographically with `-R`, and the embedded one must also equal it.
     """
-    if _probe(["codesign", "--verify", "--strict", str(app)]).returncode != 0:
-        raise PermissionsHelperBuildError(f"signed helper does not verify: {app}")
+    expected = _expected_dr()
+    verify = ["codesign", "--verify", "--strict", f"-R={expected}", str(app)]
+    if _probe(verify).returncode != 0:
+        raise PermissionsHelperBuildError(
+            f"signed helper does not satisfy the stable identity requirement: {app}"
+        )
     return _verify_dr(app)
+
+
+def verified_running_requirement(pid: int, requirement: str) -> None:
+    """The running process's kernel code-signing state satisfies `requirement`.
+
+    This checks the image that executes, not whatever file its path names now.
+    """
+    if _probe(["codesign", "--verify", f"-R={requirement}", str(pid)]).returncode != 0:
+        raise PermissionsHelperBuildError(
+            f"running helper process {pid} does not satisfy its signed identity"
+        )
 
 
 def preflight_signing_smoke() -> None:

@@ -1,0 +1,86 @@
+gui/501/com.ava.release-executor.1e79a64656ea65e2a0f86519529764f6.a0 = {
+	active count = 0
+	path = /fixture/job/home/updates/a3c5dcf2-7aee-49b9-a919-b46ccde9da0b/executor/a0/com.ava.release-executor.1e79a64656ea65e2a0f86519529764f6.a0.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /fixture/helper/AvaPermissionsHelper
+	arguments = {
+		/fixture/helper/AvaPermissionsHelper
+		--finite-executor
+		v1
+		--cwd
+		/fixture/job/home/releases/a28441106131b6aea4e30a5c4a5bff2cf8fbd4aa84ca3e4982c0ba14cd369b3a/venv/lib/python3.12/site-packages
+		--group-receipt
+		/fixture/job/home/updates/a3c5dcf2-7aee-49b9-a919-b46ccde9da0b/executor/a0/group.json
+		--env
+		AVA_CLUSTER_REGISTRY=/fixture/job/clusters.json
+		--env
+		AVA_HOME=/fixture/job/home
+		--env
+		HOME=/fixture/user
+		--env
+		PATH=/fixture/job/home/releases/a28441106131b6aea4e30a5c4a5bff2cf8fbd4aa84ca3e4982c0ba14cd369b3a/venv/bin:/usr/bin:/bin:/usr/sbin:/sbin
+		--
+		/fixture/job/home/releases/a28441106131b6aea4e30a5c4a5bff2cf8fbd4aa84ca3e4982c0ba14cd369b3a/venv/bin/python
+		-I
+		-B
+		-X
+		utf8
+		-m
+		cli.release_transition.execute
+		--operation
+		/fixture/job/home/updates/a3c5dcf2-7aee-49b9-a919-b46ccde9da0b/operation.json
+	}
+
+	working directory = /fixture/job/home/releases/a28441106131b6aea4e30a5c4a5bff2cf8fbd4aa84ca3e4982c0ba14cd369b3a/venv/lib/python3.12/site-packages
+
+	stdout path = /fixture/job/home/updates/a3c5dcf2-7aee-49b9-a919-b46ccde9da0b/executor/a0/stdout.log
+	stderr path = /fixture/job/home/updates/a3c5dcf2-7aee-49b9-a919-b46ccde9da0b/executor/a0/stderr.log
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.GML39p1dD5/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => com.ava.release-executor.1e79a64656ea65e2a0f86519529764f6.a0
+	}
+
+	domain = gui/501 [100023]
+	umask = 22
+	asid = 100023
+	minimum runtime = 10
+	exit timeout = 20
+	runs = 1
+	last terminating signal = User defined signal 2: 31
+
+	resource coalition = {
+		ID = 14114
+		type = resource
+		state = active
+		active count = 1
+		name = com.ava.release-executor.1e79a64656ea65e2a0f86519529764f6.a0
+	}
+
+	jetsam coalition = {
+		ID = 14115
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ava.release-executor.1e79a64656ea65e2a0f86519529764f6.a0
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = runatload | inferred program
+}

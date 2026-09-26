@@ -22,6 +22,7 @@ import itertools
 import json
 import os
 import socket
+import sys
 import time
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
@@ -111,7 +112,11 @@ def _call(
     if _IS_WINDOWS:
         return _call_pipe(req)
     path = str(sock_path or permissions_helper_socket())
-    s = _connect(path)
+    return _exchange(_connect(path), method, req)
+
+
+def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> Any:
+    """Send one request line on a connected socket, read one reply, close it."""
     s.settimeout(_CALL_TIMEOUT_S)
     try:
         s.sendall((json.dumps(req) + "\n").encode())
@@ -356,6 +361,29 @@ class FileReadResult(TypedDict):
 def ping(*, sock_path: str | Path | None = None) -> PingResult:
     """Report the helper's liveness and whether it holds the desktop grants."""
     return _call("ping", sock_path=sock_path)
+
+
+# macOS <sys/un.h>: SOL_LOCAL and LOCAL_PEERPID.
+_SOL_LOCAL = 0
+_LOCAL_PEERPID = 0x002
+
+
+def ping_peer(*, sock_path: str | Path) -> tuple[PingResult, int]:
+    """Ping and return the kernel-recorded PID of the process listening on the socket.
+
+    The PID in a ping reply is only the helper's own claim; LOCAL_PEERPID is the
+    kernel's record of the listener, captured when this connection was made.
+    """
+    if sys.platform != "darwin":
+        raise PermissionsHelperError("socket peer identity is a macOS helper contract")
+    s = _connect(str(sock_path))
+    try:
+        raw = s.getsockopt(_SOL_LOCAL, _LOCAL_PEERPID, 4)
+    except OSError:
+        s.close()
+        raise
+    req: dict[str, object] = {"id": next(_ids), "method": "ping"}
+    return _exchange(s, "ping", req), int.from_bytes(raw, sys.byteorder)
 
 
 def screencapture_region(

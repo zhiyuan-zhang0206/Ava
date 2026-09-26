@@ -191,19 +191,24 @@ from another process census.
 
 Implemented (see [macOS executor custody](../../cli/release_transition/launcher_macos.ava.okf.md)):
 one finite launchd job per operation attempt runs `--finite-executor` of the
-same stably signed helper artifact the live home helper runs. The executor and
-its finite tools inherit the job's process group; the helper builds the
-executor environment only from explicit pairs, keeps its direct child until
-reaped and names the outcome in its exit code. `native.py` is the one adapter
+same stably signed helper artifact the live home helper runs, admitted by
+`codesign -R` against the stable requirement and identified through the
+kernel's socket peer. The executor and its finite tools inherit the job's
+process group; the helper re-executes without launchd's session environment,
+publishes its group before spawning, keeps its direct child until reaped and
+closes its own group (TERM, then KILL) before exiting, because launchd's own
+cleanup is a single SIGTERM to the group. `native.py` is the one adapter
 dispatch; the release journal records helper birth, executor birth and
-terminal evidence separately, with no new controller or daemon. `launchctl
+terminal evidence separately and binds a receipt to its attempt. `launchctl
 print` readback is an explicit contract for the measured macOS 26 format:
-missing fields, unknown formats, failed queries and non-exact absence retain
-custody. Closure is group-scoped (recorded births closed, job group empty);
-retirement is intent, exact-label bootout, then positive absence. Opt-in
-native tests on 26.6.2 cover natural exit, lost bootstrap response, concurrent
-launch, executor and helper KILL with same-group descendants, continuation,
-stable-identity signing and the escaped-group negative control.
+missing fields, unknown formats, pending spawns, failed queries and non-exact
+absence retain custody. Every terminal closure proves the group empty;
+survivors are killed only while the recorded executor pins the group, else
+closure refuses with their evidence. A reboot, or a new login session with the
+recorded owners gone and the group empty, is positive closure. Opt-in native
+tests on 26.6.2 cover natural exit, lost bootstrap response, concurrent launch,
+executor and helper KILL, SIGTERM-ignoring members, SIGUSR1/2 terminals,
+continuation, stable-identity signing and the escaped-group negative control.
 
 Pending before macOS admission:
 
@@ -213,10 +218,15 @@ Pending before macOS admission:
   reservation.
 - A descendant that creates its own group or session is visible only while
   its parent lives and survives job cleanup. Automatic recovery after such an
-  escape needs a stronger owner boundary; PITR and any group-creating tool
-  stay unadmitted on macOS.
+  escape needs a stronger owner boundary (for example the job's resource
+  coalition, which is inherited but read only through private `proc_info`
+  flavors); PITR and any group-creating tool stay unadmitted on macOS.
+- A job-group member that outlives both recorded owners after an external
+  helper kill cannot be proven to belong to the attempt; recovery stays an
+  operator action named by the refusal.
 - Signed-helper release A/B/A on macOS with a real home helper, including
-  candidate failure, previous-image start and logout/shutdown interruption.
+  candidate failure, previous-image start and native logout/shutdown
+  interruption (logout and reboot recovery are unit-tested only).
 
 ## Verification and recovery policy
 

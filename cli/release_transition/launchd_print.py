@@ -66,16 +66,63 @@ _DIAGNOSTIC = frozenset(
         "jetsamproperties category",
         "jetsam thread limit",
         "cpumon",
+        # Present after a crash signal (measured: SIGTRAP from a Swift trap).
+        "successive crashes",
     }
 )
 _OUTCOME = frozenset({"pid", "last exit code", "last terminating signal"})
 _EXIT_CODE = re.compile(r"(\d{1,3})(?:: [A-Z][A-Z_]*)?")
-_SIGNAL = re.compile(r"[A-Za-z][A-Za-z ]*: (\d{1,2})")
 _DOMAIN = re.compile(r"gui/(\d+) \[(\d+)\]")
+# launchd prints a terminating signal as Darwin's strsignal(3) text, which
+# already ends in ": <number>". Measured on 26.6.2 for every signal 1-31; a
+# text outside this exact table refuses instead of being matched loosely.
+_DARWIN_STRSIGNAL = {
+    1: "Hangup",
+    2: "Interrupt",
+    3: "Quit",
+    4: "Illegal instruction",
+    5: "Trace/BPT trap",
+    6: "Abort trap",
+    7: "EMT trap",
+    8: "Floating point exception",
+    9: "Killed",
+    10: "Bus error",
+    11: "Segmentation fault",
+    12: "Bad system call",
+    13: "Broken pipe",
+    14: "Alarm clock",
+    15: "Terminated",
+    16: "Urgent I/O condition",
+    17: "Suspended (signal)",
+    18: "Suspended",
+    19: "Continued",
+    20: "Child exited",
+    21: "Stopped (tty input)",
+    22: "Stopped (tty output)",
+    23: "I/O possible",
+    24: "Cputime limit exceeded",
+    25: "Filesize limit exceeded",
+    26: "Virtual timer expired",
+    27: "Profiling timer expired",
+    28: "Window size changes",
+    29: "Information request",
+    30: "User defined signal 1",
+    31: "User defined signal 2",
+}
+_SIGNALS = {f"{text}: {number}": number for number, text in _DARWIN_STRSIGNAL.items()}
+_PENDING_SPAWN = "\tstate = spawn scheduled"
 
 
 class LaunchdFormatError(RuntimeError):
     """The output is outside the supported contract; native custody is retained."""
+
+
+class LaunchdPendingSpawnError(RuntimeError):
+    """launchd holds a spawn it has not performed (for example a missing program).
+
+    It may still start the job later, so a pending spawn is live custody, never
+    a terminal or absent job.
+    """
 
 
 class LaunchdJob(Record):
@@ -191,14 +238,21 @@ def _terminal_exit(scalars: dict[str, str]) -> tuple[int | None, int | None]:
         if match is None:
             raise LaunchdFormatError(f"unsupported launchd exit code: {code!r}")
         return int(match[1]), None
-    match = _SIGNAL.fullmatch(signal or "")
-    if match is None:
+    number = _SIGNALS.get(signal or "")
+    if number is None:
         raise LaunchdFormatError(f"unsupported launchd terminating signal: {signal!r}")
-    return None, int(match[1])
+    return None, number
 
 
 def read_job(text: str, target: str) -> LaunchdJob:
     """Parse one exact job target; any unknown or conflicting fact refuses."""
+    lines = list(_body(text, target))
+    if _PENDING_SPAWN in lines:
+        # Measured with a missing program: runs 1, launchd's own EX_CONFIG and
+        # event triggers that start the job once the program appears.
+        raise LaunchdPendingSpawnError(
+            f"launchd holds a pending spawn of {target}; it may still start, so custody is retained"
+        )
     scalars, blocks = _split(text, target)
     state = scalars["state"]
     if scalars["type"] != "LaunchAgent" or state not in {"running", "not running"}:
@@ -229,3 +283,22 @@ def read_job(text: str, target: str) -> LaunchdJob:
         signal=signal,
         properties=tuple(scalars["properties"].split(" | ")),
     )
+
+
+def read_domain_asid(text: str, uid: int) -> int:
+    """The audit session of the login domain ``gui/<uid>``, from its security context.
+
+    Only the domain header is read: exactly one top-level ``security context``
+    block holding exactly this uid and one decimal asid. Anything else refuses.
+    """
+    lines = text.rstrip("\n").split("\n")
+    if len(lines) < 3 or lines[0] != f"gui/{uid} = {{" or lines[-1] != "}":
+        raise LaunchdFormatError("launchd output does not describe exactly the login domain")
+    starts = [index for index, line in enumerate(lines) if line == "\tsecurity context = {"]
+    if len(starts) != 1:
+        raise LaunchdFormatError("launchd login domain lacks one security context")
+    block = lines[starts[0] + 1 : starts[0] + 4]
+    match = re.fullmatch(r"\t\tasid = (\d+)", block[1]) if len(block) == 3 else None
+    if match is None or block[0] != f"\t\tuid = {uid}" or block[2] != "\t}":
+        raise LaunchdFormatError("launchd login domain security context is unsupported")
+    return int(match[1])
