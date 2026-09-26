@@ -11,7 +11,7 @@ tags:
 
 ## What it is
 
-`shared/ui_update_state.py` owns two OS advisory locks under `$AVA_HOME`:
+`shared/home_lifecycle_locks.py` owns two OS advisory locks under `$AVA_HOME`:
 
 - `resource_lock` (`deploy-state.lifecycle.lock`) serializes long local
   start/stop/pause transitions with a bounded wait.

@@ -31,7 +31,7 @@ from ops.rpc_schemas import (
     ShellKillResult,
     ShellProbeResult,
 )
-from shared import pause_owner, ui_update_state, updater_handoff
+from shared import home_lifecycle_locks, pause_owner, updater_handoff
 from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.cluster_lock import (
     claim_recovery_lock,
@@ -72,8 +72,8 @@ def cluster_stop_op(
     deploy_acquired_at: datetime,
 ) -> dict[str, object]:
     """Drain hosted continuations under the exact executing deploy generation."""
-    with ui_update_state.resource_lock(purpose="ops.cluster_stop drain"):
-        with ui_update_state.lifecycle_lock():
+    with home_lifecycle_locks.resource_lock(purpose="ops.cluster_stop drain"):
+        with home_lifecycle_locks.lifecycle_lock():
             # Recovery takes these locks in the same order. Keep the lease proof
             # and local owner publication indivisible, then release the short
             # mutex before the potentially long drain.
@@ -129,8 +129,8 @@ def cluster_resume_op(
 ) -> dict[str, object]:
     """Generation-scoped unpause — never resume a later rollout's pause."""
     with (
-        ui_update_state.resource_lock(purpose="ops.cluster_resume"),
-        ui_update_state.lifecycle_lock(),
+        home_lifecycle_locks.resource_lock(purpose="ops.cluster_resume"),
+        home_lifecycle_locks.lifecycle_lock(),
     ):
         owner = pause_owner.read()
         if not owner.matches(deploy_holder, deploy_acquired_at):
@@ -195,8 +195,8 @@ def cluster_recover_op() -> dict[str, object]:
     Returns {"unlocked_holder": <prior lock holder or None>}.
     """
     with (
-        ui_update_state.resource_lock(purpose="ops.cluster_recover"),
-        ui_update_state.lifecycle_lock(),
+        home_lifecycle_locks.resource_lock(purpose="ops.cluster_recover"),
+        home_lifecycle_locks.lifecycle_lock(),
     ):
         handoff = updater_handoff.read()
         if handoff.status == "invalid":

@@ -55,7 +55,7 @@ until the explicit schema cutover.
 ## Notes
 
 - The cluster-level counterpart is [[cluster_lock.ava.okf.md|the cluster deploy lease]] (`deployment_state`); agents carry their own leases in `agents_meta`.
-- The home lifecycle mutexes that serialize local start/stop/pause with recovery are in [[ui_update_state.ava.okf.md|Home Lifecycle Mutexes]].
+- The home lifecycle mutexes that serialize local start/stop/pause with recovery are in [[home_lifecycle_locks.ava.okf.md|Home Lifecycle Mutexes]].
 
 The controller-driven stranded-hold writer, budget, local note queue, heartbeat
 alert, and status projection have been removed. Their five physical columns

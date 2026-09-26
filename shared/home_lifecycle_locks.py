@@ -32,7 +32,7 @@ from shared.platform import LockTimeoutError, file_lock
 _LOCK_TIMEOUT_S = 5.0
 _RESOURCE_LOCK_TIMEOUT_S = 30.0
 
-_log = logging.getLogger("shared.ui_update_state")
+_log = logging.getLogger("shared.home_lifecycle_locks")
 
 
 def lifecycle_lock_path() -> Path:
@@ -78,7 +78,9 @@ def _write_atomic(path: Path, payload: dict[str, object]) -> None:
     except OSError:
         # os.replace is the visible commit point; durability is degraded, but
         # the committed sidecar stays truthful.
-        _log.warning("[ui-update-state] directory fsync failed after holder commit", exc_info=True)
+        _log.warning(
+            "[home-lifecycle-locks] directory fsync failed after holder commit", exc_info=True
+        )
 
 
 @contextlib.contextmanager
@@ -100,7 +102,7 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
             try:
                 _write_atomic(_holder_path(path), {**holder, "state": "held"})
             except OSError:
-                _log.warning("[ui-update-state] could not record lock holder", exc_info=True)
+                _log.warning("[home-lifecycle-locks] could not record lock holder", exc_info=True)
             try:
                 yield
             finally:
@@ -108,7 +110,7 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
                     _write_atomic(_holder_path(path), {**holder, "state": "released"})
                 except OSError:
                     _log.warning(
-                        "[ui-update-state] could not mark released lock holder", exc_info=True
+                        "[home-lifecycle-locks] could not mark released lock holder", exc_info=True
                     )
     except LockTimeoutError as exc:
         if acquired:

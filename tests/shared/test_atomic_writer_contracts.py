@@ -18,9 +18,9 @@ from shared import (
     atomic_io,
     coding_session_owner_record,
     editable_install,
+    home_lifecycle_locks,
     pause_owner,
     start_serving,
-    ui_update_state,
 )
 from shared import updater_handoff as handoff
 from shared.agents.messages import delivery_outbox
@@ -54,13 +54,13 @@ def _marker_write(case: str, path: Path) -> None:
         pause_owner._write_atomic(path, payload)
     elif case == "freeze":
         allocation_freeze._write_atomic(path, payload)
-    elif case == "ui":
-        ui_update_state._write_atomic(path, payload)
+    elif case == "locks":
+        home_lifecycle_locks._write_atomic(path, payload)
     else:
         raise AssertionError(case)
 
 
-@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "ui"])
+@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "locks"])
 def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -69,7 +69,7 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
         "owner": coding_session_owner_record,
         "pause": pause_owner,
         "freeze": allocation_freeze,
-        "ui": ui_update_state,
+        "locks": home_lifecycle_locks,
     }
     module = modules[case]
     path = tmp_path / "state.json"
@@ -102,7 +102,7 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
         assert path.stat().st_mode & 0o777 == 0o600
 
 
-@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "ui"])
+@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "locks"])
 def test_marker_replace_failure_keeps_old_content_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

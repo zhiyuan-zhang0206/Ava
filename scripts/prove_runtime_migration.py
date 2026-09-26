@@ -21,7 +21,7 @@ import psycopg
 
 from cli.commands.start import cmd_start
 from cli.start_runtime import StartRuntime
-from shared import ui_update_state
+from shared import home_lifecycle_locks
 from shared.config import settings
 from shared.machine import machine_name
 from shared.migrations import (
@@ -60,7 +60,7 @@ def reject_unchanged(conn: psycopg.Connection, context: ReleaseMigrationContext)
 def home_inputs(home: Path) -> dict[Path, bytes]:
     # Lifecycle serialization records lock custody even when startup refuses.
     # Those two coordination files are not identity or configuration writes.
-    lock = ui_update_state.lifecycle_lock_path()
+    lock = home_lifecycle_locks.lifecycle_lock_path()
     coordination = {lock, lock.with_name(lock.name + ".holder.json")}
     return {
         path: path.read_bytes()

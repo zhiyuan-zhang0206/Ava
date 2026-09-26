@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from shared import ui_update_state as state
+from shared import home_lifecycle_locks as state
 from shared.platform import LockTimeoutError
 
 
