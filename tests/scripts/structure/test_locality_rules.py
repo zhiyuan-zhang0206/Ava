@@ -5,6 +5,7 @@ functions (no lcs.main, no git — see test_locality_gate.py for that)."""
 from __future__ import annotations
 
 import ast
+import os
 import pathlib
 
 import pytest
@@ -357,19 +358,26 @@ def test_a_wrong_case_module_path_does_not_resolve_to_the_real_module(
     assert sites == {"shared/other.py::shared.Mod._x": [1]}
 
 
-def test_exists_exact_cache_does_not_go_stale_after_a_file_is_created(
+def test_exists_exact_listing_is_refreshed_when_the_directory_changes(
     tmp_path: pathlib.Path,
 ) -> None:
-    """`_entries` is keyed on the directory's mtime; creating a new file bumps
-    that mtime, so a previously-cached "not found" listing must not linger."""
-    target = tmp_path / "shared" / "fresh.py"
-    target.parent.mkdir(parents=True, exist_ok=True)
+    """The cached listing is keyed on the directory's mtime; a new entry in a later
+    tick must be seen, and `reset_caches()` covers two writes in one coarse tick."""
+    directory = tmp_path / "shared"
+    directory.mkdir()
+    (directory / "old.py").write_text("x = 1\n", encoding="utf-8")
+    assert locality._exists_exact(directory / "old.py", directory=False)  # fills the cache
+    tick = directory.stat().st_mtime_ns
 
-    assert locality._exists_exact(target, directory=False) is False
+    (directory / "fresh.py").write_text("x = 1\n", encoding="utf-8")
+    os.utime(directory, ns=(tick, tick))  # same tick: the cached listing is stale
+    assert not locality._exists_exact(directory / "fresh.py", directory=False)
+    locality.reset_caches()
+    assert locality._exists_exact(directory / "fresh.py", directory=False)
 
-    target.write_text("x = 1\n", encoding="utf-8")
-
-    assert locality._exists_exact(target, directory=False) is True
+    (directory / "later.py").write_text("x = 1\n", encoding="utf-8")
+    os.utime(directory, ns=(tick + 10**9, tick + 10**9))  # a later tick
+    assert locality._exists_exact(directory / "later.py", directory=False)
 
 
 # --- owner_bypasses: the postgres-dial single decision owner ----------------
