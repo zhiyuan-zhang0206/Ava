@@ -1,4 +1,4 @@
-"""`ava._mcp_config.load_mcp_config` — per-host enable overlay filtering.
+"""`ava.mcp_config.load_mcp_config` — per-host enable overlay filtering.
 
 The loader drops servers the per-host overlay (`~/.ava/mcp_enabled.json`) marks
 disabled by default; `include_disabled=True` returns the full merged map. A
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-import ava._mcp_config as cfg_mod
+import ava.mcp_config as cfg_mod
 from shared.mcp_enabled import McpEnabledConfig, McpServerEntry, write_local
 
 
@@ -25,7 +25,7 @@ def _write_machine(unit_home: Path, servers: dict[str, dict[str, str]]) -> None:
 @pytest.fixture
 def _two_servers(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A machine mcp.json defining two servers, isolated from builtin/plugin sources."""
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     _write_machine(unit_home, {"fs": {"command": "a"}, "github": {"command": "b"}})
     return unit_home

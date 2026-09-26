@@ -21,7 +21,7 @@ def test_enable_then_disable_writes_overlay(unit_home: Path) -> None:
 
 
 def test_disable_filters_from_default_load(unit_home: Path) -> None:
-    from ava._mcp_config import load_mcp_config
+    from ava.mcp_config import load_mcp_config
 
     cmd_mcp_add("foo", None, "npx", ["-y", "server-foo"], [])
     assert "foo" in load_mcp_config()

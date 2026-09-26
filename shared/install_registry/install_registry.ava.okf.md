@@ -16,7 +16,7 @@ tags:
 `$AVA_HOME/installed.json` — **machine-local, not DB-backed**. External packages
 are installed per machine, never pushed from the cluster, and they must land on
 an **agent-runner**: skills and MCP servers are consumed inside the agent
-process (the skill scanner and `ava/_mcp_config.py` run there), so a package
+process (the skill scanner and `ava/mcp_config.py` run there), so a package
 dropped into a gateway-only host's `$AVA_HOME/plugins/` is never scanned.
 
 ## Entry shape
@@ -108,7 +108,7 @@ The single write path — `mutate()` under `registry_lock`, its wrappers, and th
   (copied verbatim), `agents/` (turned into one orchestrator skill),
   `commands/` (copied verbatim, surfaced as composer `/`-commands by
   `ava/composer_commands.py:discover_commands`), or a root `.mcp.json` (merged by
-  `ava/_mcp_config.py:load_mcp_config`). A hooks-only plugin bundling none of
+  `ava/mcp_config.py:load_mcp_config`). A hooks-only plugin bundling none of
   these is refused.
 - **MCP package** — a self-contained package (its own `.mcp.json` +
   `pyproject.toml`) under `$AVA_HOME/mcps/<name>/` with an isolated `.venv`.

@@ -126,12 +126,12 @@ def _reset_module_state() -> Iterator[None]:
 def fake_home(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point `ava_home()` to tmpdir, so `_load_config()` reads a fake mcp.json.
 
-    Patches _builtin_mcp_paths to list so tests expecting empty config are
+    Patches builtin_mcp_paths to list so tests expecting empty config are
     not surprised by the repo's mcps/chrome/.mcp.json built-in.
     """
-    import ava._mcp_config as _cfg
+    import ava.mcp_config as _cfg
 
-    monkeypatch.setattr(_cfg, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(_cfg, "builtin_mcp_paths", list)
     return unit_home
 
 
@@ -1066,9 +1066,9 @@ async def test_connect_server_enforces_requires_before_connecting(
 ) -> None:
     """A server whose `requires` is unmet raises BEFORE any stdio launch."""
     _write_config(fake_home, {"chrome": {"command": "npx", "requires": {"display": True}}})
-    import ava._mcp_config as _cfg
+    import ava.mcp_config as _cfg
 
-    # display_available is imported into _mcp_config from shared.platform_probes;
+    # display_available is imported into mcp_config from shared.platform_probes;
     # patch the bound name (where assert_requirements calls it).
     monkeypatch.setattr(_cfg, "display_available", lambda: False)
     called = False
