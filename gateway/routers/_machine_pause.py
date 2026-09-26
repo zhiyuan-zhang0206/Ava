@@ -266,7 +266,7 @@ def resume_cluster_machine(name: str, request: Request) -> MachineResumeResponse
     `register_self()` refreshes its dial URL (its reachable address may have
     changed) and clears its `stopped_at` latch. If the machine's reachable
     address changed, the gateway's pg_hba must cover the new IP — see the ops checklist in the
-    CLI output (`AVA_TRUSTED_CIDRS` + `ava cluster update --restart-only`).
+    CLI output (`AVA_TRUSTED_CIDRS`, then `ava restart` on the gateway host).
 
     404 when the row does not exist; idempotent (resumed=False) when the
     machine was not paused.

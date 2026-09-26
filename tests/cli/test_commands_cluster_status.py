@@ -433,3 +433,35 @@ def test_cmd_cluster_status_without_held_hosts_has_no_banner(
     rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     assert "host left held" not in capsys.readouterr().out
+
+
+# ─── ava cluster resume machine-side checklist ───────────────────────────────
+
+
+def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every `ava ...` command the resume checklist prints must parse with the real
+    CLI parser — an operator following it after an address change is exactly the
+    person who cannot afford a step that exits 2. The pg_hba step names the
+    current regeneration path: a gateway `ava restart` rewrites pg_hba.conf and
+    reloads the retained Postgres on its start leg."""
+    import re
+
+    from cli.parsers import build_parser
+
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr(
+        "shared.http_dial.post",
+        lambda *_a, **_kw: _FakeResponse({"name": "wsl", "resumed": True}),
+    )
+    assert _cluster_commands.cmd_cluster_resume("wsl") == 0
+    out = capsys.readouterr().out
+    commands = re.findall(r"`(ava [^`]+)`", out)
+    assert commands, out
+    parser = build_parser()
+    for command in commands:
+        parser.parse_args(command.split()[1:])  # SystemExit(2) fails the test
+    assert "`ava restart`" in out
+    assert "--restart-only" not in out

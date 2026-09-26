@@ -133,10 +133,11 @@ def cmd_cluster_resume(name: str) -> int:
         "    1. `ava start` on the machine — register_self refreshes its dial URL "
         "(the reachable address may have changed) and clears its stopped_at latch.\n"
         "    2. If its reachable address changed, the gateway's pg_hba must cover the new IP: "
-        "on the gateway host set AVA_TRUSTED_CIDRS in ~/.ava/.env to the machine's new "
-        "IP/CIDR, then `ava cluster update --restart-only` (regenerates + reloads pg_hba).\n"
+        "add the machine's new IP/CIDR to the comma-separated AVA_TRUSTED_CIDRS with "
+        "`ava config set AVA_TRUSTED_CIDRS=<ranges>`, then run `ava restart` ON THE GATEWAY "
+        "HOST — its start leg rewrites pg_hba.conf and reloads the retained Postgres.\n"
         "    3. Respawn the agents that lived on it (pause terminated them); "
-        "`ava machines list` / `ava.agents.list_machines()` shows it again."
+        "`ava cluster status` / `ava.agents.list_machines()` shows it again."
     )
     return 0
 
