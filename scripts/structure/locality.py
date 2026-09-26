@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,11 +18,19 @@ from typing import cast
 
 SECTIONS = ("private_imports", "owner_bypasses")
 _BASELINE_PATH = "scripts/structure/baseline.json"
-_TEST_PATTERNS = (
-    re.compile(r"(^|/)tests?/"),
-    re.compile(r"(^|/)test_[^/]+\.py$"),
-    re.compile(r"_test\.py$"),
-)
+# White-box tests reach into privates by design; only test *directories* are
+# exempt, since a governed module may legitimately be named test_*.py.
+_TEST_DIR = re.compile(r"(^|/)tests?/")
+# Packages whose `_` prefix marks a different axis than package privacy, with the
+# convention that says so. A private module directly under such a package is a
+# framework tier: importable by other governed packages, hidden from agents.
+FRAMEWORK_TIERS: dict[str, str] = {
+    "ava": (
+        "ava/_*.py modules are the framework / plugin-author tier: the underscore hides "
+        "them from the agent-facing ava.* surface (conventions/sdk-docstring-discipline.md), "
+        "not from other packages"
+    ),
+}
 
 Sites = dict[str, list[int]]
 
@@ -35,26 +44,77 @@ def _package_of(rel_path: str) -> list[str]:
     return rel_path.removesuffix(".py").split("/")[:-1]
 
 
+def _is_module(dotted: str, repo_root: Path) -> bool:
+    path = repo_root / dotted.replace(".", "/")
+    return path.with_name(f"{path.name}.py").is_file() or path.is_dir()
+
+
+def _import_base(node: ast.ImportFrom, rel_path: str) -> str | None:
+    if node.level == 0:
+        return node.module or ""
+    package = _package_of(rel_path)
+    if node.level - 1 > len(package):
+        return None
+    anchor = package[: len(package) - (node.level - 1)]
+    return ".".join([*anchor, *([node.module] if node.module else [])])
+
+
 def _import_candidates(node: ast.Import | ast.ImportFrom, rel_path: str) -> list[str]:
     if isinstance(node, ast.Import):
         return [alias.name for alias in node.names]
-    if node.level == 0:
-        base = node.module or ""
-    else:
-        package = _package_of(rel_path)
-        if node.level - 1 > len(package):
-            return []
-        anchor = package[: len(package) - (node.level - 1)]
-        base = ".".join([*anchor, *([node.module] if node.module else [])])
+    base = _import_base(node, rel_path)
+    if base is None:
+        return []
     return [base, *(f"{base}.{alias.name}" for alias in node.names if alias.name != "*")]
+
+
+def _module_aliases(
+    node: ast.Import | ast.ImportFrom, rel_path: str, repo_root: Path
+) -> dict[str, str]:
+    """Local names this import binds to a module or package (not to a function or class)."""
+    if isinstance(node, ast.Import):
+        return {
+            alias.asname or alias.name.split(".")[0]: alias.name
+            if alias.asname
+            else alias.name.split(".")[0]
+            for alias in node.names
+        }
+    base = _import_base(node, rel_path)
+    if not base:
+        return {}
+    return {
+        alias.asname or alias.name: f"{base}.{alias.name}"
+        for alias in node.names
+        if alias.name != "*" and _is_module(f"{base}.{alias.name}", repo_root)
+    }
+
+
+def _attribute_target(node: ast.Attribute, aliases: dict[str, str], repo_root: Path) -> str | None:
+    """`module._name` reached by attribute access on a module alias (`ava._boot.x`)."""
+    attrs: list[str] = []
+    current: ast.expr = node
+    while isinstance(current, ast.Attribute):
+        attrs.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name) or current.id not in aliases:
+        return None
+    dotted = aliases[current.id]
+    for attr in reversed(attrs):
+        if not _is_module(dotted, repo_root):
+            return None  # past the module boundary: an attribute of a function or class
+        dotted = f"{dotted}.{attr}"
+        if _is_private(attr):
+            return dotted
+    return None
 
 
 def _private_target(dotted: str, roots: tuple[str, ...], repo_root: Path) -> tuple[str, str] | None:
     """(`target`, `owner package`) for the first private component, if any.
 
-    The owner is the package the private name belongs to: the prefix itself when
-    it is a package directory (a private submodule), else that module's package
-    (a module-level private name is package-private).
+    Resolved the way Python does: when `<prefix>.py` exists the prefix is a module,
+    so the private name is package-private to that module's package; otherwise the
+    prefix is the package that owns the private submodule. A same-named directory
+    beside a module (an OKF docs folder, a stale __pycache__) never changes this.
     """
     parts = dotted.split(".")
     if parts[0] not in roots:
@@ -62,74 +122,136 @@ def _private_target(dotted: str, roots: tuple[str, ...], repo_root: Path) -> tup
     for index, part in enumerate(parts):
         if _is_private(part):
             prefix = parts[:index]
-            owner = prefix if (repo_root / "/".join(prefix)).is_dir() else prefix[:-1]
+            module_file = repo_root / f"{'/'.join(prefix)}.py"
+            owner = prefix[:-1] if module_file.is_file() else prefix
             return ".".join(parts[: index + 1]), ".".join(owner)
     return None
+
+
+@dataclass
+class _Reach:
+    rel_path: str
+    importer: str
+    roots: tuple[str, ...]
+    repo_root: Path
+    sites: Sites = field(default_factory=dict[str, list[int]])
+
+    def record(self, lineno: int, candidates: list[str]) -> None:
+        targets = {
+            found
+            for dotted in candidates
+            if (found := _private_target(dotted, self.roots, self.repo_root)) is not None
+        }
+        for target, owner in sorted(targets):
+            inside = self.importer == owner or self.importer.startswith(f"{owner}.")
+            if not inside and owner not in FRAMEWORK_TIERS:
+                self.sites.setdefault(f"{self.rel_path}::{target}", []).append(lineno)
 
 
 def private_imports(
     tree: ast.Module, rel_path: str, roots: tuple[str, ...], repo_root: Path
 ) -> Sites:
-    """Imports of a `_`-prefixed module or name from outside the package that owns it."""
-    importer = ".".join(_package_of(rel_path))
-    sites: Sites = {}
+    """Imports of, or attribute reach-ins to, a `_`-prefixed module or name from
+    outside the package that owns it."""
+    reach = _Reach(rel_path, ".".join(_package_of(rel_path)), roots, repo_root)
+    aliases: dict[str, str] = {}
+    attributes: list[ast.Attribute] = []
+    inner: set[int] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Import | ast.ImportFrom):
-            continue
-        targets = {
-            found
-            for dotted in _import_candidates(node, rel_path)
-            if (found := _private_target(dotted, roots, repo_root)) is not None
-        }
-        for target, owner in sorted(targets):
-            if importer != owner and not importer.startswith(f"{owner}."):
-                sites.setdefault(f"{rel_path}::{target}", []).append(node.lineno)
-    return sites
+        if isinstance(node, ast.Attribute):
+            attributes.append(node)
+            inner.add(id(node.value))
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            aliases.update(_module_aliases(node, rel_path, repo_root))
+            reach.record(node.lineno, _import_candidates(node, rel_path))
+    for node in attributes:
+        if id(node) not in inner:  # outermost link of each chain only
+            target = _attribute_target(node, aliases, repo_root)
+            if target is not None:
+                reach.record(node.lineno, [target])
+    return reach.sites
 
 
-def _psycopg_scan(tree: ast.Module) -> tuple[set[str], set[str], list[ast.Call]]:
-    """One walk: names bound to psycopg / its Connection classes, plus every call."""
-    modules: set[str] = set()
-    classes: set[str] = set()
-    calls: list[ast.Call] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            calls.append(node)
-        elif isinstance(node, ast.Import):
-            modules.update(a.asname or a.name for a in node.names if a.name == "psycopg")
-        elif isinstance(node, ast.ImportFrom) and node.module == "psycopg":
-            classes.update(
-                a.asname or a.name
-                for a in node.names
-                if a.name in {"Connection", "AsyncConnection"}
-            )
-    return modules, classes, calls
+@dataclass
+class _DialBindings:
+    """Local names bound to psycopg / psycopg_pool entry points in one module."""
+
+    psycopg: set[str] = field(default_factory=set[str])
+    connect: set[str] = field(default_factory=set[str])
+    connection: set[str] = field(default_factory=set[str])
+    pool_module: set[str] = field(default_factory=set[str])
+    pool: set[str] = field(default_factory=set[str])
+
+    def bind_import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            if alias.name == "psycopg":
+                self.psycopg.add(alias.asname or alias.name)
+            elif alias.name == "psycopg_pool":
+                self.pool_module.add(alias.asname or alias.name)
+
+    def bind_from(self, node: ast.ImportFrom, roots: tuple[str, ...]) -> None:
+        module = node.module or ""
+        governed = node.level > 0 or module.split(".")[0] in roots
+        for alias in node.names:
+            name = alias.asname or alias.name
+            if module == "psycopg" and alias.name == "connect":
+                self.connect.add(name)
+            elif module == "psycopg" and alias.name in {"Connection", "AsyncConnection"}:
+                self.connection.add(name)
+            elif (module == "psycopg_pool" or governed) and alias.name.endswith("ConnectionPool"):
+                # psycopg_pool's pools, or this repo's own pool subclasses.
+                self.pool.add(name)
+
+    def is_pool_class(self, node: ast.expr) -> bool:
+        node = _unsubscript(node)
+        if isinstance(node, ast.Name):
+            return node.id in self.pool
+        return (
+            isinstance(node, ast.Attribute)
+            and node.attr.endswith("ConnectionPool")
+            and isinstance(node.value, ast.Name)
+            and node.value.id in self.pool_module
+        )
+
+    def is_dial(self, call: ast.Call) -> bool:
+        func = _unsubscript(call.func)
+        if isinstance(func, ast.Name):
+            return func.id in self.connect or func.id in self.pool
+        if not isinstance(func, ast.Attribute) or func.attr != "connect":
+            return self.is_pool_class(func)
+        target = _unsubscript(func.value)
+        if isinstance(target, ast.Name):
+            return target.id in self.psycopg or target.id in self.connection
+        return (
+            isinstance(target, ast.Attribute)
+            and target.attr in {"Connection", "AsyncConnection"}
+            and isinstance(target.value, ast.Name)
+            and target.value.id in self.psycopg
+        )
 
 
 def _unsubscript(node: ast.expr) -> ast.expr:
     return node.value if isinstance(node, ast.Subscript) else node
 
 
-def _postgres_dials(tree: ast.Module) -> list[int]:
+def _postgres_dials(tree: ast.Module, roots: tuple[str, ...]) -> list[int]:
     """Lines that open a Postgres transport: psycopg connects and pool constructions."""
-    modules, classes, calls = _psycopg_scan(tree)
-    lines: list[int] = []
-    for node in calls:
-        func = _unsubscript(node.func)
-        if isinstance(func, ast.Attribute) and func.attr == "connect":
-            target = _unsubscript(func.value)
-            dial = (isinstance(target, ast.Name) and target.id in modules | classes) or (
-                isinstance(target, ast.Attribute)
-                and target.attr in {"Connection", "AsyncConnection"}
-                and isinstance(target.value, ast.Name)
-                and target.value.id in modules
-            )
-        else:
-            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
-            dial = name.endswith("ConnectionPool")
-        if dial:
-            lines.append(node.lineno)
-    return lines
+    bindings = _DialBindings()
+    calls: list[ast.Call] = []
+    classes: list[ast.ClassDef] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            calls.append(node)
+        elif isinstance(node, ast.ClassDef):
+            classes.append(node)
+        elif isinstance(node, ast.Import):
+            bindings.bind_import(node)
+        elif isinstance(node, ast.ImportFrom):
+            bindings.bind_from(node, roots)
+    for cls in classes:  # a pool subclass defined here is constructed like its base
+        if any(bindings.is_pool_class(base) for base in cls.bases):
+            bindings.pool.add(cls.name)
+    return sorted(call.lineno for call in calls if bindings.is_dial(call))
 
 
 @dataclass(frozen=True)
@@ -137,7 +259,7 @@ class Decision:
     """A design decision with exactly one owning module; other sites are bypasses."""
 
     owners: frozenset[str]
-    find: Callable[[ast.Module], list[int]]
+    find: Callable[[ast.Module, tuple[str, ...]], list[int]]
     fix: str
     # path -> one-line reason the site genuinely cannot go through the owner.
     allowed: dict[str, str] = field(default_factory=dict[str, str])
@@ -156,49 +278,56 @@ DECISIONS: dict[str, Decision] = {
 }
 
 
-def owner_bypasses(tree: ast.Module, rel_path: str) -> Sites:
+def owner_bypasses(tree: ast.Module, rel_path: str, roots: tuple[str, ...]) -> Sites:
     sites: Sites = {}
     for name, decision in DECISIONS.items():
         if rel_path in decision.owners or rel_path in decision.allowed:
             continue
-        lines = decision.find(tree)
+        lines = decision.find(tree, roots)
         if lines:
             sites[f"{rel_path}::{name}"] = lines
     return sites
 
 
-def is_test_file(rel_path: str) -> bool:
-    return any(pattern.search(rel_path) for pattern in _TEST_PATTERNS)
-
-
 def measure(
     tree: ast.Module, rel_path: str, roots: tuple[str, ...], repo_root: Path
 ) -> dict[str, Sites]:
-    if is_test_file(rel_path):
+    if _TEST_DIR.search(rel_path):
         return {kind: {} for kind in SECTIONS}
     return {
         "private_imports": private_imports(tree, rel_path, roots, repo_root),
-        "owner_bypasses": owner_bypasses(tree, rel_path),
+        "owner_bypasses": owner_bypasses(tree, rel_path, roots),
     }
 
 
-def allowlist_errors(tree: ast.Module, rel_path: str) -> list[tuple[int, str]]:
+def allowlist_errors(
+    tree: ast.Module, rel_path: str, roots: tuple[str, ...]
+) -> list[tuple[int, str]]:
     """A listed exemption whose module no longer bypasses the owner is stale."""
     return [
-        (
-            1,
-            f"stale {name} allowlist entry — the module no longer bypasses the owner; "
-            "remove it from DECISIONS in scripts/structure/locality.py",
-        )
+        (1, f"stale {name} allowlist entry — the module no longer bypasses the owner; {_UNLIST}")
         for name, decision in DECISIONS.items()
-        if rel_path in decision.allowed and not decision.find(tree)
+        if rel_path in decision.allowed and not decision.find(tree, roots)
+    ]
+
+
+_UNLIST = "remove it from DECISIONS in scripts/structure/locality.py"
+
+
+def missing_allowlist_errors(repo_root: Path) -> list[str]:
+    """A listed exemption for a module that no longer exists is stale too."""
+    return [
+        f"{path}:1: stale {name} allowlist entry — the module no longer exists; {_UNLIST}"
+        for name, decision in DECISIONS.items()
+        for path in sorted(decision.allowed)
+        if not (repo_root / path).is_file()
     ]
 
 
 def _new_site_message(kind: str, target: str) -> str:
     if kind == "private_imports":
         return (
-            f"imports private `{target}` from outside the package that owns it — import a "
+            f"reaches private `{target}` from outside the package that owns it — use a "
             "public name through the owner's package door (its __init__.py), or promote the "
             "name into the owner's contract deliberately (export it / drop the underscore)"
         )
@@ -256,6 +385,34 @@ def _stale_errors(
                 f"code has {now} — {action} (the baseline must match reality)"
             )
     return errors
+
+
+def unpaired_additions(current: dict[str, int], previous: dict[str, int]) -> list[str]:
+    """Added keys not explained by a same-file removal of the same private name.
+
+    The one legitimate new key is a moved owner: `f::a._x` becoming `f::a.b._x`
+    with an equal or lower count. Pairing on the private leaf name (not just the
+    file) keeps a PR from trading a frozen reach-in for an unrelated new one.
+    """
+    removals: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for key in previous.keys() - current.keys():
+        removals[_pair_key(key)].append(previous[key])
+    for candidates in removals.values():
+        candidates.sort()
+    unmatched: list[str] = []
+    for key in sorted(current.keys() - previous.keys(), key=lambda k: (current[k], k)):
+        candidates = removals[_pair_key(key)]
+        match = next((i for i, value in enumerate(candidates) if value >= current[key]), None)
+        if match is None:
+            unmatched.append(key)
+        else:
+            candidates.pop(match)
+    return unmatched
+
+
+def _pair_key(key: str) -> tuple[str, str]:
+    path, _, target = key.partition("::")
+    return path, target.rsplit(".", 1)[-1]
 
 
 def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None:
