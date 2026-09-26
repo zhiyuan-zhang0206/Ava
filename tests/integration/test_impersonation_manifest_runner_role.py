@@ -345,3 +345,48 @@ def test_runner_expiry_replay_cannot_freeze_failed_receipt(
     assert pending["manifest_frozen_at"] is None
     assert pending["events_completed_at"] is None
     assert pending["event_delivery_pending_reason"] == "capture_failed"
+
+
+@pytest.mark.parametrize("ending", ["abort", "terminate"])
+def test_runner_replay_after_non_expiry_end_never_raises(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    v1_lease: dict[str, Any],
+    restricted_receipt: LocalParticipant,
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
+) -> None:
+    """A supervisor abort closes admission like expiry, so replay certifies it;
+    the terminate trigger ends in SQL with admission open, so replay stays
+    pending instead of hitting the freeze gate's refusal."""
+    participant = restricted_receipt
+    _restore_receipt_door(db_conn)
+    seal_local_participant(participant)
+
+    def get(path: str, *, params: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", f"http://manifest.test{path}"),
+            json={"items": [], "meta": {"has_more": False}},
+        )
+
+    monkeypatch.setattr(reader, "_get", get)
+    if ending == "abort":
+        assert leases.abort_lease(participant.lease_id, owner, "the executor process is gone")
+    else:
+        db_conn.execute(
+            "UPDATE agents_meta SET status='terminated' WHERE id=%s", (participant.agent_id,)
+        )
+        db_conn.commit()
+    ended = history.resolve(participant.agent_id, 0)
+    assert ended["ended_at"] is not None
+    reader.consume_recorded_events(ended)
+    after = history.resolve(participant.agent_id, 0)
+    if ending == "abort":
+        assert after["manifest_admission_closed_at"] is not None
+        assert after["manifest_frozen_at"] is not None
+        assert after["events_completed_at"] is not None
+    else:
+        assert after["manifest_admission_closed_at"] is None
+        assert after["manifest_frozen_at"] is None
+        assert after["events_completed_at"] is None

@@ -133,6 +133,10 @@ def _awaits_manifest_freeze(
         return False
     if lease["ended_at"] is None:
         return True
+    # The SQL freeze requires closed admission; an end path that left it open
+    # (the terminate trigger) stays pending instead of failing every replay.
+    if lease["manifest_admission_closed_at"] is None:
+        return True
     # Expiry closes admission but must not wait for participants to hand back
     # control. The runner can freeze later, only once every receipt has sealed.
     try:

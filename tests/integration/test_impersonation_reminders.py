@@ -110,3 +110,27 @@ def _assert_reminder_commands(
         assert stopped_home not in content
     if null_home is not None:
         assert null_home not in content
+
+
+@pytest.mark.parametrize("bad", [7, "", "  ", ["python"]])
+def test_request_rejects_an_interpreter_reminders_cannot_quote(
+    db_conn: psycopg.Connection, bad: object
+) -> None:
+    agent_id = create_agent(db_conn)
+    owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,runtime_generation,runtime_owner,"
+        "runtime_kind,lease_expires_at) VALUES(%s,'idling',%s,%s,%s,'process',"
+        "clock_timestamp()+interval '10 minutes')",
+        (agent_id, machine_name(), owner.generation, owner.owner),
+    )
+    db_conn.commit()
+    with pytest.raises(ValueError, match="invoked_python"):
+        leases.request(
+            agent_id,
+            caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
+            reason="Handle the next message",
+            process_metadata={**recorded_tree(), "invoked_python": bad},
+            relay_provider="codex",
+            relay_thread_id=str(uuid4()),
+        )
