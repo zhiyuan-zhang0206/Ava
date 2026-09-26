@@ -519,9 +519,12 @@ class TestAutoResurrect:
         INSERT 'resurrect' lifecycle inbound."""
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
-            with db_conn.cursor() as cur:
+            with db_conn.cursor() as cur:  # a terminated hosted incarnation (resumable)
                 cur.execute(
-                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
+                    "UPDATE agents_meta SET status = 'terminated', runtime_kind = 'hosted', "
+                    "runtime_generation = gen_random_uuid(), runtime_owner = gen_random_uuid() "
+                    "WHERE id = %s",
+                    (agent_id,),
                 )
             db_conn.commit()
             resp = client.post(
