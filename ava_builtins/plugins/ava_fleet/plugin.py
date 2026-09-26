@@ -53,23 +53,24 @@ from . import task_registry
 
 def set_label(text: str) -> None:
     text = coerce_str(text, "text", allow_none=True)
+    agent_id = ava.agent_identity.require_agent_id()
     with ava.DB.cursor() as cur:
         cur.execute(
             "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
-            (text or None, ava.agent_identity.agent_id()),
+            (text or None, agent_id),
         )
         from shared.audit_events import insert_event_log
 
         insert_event_log(
             event_type="label_change",
-            agent_id=ava.agent_identity.agent_id(),
+            agent_id=agent_id,
             source="self",
             payload={"new_label": text or None},
         )
     # Per-call import: plugin autoload stays off the redis/live-events stack (task #3816).
     from shared.live_announce import publish_agent_updated_sync
 
-    publish_agent_updated_sync(ava.agent_identity.agent_id())
+    publish_agent_updated_sync(agent_id)
 
 
 # Sentinel for edit_notice: distinguishes "argument not passed" from an explicit
@@ -202,7 +203,7 @@ def notify(
             )
         expire_at_iso = due_at.isoformat()
 
-    aid = ava.agent_identity.agent_id()
+    aid = ava.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway performs the whole
     # lifecycle atomically — supersede the previous open notice + insert the
@@ -279,7 +280,7 @@ def edit_notice(
     if not body:
         raise ValueError("edit_notice needs at least one field to change")
 
-    aid = ava.agent_identity.agent_id()
+    aid = ava.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway edits the agent's
     # current open notice and re-publishes the posted event.
@@ -295,7 +296,7 @@ def edit_notice(
 def dismiss_notice() -> None:
     """Withdraw the open notice. At most one notice is open per agent (notify
     auto-resolves the previous one), so no id is needed."""
-    aid = ava.agent_identity.agent_id()
+    aid = ava.agent_identity.require_agent_id()
     # One unified write path (R3 door ④): the gateway withdraws the agent's
     # current open notice and publishes the resolve + agent-updated events.
     from ava import _gateway_client

@@ -124,8 +124,8 @@ def run(
     # cwd, so the two surfaces agree in every state.
     if cwd is None:
         aid = agent_identity.agent_id()
-        # agent id is typed int but is None until a bootstrap establishes it.
-        cwd = str(workspace_dir(aid)) if aid is not None else str(Path.home())  # pyright: ignore[reportUnnecessaryComparison]
+        # agent_id() is None until a bootstrap establishes it.
+        cwd = str(workspace_dir(aid)) if aid is not None else str(Path.home())
     completed = subprocess.run(  # noqa: S602
         cmd,
         shell=True,
@@ -201,7 +201,7 @@ def run_background(
     notify = _background.validate_notify(coerce_str(notify, "notify", allow_none=True))
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
-    aid = agent_identity.agent_id()
+    aid = agent_identity.require_agent_id()
     if cwd is None:
         cwd = str(workspace_dir(aid))
     session_id, _full = sessions._create_session(name, cwd=cwd, ttl=ttl)

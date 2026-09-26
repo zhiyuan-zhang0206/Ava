@@ -124,7 +124,7 @@ def is_launched_child() -> bool:
     return _agent_id is not None and not _owns_loop
 
 
-def agent_id() -> int:
+def agent_id() -> int | None:
     """Resolve the agent id used to attribute this process's work.
 
     A validated borrowed identity takes precedence, followed by the hosted turn
@@ -140,7 +140,7 @@ def agent_id() -> int:
     if turn is not None:
         return turn
     _try_establish_from_env()
-    return _agent_id  # type: ignore[return-value]
+    return _agent_id
 
 
 def require_agent_id() -> int:

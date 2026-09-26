@@ -158,7 +158,7 @@ def _own_open_page_on_port(port: int) -> bool:
     authority on conflicts.
     """
     try:
-        pages = _gateway_client.list_open_pages(ava.agent_identity.agent_id())
+        pages = _gateway_client.list_open_pages(ava.agent_identity.require_agent_id())
     except Exception:
         return False
     return any(int(page["port"]) == port for page in pages)
@@ -221,7 +221,7 @@ def _register_page(
     try:
         if ttl is None:
             row = _gateway_client.register_page(
-                ava.agent_identity.agent_id(),
+                ava.agent_identity.require_agent_id(),
                 name=name,
                 port=port,
                 host=reachable_host(),
@@ -230,7 +230,7 @@ def _register_page(
             )
         else:
             row = _gateway_client.register_page(
-                ava.agent_identity.agent_id(),
+                ava.agent_identity.require_agent_id(),
                 name=name,
                 port=port,
                 host=reachable_host(),
@@ -357,7 +357,7 @@ def close(name: str) -> None:
     _validate_name(name)
 
     try:
-        _gateway_client.close_page(ava.agent_identity.agent_id(), name)
+        _gateway_client.close_page(ava.agent_identity.require_agent_id(), name)
     except Exception as e:
         # Gateway returns 404 -> httpx.HTTPStatusError. Translate to PageClosed
         # so callers can distinguish "already gone" from real errors.
