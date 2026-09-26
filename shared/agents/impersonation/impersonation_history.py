@@ -347,10 +347,16 @@ def _pending_delivery_reason(lease: dict[str, Any]) -> str:
     return result
 
 
+def _by_occurrence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replay appends events in page order (newest first, late arrivals after);
+    the handoff reader needs call order. ``created_at`` is the event's own time."""
+    return sorted(rows, key=lambda row: (row["created_at"], row["seq"]))
+
+
 def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Derive counts only from recorded facts; preserve the original events too."""
-    sdk = [row for row in rows if row["kind"] == "sdk_call"]
-    api = [row for row in rows if row["kind"] == "api_event"]
+    sdk = _by_occurrence([row for row in rows if row["kind"] == "sdk_call"])
+    api = _by_occurrence([row for row in rows if row["kind"] == "api_event"])
     messages = _messages_with_ack(rows)
     directions = Counter(row["payload"]["direction"] for row in messages)
     started, ended = lease["activated_at"] or lease["created_at"], lease["ended_at"]
