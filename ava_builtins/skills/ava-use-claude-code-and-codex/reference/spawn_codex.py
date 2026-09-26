@@ -405,7 +405,7 @@ def _bootstrap_message(
 
 def _takeover_bootstrap_message(agent_id: int, name: str, brief: str, codex_remote: str) -> str:
     """Inline the briefing and the shared app-server endpoint; no task/work file."""
-    from ava._impersonation_launch import bootstrap_message
+    from ava.impersonation_launch import bootstrap_message
 
     guide = (
         Path(__file__).resolve().parents[4]

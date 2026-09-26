@@ -13,7 +13,7 @@ import httpx
 import psycopg
 import pytest
 
-from ava import _impersonation_events as reader
+from ava import impersonation_replay as reader
 from cli.commands import _release_services as release_services
 from ops.spec import ServiceSpec
 from shared.agents import impersonation as leases
@@ -705,7 +705,7 @@ def test_final_envelope_reader_splits_before_the_gateway_offset_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A permitted manifest never asks the public reader for offset 11,000."""
-    from ava import _impersonation_events as reader
+    from ava import impersonation_replay as reader
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "No emitted events")
     lease = history.resolve(owner.agent_id, 0)

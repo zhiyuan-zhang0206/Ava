@@ -396,7 +396,7 @@ def _takeover_bootstrap_message(
     agent_id: int, name: str, brief: str, *, relay_resident: bool
 ) -> str:
     """Inline the briefing; a takeover reads no task or work file."""
-    from ava._impersonation_launch import bootstrap_message
+    from ava.impersonation_launch import bootstrap_message
 
     guide = (
         Path(__file__).resolve().parents[4]
