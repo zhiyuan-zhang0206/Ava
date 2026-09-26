@@ -53,6 +53,16 @@ def _wake(agent_id: int, *, roster_changed: bool = False) -> None:
         publish_agent_updated_sync(agent_id)
 
 
+def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
+    """Renewal reminders shell-quote this path; refuse a malformed one at request
+    rather than failing the reminder pass for every lease."""
+    invoked_python = (process_metadata or {}).get("invoked_python")
+    if invoked_python is not None and (
+        not isinstance(invoked_python, str) or not invoked_python.strip()
+    ):
+        raise ValueError("process_metadata.invoked_python must be a nonempty string")
+
+
 def request(
     agent_id: int,
     *,
@@ -74,6 +84,7 @@ def request(
         raise ValueError("Session name and executor name must be nonempty")
     if caller.kind != "external_agent":
         raise ValueError("Impersonation requires an external_agent caller")
+    _validate_invoked_python(process_metadata)
     validate_relay_spec(relay_provider, relay_thread_id, relay_codex_remote)
     if (
         not isinstance(relay_batch_window_seconds, int)
