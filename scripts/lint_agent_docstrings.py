@@ -225,7 +225,11 @@ def _top_level_surface(repo_root: Path) -> list[str]:
             and any(isinstance(t, ast.Name) and t.id == "__all_for_ava__" for t in node.targets)
             and isinstance(node.value, ast.List)
         ):
-            return [e.value for e in node.value.elts if isinstance(e, ast.Constant)]
+            return [
+                e.value
+                for e in node.value.elts
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)
+            ]
     raise ValueError("ava/__init__.py declares no __all_for_ava__ list literal")
 
 
