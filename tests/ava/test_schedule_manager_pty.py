@@ -51,7 +51,13 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     # test_schedule_runner.py).
     from shared.config import settings as _settings
 
-    (home / ".env").write_text(f"AVA_DB_URL={_settings.data_plane.db_url}\n")
+    # The env-authority pass drops a cluster-scope key this file does not
+    # declare, so the owner password the authenticated local URL needs must be
+    # declared beside it (as the suite's own home does).
+    (home / ".env").write_text(
+        f"AVA_DB_URL={_settings.data_plane.db_url}\n"
+        f"AVA_DB_ADMIN_PASSWORD={os.environ['AVA_DB_ADMIN_PASSWORD']}\n"
+    )
     prior_home = os.environ.get("AVA_HOME")
     prior_override = os.environ.get("AVA_HOME_OVERRIDE")
     os.environ["AVA_HOME"] = str(home)

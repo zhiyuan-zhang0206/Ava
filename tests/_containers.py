@@ -90,6 +90,29 @@ def postgres() -> Generator[str]:
         yield url
 
 
+_RUNNER_PASSWORD = "suite-runner-password"  # noqa: S105 — throwaway pg only
+
+
+def runner_projection(db_url: str | None = None) -> str:
+    """`db_url` (default: the suite's owner URL) as the `ava_runner` projection
+    the agent launcher injects into every agent-profile child.
+
+    Such a child holds no owner password (dotenv_boot drops it), so an owner
+    URL cannot configure it. Creates or re-affirms the runner role first.
+    """
+    from shared.cluster import ensure_runner_role
+    from shared.cluster.derive import project_runner_db_url
+    from shared.config import settings
+
+    admin = settings.data_plane.db_url
+    ensure_runner_role(
+        "ava_citest",
+        base_admin_url=admin.rsplit("/", 1)[0] + "/postgres",
+        runner_password=_RUNNER_PASSWORD,
+    )
+    return project_runner_db_url(db_url or admin, _RUNNER_PASSWORD)
+
+
 @contextmanager
 def redis_server() -> Generator[str]:
     """Start a throwaway redis-server on an ephemeral port, yield its URL.

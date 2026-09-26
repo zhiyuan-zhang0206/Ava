@@ -26,6 +26,7 @@ import ava
 from ava import _gateway_client, _watcher_reconcile, watcher
 from ava.shell import _background
 from shared.platform import IS_WINDOWS
+from tests._containers import runner_projection
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
@@ -2230,8 +2231,7 @@ def _run_cron_racers(
         env["AVA_PROCESS_PROFILE"] = "agent"
         env["RACE_READY"] = str(ready)
         env["RACE_GO"] = str(go)
-        if db_url is not None:
-            env["AVA_DB_URL"] = db_url
+        env["AVA_DB_URL"] = runner_projection(db_url)  # the agent launcher's identity
         procs.append(
             subprocess.Popen(  # noqa: S603 — test-harness interpreter
                 [sys.executable, "-c", script],
@@ -2313,7 +2313,7 @@ def test_cron_concurrent_registration_through_pooler(
     # PgBouncer's trust mode still requires the user in an auth_file (it
     # trusts the password, not the username); the password field is ignored.
     auth_file = tmp_path / "pgbouncer-users.txt"
-    auth_file.write_text('"ava_citest" ""\n"ava" ""\n')
+    auth_file.write_text('"ava_citest" ""\n"ava" ""\n"ava_runner" ""\n')
     ini = tmp_path / "pgbouncer.ini"
     ini.write_text(
         f"""[databases]
