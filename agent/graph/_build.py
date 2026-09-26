@@ -11,10 +11,11 @@ alike, one loop — followed by each plugin's `agent_runtime.py` face (state
 fields, hooks, prompt sections). The loader lives in `agent._extensions` (task
 #3633 moved it off this module so surface-only processes never need the graph
 kernel); it is re-exported here as `_load_extensions` for the graph build. The
-import mechanics and the fail-soft contract live in `ava._extend`
+import mechanics and the fail-soft contract live in `ava.sdk_surface.plugin_loader`
 (`load_plugin_module` / `safe_load_plugin_module`), the same primitives
-`ava._extend.scan_and_load` uses at host boot, so both production load paths
-agree on module name, package context, `sys.modules` identity, and containment.
+`ava.sdk_surface.plugin_loader.scan_and_load` uses at host boot, so both
+production load paths agree on module name, package context, `sys.modules`
+identity, and containment.
 A repeat call re-executes the module already in `sys.modules` rather than
 binding a new one, so a plugin module's identity is stable for the life of the
 process. Layer A wrap monkey-patches the process's ava module; the exec child

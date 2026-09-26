@@ -85,7 +85,7 @@ def _load_face(name: str, plugin_dir: Path, *, pkg: str) -> None:
     face_py = plugin_dir / f"{FACE_MODULE}.py"
     if not face_py.exists():
         return
-    from ava._extend import safe_load_plugin_module
+    from ava.sdk_surface.plugin_loader import safe_load_plugin_module
 
     safe_load_plugin_module(face_py, name=name, pkg=pkg, module=FACE_MODULE)
 
@@ -118,7 +118,7 @@ def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
 
     discovered, config = _discovered_and_config()
 
-    from ava._extend import safe_load_plugin_module
+    from ava.sdk_surface.plugin_loader import safe_load_plugin_module
     from shared.plugin_context import PluginContext
 
     for name in sorted(config.plugins):

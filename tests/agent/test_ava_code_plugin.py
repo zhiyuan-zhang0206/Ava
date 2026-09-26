@@ -50,7 +50,7 @@ def _load_ava_code_plugin():
 
     yield
 
-    # clear_plugin_registrations() now also runs ava._extend.clear_wraps(), which
+    # clear_plugin_registrations() now also runs ava.sdk_surface.wraps.clear_wraps(), which
     # restores every wrapped ava.* target (files.*, shell.run, understand) to its
     # captured original — the old reload dance is no longer needed.
     clear_plugin_registrations()
@@ -783,14 +783,14 @@ def test_clear_wraps_restores_original(tmp_path: Path):
     question (`ava.extend.stack`), not a `__module__` sniff. After clear the
     registry is empty and the namespace holds a different object (the original).
     """
-    from ava import _extend
+    from ava.sdk_surface import wraps
 
     # fixture already loaded ava_code -> files.read carries one wrap layer
-    assert _extend.stack("files.read")  # non-empty: wrapped
+    assert wraps.stack("files.read")  # non-empty: wrapped
     wrapped = ava.files.read
 
-    _extend.clear_wraps()
-    assert _extend.stack("files.read") == []  # registry emptied
+    wraps.clear_wraps()
+    assert wraps.stack("files.read") == []  # registry emptied
     assert ava.files.read is not wrapped  # restored to the original object
     assert ava.files.read.__module__ == "ava.files"
 

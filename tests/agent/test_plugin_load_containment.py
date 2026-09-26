@@ -2,7 +2,7 @@
 
 The 2026-09-10 agent-host incident: a hand-placed external plugin whose
 `plugin.py` used `from . import refresh` was exec'd by the host-boot loader
-(`ava._extend.scan_and_load`) under a top-level module name, raised
+(`ava.sdk_surface.plugin_loader.scan_and_load`) under a top-level module name, raised
 `ImportError: attempted relative import with no known parent package`, and took
 the whole agent host down on every restart — even with the plugin disabled via
 `ava plugins disable` (the boot loader ignored the enable config).

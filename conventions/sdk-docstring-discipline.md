@@ -171,4 +171,4 @@ Python surfaces, so they keep heading form rather than stub form).
    skill discovery belongs to the skills index section. `ava/skills.py` is the
    one exempt module (enforced by `lint_agent_docstrings`).
 
-Every other `ava/` module — framework code such as `ava/_extend.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.
+Every other `ava/` module — framework code such as `ava/sdk_surface/wraps.py` or `ava/sdk_surface/plugin_loader.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.

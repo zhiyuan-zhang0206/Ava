@@ -218,7 +218,7 @@ def test_discover_agent_surface_modules(tmp_path: Path) -> None:
     # and not listed as a namespace -> OUT.
     _write(ava_dir / "framework_core.py", '"""Framework module with a public name."""\n')
     # Private-prefixed, no marker -> OUT (underscore alone proves nothing).
-    _write(ava_dir / "_extend.py", '"""Private framework module."""\n')
+    _write(ava_dir / "_internal.py", '"""Private framework module."""\n')
     # Annotated assignment form of the marker -> IN.
     _write(ava_dir / "_x.py", "__all_for_ava__: list[str] = []\n")
     # Property form of the marker -> IN.
@@ -288,9 +288,10 @@ def test_is_in_scope_plugin_paths_unchanged(
 def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> None:
     # Regression check against the actual repo tree: `ava/agents/__init__.py`
     # and `ava/shell/__init__.py` were previously excluded by the `_` rule
-    # (`__init__.py` itself starts with an underscore); `ava/agent_identity.py`
-    # and `ava/_extend.py` declare no marker and are not listed as a namespace,
-    # so they stay out under the new rule too.
+    # (`__init__.py` itself starts with an underscore); `ava/agent_identity.py`,
+    # `ava/sdk_surface/wraps.py`, and `ava/sdk_surface/plugin_loader.py`
+    # declare no marker and are not listed as a namespace, so they stay out
+    # under the new rule too — a public name is not by itself agent-visible.
     repo_root = Path(__file__).resolve().parents[1]
 
     surface = _discover_agent_surface_modules(repo_root)
@@ -298,4 +299,5 @@ def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> No
     assert (repo_root / "ava/agents/__init__.py").resolve() in surface
     assert (repo_root / "ava/shell/__init__.py").resolve() in surface
     assert (repo_root / "ava/agent_identity.py").resolve() not in surface
-    assert (repo_root / "ava/_extend.py").resolve() not in surface
+    assert (repo_root / "ava/sdk_surface/wraps.py").resolve() not in surface
+    assert (repo_root / "ava/sdk_surface/plugin_loader.py").resolve() not in surface
