@@ -16,8 +16,9 @@ Linux boot owner in [WSL gateway boot](wsl-gateway-boot.md).
 ## Prepare the Linux environment
 
 Clone into the distro's Linux filesystem, such as `~/.ava/source`, rather than
-`/mnt/c/`. Acquire Git, uv, Python 3.12, and the repository's frontend Node
-requirements. A gateway using local storage also needs Postgres 17 with
+`/mnt/c/`. Install uv with `scripts/provision/toolchain.sh`, which fetches the
+pinned release and verifies its checksum; never use the rolling astral installer.
+Acquire Git, Python 3.12, and the repository's frontend Node requirements. A gateway using local storage also needs Postgres 17 with
 pgvector, Redis 8.2, and PgBouncer. Run native Postgres under a non-root Linux
 user. Dependency acquisition does not create a cluster or start services.
 
