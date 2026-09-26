@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from argparse import Namespace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -116,6 +117,7 @@ def test_request_uses_external_identity_without_delivering_a_credential(
     assert seen["executor_name"] == "Codex: task1"
     assert seen["name"] == "Fix login"
     assert seen["process_metadata"]["pid"] > 0
+    assert seen["process_metadata"]["invoked_python"] == sys.executable
     assert seen["ttl_seconds"] == 600
     assert seen["provider"] == "codex"
     assert seen["thread_id"] == "thread-1"

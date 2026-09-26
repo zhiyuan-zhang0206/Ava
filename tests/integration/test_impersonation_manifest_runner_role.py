@@ -7,10 +7,12 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+import httpx
 import psycopg
 import pytest
 from psycopg import sql
 
+import ava._impersonation_events as reader
 import shared.agents.impersonation_manifest as manifest
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
@@ -253,3 +255,138 @@ def test_runner_late_seal_after_admission_close_and_late_capture_refusal(
         "WHERE lease_id=%s AND source_key=%s",
         (participant.lease_id, participant.source_key),
     ).fetchone() == ("sealed",)
+
+
+@pytest.mark.parametrize("seal_before_expiry", [True, False])
+def test_runner_expiry_replay_freezes_and_certifies_after_seal(
+    db_conn: psycopg.Connection[Any],
+    v1_lease: dict[str, Any],
+    restricted_receipt: LocalParticipant,
+    monkeypatch: pytest.MonkeyPatch,
+    seal_before_expiry: bool,
+) -> None:
+    participant = restricted_receipt
+    _restore_receipt_door(db_conn)
+    event = _eligible_sdk_event(participant.agent_id)
+    manifest._insert_local_item(participant, event)
+    row = db_conn.execute(
+        "SELECT event_key,line_sha256,event_at FROM agent_impersonation_event_participant_items "
+        "WHERE lease_id=%s AND source_key=%s",
+        (participant.lease_id, participant.source_key),
+    ).fetchone()
+    assert row is not None
+    key, digest, timestamp = row
+    db_conn.commit()
+    indexed = {
+        "id": key.removeprefix("event:"),
+        "line_sha256": digest,
+        "ts": timestamp.isoformat(),
+        "agent_id": participant.agent_id,
+        "event_name": "sdk_call",
+        "category": "telemetry",
+        "source": f"agent:{participant.agent_id}",
+        "attributes": {**event.attributes, "impersonation_session": f"{participant.agent_id}:0"},
+    }
+
+    def get(path: str, *, params: dict[str, Any]) -> httpx.Response:
+        items = [indexed] if params.get("event_name") == "sdk_call" else []
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", f"http://manifest.test{path}"),
+            json={"items": items, "meta": {"has_more": False}},
+        )
+
+    monkeypatch.setattr(reader, "_get", get)
+    if seal_before_expiry:
+        seal_local_participant(participant)
+    # A sealed receipt on an active lease must not freeze admission early.
+    reader.consume_recorded_events(v1_lease)
+    assert history.resolve(participant.agent_id, 0)["manifest_frozen_at"] is None
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
+        (participant.lease_id,),
+    )
+    db_conn.commit()
+    assert leases.get(participant.lease_id, attested_caller(v1_lease))["status"] == "expired"
+    expired = history.resolve(participant.agent_id, 0)
+    assert expired["manifest_admission_closed_at"] is not None
+    if not seal_before_expiry:
+        reader.consume_recorded_events(expired)
+        assert history.resolve(participant.agent_id, 0)["manifest_frozen_at"] is None
+        seal_local_participant(participant)
+    reader.consume_recorded_events(expired)
+    completed = history.resolve(participant.agent_id, 0)
+    assert completed["manifest_frozen_at"] is not None
+    assert completed["events_completed_at"] is not None
+    assert manifest.frozen_items(db_conn, participant.lease_id) == {key: (digest, "sdk_call")}
+    assert db_conn.execute(
+        "SELECT event_key,payload->>'line_sha256',kind FROM agent_impersonation_entries "
+        "WHERE lease_id=%s AND kind='sdk_call'",
+        (participant.lease_id,),
+    ).fetchall() == [(key, digest, "sdk_call")]
+
+
+def test_runner_expiry_replay_cannot_freeze_failed_receipt(
+    db_conn: psycopg.Connection[Any],
+    v1_lease: dict[str, Any],
+    restricted_receipt: LocalParticipant,
+) -> None:
+    participant = restricted_receipt
+    _restore_receipt_door(db_conn)
+    manifest._persist_capture_failure(participant)
+    db_conn.execute(
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
+        (participant.lease_id,),
+    )
+    db_conn.commit()
+    assert leases.get(participant.lease_id, attested_caller(v1_lease))["status"] == "expired"
+    reader.consume_recorded_events(history.resolve(participant.agent_id, 0))
+    pending = history.resolve(participant.agent_id, 0)
+    assert pending["manifest_frozen_at"] is None
+    assert pending["events_completed_at"] is None
+    assert pending["event_delivery_pending_reason"] == "capture_failed"
+
+
+@pytest.mark.parametrize("ending", ["abort", "terminate"])
+def test_runner_replay_after_non_expiry_end_never_raises(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    v1_lease: dict[str, Any],
+    restricted_receipt: LocalParticipant,
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
+) -> None:
+    """A supervisor abort closes admission like expiry, so replay certifies it;
+    the terminate trigger ends in SQL with admission open, so replay stays
+    pending instead of hitting the freeze gate's refusal."""
+    participant = restricted_receipt
+    _restore_receipt_door(db_conn)
+    seal_local_participant(participant)
+
+    def get(path: str, *, params: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", f"http://manifest.test{path}"),
+            json={"items": [], "meta": {"has_more": False}},
+        )
+
+    monkeypatch.setattr(reader, "_get", get)
+    if ending == "abort":
+        assert leases.abort_lease(participant.lease_id, owner, "the executor process is gone")
+    else:
+        db_conn.execute(
+            "UPDATE agents_meta SET status='terminated' WHERE id=%s", (participant.agent_id,)
+        )
+        db_conn.commit()
+    ended = history.resolve(participant.agent_id, 0)
+    assert ended["ended_at"] is not None
+    reader.consume_recorded_events(ended)
+    after = history.resolve(participant.agent_id, 0)
+    if ending == "abort":
+        assert after["manifest_admission_closed_at"] is not None
+        assert after["manifest_frozen_at"] is not None
+        assert after["events_completed_at"] is not None
+    else:
+        assert after["manifest_admission_closed_at"] is None
+        assert after["manifest_frozen_at"] is None
+        assert after["events_completed_at"] is None
