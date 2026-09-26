@@ -15,6 +15,7 @@ from cli.release_transition.journal import Journal, Operation, Phase
 from cli.release_transition.launchd_custody import Birth, RootCustody
 from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import Request
+from shared.native_process import ownership
 from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import EXECUTOR_BIRTH, Harness
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness
@@ -238,6 +239,8 @@ def test_macos_start_action_must_be_a_finite_tool_of_the_recorded_executor(
     operation = _darwin_operation(harness)
     home = Path(operation.request.home)
     monkeypatch.setattr(stage, "sys", SimpleNamespace(platform="darwin"))
+    # The birth comparison reads its own platform: tick-less darwin births.
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(os_boot_unit, "in_boot_unit", lambda _home: pytest.fail("not Linux"))
     parent = {"birth": EXECUTOR_BIRTH}
     monkeypatch.setattr(OwnedProcess, "capture", staticmethod(lambda _process: parent["birth"]))

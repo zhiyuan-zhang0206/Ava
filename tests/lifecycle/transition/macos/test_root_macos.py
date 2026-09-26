@@ -21,6 +21,7 @@ from cli.release_transition.launchd_custody import Birth, RootCustody
 from cli.release_transition.request import Request
 from services.permissions_helper import client, finite_artifact
 from shared import paths
+from shared.native_process import ownership
 from shared.native_process.ownership import OwnedProcess
 from shared.root_control import client as root_client
 from shared.runtime_release import VerifiedRelease
@@ -78,6 +79,9 @@ class World:
 
     def _patch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         world = self
+        # Tick-less macOS births compare by create time only on darwin; a Linux
+        # runner would refuse every such comparison as unknown evidence.
+        monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="darwin"))
 
         def home_helper(home: Path) -> tuple[OwnedProcess, Path]:
             assert home == world.home
@@ -509,7 +513,8 @@ def test_start_action_runs_the_selected_image_stage_as_a_bounded_finite_tool(
     )
 
 
-def test_data_plane_comparison_is_exact_births() -> None:
+def test_data_plane_comparison_is_exact_births(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="darwin"))  # tick-less births
     before = {"postgres": OwnedProcess(1, 1.0, None), "redis": OwnedProcess(2, 1.0, None)}
     root_macos._require_same_data_plane(before, dict(before))
     for after in (
