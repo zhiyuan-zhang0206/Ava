@@ -13,7 +13,7 @@ tags:
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
 path, and `ava._extend.scan_and_load()` does the same for the external plugins
 at host boot (`agent/_process_boot.py:load_process_extensions`). The
-agent-launched child enters through the same loader (`ava._ensure_plugins_loaded`);
+agent-launched child enters through the same loader (`ava.ensure_plugins_loaded`);
 its stateless form loads surfaces only ([[okf/plugins/module-loading/two-faces.ava.okf.md]]).
 All drive the same primitives (`ava/_extend.py`), so a plugin sees the same
 module name, `__package__`, `sys.modules` identity, and containment whichever
@@ -86,7 +86,7 @@ reporting through the one reporter: a plugin's `provider.py`
 (`cli/commands/_converge_plugins.py`), a built-in plugin's `metrics.py`
 (`gateway/routers/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/routers/_plugin_inspector.py`), and the launched
-child's `import ava` self-load (`ava._ensure_plugins_loaded`, plus a stderr
+child's `import ava` self-load (`ava.ensure_plugins_loaded`, plus a stderr
 line — a child usually has no log sink). One contained site stays off that
 reporter: `default_config.py` images surface as `error`-status entries on the
 plugin-update result (`shared/plugins_config.py:update_all_disk_images`).

@@ -1,7 +1,6 @@
-"""Private implementation modules behind the `ava` SDK entry surface.
+"""Implementation of the `ava` SDK entry surface — what the agent sees and how.
 
-Each module holds one cohesive slice of the entry-point machinery that used
-to live in `ava/__init__.py`:
+Each module holds one cohesive slice of the entry-point machinery:
 
 - `const` — the `ava.const()` documented-value factory;
 - `sdk_disable` — the `AVA_SDK_DISABLE` machinery (parse + sentinel swap);
@@ -12,11 +11,13 @@ to live in `ava/__init__.py`:
 - `plugins` — the plugin registration API (`register_namespace` family,
   registries, exception hierarchy).
 
-`ava/__init__.py` re-exports their public names with redundant aliases, so the
-external API (`import ava.X`, `ava.help`, `ava.register_namespace`, ...) is
-byte-identical to before the split. Nothing here is part of the agent-facing
-SDK: the whole package carries the underscore prefix, so `help(ava)` never
-lists it and `AVA_SDK_DISABLE` cannot target it.
+`ava/__init__.py` re-exports the plugin-author entry points (`ava.help`,
+`ava.register_namespace`, ...). The agent kernel drives rendering through the
+public controls here (`discovery.hidden_surface_members`,
+`help.compact_classes`, `plugins.REGISTERED_SDK_EXPANSIONS`, the
+`sdk_disable` entries). None of it is agent-facing: `help(ava)` lists only the
+`__all_for_ava__` whitelist, and `AVA_SDK_DISABLE` refuses to disable a
+framework module such as this package.
 """
 
 import sys as _sys

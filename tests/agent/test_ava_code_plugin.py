@@ -1008,12 +1008,12 @@ def test_coding_tools_section_skips_framework_expanded_modules(
     child (e.g. `shell.sessions`) does not suppress the parent's stub. `cwd`
     is registered via ava.register_sdk_expand at plugin import, so it is
     always expanded and never promoted here."""
-    import ava
+    from ava.sdk_surface import plugins
     from ava_builtins.plugins.ava_code.agent_runtime import _coding_tools_section
     from shared.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
-    monkeypatch.setattr(ava, "_REGISTERED_SDK_EXPANSIONS", ["cwd"])
+    monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", ["cwd"])
     text = _coding_tools_section()
     assert "## ava.files" not in text  # expanded by the framework -> skipped
     assert "## ava.shell" in text  # only the child is expanded -> parent stays

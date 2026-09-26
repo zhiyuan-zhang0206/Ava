@@ -95,7 +95,7 @@ class Attachment:
             # (build_agent_state().model_validate), which needs the plugins'
             # state fields registered — the surface-only default would silently
             # drop them (review finding, #2616).
-            ava._ensure_plugins_loaded(surface=False)
+            ava.ensure_plugins_loaded(surface=False)
             state, overlay, birth = load_snapshot(self.agent_id)
             self._stack.enter_context(bind_agent_config(resolve_agent_config_pins(overlay, birth)))
             self._stack.enter_context(bind_agent_plugin_config(resolve_agent_plugin_pins(overlay)))
