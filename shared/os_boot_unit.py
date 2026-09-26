@@ -183,10 +183,13 @@ def render_unit(ctx: BootUnitContext, *, action: BootStartAction | None = None) 
     )
     # Quote every supplied argument. ':' also disables systemd's $ expansion.
     command = " ".join(_quote(value, "start argument") for value in action.argv)
+    # Only the generic network target: the host's private-network or proxy
+    # services are the operator's (order after them with a drop-in), and a boot
+    # start that beats them fails and retries under Restart=on-failure.
     return (
         "[Unit]\n"
         f"Description=Ava application root ({home_slug(ctx.home)})\n"
-        "After=network-online.target tailscaled.service mihomo.service\n"
+        "After=network-online.target\n"
         "Wants=network-online.target\n"
         "StartLimitIntervalSec=0\n\n"
         "[Service]\n"

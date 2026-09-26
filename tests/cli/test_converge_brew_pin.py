@@ -24,7 +24,6 @@ EXPECTED_PINNED_FORMULAE = frozenset(
         "postgresql@17",
         "redis",
         "redis@8.2",
-        "tailscale",
         "uv",
     }
 )

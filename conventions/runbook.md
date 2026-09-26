@@ -624,26 +624,27 @@ responses and must not proxy SSE. Preserve route prefixes, query strings,
 cookies, redirects, and immediate `text/event-stream` delivery. Keep the entry
 supervised independently of rollout service teardown.
 
-For an existing Tailscale deployment, Serve can own the HTTPS listener,
-certificate renewal and persistence without a second proxy daemon. HTTPS
-certificates must be enabled for the tailnet; certificate issuance publishes
-the node's full DNS name in Certificate Transparency. Keep the service tailnet
-only (Serve, not Funnel). First save `tailscale serve status --json` and refuse
-to overwrite an occupied HTTPS port. For example, for gateway 20016 and gate
-20017 on an otherwise unused HTTPS port 443:
+If the host's private network already provides a managed HTTPS entry (listener,
+certificate renewal and persistence), it can take this role without a second
+proxy daemon. Keep that entry reachable only on the private network, never
+publicly exposed. If its certificates come from a public CA, issuance
+publishes the node's full DNS name in Certificate Transparency. Save the
+entry's current configuration first and refuse to overwrite an occupied HTTPS
+port. For example, for gateway 20016 and gate 20017 on an otherwise unused
+HTTPS port 443, add exactly four handlers:
 
-```bash
-tailscale serve --bg --https=443 --set-path=/api http://127.0.0.1:20016/api
-tailscale serve --bg --https=443 --set-path=/pages http://127.0.0.1:20016/pages
-tailscale serve --bg --https=443 --set-path=/grafana http://127.0.0.1:20016/grafana
-tailscale serve --bg --https=443 http://127.0.0.1:20017
-```
+| Path on `https://<entry-host>` | Upstream |
+|---|---|
+| `/api` | `http://127.0.0.1:20016/api` |
+| `/pages` | `http://127.0.0.1:20016/pages` |
+| `/grafana` | `http://127.0.0.1:20016/grafana` |
+| `/` (everything else) | `http://127.0.0.1:20017` |
 
-Serve strips the mount prefix, so the upstream URL deliberately restores it.
-`--bg` persists across Tailscale restarts. Preserve other Serve handlers and TCP
-relays; never use `tailscale serve reset` to roll back this entry. Remove only
-the four newly added handlers with the matching `--https` / `--set-path` and
-`off` arguments. The direct IP entry remains available throughout.
+An entry that strips the mount prefix needs the upstream URL to restore it, as
+above. Make the handlers persist across restarts of the entry. Preserve its
+other handlers and TCP relays; never reset the whole entry to roll this back.
+Remove only the four added handlers. The direct IP entry remains available
+throughout.
 
 Acceptance: verify ALPN negotiates `h2` from the user's machine with normal
 certificate verification; load several console windows and inspect the real

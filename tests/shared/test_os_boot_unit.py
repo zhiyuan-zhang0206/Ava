@@ -68,7 +68,7 @@ def test_render_unit_binds_home_checkout_and_registry(ctx: BootUnitContext) -> N
     unit = render_unit(ctx)
     # Boot ordering + identity: the unit runs as the cluster's user, in the
     # checkout, with the checkout venv on PATH.
-    assert "After=network-online.target tailscaled.service mihomo.service" in unit
+    assert "After=network-online.target\n" in unit
     assert "WantedBy=multi-user.target" in unit
     assert f"User={ctx.user}" in unit and f"Group={ctx.group}" in unit
     assert f"WorkingDirectory={ctx.repo}" in unit

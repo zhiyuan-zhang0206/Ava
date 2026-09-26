@@ -485,7 +485,7 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
         # Loopback binds — no warning.
         ("127.0.0.1", "127.0.0.1", []),
         # Listen hostname is not judged — no warning.
-        ("tailscale-box", "tailscale-box", []),
+        ("private-box", "private-box", []),
     ],
 )
 def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(

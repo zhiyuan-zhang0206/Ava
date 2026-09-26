@@ -280,7 +280,7 @@ os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 # shell exports the operator's real ~/.ava/.env into every child process (the
 # 2026-08-04 shell-env leak class), and host-scope keys survive the
 # cluster-scope drop in `_enforce_cluster_env_authority` — so on a dev box a
-# Tailscale host override reached the suite and
+# private-network host override reached the suite and
 # `test_ensure_renders_configs_with_native_paths_and_loopback` rendered
 # `http://100.x.y.z:3200` instead of loopback while CI (no .env) stayed green.
 # Pinned unconditionally, like the gateway/telegram sentinels: local runs
