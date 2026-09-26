@@ -7,7 +7,8 @@ decision to scope Windows this way is
 
 Available today for a gateway on Windows hardware: run it inside WSL2. That is
 Linux, so the whole Linux path applies unchanged — native pg/redis via
-`install.sh --role gateway`, or containers via `docker-compose.windows.yml`.
+`ava start --serve-gateway --serve-agent-runner`, or containers via
+`docker-compose.windows.yml`.
 
 ## The four blockers
 
@@ -28,35 +29,12 @@ Three possible directions, none of them started: vendor a Windows redis build,
 shell out to Memurai (closed-source, licensing unexamined), or containerize the
 redis leg alone.
 
-### 2. Self-update — closed for the `ops/cluster*` family, open for schedules
+### 2. Prepared release platform qualification
 
-**Closed.** `spawn_update`, `spawn_rollout`, `spawn_restart` and
-`unpause_local_cluster` used to each build a literal raw session spawn around a
-POSIX `sh` one-liner (`{ … }`, `2>&1 | tee -a`, `$?`), while the probe and the
-kill paths already dispatched through `get_backend()`. Liveness and teardown
-were Windows-capable and every actual orchestration failed — a partial port
-that is worse than none, because the unit comes up, reports healthy, and
-silently cannot take an update. The three orchestration spawns
-(`spawn_update` / `spawn_rollout` / `spawn_restart`) share
-`ops/cluster_session.py:_spawn_detached_session`, which dispatches on
-`PlatformBackend.is_posix()` and hands a `cmd /c` chain to winproc on Windows;
-`unpause_local_cluster` respawns the restarter (the one service among them)
-through the session backend directly (`get_backend().new_session`) —
-post-2026-08 it lands on the native POSIX supervisor, on Windows it is
-winproc.
-
-Spawning the updater was only half of it: the session it spawns is the ops
-daemon's child (Windows reparents nothing), so the updater's own `ava restart`
-killed itself the moment its stop reached `ava-ops`. Closed on the kill side —
-`winproc.kill_session` prunes other sessions and the caller's ancestry out of the
-tree walk
-([decision](../decisions/2026-07-29-windows-session-kill-boundaries.md)).
-
-**Still open.** `gateway/schedule_manager.py:_launch` had the original shape
-(a raw spawn) while its `_live_ids`/`_kill` siblings were already
-backend-dispatched — the same half-port, one layer over. Schedules are a gateway
-service, so this one is genuinely blocking for a Windows gateway and irrelevant
-to a Windows agent-runner.
+The detached CLI/ops updater graph and its platform shell chains are absent.
+`ava cluster update --prepared` uses the prepared release transition path.
+Windows support for that path requires its own native custody and complete
+qualification; the retired shell implementation is not a fallback.
 
 ### 3. `milvus` cannot install, and nothing gates it
 
@@ -78,9 +56,6 @@ default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`
 
 ## Also missing
 
-- **Birth.** `scripts/install.sh` is bash and dies on `uname` before role
-  dispatch; `cli/install_cluster.py` has no platform branch at all. A Windows
-  gateway needs a birth path that is not a shell script.
 - **Unix sockets throughout the data plane.** `_pg_socket_dir()` hardcodes
   `/tmp/ava-pg-<slug>`, `pg_admin_url()` is
   `postgresql://<user>@/postgres?host=<socket-dir>`, `_start_pg` passes

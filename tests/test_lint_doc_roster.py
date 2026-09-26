@@ -37,7 +37,7 @@ def _load_lint(monkeypatch, registered, runbook_text, tmp_path):
 
 
 def test_roster_matches_registered_passes(monkeypatch, tmp_path):
-    services = ["gateway", "labeler", "gateway-watchdog"]
+    services = ["gateway", "labeler", "otel-collector"]
     lint = _load_lint(monkeypatch, services, _roster_table(*services), tmp_path)
     assert lint.check() == 0
 
@@ -131,7 +131,7 @@ def _load_healthcheck_lint(
 
     monkeypatch.setattr(lint, "build_services", fake_services)
     monkeypatch.setattr(lint, "directory_healthchecks", lambda: directory)
-    monkeypatch.setattr(lint, "hand_added_healthchecks", lambda: hand_added)
+    monkeypatch.setattr(lint, "diagnostic_healthchecks", lambda: hand_added)
     roster = tmp_path / "check-roster.ava.okf.md"
     roster.write_text(table_text, encoding="utf-8")
     monkeypatch.setattr(lint, "_HEALTHCHECK_ROSTER", roster)
@@ -206,3 +206,20 @@ def test_parse_healthcheck_roster_strips_py_suffix():
     lint = importlib.import_module("scripts.lint_doc_roster")
     parsed = lint.parse_healthcheck_roster(_healthcheck_table("gateway", "lgtm"))
     assert parsed == {"gateway", "lgtm"}
+
+
+def test_diagnostic_imports_include_nested_and_aliased_modules(monkeypatch, tmp_path):
+    from scripts import lint_doc_roster as lint
+
+    source = tmp_path / "probes.py"
+    source.write_text(
+        "def probe():\n    from services.healthchecks import redis_acl as check, owned_service\n    from services.healthchecks.permissions_helper import probe\n"
+    )
+    monkeypatch.setattr(lint, "_DIAGNOSTIC_PROBES", source)
+    assert lint.diagnostic_healthchecks() == {"redis_acl", "owned_service", "permissions_helper"}
+
+
+def test_real_healthcheck_documentation_matches_current_sources():
+    from scripts import lint_doc_roster as lint
+
+    assert lint.check_healthcheck_roster() == 0

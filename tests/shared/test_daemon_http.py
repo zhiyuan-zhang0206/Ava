@@ -31,7 +31,6 @@ class Deny(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, Deny())
 import shared.daemon_http
 import shared.managed_writer_observation
-import services.agent_ops.bootstrap
 print('TRANSPORT_ONLY')
 """,
             str(root),

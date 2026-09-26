@@ -48,6 +48,8 @@ def test_derive_env_ports_and_urls(tmp_path: Path):
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
         pgbouncer_enabled=False,  # pooling off -> AVA_DB_URL stays on the direct pg port
     )
     # the secret is written into the cluster .env so every cluster process has it
@@ -61,34 +63,60 @@ def test_derive_env_ports_and_urls(tmp_path: Path):
     assert env["AVA_MILVUS_PORT"] == "18008"
     assert env["AVA_MILVUS_URI"] == "http://127.0.0.1:18008"
     # db_url + redis_url carry the data-plane identity AS DATA: a fresh birth
-    # writes the fixed `ava` db/role/ACL identifier, password = the cluster
-    # secret. The redis URL keeps the base logical DB (0) — every cluster owns
-    # its redis, so there is no per-cluster index swap.
-    assert env["AVA_DB_URL"] == "postgresql://ava:sekret@localhost:5432/ava"
-    assert env["AVA_REDIS_URL"] == "redis://ava:sekret@localhost:6379/0"
+    # writes the fixed `ava` db/role/ACL identifier. AVA_DB_URL is the
+    # credential-free endpoint (the owner is NOLOGIN; processes dial delivered
+    # write-generation logins) — whatever the bearer; there is no owner password.
+    # The redis URL keeps the base logical DB (0) — every cluster owns its redis,
+    # so there is no per-cluster index swap.
+    assert env["AVA_DB_URL"] == "postgresql://ava@localhost:5432/ava"
+    assert "AVA_DB_ADMIN_PASSWORD" not in env
+    assert env["AVA_REDIS_URL"] == "redis://ava:runtime-value@localhost:6379/0"
     # channels are fixed (single per-cluster redis, no neighbour to prefix away from)
     assert env["AVA_EVENTS_CHANNEL"] == "ava:events"
 
 
-def test_derive_env_empty_secret_writes_identity_without_password(tmp_path: Path):
-    """A no-secret cluster's URLs carry the data-plane identity username but no
-    password — names-as-data holds with or without auth, and `identity_from_url`
-    (which requires a username) keeps working."""
+def test_derive_env_empty_secret_keeps_redis_authenticated(tmp_path: Path):
+    """A no-secret cluster's DB URL is the same credential-free endpoint (the
+    data plane authenticates with delivered generation logins), and Redis always
+    authenticates: its URL carries the runtime password and both Redis
+    credentials are persisted."""
     env = cluster.derive_env(
         _rec(tmp_path),
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="",
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
         pgbouncer_enabled=False,
     )
     assert env["AVA_CLUSTER_SECRET"] == ""
+    assert "AVA_DB_ADMIN_PASSWORD" not in env
     assert env["AVA_DB_URL"] == "postgresql://ava@localhost:5432/ava"
-    assert env["AVA_REDIS_URL"] == "redis://ava@localhost:6379/0"
+    assert env["AVA_REDIS_URL"] == "redis://ava:runtime-value@localhost:6379/0"
+    assert env["AVA_REDIS_ADMIN_PASSWORD"] == "admin-value"  # noqa: S105 — test value
+    assert env["AVA_REDIS_PASSWORD"] == "runtime-value"  # noqa: S105 — test value
     # the identities stay readable as data
     from urllib.parse import urlsplit
 
     assert urlsplit(env["AVA_DB_URL"]).username == "ava"
     assert urlsplit(env["AVA_REDIS_URL"]).username == "ava"
+
+
+@pytest.mark.parametrize("missing", ["redis_admin_password", "redis_password"])
+def test_derive_no_secret_env_refuses_missing_redis_credential(
+    tmp_path: Path, missing: str
+) -> None:
+    credentials = {"redis_admin_password": "admin-value", "redis_password": "runtime-value"}
+    credentials[missing] = ""
+    with pytest.raises(ValueError, match="Redis always authenticates"):
+        cluster.derive_env(
+            _rec(tmp_path),
+            base_db_url="postgresql://ava@localhost:5432/ava",
+            base_redis_url="redis://localhost:6379/0",
+            cluster_secret="",
+            redis_admin_password=credentials["redis_admin_password"],
+            redis_password=credentials["redis_password"],
+        )
 
 
 def test_derived_env_keys_in_sync(tmp_path: Path):
@@ -103,6 +131,8 @@ def test_derived_env_keys_in_sync(tmp_path: Path):
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
     assert set(env) == env_registry.derived_env_keys()
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -117,6 +147,8 @@ def test_derive_env_pgbouncer_enabled_writes_pooler_port(tmp_path: Path):
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
     from urllib.parse import urlsplit
 
@@ -223,39 +255,6 @@ def test_wsl_default_health_port_base_derives_a_legal_block():
     assert all(1024 <= int(p) <= 65535 for p in ports.values())
 
 
-def test_seed_keys_disjoint_from_cluster_identity():
-    """The install-time seed allowlist must never overlap the cluster-isolation /
-    machine-identity key sets — a seeded worktree copies capability credentials
-    (and the endpoint they are minted against) only, never the prod data plane,
-    serve flags, or the cluster secret (always minted fresh). AVA_TELEGRAM_BOT_TOKEN is additionally banned by name: it is in
-    neither set, but two live clusters polling one bot token fight over the same
-    getUpdates long-poll."""
-    overlap = env_registry.seed_allowlist() & (
-        env_registry.derived_env_keys() | env_registry.env_identity_keys()
-    )
-    assert not overlap, f"seed_allowlist() leaks identity/derived keys: {sorted(overlap)}"
-    assert "AVA_CLUSTER_SECRET" not in env_registry.seed_allowlist()
-    assert "AVA_TELEGRAM_BOT_TOKEN" not in env_registry.seed_allowlist()
-    assert env_registry.seed_allowlist(), "seed allowlist must not be empty"
-
-
-def test_seed_keys_are_declared_by_settings_or_enabled_provider_plugin():
-    """Every seed key is a Settings alias or an enabled provider binding.
-
-    Provider bindings are intentionally the declaration for plugin keys: making
-    them Settings fields would make a removable plugin widen core config.
-    """
-    from shared.config import FIELD_INFOS
-
-    aliases = {
-        field.serialization_alias or field.alias or name.upper()
-        for name, field in FIELD_INFOS.items()
-    }
-    plugin_keys = env_registry._enabled_provider_key_envs()
-    missing = sorted(env_registry.seed_allowlist() - aliases - plugin_keys)
-    assert not missing, f"seed_allowlist entries with no declaration: {missing}"
-
-
 def test_health_port_env_derives_the_block_from_a_base():
     """`--health-port-base` lands each daemon exactly where an allocated cluster
     would put it — base + the service's block offset, not a second convention.
@@ -282,6 +281,8 @@ def test_health_port_env_matches_derive_env_for_the_same_base(tmp_path: Path):
         base_db_url="postgresql://ava:p@localhost:5432/ava",
         base_redis_url="redis://localhost:6379/0",
         cluster_secret="sekret",  # noqa: S106 — test fixture, not a real secret
+        redis_admin_password="admin-value",  # noqa: S106 — isolated test credential
+        redis_password="runtime-value",  # noqa: S106 — isolated test credential
     )
     hand_set = env_registry.health_port_env(18000)
     assert {k: installed[k] for k in hand_set} == hand_set
@@ -361,3 +362,20 @@ def test_allocate_ports_skips_blocks_overlapping_existing_records(
     # ±26 window skips 18027 — the record could be a 27-wide block
     # [18010,18036] — and lands on 18054. Pins the window, not just the skip.
     assert cl.allocate_ports({18010})["gateway"] == 18054
+
+
+@pytest.mark.parametrize("missing", ["redis_admin_password", "redis_password"])
+def test_derive_authenticated_env_refuses_missing_data_plane_credential(
+    tmp_path: Path, missing: str
+) -> None:
+    credentials = {"redis_admin_password": "admin-value", "redis_password": "runtime-value"}
+    credentials[missing] = ""
+    with pytest.raises(ValueError, match="explicit data-plane credentials"):
+        cluster.derive_env(
+            _rec(tmp_path),
+            base_db_url="postgresql://ava@localhost:5432/ava",
+            base_redis_url="redis://localhost:6379/0",
+            cluster_secret="bearer-only",  # noqa: S106 — isolated test credential
+            redis_admin_password=credentials["redis_admin_password"],
+            redis_password=credentials["redis_password"],
+        )

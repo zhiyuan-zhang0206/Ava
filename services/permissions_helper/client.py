@@ -22,6 +22,7 @@ import itertools
 import json
 import os
 import socket
+import sys
 import time
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
@@ -78,7 +79,13 @@ def _connect(path: str) -> socket.socket:
         try:
             s.connect(path)
             return s
-        except (FileNotFoundError, ConnectionRefusedError):
+        except PermissionError:
+            # Not an unreachability signal — the socket exists and answers, but
+            # this caller's ACLs are wrong. Surface it raw instead of closing
+            # the socket and relabeling it "not reachable": that message would
+            # send an operator chasing a dead helper instead of a permissions fix.
+            raise
+        except OSError:
             phase[0] = "close"
             s.close()
             phase[0] = "connect"
@@ -87,7 +94,9 @@ def _connect(path: str) -> socket.socket:
     last: OSError | None = None
     try:
         return retry(policy)(once)
-    except (FileNotFoundError, ConnectionRefusedError) as exc:
+    except PermissionError:
+        raise
+    except OSError as exc:
         if phase[0] != "connect":
             raise
         last = exc
@@ -98,7 +107,6 @@ def _call(
     method: str,
     *,
     sock_path: str | Path | None = None,
-    _disconnect_is_success: bool = False,
     **args: object,
 ) -> Any:
     """One JSON-line request/response over the platform transport.
@@ -110,9 +118,13 @@ def _call(
     """
     req = {"id": next(_ids), "method": method, **args}
     if _IS_WINDOWS:
-        return _call_pipe(req, disconnect_is_success=_disconnect_is_success)
+        return _call_pipe(req)
     path = str(sock_path or permissions_helper_socket())
-    s = _connect(path)
+    return _exchange(_connect(path), method, req)
+
+
+def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> Any:
+    """Send one request line on a connected socket, read one reply, close it."""
     s.settimeout(_CALL_TIMEOUT_S)
     try:
         s.sendall((json.dumps(req) + "\n").encode())
@@ -130,12 +142,10 @@ def _call(
         ) from e
     finally:
         s.close()
-    if _disconnect_is_success and not buf:
-        return True
     return _parse_reply(bytes(buf), method)
 
 
-def _call_pipe(req: dict[str, object], *, disconnect_is_success: bool = False) -> Any:
+def _call_pipe(req: dict[str, object]) -> Any:
     """Windows transport: named-pipe file I/O (see services.permissions_helper._win_pipe)."""
     from services.permissions_helper import _win_pipe
 
@@ -174,8 +184,6 @@ def _call_pipe(req: dict[str, object], *, disconnect_is_success: bool = False) -
                 raise PermissionsHelperError("permissions helper response exceeded line limit")
     finally:
         conn.close()
-    if disconnect_is_success and not buf:
-        return True
     return _parse_reply(bytes(buf), str(req["method"]))
 
 
@@ -200,6 +208,11 @@ def _parse_reply(buf: bytes, method: str) -> Any:
 
 class PingResult(TypedDict):
     pong: bool
+    pid: NotRequired[int]
+    root_stop_intent_v1: NotRequired[bool]
+    helper_shutdown_v1: NotRequired[bool]
+    finite_executor_v1: NotRequired[bool]
+    root_seed_report_v1: NotRequired[bool]  # `root_status.seed` is reported
     preflight_screen: bool  # Screen Recording grant held
     ax_trusted: NotRequired[bool]  # Accessibility grant held (macOS only)
 
@@ -290,6 +303,16 @@ class RootSeedConfig(TypedDict):
     env: NotRequired[dict[str, str]]
 
 
+class RootSeedReport(TypedDict):
+    """The seed the keeper holds for its next spawn; its environment is withheld."""
+
+    argv: list[str]
+    cwd: str
+    run_dir: str
+    stdout: str
+    stderr: str
+
+
 class RootExitInfo(TypedDict):
     """How the root process last ended (a `last_exit` on `RootStatus`)."""
 
@@ -314,11 +337,19 @@ class RootStatus(TypedDict):
     seeded: bool
     restarts: int
     stop_requested: bool
+    run_dir: NotRequired[str]
+    seed: NotRequired[RootSeedReport]  # present while seeded (`root_seed_report_v1`)
     pid: NotRequired[int]  # the keeper's live root child
     last_exit: NotRequired[RootExitInfo]
     next_restart_in_s: NotRequired[float]
     conflict: NotRequired[RootConflictInfo]
     seed_error: NotRequired[str]  # startup seed file was rejected
+
+
+class HelperShutdownResult(TypedDict):
+    stopping: bool
+    pid: int
+    run_dir: str
 
 
 class ScreenSize(TypedDict):
@@ -351,6 +382,29 @@ class FileReadResult(TypedDict):
 def ping(*, sock_path: str | Path | None = None) -> PingResult:
     """Report the helper's liveness and whether it holds the desktop grants."""
     return _call("ping", sock_path=sock_path)
+
+
+# macOS <sys/un.h>: SOL_LOCAL and LOCAL_PEERPID.
+_SOL_LOCAL = 0
+_LOCAL_PEERPID = 0x002
+
+
+def ping_peer(*, sock_path: str | Path) -> tuple[PingResult, int]:
+    """Ping and return the kernel-recorded PID of the process listening on the socket.
+
+    The PID in a ping reply is only the helper's own claim; LOCAL_PEERPID is the
+    kernel's record of the listener, captured when this connection was made.
+    """
+    if sys.platform != "darwin":
+        raise PermissionsHelperError("socket peer identity is a macOS helper contract")
+    s = _connect(str(sock_path))
+    try:
+        raw = s.getsockopt(_SOL_LOCAL, _LOCAL_PEERPID, 4)
+    except OSError:
+        s.close()
+        raise
+    req: dict[str, object] = {"id": next(_ids), "method": "ping"}
+    return _exchange(s, "ping", req), int.from_bytes(raw, sys.byteorder)
 
 
 def screencapture_region(
@@ -491,27 +545,15 @@ def root_status(*, sock_path: str | Path | None = None) -> RootStatus:
     return result
 
 
-def stop_root(*, force: bool = False, sock_path: str | Path | None = None) -> RootStatus:
-    """Stop the seeded root; `force` disposes a live root the helper did not seed.
-
-    Without `force`, a foreign root (the conflict case) is refused — stopping
-    it would tear down a serving tree. A stop the keeper requested is not
-    followed by a restart.
-    """
-    result: RootStatus = _call("root_stop", force=force, sock_path=sock_path)
+def stop_root(*, sock_path: str | Path | None = None) -> RootStatus:
+    """Durably stop the owned root; foreign or unknown custody always refuses."""
+    result: RootStatus = _call("root_stop", sock_path=sock_path)
     return result
 
 
-def request_self_upgrade(exe_path: str, *, sock_path: str | Path | None = None) -> bool:
-    """Ask the helper to exec a replacement; a clean disconnect means it succeeded."""
-    return bool(
-        _call(
-            "self_upgrade",
-            exe_path=exe_path,
-            sock_path=sock_path,
-            _disconnect_is_success=True,
-        )
-    )
+def shutdown_helper(run_dir: Path, *, sock_path: str | Path) -> HelperShutdownResult:
+    """Close this home's native admission, retain intent, and request exit zero."""
+    return _call("helper_shutdown", run_dir=str(run_dir), sock_path=sock_path)
 
 
 def screen_size(*, sock_path: str | Path | None = None) -> ScreenSize:

@@ -75,19 +75,9 @@ def test_cluster_destroy_requires_path_flag() -> None:
         p.parse_args(["cluster", "destroy"])  # --path is required
 
 
-def test_bare_enroll_still_routes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Top-level `ava enroll` routes to run_enroll (the agent-runner join path)."""
-    captured: list[list[str]] = []
-
-    def fake_run_enroll(args):
-        captured.append(list(args))  # pyright: ignore[reportUnknownArgumentType]
-        return 0
-
-    monkeypatch.setattr("cli.enroll.run_enroll", fake_run_enroll)  # pyright: ignore[reportUnknownArgumentType]
-
-    result = main(["enroll", "--gateway", "https://gw.example.com"])
-    assert result == 0
-    assert captured == [["--gateway", "https://gw.example.com"]]
+def test_enroll_entry_is_removed() -> None:
+    with pytest.raises(SystemExit):
+        main(["enroll", "--gateway", "https://gw.example.com"])
 
 
 def test_host_enroll_no_longer_routes() -> None:

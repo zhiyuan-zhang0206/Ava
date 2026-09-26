@@ -81,7 +81,6 @@ class WebSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -118,6 +117,5 @@ class WebSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )

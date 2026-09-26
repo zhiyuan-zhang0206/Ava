@@ -73,25 +73,3 @@ def test_alive_false_on_any_unexpected_exception(
     with caplog.at_level(logging.ERROR, logger="services.healthchecks.browser_mcp"):
         assert hc._is_alive() is False
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)
-
-
-def test_main_does_not_propagate_an_unexpected_probe_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """End to end: the module's entrypoint reaches its restart decision instead
-    of unwinding into the watchdog's exception handler."""
-
-    def _boom() -> bool:
-        raise AttributeError("module 'socket' has no attribute 'AF_UNIX'")
-
-    restarts: list[str] = []
-
-    def _restart() -> bool:
-        restarts.append("restart")
-        return True
-
-    monkeypatch.setattr(hc, "_probe", _boom)
-    monkeypatch.setattr(hc, "init_gateway_process", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "_restart_daemon", _restart)
-    hc.main()
-    assert restarts == ["restart"]

@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import shlex
 import signal
 import subprocess
 import sys
@@ -10,10 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _maintenance_stop
+from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.ava_root.supervisor import Supervisor, SupervisorConfig
 from shared import daemon_shutdown
-from shared.platform import IS_WINDOWS
-from shared.session_backend import PosixProcSessionBackend, WinprocSessionBackend
 from tests.shared.poll_until import poll_until
 
 
@@ -181,34 +179,30 @@ else:
 
 
 @pytest.mark.parametrize("ops", [False, True], ids=["asyncio-run", "ops-runner"])
-def test_native_service_stop_runs_the_product_handlers_cleanup(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch, ops: bool
+async def test_root_graceful_stop_runs_the_product_handlers_cleanup(
+    unit_home: Path, ops: bool
 ) -> None:
+    """ava-root owns service stop: its graceful `down` (what a normal stop
+    requests) must reach the product handler, whose cleanup then runs."""
     repo = Path(__file__).resolve().parents[2]
     script, started, marker = (unit_home / name for name in ("daemon.py", "started", "clean"))
     script.write_text(
         _SERVICE.format(repo=str(repo), started=str(started), marker=str(marker), ops=ops)
     )
-    env = dict(os.environ)
-    env.update(AVA_HOME=str(unit_home), AVA_HOME_OVERRIDE="1", AVA_CONFIG_FETCH="skip")
-    backend = WinprocSessionBackend() if IS_WINDOWS else PosixProcSessionBackend()
-    monkeypatch.setattr(_maintenance_stop, "get_backend", lambda: backend)
-    argv = [sys.executable, str(script)]
-    command = subprocess.list2cmdline(argv) if IS_WINDOWS else shlex.join(argv)
-    name = "ava-private-signal-proof"
-    assert backend.new_session(name, command, repo, env=env)
+    env = (("AVA_HOME", str(unit_home)), ("AVA_HOME_OVERRIDE", "1"), ("AVA_CONFIG_FETCH", "skip"))
+    unit = UnitManifest("svc", (sys.executable, str(script)), RestartPolicy.NEVER, "root", env)
+    owner = Supervisor(
+        UnitRegistry([unit]), run_dir=unit_home / "root", config=SupervisorConfig(stop_timeout_s=10)
+    )
+    await owner.start()
     try:
-        poll_until(started.exists, timeout=20, what="product signal handler is ready")
-        assert _maintenance_stop.stop_services(
-            10, keep_terminals=True, selected=frozenset({name})
-        ) == [name]
+        await asyncio.to_thread(
+            poll_until, started.exists, timeout=20, what="product signal handler is ready"
+        )
+        await owner.down("svc")
         assert marker.read_text() == "clean"
-        assert not backend.has_session(name)
     finally:
-        # Only fixture cleanup may force this exact private session after a
-        # failed assertion; successful normal stop already removed its record.
-        if backend.has_session(name):
-            backend.kill_session(name, graceful=False)
+        await owner.shutdown()
 
 
 _PLUGIN_SERVICE = """

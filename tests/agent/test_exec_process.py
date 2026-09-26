@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 import psutil
 import pytest
 
+from agent.graph import _exec_subprocess
 from agent.graph._exec_process import (
     _READER_JOIN_TIMEOUT_S,
     DomainCloseOwner,
@@ -33,8 +34,11 @@ from agent.graph._exec_process import (
     start_root_exit_observer,
     wait_with_grace,
 )
+from agent.graph._exec_result import _ExecCrashed
 from agent.graph._exec_stream import StreamingTextIO
 from agent.graph._exec_subprocess import _collect_child, _spawn
+from shared.native_process.ownership import OwnedProcess
+from shared.turn_identity import HostedTurnResources, bind_hosted_resources
 
 _AGENT_ID = 424242
 
@@ -94,7 +98,7 @@ async def test_grace_expiry_waits_on_popen_once(monkeypatch: pytest.MonkeyPatch)
             self.wait_calls = 0
             self.release = threading.Event()
 
-        def wait(self) -> int:
+        def wait(self, timeout: float | None = None) -> int:
             self.wait_calls += 1
             assert self.release.wait(timeout=5.0)
             return -signal.SIGKILL
@@ -113,7 +117,7 @@ async def test_grace_expiry_waits_on_popen_once(monkeypatch: pytest.MonkeyPatch)
             self.proc = proc
             self.close_calls = 0
 
-        def close(self) -> None:
+        def close_confirmed(self, _deadline: float) -> None:
             self.close_calls += 1
             proc.release.set()
             root_exited.set()
@@ -136,7 +140,7 @@ async def test_reader_join_uses_its_own_bound() -> None:
     class _ExitedProc:
         pid = 54321
 
-        def wait(self) -> int:
+        def wait(self, timeout: float | None = None) -> int:
             return 0
 
     class _Reader:
@@ -157,7 +161,7 @@ async def test_reader_join_uses_its_own_bound() -> None:
         def __init__(self) -> None:
             self.proc = proc
 
-        def close(self) -> None:
+        def close_confirmed(self, _deadline: float) -> None:
             return
 
     domain_close = DomainCloseOwner(_Domain(), root_exit_task)  # type: ignore[arg-type]
@@ -203,22 +207,21 @@ async def test_reader_join_fails_loud_when_pipe_never_reaches_eof() -> None:
         await task
 
 
-async def test_cleanup_failures_do_not_short_circuit_reap_or_reader() -> None:
-    """Close and reap failures are both observed, and the bounded reader join
-    still runs; returned failure order is stable ownership→reap→reader."""
+async def test_cleanup_failure_retains_leader_and_still_joins_reader() -> None:
+    """Failed closure blocks reap while the bounded reader join still runs."""
     events: list[str] = []
 
     class _Proc:
         pid = 111
 
-        def wait(self) -> int:
+        def wait(self, timeout: float | None = None) -> int:
             events.append("reap")
             raise OSError("wait failed")
 
     class _Domain:
         proc = _Proc()
 
-        def close(self) -> None:
+        def close_confirmed(self, _deadline: float) -> None:
             events.append("close")
             raise OSError("close failed")
 
@@ -252,7 +255,7 @@ async def test_cleanup_failures_do_not_short_circuit_reap_or_reader() -> None:
         "reap",
         "reader_join",
     ]
-    assert events == ["close", "reap", "reader"]
+    assert events == ["close", "reader"]
 
 
 async def test_posix_domain_closes_before_the_only_popen_wait() -> None:
@@ -263,14 +266,14 @@ async def test_posix_domain_closes_before_the_only_popen_wait() -> None:
     class _Proc:
         pid = 222
 
-        def wait(self) -> int:
+        def wait(self, timeout: float | None = None) -> int:
             events.append("reap")
             return 0
 
     class _Domain:
         proc = _Proc()
 
-        def close(self) -> None:
+        def close_confirmed(self, _deadline: float) -> None:
             events.append("close")
 
     root_exit_task = asyncio.create_task(asyncio.sleep(0))
@@ -292,30 +295,6 @@ def test_original_failure_stays_primary_when_teardown_also_fails() -> None:
 
     assert isinstance(original, ValueError)
     assert original.__notes__ == [str(ExecTeardownError(failures))]
-
-
-def test_zombie_only_group_eperm_is_a_verified_noop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    proc = MagicMock(pid=444)
-    live_checks = iter([True, False])
-
-    def _has_live_member(_pgid: int) -> bool:
-        return next(live_checks)
-
-    monkeypatch.setattr("shared.exec_process_domain.IS_WINDOWS", False)
-    monkeypatch.setattr(
-        "shared.exec_process_domain._process_group_has_live_member",
-        _has_live_member,
-    )
-    monkeypatch.setattr(
-        "shared.exec_process_domain.os.killpg",
-        MagicMock(side_effect=PermissionError),
-    )
-
-    ExecProcessDomain(proc=proc, windows_job=None).close()
-
-    proc.kill.assert_not_called()
 
 
 async def test_dead_status_is_a_terminal_non_reaping_observation(
@@ -374,7 +353,7 @@ async def test_repeated_cancellation_cannot_interrupt_resource_barrier() -> None
     class _Domain:
         proc = _Proc()
 
-        def close(self) -> None:
+        def close_confirmed(self, _deadline: float) -> None:
             events.append("close")
             root_exited.set()
 
@@ -438,14 +417,13 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
         f"os.replace({str(temporary_pid_path)!r}, {str(descendant_pid_path)!r})\n"
         "time.sleep(60)"
     )
-    proc = subprocess.Popen(  # noqa: S603 — fixed test-only interpreter command
+    proc, domain = ExecProcessDomain.launch_posix(
         [sys.executable, "-c", code],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        start_new_session=True,
+        new_session=True,
     )
     assert proc.stdout is not None
-    domain = ExecProcessDomain(proc=proc, windows_job=None)
     root_exit_task = start_root_exit_observer(proc)
     domain_close = DomainCloseOwner(domain, root_exit_task)
     reap_task = start_reap(proc, domain_close)
@@ -497,7 +475,11 @@ async def test_windows_stop_closes_the_owned_job_once(
     job = MagicMock()
     root_exit_task: asyncio.Task[None] = asyncio.create_task(asyncio.sleep(60))
     domain = MagicMock(proc=proc, windows_job=job)
-    domain.close.side_effect = job.close
+
+    def close_job(_deadline: float) -> None:
+        job.close()
+
+    domain.close_confirmed.side_effect = close_job
     domain_close = DomainCloseOwner(domain, root_exit_task)
     monkeypatch.setattr("agent.graph._exec_process.IS_WINDOWS", True)
 
@@ -614,3 +596,119 @@ def test_windows_popen_failure_preserves_primary_when_job_close_fails(
         "job_close: OSError: close failed" in note
         for note in getattr(caught.value, "__notes__", ())
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX live group signal refusal")
+async def test_live_signal_refusal_returns_unresolved_without_reap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import errno
+
+    from shared.native_process.ownership import OwnedProcess
+
+    proc, domain = ExecProcessDomain.launch_posix(
+        [sys.executable, "-I", "-c", "import time;time.sleep(60)"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    native = OwnedProcess.capture(psutil.Process(proc.pid))
+    root_exit = start_root_exit_observer(proc)
+    closer = DomainCloseOwner(domain, root_exit)
+    reap = start_reap(proc, closer)
+    original_signal = os.killpg
+
+    def denied(pgid: int, _signum: int) -> None:
+        assert pgid == proc.pid
+        raise PermissionError(errno.EPERM, "private live group signal refusal")
+
+    monkeypatch.setattr("shared.exec_process_domain.os.killpg", denied)
+    try:
+        failures = await asyncio.wait_for(
+            settle_resources(root_exit, reap, closer, None, request_stop=True),
+            timeout=0.5,
+        )
+        assert failures[0].stage == "domain_close"
+        assert isinstance(failures[0].error, PermissionError)
+        assert "private live group signal refusal" in str(failures[0].error)
+        assert closer.task.done() and reap.done() and root_exit.cancelled()
+        assert proc.returncode is None and native.live()
+    finally:
+        monkeypatch.setattr("shared.exec_process_domain.os.killpg", original_signal)
+        domain.close_confirmed(time.monotonic() + 5)
+        proc.wait(timeout=5)
+        root_exit.cancel()
+        await asyncio.gather(root_exit, closer.task, reap, return_exceptions=True)
+
+
+def test_cancelled_late_reader_does_not_block_runner_shutdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid_path = tmp_path / "detached-helper.pid"
+    code = (
+        "import pathlib,subprocess,sys; "
+        "p=subprocess.Popen([sys.executable,'-I','-B','-c','import time;time.sleep(60)'],"
+        "start_new_session=True); pathlib.Path(sys.argv[1]).write_text(str(p.pid)); "
+        "print('private reader fixture',flush=True)"
+    )
+    spawned: list[tuple[subprocess.Popen[bytes], ExecProcessDomain]] = []
+    failures: list[BaseException] = []
+    helper: list[OwnedProcess] = []
+    main_done, runner_done = threading.Event(), threading.Event()
+    scope = HostedTurnResources()
+
+    def private_spawn(
+        *_args: object, **_kwargs: object
+    ) -> tuple[subprocess.Popen[bytes], ExecProcessDomain]:
+        owned = ExecProcessDomain.launch_posix(
+            [sys.executable, "-I", "-B", "-c", code, str(pid_path)],
+            new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        spawned.append(owned)
+        return owned
+
+    async def run() -> None:
+        with bind_hosted_resources(scope):
+            outcome, _ = await _exec_subprocess._run_legacy_subprocess(
+                "private reader fixture", None, asyncio.Event(), 20, exec_dir=tmp_path / "exec"
+            )
+        assert isinstance(outcome, _ExecCrashed)
+        assert isinstance(outcome.exc, ExecTeardownError)
+        assert [failure.stage for failure in outcome.exc.failures] == ["reader_join"]
+        assert spawned[0][0].returncode == 0
+        helper.append(OwnedProcess.capture(psutil.Process(int(pid_path.read_text()))))
+        assert helper[0].live()
+        assert scope.unresolved and scope.completions
+        await asyncio.sleep(0.05)
+        main_done.set()
+
+    def run_in_thread() -> None:
+        try:
+            asyncio.run(run())
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            runner_done.set()
+
+    monkeypatch.setattr(_exec_subprocess, "_spawn", private_spawn)
+    runner = threading.Thread(target=run_in_thread, daemon=True)
+    runner.start()
+    try:
+        assert main_done.wait(12), failures
+        assert runner_done.wait(0.5), "cancelled late observer blocked Runner shutdown"
+        assert not failures
+        assert helper[0].live()  # Observation did not acquire detached-child kill authority.
+        assert scope.unresolved and all(path.is_file() for path in scope.unresolved)
+    finally:
+        if not helper and pid_path.exists():
+            helper.append(OwnedProcess.capture(psutil.Process(int(pid_path.read_text()))))
+        for identity in helper:
+            identity.send_signal(signal.SIGKILL)
+        for proc, domain in spawned:
+            if proc.returncode is None:
+                domain.close_confirmed(time.monotonic() + 5)
+                proc.wait(timeout=5)
+        runner.join(timeout=5)
+        assert not runner.is_alive()

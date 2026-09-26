@@ -9,11 +9,57 @@ supervisors take the dict directly.
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 
 import pytest
 
 from shared import session_env
 from shared.platform import IS_WINDOWS
+
+
+@pytest.mark.parametrize("runtime", ["runtime", "project #1/runtime"])
+def test_managed_service_path_preserves_tools_across_callers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime: str
+) -> None:
+    from shared import runtime_interpreter
+
+    venv = tmp_path / runtime
+    bindir = venv / session_env.get_backend().venv_bin_dir_name()
+    tools = tmp_path / "admitted-tools"
+    tools.mkdir()
+    command = tools / ("ava-proof.exe" if IS_WINDOWS else "ava-proof")
+    command.write_bytes(b"proof")
+    command.chmod(0o700)
+    monkeypatch.setattr(runtime_interpreter, "runtime_venv", lambda: venv)
+    admitted = os.pathsep.join((str(tools), str(bindir), str(tools)))
+    monkeypatch.setenv("PATH", str(tmp_path / "interactive"))
+    interactive = session_env.managed_service_env(admitted)
+    monkeypatch.setenv("PATH", str(tmp_path / "manager"))
+    manager = session_env.managed_service_env(admitted)
+    assert interactive == manager
+    assert manager["PATH"].split(os.pathsep)[:2] == [str(bindir), str(tools)]
+    assert manager["PATH"].split(os.pathsep).count(str(bindir)) == 1
+    assert manager["AVA_SERVICE_PATH"] == str(tools)
+    assert shutil.which(command.name, path=manager["PATH"]) == str(command)
+    assert session_env.managed_service_env(str(tmp_path / "changed")) != manager
+
+
+@pytest.mark.parametrize("entry", ["relative", ".", "bad\npath", "bad\x00path"])
+def test_managed_service_path_refuses_caller_relative_entries(entry: str) -> None:
+    with pytest.raises(ValueError, match="absolute directory"):
+        session_env.normalize_service_path(entry)
+
+
+@pytest.mark.parametrize("name", ["tools #1", "${CALLER_TOOLS}", "trailing "])
+def test_managed_service_path_refuses_lossy_home_declarations(tmp_path: Path, name: str) -> None:
+    with pytest.raises(ValueError, match="round-trip literally"):
+        session_env.admit_service_path(str(tmp_path / name))
+
+
+def test_managed_service_path_accepts_plain_spaces(tmp_path: Path) -> None:
+    path = str(tmp_path / "tools with spaces")
+    assert session_env.admit_service_path(path) == path
 
 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX toolchain paths are injected only on POSIX")

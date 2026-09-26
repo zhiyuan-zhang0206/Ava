@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from ava._mcp_config import installed_mcp_dir, load_mcp_config
-from cli.commands import cmd_mcp_install, cmd_mcp_list, cmd_mcp_uninstall, cmd_mcp_upgrade
+from cli.commands.mcp import cmd_mcp_install, cmd_mcp_list, cmd_mcp_uninstall, cmd_mcp_upgrade
 from shared import install_registry as reg
 
 

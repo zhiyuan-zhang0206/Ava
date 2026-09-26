@@ -107,6 +107,11 @@ async def _prepare_graph(
         if len(model_calls) == 1 and not automatic:
             code = (
                 "import ava\n"
+                "import os, psycopg\n"
+                "from shared.env_registry import ADMIN_DATA_PLANE_ALIASES\n"
+                "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
+                "with psycopg.connect(ava.DB_URL) as conn:\n"
+                "    assert conn.execute('SELECT current_user').fetchone() == ('ava_g0_runner',)\n"
                 f"ava.impersonation.accept({requested['id']!r}, "
                 "'Hand the task to the external session.')"
             )
@@ -160,6 +165,7 @@ async def _prepare_graph(
 
 
 @pytest.mark.parametrize("finish", ["release", "expire"])
+@pytest.mark.usefixtures("runner_exec_env")
 async def test_consent_exec_inbox_release_and_resume(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],

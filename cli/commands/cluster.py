@@ -9,27 +9,16 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime
-from typing import Any
 
 import httpx
 
-from cli.commands._managed_writer_mode import (
-    ManagedWriterMode,
-    effective_managed_writer_mode,
-)
 from shared.api_contracts.status import MachineStatus
-from shared.last_update import UpdateOutcome
 from shared.machine import format_capabilities
 
 _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
-# The gateway maps ClusterUpdateInProgress to 409 — a refusal to report, not a
-# transport failure to raise on. Every other status still fails fast.
-_DEPLOY_REFUSED_STATUS = 409
 # Roster `role` column width: the widest label format_capabilities emits is
 # "gateway + agent-runner + observability-station" (44 chars).
 _ROLE_COL_W = 44
-# Roster `hold` column width: the widest cell is "waited-on" (9 chars).
-_HOLD_COL_W = 9
 
 
 def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
@@ -37,9 +26,9 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
 
     Thin client: POSTs /api/cluster/machines/{name}/staging on the gateway,
     which flips the operator staging flag on the machines row. A staging host
-    stays registered + roster-visible but is excluded from the rollout target
-    set (`list_agent_runners` / the fan-out). Exit 1 when the gateway reports
-    no such machine.
+    stays registered + roster-visible but is excluded from the agent-runner
+    target set (`list_agent_runners`: the heartbeat probe and cluster
+    fan-outs). Exit 1 when the gateway reports no such machine.
     """
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
@@ -55,7 +44,7 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
         print(f"no machine named {name!r} in the registry", file=sys.stderr)
         return 1
     resp.raise_for_status()
-    action = "marked staging" if is_staging else "unmarked staging (now a rollout target)"
+    action = "marked staging" if is_staging else "unmarked staging (now a fan-out target)"
     print(f"{name}: {action}")
     return 0
 
@@ -70,8 +59,8 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     the machine, resolves any open "machine offline" alert for it and sets the
     pause latch. From then on the machine is hidden from the roster / cluster
     panel / `ava.agents.list_machines()`, is not probed (no offline alerts),
-    is skipped by rollouts and refuses spawns — the cluster shows only its
-    active members. The registration row (URL/role) is preserved for resume.
+    is skipped by cluster fan-outs and refuses spawns — the cluster shows only
+    its active members. The registration row (URL/role) is preserved for resume.
     Exit 1 when the gateway reports no such machine or refuses (own gateway).
     """
     from shared.http_dial import post as dial_post
@@ -102,7 +91,7 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
         f"tasks drained to #405: {body['reassigned_tasks']}"
     )
     print(
-        "  hidden from roster/probe/rollout/spawn until resumed: "
+        "  hidden from roster/probe/fan-out/spawn until resumed: "
         f"`ava cluster resume {name}` (run on the gateway host)"
     )
     return 0
@@ -113,8 +102,8 @@ def cmd_cluster_resume(name: str) -> int:
     cluster member.
 
     Thin client: POSTs /api/cluster/machines/{name}/resume on the gateway,
-    which clears the pause latch; probing, the roster, rollout and spawn
-    acceptance resume immediately. Exit 1 when the gateway reports no such
+    which clears the pause latch; probing, the roster, cluster fan-outs and
+    spawn acceptance resume immediately. Exit 1 when the gateway reports no such
     machine. Prints the ops checklist for the machine's own side (it is away,
     and its reachable address may have changed while it was out).
     """
@@ -134,7 +123,7 @@ def cmd_cluster_resume(name: str) -> int:
     resp.raise_for_status()
     body = resp.json()
     if body["resumed"]:
-        print(f"{name}: resumed — probing / roster / rollout / spawn restored")
+        print(f"{name}: resumed — probing / roster / fan-out / spawn restored")
     else:
         print(f"{name}: was not paused (no-op)")
     print(
@@ -142,10 +131,11 @@ def cmd_cluster_resume(name: str) -> int:
         "    1. `ava start` on the machine — register_self refreshes its dial URL "
         "(the reachable address may have changed) and clears its stopped_at latch.\n"
         "    2. If its reachable address changed, the gateway's pg_hba must cover the new IP: "
-        "on the gateway host set AVA_TRUSTED_CIDRS in ~/.ava/.env to the machine's new "
-        "IP/CIDR, then `ava cluster update --restart-only` (regenerates + reloads pg_hba).\n"
+        "add the machine's new IP/CIDR to the comma-separated AVA_TRUSTED_CIDRS with "
+        "`ava config set AVA_TRUSTED_CIDRS=<ranges>`, then run `ava restart` ON THE GATEWAY "
+        "HOST — its start leg rewrites pg_hba.conf and reloads the retained Postgres.\n"
         "    3. Respawn the agents that lived on it (pause terminated them); "
-        "`ava machines list` / `ava.agents.list_machines()` shows it again."
+        "`ava cluster status` / `ava.agents.list_machines()` shows it again."
     )
     return 0
 
@@ -157,8 +147,8 @@ def cmd_cluster_status() -> int:
     assembles the roster server-side (its own row locally + each agent-runner
     probed in parallel via the status_probe op) and returns
     every machine's name / role / paused / live status, plus the cluster-global
-    deploy lease stamped per row (the `hold` column + its banner). Fails fast on any
-    HTTP error rather than masking an unreachable gateway.
+    deploy lease stamped per row (the deploy-hold banner). Fails fast on any HTTP
+    error rather than masking an unreachable gateway.
 
     The transport failures get one-line stderr verdicts and a nonzero exit
     instead of an unhandled traceback — the unreachable-machine case is the
@@ -209,42 +199,32 @@ def cmd_cluster_status() -> int:
         print("(machines table empty — no host has run `ava start` yet)")
         return 0
 
-    for line in _render_roster(roster, managed_writer=effective_managed_writer_mode()):
+    for line in _render_roster(roster):
         print(line)
     return 0
 
 
-def _render_roster(
-    roster: list[MachineStatus], *, managed_writer: ManagedWriterMode | None = None
-) -> list[str]:
+def _render_roster(roster: list[MachineStatus]) -> list[str]:
     """Render the decoded /api/cluster/roster payload into aligned text lines
-    (the held-host / last-update / deploy-hold banners above the table, then header +
+    (the schema and deploy-hold banners above the table, then header +
     separator + one row per machine).
 
     Pure and split from the HTTP fetch so the row formatting is unit-testable
     against the MachineStatus wire schema, which carries the three capability
     flags (serve_gateway / serve_agent_runner / serve_observability_station)
     and no single `role` field — the role column is derived via
-    format_capabilities. `managed_writer` is the resolved mode bit to render
-    above the table (None omits it, for callers that only want the roster).
+    format_capabilities.
     Assumes a non-empty roster (the caller short-circuits the empty case).
     """
     name_w = max(
         *(len(f"{m.name} (staging)") if m.is_staging else len(m.name) for m in roster),
         len("name"),
     )
-    lines = (
-        _schema_mismatch_banner(roster)
-        + _stranded_hold_banner(roster)
-        + _last_update_banner(roster)
-        + _hold_banner(roster)
-    )
-    if managed_writer is not None:
-        lines += _managed_writer_banner(managed_writer)
+    lines = _schema_mismatch_banner(roster) + _hold_banner(roster)
     lines += [
         f"{'name'.ljust(name_w)}  {'role':<{_ROLE_COL_W}} {'paused':<7} {'status':<10} "
-        f"{'pin':<10} {'code':<10} {'hold':<{_HOLD_COL_W}} up since",
-        "-" * (name_w + 92),
+        f"{'code':<10} up since",
+        "-" * (name_w + 71),
     ]
     for m in roster:
         status = _status_cell(m.online, m.identity_mismatch, m.stopped_at)
@@ -256,128 +236,22 @@ def _render_roster(
         role = format_capabilities(
             m.serve_gateway, m.serve_agent_runner, m.serve_observability_station
         )
-        pin_str = _pin_cell(m.on_pin, m.head_sha)
         code_str = _code_cell(m.running_sha, m.head_sha)
-        hold_str = _hold_cell(m.settle_waited_on)
         lines.append(
             f"{display_name.ljust(name_w)}  {role:<{_ROLE_COL_W}} {paused_str:<7} {status:<10} "
-            f"{pin_str:<10} {code_str:<10} {hold_str:<{_HOLD_COL_W}} {up_since}"
+            f"{code_str:<10} {up_since}"
         )
     return lines
 
 
 def _schema_mismatch_banner(roster: list[MachineStatus]) -> list[str]:
-    """Keep a DB-scoped hold visible even while the ops roster is online."""
+    """Show schema disagreement or unavailable evidence even while ops is online."""
     lines: list[str] = []
     for machine in roster:
         mismatch = machine.schema_mismatch
         if mismatch is None:
             continue
-        services = ", ".join(mismatch.held_back_services) or "(watchdog has not reported yet)"
-        lines.append(
-            f"⚠ schema mismatch on {mismatch.machine}: {mismatch.kind}; "
-            f"{mismatch.consecutive_blocked_rounds} consecutive blocked round(s); "
-            f"held back: {services}. {mismatch.detail}"
-        )
-    return lines
-
-
-def _last_update_banner(roster: list[MachineStatus]) -> list[str]:
-    """The lines above the table stating that the last update failed, or none when it
-    succeeded / is running / was never recorded.
-
-    `last_update` is cluster-global and stamped identically on every row (like the
-    pin verdict and the hold), so the first row carrying one is as good as any.
-
-    It goes ABOVE the hold banner because it is the older and more consequential
-    fact: a hold explains why the *next* deploy is refused, while this explains what
-    the cluster's current state IS. Before it, a failed rollout was legible on this
-    roster only as a `pin` / `code` mismatch — and those cells are equally produced
-    by a node that missed a rollout and by a checkout that moved without a restart,
-    so an operator had to reconstruct which had happened (#1012).
-
-    Silent on success by design. Only a failure changes what an operator does next,
-    and a permanent "last update: ok" line would train them to stop reading the top
-    of the roster — which is where the failure will be.
-    """
-    record = next((m.last_update for m in roster if m.last_update is not None), None)
-    if record is None or not record.failed:
-        return []
-    # A recovered update is a failure the cluster already handled, so it gets the
-    # warning glyph rather than the failure one: the operator has to READ it, not
-    # act on it, and giving both the same mark is how the actionable one stops
-    # being read.
-    mark = "⚠" if record.outcome is UpdateOutcome.RECOVERED else "✗"
-    lines = [f"{mark} {record.describe()}{_age_suffix(record.started_at)}"]
-    anchor = next(
-        (m.cluster_last_known_good_sha for m in roster if m.cluster_last_known_good_sha), None
-    )
-    if anchor:
-        lines.append(f"  rollback anchor (last known good): {anchor[:7]}")
-    if record.pin_advanced:
-        lines.append(
-            "  the gateway reached the target and the pin advanced, so hosts still off it "
-            "converge via their watchdog;"
-        )
-    else:
-        lines.append(
-            "  the cluster pin was left where it was, so nothing is converging toward the "
-            "failed target;"
-        )
-    # The rollout recorded the log it was writing, so point at that file. The
-    # pattern is the fallback for a record written without one (a foreground
-    # `ava cluster update --local`), where naming a specific file would be a guess.
-    where = record.log_path or "$AVA_HOME/logs/rollout-<epoch>.log"
-    lines += [
-        f"  read the rollout's own log on the gateway ({where}). The next successful",
-        "  `ava cluster update` replaces this record.",
-        "",
-    ]
-    return lines
-
-
-def _age_suffix(started_at: datetime | None) -> str:
-    """` (Nh ago)` for the failure line — how STALE the failure is changes what an
-    operator does with it: minutes old is a live incident, days old is a cluster
-    nobody has updated since."""
-    if started_at is None:
-        return ""
-    from datetime import UTC
-
-    seconds = (datetime.now(UTC) - started_at).total_seconds()
-    if seconds < 3600:
-        return f" ({seconds / 60:.0f}m ago)"
-    if seconds < 86400:
-        return f" ({seconds / 3600:.0f}h ago)"
-    return f" ({seconds / 86400:.0f}d ago)"
-
-
-def _stranded_hold_banner(roster: list[MachineStatus]) -> list[str]:
-    """Lines above the table for hosts left held by a failed update (task #3132).
-
-    A host in this state has stopped serving and nothing on it will resume the
-    host on its own — the maintenance hold is released only by an explicit
-    `ava start` — so the roster is one of the two places an operator can learn it
-    without ssh (the other is the alert IM). Read from the host's durable record
-    (`host_deploy_state.stranded_hold_*`), not from a probe: the held host's own
-    ops server is usually down with it.
-
-    Rendered per host and first, above the cluster-global banners: unlike the
-    last-update record, this is a live incident, with a one-command remedy on
-    every entry that names it.
-    """
-    held = sorted((m for m in roster if m.stranded_hold_since is not None), key=lambda m: m.name)
-    if not held:
-        return []
-    lines: list[str] = []
-    for m in held:
-        reason = f" ({m.stranded_hold_reason})" if m.stranded_hold_reason else ""
-        lines.append(
-            f"✗ {m.name}: update failed{reason} — host left held"
-            f"{_age_suffix(m.stranded_hold_since)}; nothing will resume it:"
-        )
-        lines.append(f"  run `ava start` on {m.name}")
-    lines.append("")
+        lines.append(f"⚠ schema check on {mismatch.machine}: {mismatch.kind}; {mismatch.detail}")
     return lines
 
 
@@ -385,65 +259,25 @@ def _hold_banner(roster: list[MachineStatus]) -> list[str]:
     """The lines above the table naming the live deploy lease, or none when the
     cluster is free.
 
-    `deploy_hold` is cluster-global and stamped identically on every row (like the
-    pin verdict), so the first row is as good as any — no row is more authoritative
-    than another.
+    `deploy_hold` is cluster-global and stamped identically on every row, so the
+    first row is as good as any — no row is more authoritative than another.
 
-    The banner exists because a refusal happens somewhere else and later: `ava
-    update` refuses, `_assert_no_orchestration_in_flight` says to poll `ava cluster
-    status` until every host is on the pin, and the roster then said nothing about
-    the hold that was doing the refusing — it was legible only in the health-probe
-    cron log or by reading `cluster_update_lock` by hand. It states the operator
-    consequence (deploys refused, auto-rollback suppressed) because that is the
-    question that brought them here, and it says what the `hold` column is NOT so
-    the column is never mistaken for a live convergence check.
+    The banner exists because the refusal it causes happens somewhere else: another
+    owner fails to take the deploy lease, and the roster is where an operator looks
+    to learn what holds it.
 
-    It carries no "no hold" line: a blank `hold` column is not evidence the cluster
-    is free (a watchdog-spawned host-local updater takes no lease), so printing
-    "no deploy in flight" here would assert more than the roster knows.
+    It carries no "no hold" line: an absent lease is not evidence the cluster is
+    free (host-local maintenance takes no cluster lease), so printing "no deploy in
+    flight" here would assert more than the roster knows.
     """
     hold = next((m.deploy_hold for m in roster if m.deploy_hold is not None), None)
     if hold is None:
         return []
     return [
         f"deploy hold: {hold}",
-        "  while it holds, `ava cluster update` is refused and the health probe's auto-rollback is",
-        "  suppressed. `hold` names the hosts the lease RECORDED as still converging when the",
-        "  rollout exited — not a live verdict; `pin` / `code` are the live per-host ones.",
+        "  while it holds, no other owner can take the cluster deploy lease.",
         "",
     ]
-
-
-def _managed_writer_banner(mode: ManagedWriterMode) -> list[str]:
-    """The managed-writer mode bit: the EFFECTIVE state (config x readiness
-    guards), never the raw config read (task #4121 R4).
-
-    Silent on `off` -- the roster top carries only facts that change what an
-    operator does next, same rule as `_last_update_banner`. The flip ceremony
-    reads the line APPEARING (active / blocked) beside the audited config
-    value; `blocked` names the unmet guard(s) and is never a silent
-    degradation of a requested-on state.
-    """
-    if mode.state == "off":
-        return []
-    return [f"managed-writer: {mode.describe()}", ""]
-
-
-def _hold_cell(settle_waited_on: bool) -> str:  # noqa: FBT001 — one flag per cell, passed positionally by the renderer like the other cells
-    """One cell for the roster `hold` column: whether the live settle hold names this
-    host as one it is waiting for.
-
-    Deliberately narrow. This is transcribed from the lease's note — the hosts that
-    acked their self-update and were still converging when Phase B gave up — and no
-    probe informs it, so the cell means "the hold says it is waiting for this host"
-    and nothing more. It is not the deploy-window refusal verdict (that also weighs
-    orchestration sessions this roster never probes), and it is not a convergence
-    verdict in either direction: `waited-on` does not prove this host is still
-    behind, and a blank does not prove it converged — a host that never acked is
-    never named by a hold at all. The live reading sits one column left, in `pin` and
-    `code`.
-    """
-    return "waited-on" if settle_waited_on else "—"
 
 
 def _status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | None) -> str:  # noqa: FBT001 — online / identity_mismatch are probe verdicts, passed positionally by the renderer
@@ -468,94 +302,20 @@ def _status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | N
     return "stopped" if stopped_at else "offline"
 
 
-def _pin_cell(on_pin: bool | None, head_sha: str | None) -> str:  # noqa: FBT001 — on_pin is the tri-state pin verdict, passed positionally by the renderer
-    """One cell for the roster `pin` column: ✓/✗ vs the cluster pin plus the
-    node's short HEAD. `?` when there is no pin yet or the node's HEAD is unknown
-    (on_pin is None) — the same tri-state the gateway computed. This reflects the
-    CHECKOUT only; the `code` column reflects the running process."""
-    short = head_sha[:7] if head_sha else "—"
-    if on_pin is True:
-        return f"✓ {short}"
-    if on_pin is False:
-        return f"✗ {short}"
-    return f"? {short}"
-
-
 def _code_cell(running_sha: str | None, head_sha: str | None) -> str:
     """One cell for the roster `code` column: the commit the live process is
     actually running (`running_sha`), short. `⚠` when it differs from the node's
     checkout HEAD (`head_sha`) — the checkout advanced but the process was not
-    restarted, so a node can read `pin ✓` yet still be running stale code (the
-    2026-07-18 lesson: pin only proved the checkout; up-since exposed the old
-    process). `—` when the answering process froze no commit — it came up
-    outside the supervised start path, or its tree is not a git checkout.
-
-    The cell has read this way since it was written; what changed on 2026-07-28
-    is that `running_sha` finally means it. It used to be a bookmark file that
-    `ava start` rewrote one line before a launcher that skips already-running
-    sessions, so the drift this cell exists to show was the one case it could
-    not produce."""
+    restarted, so it is still running stale code (the 2026-07-18 lesson: the
+    checkout alone proved nothing; up-since exposed the old process). `—` when
+    the answering process froze no commit — it came up outside the supervised
+    start path, or its tree is not a git checkout."""
     if running_sha is None:
         return "—"
     short = running_sha[:7]
     if head_sha is not None and running_sha != head_sha:
         return f"⚠ {short}"
     return short
-
-
-def _conflict_detail(resp: httpx.Response) -> str:
-    """The refusal text out of a 409 body, or a usable fallback.
-
-    FastAPI puts `str(ClusterUpdateInProgress)` in `detail`. A body that is not the
-    expected shape (a proxy's own error page, say) must still produce something an
-    operator can act on rather than an empty line or a decode traceback — this runs
-    on a path whose entire job is explaining why a deploy was refused.
-    """
-    try:
-        payload = resp.json()
-    except ValueError:
-        return resp.text.strip() or "a deploy is already in flight (gateway returned 409)"
-    payload: dict[str, Any] = payload if isinstance(payload, dict) else {}
-    detail = payload.get("detail")
-    return str(detail) if detail else "a deploy is already in flight (gateway returned 409)"
-
-
-def cmd_cluster_restart() -> int:
-    """`ava cluster restart` — bounce the whole cluster (thin client).
-
-    POST `/api/cluster/restart` on the gateway: it restarts this
-    host and fans out a bounce to every agent-runner, on the current code (no git
-    pull / uv sync). The local `ava restart` only touches this host; this is the
-    cluster-wide form. Fire-and-forget — the gateway returns the updater session
-    immediately; poll `ava cluster status` for the hosts to come back.
-
-    A 409 is the deploy-window refusal (`ops.deploy_window`), not a transport
-    failure, so it is reported rather than raised. `raise_for_status()` would throw
-    away the one thing the operator needs — the endpoint puts the full refusal, host
-    in the way and `--force` hint included, in the response `detail` — and replace it
-    with a bare `Client error '409 Conflict' for url ...` traceback. Every other
-    status still fails fast.
-    """
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
-
-    url = f"{gateway_api_base()}/api/cluster/restart"
-    print(f"[ava cluster restart] POST {url}")
-    from shared.deploy_timing import CLUSTER_DISPATCH_TIMEOUT_S
-
-    resp = dial_post(
-        url,
-        timeout=CLUSTER_DISPATCH_TIMEOUT_S,
-        headers=gateway_auth_headers(),
-    )
-    if resp.status_code == _DEPLOY_REFUSED_STATUS:
-        print(f"\n✗ {_conflict_detail(resp)}", file=sys.stderr)
-        return 1
-    resp.raise_for_status()
-    body = resp.json()
-    print(f"  ✓ dispatched: session={body.get('session')} log={body.get('log')}")
-    print("  poll `ava cluster status` for hosts to return.")
-    return 0
 
 
 def _fetch_gateway_cluster_status() -> dict[str, object]:

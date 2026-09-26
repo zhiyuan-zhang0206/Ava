@@ -3,7 +3,7 @@
 The port-conflict preflight (#1205) bind-checks the cluster's ports before
 anything launches; this step extends it into the start-time cluster-health
 checklist (#607): it probes the data plane (Postgres + Redis, exactly the URLs
-the runtime dials) and the checkout (HEAD vs the cluster pin, dirty marker).
+the runtime dials) and the checkout (dirty marker).
 Every finding is printed and appended to `$AVA_HOME/logs/health_preflight.log`
 for after-the-fact inspection; nothing blocks — a start continues on any
 warning, the same contract as the port preflight. This is the first line of
@@ -24,14 +24,10 @@ Data plane (`_data_plane_warnings`), role-aware:
   log exists for, and the runner has no later local bring-up to fix it.
 
 Checkout (`_checkout_warnings`), prod-install only: dev worktrees are a
-development context by construction (feature-branch HEAD, always-dirty tree),
-so their state means nothing against the cluster pin and is skipped. A real
-install's checkout must sit on the pinned commit with a clean tree; HEAD/pin
-relation comes from `shared.cluster_drift.prod_source_pin_relation` (the same
-ancestry read `ava status` uses), and the pin is suppressed while an update is
-in flight — a rollout legitimately moves the checkout ahead of a pin written
-only when the gateway lands the target (the false-alarm shape status.py
-guards).
+development context by construction (always-dirty tree) and are skipped. A
+real install's checkout must be clean. There is no cluster pin to compare
+HEAD against: a source-run home's release identity is the checkout it runs,
+and `ava status` prints it.
 """
 
 from __future__ import annotations
@@ -43,9 +39,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from cli.commands._converge_spec import ConvergeCtx
-from cli.commands.status import _update_in_flight
 from shared.cluster import _port_free
-from shared.cluster_drift import prod_source_pin_relation
 from shared.config import settings
 from shared.deploy.git.gitenv import git_env
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
@@ -59,18 +53,9 @@ _GIT_TIMEOUT_S = 5.0
 _PROBE_TIMEOUT_S = 3.0
 
 # Path markers of a dev worktree, matching converge_host's prod-install
-# discrimination (`is_prod_install`). A worktree checkout's HEAD/dirty state is
-# a development context, never cluster drift.
+# discrimination (`is_prod_install`). A worktree checkout's dirty state is a
+# development context, never cluster drift.
 _WORKTREE_MARKERS = (".claude/worktrees", "/.worktrees/")
-
-# Warning text per non-aligned pin relation, mirroring status.py's _PIN_MARKS.
-_PIN_RELATION_WARN = {
-    "behind": "behind the cluster pin — this host missed a rollout (run `ava cluster update`)",
-    "ahead": "ahead of the cluster pin — the checkout moved past it (stray `git pull`?); "
-    "a restart resets to the pin, `ava cluster update` advances the cluster",
-    "diverged": "diverged from the cluster pin (run `ava cluster update`)",
-    "unknown": "pin commit not present in this checkout (run `ava cluster update`)",
-}
 
 
 def _redact(url: str) -> str:
@@ -151,17 +136,6 @@ def _git_ro(repo: Path, *args: str) -> str | None:
     return result.stdout.strip() or None
 
 
-def _cluster_pin() -> str | None:
-    """The cluster's pinned commit, or None when no rollout has pinned one or the
-    pin cannot be read (DB down — the data-plane probe reports that separately)."""
-    from shared.cluster_pin import get_cluster_target_sha
-
-    try:
-        return get_cluster_target_sha()
-    except Exception:  # a preflight must never fail a start
-        return None
-
-
 def _data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
     """Warning lines for the data plane, or [] when it is reachable / there is
     nothing to probe. See the module docstring for the role-aware skip."""
@@ -201,30 +175,19 @@ def _data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
 
 def _checkout_warnings(ctx: ConvergeCtx) -> list[str]:
     """Warning lines for the checkout, or [] when it is a dev worktree, not a git
-    repo, or aligned and clean."""
+    repo, or clean."""
     if _is_dev_worktree(ctx.repo):
         return []
-    head = _git_ro(ctx.repo, "rev-parse", "HEAD")
-    if head is None:
+    if _git_ro(ctx.repo, "rev-parse", "HEAD") is None:
         return []  # not a git repo / unreadable — nothing to report
-
-    out: list[str] = []
     dirty = _git_ro(ctx.repo, "status", "--porcelain")
-    if dirty:
-        n = len(dirty.splitlines())
-        out.append(
-            f"checkout {ctx.repo} is dirty ({n} changed file(s)) — uncommitted "
-            "changes on the running host; the next rollout force-discards them"
-        )
-
-    pin = _cluster_pin()
-    if pin is not None and not _update_in_flight():
-        relation = prod_source_pin_relation(pin, head, repo=ctx.repo)
-        if relation != "aligned":
-            out.append(
-                f"checkout HEAD {head[:7]} vs cluster pin {pin[:7]}: {_PIN_RELATION_WARN[relation]}"
-            )
-    return out
+    if not dirty:
+        return []
+    n = len(dirty.splitlines())
+    return [
+        f"checkout {ctx.repo} is dirty ({n} changed file(s)) — uncommitted "
+        "changes in the tree this host runs"
+    ]
 
 
 def collect_health_warnings(ctx: ConvergeCtx) -> list[str]:
@@ -233,8 +196,8 @@ def collect_health_warnings(ctx: ConvergeCtx) -> list[str]:
 
 
 def ensure_health_preflight(ctx: ConvergeCtx) -> None:
-    """Converge step: warn (never block) on data-plane unreachability + checkout
-    drift. Best-effort by contract: a preflight must not fail a start, so any
+    """Converge step: warn (never block) on data-plane unreachability + a dirty
+    checkout. Best-effort by contract: a preflight must not fail a start, so any
     exception in the scan prints a notice and the start proceeds."""
     try:
         warnings = collect_health_warnings(ctx)

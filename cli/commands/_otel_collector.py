@@ -25,16 +25,10 @@ with the cluster secret.
 
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import platform
-import shutil
 import sys
-import tarfile
-import tempfile
-import time
-import urllib.request
 from pathlib import Path
 from string import Template
 from urllib.parse import unquote, urlsplit
@@ -42,62 +36,10 @@ from urllib.parse import unquote, urlsplit
 from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
 from cli.commands._rendered_file import write_rendered_guarded
+from shared import collector_artifact
 from shared.atomic_io import write_text_atomic
 from shared.machine import MachineRoles
 from shared.observability import collector_allowed_for_home
-from shared.resilience import Policy, retry
-
-# Pinned contrib version — re-validate against the deploy/lgtm backends
-# (Tempo/Loki/Prometheus OTLP intake) when bumping.
-OTELCOL_CONTRIB_VERSION = "0.157.0"
-
-# SHA256 of each supported platform's release tarball
-# (opentelemetry-collector-releases v0.157.0 checksums). Keyed by the platform
-# tag used in the asset name.
-_OTELCOL_CONTRIB_SHA256: dict[str, str] = {
-    "darwin_arm64": "6c03308935573712a795b4229f756bc4288bbbb13850604f3c7287868af84d4b",
-    "darwin_amd64": "e11e7482144c3ac1eb1f612d3d175589435cad968a791d6ef5c73be43e1b8c34",
-    "linux_amd64": "d33177515a244a2393f03ffd66ab3e68a8fc11a56bc145ec4d0ca2644ee95504",
-    "linux_arm64": "34eb82390c462c877dd60ec5ec84de899088916facd07306ec988e4c34bd05b3",
-    "windows_amd64": "7b3938e1522ff04261a694a58e7111c5f7cdd19be617c3a77118cffad7abb815",
-}
-
-_DOWNLOAD_URL = (
-    "https://github.com/open-telemetry/opentelemetry-collector-releases/"
-    f"releases/download/v{OTELCOL_CONTRIB_VERSION}/"
-    "otelcol-contrib_{version}_{tag}.tar.gz"
-)
-
-_VERSION_MARKER = "version"
-
-# Download fetch discipline (issue #172): the tarball is on the critical path
-# of `ava start`, so a slow or dead mirror must fail the converge step in
-# bounded time and say so — never stall bring-up indefinitely. Per-read socket
-# timeout catches a wedged connection; a total wall-clock cap per attempt
-# catches a mirror that trickles forever; a bounded retry rides out transient
-# blips; a heartbeat line distinguishes slow from dead.
-_DOWNLOAD_SOCKET_TIMEOUT_S = 30.0
-_DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
-_DOWNLOAD_ATTEMPTS = 3
-_DOWNLOAD_RETRY_BACKOFF_S = 5.0
-_DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
-
-
-def _download_backoff(attempt: int) -> float:
-    return _DOWNLOAD_RETRY_BACKOFF_S * (attempt + 1)
-
-
-# Pinned collector download retries every failure on the original 5s, 10s schedule.
-_DOWNLOAD_POLICY = Policy(
-    max_attempts=_DOWNLOAD_ATTEMPTS,
-    backoff=_download_backoff,
-    jitter="none",
-    jitter_span=1.0,
-    classify=lambda _exc: True,
-    idempotent=True,
-    respect_retry_after=False,
-    on_final_failure=None,
-)
 
 
 def _otlp_ingress_port() -> int:
@@ -110,31 +52,6 @@ def _otlp_ingress_port() -> int:
     from shared.config import settings
 
     return settings.observability.telemetry_otlp_port
-
-
-def platform_tag() -> str | None:
-    """The release asset tag for this machine, or None when unsupported.
-
-    Tags follow the release assets: darwin_arm64 / darwin_amd64 / linux_amd64 /
-    linux_arm64 / windows_amd64. Anything else (linux_386, windows_arm64, ...)
-    has no pinned binary — the sidecar is skipped and OTLP export auto-disables
-    at the agent preflight.
-    """
-    machine = platform.machine().lower()
-    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "amd64": "amd64"}.get(machine)
-    if arch is None:
-        return None
-    if platform.system() == "Darwin":
-        return f"darwin_{arch}"
-    if platform.system() == "Linux":
-        return f"linux_{arch}"
-    if platform.system() == "Windows":
-        return "windows_amd64" if arch == "amd64" else None
-    return None
-
-
-def _binary_name() -> str:
-    return "otelcol-contrib.exe" if platform.system() == "Windows" else "otelcol-contrib"
 
 
 def _config_template(repo: Path) -> str:
@@ -171,21 +88,28 @@ def _host_port(host: str, port: int) -> str:
 # interval is 60s (not host_metrics' 30s): connection counts and redis memory
 # are slow-moving pressure gauges.
 _POSTGRES_RECEIVER_BLOCK = """
-  # This cluster's OWN Postgres — dialed DIRECT, never through PgBouncer: the
-  # receiver reads pg_stat_* views, which a transaction-pooled session cannot
-  # be trusted to serve consistently. The role is the cluster's NOSUPERUSER
-  # owner, so the receiver collects what that role can see (its own database's
-  # stats); metrics needing pg_monitor are simply absent rather than fatal.
+  # This cluster's OWN Postgres over the home's owner-only unix socket, never
+  # through PgBouncer: the receiver reads pg_stat_* views, which a
+  # transaction-pooled session cannot be trusted to serve consistently. It logs
+  # in as the stable monitoring role by peer (the collector runs as the home's
+  # OS user): that role has no password and is not a write generation, so no
+  # credential lives here and a rollout neither revokes nor rotates it. The
+  # contrib receiver refuses an empty password, so the value below is a fixed
+  # non-secret placeholder that peer authentication never asks for. The
+  # receiver prefixes a unix endpoint's host with "/".
   postgresql:
     endpoint: {pg_endpoint}
-    transport: tcp
+    transport: unix
     username: {pg_user}
-    password: {pg_password}
+    password: {pg_placeholder}
     databases: [{pg_database}]
     collection_interval: 60s
     tls:
       insecure: true
 """
+# Not a credential: pg_hba admits the monitoring role only by peer, and the role
+# has no verifier, so no password can ever authenticate it.
+_PEER_PLACEHOLDER = "peer-authenticated-no-password"
 
 _REDIS_RECEIVER_BLOCK = """
   # This cluster's OWN Redis. The receiver dials the default administrative
@@ -214,42 +138,60 @@ def _endpoint(url: str, what: str) -> str:
     return f"{parts.hostname}:{parts.port}"
 
 
-def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
+def _postgres_receiver_block(ava_home: Path) -> str:
+    """The receiver for this home's own Postgres: its socket, the monitoring role.
+
+    Everything comes from the home's registry record and identity; nothing is
+    read from a database URL, so no credential can reach the rendered file.
+    """
+    from shared.cluster import db_identity, get_record, record_postgres_port
+    from shared.cluster.authority import MONITOR_ROLE
+    from shared.pg_admin import pg_socket_path
+
+    record = get_record(ava_home)
+    if record is None:
+        raise RuntimeError(
+            "cannot build the otel-collector postgres receiver: no registry record "
+            f"for home {ava_home}"
+        )
+    socket_dir = pg_socket_path(ava_home).as_posix().lstrip("/")
+    return _POSTGRES_RECEIVER_BLOCK.format(
+        pg_endpoint=_yaml_quote(f"{socket_dir}:{record_postgres_port(record)}"),
+        pg_user=_yaml_quote(MONITOR_ROLE),
+        pg_placeholder=_yaml_quote(_PEER_PLACEHOLDER),
+        pg_database=_yaml_quote(db_identity()),
+    )
+
+
+def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[str, str]:
     """(receiver block, pipeline-list fragment) for this unit's own data plane.
 
     Empty pair on anything that does not own Postgres+Redis: a pure
     agent-runner's URLs point at the GATEWAY's data plane, so scraping from
     there would duplicate the gateway's own series under a second `host`
-    label. An unconfigured unit (roles None) has no URLs to read at all.
+    label. An unconfigured unit (roles None) has no URLs to read at all. The
+    Postgres receiver exists only for a home-owned instance: a remote-managed
+    plane has no owner-only socket or monitoring role here (its provider
+    monitors it).
     """
     if roles is None or "gateway" not in roles:
         return "", ""
     from shared.config import settings
-    from shared.db import UNANCHORED_DB_SENTINEL, direct_db_url
+    from shared.db import UNANCHORED_DB_SENTINEL
 
-    db_url = direct_db_url()
-    if db_url == UNANCHORED_DB_SENTINEL:
+    if settings.data_plane.db_url == UNANCHORED_DB_SENTINEL:
         return "", ""
-    pg = urlsplit(db_url)
     redis_url = settings.data_plane.redis_url
     from shared.cluster import redis_admin_url
 
     redis_admin = redis_admin_url()
     blocks: list[str] = []
     receivers: list[str] = []
-    if pg.password and settings.observability.telemetry_otlp_enabled:
-        blocks.append(
-            _POSTGRES_RECEIVER_BLOCK.format(
-                pg_endpoint=_endpoint(db_url, "postgres"),
-                pg_user=_yaml_quote(unquote(pg.username or "")),
-                pg_password=_yaml_quote(unquote(pg.password)),
-                pg_database=_yaml_quote(pg.path.lstrip("/")),
-            )
-        )
+    if settings.observability.telemetry_otlp_enabled and not settings.data_plane.is_remote:
+        blocks.append(_postgres_receiver_block(ava_home))
         receivers.append("postgresql")
-    # The contrib postgresql receiver rejects an empty password, so no-auth
-    # single-box homes omit only that receiver. Redis supports an empty
-    # password and remains observable in the same posture.
+    # Redis always authenticates with its admin password and stays observable
+    # in every posture.
     blocks.append(
         _REDIS_RECEIVER_BLOCK.format(
             redis_endpoint=_endpoint(redis_url, "redis"),
@@ -453,7 +395,7 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
 
     obs = settings.observability
     loki_base, prom_base = _lgtm_fanout_bases(remote=roles != frozenset({"agent-runner"}))
-    data_plane_block, data_plane_pipeline = _data_plane_receivers(roles)
+    data_plane_block, data_plane_pipeline = _data_plane_receivers(roles, ava_home)
     substitutions = {
         "AVA_HOME": str(ava_home),
         "CLUSTER_LABEL": home_label(ava_home),
@@ -472,105 +414,6 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
     }
     substitutions.update(_remote_receiver_fragments(roles))
     return Template(_config_template(repo)).substitute(substitutions)
-
-
-def _stream_download(url: str, dest: Path) -> None:
-    """Stream ``url`` into ``dest`` with the issue #172 fetch discipline.
-
-    A bounded, loud download: per-read socket timeout, a wall-clock cap on the
-    whole attempt, a progress heartbeat every 15 s (so a slow mirror reads as
-    "slow", not "hung"), and a RuntimeError naming the URL + elapsed time when
-    the attempt exceeds its budget. Deliberately not ``urlretrieve`` — it has
-    no timeout parameter, which is exactly the gap this fixes.
-    """
-    started = time.monotonic()
-    last_beat = started
-    got = 0
-    total: int | None = None
-    with (
-        urllib.request.urlopen(url, timeout=_DOWNLOAD_SOCKET_TIMEOUT_S) as resp,  # noqa: S310 — pinned https release asset
-        dest.open("wb") as fh,
-    ):
-        try:
-            total = int(resp.headers.get("Content-Length") or 0)
-        except (TypeError, ValueError):
-            total = None
-        while True:
-            chunk = resp.read(1 << 16)
-            if not chunk:
-                break
-            fh.write(chunk)
-            got += len(chunk)
-            now = time.monotonic()
-            if now - last_beat >= _DOWNLOAD_PROGRESS_INTERVAL_S:
-                pct = f" ({got * 100 // total}%)" if total else ""
-                print(
-                    f"  · otel-collector: {got / 1e6:.1f} MB{pct} in {now - started:.0f}s",
-                    flush=True,
-                )
-                last_beat = now
-            if now - started > _DOWNLOAD_ATTEMPT_TIMEOUT_S:
-                raise TimeoutError(
-                    f"download exceeded {_DOWNLOAD_ATTEMPT_TIMEOUT_S:.0f}s wall-clock cap"
-                )
-    print(f"  · otel-collector: downloaded {got / 1e6:.1f} MB in {time.monotonic() - started:.0f}s")
-
-
-def _download_with_retry(url: str, tarball: Path) -> None:
-    """Bounded retry around ``_stream_download``; a final failure names the
-    URL and total elapsed time so the operator knows exactly what to fix."""
-    started = time.monotonic()
-    attempt = 0
-
-    def _download_once() -> None:
-        nonlocal attempt
-        attempt += 1
-        try:
-            _stream_download(url, tarball)
-        except Exception as exc:  # URLError / TimeoutError / OSError
-            elapsed = time.monotonic() - started
-            print(
-                f"  ! otel-collector: download attempt {attempt}/{_DOWNLOAD_ATTEMPTS} "
-                f"failed after {elapsed:.0f}s: {exc}",
-                file=sys.stderr,
-                flush=True,
-            )
-            raise
-
-    try:
-        retry(_DOWNLOAD_POLICY)(_download_once)
-    except Exception as exc:
-        raise RuntimeError(
-            f"failed to download otel-collector from {url} after {_DOWNLOAD_ATTEMPTS} "
-            f"attempts ({time.monotonic() - started:.0f}s total): {exc}"
-        ) from exc
-
-
-def _download_and_verify(tag: str, dest_dir: Path) -> None:
-    """Download + SHA256-verify + extract the pinned tarball into dest_dir."""
-    url = _DOWNLOAD_URL.format(version=OTELCOL_CONTRIB_VERSION, tag=tag)
-    expected = _OTELCOL_CONTRIB_SHA256[tag]
-    with tempfile.TemporaryDirectory() as tmp:
-        tarball = Path(tmp) / "otelcol-contrib.tar.gz"
-        print(f"  · otel-collector: downloading {url}")
-        _download_with_retry(url, tarball)
-        digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
-        if digest != expected:
-            raise RuntimeError(
-                f"otelcol-contrib {OTELCOL_CONTRIB_VERSION} {tag} SHA256 mismatch: "
-                f"got {digest}, expected {expected} — refusing to install"
-            )
-        with tarfile.open(tarball) as tf:
-            members = [m for m in tf.getmembers() if m.name.endswith(_binary_name())]
-            if not members:
-                raise RuntimeError(f"otelcol-contrib tarball has no {_binary_name()} member")
-            tf.extract(members[0], path=tmp)
-        extracted = Path(tmp) / members[0].name
-        dest = dest_dir / _binary_name()
-        shutil.move(str(extracted), dest)
-        if platform.system() != "Windows":
-            dest.chmod(0o755)
-    (dest_dir / _VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
 
 
 def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
@@ -643,14 +486,17 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
 
     if WHEEL_RUNTIME:
         binary = runtime_otel_binary()
-        marker = binary.parent / _VERSION_MARKER
-        if not binary.is_file() or marker.read_text().strip() != OTELCOL_CONTRIB_VERSION:
+        marker = binary.parent / collector_artifact.VERSION_MARKER
+        if (
+            not binary.is_file()
+            or marker.read_text().strip() != collector_artifact.OTELCOL_CONTRIB_VERSION
+        ):
             raise RuntimeError("verified release lacks its pinned collector; prepare before start")
         dest_dir = ava_home / "otel-collector"
         dest_dir.mkdir(parents=True, exist_ok=True)
         _write_config(dest_dir / "config.yaml", generate_config(repo, ava_home, roles))
         return
-    tag = platform_tag()
+    tag = collector_artifact.platform_tag()
     if tag is None:
         print(
             f"  ! otel-collector: no pinned otelcol-contrib for this platform "
@@ -660,41 +506,21 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
         return
     dest_dir = ava_home / "otel-collector"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    binary = dest_dir / _binary_name()
-    marker = dest_dir / _VERSION_MARKER
+    binary = dest_dir / collector_artifact.binary_name()
+    marker = dest_dir / collector_artifact.VERSION_MARKER
     if not (
-        binary.exists() and marker.read_text(encoding="utf-8").strip() == OTELCOL_CONTRIB_VERSION
+        binary.exists()
+        and marker.read_text(encoding="utf-8").strip() == collector_artifact.OTELCOL_CONTRIB_VERSION
     ):
-        _download_and_verify(tag, dest_dir)
-        print(f"  · otel-collector: installed otelcol-contrib {OTELCOL_CONTRIB_VERSION} ({tag})")
+        collector_artifact.download_and_verify(tag, dest_dir)
+        print(
+            f"  · otel-collector: installed otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} ({tag})"
+        )
     else:
-        print(f"  · otel-collector: otelcol-contrib {OTELCOL_CONTRIB_VERSION} present")
+        print(
+            f"  · otel-collector: otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} present"
+        )
     _write_config(dest_dir / "config.yaml", generate_config(repo, ava_home, roles))
-
-
-def _reap_orphan_collector_session() -> None:
-    """Stop a collector that predates this gateway losing its LGTM marker.
-
-    The roster gate drops the collector from a non-LGTM gateway, so the
-    watchdog will not revive it, but a session started before the marker went
-    away keeps running until something stops it. Converge is the reconcile
-    point, so ``ava start`` and ``ava cluster update`` reach the gated roster.
-    Its force-kill fallback is the designed remedy for this operator-initiated
-    transition, so the backend logs an escalation at INFO instead of WARNING.
-    """
-    import cli.commands as _ns
-    from cli.commands._session_lifecycle import _graceful_kill_session
-    from shared.cluster import session_name
-
-    sess = session_name("otel-collector")
-    if not _ns._has_session(sess):
-        return
-    ok, mode = _graceful_kill_session(sess, expected=True)
-    print(
-        f"  ! otel-collector: reaped orphan session {sess} "
-        f"({'✓' if ok else '✗'} {mode}) — gateway no longer owns a collector",
-        file=sys.stderr,
-    )
 
 
 def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
@@ -724,6 +550,5 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
                 "collector files were preserved",
                 file=sys.stderr,
             )
-        _reap_orphan_collector_session()
         return
     ensure_otel_collector(ctx.repo, ctx.ava_home, ctx.roles)

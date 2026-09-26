@@ -5,7 +5,7 @@ is SIGKILLed rather than allowed to unlink it — eventually names a recycled
 process. Untreated that wedges the cluster: `ensure_pgbouncer` reads the live
 number as "already running", SIGHUPs a stranger, starts nothing, and never
 rewrites the pidfile, so every later start repeats it. These pin the ownership
-check on both signalling paths — the stop's SIGTERM and the start's reload
+check on both signalling paths — the stop's owned adapter and the start's reload
 SIGHUP — and on the substring trap that would let one home claim another's.
 """
 
@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import Mock
 
 import psutil
 import pytest
@@ -63,13 +64,6 @@ def _pooler_proc(pgb_dir: Path, *, platform: str) -> _FakeProc:
     return _FakeProc("pgbouncer", pgb_dir, ["/opt/pgbouncer/bin/pgbouncer", "-d", "pgbouncer.ini"])
 
 
-class _CompletedOk:
-    """A subprocess.CompletedProcess stand-in for the pgbouncer launch."""
-
-    returncode = 0
-    stderr = ""
-
-
 def _fake_psutil_process(table: dict[int, _FakeProc]) -> Callable[[int], _FakeProc]:
     def factory(pid: int) -> _FakeProc:
         if pid not in table:
@@ -97,10 +91,15 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture()
 def signalled(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """Every pid the stop path would signal. Replaces the SIGTERM/SIGKILL seam so
+    """Every pid the stop path would signal. Replaces the owned stop adapter so
     a regression shows up as a recorded pid, not as a dead process."""
     calls: list[int] = []
-    monkeypatch.setattr(pgb, "_terminate_verified", lambda pid, **_: calls.append(pid))  # pyright: ignore[reportUnknownArgumentType]
+
+    def record_stop(custodian: pgb.OwnedPooler, **_kwargs: object) -> bool:
+        calls.append(custodian.identity.pid)
+        return True
+
+    monkeypatch.setattr(pgb.OwnedPooler, "stop", record_stop)
     return calls
 
 
@@ -130,6 +129,10 @@ def test_stop_signals_this_homes_own_pooler(
         _fake_psutil_process({4242: _pooler_proc(home / "pgbouncer", platform=platform)}),
     )
 
+    from shared.native_process.ownership import OwnedProcess
+
+    monkeypatch.setattr(pgb.ownership, "pooler", Mock(return_value=OwnedProcess(4242, 1.0, None)))
+    (home / "pgbouncer" / "pgbouncer.ini").write_text("[pgbouncer]\nlisten_port=16433\n")
     pgb.stop_pgbouncer()
 
     assert signalled == [4242]
@@ -160,39 +163,16 @@ def test_sibling_home_sharing_a_path_prefix_is_not_ours(
 
 
 def test_start_does_not_reload_a_recycled_pid(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ava start` reloads an already-running pooler with SIGHUP, which for most
-    processes that are not pgbouncer is a kill — and start runs far more often
-    than stop. A recycled pid must take the launch branch instead."""
+    """A foreign live PID leaves custody unresolved; start neither signals nor writes."""
     _write_pidfile(home, os.getpid())
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")  # loopback-only render
-    monkeypatch.setattr(pgb, "pgbouncer_bin", lambda: str(Path(__file__)))  # exists; never run
-    monkeypatch.setattr(pgb, "_admin_reachable", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(pgb, "_report_backend_verification", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    signals: list[tuple[int, int]] = []
-
-    def record_kill(pid: int, sig: int) -> None:
-        if sig != 0:  # signal 0 is the liveness probe behind shared.proc.process_alive
-            signals.append((pid, sig))
-
-    monkeypatch.setattr(pgb.os, "kill", record_kill)
-
-    launched: list[list[str]] = []
-
-    def record_run(cmd: list[str], **_: object) -> _CompletedOk:
-        launched.append(cmd)
-        return _CompletedOk()
-
-    monkeypatch.setattr(pgb.subprocess, "run", record_run)
-
-    rc = pgb.ensure_pgbouncer(
-        pg_port=15433,
-        listen_port=16433,
-        db_name="ava_scratch",
-        role="ava_scratch",
-        cluster_secret=_SECRET,
-    )
-
-    assert rc == 0
-    assert signals == [], "no signal may reach a pid this home does not own"
-    assert launched, "with the stale pidfile discarded, start must launch its own pooler"
+    monkeypatch.setattr(pgb, "pgbouncer_bin", lambda: str(Path(__file__)))
+    monkeypatch.setattr(pgb, "_write_config", Mock(side_effect=AssertionError("foreign PID")))
+    with pytest.raises(RuntimeError, match="cannot verify this home's PgBouncer"):
+        pgb.ensure_pgbouncer(
+            pg_port=15433,
+            listen_port=16433,
+            db_name="ava_scratch",
+            cluster_secret="",
+            userlist=b"",
+            admin_password="unused-admin-credential",  # noqa: S106 — never presented
+        )

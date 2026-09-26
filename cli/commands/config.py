@@ -80,7 +80,7 @@ def _gateway_base() -> str:
         return anchored
     raise _ConfigError(
         "gateway_url unset — this checkout is not anchored to a cluster home: "
-        "run `scripts/install.sh --worktree` to give it its own cluster, or "
+        "run `.venv/bin/ava start --worktree` to give it its own cluster, or "
         "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly. "
         "(An unanchored checkout never falls back to the default home's gateway.)"
     )
@@ -100,7 +100,7 @@ def _guard_gateway_write(target: str) -> None:
         raise _ConfigError(
             "refusing to write gateway config: this checkout is not anchored "
             "to a cluster home (no `.ava_home` pointer). Run "
-            "`scripts/install.sh --worktree` for a dev cluster, or run this "
+            "`.venv/bin/ava start --worktree` for a dev cluster, or run this "
             "command from the target home's own checkout."
         )
     if target != anchored:
@@ -552,7 +552,7 @@ def _edit_local_config(
             "[ava config] refusing to write local config: this checkout is not "
             "anchored to a cluster home (no `.ava_home` pointer) — the fallback "
             "home is the prod home's, and a worktree must not mutate it. Run "
-            "`scripts/install.sh --worktree` for a dev cluster.",
+            "`.venv/bin/ava start --worktree` for a dev cluster.",
             file=sys.stderr,
         )
         return 1

@@ -11,13 +11,13 @@ import sys
 
 
 def _h_packages_status(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_packages_status
+    from cli.commands.packages import cmd_packages_status
 
     return cmd_packages_status(json_output=args.json_output)
 
 
 def _h_packages_refresh(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_packages_refresh
+    from cli.commands.packages import cmd_packages_refresh
 
     return cmd_packages_refresh(
         check_only=args.check,
@@ -29,7 +29,7 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
 
 
 def _h_packages_rollback(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_packages_rollback
+    from cli.commands.packages import cmd_packages_rollback
 
     return cmd_packages_rollback(args.name, force=args.force)
 
@@ -46,7 +46,7 @@ def _duration(value: str) -> str:
 
 
 def _h_packages_policy(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_packages_policy
+    from cli.commands.packages import cmd_packages_policy
 
     if args.update_mode is None and args.check_every is None:
         print(

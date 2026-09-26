@@ -107,7 +107,13 @@ _LIVE_READ_ENV_VARS = frozenset(
 # include a one-line inline comment explaining why.
 _ALLOWED_FILES = frozenset(
     {
-        "scripts/preview/local.py",  # Settings-free cross-checkout controller: allowlist the live child environment before target Settings exist.
+        "cli/main.py",  # CLI bootstrap sets config/profile/log routing before importing Settings or command modules.
+        "cli/preflight.py",  # Validates explicit home/registry and config inputs before Settings can load a cluster.
+        "cli/commands/cluster_lifecycle.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
+        "cli/commands/_temporary_stop.py",  # Clears one-shot home override transport; this is child environment control, not runtime config.
+        "cli/start_intent.py",  # Identity bootstrap precedes Settings: read and pin the explicit home and birth inputs before config imports.
+        "tests/cli/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
+        "tests/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
         "scripts/legacy_lkg/prepare.py",  # CI fixed-base reconstruction, before either app Settings exists; never a production entry.
         "scripts/legacy_lkg/cold_boot.py",  # CI private normal-process env and pre-Settings home rejection proof.
         "shared/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
@@ -118,8 +124,6 @@ _ALLOWED_FILES = frozenset(
         "cli/commands/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first
         "shared/bootstrap.py",  # fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing shared.config here is the import cycle this module exists to break
         "shared/external_caller.py",  # per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection
-        "services/agent_ops/bootstrap.py",  # restricted prepared observer consumes an explicit pre-resolved child projection before ordinary Settings can fetch the stopped gateway
-        "cli/prepared_facts.py",  # restricted prepared child of the ops handler: the explicit minimal projection's AVA_DB_URL must be read as given — absent must refuse, not fall back through Settings' merged sources
         "services/page_server/daemon.py",  # spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as shared/session_env
         "services/page_server/server.py",  # reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it
         "scripts/lint_no_os_environ.py",  # this script itself has "os.environ" in strings
@@ -129,11 +133,7 @@ _ALLOWED_FILES = frozenset(
         "scripts/prove_runtime_otel.py",  # CI-only scratch/home guard; never production collector configuration.
         "scripts/prove_runtime_plugins.py",  # CI-only private home and CI guard, not runtime plugin settings.
         "scripts/prove_exec_owner_installed.py",  # CI-only scratch child projection for source-absent proof.
-        "scripts/prove_normal_release.py",  # CI-only scratch/DB guards and explicit private child projection; never runtime configuration.
-        "scripts/prove_ops_bootstrap.py",  # CI-only scratch/DB guards and sanitized pre-Settings child projection.
         "scripts/prove_release_inventory.py",  # CI-only native PG and private unit projection for source-absent proof.
-        "scripts/prove_updater_bootstrap.py",  # CI-only native unit guard and explicit private child projection; never runtime configuration.
-        "scripts/prove_managed_writer_chain.py",  # CI-only scratch guard and explicit isolated-schema projection; never runtime configuration.
         "scripts/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
         "scripts/lint_fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
         "shared/session_env.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded
@@ -145,9 +145,11 @@ _ALLOWED_FILES = frozenset(
         "shared/trace.py",  # sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Ava's own config surface is the AVA_TRACE_STRIP_CONTENT settings field, which drives this env translation
         "shared/deploy/git/gitenv.py",  # git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Ava runtime config
         "shared/process_env.py",  # centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state
-        "shared/lgtm_systemd.py",  # _user_bus_environment overlays the logind user-bus identity (XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS) on the live env for systemctl --user; OS session plumbing (same class as shared/platform.py), not Ava runtime config — Settings has no model for it and the overlay must reflect the calling process's env
         "ops/agent_launch.py",  # agent_spawn_env_dict copies the registry's forward view (shared/env_registry.py child_env) from the live env into a detached child's env — the same child-env handoff as shared.session_env; Settings cannot enumerate non-modeled keys and the dict must reflect the parent's live env, not its own snapshot
         "scripts/migration_smoke.py",  # builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Ava runtime config
+        "scripts/preview/linux_cycle.py",  # the os.environ token is inside a `-c` script string handed to a spawned child interpreter to exercise the persistent-terminal fixture; this driving process never reads the raw environment itself
+        "scripts/preview/linux_observer.py",  # _require_context validates AVA_HOME/AVA_CLUSTER_REGISTRY name this preview's own home before importing Settings or touching storage — the same pre-Settings guard class as cli/preflight.py
+        "scripts/preview/local.py",  # clean_env() builds a disposable preview subprocess's child environment from a fixed allowlist of raw OS vars (HOME/USER/PATH/...) merged with a hardcoded profile — a preview driver constructing a child environment, the documented exemption class
         "scripts/lint_code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.
         "scripts/coverage_gates.py",  # BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing shared.config would drag the settings singleton into a pure CI report parser
         "scripts/ci_utils.py",  # CI_QUEUE and TRUNK_API_TOKEN are per-invocation CI-orchestration inputs; Settings models deployment config, and its singleton cannot preserve the required live environment read for this standalone merge watcher
@@ -156,7 +158,7 @@ _ALLOWED_FILES = frozenset(
         "ava/watcher.py",  # _spawn() bootstrap code uses os.environ.get in a string literal for the child process bootstrap
         "ava/_boot.py",  # _try_establish_from_env() reads os.environ["AVA_AGENT_ID"] as a lazy fallback; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent
         "cli/commands/impersonation.py",  # AVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity
-        "shared/proc_tree.py",  # process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config
+        "shared/native_process/ownership.py",  # process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config
         "ava/_attach.py",  # attach() reads the one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; it is not Settings config and only an exec child receives it
         "shared/observability.py",  # endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit
         "shared/telemetry/otlp/telemetry_otlp_defer.py",  # the exec-child OTLP deferral knobs (AVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as shared/observability.py
@@ -167,6 +169,8 @@ _ALLOWED_FILES = frozenset(
         "agent/exec_child.py",  # the exec child reads its per-launch protocol env (AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop
         "agent/exec_owner_child.py",  # the gated exec child validates the same one-shot AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE handoff against its signed owner context before delegating to agent.exec_child; these dynamic per-launch paths are not Settings config
         "agent/graph/_exec_subprocess.py",  # _build_child_env copies the LIVE parent env and layers the exec protocol vars on top — a whole-environment child handoff (same class as shared/session_env.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env
+        "services/ava_root_glue/windows_terminal.py",  # _launch_owner spawns the Windows terminal owner subprocess with `env=dict(os.environ)` — the same whole-environment child handoff as agent/graph/_exec_subprocess.py / shared/session_env.py; the owner needs the root supervisor's own live environment, not Ava runtime config
+        "services/ava_root_glue/windows_terminal_owner.py",  # _command reads os.environ["SYSTEMROOT"] to locate cmd.exe for shell-metacharacter commands — a Windows OS-level path, not an Ava setting; same class as shared/platform_probes.py's DISPLAY/WAYLAND_DISPLAY reads
         "shared/lm/provider_api.py",  # plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries
         "scripts/migrate_skill_identity.py",  # standalone R2-B migration tool: must target an arbitrary AVA_HOME (--ava-home overrides) and build a psql subprocess env at call time; importing shared.config would freeze the settings singleton to the process's own home at import and drag the whole config stack into a script that must run against foreign / fresh homes
         "scripts/guard_editable_venv.py",  # dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import

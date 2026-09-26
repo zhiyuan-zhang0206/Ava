@@ -38,8 +38,12 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 
 ## Entry Points
 - `services/heartbeat/daemon.py` — `.venv/bin/python -m services.heartbeat.daemon`
-- Watchdog keeps alive via `services/healthchecks/heartbeat.py`
+- The application root supervises the daemon; `services/healthchecks/heartbeat.py` supplies its protocol probe.
 
 ## Notes
 - Idle-minute observations keep the PostgreSQL clock and cross the SQL boundary as double precision, matching the float slack used by next-cycle check-in reconciliation.
 - heartbeat message tag = `NoteTag.HEARTBEAT`, agents can distinguish heartbeats from other wake-ups by this
+
+The liveness pass retains machine reachability and agent lease observation.
+It does not read or grade the retired controller's stranded-hold records, whose
+writer, alert job, and status projection have been removed.

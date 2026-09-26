@@ -1,8 +1,7 @@
 """Port-preflight helpers — the expected-port set, the bind probe, and drift.
 
-The `ava start` preflight (cli/commands/_port_preflight.py), the `ava stop`
-orphan sweep (cli/commands/stop.py) and the rollout's gateway-readiness gate
-(cli/commands/_gateway_ready.py) all need the same three facts about a
+The `ava start` preflight (cli/commands/_port_preflight.py) and the `ava stop`
+orphan sweep (cli/commands/stop.py) need the same three facts about a
 cluster's ports, stated here beside the record code they read:
 
 - `expected_cluster_ports` / `unit_port_map` — the service->port map the
@@ -16,8 +15,8 @@ cluster's ports, stated here beside the record code they read:
 - `process_mentions` / `listener_is_ours` — the pid ownership predicate (the
   #1603/#1606 lineage): a listener counts as this unit's when its argv,
   resolved executable, or working directory mentions the unit's repo or home
-  path — the same rule `ava stop`'s orphan sweep and the readiness gate apply
-  to tell "ours, safe to kill / safe to bless" from "foreign, never touch";
+  path — the same rule the start preflight and `ava stop`'s orphan sweep apply
+  to tell "ours, safe to kill / safe to reuse" from "foreign, never touch";
 - `env_port_drift` — `.env` port values that disagree with the registry record,
   the silent drift `shared.port_block`'s docstring warns about.
 """
@@ -97,7 +96,7 @@ def env_port_drift(home: Path, rec: ClusterRecord) -> list[str]:
 
     Only keys PRESENT in the `.env` are compared — an absent key is a unit that
     never got one, not a drift. Health ports are deliberately excluded: they are
-    a per-UNIT fact (`ava enroll --health-port-base` moves them on purpose), and
+    a per-UNIT fact (`ava start --health-port-base` moves them on purpose), and
     the pre-bind gate already guards them. AVA_DB_URL's expected port follows
     the unit's own AVA_PGBOUNCER_ENABLED (pooler when on, direct pg when off)."""
     from dotenv import dotenv_values
@@ -143,10 +142,8 @@ def env_port_drift(home: Path, rec: ClusterRecord) -> list[str]:
 
 
 # ── listener / ownership predicates (the #1603/#1606 lineage) ─────────────────
-# Moved here from cli/commands/_port_preflight.py so `ava stop`'s orphan sweep
-# and the rollout's gateway-readiness gate reuse the SAME ownership rule the
-# start preflight applies — one definition of "this unit's process", three
-# consumers (Task #965).
+# Shared so `ava stop`'s orphan sweep reuses the SAME ownership rule the start
+# preflight applies — one definition of "this unit's process" (Task #965).
 
 
 class ListenerDiscoveryError(RuntimeError):
@@ -384,7 +381,7 @@ def unit_port_map(home: Path) -> dict[str, int]:
 
     The cluster's port block (`expected_cluster_ports`: registry record, or the
     legacy block for a record-less default home) overlaid by this unit's health
-    ports — the per-machine layer `ava enroll --health-port-base` moves. The
+    ports — the per-machine layer `ava start --health-port-base` moves. The
     overlay OVERRIDES the block map, not fills its gaps: for a record-less
     enrolled unit the block map is the LEGACY segment while the unit's own .env
     declares its real per-unit ports (for a record-having cluster the two agree,

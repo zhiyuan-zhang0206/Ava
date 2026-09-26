@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import psycopg
@@ -29,6 +29,7 @@ from shared.context import AvaContext
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
 from shared.maintenance_cohort import _classify, _RuntimeRow
 from shared.maintenance_state import MaintenanceHold
+from shared.runtime_incarnation import RuntimeIncarnation
 from tests.agent.test_hosted_db_recovery import _admit
 from tests.shared.poll_until import poll_until_async
 
@@ -40,6 +41,83 @@ def _accept_model(**_kwargs: object) -> None:
 def _unexpected_model(state: BaseAgentState) -> dict[str, object]:
     del state
     pytest.fail("quiet idle recovery reached a model/initialization node")
+
+
+def _dead_birth_copy(host_process: ResourceProcess) -> ResourceProcess:
+    """Same PID, different birth: the predecessor has exited, even if its PID
+    was recycled. No real host or test worker is stopped for this evidence."""
+    if host_process.starttime is not None:
+        return host_process.model_copy(update={"starttime": host_process.starttime + 1})
+    return host_process.model_copy(update={"birth": host_process.birth - 60})
+
+
+def _mark_predecessor_idle(
+    db_conn: psycopg.Connection,
+    resources: IncarnationResources,
+    agent: int,
+    *,
+    evidence: str,
+    released: bool,
+) -> None:
+    """Idle the agent with the predecessor's incarnation evidence either absent
+    (`legacy`) or present but dead (`managed`), and the lease either released
+    or still (about to be) expired."""
+    assert resources.host_process is not None
+    dead = _dead_birth_copy(resources.host_process)
+    incarnation_resources = (
+        None
+        if evidence == "legacy"
+        else Jsonb(resources.model_copy(update={"host_process": dead}).model_dump(mode="json"))
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET status='idling',incarnation_resources=%s,"
+        "lease_expires_at=CASE WHEN %s THEN NULL ELSE now()-interval '1s' END WHERE id=%s",
+        (incarnation_resources, released, agent),
+    )
+    db_conn.commit()
+
+
+async def _assert_recovered_without_a_model_call(
+    db_conn: psycopg.Connection,
+    incarnation: RuntimeIncarnation,
+    agent: int,
+    host: AgentHost,
+    scheduler: TurnScheduler,
+    dispatcher: InboundWakeDispatcher,
+    graph: Any,
+    config: RunnableConfig,
+    messages: list[HumanMessage | AIMessage],
+) -> None:
+    """The quiet-idle recovery ran one turn with no model call, and left the
+    agent idling under a fresh runtime generation with its prior state intact."""
+    assert [wake.agent_id for wake in await host.pending_inbound_wakes(60)] == [agent]
+    await dispatcher.scan_once()
+    await poll_until_async(lambda: not scheduler.active_agents, timeout=5)
+    row = db_conn.execute(
+        "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
+        "lease_expires_at>clock_timestamp(),pid,incarnation_resources "
+        "FROM agents_meta WHERE id=%s",
+        (agent,),
+    ).fetchone()
+    assert row is not None
+    assert row[1:4] == ("idling", "hosted", host._owner)
+    assert row[4] != incarnation.generation and row[5] is True
+    assert host.stats.turns_started == 1
+    assert await host.pending_inbound_wakes(60) == []
+    assert db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone() == (0,)
+    assert db_conn.execute(
+        "SELECT count(*) FROM agent_watchers WHERE agent_id=%s", (agent,)
+    ).fetchone() == (0,)
+    state = await graph.aget_state(config)
+    assert [message.content for message in state.values["messages"]] == [
+        message.content for message in messages
+    ]
+    assert state.values["halted"] is True
+    assert _classify([_RuntimeRow(*row)], MaintenanceHold(), host._owner, set()).commands == {
+        agent: 0
+    }
 
 
 @pytest.mark.parametrize("evidence", ["legacy", "managed"])
@@ -60,21 +138,7 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
     resources = decode_resources(row[0])
     assert isinstance(resources, IncarnationResources)
     assert resources.host_process is not None
-    # Same PID, different birth: the predecessor has exited, even if its PID
-    # was recycled. No real host or test worker is stopped for this evidence.
-    dead = ResourceProcess(pid=resources.host_process.pid, birth=resources.host_process.birth - 60)
-    db_conn.execute(
-        "UPDATE agents_meta SET status='idling',incarnation_resources=%s,"
-        "lease_expires_at=CASE WHEN %s THEN NULL ELSE now()-interval '1s' END WHERE id=%s",
-        (
-            None
-            if evidence == "legacy"
-            else Jsonb(resources.model_copy(update={"host_process": dead}).model_dump(mode="json")),
-            released,
-            agent,
-        ),
-    )
-    db_conn.commit()
+    _mark_predecessor_idle(db_conn, resources, agent, evidence=evidence, released=released)
 
     monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model)
     monkeypatch.setattr(
@@ -102,34 +166,9 @@ async def test_quiet_idle_predecessor_is_recovered_without_a_model_call(
         "redis://unused", scheduler, pending_scan=host.pending_inbound_wakes, stale_after_s=60
     )
     try:
-        assert [wake.agent_id for wake in await host.pending_inbound_wakes(60)] == [agent]
-        await dispatcher.scan_once()
-        await poll_until_async(lambda: not scheduler.active_agents, timeout=5)
-        row = db_conn.execute(
-            "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
-            "lease_expires_at>clock_timestamp(),pid,incarnation_resources "
-            "FROM agents_meta WHERE id=%s",
-            (agent,),
-        ).fetchone()
-        assert row is not None
-        assert row[1:4] == ("idling", "hosted", host._owner)
-        assert row[4] != incarnation.generation and row[5] is True
-        assert host.stats.turns_started == 1
-        assert await host.pending_inbound_wakes(60) == []
-        assert db_conn.execute(
-            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
-        ).fetchone() == (0,)
-        assert db_conn.execute(
-            "SELECT count(*) FROM agent_watchers WHERE agent_id=%s", (agent,)
-        ).fetchone() == (0,)
-        state = await graph.aget_state(config)
-        assert [message.content for message in state.values["messages"]] == [
-            message.content for message in messages
-        ]
-        assert state.values["halted"] is True
-        assert _classify([_RuntimeRow(*row)], MaintenanceHold(), host._owner, set()).commands == {
-            agent: 0
-        }
+        await _assert_recovered_without_a_model_call(
+            db_conn, incarnation, agent, host, scheduler, dispatcher, graph, config, messages
+        )
     finally:
         await scheduler.aclose()
         await host.aclose()

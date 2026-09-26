@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from services.pitr import activation_runtime
+from cli.commands import _pitr_activation_config as activation_config
+from services.pitr.activation_state import ActivationRecord
 from shared import runtime_config
 
 
@@ -43,7 +46,12 @@ def test_enable_pitr_services_refuses_incomplete_oss_restore_proof_candidate(
     env_path = tmp_path / ".env"
     before = env_path.read_bytes()
 
-    with pytest.raises(RuntimeError, match="PITR activation refused"):
-        activation_runtime._enable_pitr_services(hashlib.sha256(before).hexdigest())
+    record = replace(
+        ActivationRecord.start(operation_id="test", origin="test"),
+        pre_activation_env_b64=base64.b64encode(before).decode(),
+        pre_activation_env_digest=hashlib.sha256(before).hexdigest(),
+    )
+    with pytest.raises(RuntimeError, match="candidate is invalid"):
+        activation_config._apply_env(tmp_path, record)
 
     assert env_path.read_bytes() == before

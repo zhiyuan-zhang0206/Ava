@@ -1,7 +1,6 @@
 """Cluster-ops RPC implementations.
 
-Local pause / resume / recover / stopping-announce + the update / rollout /
-restart spawns + the read-only update-check / status snapshot. One of the four
+Local pause, resume, recovery, stopping announcements and live status snapshots. One of the four
 op clusters split out of the former single `ops/operations.py` (the others
 are ops_lifecycle / ops_config / ops_inventory); each cluster is self-contained.
 
@@ -17,21 +16,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-from ops import cluster_session, fetch_topology
-from ops.cluster import (
+from ops.cluster_pause import pause_local_cluster, release_local_db_pools, unpause_local_cluster
+from ops.cluster_status import (
     ClusterStatus,
-    ClusterUpdateInProgress,
-    UpdateCheck,
-    pause_local_cluster,
-    spawn_restart,
-    spawn_rollout,
-    spawn_update,
+    agent_shell_sessions,
+    capture_shell,
+    kill_shell,
     status_snapshot,
-    unpause_local_cluster,
-    update_check,
 )
-from ops.cluster_pause import release_local_db_pools
-from ops.cluster_status import agent_shell_sessions, capture_shell, kill_shell
 from ops.rpc_schemas import (
     AgentSkillViewResult,
     OpsCommandItem,
@@ -39,7 +31,7 @@ from ops.rpc_schemas import (
     ShellKillResult,
     ShellProbeResult,
 )
-from shared import pause_owner, ui_update_state, updater_handoff
+from shared import home_lifecycle_locks, pause_owner, updater_handoff
 from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.cluster_lock import (
     claim_recovery_lock,
@@ -47,20 +39,14 @@ from shared.cluster_lock import (
     release_update_lock,
 )
 from shared.config.turn_view import resolve_agent_config_pins
-from shared.deploy.git.gitenv import git_env
 from shared.host_deploy_state import updater_lease_live
 from shared.log import logger
 from shared.machine import machine_name
 from shared.machines import mark_stopping
-from shared.proc import run_bounded, timeout_stderr_tail
 
-# `cluster_fetch_op`'s two git calls. The fetch ceiling is generous (the whole
-# point of the pre-flight is to find out whether this host can reach the remote);
-# the local rev-parse touches only the object store. Both bounds are enforced by
-# `run_bounded`, so a stalled fetch cannot leave a live git/ssh tail behind on a
-# host the rollout then declares unreachable.
-_FETCH_TIMEOUT_S = 30.0
-_RESOLVE_TIMEOUT_S = 5.0
+
+class ClusterUpdateInProgress(RuntimeError):  # noqa: N818 — state description
+    """An exact deploy or maintenance owner still excludes this transition."""
 
 
 def _require_executing_deploy(
@@ -86,17 +72,26 @@ def cluster_stop_op(
     deploy_acquired_at: datetime,
 ) -> dict[str, object]:
     """Drain hosted continuations under the exact executing deploy generation."""
-    with ui_update_state.resource_lock(purpose="ops.cluster_stop drain"):
-        with ui_update_state.lifecycle_lock():
+    with home_lifecycle_locks.resource_lock(purpose="ops.cluster_stop drain"):
+        with home_lifecycle_locks.lifecycle_lock():
             # Recovery takes these locks in the same order. Keep the lease proof
             # and local owner publication indivisible, then release the short
             # mutex before the potentially long drain.
             _require_executing_deploy(deploy_holder, deploy_acquired_at)
-            pause_owner.mark_paused(deploy_holder, deploy_acquired_at)
+            admission = pause_owner.begin_maintenance(deploy_holder, deploy_acquired_at)
             try:
                 _require_executing_deploy(deploy_holder, deploy_acquired_at)
             except BaseException:
-                pause_owner.clear(deploy_holder, deploy_acquired_at)
+                if admission.created_here:
+                    current = admission.snapshot
+                    assert current.maintenance is not None  # noqa: S101
+                    pause_owner.change_maintenance(
+                        deploy_holder,
+                        deploy_acquired_at,
+                        current.maintenance,
+                        current.maintenance,
+                        resumed=True,
+                    )
                 raise
         try:
             pause_local_cluster()
@@ -110,8 +105,6 @@ def cluster_stop_op(
                     "[cluster] pause failed and compensating unpause also failed; "
                     "retaining exact pause owner"
                 )
-            else:
-                pause_owner.mark_resumed(deploy_holder, deploy_acquired_at)
             raise
         released = release_local_db_pools()
     return {"released": released}
@@ -136,8 +129,8 @@ def cluster_resume_op(
 ) -> dict[str, object]:
     """Generation-scoped unpause — never resume a later rollout's pause."""
     with (
-        ui_update_state.resource_lock(purpose="ops.cluster_resume"),
-        ui_update_state.lifecycle_lock(),
+        home_lifecycle_locks.resource_lock(purpose="ops.cluster_resume"),
+        home_lifecycle_locks.lifecycle_lock(),
     ):
         owner = pause_owner.read()
         if not owner.matches(deploy_holder, deploy_acquired_at):
@@ -157,13 +150,11 @@ def cluster_resume_op(
 
 def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> bool:
     """Whether `holder` (the update-lock owner string `<machine>:pid<N>`, minted by
-    cli/commands/update.py:_run_gateway_orchestration) names a process that is
+    the deploy lease) names a process that is
     still running on THIS host.
 
-    The negation of `shared.cluster_lock.holder_process_gone` — that shared twin
-    owns the probe (the pid-recycling slack included), so this manual-recovery
-    refusal and the stranded-lease controller's automatic reclaim can never
-    disagree about whether a holder is dead. A holder on a different machine, an
+    The negation of `shared.cluster_lock.holder_process_gone` supplies local-owner
+    proof, including the pid-recycling slack. A holder on a different machine, an
     unparseable holder, and an unreadable process identity are all treated as live
     (refuse rather than risk clobbering a real run). `held_for_s` (the lease's
     server-computed age) arms the pid-recycling check: the holder string carries
@@ -185,12 +176,10 @@ def cluster_recover_op() -> dict[str, object]:
     two authoritative checks — a deploy lease whose holder PROCESS is still
     running (pid-probed when the holder is this host; a holder elsewhere cannot
     be probed and is conservatively treated as live), OR this host's live updater
-    lease (the lease-less watchdog-spawned updater the deploy lease cannot see).
+    lease (a separate updater owner the deploy lease cannot see).
     Only when neither holds is the paused/locked state stale and safe to
-    force-clear. This is the immediate manual counterpart to the watchdog's
-    auto-recovery, which instead waits out the lock TTL; probing the holder pid
-    lets the manual path clear at once without that wait, while still never
-    racing a live run.
+    force-clear. Probing the holder pid allows this retained legacy helper to
+    refuse while the process is still alive.
 
     The pid-probe gates the lease refusal rather than following it: the lease is
     renewed by its holder and outlives a crashed one by up to its full TTL, so an
@@ -206,8 +195,8 @@ def cluster_recover_op() -> dict[str, object]:
     Returns {"unlocked_holder": <prior lock holder or None>}.
     """
     with (
-        ui_update_state.resource_lock(purpose="ops.cluster_recover"),
-        ui_update_state.lifecycle_lock(),
+        home_lifecycle_locks.resource_lock(purpose="ops.cluster_recover"),
+        home_lifecycle_locks.lifecycle_lock(),
     ):
         handoff = updater_handoff.read()
         if handoff.status == "invalid":
@@ -229,12 +218,6 @@ def cluster_recover_op() -> dict[str, object]:
                 "retained updater compensation requires an explicit checked recovery — "
                 "generic unpause refused"
             )
-        live_session = cluster_session.live_orchestration_session()
-        if live_session is not None:
-            raise ClusterUpdateInProgress(
-                f"orchestration session {live_session!r} is still alive — recovery refused; "
-                "wait for it to acquire/finish its deploy lease or terminate that session first"
-            )
         lease = read_update_lease()
         if lease is not None and _lock_holder_is_live(lease.holder, held_for_s=lease.held_for_s):
             what = lease.kind or "deploy"
@@ -249,7 +232,6 @@ def cluster_recover_op() -> dict[str, object]:
                 "an update is in flight on this host — its updater lease is live; "
                 "recovery refused; wait for it to finish or kill its session first"
             )
-        snapshot = ui_update_state.read()
         pause_snapshot = pause_owner.read()
         recovery_holder = f"recovery:{machine_name()}:pid{os.getpid()}"
         claim = claim_recovery_lock(recovery_holder, lease)
@@ -260,10 +242,6 @@ def cluster_recover_op() -> dict[str, object]:
             )
         try:
             unpause_local_cluster()
-            if snapshot.status == "updating" and snapshot.generation is not None:
-                ui_update_state.clear(snapshot.generation)
-            elif snapshot.status == "invalid":
-                ui_update_state.force_clear()
             if handoff.generation is not None:
                 updater_handoff.clear(handoff.generation)
             if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
@@ -277,132 +255,10 @@ def cluster_recover_op() -> dict[str, object]:
             release_update_lock(recovery_holder)
         cleared = claim.previous_holder
     logger.info(
-        "[cluster] manual recover: force-released lock (was {holder}) + unpaused + "
-        "cleared the UI update marker",
+        "[cluster] manual recover: force-released lock (was {holder}) + unpaused",
         holder=cleared,
     )
     return {"unlocked_holder": cleared}
-
-
-def cluster_cancel_op() -> dict[str, object]:
-    """Formally cancel this host's live rollout / restart orchestration.
-
-    The recovery for a cancelled rollout is the orchestration's own `finally`
-    (`cli.commands.update._run_gateway_orchestration`): it resumes every paused
-    host, releases the deploy lease — or converts it to a settle hold over the
-    hosts still mid-transition — and clears the durable maintenance marker. That
-    unwind is exactly the recovery the stalled-rollout controller triggers
-    unattended after its no-progress bound (`ops.controllers.stalled_rollout`,
-    stage 1); this op is the operator-triggered twin — a formal cancel instead of
-    a hand kill, which is what a rollout a hung Windows box is dragging used to
-    leave an operator with (P1, 2026-08-30).
-
-    The trigger is `SIGINT` to the orchestration's own pid, read out of the deploy
-    lease's holder string (`<machine>:pid<N>`) — never a session kill, because a
-    killed process cannot run its `finally` and the cluster would sit paused until
-    the lease lapses. Python turns `SIGINT` into `KeyboardInterrupt`, which no
-    `except Exception:` in the orchestration swallows, so the `finally` runs.
-
-    Refuses (`ClusterUpdateInProgress`, each refusal naming its own next step)
-    unless: a live orchestration session exists, the deploy lease is an
-    *executing* one (settle_hosts NULL — a settle hold has nothing running), the holder
-    names THIS machine, and the pid is alive. The pid-liveness probe is the same
-    `holder_pid_if_local` the stalled-rollout controller uses, so a cancel and an
-    unattended reclaim can never disagree about who is signalable.
-
-    Returns {"cancelled": <holder>}. The orchestration may take tens of seconds
-    to finish unwinding — watch its rollout log, and `ava cluster status` after.
-    """
-    import signal
-
-    import shared.cluster
-    from ops.cluster_session import (
-        _CLUSTER_RESTART_SERVICE,
-        _ROLLOUT_SERVICE,
-        _UPDATER_SERVICE,
-        live_orchestration_session,
-    )
-    from shared.cluster_lock import holder_pid_if_local
-    from shared.last_update import UpdateOutcome, read_last_update
-
-    live = live_orchestration_session()
-    updater_session = shared.cluster.session_name(_UPDATER_SERVICE)
-    cluster_sessions = {
-        shared.cluster.session_name(_ROLLOUT_SERVICE),
-        shared.cluster.session_name(_CLUSTER_RESTART_SERVICE),
-    }
-    if live == updater_session:
-        raise ClusterUpdateInProgress(
-            "this host is mid self-update, not running a cluster orchestration — "
-            "nothing a cluster cancel owns. Its watchdog reaps a hung updater at the "
-            "no-progress bound; `ava cluster recover` clears a stranded state whose "
-            "owner is gone."
-        )
-    if live is None or live not in cluster_sessions:
-        raise ClusterUpdateInProgress(
-            "no rollout/restart orchestration is running on this host — the "
-            "orchestration runs on the gateway host, so run `ava cluster cancel` "
-            "there; `ava cluster recover` here clears a stranded state whose owner "
-            "is gone."
-        )
-    lease = read_update_lease()
-    if lease is not None and lease.is_settle_hold:
-        raise ClusterUpdateInProgress(
-            f"the deploy lease is a settle hold, not an executing orchestration — "
-            f"{lease.describe()}. Nothing is running to cancel; `ava cluster recover` "
-            "breaks the hold once you have confirmed the hosts have converged."
-        )
-    if lease is not None and lease.kind not in ("rollout", "restart"):
-        raise ClusterUpdateInProgress(
-            f"the deploy lease {lease.describe()} carries no rollout/restart kind — "
-            "a rollback or legacy orchestration; cancel is scoped to rollout/restart. "
-            "Wait for it, or `ava cluster recover` once its holder is provably gone."
-        )
-    holder: str | None = None
-    if lease is not None:
-        holder = lease.holder
-    else:
-        # Pre-lease window (the child has not acquired yet) or a lease-less
-        # orchestration. The last-update row still names the process.
-        try:
-            record = read_last_update()
-        except Exception:
-            record = None
-        if record is not None and record.outcome is UpdateOutcome.RUNNING:
-            holder = record.holder
-    if holder is None:
-        raise ClusterUpdateInProgress(
-            "the orchestration has published neither a deploy lease nor a running "
-            "update record — it is still starting or already gone; retry in a few "
-            "seconds, or `ava cluster recover` once no owner remains."
-        )
-    pid = holder_pid_if_local(holder)
-    if pid is None:
-        from shared.machine import machine_name as _machine_name
-
-        machine = holder.split(":pid", 1)[0]
-        where = (
-            f"run `ava cluster cancel` on {machine}"
-            if machine != _machine_name()
-            else "the holder pid is gone — `ava cluster recover` clears the residue"
-        )
-        raise ClusterUpdateInProgress(
-            f"the orchestration holder {holder!r} is not a live process on this host — {where}"
-        )
-    try:
-        os.kill(pid, signal.SIGINT)
-    except OSError as exc:
-        raise ClusterUpdateInProgress(
-            f"could not interrupt the orchestration pid {pid}: {exc!r}"
-        ) from exc
-    logger.warning(
-        "[cluster] cancel: SIGINT sent to rollout holder %s (pid %d); its own finally "
-        "is unwinding — compensating resume, settle/release of the deploy lease, "
-        "maintenance marker cleared",
-        holder,
-        pid,
-    )
-    return {"cancelled": holder}
 
 
 def cluster_stopping_op(machine: str, home: str) -> dict[str, str]:
@@ -417,61 +273,6 @@ def cluster_stopping_op(machine: str, home: str) -> dict[str, str]:
     """
     mark_stopping(machine, home)
     return {"machine": machine}
-
-
-def cluster_update_op(
-    *,
-    restart_only: bool = False,
-    target_sha: str | None = None,
-    mode: str = "smooth",
-    force_reap: bool = False,
-) -> dict[str, str]:
-    """Run `spawn_update()` and return the new orchestration session metadata.
-
-    `target_sha` is the rollout's pinned commit (Phase B forwards it so this host
-    force-checks-out the same commit as every other node); absent, spawn_update
-    catches up to origin/main. `restart_only=True` (the agent-runner leg of a cluster
-    restart) bounces services on the current code with no checkout / uv sync.
-    `mode` sets the agent-drain policy (smooth/force; Phase B passes 'none' — the
-    gateway-side quiesce already drained the fleet). The legacy `force_reap`
-    argument carries an explicit interruption request, never timeout escalation.
-
-    `spawn_update` validates before its own pause, then publishes a host-local
-    handoff across pause -> DB lease. It is the only layer with enough evidence
-    to compensate a definitive no-child failure; this wrapper never guesses
-    from exception type/timing.
-    """
-    # `spawn_update` owns the exact pause/spawn boundary and therefore owns
-    # compensation: only a definitive backend decline CAS-clears its handoff
-    # and unpauses. This wrapper cannot infer "no child" from an exception — a
-    # post-fork/Popen session-record failure is ambiguous and must stay paused.
-    return spawn_update(
-        restart_only=restart_only,
-        target_sha=target_sha,
-        mode=mode,
-        force_reap=force_reap,
-    )
-
-
-def cluster_rollout_op(
-    origin: str, *, mode: str = "smooth", force: bool = False, dry_run: bool = False
-) -> dict[str, str | bool]:
-    """Run `spawn_rollout()` and return the new orchestration session metadata + rollout scope.
-
-    `mode` is the agent-drain policy (smooth/force) the detached orchestration
-    applies to its quiesce step; `force` overrides the deploy-window check
-    (issue #216 threads the CLI's `--force` through the POST body)."""
-    return spawn_rollout(origin, force=force, mode=mode, dry_run=dry_run)
-
-
-def cluster_restart_op(origin: str, *, mode: str = "smooth") -> dict[str, str]:
-    """Run `spawn_restart()` and return the new orchestration session metadata."""
-    return spawn_restart(origin, mode=mode)
-
-
-def cluster_update_check_op() -> UpdateCheck:
-    """Read-only preflight — is there anything to roll out, and what would restart."""
-    return update_check()
 
 
 def cluster_status_op(pool: Any | None = None) -> ClusterStatus:
@@ -641,135 +442,3 @@ def shell_capture_op(agent_id: int, session_id: int, lines: int = 200) -> ShellC
         created_at=created_at,
         uptime_seconds=uptime_seconds,
     )
-
-
-def cluster_fetch_op() -> dict[str, object]:
-    """Run `git fetch origin` on this agent-runner — a lightweight pre-flight
-    that confirms this host can reach the remote and has the objects needed for
-    the upcoming rollout's pinned target.
-
-    Non-disruptive: does not pause agent admission, change posture or restart
-    any service. The caller (the gateway's rollout orchestration)
-    fans this out to every agent-runner *before* Phase A so a fetch failure
-    aborts the rollout with nothing paused.
-
-    **Central fetch (`settings.general.fetch_via_gateway`, default off).** In the
-    central-fetch topology the gateway is the cluster's only wall-crossing
-    fetcher, so a host that does not carry the gateway capability refuses here —
-    before any fetch — when its `origin` still addresses a wall host
-    (github.com): fetching GitHub from a runner would silently fall back out of
-    the topology. A gateway-capable host is exempt — crossing the wall is its job.
-    The predicate lives in `ops.fetch_topology`.
-
-    **Per-attempt observability (2026-08-27 performance forensics):** the
-    gateway retries a transport timeout at its own level, so one Phase 0 can
-    drive several sequential invocations of this op on the host (observed on
-    win/wsl: two 30s timeouts, then success on the third). Each invocation
-    logs its own start/end with pid + elapsed, so the attempts are countable
-    in the ops log; `--progress` forces git's stage markers onto stderr even
-    under a pipe, and a timeout carries the partial stderr tail — where git
-    was when `run_bounded` killed it (ssh connect / negotiation / pack
-    transfer) — instead of a bare "timed out".
-
-    Returns:
-        ``{"ok": True, "fetched": "<sha or empty>", "origin_url": <str>, "elapsed_s": <float>}``
-        on success; ``{"ok": False, "error": "<message>", "origin_url": <str>}`` on
-        failure. `origin_url` is the URL the fetch actually used — the evidence the
-        central-fetch refusal and the ops log are read against.
-    """
-    import subprocess
-    import time
-
-    from shared.config import settings
-    from shared.paths import repo_root
-
-    t0 = time.monotonic()
-    logger.info(
-        "[cluster_fetch] start pid={pid} timeout={timeout:.0f}s",
-        pid=os.getpid(),
-        timeout=_FETCH_TIMEOUT_S,
-    )
-    origin_url = ""
-    try:
-        origin_url = fetch_topology.git_origin_url(repo_root())
-        if (refusal := fetch_topology.fetch_wall_refusal(origin_url)) is not None:
-            logger.warning(
-                "[cluster_fetch] refusing: fetch_via_gateway is on but origin still "
-                "addresses a wall host ({url})",
-                url=origin_url,
-            )
-            return {"ok": False, "error": refusal, "origin_url": origin_url}
-        result = run_bounded(
-            ["git", "fetch", "--progress", "origin"],
-            cwd=repo_root(),
-            capture_output=True,
-            text=True,
-            env=git_env(),
-            timeout=_FETCH_TIMEOUT_S,
-        )
-        elapsed = time.monotonic() - t0
-        if result.returncode == 0:
-            # Resolve the track ref HEAD (settings.general.track_branch, not
-            # hardcoded origin/main — staging/preview clusters track another
-            # branch) to confirm the fetch landed objects.
-            track_ref = f"origin/{settings.general.track_branch}"
-            resolve = run_bounded(
-                ["git", "rev-parse", track_ref],
-                cwd=repo_root(),
-                capture_output=True,
-                text=True,
-                env=git_env(),
-                timeout=_RESOLVE_TIMEOUT_S,
-            )
-            fetched = resolve.stdout.strip() if resolve.returncode == 0 else ""
-            logger.info(
-                "[cluster_fetch] ok {ref}={sha} elapsed={elapsed:.1f}s",
-                ref=track_ref,
-                sha=fetched[:7] if fetched else "?",
-                elapsed=elapsed,
-            )
-            return {
-                "ok": True,
-                "fetched": fetched,
-                "origin_url": origin_url,
-                "elapsed_s": round(elapsed, 2),
-            }
-        logger.warning(
-            "[cluster_fetch] git fetch failed rc={rc} stderr={err!r} elapsed={elapsed:.1f}s",
-            rc=result.returncode,
-            err=result.stderr[:200],
-            elapsed=elapsed,
-        )
-        return {
-            "ok": False,
-            "error": f"git fetch origin failed (rc={result.returncode}): {result.stderr[:300]}",
-            "origin_url": origin_url,
-            "elapsed_s": round(elapsed, 2),
-        }
-    except subprocess.TimeoutExpired as exc:
-        elapsed = time.monotonic() - t0
-        # `run_bounded` drains the tree's pipes after the kill, so `exc.stderr`
-        # holds everything git wrote before the bound tripped — the timeout
-        # point. Empty stderr is itself evidence: a fetch killed before ssh or
-        # git printed anything died in the local/connect phase, not mid-transfer.
-        tail = timeout_stderr_tail(exc)
-        logger.warning(
-            "[cluster_fetch] git fetch timed out after {elapsed:.1f}s "
-            "(bound {bound:.0f}s); last stderr: {tail!r}",
-            elapsed=elapsed,
-            bound=_FETCH_TIMEOUT_S,
-            tail=tail,
-        )
-        return {
-            "ok": False,
-            "error": (
-                f"git fetch origin timed out after {elapsed:.0f}s"
-                + (f"; last stderr: {tail[:200]}" if tail else "")
-            ),
-            "origin_url": origin_url,
-            "elapsed_s": round(elapsed, 2),
-        }
-    except Exception as exc:
-        elapsed = time.monotonic() - t0
-        logger.warning("[cluster_fetch] unexpected error: {exc!r}", exc=exc)
-        return {"ok": False, "error": str(exc), "origin_url": origin_url}

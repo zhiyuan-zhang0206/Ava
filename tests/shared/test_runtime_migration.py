@@ -19,53 +19,6 @@ from shared.runtime_migration import ReleaseMigrationContext, installed_migratio
 from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
 
 
-def test_wheel_start_without_receipt_cannot_enter_legacy_source_path() -> None:
-    from cli.commands.start import cmd_start
-
-    with (
-        patch("shared.runtime_interpreter.WHEEL_RUNTIME", True),
-        patch("shared.db.connect") as connection,
-        patch("cli.commands.start._repo_root") as resolve_repo,
-        pytest.raises(ReleaseRejectedError, match="verified release admission"),
-    ):
-        cmd_start()
-    connection.assert_not_called()
-    resolve_repo.assert_not_called()
-
-
-def test_real_start_rejects_receipt_before_any_start_side_effect(tmp_path: Path) -> None:
-    from cli.commands.start import cmd_start
-
-    with (
-        patch("shared.db.connect") as connection,
-        patch(
-            "cli.commands._release_candidate.load_candidate",
-            side_effect=ReleaseRejectedError("stale operation"),
-        ) as admission,
-        patch("cli.commands.start._repo_root") as resolve_repo,
-        patch("cli.commands.start._consume_rollout_parent_handoff") as handoff,
-        pytest.raises(ReleaseRejectedError, match="stale operation"),
-    ):
-        cmd_start(release_receipt=tmp_path / "receipt.json")
-    connection.assert_called_once_with(direct=True)
-    admission.assert_called_once()
-    resolve_repo.assert_not_called()
-    handoff.assert_not_called()
-
-
-def test_receipt_alone_does_not_authorize_service_cutover(tmp_path: Path) -> None:
-    from cli.commands.start import cmd_start
-
-    with (
-        patch("shared.db.connect"),
-        patch("cli.commands._release_candidate.load_candidate", return_value=MagicMock()),
-        patch("cli.commands.start._repo_root") as resolve_repo,
-        pytest.raises(ReleaseRejectedError, match="service closure"),
-    ):
-        cmd_start(release_receipt=tmp_path / "receipt.json")
-    resolve_repo.assert_not_called()
-
-
 def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path: Path) -> None:
     from shared import runtime_migration
 
@@ -79,9 +32,11 @@ def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path:
     distribution = MagicMock()
     distribution.files = [record]
     distribution.read_text.return_value = None
-    distribution.locate_file.side_effect = lambda name: (
-        Path(runtime_migration.__file__) if isinstance(name, str) else path
-    )
+
+    def locate(name: object) -> Path:
+        return Path(runtime_migration.__file__) if isinstance(name, str) else path
+
+    distribution.locate_file.side_effect = locate
     with patch(
         "shared.runtime_migration.importlib.metadata.distribution", return_value=distribution
     ):
@@ -96,7 +51,7 @@ def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path:
             installed_migration_paths(tmp_path)
 
 
-def test_release_receipt_rejects_another_acquisition() -> None:
+def test_migration_context_rejects_another_acquisition() -> None:
     acquired = datetime(2026, 9, 3, tzinfo=UTC)
     context = ReleaseMigrationContext(MagicMock(), MagicMock(), "host:pid1", acquired, "a" * 40)
     other = DeployLease(
@@ -107,7 +62,7 @@ def test_release_receipt_rejects_another_acquisition() -> None:
         acquired_at=datetime(2026, 9, 4, tzinfo=UTC),
     )
     with (
-        patch("shared.runtime_migration.read_update_lease", return_value=other),
+        patch("shared.cluster_lock.read_update_lease", return_value=other),
         pytest.raises(ReleaseRejectedError, match="current rollout"),
     ):
         context.assert_operation(MagicMock())
@@ -128,6 +83,7 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Real PG transaction; synthetic image exercises authority, not launch closure."""
+    from scripts import prove_runtime_migration
     from shared.migrations import apply_pending_migrations
 
     home = tmp_path.resolve()
@@ -159,6 +115,7 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
         schema_digest="b" * 64,
     )
     monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", directory)
+    monkeypatch.setattr(prove_runtime_migration, "MIGRATIONS_DIR", directory)
     monkeypatch.setattr("shared.migrations.machine_name", lambda: "runtime-proof")
     with psycopg.connect(settings.data_plane.db_url) as connection:
         try:
@@ -181,6 +138,7 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
             assert apply_pending_migrations(connection, release=context) == [migration.stem]
             created = connection.execute("SELECT to_regclass('runtime_migration_probe')").fetchone()
             assert created is not None and created[0] is not None
+            prove_runtime_migration.prove_authority(connection, context)
         finally:
             connection.rollback()
         removed = connection.execute("SELECT to_regclass('runtime_migration_probe')").fetchone()

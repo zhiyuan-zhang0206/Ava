@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from services.pitr.base_manifest import CandidateManifest
+from services.pitr.operation_custody import OperationKind
 from services.pitr.retention_planner import inspect_dry_run_plan
 from services.pitr.rollback_snapshot_archive import (
     RollbackSnapshotArchive,
@@ -20,9 +21,8 @@ from services.pitr.rollback_snapshot_archive import (
     retire_rollback_snapshot,
     verify_rollback_snapshot,
 )
-from services.pitr.store_factory import construct_store_group, get_store_group
+from services.pitr.store_factory import get_store_group
 from shared.config import settings
-from shared.db import direct_db_url
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
 
@@ -296,74 +296,200 @@ def cmd_pitr_drill(
     """Restore one protected chain to an operator target in isolation.
 
     The scratch tree is kept as evidence on every outcome; the drill never
-    publishes and never writes to the live cluster. The service imports are
-    method-local on purpose: `cli.commands` sits in the agent-runner
-    updater's pre-checkout import closure, and the drill's modules reach
-    `shared.session_record`, which must stay outside it
-    (`tests/cli/test_update_import_timing.py`).
+    publishes and never writes to the live cluster. The controller launches a
+    restricted viewer-only interpreter, streams its progress to stderr and
+    accepts evidence after group closure. A relative `--scratch` means the
+    operator's working directory, resolved here before the worker sees it.
     """
+    import asyncio
+
     from services.pitr.base_operation_runtime import (
+        RestoreWorkerInput,
         live_data_directory,
+        live_probe_conninfo,
         restore_key_path,
         restore_store_args,
+        run_drill_input,
     )
-    from services.pitr.restore_drill import DrillRequest, parse_target_wall, run_restore_drill
+    from services.pitr.restore_drill import parse_target_wall
+    from services.pitr.restore_proof import RestoreSpaceBudget
 
+    scratch_path = Path(scratch).expanduser().absolute()
+    evidence_path = scratch_path / "drill-evidence.json"
     try:
         candidate_manifest = _resolve_drill_candidate(chain, candidate)
         config = settings.physical_backup
-        group = construct_store_group(config.pitr_store_backend, dict(restore_store_args(config)))
-        request = DrillRequest(
-            candidate=candidate_manifest,
-            reader=group.generation_pinned_object_reader(),
-            key=restore_key_path(config).read_bytes(),
-            ack_dir=ava_home() / "physical-backup" / "ack",
-            scratch=Path(scratch),
-            target_lsn=target_lsn,
-            target_wall=parse_target_wall(target_wall),
-            pg_ctl=pg_tool("pg_ctl"),
-            pg_verifybackup=pg_tool("pg_verifybackup"),
-            live_db_url=direct_db_url(),
-            data_directory=live_data_directory(),
-            timeout_seconds=timeout_seconds,
+        root = ava_home() / "physical-backup"
+        inputs = RestoreWorkerInput(
+            candidate_manifest.to_json(),
+            root,
+            root / "ack",
+            restore_key_path(config),
+            config.pitr_store_backend,
+            restore_store_args(config),
+            RestoreSpaceBudget(0, 0, 0),
+            live_probe_conninfo(),
+            live_data_directory(),
+            pg_tool("pg_ctl"),
+            pg_tool("pg_verifybackup"),
         )
+        wall = parse_target_wall(target_wall).isoformat()
     except Exception as exc:
         print(f"pitr drill failed before start: {exc}", file=sys.stderr)
         return 1
     print(
         json.dumps(
             {
-                "chain_id": request.candidate.chain_id,
-                "target_lsn": request.target_lsn,
-                "target_wall": request.target_wall.isoformat(),
-                "scratch": str(request.scratch),
+                "chain_id": candidate_manifest.chain_id,
+                "target_lsn": target_lsn,
+                "target_wall": wall,
+                "scratch": str(scratch_path),
             },
             sort_keys=True,
         ),
         file=sys.stderr,
     )
-    evidence_path = request.scratch / "drill-evidence.json"
     try:
-        evidence = run_restore_drill(
-            request, progress=lambda message: print(message, file=sys.stderr)
+        evidence = asyncio.run(
+            run_drill_input(
+                inputs,
+                scratch=scratch_path,
+                target_lsn=target_lsn,
+                target_wall=wall,
+                timeout_seconds=timeout_seconds,
+                progress=lambda line: print(line, file=sys.stderr, flush=True),
+            )
         )
-    except Exception as exc:
-        print(f"pitr drill failed: {exc} (evidence: {evidence_path})", file=sys.stderr)
+    except (Exception, KeyboardInterrupt) as exc:
+        kept = "kept" if evidence_path.is_file() else "absent"
+        print(f"pitr drill failed: {exc!r} (evidence: {evidence_path}, {kept})", file=sys.stderr)
+        for note in getattr(exc, "__notes__", ()):
+            print(f"  {note}", file=sys.stderr)
         return 1
-    print(
-        json.dumps(
-            {
-                "outcome": evidence.outcome,
-                "chain_id": evidence.chain_id,
-                "target_lsn": evidence.target_lsn,
-                "evidence": str(evidence_path),
-                "counts_restored": evidence.criteria.get("counts_restored"),
-                "counts_live": evidence.criteria.get("counts_live"),
-                "timings": evidence.timings,
-            },
-            sort_keys=True,
-        )
-    )
+    print(json.dumps(_drill_summary(evidence, evidence_path), sort_keys=True))
+    return 0
+
+
+def _drill_summary(evidence: dict[str, object], path: Path) -> dict[str, object]:
+    """Outcome, counts and timings only: restored rows stay in the evidence file."""
+    criteria = evidence["criteria"]
+    counts = cast("dict[str, object]", criteria) if isinstance(criteria, dict) else {}
+    return {
+        "outcome": evidence["outcome"],
+        "chain_id": evidence["chain_id"],
+        "target_lsn": evidence["target_lsn"],
+        "evidence": str(path),
+        "counts_restored": counts.get("counts_restored"),
+        "counts_live": counts.get("counts_live"),
+        "timings": evidence["timings"],
+    }
+
+
+def _operation_kinds() -> list[OperationKind]:
+    from services.backup_scheduler.worker import dump_kind, restore_drill_kind
+    from services.pitr.base_operation_runtime import drill_kind, restore_kind
+    from services.pitr.base_worker import candidate_kind
+
+    root = ava_home() / "physical-backup"
+    return [
+        dump_kind(),
+        restore_drill_kind(),
+        candidate_kind(root),
+        restore_kind(root),
+        drill_kind(root),
+    ]
+
+
+def cmd_pitr_operations_status() -> int:
+    """Show which operation kinds are blocked and what quarantine holds."""
+    from services.pitr.operation_custody import blocked_operations, quarantine_entries
+
+    kinds = _operation_kinds()
+    blocked_any = False
+    for kind in kinds:
+        blocked = blocked_operations(kind)
+        blocked_any = blocked_any or bool(blocked)
+        print(f"{kind.name}: {'BLOCKED' if blocked else 'ready'} ({kind.control_root})")
+        for work, reason in blocked:
+            print(f"  {work.name}: {reason}")
+    for kind in kinds:
+        entries = quarantine_entries(kind.quarantine_root)
+        print(f"quarantine {kind.quarantine_root}: {len(entries)} entries")
+        for entry in entries[-5:]:
+            print(f"  {entry.name}")
+    if blocked_any:
+        print("run `ava pitr operations retire` to re-prove closure and release a blocked kind")
+    return 1 if blocked_any else 0
+
+
+def cmd_pitr_operations_retire(*, confirm: bool) -> int:
+    """Re-prove closure of blocked operations; `--confirm` quarantines the proven ones."""
+    from services.pitr.operation_custody import retire_blocked
+    from shared.platform import LockTimeoutError
+
+    refused = found = False
+    for kind in _operation_kinds():
+        try:
+            reports = retire_blocked(kind, confirm=confirm)
+        except LockTimeoutError:
+            print(f"{kind.name}: an operation is running; retry once it settles", file=sys.stderr)
+            refused = True
+            continue
+        for report in reports:
+            found = True
+            if report.refusal is not None:
+                refused = True
+                verdict = "retirement NOT finished" if report.proven else "closure NOT proven"
+                print(
+                    f"{kind.name} {report.work.name}: {verdict} [{report.refusal}]: {report.reason}",
+                    file=sys.stderr,
+                )
+            elif report.entry is not None:
+                print(f"{kind.name} {report.work.name}: retired into {report.entry}")
+            else:
+                print(f"{kind.name} {report.work.name}: closure proven ({report.reason})")
+    if not found and not refused:
+        print("no blocked operations")
+    elif found and not confirm:
+        print("preview only: re-run with --confirm to quarantine every proven operation")
+    return 1 if refused else 0
+
+
+def cmd_pitr_operations_discard_candidate(*, chain: str, confirm: bool) -> int:
+    """Discard one unfinished base capture an operator judged stale.
+
+    A leftover weekly `.ready` refuses activation's forced candidate and is
+    never resumed while activation holds the schedule. `--confirm` removes it;
+    it refuses while a base-candidate operation runs or its kind is blocked.
+    """
+    from services.pitr.base_candidate import BaseCandidateError, discard_resumable_candidate
+    from services.pitr.base_worker import candidate_kind
+    from services.pitr.operation_custody import blocked_operations
+    from shared.platform import LockTimeoutError, file_lock
+
+    root = ava_home() / "physical-backup"
+    kind = candidate_kind(root)
+    try:
+        with file_lock(kind.control_root / ".lock", timeout_s=0):
+            blocked = blocked_operations(kind)
+            if blocked:
+                print(
+                    f"{kind.name} is blocked ({blocked[0][0].name}: {blocked[0][1]}); "
+                    "run `ava pitr operations retire` first",
+                    file=sys.stderr,
+                )
+                return 1
+            ready = discard_resumable_candidate(root, chain, confirm=confirm)
+    except LockTimeoutError:
+        print(f"{kind.name}: an operation is running; retry once it settles", file=sys.stderr)
+        return 1
+    except BaseCandidateError as exc:
+        print(f"pitr operations discard-candidate refused: {exc}", file=sys.stderr)
+        return 1
+    if not confirm:
+        print(f"would discard {ready}; re-run with --confirm to remove it")
+    else:
+        print(f"discarded {ready}")
     return 0
 
 

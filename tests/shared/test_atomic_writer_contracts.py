@@ -18,10 +18,9 @@ from shared import (
     atomic_io,
     coding_session_owner_record,
     editable_install,
+    home_lifecycle_locks,
     pause_owner,
-    spawn_receipt,
     start_serving,
-    ui_update_state,
 )
 from shared import updater_handoff as handoff
 from shared.agents.messages import delivery_outbox
@@ -33,17 +32,19 @@ from tests.shared.test_updater_handoff import (
     _isolated_attempts as _isolated_attempts,
 )
 from tests.shared.test_updater_handoff import (
+    _normal_journal,
     _retained_bootstrap,
-    _write_normal_through,
 )
+
+_START_GENERATION = "00000000-0000-4000-8000-000000000001"
 
 
 def _marker_write(case: str, path: Path) -> None:
     payload: dict[str, object] = {"z": 1, "a": "value"}
     if case == "start":
-        start_serving._write_state("starting", "generation")
-    elif case == "receipt":
-        spawn_receipt._write_atomic_text(path, '{"z":1,"a":"value"}')
+        start_serving._write_state(
+            start_serving.ServingState(state="starting", generation=_START_GENERATION)
+        )
     elif case == "owner":
         key = coding_session_owner_record.CodingSessionKey("cluster", "workspace", "codex")
         coding_session_owner_record.write_unlocked(
@@ -53,23 +54,22 @@ def _marker_write(case: str, path: Path) -> None:
         pause_owner._write_atomic(path, payload)
     elif case == "freeze":
         allocation_freeze._write_atomic(path, payload)
-    elif case == "ui":
-        ui_update_state._write_atomic(path, payload)
+    elif case == "locks":
+        home_lifecycle_locks._write_atomic(path, payload)
     else:
         raise AssertionError(case)
 
 
-@pytest.mark.parametrize("case", ["start", "receipt", "owner", "pause", "freeze", "ui"])
+@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "locks"])
 def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     modules = {
         "start": start_serving,
-        "receipt": spawn_receipt,
         "owner": coding_session_owner_record,
         "pause": pause_owner,
         "freeze": allocation_freeze,
-        "ui": ui_update_state,
+        "locks": home_lifecycle_locks,
     }
     module = modules[case]
     path = tmp_path / "state.json"
@@ -88,9 +88,11 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     _marker_write(case, path)
     raw = path.read_bytes()
     if case == "start":
-        assert raw == b'{"generation":"generation","schema_version":1,"state":"starting"}'
-    elif case == "receipt":
-        assert raw == b'{"z":1,"a":"value"}'
+        assert raw == (
+            b'{"schema_version":2,"state":"starting","generation":"'
+            + _START_GENERATION.encode()
+            + b'","birth":null}'
+        )
     elif case == "owner":
         assert isinstance(json.loads(raw), dict)
     else:
@@ -100,7 +102,7 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
         assert path.stat().st_mode & 0o777 == 0o600
 
 
-@pytest.mark.parametrize("case", ["start", "receipt", "owner", "pause", "freeze", "ui"])
+@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "locks"])
 def test_marker_replace_failure_keeps_old_content_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -369,8 +371,9 @@ def test_atomic_pointer_replacement_restores_read_only_mode(tmp_path: Path) -> N
 
 def test_clear_completes_across_a_half_completed_unlink() -> None:
     """INJ-14: a crash between the two unlinks must not strand the state file."""
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    _write_normal_through("committed")
+    _retained_bootstrap(
+        "candidate_ready", normal_release_planned=True, normal=_normal_journal("committed")
+    )
     handoff.bootstrap_state_path().unlink()
     assert handoff.clear("bootstrap")
     assert not handoff.state_path().exists()

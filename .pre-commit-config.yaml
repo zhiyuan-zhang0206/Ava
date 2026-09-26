@@ -77,7 +77,7 @@ repos:
         name: lint async bodies (no sync blocking calls)
         entry: .venv/bin/python scripts/lint_async_no_sync_blocking.py
         language: system
-        files: ^(gateway|ops)/.*\.py$
+        files: ^((gateway|ops)/.*|scripts/lint_async_no_sync_blocking)\.py$
         pass_filenames: false
 
       # Ban raw os.environ / os.getenv — runtime config must go through shared.config.settings.
@@ -507,7 +507,7 @@ repos:
         # freshness check like the other schema sources.
         # Include defining modules behind schema re-exports. The CI closure
         # test follows route annotations/imports so moves cannot escape here.
-        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents/contract\.py$|shared/api_contracts/.*\.py$|shared/tasks/priority\.py$|shared/tasks/task_status\.py$|shared/agents/history/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_sample\.py$|ops/rpc_schemas\.py$|ops/rpc_terminate\.py$|ops/cluster\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$|shared/agent_roster\.py$|shared/agent_observation\.py$|shared/agents/history/timeline_item\.py$|ops/rpc_messages\.py$|ops/rpc_completion\.py$|ops/rpc_billing_recovery\.py$|ops/cluster_status\.py$|ops/update_check\.py$|ops/updater_outcome\.py$|shared/last_update\.py$|shared/agents/impersonation/impersonation_history\.py$|shared/sdk_telemetry\.py$)
+        files: ^(gateway/schemas/.*\.py$|gateway/app\.py$|gateway/routers/.*\.py$|shared/agents/contract\.py$|shared/api_contracts/.*\.py$|shared/tasks/priority\.py$|shared/tasks/task_status\.py$|shared/agents/history/timeline\.py$|shared/agent_snapshot\.py$|shared/resource_sample\.py$|ops/rpc_schemas\.py$|ops/rpc_terminate\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$|shared/agent_roster\.py$|shared/agent_observation\.py$|shared/agents/history/timeline_item\.py$|ops/rpc_messages\.py$|ops/rpc_completion\.py$|ops/rpc_billing_recovery\.py$|ops/cluster_status\.py$|shared/agents/impersonation/impersonation_history\.py$|shared/sdk_telemetry\.py$)
         pass_filenames: false
       - id: constants-codegen-fresh
         name: "constants-generated.ts in sync with shared/live_events.py (drift: run ./scripts/dump_frontend_constants.py)"

@@ -99,8 +99,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     agent_boot_failed (Task #1704's visible process-boot failure marker) +
     gate_auth_probe_failed (Task #1736's gate auth-probe failure
     classification event) + plugin_load_failed (2026-08-28 observability
-    station batch) + source_tree_reset (Task #1905's source-tree guard
-    repair audit).
+    station batch).
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS
@@ -121,7 +120,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # agent_swapped_in (Task #1976 phase 2) drops it back to 127;
     # memory_search_stats (Task #2088's row-growth monitoring) raises it
     # back to 128; page_restore_notified (Task #2212 direction B — the
-    # reconcile close path's re-serve notice) raises it to 129; watchdog_tick
+    # reconcile close path's re-serve notice) raises it to 129; root_health_tick
     # (P1-4's completed-round freshness gauge) raises it to 131; `llm_retry`
     # records retry duration and exec_editable_install_poisoned (the pre-exec
     # poisoned-install guard, Task #2285) bring it to 133; exec_child_boot
@@ -220,11 +219,14 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # trigger + guardrail quintet (task #4674: hierarchy_enqueue_failed /
     # hierarchy_regen_alert / hierarchy_regen_halt / hierarchy_regen_low_reuse /
     # hierarchy_regen_budget_tripped) raises it to 219; pause_orphan_claim_settled
-    # (task #4728's parked orphan settlement) raises it to 220.
+    # (task #4728's parked orphan settlement) raises it to 220; the backup/PITR
+    # operation custody alert (backup_operation_custody) raises it to 221.
     # The recovery wake pacing pair (task #4722: host_recovery_wake_started /
-    # host_recovery_wake_released) raises it to 222.
+    # host_recovery_wake_released) raises it to 222. Retiring the source-tree
+    # repair (its source_tree_reset audit had no emitter left) lowers it by one;
+    # the current total, asserted below, is 220.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 222
+    assert len(_TELEMETRY_KINDS) == 220
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",
@@ -394,14 +396,14 @@ def test_memory_search_stats_payload_and_metric_disposition() -> None:
     assert _METRIC_DISPOSITION[("memory_search_stats", "last_save_seconds")] == "gauge"
 
 
-def test_watchdog_tick_payload_and_metric_disposition() -> None:
+def test_root_health_tick_payload_and_metric_disposition() -> None:
     """A completed watchdog round publishes its wall-clock timestamp as a
     gauge, so Prometheus exposes freshness rather than a meaningless sum."""
     from shared.events.contract import payload_keys
     from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 
-    assert payload_keys("watchdog_tick") == ("last_tick_timestamp_seconds",)
-    assert _METRIC_DISPOSITION[("watchdog_tick", "last_tick_timestamp_seconds")] == "gauge"
+    assert payload_keys("root_health_tick") == ("home_id", "last_tick_timestamp_seconds")
+    assert _METRIC_DISPOSITION[("root_health_tick", "last_tick_timestamp_seconds")] == "gauge"
 
 
 def test_pitr_remote_inventory_payload_and_metric_disposition() -> None:
@@ -427,6 +429,13 @@ def test_stall_wave_mitigation_event_contract() -> None:
         "timeout_s",
     )
     assert tier_for("stream_stall_pair_terminated", "telemetry", "warning") == "anomaly"
+
+
+def test_backup_operation_custody_payload() -> None:
+    """Custody alerts group by operation kind; the detail is never a label."""
+    from shared.events.contract import payload_keys
+
+    assert payload_keys("backup_operation_custody") == ("operation", "custody", "detail")
 
 
 def test_recovery_drill_failed_payload() -> None:

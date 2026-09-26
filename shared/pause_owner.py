@@ -47,6 +47,12 @@ class PauseOwnerSnapshot:
         return self.holder == holder and self.acquired_at == acquired_at
 
 
+@dataclass(frozen=True)
+class MaintenanceAdmission:
+    snapshot: PauseOwnerSnapshot
+    created_here: bool
+
+
 def state_path() -> Path:
     import shared.paths
 
@@ -186,48 +192,6 @@ def mark_resumed(holder: str, acquired_at: dt.datetime) -> bool:
         return True
 
 
-def finalize_natural_resume() -> bool:
-    """Generation-scoped successful-finalize when a host returns to serving on
-    its own, without a `cluster/resume` op.
-
-    A rollout's Phase-B `ava start` (and the gateway-local finally's own
-    unpause) restore posture directly, so the exact ``(holder, acquired_at)``
-    the Phase-A stop journaled would otherwise stay ``paused`` forever even
-    though the rollout finished — the 2026-08-26 residue (rollout rc=0 while
-    deploy-pause-owner.json still read ``paused``). This records the journaled
-    generation as ``resumed``, the same CAS record ``mark_resumed`` writes on
-    the explicit resume path, under the same lock.
-
-    Generation-scoped by construction, never a force-clear: only a ``paused``
-    journal is transitioned, and only to its own generation — this never
-    creates, mints or clears a record, and an absent / already-``resumed`` /
-    ``invalid`` journal is left untouched (an invalid one
-    may be cleared only by recovery's no-live-owner proof). A newer pause
-    replaces the journal before a delayed finalize can reach it.
-
-    Returns True when the journal was transitioned ``paused`` -> ``resumed``.
-    """
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(path)
-        if (
-            current.maintenance is not None
-            or current.status != "paused"
-            or current.holder is None
-            or current.acquired_at is None
-        ):
-            return False
-        _write_atomic(
-            path,
-            {
-                "state": "resumed",
-                "holder": current.holder,
-                "acquired_at": current.acquired_at.astimezone(dt.UTC).isoformat(),
-            },
-        )
-        return True
-
-
 def clear(holder: str, acquired_at: dt.datetime) -> bool:
     """CAS-clear one recovered/completed generation; never a replacement."""
     path = state_path()
@@ -263,25 +227,33 @@ def _refuse_maintenance(current: PauseOwnerSnapshot) -> None:
 
 def begin_maintenance(
     holder: str, acquired_at: dt.datetime, *, driver: HoldDriver | None = None
-) -> PauseOwnerSnapshot:
+) -> MaintenanceAdmission:
     """Close admission durably; a new deploy cannot overwrite this capability.
 
     `driver` is the shepherding identity minted by an operator-side entry (task
     #3270). Daemon-driven pauses leave it None on purpose: their ownership
     evidence is the updater handoff / outcome, never a caller daemon that
     outlives the ladder and would mask a dead shepherd.
+
+    Creation ownership is returned under the journal lock: compensation must
+    never infer it from a separately read snapshot.
     """
     if not holder or acquired_at.tzinfo is None:
         raise ValueError("holder and timezone-aware acquired_at are required")
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
         current = _read_unlocked(state_path())
+        if current.matches(holder, acquired_at) and current.status == "resumed":
+            raise RuntimeError("maintenance operation already resumed; use a new generation")
         if current.matches(holder, acquired_at) and current.maintenance is not None:
-            return current
+            return MaintenanceAdmission(current, created_here=False)
         if current.status == "invalid" or (
             current.status == "paused" and not current.matches(holder, acquired_at)
         ):
             raise RuntimeError("another or unreadable pause owner must be resolved first")
-        return _write_maintenance(holder, acquired_at, MaintenanceHold(), driver=driver)
+        return MaintenanceAdmission(
+            _write_maintenance(holder, acquired_at, MaintenanceHold(), driver=driver),
+            created_here=True,
+        )
 
 
 def _write_maintenance(

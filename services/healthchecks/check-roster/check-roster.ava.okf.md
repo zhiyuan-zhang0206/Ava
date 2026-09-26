@@ -1,46 +1,56 @@
 ---
 type: doc
-title: Health Check Roster
-description: Healthcheck modules, probes, restart methods, and certified traversals.
+title: Health probe module roster
+description: Protocol helpers registered by service specs and root diagnostics.
 tags:
 - services
 - healthchecks
-- watchdog
 ---
 
-# Health Check Roster
+# Health probe module roster
+
+Application service probes are bound to captured root ownership by their roster
+entry. Helpers in this table do not own recovery. Readiness and diagnostic
+registration are distinct; the root manifest determines which services run.
 
 <!-- lint:healthcheck-roster-table -->
 
-| Module | Service | Liveness Probe | Restart Method | What it certifies (probe traversal) |
-|--------|---------|----------------|----------------|------------------------------------------------|
-| `browser.py` | Chrome | CDP `GET /json/version`, profile argv token, listener socket, session liveness, macOS readiness wait marker | `respawn_service` (our orphan is rebuilt; a foreign holder is skipped; a live readiness wait is preserved) | the supervised Chrome serves CDP, or an explicit degraded wait names the delay |
-| `browser_mcp.py` | MCP upstream | Unix socket `ping` (JSON request, `ok` reply — the daemon's accept/read loop must answer) | `respawn_service` | the browser-MCP daemon's loop answers; lock-free by design (a slow browser op must not read as death) |
-| `browser_reach.py` | shared Chrome → gateway reach | canary fetch through the browser (background `about:blank` target, `no-cors`, wall-clock deadline, closed in `finally`) vs a same-process urllib read; throttled | none — report-only: one ERROR after `browser_reach_failure_threshold` consecutive fails (both readings + recipe), quiet until healthy | the browser's own network face reaches the gateway — breaks when page-level requests hang while the host path stays green (#3921) |
-| `brew_pin.py` | Homebrew dependency pin policy | read-only `brew list --pinned` + `brew list --formula`; non-macOS and hosts without brew are silent no-ops | none — one ERROR per drift episode tells the operator to run `brew pin <formula>` manually | every installed formula in the operator-approved manifest remains pinned; it never changes package state |
-| `prod_venv.py` | production virtualenv | `uv pip check` + isolated four-package import smoke; POSIX only | report-only, deduplicated ERROR; no repair | dependency metadata + imports, including hollow packages; [[services/watchdog/checklist.ava.okf.md|execution contract]] |
-| `computer_mcp.py` | Computer-use service | Unix socket protocol `ping` (lock-free; does not take the action lock) | `respawn_service` | the computer-MCP daemon's loop answers |
-| `mcp_daemon.py` | Shared MCP daemon | Unix socket protocol `ping` | `respawn_and_verify` (probe-confirmed) | the shared MCP daemon's loop answers |
-| `delivery_watchdog.py` | Delivery watchdog | HTTP `/healthz` (identity-verified), Liveness beat | `respawn_and_verify` | work loop still ticking (a wedged loop 503s via Liveness) |
-| `im_bridge.py` | IM Bridge | HTTP `/healthz` (identity-verified); before respawn, a bounded re-read accepts this unit's matching `name` + `home` even on a stale 503 or pidfile mismatch | `respawn_and_verify` | our daemon still owns and answers the health port; Liveness staleness is warning-only (an IM long poll can block the work loop) |
-| `heartbeat.py` | Heartbeat | HTTP `/healthz` (identity-verified), Liveness beat | `respawn_and_verify` | work loop still ticking |
-| `labeler.py` | Labeler | HTTP `/healthz` (identity-verified), Liveness beat | `respawn_and_verify` | work loop still ticking |
-| `memory_indexer.py` | Memory-indexer | HTTP `/healthz` (identity-verified), Liveness beat | `respawn_and_verify` | work loop still ticking |
-| `memory_search.py` | Memory search | real POST `/search` (zero vector, k=1) — the store, not a bare TCP connect | `respawn_and_verify` (probe-confirmed) | the exact-search store answers real searches — breaks exactly when the gateway/indexer calls would |
-| `events_maintenance.py` | Events-maintenance | HTTP `/healthz` (identity-verified), per-loop progress deadlines | `respawn_and_verify` | each loop completes bounded work; a timed-out worker wedges its tracker (503) |
-| `pg_backup.py` | PG-backup scheduler | HTTP `/healthz` (identity-verified), backup last-success age | `respawn_and_verify` | scheduler progress: fresh dump, boot grace, or running dump; else 503 |
-| `pitr_uploader.py` | PITR uploader | HTTP `/healthz` (identity-verified): liveness + disk footprint (gating) + unacked-age (non-gating) | `respawn_and_verify` | loop ticking, disk under hard bound; unacked-age reports degraded without flipping 503 (no restart flaps) |
-| `pitr_base_backup.py` | PITR base | HTTP `/healthz` | `respawn_and_verify` | scheduler liveness and durable progress |
-| `agent_host.py` | Agent host | HTTP `/healthz` (identity-verified), Liveness beat | `respawn_and_verify` | work loop still ticking |
-| `page_server.py` | Page-server supervisor | HTTP `/healthz` (identity-verified), Liveness beat | `respawn_and_verify` | work loop still ticking |
-| `ops.py` | Agent-ops | HTTP `/healthz` (identity-verified), update-lock and active-op age | `respawn_and_verify` | responsive ops; work past 30m 503s (saturation is informational) |
-| `gateway.py` | Gateway | HTTP `/api/health`: serving + Postgres `SELECT 1`, verified against this unit's `home` (`shared.daemon_health.probe_home`) | `respawn_and_verify` | gateway and DB work; degradation names the component |
-| `frontend.py` | Next.js | HTTP 2xx on the **app** port (the entry's always-up gate answers 200 while the app is down), **and the port's LISTEN socket must resolve to the frontend's owner** (session/tree unit, leader or birth-validated descendant); a foreign 2xx reads `PORT_TAKEN`+pid | kill session + `npm run build && npm run start`; refused while a listener outside the session holds the port (no EADDRINUSE loop) | the Next.js app **of this unit** renders — an orphan's 200 cannot mask a failed start |
-| `milvus.py` | Milvus | real RPC — `MilvusClient.list_collections` against the cluster's milvus URI (the indexer's own client path); replaced a bare TCP connect — port-open stays green while the server behind it is unusable (issue #192) | `respawn_service` | milvus serves RPCs — breaks exactly when the indexer's calls would |
-| `pgbouncer.py` | per-cluster PgBouncer | loopback admin console + public listener socket table | verified `ensure_pgbouncer`, then `pgbouncer_repaired` | pooler protocol and public bind; [[roster-notes.ava.okf.md|probe scope]] |
-| `redis_acl.py` | per-cluster redis ACL | PING as this cluster's username (read from `redis_identity()` using the cluster's `redis_url` — names-as-data, no longer derived from cluster name) | re-affirm ACL user | the cluster identity authenticates to redis — every component's redis path (the 0004 guardrail) |
-| `otel_collector.py` | OTel collector sidecar | POST `/v1/traces` to the OTLP receiver must return 2xx; listeners on :4318/:8888 must resolve to this unit's collector binary + live session record; non-LGTM gateways warn and skip, pure runners keep relay behavior | one 5 s SIGTERM window for a verified stale holder, then a verified SIGKILL fallback + `respawn_and_verify`; a survivor stays loud | the supervisor-owned OTLP listener the agents export through answers, not an old collector that kept the port |
-| `lgtm.py` | local LGTM backends (`deploy/lgtm/`) | three readiness endpoints (Loki/Prometheus/Grafana) on fixed host ports; remote Tempo excluded (its failure must not restart local backends); any HTTP answer = alive, connection failure = down; Linux adds canonical-unit ownership; no-op without the `$AVA_HOME/lgtm-host` marker or station capability | re-run the idempotent `deploy/lgtm/start.sh` | each local backend's readiness listener answers (its own health traversal) |
-| `permissions_helper.py` | AvaPermissionsHelper | socket `ping` (3 s); on failure a launchd `job state` classification (LWCR-stuck named); non-macOS no-op | third failure: bootout/bootstrap; failed repair escalates + backoff-retries | helper protocol answers; not LWCR-stuck |
+| Module | Role | Protocol evidence |
+|---|---|---|
+| `agent_host.py` | Service protocol probe | Agent host loop health |
+| `browser.py` | Service protocol probe | Browser CDP response and profile facts |
+| `browser_mcp.py` | Service protocol probe | Browser MCP protocol ping |
+| `browser_reach.py` | Read-only diagnostic helper | Temporary browser fetch contrasted with host request |
+| `computer_mcp.py` | Service protocol probe | Computer MCP protocol ping |
+| `delivery_watchdog.py` | Service protocol probe | Delivery progress health |
+| `events_maintenance.py` | Service protocol probe | Maintenance loop progress |
+| `frontend.py` | Service protocol probe | App HTTP response and captured root listener generation |
+| `gate.py` | Service protocol probe | Gate entry HTTP health, independent of app availability |
+| `gateway.py` | Service protocol probe | Gateway serving and database query health |
+| `heartbeat.py` | Service protocol probe | Heartbeat loop progress |
+| `im_bridge.py` | Service protocol probe | IM bridge loop health |
+| `labeler.py` | Service protocol probe | Labeler loop progress |
+| `lgtm.py` | Read-only diagnostic helper | Native backend protocol helpers and Loki write/read round trip |
+| `mcp_daemon.py` | Service protocol probe | Shared MCP protocol ping |
+| `memory_indexer.py` | Service protocol probe | Indexer loop progress |
+| `memory_search.py` | Service protocol probe | Real exact-search POST |
+| `milvus.py` | Service protocol probe | Milvus collection-list RPC |
+| `ops.py` | Service protocol probe | Ops loop health and operation age |
+| `otel_collector.py` | Service protocol probe | OTLP request accepted and both listeners in captured root lineage |
+| `owned_service.py` | Read-only diagnostic helper | Generic TCP protocol and connected Unix-peer ownership envelope |
+| `page_server.py` | Service protocol probe | Page-server loop health |
+| `permissions_helper.py` | Read-only diagnostic helper | Parent helper ping and launchd failure classification |
+| `pg_backup.py` | Service protocol probe | Backup progress and last-success age |
+| `pitr_base_backup.py` | Service protocol probe | Base backup progress |
+| `pitr_uploader.py` | Service protocol probe | Upload progress and disk footprint |
+| `prod_venv.py` | Read-only diagnostic helper | Bounded dependency check and isolated import smoke |
+| `redis_acl.py` | Read-only diagnostic helper | Runtime-credential Redis PING |
 
-Pinning, the data-plane exception, and the 2026-08-21 audit: [[roster-notes.ava.okf.md]]
+`owned_service.py` supplies the native ownership envelope for endpoints without
+Ava identity payloads and for centrally wrapped HTTP/TCP specs. A matching home,
+profile, executable, or successful protocol by itself is insufficient.
+
+The [[services/ava_root_glue/diagnostics.ava.okf.md|diagnostic roster]] documents
+platform/capability gates, per-check budgets, native data-plane custody, and
+reporting. [[services/healthchecks/check-roster/roster-notes.ava.okf.md|Roster ownership]]
+describes the documentation guard.

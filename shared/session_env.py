@@ -1,6 +1,8 @@
 """Session env forwarding — the MECHANISM for handing env to session children.
 
-Three jobs, all mechanism (no policy):
+Environment assembly and session activation:
+- `managed_service_env` builds a root generation's PATH from the persisted host
+  declaration, independent of its interactive or OS-manager caller.
 - `forward_env_dict` builds the full child env dict for a daemon/service session
   (the registry's session forward view + PATH + venv activation). The backend
   hands it to the child as its real environment — nothing ever lands on an argv
@@ -45,10 +47,13 @@ lint_no_os_environ's allowlist.
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import shlex
 from pathlib import Path
+
+from dotenv import dotenv_values
 
 from shared.platform import IS_WINDOWS
 from shared.platform_backend import get_backend
@@ -92,6 +97,51 @@ def frontend_toolchain_env() -> dict[str, str]:
     """
     env = dict(os.environ)
     env["PATH"] = frontend_toolchain_path(env.get("PATH", ""))
+    return env
+
+
+def normalize_service_path(value: str, *, excluded: tuple[Path, ...] = ()) -> str:
+    """Admit stable ordered host directories without a caller's virtualenv."""
+    excluded_paths = {path.resolve() for path in excluded}
+    selected: list[str] = []
+    seen: set[Path] = set()
+    for entry in value.split(os.pathsep):
+        if not entry:
+            continue
+        path = Path(entry).expanduser()
+        if not path.is_absolute() or any(char in entry for char in ("\x00", "\n", "\r")):
+            raise ValueError("managed service PATH requires absolute directory entries")
+        identity = path.resolve()
+        if identity not in excluded_paths and identity not in seen:
+            selected.append(str(path))
+            seen.add(identity)
+    return os.pathsep.join(selected)
+
+
+def admit_service_path(value: str, *, excluded: tuple[Path, ...] = ()) -> str:
+    """Normalize host tools and require exact persistence through the home file."""
+    normalized = normalize_service_path(value, excluded=excluded)
+    decoded = dotenv_values(
+        stream=io.StringIO(f"AVA_SERVICE_PATH={normalized}\n"), interpolate=False
+    )
+    if "${" in normalized or decoded["AVA_SERVICE_PATH"] != normalized:
+        raise ValueError(
+            "managed service PATH must round-trip literally through home configuration"
+        )
+    return normalized
+
+
+def managed_service_env(service_path: str) -> dict[str, str]:
+    """Use the admitted host PATH; interactive session forwarding is separate."""
+    from shared.runtime_interpreter import runtime_venv
+
+    env = forward_env_dict()
+    bindir = runtime_venv() / get_backend().venv_bin_dir_name()
+    host_path = normalize_service_path(service_path, excluded=(bindir,))
+    env["AVA_SERVICE_PATH"] = host_path
+    env["PATH"] = normalize_service_path(
+        os.pathsep.join((str(bindir), host_path, frontend_toolchain_path("")))
+    )
     return env
 
 

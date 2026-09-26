@@ -23,6 +23,7 @@ import psycopg
 
 from services import backup
 from shared.agents.history import checkpoint as checkpoint_reader
+from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
 from shared.config import settings
 from shared.log import logger
 from shared.pg_throwaway_base import format_bytes, select_throwaway_base
@@ -49,16 +50,18 @@ def _newest_artifact() -> Path:
     return artifacts[-1][1]
 
 
-_RESTORE_ROLES = ("ava_main", "ava_runner", "grafana_ro", "zzy")
+_RESTORE_ROLES = ("ava_main", GATEWAY_GROUP, RUNNER_GROUP, "grafana_ro", "zzy")
 """Roles a managed dump's OWNER/GRANT statements reference. initdb only
 creates the `ava` superuser; without these pg_restore fails on
-`role "..." does not exist` (2026-08-27 prod drill finding). Attributes match
-the live cluster's pg_roles: plain LOGIN roles, no password (trust auth).
+`role "..." does not exist` (2026-08-27 prod drill finding). They are created
+as plain LOGIN roles without a password (trust auth): a restore needs them
+only to exist. The two write-generation capability groups
+(`shared.cluster.authority`) hold every application grant and default
+privilege, so a dump of an always-authenticated home names both; the
+generation logins own nothing and hold no direct grant, so none is needed.
 `zzy` is the live admin role ad-hoc artifacts are created under (the
 `model_sweep_backup_*` sweep convention); the dump re-owns such objects to it,
-so the scratch cluster must carry the role too (2026-09-21 prod drill finding).
-It is created as a plain role: a restore needs it only to exist for the OWNER
-statements."""
+so the scratch cluster must carry the role too (2026-09-21 prod drill finding)."""
 
 
 def _ensure_restore_roles(db_url: str) -> None:
@@ -182,14 +185,19 @@ def _scratch_space_requirement(raw_dump: Path) -> int:
 
 
 def run_drill(
-    artifact: Path | None = None, *, foreground: bool = False
+    artifact: Path | None = None, *, foreground: bool = False, scratch_root: Path | None = None
 ) -> tuple[RestoreReport, float]:
-    """Run the complete decrypt, restore, and verification drill."""
+    """Run the complete decrypt, restore, and verification drill.
+
+    `scratch_root` places the decrypted dump inside a caller-owned private
+    directory, so a caller that proves the drill's closure can remove it even
+    when the drill was killed before its own cleanup.
+    """
     artifact = artifact or _newest_artifact()
     if not artifact.is_file():
         raise RuntimeError(f"backup artifact does not exist: {artifact.name}")
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="ava-restore-drill-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ava-restore-drill-", dir=scratch_root) as tmp:
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
         backup.decrypt_artifact(artifact, raw_dump)

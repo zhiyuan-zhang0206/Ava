@@ -224,9 +224,15 @@ def test_post_message_404_when_agent_missing(db_conn: psycopg.Connection) -> Non
 def test_post_message_terminated_agent_allows_insert(db_conn: psycopg.Connection) -> None:
     """Terminated agent receives message: SDK path does not block — auto-resurrect
     triggers automatically, delivering chat inbound + resurrect lifecycle inbound.
-    Test env has no session backend, so resurrection fails (status reverts to terminated),
-    but both inbounds are already in the queue."""
+    The row carries the hosted identity a terminated agent keeps; resurrection
+    resumes only that retained authority."""
     tid = _seed_agent(db_conn, status="terminated")
+    db_conn.execute(
+        "UPDATE agents_meta SET runtime_kind = 'hosted', runtime_generation = gen_random_uuid(), "
+        "runtime_owner = gen_random_uuid() WHERE id = %s",
+        (tid,),
+    )
+    db_conn.commit()
     with TestClient(app) as client:
         resp = client.post(f"/api/agents/{tid}/messages", json={"content": "x", "source": "user"})
     assert resp.status_code == 201  # SDK path does not block terminated

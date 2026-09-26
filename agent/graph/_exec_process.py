@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import subprocess
 import threading
 import time
@@ -78,12 +77,20 @@ class DomainCloseOwner:
         with self._close_lock:
             if self._closed:
                 return
-            self._domain.close()
+            self._domain.close_confirmed(time.monotonic() + _EMERGENCY_SETTLE_TIMEOUT_S)
             self._closed = True
 
     def reap_now(self, timeout: float) -> int:
         """Bounded direct-child reap for the Runner-cancellation barrier."""
-        return self._domain.proc.wait(timeout=timeout)
+        with self._close_lock:
+            if not self._closed:
+                raise RuntimeError("exec leader remains pinned after unresolved closure")
+            return self._domain.proc.wait(timeout=timeout)
+
+    def signal_now(self, signum: int) -> None:
+        with self._close_lock:
+            if not self._closed:
+                self._domain.signal(signum)
 
     async def wait(self) -> None:
         await asyncio.shield(self.task)
@@ -99,18 +106,18 @@ class DomainCloseOwner:
                 request_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await request_task
-        # POSIX close includes a process-table scan before killpg; Windows
-        # enters the kernel Job API. Neither belongs on the agent event loop.
+        # Native close and bounded member observation run outside the agent loop.
         await asyncio.to_thread(self.close_now)
 
 
 def signal_child(proc: subprocess.Popen[bytes], sig: int, domain_close: DomainCloseOwner) -> None:
     """Ask the owned tree to stop; Windows Job Objects only provide hard stop."""
+    if proc.pid != domain_close.pid:
+        raise RuntimeError("exec signal belongs to another direct owner")
     if IS_WINDOWS:
         domain_close.request()
         return
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, sig)
+    domain_close.signal_now(sig)
 
 
 def start_root_exit_observer(proc: subprocess.Popen[bytes]) -> asyncio.Task[None]:
@@ -120,10 +127,10 @@ def start_root_exit_observer(proc: subprocess.Popen[bytes]) -> asyncio.Task[None
     """
     identity = None if IS_WINDOWS else psutil.Process(proc.pid)
 
-    def _observe() -> None:
+    async def _observe() -> None:
         if IS_WINDOWS:
             while proc.poll() is None:
-                time.sleep(_ROOT_EXIT_POLL_S)
+                await asyncio.sleep(_ROOT_EXIT_POLL_S)
             return
         assert identity is not None  # noqa: S101 — established by platform branch
         while True:
@@ -133,19 +140,20 @@ def start_root_exit_observer(proc: subprocess.Popen[bytes]) -> asyncio.Task[None
                 return
             if status in {psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE}:
                 return
-            time.sleep(_ROOT_EXIT_POLL_S)
+            await asyncio.sleep(_ROOT_EXIT_POLL_S)
 
-    return asyncio.create_task(asyncio.to_thread(_observe), name=f"exec-root-exit-{proc.pid}")
+    # A failed close must be able to stop observation without leaving a default
+    # executor thread waiting forever on the deliberately retained live child.
+    return asyncio.create_task(_observe(), name=f"exec-root-exit-{proc.pid}")
 
 
 def start_reap(proc: subprocess.Popen[bytes], domain_close: DomainCloseOwner) -> asyncio.Task[int]:
     """Run the sole ``Popen.wait`` only after the process domain was closed."""
 
     async def _reap_after_domain_close() -> int:
-        # The barrier reports close failure separately; still reap root.
-        with contextlib.suppress(Exception):
-            await domain_close.wait()
-        return await asyncio.to_thread(proc.wait)
+        # Failed closure must retain the direct leader and its group number.
+        await domain_close.wait()
+        return await asyncio.to_thread(domain_close.reap_now, _EMERGENCY_SETTLE_TIMEOUT_S)
 
     return asyncio.create_task(_reap_after_domain_close(), name=f"exec-reap-{proc.pid}")
 
@@ -208,11 +216,14 @@ async def settle_resources(
 ) -> tuple[TeardownFailure, ...]:
     """Observe every cleanup owner, then return failures in stable priority.
 
-    Priority is domain ownership, direct-root reap, then reader join. No stage
-    failure cancels or skips another stage.
+    Failed closure stops exit observation and blocks reap; the bounded reader
+    join still runs. The retained child is unresolved, never declared exited.
     """
     if request_stop:
         domain_close.request()
+    close_verdict = await asyncio.gather(asyncio.shield(domain_close.task), return_exceptions=True)
+    if isinstance(close_verdict[0], BaseException) and not root_exit_task.done():
+        root_exit_task.cancel()
     stages: list[tuple[TeardownStage, asyncio.Future[Any]]] = [
         ("domain_close", domain_close.task),
         ("root_exit", root_exit_task),
@@ -288,10 +299,11 @@ def settle_cancelled_owners(
     except BaseException as exc:
         failures.append(TeardownFailure("domain_close", exc))
 
-    try:
-        domain_close.reap_now(max(0.0, deadline - time.monotonic()))
-    except BaseException as exc:
-        failures.append(TeardownFailure("reap", exc))
+    if not failures:
+        try:
+            domain_close.reap_now(max(0.0, deadline - time.monotonic()))
+        except BaseException as exc:
+            failures.append(TeardownFailure("reap", exc))
 
     if reader is not None:
         try:

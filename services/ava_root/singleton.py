@@ -17,7 +17,6 @@ platform adapter work lands.
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
 from pathlib import Path
@@ -40,6 +39,17 @@ def acquire_instance_lock(run_dir: Path) -> int:
     """
     run_dir.mkdir(parents=True, exist_ok=True)
     lock_path = run_dir / _LOCK_NAME
+    if os.name == "nt":
+        from shared.root_control.windows.storage import acquire_lock
+
+        try:
+            return acquire_lock(lock_path)
+        except OSError as exc:
+            if exc.errno not in {32, 33}:
+                raise
+            raise AlreadyRunningError(f"another root supervisor already owns {run_dir}") from exc
+    import fcntl
+
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -57,6 +67,11 @@ def acquire_instance_lock(run_dir: Path) -> int:
 
 def release_instance_lock(fd: int) -> None:
     """Release the instance lock and close its fd (idempotent at process exit)."""
+    if os.name == "nt":
+        os.close(fd)
+        return
+    import fcntl
+
     try:
         fcntl.flock(fd, fcntl.LOCK_UN)
     except OSError as exc:

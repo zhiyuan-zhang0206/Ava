@@ -257,12 +257,7 @@ def test_spawn_core_resets_child_signal_state() -> None:
     assert "posix_spawnattr_setsigdefault(&attributes, &signalsToDefault)" in spawn_source
 
 
-def test_root_keeper_contract_is_pinned_in_the_swift_source() -> None:
-    source = (
-        Path(__file__).parents[2] / "services/permissions_helper/helper/main.swift"
-    ).read_text()
-    keeper_source = source.split("// MARK: - Root keeper", 1)[1].split("// MARK: - Dispatch", 1)[0]
-
+def _assert_spawn_core_and_lock_file_pinned(keeper_source: str) -> None:
     # The CTO-ruled session-boundary sentence must live where root is spawned.
     assert "session boundary only" in keeper_source
     assert "ppid unchanged, no reparent" in keeper_source
@@ -273,16 +268,22 @@ def test_root_keeper_contract_is_pinned_in_the_swift_source() -> None:
     # session table.
     assert "spawnDetachedChild(" in keeper_source
     assert "children[" not in keeper_source
+
+
+def _assert_stop_seed_and_wiring_pinned(keeper_source: str, source: str) -> None:
     # A stop the keeper requested must never restart root.
     assert 'let requested = stopRequested || state == "stopping"' in keeper_source
-    # The SIGCHLD drain must route root exits to the keeper before the table.
-    assert "if rootKeeper.reapIfOwned(pid: pid, exitStatus: status) { continue }" in source
+    # The SIGCHLD drain uses one ownership boundary for both child owners.
+    assert "rootKeeper.reapExitedChildLocked()" in source
     # Startup seeding is opt-in via the seed environment; absent = dormant.
     assert 'rootSeedEnvironment = "AVA_PERMISSIONS_HELPER_ROOT_SEED"' in source
     assert "rootKeeper.startIfConfigured()" in source
     # The wire surface is wired into dispatch.
     for method in ("root_seed", "root_status", "root_stop"):
         assert f'case "{method}"' in source
+
+
+def _assert_spawn_and_reap_share_one_lock_domain(keeper_source: str) -> None:
     # Spawn and ownership accounting share one lock domain with the SIGCHLD
     # reap: no unlock may sit between the spawn call and the pid record, or a
     # root that exits inside the spawn window drains unattributed and parks
@@ -293,7 +294,20 @@ def test_root_keeper_contract_is_pinned_in_the_swift_source() -> None:
     spawn_at = attempt.index("spawnDetachedChild(")
     account_at = attempt.index("childPID = pid")
     lock_at = attempt.rindex("lock.lock()", 0, spawn_at)
-    assert "lock.unlock()" not in attempt[lock_at:account_at]
+    assert "lock.unlock()" not in attempt[spawn_at:account_at]
+    assert lock_at < spawn_at
+    assert "StopIntent.exists(seed.runDir, owner: .root)" in attempt[lock_at:spawn_at]
+
+
+def test_root_keeper_contract_is_pinned_in_the_swift_source() -> None:
+    source = (
+        Path(__file__).parents[2] / "services/permissions_helper/helper/main.swift"
+    ).read_text()
+    keeper_source = source.split("// MARK: - Root keeper", 1)[1].split("// MARK: - Dispatch", 1)[0]
+
+    _assert_spawn_core_and_lock_file_pinned(keeper_source)
+    _assert_stop_seed_and_wiring_pinned(keeper_source, source)
+    _assert_spawn_and_reap_share_one_lock_domain(keeper_source)
 
 
 def test_root_seed_env_rejects_a_non_string_map() -> None:
@@ -343,6 +357,7 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
             "stop_requested": True,
             "pid": 5150,
         },
+        "helper_shutdown": {"stopping": True, "pid": 4242, "run_dir": "/opt/ava/run"},
     }
 
     def handler(req: dict) -> dict:
@@ -372,39 +387,10 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
     stopped = client.stop_root(sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
     assert stopped["state"] == "stopping"
     assert stopped["stop_requested"] is True
-    assert seen[2] == {"method": "root_stop", "force": False}
-
-    client.stop_root(force=True, sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
-    assert seen[3] == {"method": "root_stop", "force": True}
-
-
-def test_self_upgrade_treats_connection_close_as_success(fake_helper) -> None:
-    seen: list[dict[str, object]] = []
-
-    def close_after_request(conn: socket.socket) -> None:
-        request: dict[str, object] = json.loads(_read_line(conn))
-        seen.append(request)
-
-    path = fake_helper(raw=close_after_request)
-    assert client.request_self_upgrade(
-        "/Applications/AvaPermissionsHelper.app/Contents/MacOS/AvaPermissionsHelper",
-        sock_path=path,  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert seen[0]["method"] == "self_upgrade"
-    assert seen[0]["exe_path"] == (
-        "/Applications/AvaPermissionsHelper.app/Contents/MacOS/AvaPermissionsHelper"
-    )
-
-
-def test_self_upgrade_validation_error_is_not_a_success(fake_helper) -> None:
-    def handler(req: dict) -> dict:
-        return {"id": req["id"], "ok": False, "error": "outside helper bundle"}
-
-    with pytest.raises(PermissionsHelperError, match="outside helper bundle"):
-        client.request_self_upgrade(
-            "/Applications/UntrustedHelper.app/Contents/MacOS/UntrustedHelper",
-            sock_path=fake_helper(handler),  # pyright: ignore[reportUnknownArgumentType]
-        )
+    assert seen[2] == {"method": "root_stop"}
+    shutdown = client.shutdown_helper(Path("/opt/ava/run"), sock_path=path)  # pyright: ignore[reportUnknownArgumentType]
+    assert shutdown == {"stopping": True, "pid": 4242, "run_dir": "/opt/ava/run"}
+    assert seen[3] == {"method": "helper_shutdown", "run_dir": "/opt/ava/run"}
 
 
 def test_file_method_mapping_and_list_result(fake_helper) -> None:
@@ -894,7 +880,6 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
     monkeypatch.setattr(lifecycle, "_INFO_PLIST", info)
     monkeypatch.setattr(lifecycle, "_LOCALES", locales)
     monkeypatch.setattr(lifecycle, "_BUILD_DIR", build)
-    monkeypatch.setattr(lifecycle, "_LEGACY_BUILD_DIR", tmp_path / "checkout-build")
     return app
 
 
@@ -1150,6 +1135,9 @@ def test_fresh_build_signs_with_the_stable_certificate(
         "--force",
         "--sign",
         lifecycle._CERT_CN,
+        # Hardened runtime: dyld ignores DYLD_* for the helper (review P2-A).
+        "--options",
+        "runtime",
         "--identifier",
         lifecycle._BUNDLE_ID,
         "--requirements",
@@ -1187,8 +1175,11 @@ def test_source_content_change_forces_rebuild(
     _write_current_build_state(app, lifecycle._source_content_hash())
     lifecycle._SOURCE.write_text("// changed swift")
 
-    assert lifecycle.build_and_sign() == (app, True)
-    assert any(c[0] == "swiftc" for c in _argvs(recorded))
+    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+        lifecycle.build_and_sign()
+    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
 
 
 def test_locale_content_change_forces_rebuild(
@@ -1202,8 +1193,11 @@ def test_locale_content_change_forces_rebuild(
     locale_file = lifecycle._LOCALES / "en.lproj" / "Localizable.strings"
     locale_file.write_text('"panel.title" = "Changed";')
 
-    assert lifecycle.build_and_sign() == (app, True)
-    assert any(c[0] == "swiftc" for c in _argvs(recorded))
+    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+        lifecycle.build_and_sign()
+    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
 
 
 def test_build_copies_locale_resources_into_the_bundle(
@@ -1230,8 +1224,11 @@ def test_missing_build_state_forces_rebuild(
     app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
     recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
 
-    assert lifecycle.build_and_sign() == (app, True)
-    assert any(c[0] == "swiftc" for c in _argvs(recorded))
+    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+        lifecycle.build_and_sign()
+    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
 
 
 def test_expected_dr_uses_the_named_identity_sha1(
@@ -1295,54 +1292,15 @@ def test_identity_change_warns_and_rebuilds(
     recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
     _write_current_build_state(app, "hash-for-previous-identity", dr='identifier "old"')
 
-    assert lifecycle.build_and_sign() == (app, True)
-    assert any(c[0] == "swiftc" for c in _argvs(recorded))
+    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+        lifecycle.build_and_sign()
+    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
     assert (
         "code-signing identity changed — macOS permissions may need re-granting"
         in capsys.readouterr().err
     )
-
-
-def test_valid_checkout_bundle_is_migrated_without_rebuild(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.permissions_helper import lifecycle
-
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    old_app = lifecycle._LEGACY_BUILD_DIR / app.name
-    old_exe = old_app / "Contents" / "MacOS" / "AvaPermissionsHelper"
-    old_exe.parent.mkdir(parents=True)
-    old_exe.write_bytes(b"old signed helper")
-    legacy_dr = 'identifier "legacy.permissions-helper"'
-    recorded = _fake_tools(
-        monkeypatch,
-        authority=lifecycle._CERT_CN,
-        designated_requirement=legacy_dr,
-    )
-
-    assert lifecycle.build_and_sign() == (app, False)
-    assert (
-        app / "Contents" / "MacOS" / "AvaPermissionsHelper"
-    ).read_bytes() == b"old signed helper"
-    assert not lifecycle._LEGACY_BUILD_DIR.exists()
-    assert json.loads((app.parent / "build-state.json").read_text())["dr"] == legacy_dr
-    assert not any(c[0] == "swiftc" for c in _argvs(recorded))
-
-
-def test_invalid_checkout_bundle_is_removed_and_rebuilt(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.permissions_helper import lifecycle
-
-    app = _stage_bundle(monkeypatch, tmp_path, exe_present=False)
-    old_exe = lifecycle._LEGACY_BUILD_DIR / app.name / "Contents" / "MacOS" / app.stem
-    old_exe.parent.mkdir(parents=True)
-    old_exe.write_bytes(b"invalid helper")
-    recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN, verify_rc=1)
-
-    assert lifecycle.build_and_sign() == (app, True)
-    assert not lifecycle._LEGACY_BUILD_DIR.exists()
-    assert any(c[0] == "swiftc" for c in _argvs(recorded))
 
 
 def test_ad_hoc_signed_bundle_is_rebuilt_onto_the_stable_certificate(
@@ -1356,8 +1314,11 @@ def test_ad_hoc_signed_bundle_is_rebuilt_onto_the_stable_certificate(
     app = _stage_bundle(monkeypatch, tmp_path, exe_present=True)
     recorded = _fake_tools(monkeypatch, authority=None)
 
-    assert lifecycle.build_and_sign() == (app, True)
-    assert _sign_command(recorded)[3] == lifecycle._CERT_CN
+    before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+        lifecycle.build_and_sign()
+    assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
+    assert not any(c[0] == "codesign" and "--force" in c for c in _argvs(recorded))
 
 
 def test_locked_keychain_refuses_instead_of_downgrading_to_ad_hoc(
@@ -1661,22 +1622,24 @@ def test_acl_probe_nonzero_is_inconclusive_and_the_build_proceeds(
     assert _sign_command(recorded)[3] == lifecycle._CERT_CN
 
 
-def test_a_hung_probe_answers_no_rather_than_raising(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Probes answer yes/no questions and their callers have no branch for an
-    exception -- a query that hung is the "no" they already handle, with the
-    timeout named in the one reason string an operator reads."""
+def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out native ownership query cannot certify helper absence."""
     import subprocess
 
-    from services.permissions_helper import lifecycle
+    from services.permissions_helper import launchd_job, lifecycle
 
-    def hang(cmd, **kwargs):
-        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])  # pyright: ignore[reportUnknownArgumentType]
+    def hang(cmd: list[str], *, timeout: float, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(cmd, timeout)
 
-    monkeypatch.setattr(lifecycle, "run_bounded", hang)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(lifecycle, "run_bounded", hang)
+    monkeypatch.setattr(launchd_job, "run_bounded", hang)
     monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
     monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-demo"))
 
-    assert lifecycle._is_loaded() is False
+    with pytest.raises(subprocess.TimeoutExpired):
+        lifecycle._is_loaded()
     assert lifecycle._signed_with_stable_cert(Path("/nope.app")) is False
     reason = lifecycle._keychain_lock_reason()
     assert reason is not None
@@ -1705,7 +1668,8 @@ def _install_env(
     plist_path = agents / "com.ava.permissions-helper.test.plist"
     log = tmp_path / "logs" / "permissions-helper.log"
     socket_path = tmp_path / "run" / "permissions-helper.sock"
-    monkeypatch.setattr(lifecycle, "_retire_stale_jobs", lambda: None)
+    monkeypatch.setattr(lifecycle.shared.paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(lifecycle, "_refuse_stale_jobs", lambda: None)
     monkeypatch.setattr(lifecycle, "_label", lambda: "com.ava.permissions-helper.test")
     monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
     monkeypatch.setattr(lifecycle, "_plist_path", lambda: plist_path)
@@ -1731,9 +1695,14 @@ def _install_env(
                 {
                     "Label": "com.ava.permissions-helper.test",
                     "ProgramArguments": [str(exe)],
-                    "EnvironmentVariables": {"AVA_PERMISSIONS_HELPER_SOCKET": str(socket_path)},
+                    "EnvironmentVariables": {
+                        "AVA_PERMISSIONS_HELPER_SOCKET": str(socket_path),
+                        "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(
+                            lifecycle.shared.paths.root_run_dir() / "seed.json"
+                        ),
+                    },
                     "RunAtLoad": True,
-                    "KeepAlive": True,
+                    "KeepAlive": {"SuccessfulExit": False},
                     "StandardOutPath": str(log),
                     "StandardErrorPath": str(log),
                 }
@@ -1755,7 +1724,7 @@ def test_helper_ping_settles_until_cold_start_answers(
         client.PermissionsHelperError("socket not ready"),
         {},
         {"pong": False},
-        {"pong": True},
+        {"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True},
     ]
     sleeps: list[float] = []
 
@@ -1773,136 +1742,33 @@ def test_helper_ping_settles_until_cold_start_answers(
     assert sleeps == [0.5, 0.5, 0.5]
 
 
-def test_rebuilt_loaded_helper_self_upgrades_without_kickstart(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.permissions_helper import client, lifecycle
-
-    app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=True)
-    requested: list[str] = []
-
-    def request_self_upgrade(exe: str) -> bool:
-        requested.append(exe)
-        return True
-
-    monkeypatch.setattr(client, "request_self_upgrade", request_self_upgrade)
-    monkeypatch.setattr(
-        client,
-        "ping",
-        lambda: {"pong": True, "preflight_screen": True, "ax_trusted": True},
-    )
-
-    lifecycle.install_and_load(app, rebuilt=True)
-
-    assert requested == [str(app / "Contents" / "MacOS" / "AvaPermissionsHelper")]
-    assert not any(call[:2] == ["launchctl", "kickstart"] for call in run_calls)
-
-
-def test_self_upgrade_failure_falls_back_to_kickstart(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.permissions_helper import client, lifecycle
-
-    app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=True)
-
-    def fail_upgrade(_exe: str) -> bool:
-        raise client.PermissionsHelperError("old helper has no self_upgrade")
-
-    monkeypatch.setattr(client, "request_self_upgrade", fail_upgrade)
-    monkeypatch.setattr(
-        client,
-        "ping",
-        lambda: {"pong": True, "preflight_screen": True, "ax_trusted": True},
-    )
-
-    lifecycle.install_and_load(app, rebuilt=True)
-
-    assert ["launchctl", "kickstart", "-k", "gui/501/com.ava.permissions-helper.test"] in run_calls
-
-
-def test_self_upgrade_ping_failure_falls_back_to_kickstart(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.permissions_helper import client, lifecycle
-
-    app, run_calls, _ = _install_env(monkeypatch, tmp_path, loaded=True)
-
-    def accept_upgrade(_exe: str) -> bool:
-        return True
-
-    monkeypatch.setattr(client, "request_self_upgrade", accept_upgrade)
-    replies: list[object] = [client.PermissionsHelperError("exec transition") for _ in range(10)]
-    replies.append({"pong": True, "preflight_screen": True, "ax_trusted": True})
-
-    def ping():
-        reply = replies.pop(0)
-        if isinstance(reply, Exception):
-            raise reply
-        return reply
-
-    monkeypatch.setattr(client, "ping", ping)
-    monkeypatch.setattr(time, "sleep", _skip_sleep)
-
-    lifecycle.install_and_load(app, rebuilt=True)
-
-    assert ["launchctl", "kickstart", "-k", "gui/501/com.ava.permissions-helper.test"] in run_calls
-
-
-def test_failed_post_load_ping_repairs_with_bootout_and_bootstrap(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from services.permissions_helper import client, lifecycle
-
-    app, run_calls, probe_calls = _install_env(monkeypatch, tmp_path, loaded=True)
-    replies: list[object] = [client.PermissionsHelperError("spawn failed") for _ in range(10)]
-    replies.append({"pong": True, "preflight_screen": True, "ax_trusted": True})
-
-    def ping():
-        reply = replies.pop(0)
-        if isinstance(reply, Exception):
-            raise reply
-        return reply
-
-    monkeypatch.setattr(client, "ping", ping)
-    monkeypatch.setattr(time, "sleep", _skip_sleep)
-
-    lifecycle.install_and_load(app, rebuilt=False)
-
-    assert probe_calls == [["launchctl", "bootout", "gui/501/com.ava.permissions-helper.test"]]
-    assert ["launchctl", "bootstrap", "gui/501", str(lifecycle._plist_path())] in run_calls
-
-
-@pytest.mark.parametrize("healthy", [True, False])
-def test_repair_unresponsive_helper_reloads_launchd_job_and_returns_ping_verdict(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, healthy: bool
+@pytest.mark.parametrize("changed", [False, True])
+def test_loaded_helper_changes_refuse_before_any_mutation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, changed: bool
 ) -> None:
     from services.permissions_helper import lifecycle
 
-    _, run_calls, probe_calls = _install_env(monkeypatch, tmp_path, loaded=True)
-    monkeypatch.setattr(lifecycle, "_helper_answers_ping", lambda: healthy)
+    app, run_calls, probe_calls = _install_env(
+        monkeypatch, tmp_path, loaded=True, matching_plist=not changed
+    )
+    path = lifecycle._plist_path()
+    before = path.read_bytes() if path.exists() else None
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="stop and unregister"):
+        lifecycle.install_and_load(app, rebuilt=not changed)
+    assert (path.read_bytes() if path.exists() else None) == before
+    assert run_calls == probe_calls == []
 
-    assert lifecycle.repair_unresponsive_helper() is healthy
-    assert probe_calls == [["launchctl", "bootout", "gui/501/com.ava.permissions-helper.test"]]
-    assert run_calls == [
-        ["launchctl", "bootstrap", "gui/501", str(lifecycle._plist_path())],
-    ]
 
-
-def test_failed_ping_after_one_launchd_repair_raises_with_fault_clues(
+def test_unresponsive_loaded_helper_keeps_unknown_custody(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from services.permissions_helper import client, lifecycle
+    from services.permissions_helper import lifecycle
 
-    app, _, _ = _install_env(monkeypatch, tmp_path, loaded=True)
-    monkeypatch.setattr(
-        client,
-        "ping",
-        lambda: (_ for _ in ()).throw(client.PermissionsHelperError("still dead")),
-    )
-    monkeypatch.setattr(time, "sleep", _skip_sleep)
-
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="LWCR/EX_CONFIG"):
+    app, run_calls, probe_calls = _install_env(monkeypatch, tmp_path, loaded=True)
+    monkeypatch.setattr(lifecycle, "_helper_answers_ping", lambda: False)
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="custody is unknown"):
         lifecycle.install_and_load(app, rebuilt=False)
+    assert run_calls == probe_calls == []
 
 
 def test_unloaded_helper_bootstraps_and_must_answer_ping(
@@ -1914,7 +1780,13 @@ def test_unloaded_helper_bootstraps_and_must_answer_ping(
     monkeypatch.setattr(
         client,
         "ping",
-        lambda: {"pong": True, "preflight_screen": True, "ax_trusted": True},
+        lambda: {
+            "pong": True,
+            "preflight_screen": True,
+            "ax_trusted": True,
+            "root_stop_intent_v1": True,
+            "helper_shutdown_v1": True,
+        },
     )
 
     lifecycle.install_and_load(app, rebuilt=False)
@@ -1922,6 +1794,29 @@ def test_unloaded_helper_bootstraps_and_must_answer_ping(
     assert ["launchctl", "bootstrap", "gui/501", str(lifecycle._plist_path())] in run_calls
     plist = plistlib.loads(lifecycle._plist_path().read_bytes())
     assert plist["ProgramArguments"] == [str(app / "Contents" / "MacOS" / "AvaPermissionsHelper")]
+    assert plist["KeepAlive"] == {"SuccessfulExit": False}
+
+
+@pytest.mark.parametrize("loaded", [False, True])
+def test_helper_start_clears_shutdown_intent_only_after_native_job_absence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loaded: bool
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    app, commands, _ = _install_env(monkeypatch, tmp_path, loaded=loaded)
+    monkeypatch.setattr(lifecycle, "_helper_answers_ping", lambda: True)
+    marker = tmp_path / "run" / "ava-root" / "helper-stopped"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_bytes(b"stopped\n")
+    marker.chmod(0o600)
+    if loaded:
+        with pytest.raises(lifecycle.PermissionsHelperBuildError, match="retirement is incomplete"):
+            lifecycle.install_and_load(app, rebuilt=False)
+        assert marker.read_bytes() == b"stopped\n" and commands == []
+    else:
+        lifecycle.install_and_load(app, rebuilt=False)
+        assert not marker.exists()
+        assert [cmd[1] for cmd in commands] == ["bootstrap"]
 
 
 # --- Old-layout job retirement -------------------------------------------
@@ -1990,11 +1885,10 @@ def test_old_main_job_bound_to_our_socket_is_retired(
 
     monkeypatch.setattr(lifecycle, "run_bounded", fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
-    lifecycle._retire_stale_jobs()
-
-    # The racing old-layout job is gone (booted out + plist deleted)...
-    assert not old_main.exists()
-    assert recorded == [["launchctl", "bootout", "gui/501/com.ava.permissions-helper.main"]]
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
+        lifecycle._refuse_stale_jobs()
+    assert old_main.exists()
+    assert recorded == []
     # ...while other clusters' jobs and our own are untouched.
     assert other_cluster.exists()
     assert own.exists()
@@ -2017,8 +1911,9 @@ def test_retire_is_idempotent_when_job_already_gone(
         ),  # bootout: job not loaded
     )
 
-    lifecycle._retire_stale_jobs()  # must not raise on bootout failure
-    assert not (agents / "com.ava.permissions-helper.main.plist").exists()
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="reconcile them externally"):
+        lifecycle._refuse_stale_jobs()
+    assert (agents / "com.ava.permissions-helper.main.plist").exists()
 
 
 def test_unrelated_cluster_plists_are_left_alone(
@@ -2104,3 +1999,35 @@ def test_pipe_transport_uses_shared_reply_contract(monkeypatch: pytest.MonkeyPat
             raise AssertionError(f"reply {buf!r} must raise")
         except client.PermissionsHelperError as e:
             assert expect in str(e)
+
+
+def test_long_mac_ipc_path_refuses_before_signing_or_native_jobs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from services.permissions_helper import lifecycle
+
+    long_socket = tmp_path / ("s" * 104)
+    monkeypatch.setattr(lifecycle, "permissions_helper_socket", lambda: long_socket)
+    monkeypatch.setattr(
+        lifecycle, "ensure_signing_cert", lambda: pytest.fail("must refuse before signing")
+    )
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="shorter cluster home"):
+        lifecycle.converge()
+
+
+def test_overlong_socket_is_typed_unavailability() -> None:
+    with pytest.raises(client.PermissionsHelperError, match="not reachable"):
+        client.ping(sock_path="/" + "x" * 200)
+
+
+@pytest.mark.parametrize("capability", ["root_stop_intent_v1", "helper_shutdown_v1"])
+def test_helper_ping_refuses_missing_stop_capability(
+    monkeypatch: pytest.MonkeyPatch, capability: str
+) -> None:
+    from services.permissions_helper import client, lifecycle
+
+    reply = {"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True}
+    reply.pop(capability)
+    monkeypatch.setattr(client, "ping", lambda: reply)
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="upgrade its signed artifact"):
+        lifecycle._helper_answers_ping()

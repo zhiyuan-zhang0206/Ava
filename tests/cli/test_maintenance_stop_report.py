@@ -1,337 +1,135 @@
-"""The deadline report names the exact surviving service and process identity.
-
-Issue #2162: when a held stop cannot close an owned tree, the failure must
-carry the operator to the exact resource — owning session, leader/descendant
-role, birth pair, cmdline, occupied recorded groups, and the stage — instead
-of a bare pid list that leaves only a blind rerun. These tests drive real
-private process boundaries through the same entrypoints `ava pause` / the
-update's stop leg call.
-"""
+"""Terminal deadlines preserve native survivors and their operator diagnostics."""
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest
 
-from cli.commands import _maintenance_stop as stop
-from cli.commands import stop as entry
-from shared.session_backend import PosixProcSessionBackend
-from shared.session_record import SessionRecord, pid_starttime_ticks
-from tests.cli.test_maintenance_stop import Launcher, _wait_armed
+from cli.commands import _maintenance_stop_report as report
+from cli.commands import _temporary_stop as command
+from shared import lifecycle_status
+from shared.native_process import ownership
+from shared.native_process.ownership import OwnedProcess
+from shared.session_record import SessionRecord
+from tests.agent.test_maintenance import WHEN
+from tests.cli.test_maintenance_stop import Launcher
 from tests.cli.test_maintenance_stop import home as home
 from tests.cli.test_maintenance_stop import launch as launch
-from tests.cli.test_pause_stop import dependencies
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
 
-_IGNORE = (
-    "import signal,time; "
-    "signal.signal(signal.SIGTERM,signal.SIG_IGN); "
-    "print('ready',flush=True); "
-    "time.sleep(60)"
-)
 
-
-def test_refusing_service_failure_names_its_full_identity(home: Path, launch: Launcher) -> None:
-    service = launch("ava-worker", _IGNORE)
-    with pytest.raises(stop.StopIncompleteError) as excinfo:
-        stop.stop_services(0.25)
-    exc = excinfo.value
-    message = str(exc)
-    # The legacy summary stays, so existing operators keep their grep anchors.
-    assert "service stop incomplete" in message
-    assert "surviving services: ['ava-worker']" in message
-    assert f"surviving tracked descendants: [{service.pid}]" in message
-    # ...and the inventory now names the process itself.
-    assert "stage=services" in message
-    assert f"pid={service.pid}" in message
-    assert "role=leader" in message
-    assert "service='ava-worker'" in message
-    assert "birth=" in message
-    assert "SIG_IGN" in message  # the cmdline the operator must judge
-    assert service.poll() is None  # the refusal never becomes a force kill
-    payload = {item["pid"]: item for item in exc.survivors}
-    assert payload[service.pid]["role"] == "leader"
-    assert payload[service.pid]["service"] == "ava-worker"
-    assert "SIG_IGN" in str(payload[service.pid]["cmdline"])
-    assert payload[service.pid]["pgid"] == os.getpgid(service.pid)
-
-
-def test_leader_exit_with_refusing_descendant_names_the_survivor(
-    home: Path, launch: Launcher
-) -> None:
-    # The frontend chain's shape: the leader exits on TERM without closing its
-    # child, and here the child also refuses TERM, so the stop holds until the
-    # deadline. The report must name the child as the leader's descendant — the
-    # process that actually held the stop.
-    arm_sentinel = home / "arm-sentinel"
-    child_code = (
-        "import signal,time,pathlib\n"
-        "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
-        f"pathlib.Path({str(arm_sentinel)!r}).touch()\n"
-        "print('ready',flush=True)\n"
-        "time.sleep(60)\n"
+def _terminal(
+    home: Path, process: subprocess.Popen[str], monkeypatch: pytest.MonkeyPatch
+) -> OwnedProcess:
+    identity = OwnedProcess.capture(psutil.Process(process.pid))
+    SessionRecord(
+        identity.pid, identity.birth, "private-terminal", str(home), time.time(), identity.starttime
+    ).write(home / "run/pty/private-terminal.json")
+    monkeypatch.setattr(
+        command,
+        "get_shell_backend",
+        lambda: SimpleNamespace(list_sessions=lambda: ["private-terminal"]),
     )
-    code = (
-        "import subprocess,sys,time; "
-        f"subprocess.Popen([sys.executable,'-u','-c',{child_code!r}]); "
-        "print('ready',flush=True); time.sleep(60)"
-    )
-    parent = launch("ava-frontend", code)
-    # Sync point (task #4391, same family as #3091): the stop's escalation
-    # must not race the descendant's SIG_IGN arm — enter it only once armed.
-    _wait_armed(arm_sentinel)
-    children = psutil.Process(parent.pid).children()
-    assert len(children) == 1
-    child = stop.OwnedProcess.capture(children[0])
-    try:
-        with pytest.raises(stop.StopIncompleteError) as excinfo:
-            stop.stop_services(0.6)
-        assert parent.wait(timeout=1) == -signal.SIGTERM
-        message = str(excinfo.value)
-        assert f"pid={child.pid}" in message
-        assert "role=descendant" in message
-        assert "service='ava-frontend'" in message
-        payload = {item["pid"]: item for item in excinfo.value.survivors}
-        assert payload[child.pid]["role"] == "descendant"
-        assert payload[child.pid]["service"] == "ava-frontend"
-        assert "SIG_IGN" in str(payload[child.pid]["cmdline"])
-        assert children[0].is_running()  # the refusal never becomes a force kill
-    finally:
-        # Already-dead is fine on failure paths — cleanup must never raise
-        # over the real failure (task #4391).
-        with contextlib.suppress(psutil.NoSuchProcess):
-            children[0].kill()  # Exact child created by this fixture, after the assertions.
+    return identity
 
 
-def test_late_child_in_recorded_group_is_named_as_group_member(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A child created during the leader's own TERM handling escapes the capture
-    # and lands in the recorded process group; the stop holds on the occupied
-    # group. The report must name that child — pid and cmdline — together with
-    # the recorded session whose group it occupies.
-    child_file = home / "late-child.pid"
-    parent = launch(
-        "late-child",
-        f"""
-import subprocess, signal, sys, time, pathlib, os
-
-def finish(*_):
-    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    pathlib.Path({str(child_file)!r}).write_text(str(child.pid))
-    os._exit(0)
-signal.signal(signal.SIGTERM, finish)
-print('ready', flush=True)
-time.sleep(60)
-""",
-    )
-    original = PosixProcSessionBackend.graceful_signal
-
-    def deliver(
-        backend: PosixProcSessionBackend,
-        name: str,
-        *,
-        expected: SessionRecord | None = None,
-    ) -> bool:
-        result = original(backend, name, expected=expected)
-        parent.wait(timeout=2)  # Make the actual leader exit before the next snapshot.
-        return result
-
-    monkeypatch.setattr(PosixProcSessionBackend, "graceful_signal", deliver)
-    try:
-        with pytest.raises(stop.StopIncompleteError) as excinfo:
-            stop.stop_services(0.3)
-        child = psutil.Process(int(child_file.read_text()))
-        assert child.is_running()  # The refusal must not become a force kill.
-        message = str(excinfo.value)
-        assert f"pid={child.pid}" in message
-        assert "role=group-member" in message
-        assert "service='late-child'" in message
-        payload = {item["pid"]: item for item in excinfo.value.survivors}
-        assert payload[child.pid]["role"] == "group-member"
-        assert payload[child.pid]["service"] == "late-child"
-        assert "time.sleep(60)" in str(payload[child.pid]["cmdline"])
-    finally:
-        if child_file.exists():
-            with contextlib.suppress(psutil.NoSuchProcess):
-                psutil.Process(int(child_file.read_text())).kill()  # Exact private fixture.
-
-
-@pytest.mark.skipif(
-    shutil.which("node") is None or shutil.which("bash") is None, reason="real shell/node layering"
-)
-def test_layered_shell_node_chain_reports_the_surviving_node_process(home: Path) -> None:
-    # The frontend's actual launch layering (bash -lc -> node -> node) with a
-    # child that refuses TERM: the deadline report must name the surviving node
-    # process, cmdline included, so the operator does not have to guess which
-    # layer of the chain held the stop.
-    leader = home / "leader.js"
-    child = home / "child.js"
-    leader.write_text(
-        "const { spawn } = require('child_process');\n"
-        "spawn(process.execPath, [" + repr(str(child)) + "], { stdio: 'inherit' });\n"
-        "process.on('SIGTERM', () => process.exit(0));\n"
-        "setInterval(() => {}, 1000);\n"
-    )
-    arm_sentinel = home / "arm-sentinel"
-    child.write_text(
-        "process.on('SIGTERM', () => {});\n"
-        f"require('fs').writeFileSync({json.dumps(str(arm_sentinel))}, 'armed');\n"
-        "setInterval(() => {}, 1000);\n"
-    )
-    proc = subprocess.Popen(  # noqa: S603 — test-owned bash + node, fixed fixture scripts
-        ["bash", "-lc", f"node {leader}"],
-        cwd=home,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-    leader_pid: int | None = None
-    grandchild_pid: int | None = None
-    try:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            candidates = [proc.pid] + [c.pid for c in psutil.Process(proc.pid).children()]
-            for candidate in candidates:
-                if psutil.Process(candidate).name() == "node":
-                    leader_pid = candidate
-                    break
-            if leader_pid is not None and psutil.Process(leader_pid).children():
-                break
-            time.sleep(0.05)
-        assert leader_pid is not None
-        grandchild = psutil.Process(leader_pid).children()[0]
-        grandchild_pid = grandchild.pid
-        # Sync point (task #4391, same family as #3091): the grandchild arms
-        # its SIGTERM refusal only after its node boot — wait for the arm
-        # before the stop can race it.
-        _wait_armed(arm_sentinel)
-        SessionRecord(
-            leader_pid,
-            psutil.Process(leader_pid).create_time(),
-            "layered-test",
-            str(home),
-            time.time(),
-            pid_starttime_ticks(leader_pid),
-            pgid=os.getpgid(leader_pid),
-        ).write(home / "run/sessions" / "layered.json")
-        with pytest.raises(stop.StopIncompleteError) as excinfo:
-            stop.stop_services(1.0)
-        assert grandchild.is_running()  # The refusal must not become a force kill.
-        message = str(excinfo.value)
-        assert f"pid={grandchild_pid}" in message
-        assert "role=descendant" in message
-        assert "service='layered'" in message
-        assert str(child) in message  # the cmdline names the exact node script
-        payload = {item["pid"]: item for item in excinfo.value.survivors}
-        assert payload[grandchild_pid]["role"] == "descendant"
-        assert str(child) in str(payload[grandchild_pid]["cmdline"])
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-        for pid in (leader_pid, grandchild_pid):
-            if pid is not None:
-                with contextlib.suppress(psutil.NoSuchProcess):
-                    psutil.Process(pid).kill()  # Exact private fixtures, post-assertion.
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=5)
-
-
-def test_failed_pause_persists_survivor_identity_on_the_status_journal(
+def test_terminal_deadline_names_survivor_and_persists_exact_inventory(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    dependencies(monkeypatch)
-    service = launch("ava-worker", _IGNORE)
-    # Budget starvation check (task #4392): the pre-phases ("retired" scans
-    # processes) are load-sensitive; at 0.25s a slow runner could spend the
-    # whole budget before "services" began, and the report named the deadline
-    # instead of the staged survivor. 1.0s leaves the services phase the room
-    # the sibling stage tests give theirs; the refusing service then keeps
-    # the hold until the later deadline — the assertions below are unchanged.
-    assert entry.cmd_pause(timeout=1.0) == 1
-    err = capsys.readouterr().err
-    assert "Pause/stop incomplete" in err
-    assert "service stop incomplete" in err
-    assert f"pid={service.pid}" in err
-    assert "stage=services" in err
-    # The journal — the durable record a later operator reads — carries the
-    # same structured inventory, not just the printable string.
-    journal = json.loads((home / "run" / "lifecycle-op.json").read_text())
-    assert journal["complete"] is True
-    result = journal["result"]
-    assert result["rc"] == 1
-    assert result["stage"] == "services"
-    assert {item["pid"] for item in result["survivors"]} == {service.pid}
-    ref = result["survivors"][0]
-    assert ref["role"] == "leader" and ref["service"] == "ava-worker"
-    assert "SIG_IGN" in str(ref["cmdline"])
-    assert service.poll() is None
-
-
-def test_launched_service_deadline_report_names_the_real_daemon(home: Path) -> None:
-    # The actual launch chain: `PosixProcSessionBackend.new_session` wraps the
-    # command as a login-shell exec, so the recorded pid IS the daemon (the
-    # shape every service uses). A daemon that refuses TERM must be named by
-    # the deadline report with its recorded identity and script path.
-    from shared import posixproc
-
-    started = home / "started"
-    script = home / "daemon.py"
-    script.write_text(
-        "import pathlib, signal, time\n"
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-        f"pathlib.Path({str(started)!r}).write_text('up')\n"
-        "time.sleep(120)\n"
+    process = launch(
+        "private-terminal",
+        "import signal,time; signal.signal(signal.SIGHUP,signal.SIG_IGN); "
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)",
     )
-    name = "ava-worker"
-    assert PosixProcSessionBackend().new_session(
-        name, f"{sys.executable} {script}", home, env=dict(os.environ)
+    identity = _terminal(home, process, monkeypatch)
+    assert lifecycle_status.begin("stop")
+    with pytest.raises(report.StopIncompleteError) as caught:
+        command._stop_terminals(time.monotonic() + 0.25, "private-stop", WHEN)
+    failure = caught.value
+    assert identity.live(), "a reporting deadline must not force-kill the survivor"
+    assert failure.stage == "terminals"
+    assert f"pid={identity.pid}" in str(failure) and "SIG_IGN" in str(failure)
+    assert len(failure.survivors) == 1
+    survivor = failure.survivors[0]
+    assert (survivor["pid"], survivor["birth"], survivor["starttime"]) == (
+        identity.pid,
+        identity.birth,
+        identity.starttime,
     )
+    assert survivor["role"] == "terminal" and survivor["service"] == "private-terminal"
+    command._report_incomplete(failure, [("terminals", 0.25)], owns_journal=True)
+    journal = json.loads((home / "run/lifecycle-op.json").read_text())
+    assert journal["complete"] and journal["result"]["rc"] == 1
+    assert journal["result"]["stage"] == "terminals"
+    assert journal["result"]["survivors"] == failure.survivors
+    assert f"pid={identity.pid}" in capsys.readouterr().err
+
+
+def test_report_keeps_owned_job_after_shell_exits(
+    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    armed = home / "job-armed"
+    child_code = (
+        "import signal,time,pathlib; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+        f"pathlib.Path({str(armed)!r}).touch(); time.sleep(60)"
+    )
+    parent = launch(
+        "private-terminal",
+        f"import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',{child_code!r}]); "
+        "print('ready',flush=True); time.sleep(60)",
+    )
+    _terminal(home, parent, monkeypatch)
+    deadline = time.monotonic() + 5
+    while not armed.exists():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    children = psutil.Process(parent.pid).children()
+    assert len(children) == 1
+    child = OwnedProcess.capture(children[0])
     try:
-        deadline = time.monotonic() + 20
-        while not started.exists():
-            assert time.monotonic() < deadline
-            time.sleep(0.05)
-        record = SessionRecord.read(home / "run" / "sessions" / f"{name}.json")
-        assert record is not None
-        with pytest.raises(stop.StopIncompleteError) as excinfo:
-            stop.stop_services(0.5)
-        payload = {item["pid"]: item for item in excinfo.value.survivors}
-        assert record.pid in payload
-        ref = payload[record.pid]
-        assert ref["role"] == "leader" and ref["service"] == name
-        assert str(script) in str(ref["cmdline"])
-        birth = ref["birth"]
-        assert isinstance(birth, float) and birth > 0
-        assert psutil.Process(record.pid).is_running()  # never force-killed
+        with pytest.raises(report.StopIncompleteError) as caught:
+            command._stop_terminals(time.monotonic() + 0.35, "private-stop", WHEN)
+        assert parent.wait(timeout=5) == -signal.SIGHUP
+        assert child.live()
+        assert len(caught.value.survivors) == 1
+        survivor = caught.value.survivors[0]
+        assert survivor["pid"] == child.pid
+        assert survivor["role"] == "job" and survivor["service"] == "private-terminal"
+        assert str(armed) in str(survivor["cmdline"])
     finally:
-        posixproc.kill_session(name, graceful=False)
+        child.send_signal(signal.SIGKILL)
 
 
-def test_identity_matches_tolerates_whole_second_create_time_drift() -> None:
-    """The report's live-fact guard agrees with signal delivery on drift.
+def test_report_reuses_the_native_birth_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    identity = OwnedProcess.capture(psutil.Process())
+    if sys.platform == "linux":
+        shifted = OwnedProcess(identity.pid, identity.birth + 3600, identity.starttime)
+        assert report._identity_matches(shifted)
+    else:
+        shifted = OwnedProcess(identity.pid, identity.birth + 0.0001, None)
+        assert not report._identity_matches(shifted)
+    assert report._identity_matches(identity)
 
-    The guard is the same birth question the stop path answers; a whole-second
-    create_time move must not strip a survivor's live facts.
-    """
-    from cli.commands._maintenance_stop_report import _identity_matches
 
-    process = psutil.Process()
-    assert _identity_matches(stop.OwnedProcess(process.pid, process.create_time() - 1.0, None))
-    assert not _identity_matches(stop.OwnedProcess(process.pid, process.create_time() + 60.0, None))
+def test_unknown_identity_is_retained_without_unrelated_live_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = OwnedProcess(os.getpid(), 1.0, None)
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
+    assert report.live_identities([identity]) == [identity]
+    survivor = report.capture_survivor(identity, service="private-terminal", role="job")
+    assert survivor.pid == identity.pid and survivor.birth == identity.birth
+    assert survivor.cmdline is None and survivor.ppid is None and survivor.status is None

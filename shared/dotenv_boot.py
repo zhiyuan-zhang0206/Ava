@@ -41,6 +41,7 @@ os.environ keys; repeated calls have no side effects.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -54,21 +55,6 @@ from dotenv import dotenv_values, load_dotenv
 # raises an actionable error directing the operator to `ava start`.
 UNANCHORED_DB_SENTINEL = "postgresql://unanchored-dev-checkout@127.0.0.1:1/run-ava-start-first"
 
-# Never-dialed Settings placeholder for AVA_REDIS_URL on a not-yet-born install
-# home (port 1 on loopback, mirroring the DB sentinel). cli/install_cluster.py
-# plants it before the first settings import; the authority pass preserves it
-# exactly like the DB sentinel (F-s4-6), so the documented mechanism holds —
-# before the S4 fix the drop loop popped it immediately and the comment claimed
-# a mechanism that did not exist.
-BOOT_REDIS_PLACEHOLDER = "redis://install-cluster-boot@127.0.0.1:1/0"
-
-# Values the authority pass must never drop: both are boot-time placeholders a
-# process plants in ITS OWN environment before Settings constructs, and a
-# not-yet-born home has no .env to declare them in. Everything else in
-# cluster-scope aliases the unit's .env does not declare are dropped so a
-# polluted parent cannot leak a sibling cluster's value.
-_UNANCHORED_PLACEHOLDERS = frozenset({UNANCHORED_DB_SENTINEL, BOOT_REDIS_PLACEHOLDER})
-
 # The launcher's process profile, recorded by the CLI entry point before it
 # clears the live marker (cli/main.py `_normalize_process_profile`). The CLI is
 # deliberately settings-full — no profile — but a boot pass reached through it
@@ -80,12 +66,23 @@ LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
 
 _HOME_POINTER = ".ava_home"
 
+# See `_is_launcher_runner_projection`.
+_RUNNER_LOGIN = re.compile(r"ava_runner|ava_g(?:0|[1-9][0-9]*)_runner")
+
+# The non-secret launch-environment marker that makes a launcher-injected
+# AVA_DB_URL authoritative (mirrors shared.cluster.authority.GENERATION_ENV).
+_GENERATION_ENV = "AVA_DB_GENERATION"
+
+# Why this process holds no database authority, when a home with a write-
+# generation ledger delivered none to it: `shared.db_connections._guard_db_url`
+# turns a dial of the credential-free endpoint into a named refusal.
+_db_authority_refusal: str | None = None
+
 # Opt out of the AVA_HOME-vs-checkout contradiction check (`resolve_ava_home`).
 # For callers that redirect a checkout to a home it does not own ON PURPOSE and
 # accept running that checkout's code against it — the test suite's scratch home
-# (tests/conftest.py) and `install.sh --worktree` re-pointing a checkout at a new
-# cluster. Only the real process environment can open it: the check runs at this
-# module's import, before any `.env` is loaded, so no cluster can grant itself
+# (tests/conftest.py). Only the real process environment can open it: the check
+# runs at this module's import, before any `.env` is loaded, so no cluster can grant itself
 # the exemption on disk.
 _HOME_OVERRIDE = "AVA_HOME_OVERRIDE"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -228,14 +225,6 @@ def resolve_ava_home() -> tuple[Path, bool]:
     return checkout_anchored_home()
 
 
-def _env_path(ava_home: str | None) -> Path:
-    """Resolve a unit's .env path from an explicit AVA_HOME value: `$AVA_HOME/.env`,
-    or `~/.ava/.env` when None. Used by callers that hold an explicit home
-    (cli/enroll.py writes bootstrap env to AVA_ENV_PATH)."""
-    base = Path(ava_home) if ava_home else Path.home() / ".ava"
-    return base.expanduser() / ".env"
-
-
 _HOME, _ANCHORED = resolve_ava_home()
 AVA_ENV_PATH = _HOME / ".env"
 
@@ -253,10 +242,10 @@ def checkout_anchored() -> bool:
     return _ANCHORED
 
 
-# Optional sibling of .env written by `install.sh --mirror NAME`: a bundle of
-# package-manager index/registry env vars (PyPI / npm / Homebrew). Kept separate
+# Optional sibling of .env containing explicitly configured package-manager
+# index/registry env vars (PyPI / npm / Homebrew). Kept separate
 # from .env so `cp .env.example` never clobbers it and the mirror choice is
-# orthogonal to the secrets. Absent on installs that did not opt into a mirror.
+# orthogonal to the secrets. Absent when no mirror profile is configured.
 AVA_MIRROR_ENV_PATH = _HOME / "mirror.env"
 
 
@@ -372,9 +361,10 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     any other unrecognized value — the authority pass never raises on
     environment input.
 
-    The role literal mirrors shared/cluster/derive.py `RUNNER_ROLE`; it is
-    duplicated at this leaf because this module runs BEFORE Settings (the same
-    duplication reason as shared/config/data_plane.py).
+    The runner-class shape (a write-generation runner login, or a remote
+    plane's provider `ava_runner`) mirrors shared/config/data_plane.py
+    `_RUNNER_LOGIN`; it is duplicated at this leaf because this module runs
+    BEFORE Settings.
     """
     if not value:
         return False
@@ -387,7 +377,7 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
         # the drop loop absorbs it exactly as it did before #3111 — the boot
         # pass must never raise on environment input (review nit on #3111).
         return False
-    return username == "ava_runner"
+    return _RUNNER_LOGIN.fullmatch(username or "") is not None
 
 
 def _is_launcher_redis_url(value: str | None) -> bool:
@@ -424,6 +414,8 @@ def watcher_runner_env() -> dict[str, str]:
     agent launch tree may explicitly forward them. A profile-less process on
     the secured default-home gateway can carry the owner URL after config
     import; refuse that launch before it creates a doomed watcher session.
+    Redis always authenticates, so only a named, password-carrying runtime ACL
+    URL is forwarded, never the `default` admin user, whatever the bearer.
     """
     db_url = os.environ.get("AVA_DB_URL")
     redis_url = os.environ.get("AVA_REDIS_URL")
@@ -435,14 +427,17 @@ def watcher_runner_env() -> dict[str, str]:
     ):
         try:
             db_host = urlsplit(db_url).hostname
-            redis_user = urlsplit(redis_url).username
+            redis_parts = urlsplit(redis_url)
+            redis_user, redis_password = redis_parts.username, redis_parts.password
         except ValueError:
-            db_host = None
-            redis_user = None
-        if db_host and (
-            not os.environ.get("AVA_CLUSTER_SECRET") or redis_user not in (None, "default")
-        ):
-            return {"AVA_DB_URL": db_url, "AVA_REDIS_URL": redis_url}
+            db_host = redis_user = redis_password = None
+        if db_host and redis_user not in (None, "default") and redis_password:
+            generation = os.environ.get(_GENERATION_ENV)
+            return {
+                "AVA_DB_URL": db_url,
+                "AVA_REDIS_URL": redis_url,
+                **({_GENERATION_ENV: generation} if generation else {}),
+            }
 
     if _HOME.resolve() == (Path.home() / ".ava").resolve() and os.environ.get("AVA_CLUSTER_SECRET"):
         from shared.bootstrap import config_source_is_local
@@ -521,7 +516,7 @@ def _enforce_cluster_env_authority() -> None:
     flags, machine name/description, memory remote) get the same treatment, with
     one exemption: a value the unit's own `.env` declares is forced in, an
     inherited one is DROPPED. A unit's machine identity is a per-unit fact — it
-    belongs in its own `.env` (install / `ava enroll` write it there) or its
+    belongs in its own `.env` (`ava start` writes it there) or its
     `$AVA_HOME/machine_*` files, never in whatever a parent process happened to
     inherit. The leak that motivated this was real: the gateway host's login shell
     carries prod's `~/.ava/.env` (AVA_MACHINE_SERVE_GATEWAY=true among it), so a
@@ -591,6 +586,7 @@ def _enforce_cluster_env_authority() -> None:
     # up{job="tempo"}=0 for ~14 min; task #3339). Declared -> force;
     # undeclared -> untouched.
     _force_also = {
+        "AVA_SERVICE_PATH",
         "AVA_CLUSTER_SECRET",
         "AVA_GATEWAY_URL",
         "AVA_GATEWAY_PORT",
@@ -605,9 +601,7 @@ def _enforce_cluster_env_authority() -> None:
     keep = env_keep_set(role) | _force_also
     for key in keep:
         val = file_vals.get(key)
-        if key == "AVA_DB_URL" and os.environ.get("AVA_PROCESS_PROFILE") == "agent":
-            # The injected runner projection is authoritative for an agent
-            # process; the drop loop mirrors this exemption (#4334).
+        if key == "AVA_DB_URL" and _keeps_injected_db_url(val):
             continue
         # The unanchored sentinel outranks the file. AVA_DB_URL is a cluster-scope
         # key, and an unanchored checkout resolves AVA_ENV_PATH to the DEFAULT home
@@ -623,7 +617,7 @@ def _enforce_cluster_env_authority() -> None:
     # unit's .env does not declare, and machine-identity keys it does not declare
     # (the env-suppliable gateway-URL pair stays exempt).
     for key in env_authority_drop_set(role) - _force_also - _identity_env_only():
-        if file_vals.get(key) is None and os.environ.get(key) not in _UNANCHORED_PLACEHOLDERS:
+        if file_vals.get(key) is None and os.environ.get(key) != UNANCHORED_DB_SENTINEL:
             if key == "AVA_DB_URL" and _is_launcher_runner_projection(os.environ.get(key)):
                 # Mirrored force-loop exemption (#4334): the launcher's runner
                 # projection is the agent child's DB source.
@@ -650,6 +644,85 @@ def _enforce_cluster_env_authority() -> None:
     if os.environ.get("AVA_PROCESS_PROFILE") == "agent":
         for key in ADMIN_DATA_PLANE_ALIASES:
             os.environ.pop(key, None)
+    _deliver_operator_authority(file_vals.get("AVA_DB_URL"))
+
+
+def _keeps_injected_db_url(file_url: str | None) -> bool:
+    """Whether the force loop leaves os.environ's AVA_DB_URL in place.
+
+    The injected runner projection is authoritative for an agent process; the
+    drop loop mirrors this exemption (#4334). Any process carrying a launcher-
+    delivered write generation for THIS home's endpoint keeps it too: `.env`
+    holds only the credential-free endpoint and never overwrites a delivered
+    login."""
+    return os.environ.get("AVA_PROCESS_PROFILE") == "agent" or _is_delivered_generation(file_url)
+
+
+def _endpoint_key(url: str | None) -> tuple[int | None, str] | None:
+    """(port, database) of a Postgres URL: what distinguishes one home's endpoint
+    from a co-located sibling's. None for a missing or unparseable URL."""
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url)
+        return parts.port, parts.path
+    except ValueError:
+        return None
+
+
+def _is_delivered_generation(file_url: str | None) -> bool:
+    """Whether os.environ carries a launcher-delivered login for THIS home.
+
+    A delivery is an AVA_DB_URL plus the non-secret generation marker, naming
+    the same (port, database) as the home's own `.env` endpoint — so a sibling
+    cluster's leaked delivery never survives the authority pass."""
+    if not os.environ.get(_GENERATION_ENV):
+        return False
+    delivered = _endpoint_key(os.environ.get("AVA_DB_URL"))
+    return delivered is not None and delivered == _endpoint_key(file_url)
+
+
+def _deliver_operator_authority(endpoint: str | None) -> None:
+    """Give an operator process on a write-generation home its gateway login.
+
+    Processes the root launcher starts carry their class login in the launch
+    environment. An operator process (the `ava` CLI, a script, an OS job) on
+    the gateway home has none; it receives the active gateway login only when
+    it runs the home's admitted runtime (`shared.cluster.authority.consume`:
+    the selected release image, or the source checkout the home was born
+    from). A launcher-context process that arrived without a delivery, or a
+    refused runtime, keeps the credential-free endpoint and records why, so its
+    first dial fails with that reason. Homes without a ledger are untouched.
+    """
+    global _db_authority_refusal  # noqa: PLW0603 — per-process boot authority result
+    _db_authority_refusal = None
+    if not _ANCHORED or not endpoint or os.environ.get(_GENERATION_ENV):
+        return
+    home = _HOME.expanduser().resolve()
+    if not (home / "db-authority" / "ledger.json").exists():
+        return
+    context = _launcher_context()
+    if context is not None:
+        _db_authority_refusal = (
+            f"this {context}-profile process was launched without a delivered write "
+            "generation; only the root launcher delivers database logins"
+        )
+        return
+    from shared.cluster.authority import AuthorityRefusedError, consume
+
+    try:
+        grant = consume(home, "gateway")
+    except (AuthorityRefusedError, ValueError, OSError) as exc:
+        _db_authority_refusal = f"no database authority for this process: {exc}"
+        return
+    os.environ["AVA_DB_URL"] = grant.dsn(endpoint)
+    os.environ[_GENERATION_ENV] = str(grant.number)
+
+
+def db_authority_refusal() -> str | None:
+    """Why this process holds no database login for its write-generation home,
+    or None (a login was delivered, or the home keeps no ledger)."""
+    return _db_authority_refusal
 
 
 def _is_gateway_process() -> bool:

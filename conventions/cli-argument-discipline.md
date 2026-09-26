@@ -41,13 +41,8 @@ the cron payload, the display bound, the safe mode.
 
 ## Retained environment inputs
 
-Two operational inputs deliberately stay environment-only (audited
-2026-09-20; retained with these reasons):
+The worktree override deliberately stays environment-only:
 
-- The enrollment secret fallback in `cli/commands/ensure_db_role.py` — an
-  enrolling host may carry the secret in its `.env` before enrollment
-  completes, and a secret on the command line is world-readable in process
-  listings.
 - The worktree override in `cli/commands/_converge_skills.py` — the default is
   the protection (never sync a worktree checkout's sources into a production
   home); the environment switch is the deliberate escape hatch for a caller

@@ -77,10 +77,21 @@ def test_identity_from_url_error_redacts_password():
     assert "***" in str(excinfo.value)
 
 
-def test_db_identity_refuses_usernameless_settings_url(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://h:5433/ava")
-    with pytest.raises(ValueError, match="carries no username"):
+def test_db_identity_refuses_a_settings_url_without_database(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@h:5433")
+    with pytest.raises(ValueError, match="names no database"):
         cluster.db_identity()
+
+
+def test_db_identity_reads_the_database_not_a_delivered_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delivered write-generation login replaces the URL's username; the
+    schema-owner identity is the database it names."""
+    monkeypatch.setattr(
+        settings.data_plane, "db_url", "postgresql://ava_g3_gateway:pw@127.0.0.1:6433/ava_main"
+    )
+    assert cluster.db_identity() == "ava_main"
 
 
 def test_db_and_redis_identity_read_settings_urls(monkeypatch: pytest.MonkeyPatch):

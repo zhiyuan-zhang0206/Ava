@@ -173,14 +173,9 @@ _ROLLOUT_QUIET_EVENTS = frozenset(
     }
 )
 # event='log' lines (stdlib loggers carry no event=) matched by message prefix:
-# the ops manager's per-round "blocked" / "no longer blocked" lines, and the
-# `query cancellation failed: ...` line (source currently only present on some
+# the `query cancellation failed: ...` line (source currently only present on some
 # runner checkouts — the msg prefix is the one stable handle).
-_ROLLOUT_QUIET_MSG_PREFIXES = (
-    "[ops.manager] round blocked by",
-    "[ops.manager] round no longer blocked after",
-    "query cancellation failed",
-)
+_ROLLOUT_QUIET_MSG_PREFIXES = ("query cancellation failed",)
 
 # Deploy-lease read cache for the quieting check. The sink must not dial the DB
 # per record, and the quieting must SURVIVE the short DB blip a rollout itself
@@ -623,24 +618,23 @@ def init_gateway_process(name: str = "gateway") -> None:
 
 
 def init_cli_process(*, name: str) -> None:
-    """Called once at the top of a detached CLI invocation (gateway
-    `spawn_update` child / watchdog schema reconcile child). Identical
-    sink set to ``init_gateway_process``: stderr (human) + file
-    (``<name>.log``) + unified event pipeline (agent_id NULL).
+    """Called once at the top of a supervised CLI invocation whose launcher
+    exports ``AVA_CLI_LOG_NAME``. Identical sink set to ``init_gateway_process``:
+    stderr (human) + file (``<name>.log``) + unified event pipeline (agent_id NULL).
 
     Skipped for interactive CLI use (``ava status`` from a TTY etc.) —
     interactive output already lands on the caller's terminal and the
     extra sinks would clutter ``~/.ava/logs/`` and the event stream
     with one row per command. The detection contract is "called only
     when the caller exports ``AVA_CLI_LOG_NAME``", and the caller
-    decides the name (e.g. ``cli-spawn-update-<ts>``).
+    decides the name.
 
     Catches stdlib ``logging.getLogger`` calls from imported modules
     (uvicorn / httpx / anthropic SDK / etc.) — CLI's own ``print()``
     output still lands on stdout/stderr (which the parent's Popen
     captures into its own per-invocation log file). The events
-    sink lets ``/api/cluster/admin/events`` surface a stuck
-    ``ava cluster update`` child's last logged step without ssh into the host.
+    sink lets ``/api/cluster/admin/events`` surface a stuck supervised
+    CLI child's last logged step without ssh into the host.
     """
     global _init_done  # noqa: PLW0603
     if _init_done:

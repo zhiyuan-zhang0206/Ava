@@ -4,6 +4,17 @@ from typing import cast
 import pytest
 
 from shared import cluster, port_preflight
+from shared.platform import LockTimeoutError, file_lock
+
+
+def test_registry_lock_contention_has_a_bounded_wait(tmp_path: Path) -> None:
+    registry = tmp_path / "clusters.json"
+    with (
+        file_lock(registry.with_suffix(".lock"), timeout_s=1),
+        pytest.raises(LockTimeoutError),
+        cluster.registry_lock(path=registry, timeout_s=0.02),
+    ):
+        pytest.fail("A contended registry lock must not be entered")
 
 
 def test_save_and_get_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

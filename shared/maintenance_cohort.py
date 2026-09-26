@@ -183,23 +183,14 @@ class OrphanClaim(NamedTuple):
 def orphaned_claims(
     conn: psycopg.Connection,
     *,
-    parked: tuple[int, ...] | None = None,
+    parked: tuple[int, ...],
     cold: frozenset[int] = frozenset(),
 ) -> list[OrphanClaim]:
     """Read the ordinary claims eligible for preparation's orphan settlement.
 
     Preparation supplies its locked, classified parked set and excludes cold
-    agents whose ordinary claims never block `_unresolved_parked`. Preflight
-    omits the set for a read-only snapshot across machines, using the same
-    unowned-idle predicate as `_classify`; that snapshot authorizes no writes.
+    agents whose ordinary claims never block `_unresolved_parked`.
     """
-    if parked is None:
-        rows = conn.execute(
-            "SELECT id,status,runtime_kind,runtime_owner,runtime_generation,"
-            "lease_expires_at>clock_timestamp(),pid,incarnation_resources FROM agents_meta "
-            "WHERE status='idling' ORDER BY id"
-        ).fetchall()
-        parked = tuple(row[0] for row in rows if _RuntimeRow(*row).unowned_idle())
     agents = sorted(set(parked) - cold)
     if not agents:
         return []

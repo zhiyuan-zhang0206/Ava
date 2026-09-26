@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -17,6 +18,7 @@ from services.pitr import restore_manifest, restore_postgres, restore_proof
 from services.pitr.base_manifest import SCHEMA_VERSION, BaseObject, CandidateManifest, WalRange
 from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
+from services.pitr.operation_custody import NativeProcess
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_postgres import (
     IsolatedPostgresRestoreExecutor,
@@ -38,6 +40,14 @@ from services.pitr.restore_proof import (
     verify_candidate_proof,
 )
 from shared import pg_tools
+from shared.native_process import native_boot_id
+from shared.native_process.ownership import OwnedProcess
+
+
+def _native(pid: int, birth: float = 1.0) -> NativeProcess:
+    boot = native_boot_id()
+    assert boot is not None
+    return NativeProcess(boot, OwnedProcess(pid, birth, 1))
 
 
 def test_sandbox_config_ignores_restored_config_and_disables_host_side_effects(
@@ -69,7 +79,7 @@ def test_sandbox_config_ignores_restored_config_and_disables_host_side_effects(
         assert setting in value
 
 
-def test_reconcile_removes_stale_postmaster_evidence_only_after_owner_is_dead(
+def test_reconcile_retains_interrupted_postmaster_evidence_after_owner_dies(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     restore_root = tmp_path / "restore"
@@ -86,31 +96,30 @@ def test_reconcile_removes_stale_postmaster_evidence_only_after_owner_is_dead(
                 "schema_version": 1,
                 "state": "postgres_running",
                 "partial": str(partial),
-                "pid": 888888,
-                "created_at": 1.0,
+                "native": _native(888888).value(),
                 "pgid": 888888,
                 "deadline": 1.0,
-                "sandbox_pid": 999999,
-                "sandbox_created_at": 1.0,
-                "sandbox_pgid": 888888,
+                "sandbox_native": _native(999999).value(),
+                "sandbox_pgid": 999999,
+                "sandbox_sid": 888888,
                 "sandbox_pgdata": str(pgdata),
             }
         )
     )
 
-    def no_process(_pid: int, _created: float) -> psutil.Process | None:
+    def no_process(_native: NativeProcess) -> psutil.Process | None:
         return None
 
     def no_group(_pgid: int) -> list[psutil.Process]:
         return []
 
     monkeypatch.setattr(restore_proof, "_matching_process", no_process)
-    monkeypatch.setattr(restore_proof, "_group_members", no_group)
 
-    restore_proof.reconcile_restore_runtime(tmp_path)
-
-    assert not partial.exists()
-    assert not owner.exists()
+    original = owner.read_bytes()
+    with pytest.raises(RestoreProofError, match="native operation retirement"):
+        restore_proof.reconcile_restore_runtime(tmp_path)
+    assert partial.exists()
+    assert owner.read_bytes() == original
 
 
 def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
@@ -136,7 +145,7 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
         "migrations",
     )
     calls: list[str] = []
-    live = LivePostgresIdentity(11, 1.0, "/live", "42", "start", "probe")
+    live = LivePostgresIdentity(_native(11), "/live", "42", "start", "probe")
 
     class Reader:
         def download_exact(self, expected: RestoreObject, destination: Path) -> None:
@@ -183,19 +192,13 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
     class Process:
         pid = 1234
 
-        class _Native:
-            # Darwin identity reads go through the uncorrected kernel value
-            # (`stable_create_time`); the stub keeps both paths at 1.0.
-            @staticmethod
-            def create_time(*, monotonic: bool = False) -> float:
-                assert monotonic
-                return 1.0
+    process = Process()
+    owner = _native(process.pid)
 
-        _proc = _Native
-
-        @staticmethod
-        def create_time() -> float:
-            return 1.0
+    def capture_owner(_cls: type[NativeProcess], observed: psutil.Process) -> NativeProcess:
+        # This owner is fabricated; native capture is covered by real-process tests.
+        assert observed is process
+        return owner
 
     def no_archives(_ranges: tuple[WalRange, ...], _segment_size: int) -> tuple[str, ...]:
         return ()
@@ -224,7 +227,8 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
     monkeypatch.setattr(restore_manifest, "required_archive_names", no_archives)
     monkeypatch.setattr(restore_proof, "authenticate_base_ciphertext", authenticate)
     monkeypatch.setattr(restore_proof, "extract_authenticated_base", extract)
-    monkeypatch.setattr(restore_proof.psutil, "Process", Process)
+    monkeypatch.setattr(restore_proof.psutil, "Process", lambda: process)
+    monkeypatch.setattr(NativeProcess, "capture", classmethod(capture_owner))
     monkeypatch.setattr(restore_proof.os, "getpgrp", lambda: 1234)
 
     pending = prove_candidate(
@@ -352,7 +356,7 @@ def test_live_identity_probe_needs_no_settings_privilege() -> None:
 
     assert identity.data_directory == data_directory
     assert identity.system_identifier
-    assert identity.pid == int(pid_line)
+    assert identity.native.process.pid == int(pid_line)
 
 
 def test_restore_run_token_fits_the_socket_path_budget() -> None:
@@ -412,21 +416,18 @@ def test_run_error_tail_is_bounded() -> None:
     assert message.endswith("x" * 500)
 
 
-def test_spawn_sandbox_postgres_runs_postgres_directly_in_our_group(
+def test_spawn_sandbox_postgres_inherits_the_operation_group(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    """Activation #10 surfaced the group tripwire: pg_ctl setsid()s the
-    postmaster into its own session, but the restore design reaps a whole run
-    by signalling the worker's process group. The sandbox must be exec'd
-    directly so it stays in our group, with output in the run-root log."""
+    """The outer operation worker retains the only process-group pin."""
     captured: dict[str, Any] = {}
 
-    class FakePopen:
-        def __init__(self, argv: list[str], **kwargs: Any) -> None:
-            captured["argv"] = argv
-            captured["kwargs"] = kwargs
+    def fake_launch(argv: list[str], **kwargs: Any) -> tuple[object, object]:
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return object(), object()
 
-    monkeypatch.setattr(restore_postgres.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(restore_postgres.subprocess, "Popen", fake_launch)
     log_path = tmp_path / "sandbox-postgres.log"
 
     _spawn_sandbox_postgres(
@@ -445,6 +446,8 @@ def test_spawn_sandbox_postgres_runs_postgres_directly_in_our_group(
     ]
     kwargs = captured["kwargs"]
     assert kwargs["stdin"] is restore_postgres.subprocess.DEVNULL
+    assert "process_group" not in kwargs
+    assert "start_new_session" not in kwargs
     assert isinstance(kwargs["stdout"], int)
     assert isinstance(kwargs["stderr"], int)
 
@@ -459,11 +462,11 @@ def test_spawn_sandbox_postgres_carries_the_start_env_fallback(
     locale is the "postmaster became multithreaded during startup" abort."""
     captured: dict[str, Any] = {}
 
-    class FakePopen:
-        def __init__(self, argv: list[str], **kwargs: Any) -> None:
-            captured["env"] = kwargs.get("env")
+    def fake_launch(argv: list[str], **kwargs: Any) -> tuple[object, object]:
+        captured["env"] = kwargs.get("env")
+        return object(), object()
 
-    monkeypatch.setattr(restore_postgres.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(restore_postgres.subprocess, "Popen", fake_launch)
     monkeypatch.setattr(pg_tools, "is_macos", lambda: True)
     monkeypatch.delenv("LC_ALL", raising=False)
     monkeypatch.delenv("LANG", raising=False)
@@ -483,17 +486,13 @@ def test_spawn_sandbox_postgres_carries_the_start_env_fallback(
 def test_wait_for_sandbox_identity_raises_crash_with_log_tail(
     tmp_path: Path,
 ) -> None:
-    class DeadProcess:
-        returncode = 1
-
-        def poll(self) -> int:
-            return 1
+    identity = SandboxPostgresIdentity(_native(999999), 999999, os.getsid(0), "/data")
 
     log_path = tmp_path / "sandbox-postgres.log"
     log_path.write_text("FATAL:  could not open file\n")
-    with pytest.raises(RestoreProofError, match=r"exited 1.*could not open file"):
+    with pytest.raises(RestoreProofError, match=r"exited.*could not open file"):
         _wait_for_sandbox_identity(
-            DeadProcess(),  # type: ignore[arg-type]
+            identity,
             tmp_path / "data",
             log_path,
             30,
@@ -503,11 +502,9 @@ def test_wait_for_sandbox_identity_raises_crash_with_log_tail(
 def test_wait_for_sandbox_identity_returns_once_pid_file_exists(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    class LiveProcess:
-        def poll(self) -> None:
-            return None
-
-    identity = SandboxPostgresIdentity(11, 1.0, 11, "/data")
+    identity = SandboxPostgresIdentity(
+        NativeProcess.capture(psutil.Process()), os.getpgrp(), os.getsid(0), "/data"
+    )
 
     def fake_identity(_pgdata: Path) -> SandboxPostgresIdentity:
         return identity
@@ -518,7 +515,7 @@ def test_wait_for_sandbox_identity_returns_once_pid_file_exists(
 
     assert (
         _wait_for_sandbox_identity(
-            LiveProcess(),  # type: ignore[arg-type]
+            identity,
             tmp_path / "data",
             tmp_path / "sandbox-postgres.log",
             30,
@@ -528,14 +525,12 @@ def test_wait_for_sandbox_identity_returns_once_pid_file_exists(
 
 
 def test_wait_for_sandbox_identity_times_out(tmp_path: Path) -> None:
-    class LiveProcess:
-        def poll(self) -> None:
-            return None
+    identity = SandboxPostgresIdentity(_native(999999), 999999, os.getsid(0), "/data")
 
     (tmp_path / "data").mkdir()
     with pytest.raises(RestoreProofError, match="never wrote its pid file"):
         _wait_for_sandbox_identity(
-            LiveProcess(),  # type: ignore[arg-type]
+            identity,
             tmp_path / "data",
             tmp_path / "sandbox-postgres.log",
             0,
@@ -553,20 +548,16 @@ def test_wait_for_promotion_raises_on_postmaster_crash(tmp_path: Path) -> None:
         timeout_seconds=900,
     )
 
-    class DeadProcess:
-        returncode = 6
-
-        def poll(self) -> int:
-            return 6
+    identity = SandboxPostgresIdentity(_native(999999), 999999, os.getsid(0), "/data")
 
     log_path = tmp_path / "sandbox-postgres.log"
     log_path.write_text("replay stalled then died\n")
-    with pytest.raises(RestoreProofError, match=r"exited 6 before promotion.*stalled"):
+    with pytest.raises(RestoreProofError, match=r"exited before promotion.*stalled"):
         executor._wait_for_promotion(
             tmp_path / "socket",
             54321,
             _dummy_candidate(),
-            DeadProcess(),  # type: ignore[arg-type]
+            identity,
             log_path,
         )
 
@@ -593,74 +584,17 @@ def _dummy_candidate() -> CandidateManifest:
     )
 
 
-def _dead_child() -> tuple[subprocess.Popen[str], int, float, int]:
-    """A real child that has exited but is not yet reaped (a zombie).
-
-    The caller must popen.wait() in a finally to reap it."""
-    process = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    probe = psutil.Process(process.pid)
-    created_at = probe.create_time()
-    pgid = os.getpgid(process.pid)
-    # SIGKILL: SIGTERM is ignored when this suite runs inside a shell session
-    # (SIG_IGN is inherited), and the zombie post-condition needs a real death.
-    process.kill()
-    deadline = time.monotonic() + 10
-    while probe.status() != psutil.STATUS_ZOMBIE and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert probe.status() == psutil.STATUS_ZOMBIE
-    return process, process.pid, created_at, pgid
-
-
-def test_matching_process_treats_a_zombie_as_not_live() -> None:
-    """Activation #12: a stopped-but-unreaped sandbox postmaster kept passing
-    the create_time probe, so cleanup refused to remove a dead restore and
-    masked the real failure. A zombie runs nothing and is not live."""
-    process, pid, created_at, _pgid = _dead_child()
-    try:
-        assert restore_proof._matching_process(pid, created_at) is None
-        assert not restore_proof._sandbox_is_live(
-            {"sandbox_pid": pid, "sandbox_created_at": created_at}
-        )
-    finally:
-        process.wait(timeout=10)
-
-
-def test_matching_sandbox_treats_a_zombie_as_not_live() -> None:
-    process, pid, created_at, pgid = _dead_child()
-    try:
-        identity = SandboxPostgresIdentity(pid, created_at, pgid, "/data")
-        assert restore_postgres._matching_sandbox(identity) is None
-    finally:
-        process.wait(timeout=10)
-
-
-def test_group_members_excludes_zombies() -> None:
-    process, pid, _created_at, pgid = _dead_child()
-    try:
-        assert all(member.pid != pid for member in restore_proof._group_members(pgid))
-    finally:
-        process.wait(timeout=10)
-
-
-def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
-    tmp_path: Path, monkeypatch: MonkeyPatch
+@pytest.mark.parametrize("failure", ["smoke", "closure", "capture"])
+def test_executor_reaps_sandbox_only_after_proven_closure(  # noqa: PLR0915
+    tmp_path: Path, monkeypatch: MonkeyPatch, failure: str
 ) -> None:
-    """The direct-exec postmaster is the worker's child; the stop path never
-    reaps it (a zombie fails the pgid identity probe), so run()'s finally must
-    reap the Popen itself — otherwise cleanup still sees a "live" restore and
-    masks the real failure (activation #12)."""
+    """A failed restore reaps after closure, while unknown closure retains
+    the leader and durable ownership evidence for the worker session owner."""
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        text=True,
     )
     # Mirror the production partial layout: everything the sandbox touches
     # lives under the run root (recovery config paths are root-checked).
@@ -676,8 +610,7 @@ def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
             "state": "spawning",
             "run_id": "test-run",
             "partial": str(tmp_path / ".test.partial"),
-            "pid": os.getpid(),
-            "created_at": psutil.Process().create_time(),
+            "native": NativeProcess.capture(psutil.Process()).value(),
             "pgid": os.getpgrp(),
             "deadline": time.time() + 100,
         },
@@ -689,7 +622,6 @@ def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
         pg_verifybackup=Path("/pg/pg_verifybackup"),
         timeout_seconds=900,
     )
-    created_at = psutil.Process(child.pid).create_time()
 
     class LiveProbe:
         data_directory = "/unused"
@@ -699,22 +631,27 @@ def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
 
     def fake_spawn(
         _postgres: Path, _pgdata: Path, _config_file: Path, _log_path: Path
-    ) -> subprocess.Popen[str]:
+    ) -> subprocess.Popen[bytes]:
         return child
 
     def fake_wait_identity(
-        _process: subprocess.Popen[str],
+        _identity: SandboxPostgresIdentity,
         _pgdata: Path,
         _log_path: Path,
         _timeout: int,
     ) -> SandboxPostgresIdentity:
-        return SandboxPostgresIdentity(child.pid, created_at, os.getpgrp(), str(pgdata.resolve()))
+        return SandboxPostgresIdentity(
+            NativeProcess.capture(psutil.Process(child.pid)),
+            os.getpgid(child.pid),
+            os.getsid(child.pid),
+            str(pgdata.resolve()),
+        )
 
     def fake_wait_promotion(
         _socket_dir: Path,
         _port: int,
         _candidate: CandidateManifest,
-        _process: subprocess.Popen[str] | None = None,
+        _identity: SandboxPostgresIdentity | None = None,
         _log_path: Path | None = None,
     ) -> str:
         return "0/2000000"
@@ -722,10 +659,15 @@ def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
     def fake_smoke(_socket_dir: Path, _port: int, _candidate: CandidateManifest) -> str:
         raise RestoreProofError("restored migration set differs")
 
-    def fake_stop(_pgdata: Path, _identity: SandboxPostgresIdentity) -> None:
+    def fake_stop(
+        _pgdata: Path, _identity: SandboxPostgresIdentity, _process: subprocess.Popen[bytes]
+    ) -> None:
         # SIGKILL (SIG_IGN-inherited sessions ignore SIGTERM): dead child left
         # unreaped, as the real stop path does.
-        child.kill()
+        os.kill(child.pid, signal.SIGKILL)
+        if failure == "closure":
+            raise RestoreProofError("sandbox closure unresolved")
+        child.wait(timeout=5)
 
     monkeypatch.setattr(restore_postgres, "_run", fake_verify)
     monkeypatch.setattr(restore_postgres, "_spawn_sandbox_postgres", fake_spawn)
@@ -734,8 +676,15 @@ def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
     monkeypatch.setattr(executor, "_wait_for_promotion", fake_wait_promotion)
     monkeypatch.setattr(executor, "_smoke", fake_smoke)
     monkeypatch.setattr(executor, "_stop", fake_stop)
+    if failure == "capture":
+
+        def denied(_process: subprocess.Popen[str], _data: Path) -> SandboxPostgresIdentity:
+            raise psutil.AccessDenied(child.pid)
+
+        monkeypatch.setattr(restore_postgres, "_capture_sandbox", denied)
     try:
-        with pytest.raises(RestoreProofError, match="migration set differs"):
+        error_type = psutil.AccessDenied if failure == "capture" else RestoreProofError
+        with pytest.raises(error_type) as caught:
             executor.run(
                 pgdata=pgdata,
                 wal_dir=run_root / "archive",
@@ -743,10 +692,21 @@ def test_executor_run_reaps_the_sandbox_postmaster_on_failure(
                 run_root=run_root,
                 owner_path=owner,
             )
-        assert child.poll() is not None
-        with pytest.raises(psutil.NoSuchProcess):
-            psutil.Process(child.pid)
+        if failure == "closure":
+            assert "restored migration set differs" in str(caught.value) and (
+                "sandbox closure unresolved" in " ".join(caught.value.__notes__)
+            )
+        if failure in {"capture", "closure"}:
+            assert child.returncode is None and psutil.Process(child.pid).create_time() > 0
+            expected_state = "postgres_starting" if failure == "capture" else "postgres_running"
+            assert json.loads(owner.read_text())["state"] == expected_state
+        else:
+            assert child.returncode is not None
+            with pytest.raises(psutil.NoSuchProcess):
+                psutil.Process(child.pid)
     finally:
+        if failure == "capture":
+            child.kill()
         child.wait(timeout=10)
 
 

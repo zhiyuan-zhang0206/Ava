@@ -10,7 +10,6 @@ the ABSENCE half — the roster, the stop scope, and the converge migration.
 from __future__ import annotations
 
 import ops.roster as spec_mod
-from cli.commands._converge import _RENAMED_AWAY_SERVICES
 
 
 def test_roster_carries_no_pty_service() -> None:
@@ -23,14 +22,6 @@ def test_roster_carries_no_pty_service() -> None:
     sessions = {s.session for s in spec_mod.build_services()}
     assert "pty-supervisor" not in sessions
     assert not any("pty" in s for s in sessions), sessions
-
-
-def test_retired_supervisor_is_reaped_by_converge() -> None:
-    """The one-way transition: converge's renamed-away reap must name the
-    retired `pty-supervisor` service session so an updated host kills the old
-    daemon (and with it the final pre-host-era shells — the one accepted
-    loss) instead of stranding it as an unmanaged orphan."""
-    assert "pty-supervisor" in _RENAMED_AWAY_SERVICES
 
 
 def test_no_healthcheck_module_references_pty() -> None:

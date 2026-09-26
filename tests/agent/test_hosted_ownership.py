@@ -64,7 +64,7 @@ def _seed_managed_row(conn: psycopg.Connection, agent_id: int, owner: UUID) -> R
     evidence = IncarnationResources(
         generation=generation,
         owner=owner,
-        host_process=ResourceProcess(pid=native.pid, birth=native.create_time()),
+        host_process=ResourceProcess.capture(native),
         requests={},
     )
     conn.execute(
@@ -277,7 +277,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
         evidence = IncarnationResources(
             generation=old.generation,
             owner=old.owner,
-            host_process=ResourceProcess(pid=native.pid, birth=native.create_time()),
+            host_process=ResourceProcess.capture(native),
             requests={},
         )
         db_conn.execute(

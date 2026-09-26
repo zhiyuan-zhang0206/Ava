@@ -2,7 +2,10 @@
 
 import hashlib
 import hmac
+import math
 import re
+import subprocess
+import sys
 from typing import Any, cast
 from uuid import UUID
 
@@ -13,7 +16,8 @@ from psycopg.types.json import Jsonb
 
 from shared.caller_identity import caller_payload
 from shared.machine import machine_name
-from shared.proc_tree import create_time_matches, stable_create_time
+from shared.native_process import native_boot_id
+from shared.native_process.ownership import OwnedProcess
 from shared.runtime_incarnation import RuntimeIncarnation
 
 OPEN = ("requested", "accepted", "active")
@@ -87,7 +91,13 @@ def _metadata_nodes(metadata: object) -> list[dict[str, Any]]:
     meta = cast("dict[str, Any]", metadata)
     nodes: list[dict[str, Any]] = []
     if meta.get("pid") is not None:
-        nodes.append({key: meta.get(key) for key in ("pid", "name", "executable", "created_at")})
+        nodes.append(
+            {
+                key: meta[key]
+                for key in ("pid", "name", "executable", "created_at", "starttime", "boot_id")
+                if key in meta
+            }
+        )
     ancestors = meta.get("ancestors")
     if isinstance(ancestors, list):
         nodes.extend(
@@ -105,7 +115,7 @@ def _is_claude_native_executable(executable: object) -> bool:
     ``versions`` directory whose entry is version-stamped (e.g.
     ``~/.local/share/claude/versions/2.1.274``). Exactly like the basename
     allowlist, this is a shape gate on what gets recorded; the attestation
-    itself stays pid + stable start time equality with the recorded process.
+    itself requires the recorded native process birth and boot identity.
     """
     if not isinstance(executable, str) or not executable:
         return False
@@ -124,69 +134,86 @@ def _is_provider_node(node: dict[str, Any]) -> bool:
     )
 
 
-def _number(value: object) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+def _process_identity(node: dict[str, Any]) -> tuple[OwnedProcess, str | None] | None:
+    """Read complete native evidence; incomplete historical nodes stay unknown."""
+    if not {"pid", "created_at", "starttime", "boot_id"} <= node.keys():
         return None
-    return float(value)
+    pid, birth, ticks, boot = (node[key] for key in ("pid", "created_at", "starttime", "boot_id"))
+    if type(pid) is not int or pid <= 0:
+        return None
+    if not _valid_birth(birth):
+        return None
+    if not _valid_ticks(ticks):
+        return None
+    if not _valid_boot_id(boot):
+        return None
+    return OwnedProcess(pid, birth, ticks), boot
+
+
+def _valid_birth(birth: object) -> bool:
+    if isinstance(birth, bool) or not isinstance(birth, (int, float)):
+        return False
+    try:
+        return math.isfinite(birth) and birth > 0
+    except OverflowError:
+        return False
+
+
+def _valid_ticks(ticks: object) -> bool:
+    if sys.platform == "linux":
+        return type(ticks) is int and ticks > 0
+    return ticks is None
+
+
+def _valid_boot_id(boot: object) -> bool:
+    if sys.platform == "win32":
+        return boot is None
+    if not isinstance(boot, str):
+        return False
+    try:
+        return str(UUID(boot)) == boot
+    except ValueError:
+        return False
 
 
 def _same_process(anchor: dict[str, Any], node: dict[str, Any]) -> bool:
-    if node.get("pid") is None or node.get("pid") != anchor.get("pid"):
+    recorded, observed = _process_identity(anchor), _process_identity(node)
+    if recorded is None or observed is None:
         return False
-    live = _number(node.get("created_at"))
-    birth = _number(anchor.get("created_at"))
-    if live is None or birth is None:
-        return False
-    return create_time_matches(live, birth)
-
-
-def _anchor_liveness(anchor: dict[str, Any]) -> str:
-    """Classify one recorded anchor against the live process table.
-
-    "reused" is a dead anchor whose pid now belongs to a different process; it
-    keeps that failure distinguishable from a live anchor the caller simply
-    does not descend from.
-    """
-    pid = anchor.get("pid")
-    if isinstance(pid, bool) or not isinstance(pid, int):
-        return "dead"
     try:
-        process = psutil.Process(pid)
-        if process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
-            return "dead"
-        birth = _number(anchor.get("created_at"))
-        if birth is not None and not create_time_matches(stable_create_time(process), birth):
-            return "reused"
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return "dead"
-    return "alive"
+        return recorded[1] == observed[1] == native_boot_id() and recorded[0].same_birth(
+            observed[0]
+        )
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        return False
 
 
 def classify_anchor(anchor: dict[str, Any]) -> str:
     """Strict liveness for one recorded anchor: alive | dead | reused | denied | unknown.
 
-    Unlike ``_anchor_liveness`` (fail-closed for caller attestation, where
-    AccessDenied reads as dead), the supervisor must not kill a possibly-live
-    executor it merely cannot read, so unreadable and unexpected states stay
-    distinguishable for the two-beat rule.
+    Unreadable evidence is not exit or PID reuse. Both caller attestation and
+    the supervisor use this classification; neither substitutes Linux wall time.
     """
-    pid = anchor.get("pid")
-    if isinstance(pid, bool) or not isinstance(pid, int):
+    recorded = _process_identity(anchor)
+    if recorded is None:
         return "unknown"
+    identity, boot = recorded
     try:
-        process = psutil.Process(pid)
-        if process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+        current_boot = native_boot_id()
+        if not _valid_boot_id(current_boot):
+            return "unknown"
+        if boot != current_boot:
             return "dead"
-        birth = _number(anchor.get("created_at"))
-        if birth is not None and not create_time_matches(stable_create_time(process), birth):
+        observed = OwnedProcess.capture(psutil.Process(identity.pid))
+        if not identity.same_birth(observed):
             return "reused"
+        return "alive" if observed.live() else "dead"
     except psutil.NoSuchProcess:
         return "dead"
     except psutil.AccessDenied:
         return "denied"
-    except psutil.Error:
+    except (psutil.Error, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         return "unknown"
-    return "alive"
 
 
 def provider_anchor_states(process_metadata: object) -> list[str]:
@@ -205,10 +232,10 @@ def verify_caller(lease: dict[str, Any], caller: object) -> None:
     this presence check replaces the deliverable token: a recorded provider
     anchor (codex / claude — claude's native ``claude/versions/<version>``
     layout included) must appear among the caller's live ancestors with
-    the same identity (pid + stable start time, with the 2.0s tolerance kept
-    for records written before the stable key). Every failure is fail-closed
-    and classified — no-anchor / anchor-dead / chain-mismatch — so the operator
-    gets a next step instead of a dead end. An orphaned session ends on the
+    the same native birth and boot identity. Linux requires kernel start ticks;
+    other platforms compare exact native timestamps. Every failure is fail-closed
+    and classified as no-anchor, anchor-dead, anchor-unavailable, or chain-mismatch.
+    The operator gets a next step instead of a dead end. An orphaned session ends on the
     native side or by TTL; it is never re-anchored here.
     """
     recorded = _metadata_nodes(lease.get("process_metadata"))
@@ -222,12 +249,18 @@ def verify_caller(lease: dict[str, Any], caller: object) -> None:
     live = _metadata_nodes(caller)
     if any(_same_process(anchor, node) for anchor in anchors for node in live):
         return
-    states = {_anchor_liveness(anchor) for anchor in anchors}
+    states = {classify_anchor(anchor) for anchor in anchors}
     if states & {"alive"}:
         raise ImpersonationError(
             "Controller caller check failed (chain-mismatch): the recorded "
             "controller process is alive but this caller does not descend from it. "
             "Run impersonation commands from the controller session."
+        )
+    if states & {"unknown", "denied"}:
+        raise ImpersonationError(
+            "Controller caller check failed (anchor-unavailable): the recorded "
+            "controller's native identity cannot be verified. End the session "
+            "from the native side (restart/stop) or let its TTL expire."
         )
     if "reused" in states:
         raise ImpersonationError(

@@ -102,22 +102,21 @@ _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
 # A call site not listed here fails the lint; a listed module whose calls
 # disappear fails too (stale entry). See the module docstring.
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
+    "cli/release_transition/stage.py": "Read the local ordinary root roster for captured-image preflight and readiness; does not route a cluster request.",
+    "cli/release_transition/identity.py": "Refuse a nonlocal/fleet topology before effects in the first one-host release adapter; never dispatch by role.",
     "cli/commands/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
     "ops/agent_pause.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
-    "ops/cluster_pause.py": "Does this unit serve an agent host whose live daemon identity must answer before a pre-stop hold release restores local posture (what do I serve)",
     "cli/commands/_maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
     "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
     "shared/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
     "services/healthchecks/otel_collector.py": "does this unit own the LGTM collector healthcheck, preserving pure-runner relay behavior (what do I serve)",
     "cli/commands/start.py": "which daemons do I bring up (what do I serve)",
     "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
-    "cli/commands/_gateway_ready.py": "audit this host's role for the readiness report (what do I serve)",
     "cli/commands/trace.py": "which recovery ingress does this host serve: gateway-local Tempo or a pure-runner relay target (what do I serve)",
     "services/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
     "ops/ops_inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
     "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
     "cli/commands/_release_inventory.py": "verified installed image reads the real annotated service roster for the unit receipt (read-only, WHEEL_RUNTIME-guarded; no serve decision)",
-    "cli/commands/_release_services.py": "verified candidate updater rechecks the local annotated roster before any service stop or start (read-only, WHEEL_RUNTIME-guarded; no routing decision)",
 }
 
 

@@ -3,8 +3,8 @@
 ``shared.brew_pin`` (UV_VERSION / UV_ASSET_SHA256) is canonical. toolchain.sh
 embeds the same values because it runs before Python exists on a fresh box, the
 CI workflows pin setup-uv with the same version, and the Windows setup guide
-(conventions/windows-setup.md) embeds the Windows zip hashes; these tests fail
-when any of the copies drift.
+(conventions/windows-setup.md, a WSL2 install) routes uv through toolchain.sh;
+these tests fail when any of the copies drift.
 """
 
 from __future__ import annotations
@@ -66,19 +66,10 @@ def test_toolchain_script_parses() -> None:
     )
 
 
-def test_windows_setup_pins_the_canonical_version() -> None:
+def test_windows_setup_installs_uv_through_the_pinned_toolchain() -> None:
+    """Windows runs Ava inside WSL2; its only uv install path is toolchain.sh."""
     text = _WINDOWS_SETUP.read_text(encoding="utf-8")
-    match = re.search(r'^\s*\$v = "([0-9][0-9.]*)"', text, re.MULTILINE)
-    assert match is not None, "windows-setup.md must define $v (the pinned uv version)"
-    assert match.group(1) == brew_pin.UV_VERSION
-
-
-def test_windows_setup_sha256_matches_the_canonical_set() -> None:
-    text = _WINDOWS_SETUP.read_text(encoding="utf-8")
-    embedded = set(re.findall(r"[0-9a-f]{64}", text))
-    assert embedded, "windows-setup.md must embed the pinned uv asset sha256 values"
-    canonical = set(brew_pin.UV_WINDOWS_ASSET_SHA256.values())
-    assert embedded <= canonical, (
-        "windows-setup.md embeds sha256 values not in brew_pin.UV_WINDOWS_ASSET_SHA256: "
-        f"{embedded - canonical}"
+    assert "scripts/provision/toolchain.sh" in text, (
+        "windows-setup.md must install uv through the pinned toolchain.sh"
     )
+    assert "astral.sh/uv/install" not in text, "windows-setup.md names the unpinned installer"

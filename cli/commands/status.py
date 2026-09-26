@@ -1,8 +1,7 @@
 """`ava status` — one-screen view of services, infra, host relays, and cron.
 
 Composed from `_print_service_row` (session + probe per spec) +
-`print_data_plane_status` (this cluster's own pg/redis) + `print_gate_status`
-(the fleet UI entry port) + `print_redis_bridge_status` (authenticated PING
+`print_data_plane_status` (this cluster's own pg/redis) + `print_redis_bridge_status` (authenticated PING
 through the private-network relay), followed by the gateway's own cluster-status
 snapshot (GET `/api/cluster/status`).
 
@@ -15,12 +14,11 @@ additionally — rather than delegating wholesale.
 from __future__ import annotations
 
 from contextlib import suppress
+from pathlib import Path
 
 from cli.commands._cluster_instance import print_data_plane_status
-from cli.commands._converge_gate import print_gate_status
 from cli.commands._converge_redis_bridge import print_redis_bridge_status
 from cli.commands._probe import (
-    _cluster_pin_status,
     _detect_prod_source_drift,
     _print_service_row,
 )
@@ -30,70 +28,23 @@ from cli.commands._repo import (
     build_services,
     session_name,
 )
-from shared.cluster_drift import prod_source_pin_relation
-
-# Cluster-pin line marks, keyed by `prod_source_pin_relation`. "ahead" means HEAD
-# moved past the pin: a stray `git pull`, or a rollout that landed while the pin
-# was not advanced. The pin is a floor, not a ceiling — nothing resets the tree
-# back to it; `ava cluster update` advances the pin to the live HEAD.
-_PIN_MARKS = {
-    "aligned": "✓ aligned",
-    "behind": "⚠ behind pin (run `ava cluster update`)",
-    "ahead": "⚠ ahead of pin — HEAD moved past it (stray `git pull`, or a rollout "
-    "that landed without advancing the pin); `ava cluster update` brings the pin up",
-    "diverged": "⚠ diverged from pin (run `ava cluster update`)",
-    "unknown": "⚠ off pin (run `ava cluster update`)",
-}
-
-# What every non-aligned relation means while a cluster update is actually running.
-# Mid-rollout the checkout legitimately moves ahead of a pin that is only written
-# once the gateway lands the target, so the standing hints accuse an in-flight
-# rollout of being a stray `git pull` — on 2026-07-28 that line, read live in a
-# rollout log, is what a false alarm was built on. During an update the honest
-# reading of any drift is "not converged yet", and none of the remedies apply:
-# `ava cluster update` is what is already running.
-_PIN_MARK_DURING_UPDATE = "· update in progress — this host has not converged yet"
+from ops.service_spec import ServiceSpec
+from shared import service_selection
+from shared.machine import MachineRoles
 
 
 def _update_in_flight() -> bool:
-    """Whether a cluster update owns this cluster right now — a live update-lock
-    holder, or an orchestration session alive on this host.
-
-    Both are checked because they cover different hosts: the lock is cluster-wide
-    (so an agent-runner sees the gateway's rollout), the session is local (so a
-    host running its own `ava cluster update` sees it even though that takes no cluster
-    lock). Never raises: this only downgrades an advisory line, so a DB hiccup must
-    report "not updating" rather than break `ava status`, the first diagnostic
-    command anyone runs when things are already wrong.
-    """
+    """Whether a live cluster deploy lease is held (package refresh skips then)."""
     with suppress(Exception):
         from shared.cluster_lock import update_lock_holder
 
         if update_lock_holder() is not None:
             return True
-    try:
-        from ops.cluster import current_orchestration
-
-        return current_orchestration() is not None
-    except Exception:
-        return False
+    return False
 
 
-def _root_tree_units() -> dict[str, dict[str, object]] | None:
-    """This host's ava-root tree rows by unit id, or None when sessions drive it.
-
-    A root-driven host (`settings.services.root_driver_enabled` — the same
-    switch `ava start`/`ava stop` fork on) keeps its services as ava-root tree
-    units, not session records, so the status table's session column must read
-    the tree or every serving row reports ✗. An unreachable root yields an
-    empty map: the tree claims nothing, so nothing reads as running. A session
-    host returns None and the column keeps its session reading. One snapshot
-    per `ava status` — the column is not a per-row root roundtrip.
-    """
-    import cli.commands as _ns
-
-    if not _ns._root_driven_enabled():
-        return None
+def _root_tree_units() -> dict[str, dict[str, object]]:
+    """Read one root snapshot; an unreachable root claims no running services."""
     from cli.commands import _root_driver
 
     status = _root_driver._root_status(_root_driver._root_client())
@@ -102,14 +53,8 @@ def _root_tree_units() -> dict[str, dict[str, object]] | None:
     return _root_driver._root_units(status)
 
 
-def cmd_status() -> int:
-    # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands as _ns
-
-    repo = _repo_root()
-    roles = _ns._roles_or_none()
-    print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
-
+def _status_roster(roles: MachineRoles | None) -> tuple[tuple[ServiceSpec, str | None], ...]:
+    """Explain every service excluded by capabilities or the durable desired set."""
     # Show this host's role roster WITH each gated-out service's reason, so a
     # service the start path drops (ava-browser with no display) is visible +
     # explained rather than silently missing — `ava status` is
@@ -120,12 +65,25 @@ def cmd_status() -> int:
         services_to_show = tuple((spec, None) for spec in build_services())
     else:
         services_to_show = _services_for_roles_annotated(roles)
-    name_w = max(len(session_name(spec.session)) for spec, _reason in services_to_show)
-    # Root-driven hosts keep their services as tree units: read one tree
-    # snapshot for the whole table (None on session hosts — the column keeps
-    # its session reading; an unreachable root reads as an empty tree).
+    selection = service_selection.read_selection()
+    return tuple(
+        (spec, reason if selection.enabled(spec.session) else "disabled by desired service set")
+        for spec, reason in services_to_show
+    )
+
+
+def cmd_status() -> int:
+    # Dynamic lookup for monkeypatch-aware tests.
+    import cli.commands._repo as _repo_commands
+
+    repo = _repo_root()
+    roles = _repo_commands._roles_or_none()
+    print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
+    services_to_show = _status_roster(roles)
+    name_w = max((len(session_name(spec.session)) for spec, _reason in services_to_show), default=7)
+    # The root is the only service owner. Do not infer liveness from old records.
     root_units = _root_tree_units()
-    header = f"{'service'.ljust(name_w)}  sess  probe"
+    header = f"{'service'.ljust(name_w)}  root  probe"
     print(header)
     print("-" * len(header))
     for spec, skip_reason in services_to_show:
@@ -157,64 +115,93 @@ def cmd_status() -> int:
         print("\nlgtm (observability backend):")
         print_lgtm_status()
 
-    # gate section: the fleet UI entry port. Its own section rather than a row in
-    # the table above, because the gate is not a session service — it is a launchd
-    # KeepAlive job (a pidfile-backed detached process off macOS), so the session
-    # column has no answer for it and the two facts worth showing are not the ones
-    # a ServiceSpec row carries. Same placement rule as pg/redis: gateway-capable
-    # hosts only, since a runner owns no entry port.
+    # The private-network relay is a host data-plane resource.
     if not runner_only:
-        print("\ngate (fleet UI entry):")
-        print_gate_status()
         print("\nredis bridge (private-network ingress):")
         print_redis_bridge_status()
 
     # any installed host: warn if the prod source ($AVA_HOME/source) has drifted
-    # off `main`. It is the checkout the live cluster runs from, so it must be
+    # off `main`. A source-run home executes that checkout, so it must be
     # reviewed `main` — a feature branch there means the host runs un-reviewed
-    # code, and the next rollout force-discards those commits (work in a
-    # worktree, never the prod tree).
+    # code (work in a worktree, never the prod tree).
     if roles:
         drift_branch = _detect_prod_source_drift()
         if drift_branch is not None:
             where = "a detached HEAD" if drift_branch == "HEAD" else f"branch '{drift_branch}'"
             print(
                 f"\n⚠ prod source ($AVA_HOME/source) is on {where}, not `main`.\n"
-                f"   The live cluster runs this tree — it must be reviewed `main`; a "
-                f"feature branch here runs un-reviewed code and the next rollout "
-                f"force-discards its commits.\n"
+                f"   A source-run home executes this tree — it must be reviewed `main`; a "
+                f"feature branch here runs un-reviewed code on the next restart.\n"
                 f"   Develop in a worktree, never the prod checkout. Recover: stash / "
                 f"branch any work, then `git -C $AVA_HOME/source checkout main`."
             )
 
-    # any installed host: show the cluster pin (cluster_target_sha — the commit the
-    # last rollout pinned the cluster to) vs this host's HEAD, so a node that missed
-    # a rollout is visible. Read-only / non-fatal (skipped when no pin yet or the DB
-    # is unreachable). The fail-fast-on-drift step is future (commit-pinned-cluster).
-    if roles:
-        pin_status = _cluster_pin_status()
-        if pin_status is not None:
-            pin, head = pin_status
-            updating = _update_in_flight()
-            if head is None:
-                head_s = "unknown"
-                mark = (
-                    _PIN_MARK_DURING_UPDATE
-                    if updating
-                    else "⚠ HEAD unreadable (run `ava cluster update`)"
-                )
-            else:
-                head_s = head[:7]
-                relation = prod_source_pin_relation(pin, head)
-                mark = (
-                    _PIN_MARK_DURING_UPDATE
-                    if updating and relation != "aligned"
-                    else _PIN_MARKS[relation]
-                )
-            print(f"\ncluster pin: {pin[:7]} — this host HEAD {head_s} [{mark}]")
+    # This home's current release identity, from its own durable records: the
+    # selected image, or the source checkout it runs, plus any incomplete home
+    # operation. There is no cluster-wide pin; the release journal is the record.
+    print()
+    for line in _release_identity_lines(Path(repo)):
+        print(line)
 
     _print_gateway_cluster_status()
     return 0
+
+
+def _release_identity_lines(repo: Path) -> list[str]:
+    """This home's release identity and any incomplete home operation.
+
+    A selected image (`$AVA_HOME/releases/current-release`) is the release; a
+    home without one runs its source checkout. Unreadable records print as
+    unreadable — never replaced by a guess or by a historical value.
+    """
+    from shared.cluster_drift import checkout_head_sha
+    from shared.paths import ava_home
+    from shared.runtime_release import current_pointer
+
+    home = ava_home()
+    try:
+        selected = current_pointer(home / "releases")
+    except (OSError, ValueError) as exc:
+        lines = [f"release: ✗ selector unreadable ({exc})"]
+    else:
+        if selected is None:
+            head = checkout_head_sha(repo)
+            lines = [
+                f"release: source checkout {repo} at {head[:7] if head else 'unreadable HEAD'}"
+            ]
+        else:
+            artifact, manifest = selected
+            lines = [f"release: image {artifact[:12]} (manifest {manifest[:12]})"]
+    operation = _home_operation_line(home)
+    if operation is not None:
+        lines.append(operation)
+    return lines
+
+
+def _home_operation_line(home: Path) -> str | None:
+    """The active release/PITR operation unless it completed cleanly."""
+    from cli.release_transition.journal import read_operation
+    from shared.verified_file import regular_bytes
+
+    try:
+        journal = Path(regular_bytes(home / "updates" / "active").decode().strip())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        return f"  operation: ✗ active pointer unreadable ({exc})"
+    try:
+        operation = read_operation(journal)
+    except (OSError, ValueError) as exc:
+        return f"  operation: ✗ journal {journal} unreadable ({exc})"
+    if operation.terminal and operation.error is None:
+        return None
+    request = operation.request
+    line = f"  operation: {request.kind} {str(request.id)[:8]} — phase {operation.phase}"
+    if operation.direction is not None:
+        line += f", direction {operation.direction}"
+    if operation.error is not None:
+        line += f", error: {operation.error}"
+    return line
 
 
 def _print_host_resources() -> None:
@@ -250,7 +237,7 @@ def _print_gateway_cluster_status() -> None:
     import httpx
 
     from cli.commands.cluster import _fetch_gateway_cluster_status
-    from ops.cluster import ClusterStatus
+    from ops.cluster_status import ClusterStatus
     from shared.machine import (
         GatewayApiBaseMissing,
         MachineRoleInvalid,

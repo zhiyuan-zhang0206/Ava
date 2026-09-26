@@ -13,7 +13,7 @@ What it flags — any of these inside an `async def` (not inside a nested
   `fetchone` / `fetchall` / `commit` / `rollback` calls
 - known sync DB helpers (`insert_inbound_message`, `get_agent_status`,
   `agent_exists`, `publish_agent_updated_sync`, ...)
-- sync ops (`config_read_op`, `cluster_rollout_op`, `spawn_agent`, ...)
+- sync ops (`config_read_op`, `cluster_recover_op`, `spawn_agent`, ...)
 - process/session backends (`kill_session`, `has_session`, `force_kill`,
   `process_alive`, `capture_pane`)
 - filesystem (`shutil.rmtree`, `Path.write_bytes/read_text`, ...)
@@ -28,19 +28,25 @@ read; a third-party callback contract) opts out with an inline
 
 Scope: `gateway/` and `ops/` — the event-loop surfaces. Tests, cli, shared,
 agent and services are not scanned (they do not run the gateway loop).
+
+The repo-helper names must stay current: each one in `_REPO_BLOCKING_HELPERS`
+must still be defined (`def` / `async def`) somewhere in the source tree, or
+the lint fails. A name left behind by a deleted helper would silently flag an
+unrelated future function that reuses it.
 """
 
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SCAN_DIRS = ("gateway", "ops")
 
-# Sync callable attribute-names that must not appear un-awaited in an async body.
-_BLOCKING_NAMES = {
+# Sync library/method surfaces that must not appear un-awaited in an async body.
+_LIBRARY_BLOCKING_NAMES = {
     # psycopg surface
     "connection",
     "cursor",
@@ -51,6 +57,17 @@ _BLOCKING_NAMES = {
     "rollback",
     # time
     "sleep",
+    # filesystem
+    "rmtree",
+    "write_bytes",
+    "read_bytes",
+    "write_text",
+    "read_text",
+}
+
+# Sync helpers defined in this repo. Every name must still be defined somewhere
+# in `_DEFINITION_DIRS` (see `_stale_repo_helpers`).
+_REPO_BLOCKING_HELPERS = {
     # DB helpers (sync psycopg on a fresh connection)
     "insert_inbound_message",
     "publish_agent_updated_sync",
@@ -78,23 +95,27 @@ _BLOCKING_NAMES = {
     "resurrect_agent",
     "cluster_recover_op",
     "cluster_stopping_op",
-    "cluster_rollout_op",
-    "cluster_restart_op",
-    "cluster_update_check_op",
-    "cluster_update_op",
     # process / session backends
     "kill_session",
     "has_session",
     "capture_pane",
     "force_kill",
     "process_alive",
-    # filesystem
-    "rmtree",
-    "write_bytes",
-    "read_bytes",
-    "write_text",
-    "read_text",
 }
+
+_BLOCKING_NAMES = _LIBRARY_BLOCKING_NAMES | _REPO_BLOCKING_HELPERS
+
+# Where a repo helper may be defined (the non-test source tree).
+_DEFINITION_DIRS = (
+    "agent",
+    "ava",
+    "ava_builtins",
+    "cli",
+    "gateway",
+    "ops",
+    "services",
+    "shared",
+)
 
 # Module-qualified sync calls (any attribute of these modules).
 _BLOCKING_MODULES = {"shutil", "subprocess", "psutil"}
@@ -164,7 +185,34 @@ class _Linter(ast.NodeVisitor):
         self.errors.append((line, f"{reason}: {snippet}"))
 
 
+def _stale_repo_helpers() -> list[str]:
+    """`_REPO_BLOCKING_HELPERS` names no longer defined anywhere in the source tree."""
+    remaining = set(_REPO_BLOCKING_HELPERS)
+    pattern = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*[\[(]", re.MULTILINE)
+    for directory in _DEFINITION_DIRS:
+        for path in (_ROOT / directory).rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            remaining -= set(pattern.findall(text))
+            if not remaining:
+                return []
+    return sorted(remaining)
+
+
 def main() -> int:
+    stale = _stale_repo_helpers()
+    if stale:
+        for name in stale:
+            print(
+                f"scripts/lint_async_no_sync_blocking.py: stale _REPO_BLOCKING_HELPERS "
+                f"entry {name!r} — no `def {name}` exists in the source tree any more; "
+                "drop it"
+            )
+        return 1
     files = sorted(
         p for d in _SCAN_DIRS for p in (_ROOT / d).rglob("*.py") if "__pycache__" not in p.parts
     )

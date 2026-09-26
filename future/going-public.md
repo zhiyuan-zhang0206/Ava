@@ -14,10 +14,10 @@ does not.
 
 Note that the rest of `scripts/provision/` is **not** self-hosted-runner
 machinery and stays: `_lib.sh` / `database.sh` / `node.sh` / `toolchain.sh` are
-sourced by `scripts/install.sh` (the installer a new user runs) and the
-`Dockerfile`, and `install-playwright.sh` is the eval image's playwright layer.
+package-acquisition helpers used by image/toolchain preparation, and
+`install-playwright.sh` is the eval image's playwright layer.
 Deleting the directory wholesale, as an earlier version of this checklist said
-to, would break the installer.
+to, would remove those dependency-acquisition primitives.
 
 ## Gaps vs. the retired private lane
 

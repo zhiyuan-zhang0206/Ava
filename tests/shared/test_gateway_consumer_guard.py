@@ -513,20 +513,27 @@ def _closure_domains(closure: set[Path]) -> set[str]:
     return domains
 
 
-def test_agent_host_launches_under_the_agent_profile() -> None:
+def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """The hosted agent-host daemon consumes the agent domain set (it runs the
     agent kernel in-process, and services/agent_host/ is in the agent kind's
-    roots above). Its healthcheck must therefore launch it with the `agent`
-    profile — a `runner` profile crashed it at import (2026-08-30 soak startup),
-    and a marker-less launch (full construction) would silently mask any future
-    cross-profile read instead of failing fast."""
-    from services.healthchecks.agent_host import _HOST_PROCESS_PROFILE
+    roots above). The root launcher, its only launch path, must therefore
+    start it with the `agent` profile — a `runner` profile crashed it at import
+    (2026-08-30 soak startup), and a marker-less launch (full construction)
+    would silently mask any future cross-profile read instead of failing fast."""
+    from cli.commands import _root_driver
+    from ops.roster import build_services
     from shared.config import PROCESS_PROFILES
 
-    assert _HOST_PROCESS_PROFILE in PROCESS_PROFILES, (
-        f"{_HOST_PROCESS_PROFILE} is not a process profile"
-    )
-    assert _HOST_PROCESS_PROFILE == "agent"
+    def projection(_url: str) -> str:
+        return "postgresql://ava_runner@fixture/ava"
+
+    # The launcher binds the runner DB projection next to the marker; that
+    # projection is not under test, so keep it independent of this host's .env.
+    monkeypatch.setattr(_root_driver, "runner_db_url_projection", projection)
+    agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
+    profile = _root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
+    assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
+    assert profile == "agent"
 
 
 def test_profile_domains_match_consumption_matrix() -> None:

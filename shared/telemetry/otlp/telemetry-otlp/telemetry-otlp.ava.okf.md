@@ -103,11 +103,11 @@ single-box hosts collapse to the local receiver even when their secret is set.
   `_emit_log`, so flag-off processes never pay for it.
 - `shared/config/observability.py` — the producer-local `telemetry_otlp_*`
   settings plus gateway-local backend read/write URLs.
-- `cli/commands/_otel_collector.py` + `deploy/otel-collector/otel-collector.yaml`
-  — the pinned otelcol-contrib install + generated sidecar config (converge
-  step), including cluster filtering and empty-password Postgres receiver
-  omission; `ops/spec.py` (`ava-otel-collector` service) +
-  `services/healthchecks/otel_collector.py` (watchdog supervision).
+- `shared/collector_artifact.py` — pinned downloader shared by release prep and
+  `cli/commands/_otel_collector.py` converge. Converge and
+  `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
+  the credential-free (peer, monitoring role) Postgres receiver. Root health: `ops/spec.py`
+  (`ava-otel-collector`) + `services/healthchecks/otel_collector.py`.
 - `shared/trace.py` + `cli/commands/trace.py` + `cli/parsers/host.py` — the
   mirror `ava trace ship` replays, and the ship command.
 

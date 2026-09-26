@@ -17,7 +17,6 @@ PINNED_BREW_FORMULAE: frozenset[str] = frozenset(
         "postgresql@17",
         "redis",
         "redis@8.2",
-        "tailscale",
         "uv",
     }
 )
@@ -38,16 +37,6 @@ UV_ASSET_SHA256: dict[str, str] = {
     "x86_64-apple-darwin": "3cdbd038333cfe861ce04f3d91678547bf2e726224acf5f42d3f0affa6740e19",
     "aarch64-unknown-linux-gnu": "4998f545234d52fc6f1280827d392f00a9278295050d59c53a776546dbf0124d",
     "x86_64-unknown-linux-gnu": "6aa4576c31f791c0b9d4739e256d07358d45e7535695287fec03cf6839e25512",
-}
-
-# SHA256 of the Windows zip assets (astral-sh/uv 0.10.2 per-asset .sha256
-# files, e.g. uv-x86_64-pc-windows-msvc.zip.sha256). toolchain.sh is bash and
-# never runs on native Windows, so these have their own map; the Windows setup
-# guide (conventions/windows-setup.md) embeds the x86_64 value and a contract
-# test asserts it never drifts from this map.
-UV_WINDOWS_ASSET_SHA256: dict[str, str] = {
-    "x86_64-pc-windows-msvc": "493ebbe0e06128d6ee4905e1ed5e2a433fb0f7cfc08b0eaca9fab4ca76778ae1",
-    "aarch64-pc-windows-msvc": "826e4ee3a03ec245e54c449e272fdf8aab749e039cc49c950ad43cc13702221f",
 }
 
 

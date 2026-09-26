@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # The system layer of a Linux Ava host: Python 3.12 + build tools, then the
 # shared provision pieces — pg17 + redis servers, node 22, CLI tools. Composes
-# scripts/provision/* so the package logic lives in one place (install.sh's
-# gateway path and this whole-host path draw from the same pieces).
+# scripts/provision/* so the package logic lives in one place.
 #
 # Use it to bring a bare Debian/Ubuntu box up to "can run Ava" in one call;
-# install.sh then births the cluster on top. Not required on a host that already
-# has the toolchain — install.sh provisions what it needs on its own.
+# `ava start` then initializes the cluster. Not required on a host that already
+# has the toolchain.
 #
 # Server binaries only, NO initdb: the test suite spins throwaway native clusters
 # (tests/_containers.py), and a gateway unit's own per-cluster instance is
-# provisioned under $AVA_HOME/pg by `ava start` (install.sh --role gateway).
+# provisioned under $AVA_HOME/pg by `ava start`.
 #
 # Idempotent, runs as root (or via sudo). macOS prod is provisioned via brew.
 set -euo pipefail

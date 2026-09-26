@@ -1,8 +1,8 @@
 """OS-level cron registration for the cluster health probe.
 
 Platform-aware registration of a periodic job that runs the cluster health probe.
-The probe itself counts consecutive failures and triggers rollback once the
-threshold is reached.
+The probe reports observations and graded alerts. Release actions are owned by
+the retained release operation.
 
 - macOS: launchd User LaunchAgent plist in ~/Library/LaunchAgents/
 - Linux: user crontab entry
@@ -36,7 +36,6 @@ from shared.config import settings
 from shared.platform import crontab_lock, descends_from_launchd_job, launchd_job_label
 
 DEFAULT_INTERVAL_SECONDS = 300  # 5 minutes
-DEFAULT_CONSECUTIVE_THRESHOLD = 3
 
 # launchd label: com.ava.<home-slug>.health-probe (the slug is
 # `shared.cluster.home_slug` — basename + 8-hex path hash, so two homes sharing
@@ -216,7 +215,7 @@ def ava_binary_path() -> str:
     from — not necessarily the checkout that owns `$AVA_HOME`. A process could
     therefore write a job labelled for its own cluster but pointed at another
     cluster's binary; when that other binary is prod's, the job runs prod's
-    health probe (`--auto-rollback`) against prod's home. Resolving from
+    health probe against prod's home. Resolving from
     `repo_root()` makes binary, `$AVA_HOME` and label come from one checkout.
     """
     from shared.paths import repo_root
@@ -254,7 +253,7 @@ def launchd_env_block(indent: str = "    ", extra: dict[str, str] | None = None)
 
     `extra` is rendered in the caller's own order, so one caller's dict always
     produces the same bytes — a plist that is compared against the one on disk to
-    decide whether the job needs replacing (`cli/commands/_converge_gate.py`)
+    decide whether the job needs replacing
     cannot afford a fragment that reshuffles between runs.
     """
     entries = {"AVA_HOME": job_home(), "PATH": launchd_path_env(), **(extra or {})}
@@ -345,12 +344,8 @@ def _launchd_plist_path(slug: str) -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{_health_probe_label(slug)}.plist"
 
 
-def _launchd_plist_content(interval_s: int, threshold: int) -> str:
-    """Generate the launchd plist XML for the health probe.
-
-    The probe runs with `--auto-rollback --threshold <threshold>` so it counts
-    consecutive failures and triggers rollback itself (macOS launchd has no
-    shell wrapper to do the counting)."""
+def _launchd_plist_content(interval_s: int) -> str:
+    """Generate the observation-only health-probe launchd job."""
     ava_path = ava_binary_path()
     label = _health_probe_label(_home_slug())
     log_dir = Path(settings.general.ava_home) / "logs"
@@ -368,9 +363,6 @@ def _launchd_plist_content(interval_s: int, threshold: int) -> str:
         <string>{ava_path}</string>
         <string>cluster</string>
         <string>health-probe</string>
-        <string>--auto-rollback</string>
-        <string>--threshold</string>
-        <string>{threshold}</string>
     </array>
 {launchd_env_block()}
     <key>StartInterval</key>
@@ -402,7 +394,7 @@ def _own_probe_job_of(own_labels: set[str]) -> str | None:
     return None
 
 
-def _register_macos(interval_s: int, threshold: int) -> int:
+def _register_macos(interval_s: int) -> int:
     """Register the health probe as a launchd User LaunchAgent.
 
     Writes the plist to ~/Library/LaunchAgents/ and loads it with
@@ -412,11 +404,9 @@ def _register_macos(interval_s: int, threshold: int) -> int:
     label = _health_probe_label(slug)
     plist_path = _launchd_plist_path(slug)
 
-    # `bootout` terminates the job's whole process tree. Auto-rollback invokes
-    # `ava start` below this LaunchAgent, so replacing the job here would kill
-    # the rollback before its finally block can resume the cluster and release
-    # the update lease. Leave the old plist in place so a later external start
-    # still sees any desired-content change and performs the deferred reload.
+    # `bootout` terminates the job's whole process tree. A registering job
+    # cannot replace itself safely. Leave its plist in place so the next
+    # external converge sees the desired-content change and reloads it.
     # Ownership is two-pronged: the inherited `XPC_SERVICE_NAME` is a cheap
     # fast path that only the job's direct child matches, while descendants —
     # where converges actually run — read "0", so the live process tree check
@@ -430,7 +420,7 @@ def _register_macos(interval_s: int, threshold: int) -> int:
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write the plist.
-    plist_path.write_text(_launchd_plist_content(interval_s, threshold))
+    plist_path.write_text(_launchd_plist_content(interval_s))
     logger.info("Wrote plist to {}", plist_path)
 
     # Unload any existing instance (ignore errors if not loaded).
@@ -475,13 +465,12 @@ def _unregister_macos(slug: str) -> int:
     return 0
 
 
-def _register_linux(interval_s: int, threshold: int) -> int:
+def _register_linux(interval_s: int) -> int:
     """Add the health probe to the user's crontab.
 
     Reads the current crontab, removes any existing Ava health-probe entry,
     appends the new one, and writes it back. Idempotent. The crontab line runs
-    the probe directly with `--auto-rollback --threshold N` — the probe counts
-    failures and triggers rollback itself, so there is no shell wrapper.
+    the observation-only probe directly, with no shell wrapper.
 
     When crontab is not installed on the host (a minimal Linux box such as a
     hermetic bench / CI container), the health probe is a capability this host
@@ -503,7 +492,7 @@ def _register_linux(interval_s: int, threshold: int) -> int:
     minutes = max(1, interval_s // 60)
     entry = (
         f"*/{minutes} * * * * {cron_env_prefix()}{ava_path} cluster health-probe "
-        f"--auto-rollback --threshold {threshold} {_cron_marker(slug)}"
+        f"{_cron_marker(slug)}"
     )
 
     def report_update_failure(err: str) -> None:
@@ -517,7 +506,7 @@ def _register_linux(interval_s: int, threshold: int) -> int:
         owns_line=lambda line: _owns_health_probe_line(line, slug),
     )
     if rc == 0:
-        print(f"  . crontab entry added (every {minutes} min, threshold={threshold})")  # noqa: T201
+        print(f"  . crontab entry added (every {minutes} min)")  # noqa: T201
     return rc
 
 
@@ -549,33 +538,19 @@ def _unregister_linux(slug: str) -> int:
 # invocation blocks every later one — three days of it, at the scheduler's 72h
 # default.
 #
-# 1800s, an order of magnitude above the probe's own checks, because the bound has
-# to clear the longest thing an invocation can legitimately DO, not the longest
-# check. With `--auto-rollback` the probe runs `ava cluster rollback --yes` as a
-# child (`cli/commands/_cluster_health.py:_handle_consecutive_failure`), and that
-# quiesces every agent, reverses migrations, `git reset --hard`, `uv sync`, `ava
-# start` — plus a recovery path that does a second `uv sync` + start. Task
-# Scheduler ends a task by tearing down its job object, so the child dies with the
-# probe: a limit that truncated a rollback would leave schema behind code, which is
-# far worse than the missing health signal a long bound costs (at a 300s cadence,
-# at most five skipped ticks). `IgnoreNew` is also what stops two auto-rollbacks
-# from ever running at once, so it stays.
-#
-# Not reachable on Windows today — the health probe is gateway-gated and `gateway`
-# is POSIX-only — so this is the value that applies if that ever changes.
+# Keep the existing bound for observation and alert delivery. IgnoreNew prevents
+# overlapping probes; release transitions never run beneath this scheduled job.
+# Gateway is POSIX-only today, so this applies if Windows gains that capability.
 _WINDOWS_TIME_LIMIT_S = 1800
 
 
-def _register_windows(interval_s: int, threshold: int) -> str | None:
-    """Register the health probe as a Windows scheduled task.
-
-    Same payload as the launchd / crontab paths — the probe counts consecutive
-    failures and triggers rollback itself (`--auto-rollback --threshold N`)."""
+def _register_windows(interval_s: int) -> str | None:
+    """Register the observation-only health probe as a Windows task."""
     from shared.os_schtasks import create_minute_task
 
     return create_minute_task(
         "health-probe",
-        ("cluster", "health-probe", "--auto-rollback", "--threshold", str(threshold)),
+        ("cluster", "health-probe"),
         interval_s // 60,
         time_limit_s=_WINDOWS_TIME_LIMIT_S,
     )
@@ -589,12 +564,11 @@ def _unregister_windows(slug: str) -> int:
 
 def register_os_cron(
     interval_s: int = DEFAULT_INTERVAL_SECONDS,
-    threshold: int = DEFAULT_CONSECUTIVE_THRESHOLD,
 ) -> None:
     """Register the OS cron job for the cluster health probe.
 
     Platform-aware: delegates to ``PlatformBackend.register_cron``.
-    Idempotent — re-running updates the interval/threshold and reloads the job.
+    Idempotent — re-running updates the interval and reloads the job.
     A no-op when ``os_jobs_enabled()`` is off (the test suite).
 
     Refused (with an error log) when this process runs from a non-prod
@@ -622,7 +596,7 @@ def register_os_cron(
         return
     from shared.platform_backend import get_backend
 
-    get_backend().register_cron(interval_s=interval_s, threshold=threshold)
+    get_backend().register_cron(interval_s=interval_s)
 
 
 def unregister_os_cron(home: Path | None = None) -> None:

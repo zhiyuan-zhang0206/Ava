@@ -306,20 +306,17 @@ async def resurrect_agent_op(
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
 ) -> ResurrectAgentResponse:
-    """Local-target resurrect (UPDATE terminated -> idling + detached process launch).
+    """Commit hosted resurrection intent, then publish a wake to the home host.
 
     `trigger_inbound_id` carries the internal auto-resurrect CAS to the home
-    runner; manual resurrects omit it and retain their unconditional contract.
+    runner; manual resurrects omit it and may reopen a closed hosted agent.
     """
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is not AgentStatus.TERMINATED:
         return ResurrectAgentResponse(status="already_alive")
     try:
-        # resurrect_agent synchronously launches the agent and polls up to
-        # launch_confirm_timeout_seconds for it to claim. Run it off the event loop: a
-        # resurrected agent self-fetches its config from THIS gateway at boot, so
-        # blocking the loop here would deadlock that fetch. (spawn avoids this by
-        # always dispatching to the ops daemon; a local resurrect runs in-process.)
+        # Keep the synchronous row-lock transaction and wake publication off
+        # the gateway event loop. The agent host admits the successor later.
         await asyncio.to_thread(
             resurrect_agent,
             agent_id,

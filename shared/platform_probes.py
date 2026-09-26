@@ -88,8 +88,8 @@ def default_chrome_user_data_dir() -> Path | None:
     This is the top-level Chrome data dir (it holds ``Default/``, ``Profile N/``,
     and ``Local State``), NOT a single profile — copying it whole carries every
     signed-in profile plus the cookie jars and saved passwords. It is the source
-    the install/first-start prompt copies from when the operator opts to seed the
-    agent's dedicated profile with their own logged-in Chrome state.
+    used by the browser profile's explicit import of the operator's logged-in
+    Chrome state.
 
     Returns None when the platform has no known location (Windows/other) or the
     dir simply does not exist (Chrome never installed / never launched) — the

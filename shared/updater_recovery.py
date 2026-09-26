@@ -1,4 +1,8 @@
-"""Strict durable evidence schemas for updater recovery and continuation."""
+"""Strict schemas for the retained updater recovery evidence.
+
+The retired updater wrote these journals; `shared.updater_handoff` only reads
+them now, to refuse generic recovery while one is unfinished or malformed.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +13,11 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
-from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity
+from shared.managed_writer_barrier import RolloutIdentity
 from shared.managed_writer_closure import LauncherTerminal
 from shared.managed_writer_observation import ExpectedUnitWriters, ObservationChallenge
 from shared.managed_writer_publication import PublishedUnit, UnitActivationReadback
+from shared.process_evidence import Digest, EvidenceModel
 
 BootstrapRecoveryStage = Literal[
     "prepared",
@@ -133,58 +138,6 @@ class NormalReleaseRecoveryJournal(EvidenceModel):
         ):
             raise ValueError("replaces witnesses only a replaced starting attempt")
         return self
-
-
-def validate_normal_recovery_transition(
-    previous: NormalReleaseRecoveryJournal | None,
-    current: NormalReleaseRecoveryJournal,
-) -> None:
-    """Validate one monotonic journal CAS while retaining activation identity."""
-    if previous is None:
-        if current.stage != "waiting":
-            raise ValueError("normal recovery must begin at waiting")
-        return
-    if (
-        current.request_path,
-        current.operation_context,
-        current.unit,
-        current.previous_selector,
-    ) != (
-        previous.request_path,
-        previous.operation_context,
-        previous.unit,
-        previous.previous_selector,
-    ):
-        raise ValueError("normal recovery identity changed")
-    allowed: dict[str, frozenset[str]] = {
-        "waiting": frozenset({"selected"}),
-        "selected": frozenset({"bootstrap_stopped"}),
-        "bootstrap_stopped": frozenset({"starting"}),
-        "starting": frozenset({"starting", "observed"}),
-        "observed": frozenset({"committed"}),
-        "committed": frozenset(),
-    }
-    if current.stage not in allowed[previous.stage]:
-        raise ValueError(
-            f"normal recovery cannot transition from {previous.stage} to {current.stage}"
-        )
-    if current.stage == "starting":
-        # I8: the single slot may only be replaced with its displaced attempt
-        # already adjudicated — an empty slot carries no verdict, an occupied
-        # slot demands one plus a fresh nonce (a new attempt is a new attempt).
-        if previous.starting_attempt is None:
-            if current.replaces is not None:
-                raise ValueError("a first start displaces no attempt verdict")
-        else:
-            if current.replaces is None:
-                raise ValueError("replacing a starting attempt requires its adjudication witness")
-            if (
-                current.starting_attempt is None
-                or current.starting_attempt.nonce == previous.starting_attempt.nonce
-            ):
-                raise ValueError("a replacement start requires a fresh attempt nonce")
-    if previous.stage == "observed" and current.readback != previous.readback:
-        raise ValueError("committed normal recovery changed observed readback")
 
 
 class LaunchdRecovery(EvidenceModel):

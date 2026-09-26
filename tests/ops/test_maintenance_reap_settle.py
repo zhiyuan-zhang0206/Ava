@@ -46,7 +46,7 @@ def private_journal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def _publish(hold: MaintenanceHold) -> None:
-    before = pause_owner.begin_maintenance(HOLDER, WHEN)
+    before = pause_owner.begin_maintenance(HOLDER, WHEN).snapshot
     assert before.maintenance is not None
     pause_owner.change_maintenance(HOLDER, WHEN, before.maintenance, hold)
 

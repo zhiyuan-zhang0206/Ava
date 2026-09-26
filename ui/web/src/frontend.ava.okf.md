@@ -39,7 +39,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
                               Section components are also bare routes: control/{guide,config,display,presets,schedules,inventory,skills}/page.tsx
                               inventory/page.tsx exports PluginsInventory/McpInventory (shared /api/inventory query) as Plugins+MCP sections
 /insights                     Observation surface (read) — Status + Ops + Alerts sections, same shell as Control (sharing ControlNav + single scroll container INSIGHTS_SCROLL_ID)
-                              Continuous polling usage (Status 15s; update-check only on entry/manual re-check); cluster Restart/Update buttons are right in Status header, "observe health → act in place"
+                              Visibility-bounded Status polling (15s); readiness, host roster and reported release observations. No deployment mutation or source-checkout update preflight.
                               Ops links to Grafana; Alerts is live via SSE. Retired Metrics bookmarks transition through insights/metrics/page.tsx to Ops when Grafana is reachable.
                               Section components are also bare routes: insights/{status,ops}/page.tsx; insights/alerts/page.tsx redirects to the Alerts anchor
 /insights/run/[agentId]       Run-level tracing view — a direct, shareable linear turn track for one agent, with prioritized event connectors and click-through turn details (time, usage, cost, model, execs, anomalies). It reads the gateway's bounded run session, offers explicit start/end and zoom windows, requests one-hour buckets up front for explicit windows of at least six hours, and switches after a turn response above 400 rows. Insights and the active inspector link here.
@@ -56,7 +56,7 @@ Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4
 - **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).
 - **OpenTasksNoticeHost** (#3374): root-level renderer for the store's open-tasks notice slot — a terminate response carrying `open_tasks` (wire #2488) raises a dialog (count + up to five rows + "and N more"); dismissal is explicit; lazily imported.
 - **VisualViewportHeightSync** (#4779): with the on-screen keyboard up, pins `<html>` to `visualViewport.height` so the composer stays above it — the iOS half of the contract whose Android half is the `interactive-widget=resizes-content` viewport export.
-- **AppConnectionBanner** (#648): root-mounted; drives cluster health polling (`useClusterHealth`), mirrors SSE status into store (`ConnectionNotice`), stranded-cluster recovery banner (the only root banner, requires operator action); self-gated by `useAuth().status`. All Providers self-gate on auth state—no outer auth guard layer.
+- **AppConnectionBanner** (#648): root-mounted and renders nothing; drives cluster health polling (`useClusterHealth`) and mirrors SSE status into store (`ConnectionNotice`); self-gated by `useAuth().status`. All Providers self-gate on auth state—no outer auth guard layer.
 
 ## Core principles
 

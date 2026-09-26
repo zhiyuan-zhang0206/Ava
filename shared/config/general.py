@@ -17,6 +17,19 @@ from shared.config._base import EnvSettings
 
 
 class GeneralSettings(EnvSettings):
+    service_path: str = Field(
+        default="",
+        alias="AVA_SERVICE_PATH",
+        description="Host executable search directories admitted at first start, excluding virtualenv directories. Managed services prepend the current runtime virtualenv. The home declaration overrides inherited values; changing it requires stopping the current generation.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     impersonation_event_manifest_enabled: bool = Field(
         default=False,
         alias="AVA_IMPERSONATION_EVENT_MANIFEST_ENABLED",
@@ -266,24 +279,6 @@ class GeneralSettings(EnvSettings):
         description="Whether this process may hand jobs to the platform scheduler (launchd LaunchAgent / crontab line / Task Scheduler task). The test suite turns it off: the scheduler is one namespace per OS user, so a test-scoped $AVA_HOME cannot isolate it. Deregistration is never gated.",
         json_schema_extra={
             "restart_required": "all",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    start_gui_handover: bool = Field(
-        default=True,
-        alias="AVA_START_GUI_HANDOVER",
-        description=(
-            "macOS only: an `ava start` whose own chain runs outside the GUI login session hands "
-            "the bring-up to the cluster's GUI-domain job instead of starting sessions that would "
-            "inherit the wrong launchd domain (operator-shaped starts only; internal restart legs "
-            "never hand over). Off = the old warn-and-continue behavior."
-        ),
-        json_schema_extra={
-            "restart_required": "",
             "writable": False,
             "sensitive": False,
             "scope": "host",

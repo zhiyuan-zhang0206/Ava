@@ -211,47 +211,6 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         None,
         "exec child boot: _apply_per_agent_sdk_disable reads it after the overlay",
     ),
-    # The OS-scheduled hold watchdog (task #3887): its one-shot job process is a
-    # settings-lite verb (cli.main sets AVA_CONFIG_FETCH=skip for `cluster`), and
-    # it must resolve these while the database and gateway are down - that is the
-    # full-stop shape it exists for. Read order (pending > env/.env > default) is
-    # also the kill-switch contract: the unit's .env or the process environment
-    # overrides, and the compiled default is the full-stop answer.
-    LiteField(
-        "stranded_hold_recovery",
-        "literal",
-        None,
-        "shared/hold_watchdog.py enabled() - the hold watchdog's kill-switch",
-    ),
-    LiteField(
-        "hold_watchdog_min_age_seconds",
-        "literal",
-        None,
-        "shared/hold_watchdog.py min_age_seconds() - the completion bound floor",
-    ),
-    LiteField(
-        "hold_watchdog_cooldown_seconds",
-        "literal",
-        None,
-        "shared/hold_watchdog.py cooldown_seconds() - the per-generation cooldown",
-    ),
-    # The caller-side stop-incomplete recovery (task #3942): the updater leg
-    # reads the pair at its post-stop failure exit - the moment the host is
-    # mid-stop and the data plane may be down - so both must resolve without a
-    # full config build. Same kill-switch contract as the rows above: pending
-    # override > env/.env > the compiled default.
-    LiteField(
-        "stop_incomplete_recovery",
-        "literal",
-        None,
-        "cli/commands/_update_stop_recovery.py _recovery_enabled() - the caller arm's switch",
-    ),
-    LiteField(
-        "stop_incomplete_recovery_timeout_seconds",
-        "literal",
-        None,
-        "cli/commands/_update_stop_recovery.py _attempt_timeout_s() - the attempt's deadline",
-    ),
 )
 
 # The named validity rules `_lite.py` implements for the `check` column.

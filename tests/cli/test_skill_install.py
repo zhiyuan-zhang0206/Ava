@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
-from cli.commands import cmd_skill_install
+from cli.commands.skill import cmd_skill_install
 from shared import install_registry as reg
 
 # Every test here installs a package, which records `local:<machine>` provenance

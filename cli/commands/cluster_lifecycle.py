@@ -1,13 +1,4 @@
-"""Cluster lifecycle helpers — registry allocation + `ava cluster ls/down/destroy`.
-
-Identity is the home path (path-only): a cluster is born by
-`scripts/install.sh` -> `python -m cli.install_cluster` (which calls
-`_ensure_record` / the data-plane bring-up / provision), and `ava start` is a
-pure bring-up — the settings-free `cli.preflight.require_installed_home` gate
-(run by `cli.main` before any settings-loading import) fail-fasts an
-uninstalled home with a role-appropriate pointer instead of birthing anything.
-The management verbs address a cluster by its home path (`--path`), never a name.
-"""
+"""Home-addressed cluster management; initialization belongs only to start."""
 
 from __future__ import annotations
 
@@ -16,70 +7,11 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
-
-from shared.cluster import ClusterPorts
-from shared.config import settings
 
 
 def _repo_root() -> Path:
     # cli/commands/ is two levels below repo root.
     return Path(__file__).resolve().parents[2]
-
-
-def _provision(identity: str, *, base_admin_url: str, db_admin_password: str) -> bool:
-    """Thin wrapper around cluster.provision_database for monkeypatching in tests."""
-    from shared import cluster as cl
-
-    return cl.provision_database(
-        identity, base_admin_url=base_admin_url, db_admin_password=db_admin_password
-    )
-
-
-def _ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
-    """Thin wrapper around cluster.ensure_pgvector_extension for monkeypatching
-    in tests (same seam as `_provision` — birth-side provisioning steps are
-    stubbed together). A remote-managed plane is skipped here (no local admin
-    socket; its extension provisioning belongs to its owner) — the same guard
-    the `ava start` call site carries."""
-    from shared import cluster as cl
-
-    if settings.data_plane.is_remote:
-        return
-    cl.ensure_pgvector_extension(identity, base_admin_url=base_admin_url)
-
-
-def _ensure_cluster_instance(
-    rec: Any,
-    cluster_secret: str,
-    identity: str,
-    runner_password: str | None = None,
-    *,
-    db_admin_password: str = "",
-    redis_admin_password: str = "",
-    redis_password: str = "",
-) -> int:
-    """Thin wrapper around the per-cluster Postgres+Redis bring-up (for
-    monkeypatching in tests, like `_provision`). `identity` is the data-plane
-    db/role/ACL identifier, names-as-data (see ensure_cluster_instance).
-    `runner_password` (the gateway .env AVA_RUNNER_DB_PASSWORD) is threaded at
-    install birth, when the .env does not exist yet; a later bring-up resolves
-    it from the file itself."""
-    from cli.commands._cluster_instance import ensure_cluster_instance
-    from shared.cluster import record_pgbouncer_port
-
-    return ensure_cluster_instance(
-        pg_port=rec.ports["postgres"],
-        redis_port=rec.ports["redis"],
-        cluster_secret=cluster_secret,
-        db_admin_password=db_admin_password or cluster_secret,
-        redis_admin_password=redis_admin_password or cluster_secret,
-        redis_password=redis_password or cluster_secret,
-        pgbouncer_port=record_pgbouncer_port(rec),
-        identity=identity,
-        redis_user=identity,
-        runner_password=runner_password,
-    )
 
 
 def _subprocess_env(*, gateway_home: Path) -> dict[str, str]:
@@ -112,55 +44,6 @@ def _subprocess_env(*, gateway_home: Path) -> dict[str, str]:
     # gateway fetch, and it reads only this target home's host-scope .env, which
     # is exactly what a teardown needs with the gateway down.
     return env
-
-
-def _ensure_record(home: Path) -> tuple[Any, bool]:
-    """Read-allocate-save the cluster's registry record under the host registry
-    lock, so concurrent births serialize and never claim the same port block.
-    Keyed by the home path — the cluster's identity.
-
-    Returns `(record, created)`. `created` is False when the record already
-    existed (returned unchanged) and True when this call allocated it — the caller
-    uses it to roll the registration back if a later provisioning step fails,
-    rather than leaking an orphan port-block reservation."""
-    from datetime import UTC, datetime
-
-    from shared import cluster as cl
-
-    with cl.registry_lock():
-        rec = cl.get_record(home)
-        if rec is not None:
-            return rec, False
-        if cl.is_default_home(home):
-            # The default home (prod ~/.ava) uses fixed historical ports (incl. its
-            # own pg/redis on 5433/6380). LEGACY_AVA_PORTS moved to the
-            # dependency-free port_block module as a plain dict — it IS the legacy
-            # ClusterPorts shape.
-            ports = cast("ClusterPorts", cl.LEGACY_AVA_PORTS)
-        else:
-            registry = cl.load_registry()
-            # Allocate a fresh port block not already claimed by non-default clusters.
-            existing_bases: set[int] = {
-                min(cast("dict[str, int]", r.ports).values())
-                for r in registry.values()
-                if not cl.is_default_home(Path(r.gateway_home))
-            }
-            ports = cl.allocate_ports(existing_bases)
-
-        rec = cl.ClusterRecord(
-            ports=ports,
-            gateway_home=str(Path(home).expanduser()),
-            created_at=datetime.now(UTC).isoformat(),
-            # The derived-URL host for this cluster's data plane (empty =
-            # loopback, the single-box posture). Read from the settings knob
-            # AVA_DATA_PLANE_HOST at birth — a host-scope input that survives
-            # the env-authority pass on a not-yet-born home — and snapshotted
-            # on the record because derive_env runs at birth, before the
-            # home's .env exists (external data plane: Task #1752).
-            data_plane_host=(settings.data_plane.data_plane_host or "").strip(),
-        )
-        cl.save_record_locked(rec)  # lock already held — see ensure_registered
-        return rec, True
 
 
 def cmd_cluster_down(*, path: str) -> int:
@@ -214,7 +97,7 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
     """
     from shared import cluster as cl
 
-    home = Path(path).expanduser()
+    home = Path(path).expanduser().resolve()
     if cl.is_default_home(home):
         print(
             f"✗ ava cluster destroy: refusing to destroy the default home ({cl.default_home()}) "
@@ -228,34 +111,35 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
         print(f"✗ ava cluster destroy: no cluster at '{home}' in the registry", file=sys.stderr)
         return 1
 
-    # Stop the cluster first — the child stop runs with AVA_HOME = this home, so
-    # it takes down that home's services AND its own pg/redis (the instance must
-    # be down before --drop-db removes its data dirs).
-    rc = cmd_cluster_down(path=str(home))
-    if rc != 0:
-        # Non-fatal: the stop failed (e.g. sessions already gone), but we proceed
-        # to free the registry entry so the port block is returned.
-        print(
-            f"  ⚠ ava cluster down returned rc={rc}; proceeding with registry cleanup",
-            file=sys.stderr,
-        )
+    from cli.start_identity import retire_checkout_binding
+    from services.permissions_helper.launchd_job import unregister_helper
+    from shared.platform import file_lock
+    from shared.private_storage import write_private_bytes
 
-    # Free the registry entry under the host lock (delete_record is now
-    # self-serializing; the locked variant keeps this critical section whole).
-    with cl.registry_lock():
-        deleted = cl.delete_record_locked(home)
-
-    if not deleted:
-        # Another process beat us; nothing to clean up.
-        print(f"  · registry entry for '{home}' was already absent", file=sys.stderr)
-    else:
-        print(f"✓ removed '{home}' from cluster registry (port block freed)")
-
-    # Deregister this cluster's OS-scheduled jobs. Freeing the registry slot
-    # without this leaves launchd / crontab entries pointing at a home that no
-    # longer has a cluster — for a dev worktree they also point at a checkout
-    # about to be deleted, so they fail every interval, forever.
-    _unregister_scheduled_jobs(home)
+    # Publish a terminal intent before stopping. Concurrent/internal starts must
+    # refuse it even while this home still owns its reservation.
+    with file_lock(home / "start-intent.lock", timeout_s=30):
+        write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"destroying"}\n')
+        rc = cmd_cluster_down(path=str(home))
+        if rc != 0:
+            print(
+                "cluster stop incomplete; reservation and destroy intent retained", file=sys.stderr
+            )
+            return rc
+        try:
+            _unregister_scheduled_jobs(home)
+            unregister_helper(home, helper_port=rec.ports["permissions_helper"])
+            retire_checkout_binding(home)
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
+            print(f"cluster cleanup incomplete; reservation retained: {exc}", file=sys.stderr)
+            return 1
+        with cl.registry_lock():
+            current = cl.get_record(home)
+            if current != rec:
+                raise RuntimeError("cluster reservation changed during destroy")
+            cl.delete_record_locked(home)
+        write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"detached"}\n')
+        print(f"removed {home} from cluster registry after exact cleanup")
 
     if drop_db:
         # The whole Postgres+Redis instance is this cluster's own, so removing its
@@ -273,44 +157,28 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
 
 def _unregister_scheduled_jobs(home: Path) -> None:
     """Remove every OS-scheduled job the cluster at `home` registered (health
-    probe, both capabilities' watchdog probes, boot autostart, the systemd
-    boot unit, logs maintenance, packages refresh).
+    probe, boot autostart, logs maintenance and packages refresh).
 
     `home` is passed to each helper as an argument. It cannot be signalled by
     setting `AVA_HOME`: `settings` is constructed once at import, so a mid-process
     mutation of the environment changes nothing, and the helpers would deregister
     THIS process's cluster — running `ava cluster destroy --path <worktree>` from
     the prod checkout (the documented way to address a cluster) would tear down
-    prod's own health probe, watchdog probes and autostart.
+    prod's own health probe and autostart.
 
-    Failures are reported, not raised: a half-registered cluster, or a host whose
-    scheduler is unavailable, must still be destroyable — the registry slot is
-    already freed by the time this runs.
+    Every job must be retired before the registry slot can be freed. An
+    unavailable scheduler is ambiguous custody, so failures are raised.
     """
-    from cli.commands._converge_gate import unregister_gate
     from shared.os_autostart import unregister_autostart
-    from shared.os_boot_unit import uninstall as uninstall_boot_unit
     from shared.os_cron import unregister_os_cron
-    from shared.os_hold_watchdog import unregister_hold_watchdog
     from shared.os_logs_job import unregister_logs_job
     from shared.os_packages import unregister_packages_job
-    from shared.os_watchdog_probe import unregister_watchdog_probe
-
-    def uninstall_boot_unit_job() -> None:
-        # The steps it returns belong to the boot-unit CLI verbs; destroy
-        # reports only success/failure per job.
-        uninstall_boot_unit(home)
 
     jobs: list[tuple[str, Callable[[], None]]] = [
         ("health probe", lambda: unregister_os_cron(home)),
         ("autostart", lambda: unregister_autostart(home)),
-        ("boot unit", uninstall_boot_unit_job),
         ("logs maintenance", lambda: unregister_logs_job(home)),
         ("packages refresh", lambda: unregister_packages_job(home)),
-        ("watchdog probe (gateway)", lambda: unregister_watchdog_probe("gateway", home)),
-        ("watchdog probe (agent-runner)", lambda: unregister_watchdog_probe("agent-runner", home)),
-        ("hold watchdog", lambda: unregister_hold_watchdog(home)),
-        ("fleet UI gate", lambda: unregister_gate(home)),
     ]
     failed: list[str] = []
     for name, unregister in jobs:
@@ -320,16 +188,7 @@ def _unregister_scheduled_jobs(home: Path) -> None:
             failed.append(f"{name} ({e})")
 
     if failed:
-        print(
-            f"  ⚠ could not deregister some of '{home}' OS-scheduled jobs: {', '.join(failed)}",
-            file=sys.stderr,
-        )
-    else:
-        print(
-            f"✓ removed '{home}' OS-scheduled jobs "
-            "(health probe, watchdog probes, hold watchdog, autostart, boot unit, "
-            "logs maintenance)"
-        )
+        raise RuntimeError("could not remove scheduled jobs: " + ", ".join(failed))
 
 
 def cmd_cluster_ls() -> int:

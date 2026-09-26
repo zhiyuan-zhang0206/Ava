@@ -43,34 +43,20 @@ from cli.parsers.agents import (
     _h_notices_resolve,
 )
 from cli.parsers.cluster import (
-    _h_cluster_boot_unit_install,
-    _h_cluster_boot_unit_status,
-    _h_cluster_boot_unit_uninstall,
-    _h_cluster_cancel,
     _h_cluster_destroy,
     _h_cluster_down,
-    _h_cluster_ensure_db_role,
     _h_cluster_health_probe,
     _h_cluster_health_probe_register,
     _h_cluster_health_probe_unregister,
-    _h_cluster_hold_watchdog,
-    _h_cluster_hold_watchdog_register,
-    _h_cluster_hold_watchdog_unregister,
     _h_cluster_ls,
     _h_cluster_pause,
     _h_cluster_pitr_activate,
     _h_cluster_pitr_rollback,
     _h_cluster_pitr_status,
     _h_cluster_recover,
-    _h_cluster_recover_pending,
-    _h_cluster_restart,
     _h_cluster_resume,
-    _h_cluster_rollback,
     _h_cluster_status,
     _h_cluster_update,
-    _h_cluster_watchdog_probe,
-    _h_cluster_watchdog_probe_register,
-    _h_cluster_watchdog_probe_unregister,
 )
 from cli.parsers.computer import _h_computer_release
 from cli.parsers.host import (
@@ -132,6 +118,8 @@ from cli.parsers.pitr import (
     _h_pitr_drill,
     _h_pitr_multipart_abort,
     _h_pitr_multipart_list,
+    _h_pitr_operations_retire,
+    _h_pitr_operations_status,
     _h_pitr_retention_arm,
     _h_pitr_retention_disable,
     _h_pitr_retention_inspect,
@@ -172,34 +160,20 @@ __all__ = [
     "_h_agents_send",
     "_h_agents_terminate",
     "_h_agents_timeline",
-    "_h_cluster_boot_unit_install",
-    "_h_cluster_boot_unit_status",
-    "_h_cluster_boot_unit_uninstall",
-    "_h_cluster_cancel",
     "_h_cluster_destroy",
     "_h_cluster_down",
-    "_h_cluster_ensure_db_role",
     "_h_cluster_health_probe",
     "_h_cluster_health_probe_register",
     "_h_cluster_health_probe_unregister",
-    "_h_cluster_hold_watchdog",
-    "_h_cluster_hold_watchdog_register",
-    "_h_cluster_hold_watchdog_unregister",
     "_h_cluster_ls",
     "_h_cluster_pause",
     "_h_cluster_pitr_activate",
     "_h_cluster_pitr_rollback",
     "_h_cluster_pitr_status",
     "_h_cluster_recover",
-    "_h_cluster_recover_pending",
-    "_h_cluster_restart",
     "_h_cluster_resume",
-    "_h_cluster_rollback",
     "_h_cluster_status",
     "_h_cluster_update",
-    "_h_cluster_watchdog_probe",
-    "_h_cluster_watchdog_probe_register",
-    "_h_cluster_watchdog_probe_unregister",
     "_h_computer_release",
     "_h_config_audit",
     "_h_config_get",
@@ -235,6 +209,8 @@ __all__ = [
     "_h_pitr_drill",
     "_h_pitr_multipart_abort",
     "_h_pitr_multipart_list",
+    "_h_pitr_operations_retire",
+    "_h_pitr_operations_status",
     "_h_pitr_retention_arm",
     "_h_pitr_retention_disable",
     "_h_pitr_retention_inspect",
@@ -299,13 +275,11 @@ ensure_utf8_stdio()
 ensure_line_buffered_stdio()
 
 
-# Detached CLI invocations (gateway `spawn_update` child / the ops update-trigger
-# `ops.controllers.update_trigger.trigger_update`, run by the watchdog's schema/pin
-# controllers) set `AVA_CLI_LOG_NAME` in the child env. When set,
+# Detached CLI invocations can set `AVA_CLI_LOG_NAME` in the child env. When set,
 # we wire the same loguru sinks the long-running daemons use so the
 # child's logged steps land in `~/.ava/logs/<name>.log` + PG
 # `events` (queryable via `/api/cluster/admin/events`). Without
-# this, a stuck `ava cluster update` child's last words live only in the
+# this, a stuck command's last words live only in the
 # parent's per-invocation Popen log file, never reaching the cluster
 # admin events surface.
 #
@@ -321,14 +295,14 @@ def _init_detached_cli_logging() -> None:
     if cli_log_name:
         from shared.log import init_cli_process
 
-        # The updater's recovery child must remain usable while the gateway or DB is
+        # A supervised CLI child must remain usable while the gateway or DB is
         # restarting; stderr/file sinks are still useful if the Postgres sink fails.
         with suppress(Exception):
             init_cli_process(name=cli_log_name)
 
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
-# (a runner's stop / status / watchdog-probe are its recovery path), so
+# (stop and status must remain available for recovery inspection), so
 # `cli.main` opts them out of the gateway config fetch that every other process
 # performs at Settings build. The fetch decision itself is role-derived
 # (shared.bootstrap.config_source_is_local; AVA_CONFIG_SOURCE is gone).
@@ -354,7 +328,6 @@ _LITE_VERBS = frozenset(
         "memory",
         "plugins",
         "skill",
-        "enroll",
         "boot",
     }
 )
@@ -371,16 +344,14 @@ _LITE_VERBS = frozenset(
 # current one; and why the read-only (`ls`, `status`) and probe-registration
 # subcommands are absent too.
 _ANCHORED_HOME_VERBS = frozenset({"stop", "pause", "restart", "converge", "logs", "maintenance"})
-_ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset(
-    {"update", "restart", "rollback", "recover", "cancel", "ensure-db-role", "ensure-runner-role"}
-)
+_ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset({"recover"})
 
 
 def _print_settings_load_failure(e: ValidationError) -> int:
     """Translate Pydantic settings ValidationError into a copy-paste env template.
 
     Hit on a fresh host (no ~/.ava/.env, or missing required fields like
-    AVA_DB_URL / AVA_REDIS_URL). `ava enroll` writes these; this prints the
+    AVA_DB_URL / AVA_REDIS_URL). `ava start` resolves these; this prints the
     minimum env template for the manual path.
     """
     missing: list[str] = []
@@ -404,7 +375,7 @@ def _print_settings_load_failure(e: ValidationError) -> int:
             print(f"  {var}=<value>", file=sys.stderr)
     print(
         "\nAdd the lines above to ~/.ava/.env, then re-run your command. For the full\n"
-        "agent-runner bring-up flow, use `ava enroll --gateway <url> --machine-name <name> "
+        "agent-runner bring-up flow, use `ava start --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> "
         "--machine-host <this-host-addr>`.",
         file=sys.stderr,
     )
@@ -416,7 +387,7 @@ def _print_settings_load_failure(e: ValidationError) -> int:
 # importing shared.dotenv_boot at CLI entry is not safe — it resolves the
 # process home at import (resolve_ava_home raises for an installed wheel
 # without an explicit absolute AVA_HOME, and on an env/checkout home
-# contradiction), while `ava enroll` must run exactly on hosts where those
+# contradiction), while first start must run exactly on hosts where those
 # gates cannot hold yet.
 _LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
 
@@ -428,12 +399,8 @@ def _normalize_process_profile() -> None:
     process profile: with no marker, profiles.py constructs every domain as
     before. Importing shared.config.profiles initializes shared.config first,
     so that constant cannot be used before this cleanup without constructing
-    Settings. `ava enroll` bootstraps a fresh agent-runner that has no full
-    config yet, so it must run BEFORE any cli.commands import (handlers defer
-    that import, but parser building doesn't need it either — argparse builds
-    fine without Settings()). It lives in a settings-free module that does not
-    import shared.config. (Host provisioning is `scripts/install.sh`, not a
-    CLI verb.)
+    Settings. First start resolves and persists unit identity before importing
+    cli.commands; parser construction remains settings-free.
 
     The popped value is recorded, not discarded: an agent-launched tree keeps
     the launcher's injected runner DB / Redis projections through the authority
@@ -453,20 +420,13 @@ def main(argv: list[str] | None = None) -> int:
     _normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
     if args_in[:2] == ["cluster", "update"]:
-        # A verified wheel has no checkout anchor. Parse the SAME public tree,
-        # then verify the loaded image/home before importing settings-full ops.
-        # Parse first instead of scanning raw tokens so argparse abbreviations
-        # cannot make a prepared entry fall through to ordinary source dispatch.
+        # Release submission has one captured request and no mutable-checkout
+        # fallback. Validate it before Settings or checkout-home resolution.
         args = _build_parser().parse_args(args_in)
-        if getattr(args, "prepared", None) is not None:
-            return args.func(args)
+        return args.func(args)
 
-    _init_detached_cli_logging()
-    if args_in and args_in[0] == "enroll":
-        from cli.enroll import run_enroll
-
-        return run_enroll(args_in[1:])
-
+    if args_in[:1] != ["start"]:
+        _init_detached_cli_logging()
     # `ava boot` is what the OS boot job runs on the platforms whose scheduler
     # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
     # `ava start` re-run while the machine is still coming up. Dispatched here,
@@ -506,21 +466,14 @@ def main(argv: list[str] | None = None) -> int:
     # gets the actionable pointer instead of the generic Settings validation error the
     # cli.commands import would raise first. Skips --help (parse-only invocations).
     #
-    # `start` takes the full installed-home check (registry record + port block: it is
-    # about to bring a data plane UP). Every other verb that acts on THIS checkout's
-    # cluster takes the anchoring check alone — enough to stop an unanchored dev
+    # First start owns its identity validation before importing Settings. Other
+    # verbs that act on THIS checkout's cluster take the anchoring check — enough to stop an unanchored dev
     # worktree from reaching production, without blocking a home whose registry record
     # is gone from cleaning itself up.
     if args_in and not ({"-h", "--help"} & set(args_in)):
         verb = args_in[0]
         sub = args_in[1] if len(args_in) > 1 else ""
-        if verb == "start" or (verb == "maintenance" and sub == "start"):
-            from cli.preflight import require_installed_home
-
-            rc = require_installed_home()
-            if rc is not None:
-                return rc
-        elif verb in _ANCHORED_HOME_VERBS or (
+        if verb in _ANCHORED_HOME_VERBS or (
             verb == "cluster" and sub in _ANCHORED_HOME_CLUSTER_SUBVERBS
         ):
             from cli.preflight import require_anchored_home

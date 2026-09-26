@@ -29,7 +29,7 @@ child, and nested `ava` CLI therefore cannot re-materialize it by booting
 config. Same-user direct reads of the unit file remain the documented physical
 residual pending the per-machine authority design.
 
-All agent runners currently share the `ava_runner` database role. Native
+All agent runners currently share the `ava_runner` capability group (through their write generation's runner login). Native
 acceptance binds the proof before its accepted row commits, so a normal request
 cannot preempt the target host. A malicious process with the shared runner
 credential is nevertheless still a trusted controller: it can exercise

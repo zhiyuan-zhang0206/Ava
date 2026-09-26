@@ -28,8 +28,8 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 
 1. **Defined in a lattice family module** — `shared/timing.py`,
    `shared/deploy_timing.py`, `shared/stop_timing.py`,
-   `shared/daemon/schedules/schedule_timing.py`, `shared/cluster_lock.py`,
-   `shared/host_deploy_state.py`. These are the lattice's homes; registering a
+   `shared/daemon/schedules/schedule_timing.py`, `shared/cluster_lock.py`.
+   These are the lattice's homes; registering a
    new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
    reference to a clock registered in `shared.timing.CLOCKS`
@@ -38,6 +38,12 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 3. **Explicitly exempt** in `_INDEPENDENT_CLOCKS` below — the constant is either
    not a clock at all (a flag name, a SQL key, a collection) or a genuinely
    independent clock with no lattice neighbour, each with a stated reason.
+
+The allowlists must stay current: a full scan (no path arguments, as pre-commit
+and CI run it) also fails when a `_FAMILY_MODULES` file or an
+`_INDEPENDENT_CLOCKS` file is gone, or an exempted constant is no longer defined
+at module level in its file — an exemption for a deleted symbol would silently
+pre-approve whatever next takes that name.
 
 Scope: non-test code only (tests monkeypatch clocks smaller on purpose).
 Settings fields are class-body definitions in `shared/config/` and are the
@@ -94,15 +100,13 @@ _LATTICE_TERMS = (
 )
 
 # The lattice family modules: lattice vocabulary may be DEFINED here (and only
-# here). `shared/cluster_lock.py` and `shared/host_deploy_state.py` hold the
-# deploy-lease and updater-lease clocks respectively.
+# here). `shared/cluster_lock.py` holds the deploy-lease clocks.
 _FAMILY_MODULES = (
     "shared/timing.py",
     "shared/deploy_timing.py",
     "shared/stop_timing.py",
     "shared/daemon/schedules/schedule_timing.py",
     "shared/cluster_lock.py",
-    "shared/host_deploy_state.py",
 )
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
@@ -164,6 +168,19 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_TERMINATE_GRACE_S",
     ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
     (
+        "services/pitr/operation_custody.py",
+        "TERMINATE_GRACE_S",
+    ): "independent: the SIGTERM courtesy window for one backup/PITR operation worker to "
+    "unwind its own private cleanup (key files, decrypted scratch) before the controller's "
+    "confirmed group closure; the same class as shared/proc.py's TERM->KILL ladder wait, "
+    "no lattice neighbour",
+    (
+        "services/pitr/base_operation_runtime.py",
+        "DRILL_GRACE_S",
+    ): "independent: the same courtesy window for an operator `ava pitr drill`, long enough "
+    "for its bounded sandbox stop, residue scan and evidence write; an operator command "
+    "outside every daemon stop budget, no lattice neighbour",
+    (
         "shared/proc.py",
         "_REAP_TIMEOUT_S",
     ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",
@@ -175,12 +192,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "shared/redis_listener.py",
         "_CONSUME_ABANDON_GRACE",
     ): "independent: pubsub consume-abandon window, no lattice neighbour",
-    (
-        "services/agent_host/daemon.py",
-        "_STRAY_STOP_GRACE_S",
-    ): "independent: SIGTERM drain window for a roster-gated stray at hosted bring-up; "
-    "the watchdog round is the backstop but no ordering safety depends on this value "
-    "(it only bounds how long bring-up waits before handing over), no lattice neighbour",
     (
         "shared/events/contract.py",
         "DELIVERY_STALLED_KEYS",
@@ -197,17 +208,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "ava_builtins/plugins/lm_anthropic/provider.py",
         "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
     ): "LLM thinking-token budget, not a wall-clock constant",
-    ("cli/commands/_update_phase_b.py", "POLL_STALLED"): "poll status value, not a clock",
-    ("cli/commands/_update_phase_b.py", "POLL_NO_PROGRESS"): "poll status value, not a clock",
-    (
-        "cli/commands/_update_phase_b.py",
-        "_STALL_CONFIRMATIONS",
-    ): "set of stalled confirmations, not a clock",
-    ("ops/updater_reap.py", "REAP_CLEARED_QUALIFIER"): "SQL qualifier string, not a clock",
-    (
-        "ops/agent_launch.py",
-        "_LAUNCH_CONFIRM_POLL_INTERVAL_SEC",
-    ): "independent: poll granularity (50 ms), orders nothing",
     (
         "gateway/schedule_runner.py",
         "_STALL_TIMEOUT_S",
@@ -228,13 +228,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     ): "independent: the at-watcher session's post-fire reclamation window (wake delivery + "
     "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "
     "no lattice neighbour and no ordering safety depends on this value",
-    (
-        "services/healthchecks/browser.py",
-        "_RESPAWN_GRACE_S",
-    ): "independent: post-respawn CDP cold-start bound in the ava-browser healthcheck — a "
-    "bounded, consumer-local wait read off the live session record (an unreadable age falls "
-    "through to the respawn); its only cadence reference, the 60s watchdog round it spans, "
-    "is not a lattice clock, so no lattice neighbour",
     (
         "ava_builtins/skills/ava-use-claude-code-and-codex/reference/watch_work.py",
         "STALL_SECONDS",
@@ -278,6 +271,40 @@ def _scan_file(path: Path) -> list[str]:
     return errors
 
 
+def _module_level_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names.update(t.id for t in targets if isinstance(t, ast.Name))
+    return names
+
+
+def _stale_allowlist_entries() -> list[str]:
+    """Allowlist entries whose file or exempted constant no longer exists."""
+    errors: list[str] = []
+    for rel in _FAMILY_MODULES:
+        if not (_REPO_ROOT / rel).is_file():
+            errors.append(f"{rel}: stale _FAMILY_MODULES entry — the file no longer exists")
+    for rel, name in _INDEPENDENT_CLOCKS:
+        path = _REPO_ROOT / rel
+        if not path.is_file():
+            errors.append(
+                f"{rel}: stale _INDEPENDENT_CLOCKS entry {name} — the file no longer exists"
+            )
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue  # unreadable or a syntax error the compiler owns: cannot judge
+        if name not in _module_level_names(tree):
+            errors.append(
+                f"{rel}: stale _INDEPENDENT_CLOCKS entry {name} — no module-level {name} "
+                "is defined there any more; drop the exemption"
+            )
+    return errors
+
+
 def _scan(paths: list[Path]) -> list[str]:
     errors: list[str] = []
     for path in paths:
@@ -304,6 +331,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     paths = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
     errors = _scan(paths)
+    if not argv:
+        errors.extend(_stale_allowlist_entries())
     for err in errors:
         print(err, file=sys.stderr)
     return 1 if errors else 0

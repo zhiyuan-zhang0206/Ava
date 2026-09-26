@@ -27,7 +27,7 @@ from shared.managed_writer_publication import AdmissionDecision, CurrentAdmissio
 from shared.resource_admission import admit_resources
 from shared.runtime_admission import RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation
-from tests.agent.test_incarnation_resources import _admitted, _entry, _force
+from tests.agent.test_incarnation_resources import _admitted, _entry, _force, _process
 
 
 class _CurrentRuntimeAdmission(RuntimeAdmission):
@@ -106,11 +106,10 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
 
     def validate_then_wait(
         receipt: OwnerReady,
-        launcher_pid: int,
-        launcher_birth: float,
+        launcher: ResourceProcess,
         context_path: Path,
     ) -> None:
-        original_validate(receipt, launcher_pid, launcher_birth, context_path)
+        original_validate(receipt, launcher, context_path)
         ready.set()
         assert force_done.wait(10)
 
@@ -336,7 +335,7 @@ def test_successor_cannot_reset_unknown_or_unresolved_set(db_conn: psycopg.Conne
         register_exec(db_conn, target, entry)
     successor = RuntimeIncarnation(target.agent_id, uuid4(), uuid4())
     with pytest.raises(ResourceEvidenceError), db_conn.transaction():
-        admit_resources(db_conn, successor, ResourceProcess(pid=999, birth=1.0))
+        admit_resources(db_conn, successor, _process(999, 1.0))
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
     ).fetchone()
@@ -350,8 +349,8 @@ def test_exact_terminal_consumption_survives_force_but_replay_refuses(
     entry = _entry()
     attached = entry.model_copy(
         update={
-            "owner_process": ResourceProcess(pid=10, birth=1.0),
-            "root_process": ResourceProcess(pid=11, birth=2.0),
+            "owner_process": _process(10, 1.0),
+            "root_process": _process(11, 2.0),
         }
     )
     with db_conn.transaction():
@@ -379,7 +378,7 @@ def test_malformed_never_downgrades_to_legacy(db_conn: psycopg.Connection) -> No
     )
     db_conn.commit()
     with pytest.raises(ValueError), db_conn.transaction():
-        admit_resources(db_conn, target, ResourceProcess(pid=10, birth=1.0))
+        admit_resources(db_conn, target, _process(10, 1.0))
 
 
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(

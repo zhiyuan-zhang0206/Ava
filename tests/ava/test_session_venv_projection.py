@@ -210,6 +210,35 @@ def test_secured_default_home_refuses_missing_or_unsafe_projection(
         dotenv_boot.watcher_runner_env()
 
 
+@pytest.mark.parametrize(
+    "redis_url",
+    [
+        "redis://127.0.0.1:6380/0",
+        "redis://default:owner@127.0.0.1:6380/0",
+        "redis://ava@127.0.0.1:6380/0",
+    ],
+)
+def test_no_secret_home_never_forwards_an_unauthenticated_or_admin_redis_url(
+    monkeypatch: pytest.MonkeyPatch, redis_url: str
+) -> None:
+    """Redis always authenticates, so an empty bearer does not relax the
+    watcher projection: only the named runtime ACL URL with its password is
+    forwarded, never the `default` admin user or a password-less URL."""
+    _secured_default_home(monkeypatch)
+    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "")
+    monkeypatch.delenv("AVA_LAUNCHER_PROFILE", raising=False)
+    monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", _RUNNER_DB)
+    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", redis_url)
+
+    assert dotenv_boot.watcher_runner_env() == {}
+    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", _RUNNER_REDIS)
+    assert dotenv_boot.watcher_runner_env() == {
+        "AVA_DB_URL": _RUNNER_DB,
+        "AVA_REDIS_URL": _RUNNER_REDIS,
+    }
+
+
 @pytest.mark.parametrize("different_home", [False, True])
 def test_other_home_or_pure_runner_keeps_existing_child_boot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, different_home: bool
@@ -263,7 +292,7 @@ def test_unprojected_agent_child_still_hits_owner_url_guard(
             "try:\n"
             "    settings.data_plane.db_url\n"
             "except Exception as exc:\n"
-            "    print(type(exc).__name__, 'agent-profile processes must receive an ava_runner' in str(exc))\n",
+            "    print(type(exc).__name__, 'agent-profile processes must receive a runner-class' in str(exc))\n",
         ],
         env=env,
         cwd=Path(__file__).resolve().parents[2],

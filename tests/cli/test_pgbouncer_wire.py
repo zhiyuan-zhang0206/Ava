@@ -1,9 +1,10 @@
 """End-to-end: a real PgBouncer in transaction pooling in front of a throwaway
 Postgres. Proves the load-bearing wire behaviour the unit tests cannot:
 
-- scram-sha-256 client auth against a plaintext userlist entry (the chosen auth
-  scheme), with a credential-less server hop (here TCP loopback trust, mirroring
-  the prod unix-socket trust),
+- scram-sha-256 client auth against a userlist entry, with a credential-less
+  server hop (here TCP loopback trust — the pooling behavior under test is
+  independent of the hop's auth; the production verifier userlist and SCRAM
+  pass-through socket hop are proven in tests/lifecycle/db_authority/test_single_box.py),
 - transaction pooling with `prepare_threshold=None` (never prepare) — the same
   query run across many autocommit transactions never hits "prepared statement
   does not exist" as different backends are handed out,
@@ -53,9 +54,9 @@ def _pgbouncer_in_front(
     pg_url: str, listen_addr: str = "127.0.0.1", pool_size: int = 2
 ) -> Generator[str]:
     """Start a transaction-pooling PgBouncer in front of the throwaway Postgres at
-    `pg_url`; yield the pooled connection URL. Config mirrors cli/commands/_pgbouncer,
-    but the server hop is TCP loopback (the throwaway's trust posture) rather than the
-    prod unix socket — behaviourally the same credential-less trust hop.
+    `pg_url`; yield the pooled connection URL. Pooling config mirrors
+    cli/commands/_pgbouncer; the server hop is TCP loopback under the throwaway's
+    trust posture rather than the production SCRAM pass-through socket hop.
 
     `listen_addr` lets a test bind the listener on a specific loopback address —
     e.g. 127.0.0.2 to prove the degraded-bind probe dials exactly the bound

@@ -4,10 +4,9 @@
 // area (not as a full-width page-top bar). Shows SSE connection status
 // without causing layout shifts.
 //
-// No "cluster updating" state here: while maintenance owns the entry, a
-// reload is served the Gate's full-screen static page. An already-open tab
-// reloads through Gate from the persisted-state/SSE hint, so a separate
-// updating banner would be a second conflicting owner.
+// No "cluster updating" state here: a paused or restarting cluster shows as
+// the connection state it produces, and a reload while the app is down is
+// served the Gate's full-screen unavailable page.
 
 import { useStore } from "@/lib/store";
 

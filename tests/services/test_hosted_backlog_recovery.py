@@ -148,9 +148,7 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
         [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
     ) as predecessor:
         assert predecessor.stdin is not None
-        dead = ResourceProcess(
-            pid=predecessor.pid, birth=psutil.Process(predecessor.pid).create_time()
-        )
+        dead = ResourceProcess.capture(psutil.Process(predecessor.pid))
         predecessor.stdin.close()
         predecessor.wait(timeout=3)
     row = db_conn.execute(
@@ -273,9 +271,7 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
             assert row is not None
             resources = decode_resources(row[0])
             assert isinstance(resources, IncarnationResources)
-            native = ResourceProcess(
-                pid=predecessor.pid, birth=psutil.Process(predecessor.pid).create_time()
-            )
+            native = ResourceProcess.capture(psutil.Process(predecessor.pid))
             db_conn.execute(
                 "UPDATE agents_meta SET status=%s,incarnation_resources=%s,"
                 "lease_expires_at=now()-interval '1s' WHERE id=%s",

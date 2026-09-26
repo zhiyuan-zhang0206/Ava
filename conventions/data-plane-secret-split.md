@@ -1,104 +1,117 @@
 # Data-plane credential split
 
-The cluster bearer and data-plane credentials have separate authority.
+The cluster bearer and data-plane credentials have separate authority. The
+internal data plane always authenticates, whatever the bearer
+([decision](../decisions/2026-09-26-internal-data-plane-always-authenticated.md)).
 
 | Authority | Holder | Purpose |
 |---|---|---|
-| `AVA_CLUSTER_SECRET` | Gateway and enrolled runners | Control-plane bearer for gateway API, `/ops`, bootstrap, and machine registration |
-| `AVA_DB_ADMIN_PASSWORD` | Gateway only | Main Postgres owner role and PgBouncer main entry |
+| `AVA_CLUSTER_SECRET` | Gateway and enrolled runners | Control-plane bearer for gateway API, `/ops`, bootstrap, and machine registration; empty = unauthenticated user-facing API, loopback-only listeners |
+| OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority fence |
+| OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists and rollouts leave it alone |
+| `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home only | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`) |
 | `AVA_REDIS_ADMIN_PASSWORD` | Gateway only | Redis `default` user and `requirepass` |
-| `AVA_RUNNER_DB_PASSWORD` | Gateway file; runner URL projection | Least-privilege `ava_runner` Postgres role |
 | `AVA_REDIS_PASSWORD` | Gateway file; embedded in `AVA_REDIS_URL` | Redis ACL runtime user |
+| `AVA_RUNNER_DB_PASSWORD` | Remote-managed planes only | The provider-provisioned `ava_runner` login a remote plane's bootstrap projects |
 
-Agents must never receive either admin password, `AVA_REDIS_PASSWORD` as a
-standalone variable, or a main-identity `AVA_DB_URL`. Bootstrap always projects
-the `ava_runner` URL; its Redis URL carries the runtime ACL password.
+A local plane's `.env` carries only the credential-free database endpoint
+(`postgresql://<owner>@host:port/<db>`). The schema owner is `NOLOGIN` without
+a password. Every application login is a write generation: `ava_g<n>_gateway`
+and `ava_g<n>_runner`, which inherit the `NOLOGIN` groups `ava_gateway` /
+`ava_runner` and own nothing (`shared/cluster/authority/`).
 
-The same rule applies to every `AVA_PROCESS_PROFILE=agent` process, not only
-detached agents. In particular, the single-box hosted agent-host receives an
-explicit `ava_runner` URL from both the initial service launch and its watchdog
-respawn. Agent-profile startup rejects a loopback owner URL on a
-secret-bearing cluster: profile hygiene intentionally removes owner credentials,
-so deriving an owner password from `AVA_CLUSTER_SECRET` there would create an
-invalid mixed credential instead of a legal runner connection.
+Delivery:
 
-## Upgrade a legacy cluster
+- The root launcher puts each DB-using service's class login into that
+  service's launch environment only (`AVA_DB_URL` plus the non-secret
+  `AVA_DB_GENERATION`); gateway-profile services get the gateway login, runner
+  and agent processes the runner login. The launch digest binds the generation
+  number and credential digest, never a password.
+- An operator process on the gateway home (the `ava` CLI, a script, an OS job)
+  receives the gateway login only while it runs the home's admitted runtime:
+  the selected release image, or the source checkout the home was born from.
+  Anything else keeps the credential-free endpoint and its first dial fails
+  with `NoDatabaseAuthorityError`.
+- Bootstrap projects the active runner login inside `AVA_DB_URL` for enrolled
+  runners. This interim exchange lets a stale runner holding the bearer
+  reacquire the current generation; per-unit delivery retires it.
 
-On the first eligible gateway `ava start` after this version is installed, Ava
-brings up the legacy bearer-backed data plane, applies migrations, then mints
-missing DB owner, Redis admin, and Redis runtime passwords. It re-affirms the
-owner role, changes and rewrites Redis `requirepass`, re-creates the Redis ACL
-password, refreshes the PgBouncer owner entry, writes the split values and URLs
-to the gateway `.env`, and updates the running process before service sessions
-start.
+Agents never receive an admin password, `AVA_REDIS_PASSWORD` as a standalone
+variable, or a gateway-class login. Agent-profile startup at the default home
+rejects a loopback non-runner URL on a secret-bearing cluster.
 
-An update launched by a predecessor that does not advertise the versioned
-credential-handoff protocol is a compatibility install: its child leaves the
-legacy credentials unchanged. That installs a parent capable of adopting the
-transition. A later ordinary `ava start` or rollout may then perform the split.
-This predecessor gate prevents a surviving old rollout process from attempting
-pin/recovery writes with credentials only its child knows.
+## Convert an existing home
 
-Deploy that compatibility revision by itself and monitor the rollout through
-completion before relying on the handoff for a later transition. The already
-running predecessor owns its imported recovery implementation: if this first
-compatibility rollout itself fails or is interrupted after service stop, the
-target revision cannot retrofit the predecessor's recovery ordering, and that
-old recovery may relaunch the restarter before the gateway is ready. Keep the
-rollout under operator supervision; after the compatibility revision completes,
-subsequent rollouts use the versioned handoff and the new recovery boundary.
+A home born before the data plane always authenticated has empty Redis
+credentials, a LOGIN schema owner (with `AVA_DB_ADMIN_PASSWORD` on a secret
+home), a LOGIN `ava_runner` (`AVA_RUNNER_DB_PASSWORD`), trust `pg_hba` lines and
+no database authority ledger. `ava start` refuses it before any native effect
+and names `scripts/cutover_db_authority.py`, the one explicit conversion;
+nothing converts implicitly. Development and preview homes can be destroyed
+and re-born instead. Networked homes (remote agent-runners) are not converted
+by this script: their runners hold owner-era credentials and wait for the
+fleet cutover.
 
-Before the first external mutation, the complete five-field target is atomically
-journaled at `$AVA_HOME/run/data-plane-credential-split.json`. Every phase is
-idempotent. A later start retries native data-plane bring-up with the journaled
-passwords when the current `.env` credentials no longer work, then replays the
-journal before migrations. The journal is removed only after Postgres, Redis,
-PgBouncer, `.env`, process environment, and in-memory settings agree. No manual
-Redis restart or password rollback is required after an interruption; re-run
-`ava start` and let the journal finish forward.
-
-Failed-update schema recovery does not depend on the runtime owner password.
-It connects to the target database through this gateway's local Postgres trust
-socket as the instance administrator, so a failure after Postgres accepts the
-journaled password but before the parent adopts it can still roll migrations
-back, restore last-known-good code, and restart the gateway.
-
-Only failure to construct or open that local-admin connection proves rollback
-never began and the schema is unchanged. An unexpected error after rollback
-execution starts can arrive after commit or with an uncertain commit outcome;
-recovery leaves code on the new revision, reports schema state as unknown, and
-requires the operator to verify the applied migration set and schema before
-choosing reset or fix-forward.
-
-Fresh authenticated installs mint all three values at birth. Empty-bearer
-single-box clusters are intentionally a no-op: all data-plane credentials remain
-empty and local services stay unauthenticated.
-
-Verify a completed split on the gateway without printing credentials:
+Run it from the checkout that owns the home (its `.venv`), in a gateway context,
+with the application stopped:
 
 ```bash
-grep -E '^(AVA_DB_ADMIN_PASSWORD|AVA_REDIS_ADMIN_PASSWORD|AVA_REDIS_PASSWORD)=' "$AVA_HOME/.env" | cut -d= -f1
+ava stop --keep-infra
+.venv/bin/python scripts/cutover_db_authority.py --home "$AVA_HOME"            # dry-run
+.venv/bin/python scripts/cutover_db_authority.py --home "$AVA_HOME" --execute
+ava start
+```
+
+`--home` must name the checkout's own home. The script refuses a remote-managed
+plane, a home without a registry record, an active release operation, a running
+application root and persistent terminals. Two steps run in order:
+
+- `redis` mints both passwords into `.env` (the runtime one also inside
+  `AVA_REDIS_URL`), stops the owned password-less Redis under native custody
+  with a final save, restarts it from a `redis.conf` carrying `requirepass`,
+  re-affirms the ACL user with its password, and proves that an unauthenticated
+  client is refused.
+- `db` stops the owned pooler, rewrites the always-authenticated `pg_hba` and
+  proves the running postmaster demands passwords, applies pending migrations,
+  demotes the owner and `ava_runner` to `NOLOGIN` without passwords, creates
+  `ava_gateway` and both groups' grants, proves every legacy session closed,
+  creates the ledger, mints generation 0, restarts the pooler serving exactly
+  that pair, proves both logins, activates the generation, checks the catalog
+  invariant, and only then rewrites `.env` (credential-free `AVA_DB_URL`; the
+  owner and runner passwords removed). A superuser owner is refused first.
+
+A home already born authenticated is only verified. Each step records its
+intent before its effect in `$AVA_HOME/db-authority/cutover.json` (0600): an
+interrupted run continues with what it already wrote (the same generation, the
+same passwords), and a completed run repeats as a verified no-op. Ambiguous
+state is refused before any change: partial Redis credentials, a Redis that
+demands a password the home does not record, a ledger for another owner, or a
+journal that contradicts `.env` or the ledger.
+
+The rewritten `.env` changes the configuration digest, so a release request
+prepared before the cutover must be prepared again.
+
+Verify a converted home without printing credentials:
+
+```bash
+grep -E '^(AVA_DB_ADMIN_PASSWORD|AVA_RUNNER_DB_PASSWORD|AVA_REDIS_ADMIN_PASSWORD|AVA_REDIS_PASSWORD)=' "$AVA_HOME/.env" | cut -d= -f1
 ava status
 ```
 
-The expected key names are printed by the first command; do not echo values,
-paste URLs into tickets, or put passwords in command arguments.
+Only the two Redis key names may print; do not echo values, paste URLs into
+tickets, or put passwords in command arguments.
 
 ## Routine data-plane rotation
 
-Run this only on the gateway checkout that owns the target cluster. It defaults
-to dry-run and has no `--home` flag.
+PostgreSQL has nothing to rotate by hand: the owner never logs in, and
+application logins rotate as write generations with each release transition.
+`scripts/rotate_data_plane_secrets.py` rotates the Redis credentials only; they
+do not rotate per rollout
+([decision](../decisions/2026-09-27-write-generation-rollout-choices.md)).
 
-Run it in a gateway process context, not from an agent shell. An agent context
-sees the runner-projected `AVA_DB_URL`, while its profile hygiene removes the
-admin data-plane password variables; preflight would therefore misidentify the
-owner role. The script fails closed with an invocation-posture error instead.
-This is a footgun guard against accidental agent-context invocation, not an
-authorization boundary.
-
-```bash
-cd <gateway checkout (e.g. ~/.ava/source)> && unset AVA_PROCESS_PROFILE && set -a; . ~/.ava/.env; set +a && .venv/bin/python scripts/rotate_data_plane_secrets.py ...
-```
+Run it on the gateway checkout that owns the target cluster, in a gateway
+process context (not an agent shell). It defaults to dry-run and has no
+`--home` flag.
 
 ```bash
 .venv/bin/python scripts/rotate_data_plane_secrets.py
@@ -106,46 +119,12 @@ cd <gateway checkout (e.g. ~/.ava/source)> && unset AVA_PROCESS_PROFILE && set -
 .venv/bin/python scripts/rotate_data_plane_secrets.py --scope runner --execute
 ```
 
-`--scope admin` rotates the owner Postgres password and Redis `default`
-password, then refreshes PgBouncer's main user entry. `--scope runner` rotates
-both runner credentials, replays the Redis ACL, and refreshes PgBouncer's runner
-entry. The default scope is both.
-
-Runner scope requires a restart of every enrolled runner after success. The
-PgBouncer reload updates new database connections but cannot replace an already
-cached runner URL; restarting makes the runner fetch the current projection.
-
-Gateway-local agent and agent-host launchers project the runner database URL
-from one fresh gateway `.env` snapshot: both the endpoint/database and runner
-password in that projection belong to that snapshot. Neither a cached owner
-URL nor an old runner URL is combined with a newly read password. A missing
-snapshot URL fails before launch instead of falling back to boot-time Settings.
-Enrolled remote runners are different: their authenticated bootstrap URL is
-authoritative and passes through unchanged; they never consult a local gateway
-runner password or synthesize a runner identity from an owner URL. The bootstrap
-response and local launcher share the same pure credential projection function.
-Bootstrap likewise requires its database URL from that same file snapshot;
-it cannot substitute a cached Settings URL when the file omits it. Noncredential
-defaults retain the existing Settings resolution. Connection pools bind the
-complete configuration captured at process startup and are closed at shutdown;
-configuration changes take effect through the existing restart boundary, not
-a hot pool swap or a new credential-generation protocol.
-This is per-call consistency, not a credential rotation protocol or proof that
-the database's live verifier has already been changed. Connection credentials
-must not be included in logs or manifests.
-
-The gateway process must also restart after any data-plane rotation. Its
-in-memory connection URLs and admin passwords remain stale until it reloads
-`.env`, so new DB connections and Redis reconnects fail; for runner scope, its
-in-memory `AVA_REDIS_URL` retains the old runtime password.
-
-Each execute writes a 0600 recovery file beneath
-`$AVA_HOME/backups/secret-rotation/`. On failure, re-run the exact printed
-`--execute --resume <state-file>` command. Do not attempt a manual rollback by
-changing only a URL or only one server password: the saved state is the authority
-for completing the idempotent phases. If the recovery file is unavailable, stop
-and reconcile the actual Postgres, Redis default, Redis ACL, and PgBouncer states
-before changing the gateway `.env`.
+`--scope admin` rotates the Redis `default` password (`requirepass`);
+`--scope runner` rotates the Redis ACL runtime password; the default is both.
+After runner scope, restart the gateway and every enrolled runner so each
+reloads its Redis URL. Each execute writes a 0600 recovery file beneath
+`$AVA_HOME/backups/secret-rotation/`; on failure, re-run the exact printed
+`--execute --resume <state-file>` command rather than editing one side by hand.
 
 ## Emergency bearer rotation
 

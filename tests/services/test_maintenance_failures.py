@@ -36,7 +36,7 @@ async def test_failure_is_latched_before_any_journal_io(
 
     async def broken(*_args: Any, **_kwargs: Any) -> None:
         nonlocal fail_next_read
-        before = pause_owner.begin_maintenance("failed", WHEN)
+        before = pause_owner.begin_maintenance("failed", WHEN).snapshot
         assert before.maintenance is not None
         pause_owner.change_maintenance(
             "failed", WHEN, before.maintenance, MaintenanceHold("draining", {11: 100})

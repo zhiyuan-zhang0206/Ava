@@ -20,7 +20,10 @@ mandatory.
 ## Entry Points
 
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
-- `services/pitr/activation_state.py` — strict schema-v4 atomic activation record; CAS transitions persist config digests, restart handoffs, exact WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`
+- `services/pitr/activation_state.py` — strict schema-v5 atomic activation record; CAS transitions persist config digests, the exact home operation/action/generation binding, WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`; older transport schemas refuse rather than acquiring new authority
+- `services/gateway_side/backup/snapshot.py` — creates and verifies activation's
+  encrypted logical recovery floor independently of updater orchestration;
+  activation reuses a previously recorded artifact only after re-verifying it
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 - `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
 - `services/pitr/retention_planner.py` — the default-off local dry-run planner (see *Remote retention* below)
@@ -33,18 +36,17 @@ mandatory.
   per-home spool and a source-independent, self-checked shim, while
   `AVA_PITR_ENABLED` defaults false and PostgreSQL `archive_mode` stays untouched.
   `ava cluster pitr activate` first validates that shadow posture and creates a
-  verified encrypted logical snapshot, then durably resumes through the existing
-  whole-cluster restart path. Protection requires exact PostgreSQL/local ACK/
+  verified encrypted logical snapshot under the reserved
+  [home operation authority](../../cli/release_transition/release_transition.ava.okf.md),
+  then closes and starts root plus the native data plane using one captured image. Protection requires exact PostgreSQL/local ACK/
   viewer WAL evidence, an operation-scoped base candidate, and its isolated
-  restore proof. Rollback restores frozen settings through the same restart seam
+  restore proof. Explicit rollback restores frozen settings under that same authority
   and never deletes backup data.
 - A local archived segment is not a remote ACK. When explicitly enabled, the
   GCS uploader encrypts each spooled segment, conditionally creates one immutable
   object, verifies its generation/CRC32C/metadata, and only then fsyncs an ACK
-  before removing local staging and spool files. Enabled PITR protects a
-  migration-bearing update through the newest drilled base and freshly
-  verified continuous WAL (`cli/commands/_update_pitr.py`). Daily logical
-  dumps and activation's initial logical floor remain independent.
+  before removing local staging and spool files. Daily logical dumps and
+  activation's initial logical floor remain independent.
 - `AVA_PITR_BASE_BACKUP_ENABLED` is a second, default-off gate: enabling WAL
   upload alone cannot accidentally start a multi-GiB weekly base. A candidate
   is born as one plain `pg_basebackup -Fp -X none` tree under the shared backup
@@ -60,6 +62,24 @@ mandatory.
   remote data.
 - The second gate also requires an explicit local least-privilege replication
   URL; the ordinary cluster owner remains `NOSUPERUSER` without `REPLICATION`.
+- Database dials never use a write-generation login. Capture facts, the
+  restore worker's live probes and the operator drill's live counts read as
+  the administrator acting as the schema owner over the home's owner-only
+  socket (`shared.pg_admin`); the worker receives that password-free conninfo
+  on stdin after the controller's custody-checked session. Server
+  administration (WAL switch, archiver and `pg_hba` reads, `ALTER SYSTEM`,
+  `data_directory`) runs on the administrator as itself over a
+  `shared.pg_admin.connect` session bound to the home's recorded postmaster
+  (`pitr_admin_session`).
+
+## Operation custody
+
+Base candidates, restore proofs and operator drills (and the logical backup
+jobs) each run as one directly owned worker process group; results commit only
+after confirmed closure, a zero exit and validation. A failed or cancelled
+operation with proven closure is quarantined without plaintext and the next
+one proceeds; unproven closure blocks its kind until `ava pitr operations
+retire`: [[services/pitr/operation-custody.ava.okf.md|Operation custody]].
 
 ## Remote retention (dry run)
 

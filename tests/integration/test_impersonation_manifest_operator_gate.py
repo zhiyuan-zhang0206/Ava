@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from threading import Event as ThreadEvent
 from threading import Thread
 from typing import Any
@@ -14,8 +13,6 @@ import psycopg
 import pytest
 
 from ava import _impersonation_events as reader
-from cli.commands import _release_services as release_services
-from ops.spec import ServiceSpec
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation_manifest import (
@@ -39,7 +36,6 @@ from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
 from shared.loki_index_labels import EVENT_STREAM_RETENTION
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
-from shared.runtime_release import VerifiedRelease
 from shared.telemetry import Event
 from tests.impersonation_support import attested_caller
 from tests.shared import test_impersonation_history as history_cases
@@ -426,10 +422,10 @@ def test_v1_reader_keeps_tagged_expected_send_and_excludes_same_agent_audit(
     assert history.resolve(owner.agent_id, 0)["events_completed_at"] is not None
 
 
-def test_finalizer_proof_is_private_in_root_tree_and_release_metadata(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_finalizer_proof_is_private_to_the_agent_host_in_the_root_tree(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The agent-host can receive the proof without exposing it in a launch receipt."""
+    """The agent-host can receive the proof; no other root unit is launched with it."""
     from services.ava_root import supervisor
 
     monkeypatch.setattr(
@@ -444,42 +440,6 @@ def test_finalizer_proof_is_private_in_root_tree_and_release_metadata(
     assert agent_host_env[MANIFEST_CERTIFICATION_SECRET_ENV] == "host-finalizer-proof"
     assert agent_host_env["AVA_MANIFEST_CERTIFICATION_FINALIZER"] == "1"
     assert MANIFEST_CERTIFICATION_SECRET_ENV not in supervisor._unit_env("gateway")
-
-    root = tmp_path / "image"
-    root.mkdir()
-    executable = root / "otelcol"
-    executable.write_bytes(b"not executed")
-    image = VerifiedRelease("a" * 64, "b" * 64, root, executable, root)
-    spec = ServiceSpec(
-        session="otel-collector",
-        cmd=str(executable),
-        capabilities=frozenset({"gateway"}),
-        requires_db=False,
-        curl_url="http://127.0.0.1:4318/healthz",
-    )
-
-    def first_proof(_spec: ServiceSpec) -> dict[str, str]:
-        return {MANIFEST_CERTIFICATION_SECRET_ENV: "first-proof"}
-
-    monkeypatch.setattr(
-        release_services,
-        "_service_extra_env",
-        first_proof,
-    )
-    first = release_services._command(spec, image)
-
-    def second_proof(_spec: ServiceSpec) -> dict[str, str]:
-        return {MANIFEST_CERTIFICATION_SECRET_ENV: "second-proof"}
-
-    monkeypatch.setattr(
-        release_services,
-        "_service_extra_env",
-        second_proof,
-    )
-    second = release_services._command(spec, image)
-    assert first.environment[MANIFEST_CERTIFICATION_SECRET_ENV] == "first-proof"
-    assert second.environment[MANIFEST_CERTIFICATION_SECRET_ENV] == "second-proof"
-    assert first.identity.command_digest == second.identity.command_digest
 
 
 def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(

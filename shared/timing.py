@@ -22,7 +22,6 @@ import shared.stop_timing as stop
 from shared import cluster_lock
 from shared.config import settings
 from shared.daemon.schedules.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
-from shared.host_deploy_state import UPDATER_LEASE_TTL_S
 
 # --- schedule supervision family ---------------------------------------------
 # Value lives in shared/daemon/schedules/schedule_timing.py: the gateway's schedule manager
@@ -78,34 +77,6 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.NO_PROGRESS_TIMEOUT_S,
         "the one definition of 'this host stopped making progress'",
     ),
-    "PHASE_B_ABSOLUTE_TIMEOUT_S": Clock(
-        "deploy",
-        lambda: deploy.PHASE_B_ABSOLUTE_TIMEOUT_S,
-        "the Phase-B poll's alias for the whole-run no-progress deadline",
-    ),
-    "STAGE_NO_PROGRESS_TIMEOUT_S": Clock(
-        "deploy",
-        lambda: deploy.STAGE_NO_PROGRESS_TIMEOUT_S,
-        "how long one updater stage may be in flight before host reaper and Phase-B "
-        "poll call it no-progress",
-    ),
-    "LEASE_ARM_GRACE_S": Clock(
-        "deploy",
-        lambda: deploy.LEASE_ARM_GRACE_S,
-        "how long a Phase-B poll reads paused-with-no-lease as 'the updater has "
-        "not armed yet' before treating it as a provable stop",
-    ),
-    "CONVERGING_POLL_TIMEOUT_S": Clock(
-        "deploy",
-        lambda: deploy.CONVERGING_POLL_TIMEOUT_S,
-        "how long the Phase-B poll keeps waiting on a host that is alive and making "
-        "progress before handing its convergence to the settle hold",
-    ),
-    "HARVEST_GRACE_S": Clock(
-        "deploy",
-        lambda: deploy.HARVEST_GRACE_S,
-        "one short wait before the Phase-B harvest re-probe of a converged host",
-    ),
     "LOCK_TTL_S": Clock(
         "deploy",
         lambda: cluster_lock.LOCK_TTL_S,
@@ -119,28 +90,12 @@ CLOCKS: dict[str, Clock] = {
     "LEASE_RENEW_INTERVAL_S": Clock(
         "deploy",
         lambda: deploy.LEASE_RENEW_INTERVAL_S,
-        "how often the orchestration process re-arms its own lease",
-    ),
-    "GATEWAY_READY_TIMEOUT_S": Clock(
-        "deploy",
-        lambda: deploy.GATEWAY_READY_TIMEOUT_S,
-        "how long Phase B waits for its own gateway to serve before fan-out",
-    ),
-    "UV_SYNC_TIMEOUT_S": Clock(
-        "deploy",
-        lambda: deploy.UV_SYNC_TIMEOUT_S,
-        "hard ceiling on one production uv sync inside the updater",
+        "how often a lease-owning operation re-arms its own deploy lease",
     ),
     "GATEWAY_PREFLIGHT_BUDGET_S": Clock(
         "deploy",
         lambda: deploy.GATEWAY_PREFLIGHT_BUDGET_S,
-        "updater preflight's per-dial gateway budget",
-    ),
-    "GATEWAY_DOWN_OWNER_GRACE_S": Clock(
-        "deploy",
-        lambda: deploy.GATEWAY_DOWN_OWNER_GRACE_S,
-        "how long the gateway must be unreachable before a live deploy lease "
-        "reads as dead evidence in the stranded-pause owner determination",
+        "agent-runner start preflight's per-dial gateway budget",
     ),
     "SERVICE_READY_TIMEOUT_S": Clock(
         "deploy",
@@ -153,16 +108,6 @@ CLOCKS: dict[str, Clock] = {
         "how long `ava start` waits for a non-critical service before it stops "
         "blocking the start (reported and alerted instead)",
     ),
-    "ORCHESTRATION_OWNER_WAIT_S": Clock(
-        "deploy",
-        lambda: deploy.ORCHESTRATION_OWNER_WAIT_S,
-        "server-side wait for a detached orchestration to publish its durable UI owner",
-    ),
-    "CLUSTER_DISPATCH_TIMEOUT_S": Clock(
-        "deploy",
-        lambda: deploy.CLUSTER_DISPATCH_TIMEOUT_S,
-        "client-side bound that must outlive orchestration ownership publication",
-    ),
     # --- agent-lease family (values in shared/deploy_timing.py) ---
     "AGENT_LEASE_TTL_S": Clock(
         "agent-lease",
@@ -172,7 +117,7 @@ CLOCKS: dict[str, Clock] = {
     "AGENT_LEASE_RENEW_INTERVAL_S": Clock(
         "agent-lease",
         lambda: deploy.AGENT_LEASE_RENEW_INTERVAL_S,
-        "how often a healthy agent renews its lease",
+        "the agent host's ownership beat: how often it renews hosted agent leases",
     ),
     "LEGACY_HOST_ADOPTION_SILENCE_S": Clock(
         "agent-lease",
@@ -191,12 +136,6 @@ CLOCKS: dict[str, Clock] = {
         "schedule-supervision",
         SCHEDULE_STALL_ALERT_AFTER_S,
         "how long an enabled non-completed schedule may remain sessionless before alerting",
-    ),
-    # --- updater family ---
-    "UPDATER_LEASE_TTL_S": Clock(
-        "updater",
-        lambda: UPDATER_LEASE_TTL_S,
-        "how long a crashed updater's lease keeps its host reading 'converging'",
     ),
     # --- wedged family ---
     "WEDGED_AGE_SEC": Clock(
@@ -240,39 +179,6 @@ CONSTRAINTS: list[Constraint] = [
     ),
     Constraint(
         "<",
-        "STAGE_NO_PROGRESS_TIMEOUT_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "the stage judgment must fire while the whole-run patience still holds, or "
-        "a host stuck in one stage outlasts the poll that exists to wait for it",
-    ),
-    Constraint(
-        "<",
-        "CONVERGING_POLL_TIMEOUT_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "the converging patience spends only PART of the absolute no-progress "
-        "deadline: a host that is alive and making progress is handed to the settle "
-        "hold once this elapses, and a value at or beyond the whole-run bound would "
-        "make that early exit unreachable",
-    ),
-    Constraint(
-        "==",
-        "PHASE_B_ABSOLUTE_TIMEOUT_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "the advertised Phase-B absolute deadline is an alias for the whole-run "
-        "no-progress definition, not an independent calibration",
-    ),
-    Constraint(
-        "<",
-        "HARVEST_GRACE_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "the harvest re-probe reads the host's outcome through the same "
-        "fresh-idle window the no-progress judgment defines, so its grace must "
-        "land far inside that window — a grace at or beyond it would always "
-        "find the reading stale and silently drop a converged host's completed "
-        "stage breakdown",
-    ),
-    Constraint(
-        "<",
         "AGENT_LEASE_TTL_S",
         "CORPSE_REAP_GRACE_S",
         "a crash-marked corpse must first decay offline (its lease stops being "
@@ -281,39 +187,9 @@ CONSTRAINTS: list[Constraint] = [
     ),
     Constraint(
         "<",
-        "GATEWAY_READY_TIMEOUT_S",
-        "LOCK_TTL_S",
-        "the ready wait sits BEFORE the Phase-B poll with no renewal task armed, "
-        "so it spends lease time and must stay well under the TTL",
-    ),
-    Constraint(
-        "<",
         "GATEWAY_PREFLIGHT_BUDGET_S",
         "NO_PROGRESS_TIMEOUT_S",
         "one preflight dial can never be what makes a host look stalled",
-    ),
-    Constraint(
-        "<",
-        "UV_SYNC_TIMEOUT_S",
-        "STAGE_NO_PROGRESS_TIMEOUT_S",
-        "the bounded sync's self-termination lands before the stage no-progress "
-        "judgment reaps the updater, so the updater's own recovery ladder wins the "
-        "race on its own stage",
-    ),
-    Constraint(
-        "<",
-        "UV_SYNC_TIMEOUT_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "a hung sync must fail itself into a terminal outcome before the host is "
-        "judged stalled, so the updater's recovery ladder beats the stalled-updater reap",
-    ),
-    Constraint(
-        "==",
-        "SERVICE_READY_TIMEOUT_S",
-        "GATEWAY_READY_TIMEOUT_S",
-        "same physical job (a local daemon binds its port) and same value — but "
-        "deliberately separate constants with different observers and escalation "
-        "paths; retuning one is not automatically a reason to retune the other",
     ),
     Constraint(
         "<",
@@ -329,24 +205,7 @@ CONSTRAINTS: list[Constraint] = [
         "NO_PROGRESS_TIMEOUT_S",
         "the settle hold shares the whole-run no-progress definition — it lapses "
         "when the host it waits for has outlived the longest legitimate leg, "
-        "never before; the reaper's earlier per-stage judgment "
-        "(STAGE_NO_PROGRESS_TIMEOUT_S) ends the hold through the convergence "
-        "path instead",
-    ),
-    Constraint(
-        "<",
-        "ORCHESTRATION_OWNER_WAIT_S",
-        "CLUSTER_DISPATCH_TIMEOUT_S",
-        "the detached child must publish ownership before the dispatching client "
-        "can time out and invite a duplicate submission",
-    ),
-    Constraint(
-        "<",
-        "GATEWAY_DOWN_OWNER_GRACE_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "the reachability evidence opens before the no-progress reap: a hung "
-        "orchestration is still ended by the reaper on its own clock, and this "
-        "earlier bound only recovers pauses whose owner is already dead",
+        "never before",
     ),
     # --- schedule supervision family ---
     Constraint(
@@ -358,11 +217,19 @@ CONSTRAINTS: list[Constraint] = [
     ),
     # --- agent-lease family ---
     Constraint(
-        "==",
+        ">=",
         "AGENT_LEASE_TTL_S",
         "10 * AGENT_LEASE_RENEW_INTERVAL_S",
-        "TTL = 10x the renewal interval, so a transient renewal blip never reads "
-        "as death against the reaper cadence",
+        "the lease must outlive at least ten missed renewal beats, so a transient "
+        "renewal blip never reads as death against the reaper cadence",
+    ),
+    Constraint(
+        ">=",
+        "LEGACY_HOST_ADOPTION_SILENCE_S",
+        "4 * AGENT_LEASE_RENEW_INTERVAL_S",
+        "legacy adoption needs four missed renewal beats of silence, so a live "
+        "predecessor between two beats (or behind one slow renewal) never reads "
+        "as silent",
     ),
     Constraint(
         "<",
@@ -371,14 +238,6 @@ CONSTRAINTS: list[Constraint] = [
         "the legacy adoption silence window must land inside the lease it "
         "shortens — at or beyond the TTL a dead predecessor's row could only "
         "ever be adopted by natural expiry, and the evidence gate would be inert",
-    ),
-    # --- updater family ---
-    Constraint(
-        "==",
-        "UPDATER_LEASE_TTL_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "the updater lease must not expire before the no-progress judgment that "
-        "reaps a hung updater — a slow-but-alive updater is never reaped mid-work",
     ),
     # --- wedged family ---
     Constraint(

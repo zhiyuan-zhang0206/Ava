@@ -173,7 +173,7 @@ def install(
 
 
 def main() -> int:
-    """Shared dependency-free entry point for install.sh and the bounded updater."""
+    """Dependency-free entry point for locked source-development dependencies."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--locked", action="store_true", help="Always enforced")

@@ -19,10 +19,13 @@ invariants here:
 - the evidence tables come from ``DRILL_TABLES`` -- ``agent_tasks``, not
   ``tasks``.
 
-Like the restore proof, the drill must run as its process-group leader: the
-sandbox postmaster rides in the drill's process group so a crashed drill stays
-reapable by a single group signal. ``ava pitr drill`` refuses to start
-otherwise and prints the ``setsid`` re-run.
+The restricted operation worker owns this flow and reports progress on stderr,
+which the controller streams to the operator. Trusted tools and the sandbox
+postmaster inherit its group, and the postmaster is receipted because its
+children setsid() out of it. The controller refuses operator input mistakes
+before launch and confirms closure of the group and of that family before
+accepting the retained drill evidence. A controller crash leaves the drill kind
+blocked until `ava pitr operations retire` re-proves closure.
 """
 
 from __future__ import annotations
@@ -54,18 +57,20 @@ from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.restore_postgres import (
     SandboxPostgresIdentity,
     _append_recovery_config,
+    _capture_sandbox,
     _free_port,
     _live_identity,
     _matching_sandbox,
     _run,
     _spawn_sandbox_postgres,
-    _stop_process_tree,
     _wait_for_sandbox_identity,
     _write_sandbox_config,
 )
+from services.pitr.restore_postgres import (
+    _stop_sandbox as _stop_postmaster,
+)
 from services.pitr.restore_proof import (
     LivePostgresIdentity,
-    RestoreProofError,
     _base_restore_object,
     _download_wal,
 )
@@ -285,29 +290,36 @@ def _run_sandbox(
     sandbox: SandboxPostgresIdentity | None = None
     try:
         started = time.monotonic()
-        sandbox = _wait_for_sandbox_identity(process, pgdata, sandbox_log, request.timeout_seconds)
-        if sandbox.pgid != os.getpgrp():
+        sandbox = _capture_sandbox(process, pgdata)
+        ready = _wait_for_sandbox_identity(sandbox, pgdata, sandbox_log, request.timeout_seconds)
+        if not sandbox.native.same_birth(ready.native):
+            raise DrillError("sandbox pid file differs from its captured launch")
+        if sandbox.pgid != os.getpgrp() or sandbox.sid != os.getsid(0):
             raise DrillError("sandbox PostgreSQL escaped the drill process group")
         evidence.criteria["sandbox"] = {
-            "pid": sandbox.pid,
+            "pid": sandbox.native.process.pid,
+            "native": sandbox.native.value(),
             "pgid": sandbox.pgid,
+            "sid": sandbox.sid,
             "port": port,
             "seconds": round(time.monotonic() - started, 1),
         }
-        say(f"sandbox postmaster up (pid {sandbox.pid}, port {port}); replaying to target")
-        _wait_for_promotion(request, process, sandbox_log, socket_dir, port, evidence)
+        say(
+            f"sandbox postmaster up (pid {sandbox.native.process.pid}, port {port}); replaying to target"
+        )
+        _wait_for_promotion(request, sandbox, sandbox_log, socket_dir, port, evidence)
         evidence.criteria["stop_lines"] = _stop_lines(sandbox_log)
         _collect_criteria(request, evidence, socket_dir, port)
         live_after = _live_identity(request.live_db_url, request.data_directory)
         evidence.criteria["live_after"] = dataclasses.asdict(live_after)
-        evidence.criteria["live_unchanged"] = live_before == live_after
+        evidence.criteria["live_unchanged"] = live_before.unchanged(live_after)
     finally:
         _teardown_sandbox(request, evidence, pgdata, sandbox, process, port, say)
 
 
 def _wait_for_promotion(
     request: DrillRequest,
-    process: subprocess.Popen[str],
+    captured: SandboxPostgresIdentity,
     sandbox_log: Path,
     socket_dir: Path,
     port: int,
@@ -317,10 +329,9 @@ def _wait_for_promotion(
     deadline = time.monotonic() + request.timeout_seconds
     last_error: Exception | None = None
     while time.monotonic() < deadline:
-        if process.poll() is not None:
+        if captured.native.live() is None:
             raise DrillError(
-                f"sandbox postmaster exited {process.returncode} before promotion: "
-                f"{_log_tail(sandbox_log)}"
+                f"sandbox postmaster exited before promotion: {_log_tail(sandbox_log)}"
             )
         try:
             with psycopg.connect(dsn, connect_timeout=2) as conn, conn.cursor() as cur:
@@ -415,35 +426,40 @@ def _teardown_sandbox(
     evidence: DrillEvidence,
     pgdata: Path,
     sandbox: SandboxPostgresIdentity | None,
-    process: subprocess.Popen[str],
+    process: subprocess.Popen[bytes],
     port: int,
     say: Callable[[str], None],
 ) -> None:
     teardown: dict[str, object] = {"stopped": False, "error": None}
     try:
-        if sandbox is not None:
-            _stop_sandbox(request.pg_ctl, pgdata, sandbox)
+        _stop_captured_sandbox(pgdata, sandbox, process)
         teardown["stopped"] = True
         say("sandbox stopped")
     except Exception as exc:  # the residue scan below is the backstop
         teardown["error"] = f"{type(exc).__name__}: {exc}"
     finally:
-        with suppress(Exception):
-            process.wait(timeout=10)
+        if teardown["stopped"]:
+            with suppress(Exception):
+                process.wait(timeout=10)
         evidence.criteria["teardown"] = teardown
         evidence.criteria["residue"] = _residue_scan(request.scratch, port, pgdata)
 
 
-def _stop_sandbox(pg_ctl: Path, pgdata: Path, sandbox: SandboxPostgresIdentity) -> None:
+def _stop_captured_sandbox(
+    pgdata: Path, sandbox: SandboxPostgresIdentity | None, process: subprocess.Popen[bytes]
+) -> None:
+    if sandbox is None:
+        raise DrillError("sandbox native birth was not captured; closure is unresolved")
+    _stop_sandbox(pgdata, sandbox, process)
+
+
+def _stop_sandbox(
+    pgdata: Path, sandbox: SandboxPostgresIdentity, process: subprocess.Popen[bytes]
+) -> None:
     """Stop the sandbox; mirrors IsolatedPostgresRestoreExecutor._stop."""
     if Path(sandbox.data_directory) != pgdata.resolve():
         raise DrillError("refusing to stop PostgreSQL outside the drill sandbox")
-    with suppress(RestoreProofError):
-        _run(
-            [str(pg_ctl), "-D", str(pgdata), "-m", "fast", "-w", "stop"],
-            timeout=30,
-        )
-    _stop_process_tree(sandbox)
+    _stop_postmaster(sandbox, process)
     if _matching_sandbox(sandbox) is not None:
         raise DrillError("sandbox PostgreSQL could not be reaped")
 
@@ -544,19 +560,29 @@ def _require_group_leader() -> None:
     if os.getpgrp() != os.getpid():
         raise DrillError(
             "the restore drill must run as its process-group leader so the sandbox postmaster "
-            "shares the group and a crashed drill stays reapable; re-run it under setsid"
+            "inherits the controller-owned operation group; use ava pitr drill"
+        )
+
+
+def validate_drill_inputs(candidate: CandidateManifest, scratch: Path, target_lsn: str) -> None:
+    """Refuse operator input mistakes before any drill operation starts."""
+    if not scratch.is_absolute():
+        raise DrillError(f"drill scratch {scratch} must be an absolute path")
+    _refuse_used_scratch(scratch)
+    _require_target_lsn(candidate, target_lsn)
+
+
+def _refuse_used_scratch(scratch: Path) -> None:
+    if scratch.exists() and (not scratch.is_dir() or any(scratch.iterdir())):
+        raise DrillError(
+            f"drill scratch {scratch} is not fresh; it must be absent or an empty directory "
+            "(the previous evidence tree is never overwritten)"
         )
 
 
 def _require_fresh_scratch(scratch: Path) -> None:
-    if scratch.exists():
-        if not scratch.is_dir() or any(scratch.iterdir()):
-            raise DrillError(
-                f"drill scratch {scratch} is not fresh; it must be absent or an empty directory "
-                "(the previous evidence tree is never overwritten)"
-            )
-    else:
-        scratch.mkdir(parents=True, mode=0o700)
+    _refuse_used_scratch(scratch)
+    scratch.mkdir(parents=True, mode=0o700, exist_ok=True)
 
 
 def _require_target_lsn(candidate: CandidateManifest, target_lsn: str) -> None:

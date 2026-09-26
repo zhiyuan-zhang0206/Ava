@@ -17,6 +17,7 @@ import threading
 import time
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from services.pitr import base_candidate
@@ -164,42 +165,16 @@ def test_run_capture_failure_carries_the_child_output(tmp_path: Path) -> None:
         "import sys; print('stdout-detail'); print('boom-detail', file=sys.stderr); sys.exit(3)",
     ]
     with pytest.raises(BaseCandidateError) as caught:
-        base_candidate._run_capture(
+        (tmp_path / "owner.json").write_text("{}")
+        base_candidate._run_tool(
             command,
             env={"PGPASSWORD": "x"},
-            owner=tmp_path / "owner.json",
             stop=threading.Event(),
         )
     message = str(caught.value)
     assert "exited 3" in message
     assert "stdout-detail" in message
     assert "boom-detail" in message
-
-
-def test_run_capture_stop_path_carries_the_child_output(tmp_path: Path) -> None:
-    """An interrupted capture must still name what the child emitted before it
-    was stopped — the stop and six-hour-bound branches share this shape."""
-    command = [
-        sys.executable,
-        "-c",
-        "import sys, time; print('partial-out', file=sys.stderr); sys.stderr.flush(); time.sleep(30)",
-    ]
-    stop = threading.Event()
-    timer = threading.Timer(0.4, stop.set)
-    timer.start()
-    try:
-        with pytest.raises(BaseCandidateError) as caught:
-            base_candidate._run_capture(
-                command,
-                env={"PGPASSWORD": "x"},
-                owner=tmp_path / "owner.json",
-                stop=stop,
-            )
-    finally:
-        timer.cancel()
-    message = str(caught.value)
-    assert "was stopped" in message
-    assert "partial-out" in message
 
 
 def test_verify_candidate_failure_carries_the_child_output(
@@ -283,12 +258,10 @@ def test_validate_replication_hba_requires_a_rule_covering_the_role(
     rules: list[tuple[str, str, str | None]],
     covers: bool,
 ) -> None:
-    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_url", lambda: "admin-url")
-
-    def _connect(_url: str) -> _FakeConn:
+    def _session() -> _FakeConn:
         return _FakeConn(rules)
 
-    monkeypatch.setattr(base_candidate.psycopg, "connect", _connect)
+    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_session", _session)
     replication = {"user": "ava_pitr_repl", "host": "127.0.0.1", "port": "5433"}
     if covers:
         _validate_replication_hba(replication)
@@ -300,11 +273,10 @@ def test_validate_replication_hba_requires_a_rule_covering_the_role(
 def test_validate_replication_hba_wraps_probe_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def boom(_url: str) -> _FakeConn:
+    def boom() -> _FakeConn:
         raise RuntimeError("registry missing")
 
-    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_url", lambda: "admin-url")
-    monkeypatch.setattr(base_candidate.psycopg, "connect", boom)
+    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_session", boom)
     with pytest.raises(BaseCandidateError, match="cannot verify the replication pg_hba"):
         _validate_replication_hba({"user": "ava_pitr_repl", "host": "127.0.0.1"})
 
@@ -391,7 +363,12 @@ def test_validate_replication_contract_fails_closed_without_replication_row(
         capture_output=True,
     )
     try:
-        monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_url", lambda: admin)
+        # The scratch server has no home receipt: its session stands in for the
+        # custody-checked admin session.
+        monkeypatch.setattr(
+            "services.pitr.activation_runtime.pitr_admin_session",
+            lambda: psycopg.connect(admin, autocommit=True),
+        )
         with pytest.raises(BaseCandidateError, match="physical-replication rule"):
             _validate_replication_contract(db_url, repl_url)
 
@@ -442,3 +419,172 @@ def test_validate_replication_contract_fails_closed_without_replication_row(
             capture_output=True,
         )
         shutil.rmtree(sock, ignore_errors=True)
+
+
+# ─── controller commit boundary after worker group closure ───────────────────
+
+
+def _prepared(tmp_path: Path, chain_id: str = "20260926T000000Z"):
+    import hashlib
+    import json
+    from dataclasses import replace
+
+    from services.pitr.base_stream import snapshot_candidate
+    from tests.services.test_pitr_base_scheduler import _candidate
+
+    root = tmp_path / "root"
+    ready = root / "base-candidates" / f"{chain_id}.ready"
+    ready.mkdir(parents=True)
+    (ready / "backup_manifest").write_bytes(b"manifest")
+    (ready / "PG_VERSION").write_bytes(b"17\n")
+    candidate = _candidate(chain_id)
+    candidate = replace(
+        candidate,
+        base_object=replace(candidate.base_object, source_sha256=snapshot_candidate(ready)[1]),
+        native_manifest_sha256=hashlib.sha256(b"manifest").hexdigest(),
+    )
+    for path in (
+        root / "base-plans" / f"{chain_id}.plan.json",
+        root / "base-facts" / f"{chain_id}.json",
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"staged": True}))
+    return root, ready, candidate
+
+
+def test_commit_accepts_only_the_recorded_worker_then_retires_staging(tmp_path: Path) -> None:
+    import psutil
+
+    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.operation_custody import NativeProcess
+
+    root, ready, candidate = _prepared(tmp_path)
+    base_candidate._record_owner(root, candidate.chain_id)
+    worker = NativeProcess.capture(psutil.Process())
+    base_candidate.commit_base_candidate(root, candidate, worker)
+    manifest = root / "base-manifests" / f"{candidate.chain_id}.candidate.json"
+    assert CandidateManifest.from_json(manifest.read_text()) == candidate
+    assert not ready.exists()
+    assert not list((root / "base-facts").iterdir()) and not list((root / "base-plans").iterdir())
+
+
+@pytest.mark.parametrize("change", ["owner", "tree"])
+def test_commit_refusal_after_closure_retains_every_staged_file(
+    tmp_path: Path, change: str
+) -> None:
+    from dataclasses import replace
+
+    import psutil
+
+    from services.pitr.operation_custody import NativeProcess
+
+    root, ready, candidate = _prepared(tmp_path)
+    base_candidate._record_owner(root, candidate.chain_id)
+    worker = NativeProcess.capture(psutil.Process())
+    if change == "owner":
+        worker = replace(worker, process=replace(worker.process, pid=1))
+    else:
+        (ready / "PG_VERSION").write_bytes(b"16\n")
+    before = sorted(path.relative_to(root) for path in root.rglob("*"))
+    with pytest.raises(BaseCandidateError):
+        base_candidate.commit_base_candidate(root, candidate, worker)
+    assert sorted(path.relative_to(root) for path in root.rglob("*")) == before
+    assert not (root / "base-manifests").exists()
+
+
+def test_resumed_candidate_records_its_worker_before_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operator retirement removed the prior owner; the resuming worker binds itself."""
+    import json
+    import os
+
+    from services.pitr.base_candidate import CandidateFacts
+    from services.pitr.space_budget import CandidateSpaceBudget
+
+    root, _ready, candidate = _prepared(tmp_path)
+    owner = root / "base-facts" / f"{candidate.chain_id}.owner.json"
+    facts = CandidateFacts(17, "1", 16 << 20, 1, "migrations", "ava")
+
+    class _StoppedError(Exception):
+        pass
+
+    def verify(_path: Path, _stop: object) -> None:
+        assert json.loads(owner.read_text())["native"]["process"]["pid"] == os.getpid()
+        raise _StoppedError
+
+    def no_reconcile(_root: Path, *, key: bytes, key_id: str) -> None:
+        return None
+
+    def load_facts(_root: Path, _chain: str) -> CandidateFacts:
+        return facts
+
+    monkeypatch.setattr(base_candidate, "reconcile_runtime_state", no_reconcile)
+    monkeypatch.setattr(base_candidate, "_load_facts", load_facts)
+    monkeypatch.setattr(base_candidate, "_verify_candidate", verify)
+    with pytest.raises(_StoppedError):
+        base_candidate.prepare_base_candidate(
+            root=root,
+            prefix="pitr",
+            key=b"k" * 32,
+            key_id="key",
+            store=object(),  # type: ignore[arg-type]  # verification stops first
+            budget=CandidateSpaceBudget(0, 0, 0, 0),
+            replication_db_url="postgresql://unused",
+        )
+    assert json.loads(owner.read_text())["chain_id"] == candidate.chain_id
+
+
+@pytest.mark.parametrize("outcome", ["failure", "stop"])
+def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    """A resumable `.ready` that fails verification would fail every retry: the
+    worker rejects it and quarantine discards it. A stop keeps it resumable."""
+    import json
+    import os
+
+    import psutil
+
+    from services.pitr.base_candidate import CandidateFacts
+    from services.pitr.operation_custody import NativeProcess, OperationWorker
+    from services.pitr.space_budget import CandidateSpaceBudget
+
+    root, ready, candidate = _prepared(tmp_path)
+    owner = root / "base-facts" / f"{candidate.chain_id}.owner.json"
+    raised = (
+        BaseCandidateError("pg_verifybackup exited 1")
+        if outcome == "failure"
+        else KeyboardInterrupt()
+    )
+
+    def verify(_path: Path, _stop: object) -> None:
+        raise raised
+
+    def no_reconcile(_root: Path, *, key: bytes, key_id: str) -> None:
+        return None
+
+    def load_facts(_root: Path, _chain: str) -> CandidateFacts:
+        return CandidateFacts(17, "1", 16 << 20, 1, "migrations", "ava")
+
+    monkeypatch.setattr(base_candidate, "reconcile_runtime_state", no_reconcile)
+    monkeypatch.setattr(base_candidate, "_load_facts", load_facts)
+    monkeypatch.setattr(base_candidate, "_verify_candidate", verify)
+    with pytest.raises(type(raised)):
+        base_candidate.prepare_base_candidate(
+            root=root,
+            prefix="pitr",
+            key=b"k" * 32,
+            key_id="key",
+            store=object(),  # type: ignore[arg-type]  # verification ends first
+            budget=CandidateSpaceBudget(0, 0, 0, 0),
+            replication_db_url="postgresql://unused",
+        )
+    rejected = json.loads(owner.read_text())["state"] == "rejected"
+    assert rejected is (outcome == "failure")
+    work = tmp_path / "work"
+    work.mkdir()
+    worker = OperationWorker(os.getpid(), NativeProcess.capture(psutil.Process()))
+    base_candidate.quarantine_candidate_staging(root, work, worker)
+    assert ready.exists() is (outcome == "stop")
+    assert (root / "base-facts" / f"{candidate.chain_id}.json").exists() is (outcome == "stop")

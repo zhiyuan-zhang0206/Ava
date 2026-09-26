@@ -1,32 +1,15 @@
-"""ava-browser-mcp healthcheck — called every 60s by the watchdog.
-
-Probe the shared chrome MCP service over its Unix socket with a lock-free `ping`
-(connect + reply proves the accept/read loop is alive). `ping` deliberately does
-NOT round-trip to the upstream or take the daemon's serial lock — a slow browser
-op can hold that lock past the probe timeout, and probing through it would
-false-kill a busy-but-healthy daemon. A dead upstream is surfaced the other way:
-the daemon exits, its socket vanishes, and the connect below fails -> restart. On
-death, respawn the daemon in the ava-browser-mcp session via
-`shared.service_respawn.respawn_service` (same pattern as the browser / milvus
-healthchecks).
-"""
+"""Read-only health probes for browser mcp; the root supervisor owns recovery."""
 
 import json
 import logging
 import socket
-import sys
-from pathlib import Path
 
 from services.browser.protocol import Request, Response
-from shared.config import settings
-from shared.log import init_gateway_process
 from shared.paths import chrome_mcp_socket
-from shared.service_respawn import respawn_service
 
 _log = logging.getLogger("services.healthchecks.browser_mcp")
 
 _TIMEOUT_S = 5.0
-_CMD = ".venv/bin/python -m services.browser.mcp_daemon"
 
 
 def _probe() -> bool:
@@ -72,27 +55,3 @@ def _is_alive() -> bool:
     except Exception:
         _log.exception("[browser-mcp healthcheck] probe raised unexpectedly; treating as dead")
         return False
-
-
-def _restart_daemon() -> bool:
-    project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
-    return respawn_service(
-        "browser-mcp", _CMD, project_root, extra_env={"AVA_PROCESS_PROFILE": "runner"}
-    )
-
-
-def main() -> None:
-    init_gateway_process(name="browser-mcp-healthcheck")
-    if _is_alive():
-        _log.debug("[browser-mcp healthcheck] alive, no-op")
-        return
-    _log.info("[browser-mcp healthcheck] dead, restarting...")
-    if _restart_daemon():
-        _log.info("[browser-mcp healthcheck] daemon restarted")
-    else:
-        _log.error("[browser-mcp healthcheck] restart FAILED — manual intervention needed")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

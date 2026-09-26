@@ -16,11 +16,12 @@ There is no standalone migrate command. Pending migrations are applied as a step
 `ava start` (early in boot, after Postgres is up and before the schema-current assertion), so
 any restart that crosses a schema change catches the DB up automatically.
 
-Real production upgrades go through `ava cluster update` (the CLI — the only
-update entry point since `ava.self.update()` was removed 2026-08; run by the
-Release agent with user approval), which on the gateway ends in a fresh
-`ava start` that migrates. For a manual catch-up, run `ava cluster update` (or just `ava start`, which
-applies pending migrations on the way up).
+Real production upgrades go through `ava cluster update --prepared REQUEST`
+(the CLI — the only update entry point; run by the Release agent with user
+approval), which submits or resumes one immutable release operation whose
+start phase runs the ordinary `ava start` boot path that migrates. For a
+manual catch-up, run `ava start` directly, which applies pending migrations on
+the way up.
 
 ## Adding a new migration
 
@@ -44,7 +45,9 @@ In CI, `scripts/lint_migrations.py` statically checks the timestamp filename for
 `db/schema.sql` stamps the baseline sentinel and no longer carries a `generate_series` seed,
 and that a migration whose strict (non-idempotent) DDL is already folded into the baseline
 is stamped in the seed — an unstamped strict delta dies on the first fresh-DB bootstrap, so
-lint fails it early. Local pre-check: `.venv/bin/python scripts/lint_migrations.py`. There is no
+lint fails it early. It also refuses `SET ROLE` / `RESET ROLE` / session-authorization
+changes: migrations run as the OS-user administrator acting as the schema owner, so every
+object stays owner-owned and only the owner's privileges apply. Local pre-check: `.venv/bin/python scripts/lint_migrations.py`. There is no
 continuity / next-number / cross-branch-collision check — timestamp names are collision-free by
 construction.
 

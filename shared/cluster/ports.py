@@ -166,7 +166,7 @@ def record_health_port(rec: cluster.ClusterRecord, svc: str) -> int:
     This is the install-time producer only. A health port is a per-UNIT fact
     (`shared.env_registry.health_port_env_aliases()`), so nothing hands this value to another
     unit — a second unit sharing the machine's localhost namespace states its own
-    base instead (`ava enroll --health-port-base`).
+    base instead (`ava start --health-port-base`).
 
     The default home keeps its fixed legacy value; every other record carries
     the port. A missing key on an allocated record is a corrupt record —

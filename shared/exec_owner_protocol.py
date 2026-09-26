@@ -11,8 +11,7 @@ from uuid import UUID
 import psutil
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from shared.incarnation_resources import ExecAllocation
-from shared.proc_tree import create_time_matches, stable_create_time
+from shared.incarnation_resources import ExecAllocation, ResourceProcess
 
 MAX_OWNER_MESSAGE = 16 * 1024
 
@@ -65,22 +64,21 @@ class OwnerClosed(BaseModel):
 
 
 def validate_native_ready(
-    ready: OwnerReady, launcher_pid: int, launcher_birth: float, context_path: Path
+    ready: OwnerReady, launcher_identity: ResourceProcess, context_path: Path
 ) -> None:
     """Bind actual owner Python, allowing only the native Windows venv redirector."""
     owner, root = ready.allocation.owner_process, ready.allocation.root_process
     if owner is None or root is None:
         raise ValueError("ready receipt lacks owner/root identities")
-    launcher = psutil.Process(launcher_pid)
+    launcher = psutil.Process(launcher_identity.pid)
     actual = psutil.Process(owner.pid)
     # The owner writes its own receipt and the launcher reads it back: both
-    # sides read the stable start time; the tolerance stays for receipts
-    # written by older code.
-    if not create_time_matches(
-        stable_create_time(launcher), launcher_birth
-    ) or not create_time_matches(stable_create_time(actual), owner.birth):
+    # sides must read exactly the same stable native birth.
+    if not launcher_identity.same_birth(ResourceProcess.capture(launcher)) or not owner.same_birth(
+        ResourceProcess.capture(actual)
+    ):
         raise ValueError("ready owner or launcher native birth changed")
-    if owner.pid != launcher_pid:
+    if owner.pid != launcher_identity.pid:
         arguments = [
             "-I",
             "-B",
@@ -93,13 +91,13 @@ def validate_native_ready(
         ]
         if (
             sys.platform != "win32"
-            or actual.ppid() != launcher_pid
+            or actual.ppid() != launcher_identity.pid
             or actual.cmdline()[1:] != arguments
             or launcher.cmdline()[1:] != arguments
         ):
             raise ValueError("ready owner is not the exact launched Python/redirector")
     child = psutil.Process(root.pid)
-    if not create_time_matches(stable_create_time(child), root.birth) or child.ppid() != owner.pid:
+    if not root.same_birth(ResourceProcess.capture(child)) or child.ppid() != owner.pid:
         raise ValueError("ready root is not the exact owner's direct child")
 
 

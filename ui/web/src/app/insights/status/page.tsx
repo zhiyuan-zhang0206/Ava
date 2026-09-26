@@ -1,27 +1,14 @@
 "use client";
 
-// /insights#status — live cluster status. Services renders the cluster-wide
-// Update / Restart actions and agent-runners table; Gateway combines the
-// gateway card (host / status / health / up since) with its daemon list. The
-// Resources block was removed 2026-08-24 because Grafana's "Host & data plane"
-// row covers per-host resource charts. (The per-agent session tree was removed
-// 2026-08-05 per user ruling — the Grafana embed shows runner health now.)
-//
-// Rendered as a section of the vertical Insights page; `useSectionVisible`
-// starts the 15s status poll on first paint and pauses it once the Status
-// section scrolls off-screen, so it doesn't keep hitting the gateway while
-// unseen. The update check (a remote `git fetch` on the gateway) is NOT on an
-// interval: it fetches when the section comes on screen and on the explicit
-// re-check button — an update is a human-paced action, not a live signal.
-// Also usable as the bare `/insights/status` route (no provider ⇒ visible
-// defaults true).
+// Live cluster status: service readiness, machine roster, and reported release
+// observations. Visibility bounds the status poll; this page has no deployment
+// mutation or source-checkout update preflight.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw, RotateCcw, Server } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Loader2, Server } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { type ComponentType, type ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -31,11 +18,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { errMsg } from "@/lib/errors";
-import { useStore } from "@/lib/store";
 import { formatRelative } from "@/lib/time";
-import type { ClusterPanel, ClusterUpdateCheck, MachineStatus, SystemStatus } from "@/lib/types";
-import { CLUSTER_STATUS_QUERY_KEY, SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
+import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/types";
+import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/use-cluster-health";
 
 import { useSectionVisible } from "@/app/control/_visibility";
 import { FLEX } from "@/lib/layout";
@@ -114,7 +99,6 @@ const TONE_DOT: Record<StatusTone, string> = {
 
 type MachineVerdictLabel =
   | "identityMismatch"
-  | "strandedHold"
   | "statusUnknown"
   | "paused"
   | "running"
@@ -126,10 +110,6 @@ function machineVerdict(m: MachineStatus): { label: MachineVerdictLabel; tone: S
   // answered under the WRONG machine_name, so this row's gateway_url points at
   // the wrong host. It outranks online/offline — never green.
   if (m.identity_mismatch) return { label: "identityMismatch", tone: "error" };
-  // A stranded hold (task #3132) is louder than every ordinary state: an update
-  // failed and nothing will resume the host — never render it as "paused" or a
-  // plain "offline" while the record stands.
-  if (m.stranded_hold_since) return { label: "strandedHold", tone: "error" };
   if (m.online && m.paused === null) return { label: "statusUnknown", tone: "warn" };
   if (m.online && m.paused === true) return { label: "paused", tone: "warn" };
   if (m.online && m.paused === false) return { label: "running", tone: "ok" };
@@ -143,8 +123,8 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: "runn
   const t = useTranslations("insights.status");
   const v = machineVerdict(m);
   // running_sha is the code the live process loaded; head_sha is its checkout.
-  // A drift means the checkout advanced (pull / rollout) but the process was
-  // not restarted — a node can read pin ✓ yet still run stale code.
+  // A drift means the checkout advanced (pull) but the process was not
+  // restarted, so it still runs stale code.
   const codeDrift =
     m.running_sha != null && m.head_sha != null && m.running_sha !== m.head_sha;
   return (
@@ -159,26 +139,6 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: "runn
           ⚠{m.running_sha?.slice(0, 7)}
         </span>
       )}
-      {!codeDrift && m.on_pin === false && (
-        <span
-          className="text-amber-600 dark:text-amber-400"
-          title={t("offPin", { head: m.head_sha?.slice(0, 7) ?? "?" })}
-        >
-          {t("offPinBadge")}
-        </span>
-      )}
-      {/* The live settle hold names this host. Recorded by the lease when the
-          rollout exited (this host acked its self-update and had not finished
-          converging), NOT a live check — the off-pin / code-drift badges beside it
-          are the live verdicts, and its absence does not prove convergence. */}
-      {m.settle_waited_on && (
-        <span
-          className="text-amber-600 dark:text-amber-400"
-          title={t("settleHold")}
-        >
-          {t("settleHoldBadge")}
-        </span>
-      )}
     </span>
   );
 }
@@ -187,9 +147,9 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: "runn
 // probes alive = healthy; any dead = degraded; unknown probes = "—".
 function healthVerdict(m: MachineStatus): { label: "none" | "degraded" | "healthy"; tone: StatusTone } {
   if (!m.online) return { label: "none", tone: "muted" };
-  if ((m.serve_agent_runner && m.agent_host_online === false) || m.watchdog_online === false)
+  if ((m.serve_agent_runner && m.agent_host_online === false) || m.supervisor_online === false)
     return { label: "degraded", tone: "warn" };
-  if ((!m.serve_agent_runner || m.agent_host_online === true) && m.watchdog_online === true)
+  if ((!m.serve_agent_runner || m.agent_host_online === true) && m.supervisor_online === true)
     return { label: "healthy", tone: "ok" };
   return { label: "none", tone: "muted" };
 }
@@ -201,176 +161,15 @@ function daemonMark(ok: boolean | null | undefined): string {
 // "Up since" for a live host — a boot/announce stamp, not a heartbeat, so it is
 // only ever rendered, never freshness-tested (see MachineStatus.up_since_at). An
 // offline host's row states the stop instead, which IS a "last seen".
-// ── Services: agent-runner table + cluster-wide actions ──
+// Services and agent-runner observations.
 
 function ServicesPanel({ data }: { data: ClusterPanel }) {
   const t = useTranslations("insights.status");
-  const visible = useSectionVisible();
-  const showToast = useStore((s) => s.showToast);
-  const queryClient = useQueryClient();
-  const isGateway = data.current_serve_gateway;
-
-  // Preflight check — drives the Update button's "no updates" state. Gateway
-  // only (the endpoint 400s elsewhere); the frontend always runs on the
-  // gateway, but gate defensively. No interval: each call runs a remote
-  // `git fetch` on the gateway, and "commits behind origin" only changes at
-  // human pace — so fetch when the section comes on screen (staleTime bounds
-  // re-entry churn), on the explicit re-check button below, and via the
-  // invalidation after an update is triggered.
-  const check = useQuery({
-    queryKey: ["cluster-update-check"],
-    queryFn: api.checkClusterUpdate,
-    staleTime: 5 * 60_000,
-    enabled: isGateway && visible,
-  });
-  const behind = check.data?.behind;
-  const needsReplay = check.data?.needs_replay === true;
-  const noUpdates = behind === 0 && !needsReplay;
-  const restartSides = (details: ClusterUpdateCheck) => {
-    const sides = [
-      details.frontend_changed ? t("frontend") : null,
-      details.backend_changed ? t("backend") : null,
-    ].filter((side): side is string => side != null);
-    return sides.length > 0 ? sides.join(" + ") : t("nothing");
-  };
-
-  const inFlightMsg = (msg: string) =>
-    msg.includes("409") ||
-    msg.toLowerCase().includes("in progress") ||
-    msg.toLowerCase().includes("in flight");
-
-  // The detached rollout/restart session is alive by the time the trigger
-  // POST returns, so refetching status immediately picks up
-  // `current_orchestration` and disables the actions with no poll-interval gap a
-  // second click could slip through.
-  const refreshClusterState = () => {
-    // Refresh this view's roster (/api/status) AND the app-root "updating"
-    // banner's snapshot (/api/cluster/status — the health hook's only poll)
-    // so both pick up `current_orchestration` immediately, with no
-    // poll-interval gap a second click could slip through.
-    void queryClient.invalidateQueries({ queryKey: SYSTEM_STATUS_QUERY_KEY });
-    void queryClient.invalidateQueries({ queryKey: CLUSTER_STATUS_QUERY_KEY });
-    void queryClient.invalidateQueries({ queryKey: ["cluster-update-check"] });
-  };
-
-  const update = useMutation({
-    mutationFn: api.triggerClusterRollout,
-    onSuccess: (result) => {
-      refreshClusterState();
-      showToast(
-        t("rolloutStarted", { session: result.session, log: result.log }),
-      );
-    },
-    onError: (err: unknown) => {
-      const msg = errMsg(err);
-      showToast(
-        inFlightMsg(msg)
-          ? t("rolloutInFlight")
-          : t("rolloutFailed", { message: msg }),
-      );
-    },
-  });
-
-  const restart = useMutation({
-    mutationFn: api.triggerClusterRestart,
-    onSuccess: (result) => {
-      refreshClusterState();
-      showToast(
-        t("restartStarted", { session: result.session, log: result.log }),
-      );
-    },
-    onError: (err: unknown) => {
-      const msg = errMsg(err);
-      showToast(
-        inFlightMsg(msg)
-          ? t("restartInFlight")
-          : t("restartFailed", { message: msg }),
-      );
-    },
-  });
-
-  // A rollout/restart runs for minutes in a detached session after the request
-  // returns. `current_orchestration` (the live orchestration session) is the
-  // durable in-flight signal — it flips true the moment the session spawns and
-  // stays true for the whole run, so the actions stay disabled across it (not just
-  // for the POST blink). `current_paused` is kept as a secondary guard; firing a
-  // second rollout into an active one just 409s either way.
-  const orchestration = data.current_orchestration;
-  const updating = update.isPending || orchestration === "rollout" || orchestration === "update";
-  const restarting = restart.isPending || orchestration === "restart";
-  const busy = updating || restarting || data.current_paused;
-
-  const onUpdate = () => {
-    if (noUpdates) return;
-    // Native confirm — cluster-wide restart is irreversible-in-progress; one
-    // misclick stops every agent. Native dialog is mobile-friendly, blocks
-    // the event loop until decided, and adds no headless-component baggage.
-    const sides = check.data
-      ? needsReplay
-        ? t("replaySides")
-        : t("restartSides", { sides: restartSides(check.data) })
-      : "";
-    const n = needsReplay
-      ? t("replayRequired")
-      : typeof behind === "number"
-        ? t("commitsBehind", { count: behind })
-        : "";
-    const ok = window.confirm(t("rolloutConfirm", { behind: n, sides }));
-    if (ok) update.mutate();
-  };
-
-  const onRestart = () => {
-    const ok = window.confirm(t("restartConfirm"));
-    if (ok) restart.mutate();
-  };
-
   const runners = data.machines.filter((m) => m.serve_agent_runner);
 
   return (
     <div id="status-services" className="scroll-mt-4">
-      <div className={cn("mb-2 items-center justify-between", FLEX)}>
-        <h3 className="text-sm font-semibold">{t("services")}</h3>
-        <div className={cn("items-center gap-2", FLEX)}>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={onRestart}
-            disabled={busy}
-          >
-            {restarting ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <RotateCcw className="size-3.5" />
-            )}
-            <span className="ml-1.5">{restarting ? t("restarting") : t("restart")}</span>
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onUpdate}
-            disabled={busy || !isGateway || noUpdates}
-          >
-            {updating ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="size-3.5" />
-            )}
-            <span className="ml-1.5">
-              {updating
-                ? t("updating")
-                : needsReplay
-                  ? t("replayUpdate")
-                  : noUpdates
-                    ? t("upToDate")
-                    : behind
-                      ? t("updateWithCount", { count: behind })
-                      : t("update")}
-            </span>
-          </Button>
-        </div>
-      </div>
+      <h3 className="mb-2 text-sm font-semibold">{t("services")}</h3>
 
       <div className="mb-3 text-xs text-muted-foreground">
         {t("thisHost", {
@@ -384,64 +183,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
         {data.current_paused && (
           <span className="ml-1 text-amber-600 dark:text-amber-400">{t("pausedDetail")}</span>
         )}
-        {data.cluster_target_sha && (
-          <span className="ml-1">{t("pinnedTo", { sha: data.cluster_target_sha.slice(0, 7) })}</span>
-        )}
-        {/* Recorded since the pin existed and shown nowhere until now — without it a
-            rollback presents as the pin simply moving to an older commit, with
-            nothing saying that commit is the anchor the cluster fell back to. */}
-        {data.cluster_last_known_good_sha && (
-          <span
-            className="ml-1"
-            title={t("rollbackAnchor")}
-          >
-            {t("lastKnownGood", { sha: data.cluster_last_known_good_sha.slice(0, 7) })}
-          </span>
-        )}
-        {isGateway && (
-          <span className="ml-2">
-            {orchestration ? (
-              <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                <Loader2 className="size-3 animate-spin" />
-                {orchestration === "restart"
-                  ? t("restartInProgress")
-                  : t("rolloutInProgress")}
-              </span>
-            ) : check.isLoading ? (
-              <span>{t("checkingUpdates")}</span>
-            ) : check.error ? (
-              <span>{t("checkUnavailable")}</span>
-            ) : needsReplay ? (
-              <span className="text-amber-600 dark:text-amber-400">{t("replayRequired")}</span>
-            ) : noUpdates ? (
-              <span className="text-green-600 dark:text-green-400">{t("upToDateOrigin")}</span>
-            ) : check.data ? (
-              <span className="text-amber-600 dark:text-amber-400">
-                {t("updateRestarts", { count: check.data.behind, sides: restartSides(check.data) })}
-              </span>
-            ) : null}
-            {/* Explicit re-check — the update check has no poll interval
-                (it runs a remote `git fetch`), so this button is how the
-                verdict refreshes without leaving the section. */}
-            {!orchestration && (
-              <button
-                type="button"
-                onClick={() => void check.refetch()}
-                disabled={check.isFetching}
-                aria-label={t("checkUpdates")}
-                title={t("checkUpdatesNow")}
-                className="ml-1 inline-flex rounded p-0.5 align-middle text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                <RefreshCw className={cn("size-3", check.isFetching && "animate-spin")} />
-              </button>
-            )}
-          </span>
-        )}
       </div>
-
-      <StrandedHoldBanner machines={data.machines} />
-
-      <LastUpdateBanner record={data.last_update ?? null} />
 
       {data.machines.length === 0 ? (
         <p className="text-xs text-muted-foreground">
@@ -450,100 +192,6 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
       ) : (
         runners.length > 0 && <AgentRunnersCard runners={runners} />
       )}
-    </div>
-  );
-}
-
-// Hosts left held by a failed update (task #3132): the maintenance hold is
-// released only by an explicit `ava start` on the host, and the record is
-// written by the host itself — so this banner still states the failure when
-// the host cannot answer a probe. Rendered per host, above the cluster-global
-// banner: unlike the last-update record this is a live incident with a
-// one-command remedy.
-function StrandedHoldBanner({ machines }: { machines: MachineStatus[] }) {
-  const t = useTranslations("insights.status");
-  const held = machines.filter((m) => m.stranded_hold_since != null);
-  if (held.length === 0) return null;
-  return (
-    <div
-      role="alert"
-      className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs"
-    >
-      {held.map((m) => (
-        <div key={m.name}>
-          <p className="font-semibold text-destructive">
-            {t("strandedHoldBanner", { machine: m.name })}
-          </p>
-          {m.stranded_hold_reason && (
-            <p className="mt-1 text-muted-foreground">
-              {t("strandedHoldReason", { reason: m.stranded_hold_reason })}
-            </p>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// The gateway service as one card: host / status / health / last seen.
-// A failed rollout used to reach this page only as a COLOUR: the amber pin/head
-// mismatch a few lines up. That mismatch is equally produced by a node that missed
-// a rollout, by a checkout that moved without a restart, and by a rollout that
-// failed and rolled back — so on 2026-07-30 the operator was left to work out which
-// (#1012). This states the fact in a sentence, from the record the rollout itself
-// wrote, and says nothing at all when the last update succeeded: a permanent
-// "last update: ok" line is one people stop reading, and this is the line that has
-// to be read the one time it appears.
-function LastUpdateBanner({ record }: { record: ClusterPanel["last_update"] }) {
-  const t = useTranslations("insights.status");
-  if (!record?.failed) return null;
-  const target = record.target_sha ? t("target", { sha: record.target_sha.slice(0, 7) }) : "";
-  const when = record.started_at ? new Date(record.started_at).toLocaleString() : null;
-  // How stale the failure is changes what to do with it: minutes old is a live
-  // incident, days old is a cluster nobody has updated since.
-  const age = record.started_at ? formatRelative(record.started_at) : null;
-  // A recovered update failed and then put the cluster back on a commit that
-  // works. It still has to be stated — 2026-07-30 is the incident where a silent
-  // recovery left the operator reading a sha mismatch as a live fault — but it is
-  // not the same call to action as a failure nobody has handled, so it renders
-  // amber rather than destructive.
-  const recovered = record.outcome === "recovered";
-  return (
-    <div
-      role="alert"
-      className={
-        recovered
-          ? "mb-3 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs"
-          : "mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs"
-      }
-    >
-      <p className={recovered ? "font-semibold text-amber-600" : "font-semibold text-destructive"}>
-        {t("lastUpdateFailed", { target })}
-        {recovered ? t("clusterRecovered") : ""}
-        {when ? t("started", { when, age: age ? t("ageSuffix", { age }) : "" }) : ""}
-      </p>
-      <p className="mt-1 text-muted-foreground">
-        {record.outcome === "orphaned"
-          ? t("orchestrationDied")
-          : record.failing_step
-            ? t("stoppedAtStep", { step: record.failing_step })
-            : t("endedOutcome", { outcome: record.outcome })}{" "}
-        {recovered
-          ? t("recoveredDetail")
-          : record.pin_advanced
-            ? t("pinAdvancedDetail")
-            : t("pinUnchangedDetail")}
-      </p>
-      {record.observed_by && (
-        <p className="mt-1 text-muted-foreground">
-          {t("sinceThen", { host: record.observed_by })}
-        </p>
-      )}
-      <p className="mt-1 text-muted-foreground">
-        {t("rolloutLogBefore")} {" "}
-        <code>{record.log_path ?? "$AVA_HOME/logs/rollout-<epoch>.log"}</code>
-        {t("rolloutLogAfter")}
-      </p>
     </div>
   );
 }
@@ -584,7 +232,7 @@ function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: 
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("health")}</div>
-          <div className={`mt-0.5 text-sm font-medium ${TONE_TEXT[health.tone]}`} title={t("daemonHealth", { agentHost: daemonMark(m.agent_host_online), watchdog: daemonMark(m.watchdog_online) })}>
+          <div className={`mt-0.5 text-sm font-medium ${TONE_TEXT[health.tone]}`} title={t("daemonHealth", { agentHost: daemonMark(m.agent_host_online), supervisor: daemonMark(m.supervisor_online) })}>
             {health.label === "none" ? "—" : t(health.label)}
           </div>
         </div>

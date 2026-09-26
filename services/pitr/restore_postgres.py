@@ -5,29 +5,29 @@ from __future__ import annotations
 import hashlib
 import os
 import shlex
+import signal
 import socket
 import subprocess
 import sys
 import time
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 import psutil
 import psycopg
 from psycopg import sql
 
 from services.pitr.base_manifest import CandidateManifest, _lsn
+from services.pitr.operation_custody import NativeProcess
 from services.pitr.restore_proof import (
     DrillResult,
     LivePostgresIdentity,
     RestoreProofError,
-    _is_zombie,
+    _same_live,
     update_restore_owner,
 )
+from shared.pg_foreground import start_foreground_postgres
 from shared.pg_tools import pg_start_env
-from shared.proc_tree import create_time_matches, stable_create_time
 
 
 def _migration_hash(conn: psycopg.Connection[tuple[object, ...]]) -> str:
@@ -84,13 +84,11 @@ def _live_identity(db_url: str, data_directory: str) -> LivePostgresIdentity:
             raise RestoreProofError("live PostgreSQL read probe failed")
     pid_path = Path(data_directory) / "postmaster.pid"
     pid = int(pid_path.read_text().splitlines()[0])
-    created_at = stable_create_time(psutil.Process(pid))
+    native = NativeProcess.capture(psutil.Process(pid))
     fingerprint = hashlib.sha256(
         f"{data_directory}\n{system_identifier}\n{started_at}\n1".encode()
     ).hexdigest()
-    return LivePostgresIdentity(
-        pid, created_at, data_directory, system_identifier, started_at, fingerprint
-    )
+    return LivePostgresIdentity(native, data_directory, system_identifier, started_at, fingerprint)
 
 
 def _free_port() -> int:
@@ -184,13 +182,8 @@ def _write_sandbox_config(pgdata: Path, socket_dir: Path, port: int, run_root: P
 
 
 def _run(command: list[str], *, timeout: float) -> None:
-    result = subprocess.run(  # noqa: S603
-        command,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
+    result = subprocess.run(  # noqa: S603 -- trusted inherited operation tool.
+        command, capture_output=True, text=True, timeout=timeout, check=False
     )
     if result.returncode != 0:
         # Carry the child's own output in the error (a tail, bounded): the
@@ -210,9 +203,9 @@ def _run(command: list[str], *, timeout: float) -> None:
 
 @dataclass(frozen=True)
 class SandboxPostgresIdentity:
-    pid: int
-    created_at: float
+    native: NativeProcess
     pgid: int
+    sid: int
     data_directory: str
 
 
@@ -230,45 +223,28 @@ def _log_tail(path: Path, limit: int = 4000) -> str:
 
 def _spawn_sandbox_postgres(
     postgres: Path, pgdata: Path, config_file: Path, log_path: Path
-) -> subprocess.Popen[str]:
-    """Start the sandbox postmaster as our direct child, never via pg_ctl.
+) -> subprocess.Popen[bytes]:
+    """Launch a foreground postmaster in the operation worker's group.
 
-    pg_ctl detaches the postmaster with setsid() into its own session and
-    process group, but the whole restore design reaps a run — restricted
-    worker, sandbox postmaster and all — by signalling the worker's process
-    group (worker_bootstrap setsid + killpg in worker_process.py /
-    restore_proof.py). A pg_ctl-detached postmaster would survive the
-    worker's crash unreachable by any group signal, so the sandbox must stay
-    in OUR group: exec postgres directly with its output in the run-root log
-    (activation #10 first surfaced the group-escape tripwire; #8/#9 hung
-    earlier on pg_ctl's capture pipe for the same daemonization reason).
-
-    The child environment comes from `pg_start_env()` (Task #3829): a caller
-    that is itself locale-less (launchd, a non-interactive drill start) must
-    not hand a locale-less environment to the postmaster — on macOS that is
-    the "postmaster became multithreaded during startup" abort (Task #3754).
+    Inside an operation worker it is receipted in the controls, so the
+    controller can close the children that setsid() puts outside the group.
     """
-    with log_path.open("ab", buffering=0) as log:
-        return cast(
-            "subprocess.Popen[str]",
-            subprocess.Popen(  # noqa: S603 — resolved pg binary + static argv
-                [
-                    str(postgres),
-                    "-D",
-                    str(pgdata),
-                    "-c",
-                    f"config_file={config_file}",
-                ],
-                stdin=subprocess.DEVNULL,
-                stdout=log.fileno(),
-                stderr=log.fileno(),
-                env=pg_start_env(),
-            ),
-        )
+    return start_foreground_postgres(
+        [str(postgres), "-D", str(pgdata), "-c", f"config_file={config_file}"],
+        log=log_path,
+        env=pg_start_env(),
+    )
+
+
+def _capture_sandbox(process: subprocess.Popen[bytes], pgdata: Path) -> SandboxPostgresIdentity:
+    native = NativeProcess.capture(psutil.Process(process.pid))
+    return SandboxPostgresIdentity(
+        native, os.getpgid(process.pid), os.getsid(process.pid), str(pgdata.resolve())
+    )
 
 
 def _wait_for_sandbox_identity(
-    process: subprocess.Popen[str],
+    captured: SandboxPostgresIdentity,
     pgdata: Path,
     log_path: Path,
     timeout: int,
@@ -276,10 +252,10 @@ def _wait_for_sandbox_identity(
     """Wait until the sandbox postmaster owns its pid file (or crashed)."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if process.poll() is not None:
+        if captured.native.live() is None:
             detail = _log_tail(log_path)
             raise RestoreProofError(
-                f"sandbox postmaster exited {process.returncode}"
+                "sandbox postmaster exited before PID-file readiness"
                 + (f": {detail}" if detail else "")
             )
         if (pgdata / "postmaster.pid").exists():
@@ -298,8 +274,9 @@ def _sandbox_identity(pgdata: Path) -> SandboxPostgresIdentity:
         pid = int(lines[0])
         recorded_data_directory = Path(lines[1]).resolve()
         process = psutil.Process(pid)
-        created_at = stable_create_time(process)
+        native = NativeProcess.capture(process)
         pgid = os.getpgid(pid)
+        sid = os.getsid(pid)
     except (OSError, IndexError, ValueError, psutil.Error) as exc:
         raise RestoreProofError("cannot establish sandbox PostgreSQL identity") from exc
     if recorded_data_directory != pgdata.resolve():
@@ -307,56 +284,31 @@ def _sandbox_identity(pgdata: Path) -> SandboxPostgresIdentity:
     command = " ".join(process.cmdline())
     if str(pgdata) not in command and str(pgdata.resolve()) not in command:
         raise RestoreProofError("sandbox postmaster command does not name its PGDATA")
-    return SandboxPostgresIdentity(pid, created_at, pgid, str(recorded_data_directory))
+    return SandboxPostgresIdentity(native, pgid, sid, str(recorded_data_directory))
 
 
 def _matching_sandbox(identity: SandboxPostgresIdentity) -> psutil.Process | None:
     try:
-        process = psutil.Process(identity.pid)
-        if not create_time_matches(stable_create_time(process), identity.created_at):
-            return None
-        # A zombie postmaster is dead, not live — and it fails the pgid probe
-        # below on macOS anyway (getpgid raises on zombies). Only the run()
-        # cleanup reaps it, via the Popen handle (activation #12).
-        if _is_zombie(process):
-            return None
-        if os.getpgid(identity.pid) != identity.pgid:
-            return None
+        process = identity.native.live()
+        if process is not None and (
+            os.getpgid(process.pid) != identity.pgid or os.getsid(process.pid) != identity.sid
+        ):
+            raise RestoreProofError("sandbox PostgreSQL escaped its recorded process group")
         return process
-    except (ProcessLookupError, psutil.NoSuchProcess, psutil.ZombieProcess):
+    except (ProcessLookupError, psutil.NoSuchProcess):
         return None
     except (PermissionError, psutil.AccessDenied) as exc:
         raise RestoreProofError("cannot verify sandbox PostgreSQL identity") from exc
 
 
-def _stop_process_tree(identity: SandboxPostgresIdentity) -> None:
-    leader = _matching_sandbox(identity)
-    if leader is None:
-        return
-    owned: dict[tuple[int, float], psutil.Process] = {}
-    try:
-        members = [leader, *leader.children(recursive=True)]
-        owned = {(item.pid, stable_create_time(item)): item for item in members}
-    except (psutil.AccessDenied, psutil.NoSuchProcess) as exc:
-        raise RestoreProofError("cannot enumerate sandbox PostgreSQL descendants") from exc
-    for member in reversed(list(owned.values())):
-        with suppress(psutil.NoSuchProcess):
-            member.terminate()
-    deadline = time.monotonic() + 20
-    alive = list(owned.values())
-    while alive and time.monotonic() < deadline:
-        with suppress(psutil.NoSuchProcess):
-            for child in leader.children(recursive=True):
-                owned[(child.pid, stable_create_time(child))] = child
-        _gone, alive = psutil.wait_procs(
-            list(owned.values()), timeout=min(0.25, max(0, deadline - time.monotonic()))
-        )
-        if time.monotonic() + 5 >= deadline:
-            for member in alive:
-                with suppress(psutil.NoSuchProcess):
-                    member.kill()
-    if alive:
-        raise RestoreProofError("sandbox PostgreSQL retained live descendants")
+def _stop_sandbox(identity: SandboxPostgresIdentity, process: subprocess.Popen[bytes]) -> None:
+    if process.pid != identity.native.process.pid:
+        raise RestoreProofError("sandbox stop belongs to another child")
+    if _matching_sandbox(identity) is not None:
+        identity.native.process.send_signal(signal.SIGINT)
+    # Local postmaster shutdown is needed for a valid proof. Failure leaves its
+    # receipt and scratch intact; the outer operation owner closes descendants.
+    process.wait(timeout=20)
 
 
 class IsolatedPostgresRestoreExecutor:
@@ -407,39 +359,43 @@ class IsolatedPostgresRestoreExecutor:
         sandbox_log = run_root / "sandbox-postgres.log"
         replay_started = time.monotonic()
         sandbox: SandboxPostgresIdentity | None = None
-        sandbox_process: subprocess.Popen[str] | None = None
+        sandbox_process: subprocess.Popen[bytes] | None = None
         try:
             update_restore_owner(
                 owner_path,
                 state="postgres_starting",
                 sandbox_pgdata=str(pgdata.resolve()),
-                expected_sandbox_pgid=os.getpgrp(),
+                expected_sandbox_sid=os.getsid(0),
             )
             sandbox_process = _spawn_sandbox_postgres(
                 self._postgres, pgdata, sandbox_config, sandbox_log
             )
-            sandbox = _wait_for_sandbox_identity(
-                sandbox_process, pgdata, sandbox_log, self._timeout
+            sandbox = _capture_sandbox(sandbox_process, pgdata)
+            update_restore_owner(
+                owner_path,
+                sandbox_native=sandbox.native.value(),
+                sandbox_pgid=sandbox.pgid,
+                sandbox_sid=sandbox.sid,
             )
-            if sandbox.pgid != os.getpgrp():
+            ready_sandbox = _wait_for_sandbox_identity(sandbox, pgdata, sandbox_log, self._timeout)
+            if not sandbox.native.same_birth(ready_sandbox.native):
+                raise RestoreProofError("sandbox pid file differs from its captured launch")
+            if sandbox.pgid != os.getpgrp() or sandbox.sid != os.getsid(0):
                 raise RestoreProofError("sandbox PostgreSQL escaped the restore process group")
             update_restore_owner(
                 owner_path,
                 state="postgres_running",
-                sandbox_pid=sandbox.pid,
-                sandbox_created_at=sandbox.created_at,
+                sandbox_native=sandbox.native.value(),
                 sandbox_pgid=sandbox.pgid,
+                sandbox_sid=sandbox.sid,
                 sandbox_pgdata=sandbox.data_directory,
             )
-            achieved = self._wait_for_promotion(
-                socket_dir, port, candidate, sandbox_process, sandbox_log
-            )
+            achieved = self._wait_for_promotion(socket_dir, port, candidate, sandbox, sandbox_log)
             replay_seconds = time.monotonic() - replay_started
             smoke_started = time.monotonic()
             restored_fingerprint = self._smoke(socket_dir, port, candidate)
             smoke_seconds = time.monotonic() - smoke_started
-            if self.live_identity() != live:
-                raise RestoreProofError("live PostgreSQL changed while sandbox was running")
+            _same_live(live, self.live_identity())
             return DrillResult(
                 achieved,
                 replay_seconds,
@@ -448,48 +404,42 @@ class IsolatedPostgresRestoreExecutor:
                 restored_fingerprint,
             )
         finally:
-            if sandbox is None and (pgdata / "postmaster.pid").exists():
-                sandbox = _sandbox_identity(pgdata)
-                update_restore_owner(
-                    owner_path,
-                    state="postgres_running",
-                    sandbox_pid=sandbox.pid,
-                    sandbox_created_at=sandbox.created_at,
-                    sandbox_pgid=sandbox.pgid,
-                    sandbox_pgdata=sandbox.data_directory,
-                )
-            try:
-                if sandbox is not None:
-                    self._stop(pgdata, sandbox)
-                    update_restore_owner(owner_path, state="postgres_stopped")
-            finally:
-                if sandbox_process is not None:
-                    # The sandbox postmaster is our direct child; once stopped it
-                    # lingers as a zombie until someone waitpid()s it. The stop
-                    # path never reaps: a zombie fails the pgid identity probe,
-                    # and an unreaped one kept looking "live" to the cleanup
-                    # guards, masking the real failure (activation #12). Reap it
-                    # here on every exit path.
-                    with suppress(Exception):
-                        sandbox_process.wait(timeout=10)
+            if sandbox is not None and sandbox_process is not None:
+                self._finish_sandbox(pgdata, sandbox, sandbox_process, owner_path)
+
+    def _finish_sandbox(
+        self,
+        pgdata: Path,
+        sandbox: SandboxPostgresIdentity,
+        process: subprocess.Popen[bytes],
+        owner_path: Path,
+    ) -> None:
+        original = sys.exception()
+        try:
+            self._stop(pgdata, sandbox, process)
+            update_restore_owner(owner_path, state="postgres_stopped")
+        except BaseException as cleanup:
+            if original is not None:
+                original.add_note(f"sandbox custody remains unresolved: {cleanup}")
+                raise original from cleanup
+            raise
 
     def _wait_for_promotion(
         self,
         socket_dir: Path,
         port: int,
         candidate: CandidateManifest,
-        process: subprocess.Popen[str] | None = None,
+        captured: SandboxPostgresIdentity | None = None,
         log_path: Path | None = None,
     ) -> str:
         deadline = time.monotonic() + self._timeout
         db_url = f"postgresql://?host={socket_dir}&port={port}&dbname=postgres"
         last_error: Exception | None = None
         while time.monotonic() < deadline:
-            if process is not None and process.poll() is not None:
+            if captured is not None and captured.native.live() is None:
                 detail = _log_tail(log_path) if log_path is not None else ""
                 raise RestoreProofError(
-                    f"sandbox postmaster exited {process.returncode} before promotion"
-                    + (f": {detail}" if detail else "")
+                    "sandbox postmaster exited before promotion" + (f": {detail}" if detail else "")
                 ) from last_error
             try:
                 with psycopg.connect(db_url, connect_timeout=2) as conn, conn.cursor() as cur:
@@ -528,17 +478,13 @@ class IsolatedPostgresRestoreExecutor:
             evidence.extend("|".join(str(value) for value in row) for row in cur.fetchall())
             return hashlib.sha256("\n".join(evidence).encode()).hexdigest()
 
-    def _stop(self, pgdata: Path, identity: SandboxPostgresIdentity) -> None:
+    def _stop(
+        self, pgdata: Path, identity: SandboxPostgresIdentity, process: subprocess.Popen[bytes]
+    ) -> None:
         if Path(identity.data_directory) != pgdata.resolve():
             raise RestoreProofError("refusing to stop PostgreSQL outside the restore sandbox")
-        current = _matching_sandbox(identity)
-        if current is None:
-            return
-        with suppress(RestoreProofError):
-            _run(
-                [str(self._pg_ctl), "-D", str(pgdata), "-m", "fast", "-w", "stop"],
-                timeout=30,
-            )
-        _stop_process_tree(identity)
+        # Signal the captured native postmaster directly. pg_ctl would reread a
+        # mutable pid file and create a second authority for this owned child.
+        _stop_sandbox(identity, process)
         if _matching_sandbox(identity) is not None:
             raise RestoreProofError("sandbox PostgreSQL could not be reaped")

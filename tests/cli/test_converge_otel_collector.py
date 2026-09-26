@@ -12,13 +12,14 @@ import os
 import platform
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import pytest
 import yaml
 
 from cli.commands import _otel_collector as oc
+from shared import collector_artifact as artifact
 from shared import resilience
 
 
@@ -41,7 +42,7 @@ def test_platform_tag_maps_machines(monkeypatch: pytest.MonkeyPatch) -> None:
     for system, machine, expected in cases:
         monkeypatch.setattr(platform, "system", lambda _s=system: _s)
         monkeypatch.setattr(platform, "machine", lambda _m=machine: _m)
-        assert oc.platform_tag() == expected
+        assert artifact.platform_tag() == expected
 
 
 def test_generate_config_bakes_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -154,7 +155,9 @@ def test_ensure_skips_download_when_version_matches(
     regenerated each converge."""
     (tmp_path / "otel-collector").mkdir(parents=True)
     (tmp_path / "otel-collector/otelcol-contrib").write_bytes(b"bin")
-    (tmp_path / "otel-collector/version").write_text(oc.OTELCOL_CONTRIB_VERSION, encoding="utf-8")
+    (tmp_path / "otel-collector/version").write_text(
+        artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
+    )
     repo = tmp_path / "repo"
     (repo / "deploy/otel-collector").mkdir(parents=True)
     (repo / "deploy/otel-collector/otel-collector.yaml").write_text(
@@ -163,8 +166,8 @@ def test_ensure_skips_download_when_version_matches(
 
     downloaded: list[str] = []
     monkeypatch.setattr(
-        oc,
-        "_download_and_verify",
+        artifact,
+        "download_and_verify",
         lambda _tag, _dir: downloaded.append(_tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -195,8 +198,8 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     downloaded: list[str] = []
     monkeypatch.setattr(
-        oc,
-        "_download_and_verify",
+        artifact,
+        "download_and_verify",
         lambda tag, _d: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -218,15 +221,41 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 def test_unsupported_platform_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No pinned tag -> warn + skip, never download."""
-    monkeypatch.setattr(oc, "platform_tag", lambda: None)
+    monkeypatch.setattr(artifact, "platform_tag", lambda: None)
     downloaded: list[str] = []
     monkeypatch.setattr(
-        oc,
-        "_download_and_verify",
+        artifact,
+        "download_and_verify",
         lambda _t, _d: downloaded.append(_t),  # pyright: ignore[reportUnknownArgumentType]
     )
     oc.ensure_otel_collector(tmp_path / "repo", tmp_path, roles=None)
     assert downloaded == []
+
+
+_HOME = Path("/home/u/.ava")
+_PG_PORT = 5433
+# The gateway login a start process adopts into AVA_DB_URL (port 1: never dialed).
+_DELIVERED = "postgresql://ava_g3_gateway:generation-login-password@127.0.0.1:1/ava"
+
+
+def _local_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A loopback Redis and this home's registry record (the DB URL stays the caller's)."""
+    from shared import cluster
+
+    record = cluster.ClusterRecord(
+        ports=cast("cluster.ClusterPorts", {"postgres": _PG_PORT, "redis": 6380}),
+        gateway_home=str(_HOME),
+        created_at="test",
+    )
+
+    def _get_record(home: Path) -> cluster.ClusterRecord | None:
+        return record if home == _HOME else None
+
+    monkeypatch.setattr(cluster, "get_record", _get_record)
+    monkeypatch.setattr(
+        "shared.config.settings.data_plane.redis_url", "redis://ava:runtime@127.0.0.1:6380/0"
+    )
+    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
 
 
 def _render_real_template(
@@ -241,11 +270,7 @@ def _render_real_template(
     observability_url: str = "",
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
-    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
-    monkeypatch.setattr(
-        "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
-    )
-    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
+    _local_data_plane(monkeypatch)
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", gateway_url)
     from shared.url_secret import url_with_host
 
@@ -262,7 +287,7 @@ def _render_real_template(
     monkeypatch.setattr("shared.machine.reachable_host", lambda: machine_host)
     monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
-    out = oc.generate_config(repo, Path("/home/u/.ava"), roles)
+    out = oc.generate_config(repo, _HOME, roles)
     # No placeholder left unconsumed. (A literal dollar survives on purpose:
     # the network-interface exclusion regexp's end-anchor, written $$ in the
     # template.)
@@ -376,15 +401,26 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A gateway-capable unit owns Postgres+Redis, so its sidecar carries the
-    postgresql + redis receivers, dialed DIRECT (never the pooler) with the
-    credentials the cluster's own URLs carry."""
+    postgresql + redis receivers. Postgres is dialed DIRECT (never the pooler)
+    over the home's owner-only socket as the password-less monitoring role,
+    never as the write-generation login the start process adopted (revoked by
+    the next rollout); Redis with its admin password."""
+    from shared.cluster.authority import MONITOR_ROLE
+    from shared.pg_admin import pg_socket_path
+
+    monkeypatch.setattr("shared.config.settings.data_plane.db_url", _DELIVERED)
     cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+    rendered = yaml.safe_dump(cfg)
+    assert "generation-login-password" not in rendered and "ava_g3_gateway" not in rendered
     receivers = cfg["receivers"]
-    assert receivers["postgresql"]["endpoint"] == "10.0.0.2:5433"
-    assert receivers["postgresql"]["username"] == "ava"
-    assert receivers["postgresql"]["password"] == "abc"  # noqa: S105 — fixture value
+    socket_dir = pg_socket_path(_HOME).as_posix()
+    # The receiver prefixes a unix endpoint's host with "/" itself.
+    assert receivers["postgresql"]["endpoint"] == f"{socket_dir.lstrip('/')}:{_PG_PORT}"
+    assert receivers["postgresql"]["transport"] == "unix"
+    assert receivers["postgresql"]["username"] == MONITOR_ROLE
+    assert receivers["postgresql"]["password"] == oc._PEER_PLACEHOLDER
     assert receivers["postgresql"]["databases"] == ["ava"]
-    assert receivers["redis"]["endpoint"] == "10.0.0.2:6380"
+    assert receivers["redis"]["endpoint"] == "127.0.0.1:6380"
     assert receivers["redis"]["password"] == "abc"  # noqa: S105 — fixture value
     assert receivers["redis"]["password"] != "cluster-token"  # noqa: S105 — fixture token
     infra = cfg["service"]["pipelines"]["metrics/infra"]
@@ -411,22 +447,28 @@ def test_gateway_config_skips_postgres_receiver_when_otlp_export_is_disabled(
     assert "postgresql" not in cfg["service"]["pipelines"]["metrics/infra"]["receivers"]
 
 
-def test_gateway_config_skips_postgres_receiver_without_password(
+def test_remote_managed_plane_omits_the_postgres_receiver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The contrib postgresql receiver rejects an empty password, while the
-    redis receiver supports the no-auth single-box posture."""
-    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava@10.0.0.2:5433/ava")
+    """A remote-managed plane has no owner-only socket or monitoring role on
+    this host (its provider monitors it), so only Redis is scraped; the
+    provider's database credential never reaches the config."""
+    monkeypatch.setattr(
+        "shared.config.settings.data_plane.db_url",
+        "postgresql://ava:provider-password@10.0.0.2:5433/ava",
+    )
     monkeypatch.setattr("shared.config.settings.data_plane.redis_url", "redis://10.0.0.2:6380/0")
+    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://localhost:8000")
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "")
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "localhost")
+    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
 
-    cfg = yaml.safe_load(
-        oc.generate_config(repo, Path("/home/u/.ava"), frozenset({"gateway", "agent-runner"}))
-    )
+    rendered = oc.generate_config(repo, _HOME, frozenset({"gateway", "agent-runner"}))
+    cfg = yaml.safe_load(rendered)
 
+    assert "provider-password" not in rendered
     assert "postgresql" not in cfg["receivers"]
     assert cfg["receivers"]["redis"]["endpoint"] == "10.0.0.2:6380"
     assert cfg["service"]["pipelines"]["metrics/infra"]["receivers"] == [
@@ -534,7 +576,6 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
             "statements": [
                 'set(attributes["tmp_svc"], attributes["log.file.name"])',
                 'replace_pattern(attributes["tmp_svc"], "\\\\.out\\\\.log$", "")',
-                'replace_pattern(attributes["tmp_svc"], "^(updater|rollout)-[0-9]+$", "$1")',
                 'set(resource.attributes["service.name"], attributes["tmp_svc"])',
                 'delete_key(attributes, "tmp_svc")',
             ],
@@ -550,7 +591,6 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
         "otlp/remote",
         "filelog/sessions",
         "filelog/services",
-        "filelog/orchestration",
     ]
     assert logs["processors"] == [
         "memory_limiter",
@@ -640,75 +680,22 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
     assert installed[0][1] == home
 
 
-def test_non_lgtm_gateway_reaps_orphan_collector_session(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+def test_collector_preparation_never_controls_a_running_service_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    home = tmp_path / ".ava-preview"
+    home = tmp_path / "home"
     home.mkdir()
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[2],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
+        repo=Path(__file__).resolve().parents[2], ava_home=home, roles=frozenset({"gateway"})
     )
-    killed: list[str] = []
-    expected_flags: list[bool] = []
+
+    def no_root_control() -> None:
+        pytest.fail("Preparation cannot independently reconcile a live root")
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-
-    def _collector_session_exists(session: str) -> bool:
-        return session == "ava-otel-collector"
-
-    monkeypatch.setattr("cli.commands._has_session", _collector_session_exists)
-
-    def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
-        killed.append(session)
-        expected_flags.append(expected)
-        return True, "graceful"
-
-    monkeypatch.setattr("cli.commands._session_lifecycle._graceful_kill_session", _record_kill)
-
+    monkeypatch.setattr("cli.commands._root_driver._root_client", no_root_control)
     oc.ensure_otel_collector_step(ctx)
-
-    assert killed == ["ava-otel-collector"]
-    assert expected_flags == [True]
-    assert "reaped orphan session ava-otel-collector" in capsys.readouterr().err
-
-
-def test_non_lgtm_gateway_without_session_skips_reap(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    home = tmp_path / ".ava-preview"
-    home.mkdir()
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[2],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
-    )
-    killed: list[str] = []
-
-    monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-
-    def _no_session(_session: str) -> bool:
-        return False
-
-    monkeypatch.setattr("cli.commands._has_session", _no_session)
-
-    def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
-        killed.append(session)
-        return True, "graceful"
-
-    monkeypatch.setattr("cli.commands._session_lifecycle._graceful_kill_session", _record_kill)
-
-    oc.ensure_otel_collector_step(ctx)
-
-    assert killed == []
-    assert "reaped orphan session" not in capsys.readouterr().err
 
 
 def test_non_lgtm_gateway_reports_and_preserves_residual_config(
@@ -772,9 +759,6 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
         "polls_to_archive": 50,
         "max_concurrent_files": 200,
     }
-
-    orchestration = cfg["receivers"]["filelog/orchestration"]
-    assert orchestration["poll_interval"] == "30s"
 
 
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(
@@ -1129,18 +1113,16 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
 
 def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Every split role's config carries the cluster bearer, and a gateway
-    also carries pg/redis credentials. The file is 0600 from first creation,
-    not write-as-0644 followed by chmod."""
+    also carries the Redis admin password. The file is 0600 from first
+    creation, not write-as-0644 followed by chmod."""
     if platform.system() == "Windows":
         pytest.skip("POSIX file modes only")
     (tmp_path / "otel-collector").mkdir(parents=True)
     (tmp_path / "otel-collector/otelcol-contrib").write_bytes(b"bin")
-    (tmp_path / "otel-collector/version").write_text(oc.OTELCOL_CONTRIB_VERSION, encoding="utf-8")
-    monkeypatch.setattr(oc, "_download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
-    monkeypatch.setattr(
-        "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
+    (tmp_path / "otel-collector/version").write_text(
+        artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
     )
+    monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "shared.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )
@@ -1197,10 +1179,10 @@ def test_stream_download_writes_all_chunks(
     def _fake_urlopen(_url: str, **kw: object) -> _ChunkedResp:
         return _ChunkedResp([payload] * 4, {"Content-Length": str(4 << 20)})
 
-    monkeypatch.setattr(oc.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     dest = tmp_path / "t.tar.gz"
 
-    oc._stream_download("https://example.invalid/t.tar.gz", dest)
+    artifact._stream_download("https://example.invalid/t.tar.gz", dest)
 
     assert dest.read_bytes() == payload * 4
     out = capsys.readouterr().out
@@ -1219,10 +1201,10 @@ def test_stream_download_honors_socket_timeout(
         seen["timeout"] = timeout
         raise TimeoutError("timed out")
 
-    monkeypatch.setattr(oc.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     with pytest.raises(TimeoutError):
-        oc._stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
-    assert seen["timeout"] == oc._DOWNLOAD_SOCKET_TIMEOUT_S
+        artifact._stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
+    assert seen["timeout"] == artifact._DOWNLOAD_SOCKET_TIMEOUT_S
 
 
 @pytest.mark.parametrize("failures", [1, 3])
@@ -1243,21 +1225,21 @@ def test_download_with_retry_preserves_contract(
             raise errors[calls - 1]
         dest.write_bytes(b"ok")
 
-    monkeypatch.setattr(oc, "_stream_download", download)
-    monkeypatch.setattr(oc.time, "sleep", sleeps.append)
+    monkeypatch.setattr(artifact, "_stream_download", download)
+    monkeypatch.setattr(artifact.time, "sleep", sleeps.append)
     monkeypatch.setattr(resilience, "_sleep", sleeps.append)
-    monkeypatch.setattr(oc.time, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(artifact.time, "monotonic", lambda: 10.0)
     url = "https://example.invalid/t.tar.gz"
     if failures == 3:
         with pytest.raises(RuntimeError) as caught:
-            oc._download_with_retry(url, tmp_path / "t.tar.gz")
+            artifact._download_with_retry(url, tmp_path / "t.tar.gz")
         assert (
             str(caught.value)
             == f"failed to download otel-collector from {url} after 3 attempts (0s total): reset 3"
         )
         assert caught.value.__cause__ is errors[-1]
     else:
-        oc._download_with_retry(url, tmp_path / "t.tar.gz")
+        artifact._download_with_retry(url, tmp_path / "t.tar.gz")
         assert (tmp_path / "t.tar.gz").read_bytes() == b"ok"
     assert calls == min(failures + 1, 3)
     assert sleeps == [5.0 * i for i in range(1, calls)]

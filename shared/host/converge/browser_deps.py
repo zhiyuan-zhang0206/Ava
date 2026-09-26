@@ -1,7 +1,6 @@
 """Settings-free browser dependency detection, repair, and operator guidance.
 
-This is the settings-free half of the browser-deps contract, used by
-``cli.enroll`` on a fresh host before Settings can be built and by converge's
+This is the settings-free half of the browser-deps contract, used by converge's
 browser step. It imports only the standard library plus settings-free probes
 from ``shared.platform_probes``; it must never import ``shared.config`` or a
 ``cli`` module.

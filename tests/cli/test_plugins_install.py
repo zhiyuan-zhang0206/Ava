@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
-from cli.commands import (
+from cli.commands.plugins import (
     cmd_plugins_install,
     cmd_plugins_installed,
     cmd_plugins_uninstall,

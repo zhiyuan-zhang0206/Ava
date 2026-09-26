@@ -1,6 +1,6 @@
 """The env-key registry and its projections (R2 design, convergence point A).
 
-Every env key this system forwards, forces, drops, or seeds is declared here or
+Every env key this system forwards, forces, or drops is declared here or
 in the Settings class metadata — except removable provider keys, whose enabled
 plugin binding is their declaration:
 
@@ -35,15 +35,11 @@ Projections (the design's boundary currency):
   to the gateway/runner profiles.
 - `env_keep_set(role)` / `env_authority_drop_set(role)` — the dotenv_boot
   env-authority force/drop families (set membership queries, not env dicts).
-- `seed_allowlist()` — the install-time file-copy whitelist.
 
-The derived sets are computed lazily on first use (memoized), not at module
-level: computing them walks the Settings class metadata, which imports the
-`shared.config` package (its __init__ constructs the Settings singleton), and
-this module must stay importable before Settings exists — `dotenv_boot`'s
-env-authority pass runs at `.env`-load time. First use happens during the very
-import of `shared.config`, so the design's "collections are derived at import"
-still holds; the mechanism just tolerates the boot-time import order.
+The derived sets use the generated static index and are memoized on first use.
+The module stays importable before Settings exists: `dotenv_boot` runs its
+authority pass at `.env`-load time. Provider-plugin declarations load lazily
+only at the delivery boundaries that consume them.
 
 POSIX delivery is the backend env-dict handoff (`shared.session_env.forward_env_dict`);
 Windows delivers a dict. KEY=VALUE argv delivery stays forbidden (secrets never ride
@@ -61,11 +57,6 @@ from shared.config_lite_table import (
     FIELD_ALIASES,
     FIELD_CAPABILITIES,
     FIELD_SCOPES,
-)
-from shared.config_registry import (
-    _fields,
-    _schema_extra,
-    field_alias,
 )
 from shared.port_block import BLOCK_MAX, BLOCK_SIZE, PORT_OFFSETS
 
@@ -305,69 +296,11 @@ def health_port_env(base: int) -> dict[str, str]:
 _HEALTH_PORT_BLOCK_FLOOR = 15000
 
 
-def backfill_missing_health_ports(existing: dict[str, str]) -> dict[str, str]:
-    """The `AVA_*_HEALTH_PORT` keys a block-style unit is missing, derived from
-    the block its present keys already prove.
-
-    A unit enrolled before a service joined `_HEALTH_PORT_SERVICES` carries an
-    older key set in its `.env` (agent_host joined 2026-08-20, the capability
-    watchdogs later), so that service's daemon falls back to the LEGACY shared
-    port (`daemon_health.health_port`) — and on a mirrored localhost namespace
-    (a Windows unit + its WSL2 sibling) two co-located units then collide on
-    the same shared default (2026-09-02: win and wsl both fell back to 8114).
-    The unit's own block base is recoverable from the keys it DOES have: each
-    value equals `base + PORT_OFFSETS[svc]`.
-
-    Returns {} unless at least two present keys solve to ONE common base at or
-    above `_HEALTH_PORT_BLOCK_FLOOR` — the majority base. Keys that solve to a
-    different base, or to none at all (unparseable value, or a base below the
-    floor), are outliers and ignored: a single drifted key must not block the
-    backfill for a block the remaining keys prove (2026-09-02: wsl carried one
-    hand-set outlier, AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT=20024, that aborted
-    the whole table). A legacy unit's fixed 8102-8111 pins solve to different
-    bases (their slot order predates PORT_OFFSETS) or to a base below the
-    floor, and no two of them agree above it, so it is never misread as a
-    block. Fewer than two agreeing keys cannot prove a block (one legacy pin
-    is trivially "consistent"). A tie between two candidate bases is ambiguous
-    and yields {} — guessing would bind ports nobody asked for. Keys already
-    present are never rewritten — this heals ABSENCE, never drift (a hand-set
-    emergency port, even one on the wrong slot, is the operator's to move
-    through the config surface).
-    """
-    if len(existing) < 2:
-        return {}
-    aliases = health_port_env_aliases()
-    svc_by_var = {var: svc for svc, var in aliases.items()}
-    counts: dict[int, int] = {}
-    for var, value in existing.items():
-        svc = svc_by_var.get(var)
-        if svc is None:
-            continue
-        try:
-            base = int(value) - PORT_OFFSETS[svc]
-        except (TypeError, ValueError):
-            continue  # outlier: unparseable value
-        if base < _HEALTH_PORT_BLOCK_FLOOR:
-            continue  # outlier: legacy pin sequence, not a block
-        counts[base] = counts.get(base, 0) + 1
-    if not counts:
-        return {}
-    solved, n = max(counts.items(), key=lambda kv: (kv[1], kv[0]))
-    if n < 2 or any(cnt == n and base != solved for base, cnt in counts.items()):
-        return {}
-    highest = solved + max(PORT_OFFSETS.values())
-    if highest > 65535:
-        return {}
-    return {
-        var: str(solved + PORT_OFFSETS[svc]) for svc, var in aliases.items() if var not in existing
-    }
-
-
-# The base `ava enroll` applies to a WSL2 host when --health-port-base is
+# The base `ava start` applies to a WSL2 host when --health-port-base is
 # omitted (issue #1152). WSL2 shares its physical machine's localhost namespace
 # with any co-located native Windows unit, and both otherwise fall back to the
 # SAME hardcoded shared default (`shared.daemon_health.DEFAULT_PORTS`, the
-# legacy 8102-8111 segment) — so a from-scratch WSL2 enroll with no flag would
+# legacy 8102-8111 segment) — so a first WSL2 start with no flag would
 # recreate the exact 2026-07-26 collision
 # (decisions/2026-07-31-a-health-port-belongs-to-a-unit.md).
 # This is a FIXED constant, not a scan: one slot past the birth allocator's own
@@ -415,14 +348,11 @@ _DERIVED_FIELDS = frozenset(
         "permissions_helper_port",
         "db_url",
         "redis_url",
-        "db_admin_password",
         "redis_admin_password",
         "events_channel",
     }
 )
-ADMIN_DATA_PLANE_ALIASES = frozenset(
-    {"AVA_DB_ADMIN_PASSWORD", "AVA_REDIS_ADMIN_PASSWORD", REDIS_PASSWORD_ENV}
-)
+ADMIN_DATA_PLANE_ALIASES = frozenset({"AVA_REDIS_ADMIN_PASSWORD", REDIS_PASSWORD_ENV})
 
 
 def _scope_aliases(*scopes: str) -> frozenset[str]:
@@ -485,42 +415,6 @@ def derived_env_keys() -> frozenset[str]:
         | frozenset(health_port_env_aliases().values())
         | {REDIS_PASSWORD_ENV}
     )
-
-
-@lru_cache(maxsize=1)
-def seed_allowlist() -> frozenset[str]:
-    """Convenience-seed allowlist — the ONLY keys the install-time seed step
-    (`install.sh --worktree` / `python -m cli.install_cluster --seed-only`) may
-    copy from the prod home's `.env` into a fresh worktree cluster's `.env`.
-    Capability credentials only: LLM provider keys + web search/fetch keys, plus
-    the one non-secret a key is useless without (`AVA_DASHSCOPE_BASE_URL` — a
-    dedicated Model Studio workspace mints its key for its own host). Derived
-    from the `seed: True` field marker (declared once on each such field in
-    shared/config/lm.py + web.py), plus each enabled provider binding's key when
-    it is either unmodeled or already seedable as a Settings field. A removable
-    provider is therefore seedable without becoming a Settings field, but cannot
-    turn an unrelated modeled setting into a seed credential. The runner database
-    password is also explicitly excluded. Structurally disjoint from
-    derived_env_keys() | env_identity_keys() (guarded by
-    tests/shared/test_cluster_env.py): a seeded worktree must never inherit
-    prod's data-plane identity or its cluster secret (always freshly minted),
-    and never a singleton credential like AVA_TELEGRAM_BOT_TOKEN."""
-    seed_keys = frozenset(
-        field_alias(name)
-        for name, ref in _fields().items()
-        if _schema_extra(ref.info).get("seed") is True
-    )
-    settings_aliases = frozenset(field_alias(name) for name in _fields())
-    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV
-
-    plugin_seed_keys = (
-        _enabled_provider_key_envs()
-        - (settings_aliases - seed_keys)
-        - derived_env_keys()
-        - env_identity_keys()
-        - {RUNNER_DB_PASSWORD_ENV}
-    )
-    return seed_keys | plugin_seed_keys
 
 
 def _enabled_provider_key_envs() -> frozenset[str]:

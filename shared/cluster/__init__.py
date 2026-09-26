@@ -8,11 +8,10 @@ instance.
 
 **Identity IS the home path.** There is no cluster name: a unit's identity is
 the `$AVA_HOME` it runs from (single-machine self-reference), and a remote
-runner's identity is the gateway URL + cluster secret it enrolled with
-(cross-machine reference). The human-facing label is the home's basename,
-computed on the fly — pure display, zero stored state. Identity is born by
-`scripts/install.sh` (`python -m cli.install_cluster`); `ava start` is a pure
-bring-up; agent-runners inherit connection facts via enroll.
+runner's identity is the gateway URL + cluster secret it joins with.
+The human-facing label is the home's basename. The single `ava start`
+lifecycle persists identity before effects and brings up or resumes that home;
+runner initialization obtains its explicit gateway connection projection.
 
 **Names-as-data.** The Postgres database/role and the redis ACL user a cluster
 uses are carried by its `.env` connection URLs and read from there as data
@@ -21,15 +20,9 @@ whose data plane still uses a historical identifier (prod's `ava_main`) keeps
 working unchanged until an explicit ops rename rewrites its URLs. A newly-born
 cluster gets the fixed identifier `DATA_PLANE_IDENTITY` (`ava`): its instance
 is single-tenant, so the identifier needs no per-cluster distinction.
-The package split (2026-08, Task #1007) keeps this module's import surface
-byte-for-byte: `shared.cluster` remains the one import target — every public
-name plus the test-imported privates (`_swap_db`, `_port_free`) are
-re-exported here from the cohesive submodules `registry` (the `clusters.json`
-record store), `ports` (port-block allocation + per-record derives), `derive`
-(identity/label/session/env derivation), and `provision` (Postgres role/db +
-redis ACL ensure). Cross-module calls resolve through this package namespace
-at call time, so `monkeypatch.setattr(shared.cluster, ...)` keeps its
-single-module semantics.
+The public namespace exports registry, port allocation, URL derivation,
+Postgres provisioning and Redis ACL helpers. `ownership` provides the shared
+native storage observer used before startup and maintenance effects.
 """
 
 from __future__ import annotations
@@ -95,9 +88,6 @@ from shared.cluster.derive import (
     redis_password_from_env as redis_password_from_env,
 )
 from shared.cluster.derive import (
-    runner_password_from_env as runner_password_from_env,
-)
-from shared.cluster.derive import (
     session_name as session_name,
 )
 from shared.cluster.derive import (
@@ -155,19 +145,16 @@ from shared.cluster.provision import (
     ensure_checkpoint_schema as ensure_checkpoint_schema,
 )
 from shared.cluster.provision import (
-    ensure_cluster_redis_acl as ensure_cluster_redis_acl,
-)
-from shared.cluster.provision import (
     ensure_cluster_role as ensure_cluster_role,
 )
 from shared.cluster.provision import (
     ensure_pgvector_extension as ensure_pgvector_extension,
 )
 from shared.cluster.provision import (
-    ensure_runner_role as ensure_runner_role,
-)
-from shared.cluster.provision import (
     provision_database as provision_database,
+)
+from shared.cluster.redis_acl import (
+    ensure_cluster_redis_acl as ensure_cluster_redis_acl,
 )
 from shared.cluster.registry import (
     ClusterRecord as ClusterRecord,
@@ -202,7 +189,6 @@ from shared.cluster.registry import (
 from shared.cluster.registry import (
     save_record_locked as save_record_locked,
 )
-from shared.config import settings as settings
 from shared.platform import file_lock as file_lock
 from shared.port_block import (
     BLOCK_MAX as BLOCK_MAX,

@@ -33,7 +33,17 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   or for a test-only run reuse another worktree's real venv:
   `PYTHONPATH=<this-worktree> <other-worktree>/.venv/bin/python -m pytest ...`
   (PYTHONPATH outranks that venv's `.pth`, so the tests run against this
-  worktree's code).
+  worktree's code). This shortcut is only valid when every tested subprocess
+  preserves that import path. Python `-I` ignores `PYTHONPATH` and imports the
+  reused venv's editable checkout. Tests that launch isolated Python children
+  need this worktree's own real venv. Verify the child import with
+  `.venv/bin/python -I -c 'import agent; print(agent.__file__)'` before trusting
+  a cross-process result.
+- **Native lifecycle proof uses the release interpreter build.** Matching only
+  Python's major/minor version is insufficient: managed builds can omit optional
+  OS bindings exposed by a distribution Python. Record the exact interpreter,
+  build and native capabilities; do not substitute a system interpreter to turn
+  a failed release-environment test green. Exercise cleanup as well as startup.
 - **Every worktree `uv` command needs `env -u VIRTUAL_ENV`**, including
   `uv run` and `uv pip`. Never run bare `uv pip install`: it can target an
   inherited shared production environment and remove its launcher (#4629).

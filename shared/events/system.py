@@ -211,14 +211,18 @@ class MemorySearchStats(TypedDict):
     last_save_seconds: float
 
 
-class WatchdogTick(TypedDict):
-    """`watchdog_tick` payload — services/watchdog/daemon.py.
+class RootHealthTick(TypedDict):
+    """Completed service/diagnostic observation round, regardless of its verdicts."""
 
-    One fully completed watchdog round replaces the previous timestamp. The
-    OTLP metric is a gauge so Prometheus can calculate a role's tick age.
-    """
-
+    home_id: str
     last_tick_timestamp_seconds: float
+
+
+class RootHealthExpected(TypedDict):
+    """Observer start time before its first sample; zero explicitly retires it."""
+
+    home_id: str
+    expected_since_timestamp_seconds: float
 
 
 class ScheduleStalled(TypedDict):
@@ -244,6 +248,21 @@ class PitrRemoteInventory(TypedDict):
     backend: str
     object_count: int
     bytes: int
+
+
+class BackupOperationCustody(TypedDict):
+    """`backup_operation_custody` payload — backup/PITR operation custody.
+
+    ``operation`` names the operation kind (``logical-dump``, ``base-candidate``,
+    ...). ``custody`` is ``quarantined`` (closure proven; the next operation
+    proceeds), ``blocked`` (closure unproven; the kind refuses new work until
+    ``ava pitr operations retire``) or ``retired`` (an operator retirement).
+    ``detail`` is the bounded diagnostic; it is never an alert grouping key.
+    """
+
+    operation: str
+    custody: str
+    detail: str
 
 
 class RecoveryDrillFailed(TypedDict):

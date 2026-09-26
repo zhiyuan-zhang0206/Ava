@@ -1,11 +1,8 @@
-"""Deadline survivor reporting for the held stop path (issue #2162).
+"""Native survivor diagnostics for terminal stop and maintenance waits.
 
-When `cli.commands._maintenance_stop.stop_services` runs its deadline out, the
-operator needs the exact resource that remained — not a bare pid list. This
-module builds that report: per-process identity (owning session, role, birth
-pair, cmdline), the recorded process groups still occupied, and the stage the
-stop died in. The caller raises it as `StopIncompleteError`; the lifecycle
-journal keeps the same payload as JSON right beside the printable message.
+Reports retain the captured birth even when live facts cannot be read. The
+terminal boundary raises StopIncompleteError; its lifecycle journal stores the
+same structured inventory. Process groups are observation-only facts.
 """
 
 from __future__ import annotations
@@ -16,8 +13,8 @@ from dataclasses import dataclass
 
 import psutil
 
-from shared.proc_tree import OwnedProcess
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import OwnedProcess
 
 
 def occupied_groups(groups: tuple[int, ...]) -> list[int]:
@@ -177,7 +174,7 @@ def _identity_matches(identity: OwnedProcess) -> bool:
             psutil.STATUS_ZOMBIE,
             psutil.STATUS_DEAD,
         )
-    except (psutil.Error, OSError):
+    except (psutil.Error, OSError, RuntimeError):
         return False
 
 
@@ -212,89 +209,4 @@ def capture_survivor(
         birth=identity.birth,
         starttime=identity.starttime,
         cmdline=cmdline,
-    )
-
-
-def _group_member_candidates(pgid: int) -> list[OwnedProcess]:
-    """Best-effort live members of `pgid` for the deadline report.
-
-    Unlike `_group_members` (whose answer gates signalling), a member that
-    cannot be inspected is omitted here rather than refusing the whole report —
-    the group id itself stays in the message either way.
-    """
-    candidates: list[OwnedProcess] = []
-    for process in psutil.process_iter():
-        try:
-            if process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
-                continue
-            if os.getpgid(process.pid) != pgid:
-                continue
-            candidates.append(OwnedProcess.capture(process))
-        except (psutil.Error, OSError):
-            continue
-    return candidates
-
-
-def service_inventory(
-    *,
-    records: dict[str, SessionRecord],
-    leaders: dict[str, OwnedProcess],
-    by_service: dict[str, set[OwnedProcess]],
-    tracked: set[OwnedProcess],
-    groups: tuple[int, ...],
-) -> SurvivorInventory:
-    """Resolve a deadline's remaining tree to per-process identity (issue #2162).
-
-    Answers "what held the stop" for the operator: which recorded session each
-    survivor belongs to — its leader, a captured descendant, or a member of the
-    session's recorded process group that appeared after the capture — plus the
-    birth pair and cmdline to act on. Reads only; nothing here signals.
-    """
-    service_of: dict[int, str] = {}
-    for name, tree in by_service.items():
-        for identity in tree:
-            service_of.setdefault(identity.pid, name)
-    leader_pids = {identity.pid for identity in leaders.values()}
-    group_owner: dict[int, str] = {}
-    if groups and os.name == "posix":
-        from shared.posixproc import _pgid_of
-
-        for name, record in records.items():
-            if _identity_matches(leaders[name]):
-                try:
-                    group = _pgid_of(psutil.Process(record.pid))
-                except (psutil.Error, OSError):
-                    continue
-            else:
-                group = record.pgid
-            if group is not None:
-                group_owner.setdefault(group, name)
-
-    survivors: list[StopSurvivor] = []
-    seen: set[int] = set()
-    for identity in live_identities(tracked):
-        survivors.append(
-            capture_survivor(
-                identity,
-                service=service_of.get(identity.pid),
-                role="leader" if identity.pid in leader_pids else "descendant",
-            )
-        )
-        seen.add(identity.pid)
-    occupied = occupied_groups(groups)
-    for group in occupied:
-        for member in _group_member_candidates(group):
-            if member.pid in seen:
-                continue
-            survivors.append(
-                capture_survivor(
-                    member,
-                    service=group_owner.get(group),
-                    role="group-member",
-                    pgid_hint=group,
-                )
-            )
-            seen.add(member.pid)
-    return SurvivorInventory(
-        survivors=sorted(survivors, key=lambda survivor: survivor.pid), groups=occupied
     )

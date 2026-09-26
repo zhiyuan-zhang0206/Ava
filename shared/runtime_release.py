@@ -1,10 +1,15 @@
-"""Dormant, config-free release verification and atomic generation selection.
+"""Config-free release verification and atomic generation selection.
 
-No production launcher consumes this pointer yet. Callers must hold the official
-rollout lease and supply independently observed platform/schema compatibility
-before using activation. This module never installs dependencies, migrates a
-database, stops services, or falls back to a checkout. Generations are assembled
-at their final path (venv entry-point shebangs are not relocatable).
+Ordinary image startup and the finite release executor verify retained image
+bytes here. The caller owns operation admission and independently establishes
+platform/schema compatibility before selection; a verified image alone grants
+no mutation authority. Generations are assembled at their final path because
+venv entry-point shebangs are not relocatable.
+
+Standard library only: the release-store filesystem contract and the
+checkout-retiring runtime proof import this module (and `shared.runtime_prepare`)
+from a bare interpreter. The pydantic application identity read from a verified
+image lives in `shared.release_identity`.
 """
 
 from __future__ import annotations

@@ -19,7 +19,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from shared import cluster
-from shared.config import settings
 from shared.env_registry import REDIS_PASSWORD_ENV, health_port_env_aliases
 from shared.platform import IS_WINDOWS
 from shared.url_secret import redacted_url, url_with_port, url_with_userinfo
@@ -30,22 +29,18 @@ from shared.url_secret import redacted_url, url_with_port, url_with_userinfo
 # URLs carry (names-as-data) until an ops rename.
 DATA_PLANE_IDENTITY = "ava"
 
-# The runner role's FIXED name and the gateway-.env key carrying its password.
-# Unlike the main data-plane identity (names-as-data, read back from URL
-# userinfo), the runner role is deliberately fixed: every runner in the cluster
-# connects as `ava_runner`, and the role name is part of the bootstrap
-# projection contract (GET /api/bootstrap?role=runner), not a per-cluster fact.
-# The password is a gateway-side secret — generated at install / by
-# `ava cluster ensure-db-role`, written to the gateway's .env as
-# AVA_RUNNER_DB_PASSWORD, and only ever distributed inside the projected
-# AVA_DB_URL (never as a standalone bootstrap field).
+# The provider-provisioned runner role's FIXED name and the gateway-.env key
+# carrying its password, for REMOTE-MANAGED data planes only (write generations
+# are unsupported there until an operator-declared provider admin authority
+# exists). A local plane's runners log in as its write generation's runner
+# login instead (`shared.cluster.authority`); nothing local mints this password.
 RUNNER_ROLE = "ava_runner"
 RUNNER_DB_PASSWORD_ENV = "AVA_RUNNER_DB_PASSWORD"  # noqa: S105 — the env KEY name, not a credential
 
 
 def default_home() -> Path:
-    """The default (prod) cluster home, `~/.ava` — the one home whose install
-    uses the fixed legacy port block and whose checkout anchors without a
+    """The default (prod) cluster home, `~/.ava` — the one home whose initialization
+    uses the fixed default port block and whose checkout anchors without a
     pointer."""
     return Path.home() / ".ava"
 
@@ -111,11 +106,26 @@ def identity_from_url(url: str) -> str:
 
 
 def db_identity() -> str:
-    """This cluster's Postgres db/role identity, read from its own db_url.
+    """This cluster's Postgres database / schema-owner identity, read from its own
+    db_url's DATABASE name.
+
+    The database and its NOLOGIN owner share the identifier (provisioning
+    creates `DATABASE <identity> OWNER <identity>`). The database is read rather
+    than the username because a delivered write-generation login
+    (`ava_g<n>_<class>`) replaces the URL's username, never its database.
 
     Raises:
-        ValueError: db_url carries no username (see identity_from_url)."""
-    return identity_from_url(settings.data_plane.db_url)
+        ValueError: db_url names no database."""
+    from shared.config import settings
+
+    url = settings.data_plane.db_url
+    database = urlsplit(url).path.strip("/")
+    if not database:
+        raise ValueError(
+            f"data-plane database URL names no database (the db/owner identity): "
+            f"{redacted_url(url)!r}. Identity is read from the URL as data, never guessed."
+        )
+    return database
 
 
 def redis_identity() -> str:
@@ -123,6 +133,8 @@ def redis_identity() -> str:
 
     Raises:
         ValueError: redis_url carries no username (see identity_from_url)."""
+    from shared.config import settings
+
     return identity_from_url(settings.data_plane.redis_url)
 
 
@@ -155,6 +167,8 @@ def fe_build_env() -> str:
     (services/healthchecks/frontend.py) — so a watchdog restart can never bake a
     different (stale) gateway port than `ava start` did.
     """
+    from shared.config import settings
+
     gateway_env = f"NEXT_PUBLIC_GATEWAY_PORT={settings.gateway.gateway_port}"
     if not (origin := settings.gateway.browser_origin):
         return gateway_env
@@ -193,6 +207,7 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
             inlined and never reaches the build from a unit .env); see
             ``fe_build_env``.
     """
+    from shared.config import settings
     from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_frontend_dir
 
     if WHEEL_RUNTIME:
@@ -229,44 +244,31 @@ def redis_admin_url() -> str:
     per-cluster runtime identity.
 
     Every cluster owns its Redis instance. Its `default` user password is an
-    independent gateway-only credential; a pre-split .env temporarily falls
-    back to the bearer until `ava start` mints the split. Host/port come from
-    this cluster's own `redis_url` (loopback + its per-cluster port), never a
-    hardcoded 6379."""
+    independent gateway-only credential (`AVA_REDIS_ADMIN_PASSWORD`, also the
+    instance's `requirepass`). Host/port come from this cluster's own
+    `redis_url` (loopback + its per-cluster port), never a hardcoded 6379."""
+    from shared.config import settings
+
     parts = urlsplit(settings.data_plane.redis_url)
     # `parts.port` is None when the URL carries no explicit port — the
     # stringified ":None" would be a connect error with a confusing message
     # (audit 2026-08-08 P3: settings normally carry the port, this is the
     # defensive floor).
     port = parts.port or 6379
-    password = settings.data_plane.redis_admin_password or settings.data_plane.cluster_secret
+    password = settings.data_plane.redis_admin_password
     return f"redis://default:{password}@{parts.hostname or '127.0.0.1'}:{port}"
 
 
 def redis_password_from_env() -> str:
-    """This gateway home's file-only Redis ACL runtime password, or an empty
-    string when a legacy cluster has not completed the split mint step."""
+    """This gateway home's file-only Redis ACL runtime password.
+
+    Empty only on a home born before Redis always authenticated; storage
+    bring-up refuses it and names the one-time cutover script."""
     from dotenv import dotenv_values
 
     from shared.paths import ava_home
 
     return (dotenv_values(ava_home() / ".env").get(REDIS_PASSWORD_ENV) or "").strip()
-
-
-def runner_password_from_env(home: Path | None = None) -> str:
-    """Read a gateway home's runner DB password from its `.env` file.
-
-    The runner credential is deliberately not a Settings field: it is gateway
-    secret material that bootstrap projects only inside the runner database URL.
-    ``home`` exists for the pooler, which may reconcile a specified home; normal
-    callers read this process's checkout-anchored home.
-    """
-    from dotenv import dotenv_values
-
-    from shared.paths import ava_home
-
-    env_path = (home if home is not None else ava_home()) / ".env"
-    return (dotenv_values(env_path).get(RUNNER_DB_PASSWORD_ENV) or "").strip()
 
 
 def runner_db_url_projection(db_url: str) -> str:
@@ -300,8 +302,8 @@ def project_runner_db_url(db_url: str, runner_password: str) -> str:
     """Pure credential projection; both inputs must belong to one config snapshot."""
     if not runner_password:
         raise RuntimeError(
-            "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — run "
-            "`ava cluster ensure-db-role` before spawning agents."
+            "AVA_RUNNER_DB_PASSWORD is missing from the gateway initialization; "
+            "restore its recorded credential before starting services or agents."
         )
     return url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
 
@@ -310,6 +312,8 @@ def redis_channel_prefix() -> str:
     """The pub/sub channel prefix (`ava`) — the events channel is `<prefix>:events`,
     so strip that suffix. Fixed across clusters now that each owns its redis: there
     is no neighbour to prefix away from."""
+    from shared.config import settings
+
     return settings.data_plane.events_channel.removesuffix(":events")
 
 
@@ -343,48 +347,49 @@ def derive_env(
     base_db_url: str,
     base_redis_url: str,
     cluster_secret: str,
-    db_admin_password: str = "",
-    redis_admin_password: str = "",
-    redis_password: str = "",
+    redis_admin_password: str,
+    redis_password: str,
     pgbouncer_enabled: bool = True,
 ) -> dict[str, str]:
     """Map a cluster record to the env vars a unit needs. Daemons read these via
     settings, so the cluster layer touches no daemon code.
 
     `cluster_secret` is written as `AVA_CLUSTER_SECRET`, the control-plane
-    bearer every enrolled runner needs. `AVA_DB_URL` instead carries the
-    gateway-local Postgres owner password and `AVA_REDIS_URL` the runtime ACL
-    password. Both URLs carry the fixed `DATA_PLANE_IDENTITY` db/role/ACL user
-    **as data**: every consumer reads the identity back from these URLs; nothing
-    re-derives it from a name. The three data-plane passwords are independently
-    persisted so their rotation self-heals the matching URLs without changing
-    the bearer. An empty secret writes empty data-plane passwords and still
-    retains the identity username — names-as-data holds without auth. Pub/sub
-    channels are fixed (`ava:*`).
+    bearer every enrolled runner needs. `AVA_DB_URL` is the CREDENTIAL-FREE
+    endpoint (`postgresql://<identity>@host:port/<identity>`): the schema owner
+    is NOLOGIN, and every process dials as a write-generation login its launcher
+    delivers (`shared.cluster.authority`), never with a password from `.env`.
+    `AVA_REDIS_URL` carries the runtime ACL password. Both URLs carry the fixed
+    `DATA_PLANE_IDENTITY` db/role/ACL user **as data**: every consumer reads the
+    identity back from these URLs; nothing re-derives it from a name. Redis
+    always authenticates, so both Redis passwords are required whatever the
+    bearer. Pub/sub channels are fixed (`ava:*`).
 
-    `AVA_DB_URL` is the ONE access URL every process dials as-is;
-    `pgbouncer_enabled` decides its port at generation — pooler (default) or
-    direct Postgres. No pgbouncer-port env key."""
+    `AVA_DB_URL` is the ONE access endpoint; `pgbouncer_enabled` decides its port
+    at generation — pooler (default) or direct Postgres. No pgbouncer-port env key."""
     p = rec.ports
-    db_password = db_admin_password or cluster_secret
-    redis_default_password = redis_admin_password or cluster_secret
-    runtime_password = redis_password or cluster_secret
+    if not (redis_admin_password and redis_password):
+        raise ValueError(
+            "identity requires explicit data-plane credentials: Redis always "
+            "authenticates with its admin and runtime passwords"
+        )
+    redis_default_password = redis_admin_password
+    runtime_password = redis_password
     db_url = url_with_userinfo(
         cluster._swap_db(base_db_url, cluster.DATA_PLANE_IDENTITY),
         cluster.DATA_PLANE_IDENTITY,
-        db_password,
+        "",
     )
     if pgbouncer_enabled:
         db_url = url_with_port(db_url, cluster.record_pgbouncer_port(rec))
     env = {
         "AVA_CLUSTER_SECRET": cluster_secret,
-        "AVA_DB_ADMIN_PASSWORD": db_password,
         "AVA_REDIS_ADMIN_PASSWORD": redis_default_password,
         REDIS_PASSWORD_ENV: runtime_password,
         "AVA_GATEWAY_PORT": str(p["gateway"]),
         # A gateway box reaches its OWN gateway over loopback (same-machine call);
         # the address remote agent-runners dial is handed to them out-of-band at
-        # `ava enroll`, never stored here. Materialized so `ava start` reads the URL
+        # runner first start, never stored here. Materialized so `ava start` reads the URL
         # from .env with no runtime default (an enrolled runner overwrites this with
         # the gateway's reachable URL).
         "AVA_GATEWAY_URL": f"http://localhost:{p['gateway']}",

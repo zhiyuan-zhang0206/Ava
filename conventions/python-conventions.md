@@ -200,7 +200,7 @@ Not lint-enforced repo-wide yet; the modules that drive git are guarded by
 *reader's* module dict at import time, and that binding is what the reader
 resolves. So the reader — not the owner — becomes the patch surface, and moving a
 function to another module silently takes it out of reach of a patch aimed at its
-old home. Splitting `ops/cluster.py` cost **81 `setattr` repoints across 6 test
+old home. Splitting one `ops` module cost **81 `setattr` repoints across 6 test
 files over 12 names** for exactly this reason; a re-export facade did not help,
 because it fixes importers, not global resolution inside moved code.
 
@@ -208,17 +208,17 @@ So a name that a test would stub is **reached through the module that owns it**:
 
 ```python
 import shared.cluster
-from ops import cluster_session
+from ops import cluster_pause
 
-shared.cluster.session_name(_UPDATER_SERVICE)      # not: session_name(...)
-cluster_session._has_orchestration_session(updater_sess)    # not: _has_orchestration_session(...)
+shared.cluster.session_name(service)      # not: session_name(...)
+cluster_pause.unpause_local_cluster()     # not: unpause_local_cluster()
 ```
 
 Which names: the state-touching ones — path resolvers, session liveness probes,
 spawners, pause/unpause, anything that reads the filesystem, a subprocess or the
 network. **Not** constants, exception classes, Pydantic models, type aliases, pure
 formatters, or the `settings` singleton: nothing stubs them, so they carry no patch
-surface, and `except cluster_session.OrchestrationSpawnFailed` only adds noise. A
+surface, and `except ops_cluster.ClusterUpdateInProgress` only adds noise. A
 function-local `from x import y` is already fine — it re-resolves per call, so it
 reads the owner's current binding and survives its enclosing function moving.
 
@@ -250,13 +250,10 @@ process (there is one `$AVA_HOME`, one posture row, one session-naming
 scheme — a second reader seeing the unpatched value is a bug, not precision).
 
 Keep the from-import where the test's assertion is about *one call site's mechanism*
-rather than about the value. `shared.proc.run_bounded` stays from-imported into
-`ops/cluster_deploy.py` on that ground: the test claims the validate-before-kill
-fetch uses `run_bounded` rather than a plausible-looking `subprocess.run(timeout=)`,
-so the stub has to name the site to mean anything. The widening there is also latent
-rather than absent — `run_bounded` is the repo's universal subprocess primitive, so
-the moment a second module reaches it through `shared.proc`, one test's source patch
-starts faking that module's bounded work too.
+rather than about the value. A subprocess-boundary test must name the actual
+call site when it proves that site's timeout, native custody or refusal behavior.
+Patching the shared utility itself can also intercept unrelated consumers and
+turn their work into an accidental fake.
 
 Pre-existing aliases that cannot be converted away — a facade's own re-exports, and
 consumers that from-import from it at module top level — are what

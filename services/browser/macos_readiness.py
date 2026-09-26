@@ -32,8 +32,8 @@ import psutil
 import shared.paths
 import shared.private_storage
 import shared.proc
+from shared.native_process.ownership import stable_create_time
 from shared.platform import IS_MACOS
-from shared.proc_tree import stable_create_time
 
 try:  # `pwd` is absent on Windows, where this module remains import-safe.
     import pwd

@@ -94,7 +94,6 @@ def _settings_with(
     db_url: str,
     redis_url: str,
     secret: str,
-    db_admin_password: str = "",
     redis_admin_password: str = "",
 ) -> DataPlaneSettings:
     # Construct a fresh Settings from init kwargs (highest-priority source, so the
@@ -105,42 +104,39 @@ def _settings_with(
         AVA_DB_URL=db_url,
         AVA_REDIS_URL=redis_url,
         AVA_CLUSTER_SECRET=secret,
-        AVA_DB_ADMIN_PASSWORD=db_admin_password,
         AVA_REDIS_ADMIN_PASSWORD=redis_admin_password,
     )
 
 
-class TestSettingsAppliesDataPlanePasswords:
-    def test_main_url_uses_the_database_admin_password(self) -> None:
-        # Names-as-data: on a LOCAL instance the stale PASSWORD is overwritten
-        # with the DB owner password; the username and database stay exactly
-        # what the URL says (here the historical prod identifiers), so an
-        # existing cluster keeps dialing its own db across the rename window.
-        # A foreign host would keep its own password (Task #1752) — see
-        # test_foreign_url_password_survives_a_nonempty_cluster_secret.
-        db_admin = "-".join(("db", "admin", "v2"))
+class TestSettingsKeepDatabaseCredentialsVerbatim:
+    """Settings never derive or re-apply a database credential. A local plane's
+    `.env` carries the credential-free endpoint; a process dials the write-
+    generation login its launcher delivered, byte-for-byte (names-as-data: the
+    username and database stay exactly what the URL says)."""
+
+    def test_local_url_is_never_rewritten(self) -> None:
         redis_admin = "-".join(("redis", "admin", "v2"))
         s = _settings_with(
-            db_url=_pg("STALE", host="localhost:5432", user="ava_main", db="ava_main"),
+            db_url=_pg("delivered", host="localhost:5432", user="ava_g2_gateway", db="ava_main"),
             redis_url=_redis("STALE", host="localhost:6379", user="ava_main"),
             secret=_SECRET,
-            db_admin_password=db_admin,
             redis_admin_password=redis_admin,
         )
-        assert s.db_url == _pg(db_admin, host="localhost:5432", user="ava_main", db="ava_main")
+        assert s.db_url == _pg(
+            "delivered", host="localhost:5432", user="ava_g2_gateway", db="ava_main"
+        )
         assert s.redis_url == _redis("STALE", host="localhost:6379", user="ava_main")
-        assert s.db_admin_password == db_admin
         assert s.redis_admin_password == redis_admin
 
-    def test_fresh_cluster_fixed_identity_passes_through(self) -> None:
-        # A path-only birth writes the fixed `ava` identifiers; Settings keeps
-        # them (on a loopback URL, which is the local-instance posture).
+    def test_credential_free_endpoint_stays_credential_free(self) -> None:
+        # A path-only birth writes the fixed `ava` identifiers without a password;
+        # nothing — not the bearer, not an owner password — fills one in.
         s = _settings_with(
-            db_url=_pg("STALE", host="localhost:5432", user="ava", db="ava"),
+            db_url="postgresql://ava@localhost:5432/ava",
             redis_url=_redis("STALE", host="localhost:6379", user="ava"),
             secret=_SECRET,
         )
-        assert s.db_url == _pg(_SECRET, host="localhost:5432", user="ava", db="ava")
+        assert s.db_url == "postgresql://ava@localhost:5432/ava"
         assert s.redis_url == _redis("STALE", host="localhost:6379", user="ava")
 
     def test_redis_url_stays_verbatim(self) -> None:
@@ -176,7 +172,7 @@ class TestSettingsAppliesDataPlanePasswords:
         monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
         monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
 
-        with pytest.raises(ValueError, match="must receive an ava_runner AVA_DB_URL"):
+        with pytest.raises(ValueError, match="must receive a runner-class AVA_DB_URL"):
             _settings_with(
                 db_url=_pg("STALE", host="127.0.0.1:5432", user="ava"),
                 redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
@@ -195,20 +191,47 @@ class TestSettingsAppliesDataPlanePasswords:
             secret=_SECRET,
         )
 
-        assert s.db_url.startswith(f"postgresql://ava:{_SECRET}@127.0.0.1:5432/ava")
+        assert s.db_url.startswith("postgresql://ava:STALE@127.0.0.1:5432/ava")
 
-    def test_gateway_profile_keeps_local_owner_url_password_refresh(
+    def test_gateway_profile_keeps_its_delivered_login(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("AVA_PROCESS_PROFILE", "gateway")
 
         s = _settings_with(
-            db_url=_pg("STALE", host="127.0.0.1:5432", user="ava"),
+            db_url=_pg("delivered", host="127.0.0.1:5432", user="ava_g0_gateway"),
             redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
             secret=_SECRET,
         )
 
-        assert s.db_url.startswith(f"postgresql://ava:{_SECRET}@127.0.0.1:5432/ava")
+        assert s.db_url.startswith("postgresql://ava_g0_gateway:delivered@127.0.0.1:5432/ava")
+
+    def test_agent_profile_accepts_a_generation_runner_login(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+        monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
+
+        s = _settings_with(
+            db_url=_pg("delivered", host="127.0.0.1:5432", user="ava_g4_runner"),
+            redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
+            secret=_SECRET,
+        )
+
+        assert s.db_url.startswith("postgresql://ava_g4_runner:delivered@127.0.0.1:5432/ava")
+
+    def test_agent_profile_refuses_a_generation_gateway_login(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AVA_PROCESS_PROFILE", "agent")
+        monkeypatch.setattr(data_plane, "_unit_home", lambda: Path.home() / ".ava")
+
+        with pytest.raises(ValueError, match="must receive a runner-class AVA_DB_URL"):
+            _settings_with(
+                db_url=_pg("delivered", host="127.0.0.1:5432", user="ava_g4_gateway"),
+                redis_url=_redis("STALE", host="127.0.0.1:6379", user="ava"),
+                secret=_SECRET,
+            )
 
     def test_agent_profile_keeps_projected_runner_url(
         self, monkeypatch: pytest.MonkeyPatch
@@ -291,7 +314,7 @@ class TestSelfHostDialsLoopback:
         # db_url also picks up ?hostaddr=127.0.0.1 (_pin_ipv4_hostaddr): the
         # loopback host IS an IPv4 literal, so libpq's own resolution-bypass
         # applies here too, same as any other literal host.
-        assert s.db_url == _pg(_SECRET, host="127.0.0.1:5433") + "?hostaddr=127.0.0.1"
+        assert s.db_url == _pg("STALE", host="127.0.0.1:5433") + "?hostaddr=127.0.0.1"
         assert s.redis_url == _redis("STALE", host="127.0.0.1:6380")
 
     def test_foreign_host_is_untouched(self, tmp_path: Path) -> None:
@@ -317,7 +340,7 @@ class TestSelfHostDialsLoopback:
         )
         # ?hostaddr= survives (url_with_host preserves the query string) — see the
         # note in test_self_host_rewrites_to_loopback.
-        assert s.db_url == _pg(_SECRET, host="127.0.0.1:6433") + "?hostaddr=127.0.0.1"
+        assert s.db_url == _pg("STALE", host="127.0.0.1:6433") + "?hostaddr=127.0.0.1"
 
     def test_localhost_machine_host_default_is_noop(self, tmp_path: Path) -> None:
         # The zero-config single box (machine host resolves to `localhost`): an
@@ -340,7 +363,7 @@ class TestSelfHostDialsLoopback:
             redis_url=_redis("STALE", host="localhost:6380"),
             secret=_SECRET,
         )
-        assert s.db_url == _pg(_SECRET, host="localhost:5433")
+        assert s.db_url == _pg("STALE", host="localhost:5433")
         assert s.redis_url == _redis("STALE", host="localhost:6380")
 
     def test_machine_host_file_fallback_matches(self, tmp_path: Path) -> None:
@@ -481,3 +504,14 @@ class TestRedactedUrl:
         # single-quoted .env line the parser has not yet decoded (#2046).
         raw = "'redis://ava:FICTIONAL_CREDENTIAL_DO_NOT_USE@127.0.0.1:20028/0'"
         assert "FICTIONAL_CREDENTIAL_DO_NOT_USE" not in redacted_url(raw)
+
+
+def test_local_endpoint_never_substitutes_the_bearer() -> None:
+    """The control-plane bearer is never a database credential."""
+    s = _settings_with(
+        db_url="postgresql://ava@127.0.0.1:5432/ava",
+        redis_url=_redis("runtime-value", host="127.0.0.1:6379", user="ava"),
+        secret=_SECRET,
+    )
+    assert urlsplit(s.db_url).password is None
+    assert _SECRET not in s.db_url

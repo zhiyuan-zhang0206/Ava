@@ -14,9 +14,6 @@ their unchanged OpenAPI names, so `cli` validates them without importing up into
 from gateway.schemas.agents import (
     AgentRow,
 )
-from gateway.schemas.cluster import (
-    ClusterOpRequest,
-)
 from gateway.schemas.commands import (
     CommandItem,
 )
@@ -209,7 +206,6 @@ __all__ = [
     "BornChainResponse",
     "BornChainRow",
     "CancelRequest",
-    "ClusterOpRequest",
     "ClusterPanel",
     "CommandItem",
     "CompactEnqueued",

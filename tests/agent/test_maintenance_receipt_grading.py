@@ -13,7 +13,7 @@ from tests.agent.test_maintenance import isolate as isolate
 
 
 def _held() -> None:
-    before = pause_owner.begin_maintenance("grade", WHEN)
+    before = pause_owner.begin_maintenance("grade", WHEN).snapshot
     assert before.maintenance is not None
     from shared.maintenance_state import MaintenanceHold
 
@@ -97,7 +97,7 @@ def test_undelivered_record_is_idempotent_and_preserves_other_receipts() -> None
 def _hold_with(
     *, failures: dict[int, str] | None = None, undelivered: dict[int, str] | None = None
 ) -> None:
-    before = pause_owner.begin_maintenance("grade", WHEN)
+    before = pause_owner.begin_maintenance("grade", WHEN).snapshot
     assert before.maintenance is not None
     from shared.maintenance_state import MaintenanceHold
 

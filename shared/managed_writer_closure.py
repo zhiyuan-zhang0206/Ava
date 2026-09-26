@@ -35,19 +35,14 @@ from uuid import UUID
 from pydantic import AwareDatetime, Field, model_validator
 
 from shared.managed_writer_barrier import (
-    Digest,
-    EvidenceModel,
     ManagedUnit,
     ManagedUnitClosure,
     ManagedWriterCollection,
     RolloutIdentity,
 )
-from shared.managed_writer_observation import (
-    ExpectedUnitWriters,
-    ProcessVerdict,
-    SessionVerdict,
-)
+from shared.managed_writer_observation import ExpectedUnitWriters, SessionVerdict
 from shared.native_job_observation import LauncherObservation
+from shared.process_evidence import Digest, EvidenceModel, ProcessVerdict
 
 
 class LauncherTerminal(EvidenceModel):

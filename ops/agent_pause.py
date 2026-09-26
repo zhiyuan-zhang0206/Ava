@@ -476,8 +476,8 @@ def pause_agents(
     """Idempotently drain this unit, leaving persistent terminals untouched.
 
     `driver` is minted by operator-side callers (`ava stop` / `ava pause`);
-    daemon-driven callers (`spawn_update`, the update quiesce) pass None so a
-    long-lived caller process never masks a dead ladder shepherd.
+    daemon-driven callers (`ops.cluster_pause.pause_local_cluster`) pass None so
+    a long-lived caller process never masks a dead ladder shepherd.
 
     `reap` enables the update straggler reap (task #4016): a cohort member
     still un-landed W seconds after its restart command's issuance is

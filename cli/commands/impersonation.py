@@ -191,7 +191,7 @@ def _send(args: argparse.Namespace) -> int:
     from cli.commands.agents import send_agent_message
     from shared.agents import impersonation as control
     from shared.agents.impersonation import impersonation_sessions as sessions
-    from shared.proc_tree import process_metadata
+    from shared.native_process.ownership import process_metadata
 
     content = sys.stdin.read() if args.content == "-" else args.content
     caller = process_metadata()
@@ -207,7 +207,7 @@ def _dispatch(args: argparse.Namespace) -> int:
     from shared.agents import impersonation as control
     from shared.agents.impersonation import impersonation_sessions as sessions
     from shared.agents.impersonation.impersonation_history import public_session, say
-    from shared.proc_tree import process_metadata
+    from shared.native_process.ownership import process_metadata
 
     command = args.impersonation_cmd
     if command == "request":

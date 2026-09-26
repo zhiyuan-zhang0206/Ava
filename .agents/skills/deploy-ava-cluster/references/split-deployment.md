@@ -1,166 +1,82 @@
-## Split across machines
+# Split deployment
 
-Give each capability its own machine when you want the gateway and the
-compute isolated (e.g. a small always-on gateway + beefier runners).
+A split cluster has a gateway that owns the application schema and one or more
+runners. Start the gateway before joining runners. Each host has its own home;
+the gateway supplies runner connection facts through authenticated bootstrap.
 
-The data-plane posture has no single-vs-multi branch: Postgres and PgBouncer use
-the configured reachable address when authenticated, while Redis always binds
-loopback and off-box Redis inbound goes through the host-level relay bridge. The
-agent-facing machine surface (`spawn(machine=)`, `list_machines`, the roster) is
-always present — a single box simply sees one machine.
+## Gateway first start
 
-**Auth and reachability move together.** `AVA_CLUSTER_SECRET` is what makes the
-data plane reachable off-box at all:
+Acquire dependencies in the canonical checkout as described in
+[the deployment guide](../SKILL.md). Prepare a private dotenv configuration file
+outside the home containing the transport policy and source network:
 
-- **No secret** (the single-box default) → Postgres and PgBouncer bind
-  **loopback only**, whatever `AVA_MACHINE_HOST` says. Redis is also loopback-only.
-  An unauthenticated data plane is never exposed to the LAN.
-- **Secret set** → Postgres and PgBouncer bind loopback **plus** this host's
-  reachable address (`AVA_MACHINE_HOST`), de-duplicated — never all interfaces.
-  Redis remains loopback-only; `com.ava.redis-bridge` (`/usr/bin/python3 relay.py`)
-  forwards the host's private-network Redis port to `127.0.0.1` for off-box clients.
-
-A split deployment therefore always has a secret: `install.sh --role gateway`
-mints one for you, and every `ava enroll` requires it.
-
-**On the gateway host** (owns Postgres/Redis + the HTTP gateway):
-
-```bash
-mkdir -p ~/.ava
-git clone https://github.com/zhiyuan-zhang0206/Ava.git ~/.ava/source
-cd ~/.ava/source
-./scripts/install.sh --role gateway
-# The birth step already wrote ~/.ava/.env (derived urls + a freshly minted
-# AVA_CLUSTER_SECRET + the serve flags). EDIT it — do not copy .env.example over it.
-# The gateway must advertise an address the runners reach it at (the operator
-# declares it — Ava assumes the machines can reach each other, not HOW).
-# AVA_MACHINE_HOST defaults to localhost; setting it to this node's real address
-# adds that address to the native Postgres/PgBouncer binds (alongside loopback)
-# and lets /api/bootstrap project reachable URL hosts to runners. Redis remains
-# loopback-only and the host-level relay bridge accepts its off-box traffic.
-# Keep the born AVA_DB_URL and AVA_REDIS_URL unchanged: they remain the gateway's loopback
-# self-dial URLs. AVA_TRUSTED_CIDRS is the
-# private-network range the runners connect from (the overlay's address block);
-# pg_hba requires scram-sha-256 from it:
-#   AVA_MACHINE_HOST=<this host's reachable address>
-#   AVA_TRUSTED_CIDRS=<runner source range, e.g. the overlay's CGNAT block>
-ava start --machine-name machine-1 --serve-gateway \
-          --gateway-url http://<reachable-address>:8000
+```dotenv
+AVA_TRANSPORT_ENCRYPTION=overlay
+AVA_TRUSTED_CIDRS=<private-network-source-range>
 ```
 
-With a cluster secret and `AVA_MACHINE_HOST` set to this node's address,
-`ava start` binds native Postgres + PgBouncer to loopback + that address,
-de-duplicated — never a wildcard — and Redis to loopback alone. The relay bridge
-listens on the chosen private-network address at the Redis port and forwards to
-`127.0.0.1`; remote clients still need the credential. pg_hba trusts the local
-unix socket but requires `scram-sha-256` from the
-`AVA_TRUSTED_CIDRS` ranges. The gateway's main Postgres identity authenticates
-with `AVA_DB_ADMIN_PASSWORD`, and Redis's `default`/`requirepass` administrator
-uses `AVA_REDIS_ADMIN_PASSWORD`. A runner does **not** receive either
-administrator credential: `/api/bootstrap?role=runner` rewrites `AVA_DB_URL` to
-the least-privilege `ava_runner` identity with its independent
-`AVA_RUNNER_DB_PASSWORD`, freshly read gateway-side and carried only inside the
-served URL. Its Redis URL embeds the independent `AVA_REDIS_PASSWORD` runtime
-ACL credential. Every remote connection therefore needs private-network
-reachability plus the credential for its role; `AVA_CLUSTER_SECRET` remains
-only the gateway and `/ops` bearer.
-
-On the gateway, the born URLs stay loopback self-dial URLs. When serving a
-runner bootstrap, `shared/config/service_read.py` rewrites their loopback hosts
-to `AVA_MACHINE_HOST`; it also projects the independent runner Postgres
-credential. Operators never hand-edit the URLs or synchronize their passwords.
-
-Config re-application on `ava start` differs between the two engines:
-
-- **Postgres** — `pg_hba.conf` is rewritten and reloaded, and
-  `listen_addresses` re-applied, on every `ava start`, so a changed
-  `AVA_MACHINE_HOST` converges the hba immediately. A new *bind* still needs the
-  server to restart (`ava stop` then `ava start` brings the pg_ctl-managed
-  instance back up under the new config).
-- **Redis** — the conf is rewritten only when Ava actually brings a Redis up. A
-  server already running is left alone (only its ACL user is re-affirmed). Its
-  bind is fixed at loopback; the host-level relay bridge owns off-box ingress.
-
-> **Ava owns this Postgres.** Every cluster runs its own Postgres instance that
-> Ava `initdb`s under `$AVA_HOME`, so it provisions the per-cluster role +
-> database over that instance's own initdb superuser on its private unix socket
-> (loopback `trust`). There is no external/managed-Postgres knob — the data
-> plane is always Ava-owned and per-cluster.
-
-> **macOS — allow the serving binaries through the Application Firewall.** Binding
-> the overlay interface is necessary but not sufficient on macOS: with the Application
-> Firewall on (System Settings → Network → Firewall), incoming connections to a binary
-> macOS does not recognise are dropped, so a remote agent-runner (or even this host
-> dialing its *own* private-network IP) times out, while `127.0.0.1` still works —
-> loopback is never filtered. The following binaries serve off-box ports and
-> neither is
-> Developer-ID signed (the uv interpreter is `adhoc, linker-signed`, so the
-> "automatically allow downloaded signed software" default does not cover it):
->
-> | Binary | Serves | Present on |
-> |---|---|---|
-> | the venv's python (`readlink -f .venv/bin/python`) | the gateway's HTTP port; an agent-runner's ops port | both capabilities |
-> | `postgres` (the vendored `~/.ava/runtime/pg/<ver>/bin`, else the brew keg) | the cluster's pg port | gateway |
->
-> Redis is absent because `redis-server` binds loopback-only. Its private-network
-> listener is the relay bridge running as Apple-signed `/usr/bin/python3`, which
-> ALF auto-allows without a manifest entry.
->
-> **Do not hand-transcribe these paths — ask for them.** `ava converge` (run
-> automatically by `ava start`) audits this host, repairs what it can through a
-> passwordless `sudo -n`, and prints the exact `--add` / `--unblockapp` pair for
-> anything left, which matters because both paths are version-stamped:
->
-> ```bash
-> ava converge          # audits + repairs where it has a grant, else prints the commands
-> ava firewall status   # read-only: audit the host and diff against the allowlist manifest
-> ```
->
-> Whatever route applies the rule, **restart the affected service** — an
-> already-bound socket keeps the policy it was accepted under, so the rule alone
-> changes nothing until the process re-binds.
->
-> **This recurs, by design of the Application Firewall.** The rule is stored against
-> the path it was added with, and a `uv python` bump (or a vendored-Postgres version
-> bump) moves the binary to a *new* version-stamped path that has never been heard of —
-> the old rule is not invalidated, it is orphaned. Symptom: the gateway answers
-> `127.0.0.1` perfectly and every runner reports it unreachable. `ava cluster update`
-> names this `OFF_BOX_UNREACHABLE` and reprints the repair. Converge cannot always
-> apply it itself — `socketfilterfw` refuses a non-root caller, and a password-prompting
-> `sudo` inside converge would hang an unattended `ava start`, so the repair is
-> attempted with `sudo -n` and degrades to printing the commands.
->
-> A **single-box** macOS gateway with no remote runners needs none of this: with
-> no cluster secret the data plane binds loopback only, and loopback is never
-> filtered.
-
-**On each agent-runner host** (no local data plane — points at the gateway):
+Use `overlay` only when the deployment actually has that encrypted
+transport; the other supported declarations are `tls` and `mtls`. Then run:
 
 ```bash
-mkdir -p ~/.ava
-git clone https://github.com/zhiyuan-zhang0206/Ava.git ~/.ava/source
-cd ~/.ava/source
-./scripts/install.sh --role agent-runner
-# enroll against the gateway (writes ~/.ava/.env: gateway URL, machine name,
-# role, cluster secret — the db/redis URLs are fetched from /api/bootstrap,
-# never cached). Read/export the bearer secret without echoing it or putting it
-# in shell history/argv:
-printf 'Cluster secret: ' >&2
-IFS= read -rs AVA_CLUSTER_SECRET
-printf '\n' >&2
-export AVA_CLUSTER_SECRET
-ava enroll --gateway <gateway-url> --machine-name machine-2 \
-           --machine-host <this-host-addr>
-unset AVA_CLUSTER_SECRET
-ava start
+.venv/bin/ava start --serve-gateway --no-serve-agent-runner \
+  --machine-name machine-1 --machine-host <this-host-addr> \
+  --gateway-url http://<reachable-address>:8000 \
+  --config-file /absolute/path/gateway.env
 ```
 
-The gateway dials each runner's ops server (`http://<runner-host>:<ops_port>`)
-over the cluster's private network, so an agent-runner host must also declare its
-reachable address (`--machine-host` — required; Ava does not auto-detect it, so
-it makes no assumption about the network). Co-located gateway + runner units on
-one machine are also possible (the gateway home at `~/.ava_gateway`, the runner
-at `~/.ava`), but a single `gateway,agent-runner` unit is simpler.
+The gateway-only identity mints the control-plane bearer and the independent
+Redis-admin and Redis-runtime credentials before provisioning; the first start
+then mints Postgres write generation 0 (one gateway and one runner login) into
+the gateway's private `$AVA_HOME/db-authority/`. The schema owner never logs in. The configuration input is bound to this initialization; retry
+with the same bytes or omit it. Transfer the bearer through the operator's
+secret channel. Do not transfer the gateway environment file to a runner.
 
-Full enroll detail — what the bootstrap bundle carries, the optional flags, and
-why startup order matters — is in [`enroll-a-runner.md`](enroll-a-runner.md).
+For locally owned storage, keep the generated DB and Redis URLs (the DB URL is
+a credential-free endpoint). Bootstrap projects the active runner login and
+rewrites loopback hosts to the gateway's reachable `machine_host`. The gateway itself dials its local
+storage. Off-box reachability requires both the configured private network and
+the credential for the caller's role.
+
+Postgres and PgBouncer expose the configured reachable address only with
+control-plane authentication enabled. Redis uses the platform's native network
+contract: macOS has its host relay, while Linux binds the authenticated native
+instance to the configured address. See the [runbook](../../../../conventions/runbook.md)
+for binding and firewall ownership. No-secret single-box storage remains local.
+
+## Join each runner
+
+Acquire its dependencies and follow [join a runner](join-a-runner.md). Its one
+first-start command validates bootstrap, records identity, registers the host,
+and launches its root-owned services. The gateway must reach the runner's
+`--machine-host` and ops port; a successful connection from the runner to the
+gateway alone does not establish that return path.
+
+Use a distinct health-port block when units share a loopback namespace. A
+runner does not cache the gateway's DB/Redis URLs or owner credentials; each
+process fetches its runner projection at startup. Model-provider credentials
+remain local to the runner.
+
+## External data plane
+
+A gateway may explicitly name a paired foreign Postgres and Redis service in
+its first-start config, together with the existing runner DB credential:
+`AVA_DB_URL`, `AVA_REDIS_URL`, and `AVA_RUNNER_DB_PASSWORD`. The DB URL must use
+the application-owner identity. The three fields are required together; local,
+mixed-ownership, or query-redirected endpoints are rejected.
+
+The external service must already provide Ava's baseline schema and runner role.
+Start does not initialize or manage its native instances, provision roles, or
+apply Redis ACLs. The explicitly supplied DB owner still authorizes ordinary
+application migrations. Native instance ownership and application-schema
+ownership are separate boundaries.
+
+## Verify both directions
+
+Require successful start and fresh status on the gateway and each runner. Then
+request a small task targeted at the new runner through the gateway. This
+checks scheduling and runner execution in addition to bootstrap reachability.
+
+On macOS, `ava firewall status` shows the current allowlist, and convergence
+reports any manual action needed for the exact serving binaries. A listener
+working on loopback is not proof it is reachable from another host.

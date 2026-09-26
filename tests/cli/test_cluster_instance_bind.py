@@ -8,11 +8,41 @@ fails fast on timeout. A loopback-only single box never waits.
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from cli.commands import _cluster_instance as _ci
 from shared.config import settings
+
+
+def _no_native_effect(*_args: object, **_kwargs: object) -> None:
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _native_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_ci.ownership, "require_listener", _no_native_effect)
+    monkeypatch.setattr(_ci.ownership, "require_postgres", _no_native_effect)
+    # The loaded-hba proof dials the postmaster; real Postgres covers it
+    # (tests/lifecycle/db_authority/test_single_box.py).
+    monkeypatch.setattr(_ci, "require_authenticated_hba", _no_native_effect)
+
+
+def _admin_peer_line() -> str:
+    import getpass
+
+    return f"local all {getpass.getuser()} peer"
+
+
+_ALWAYS_AUTH_LOOPBACK = [
+    # The collector's password-less monitoring role: peer, mapped from the OS user.
+    "local all ava_monitor peer map=ava_monitor",
+    "local all all scram-sha-256",
+    "host all all 127.0.0.1/32 scram-sha-256",
+    "host all all ::1/128 scram-sha-256",
+]
 
 
 def _pg_socket_path(root: Path, home: Path) -> Path:
@@ -101,32 +131,37 @@ def test_bind_addrs_includes_reachable_with_secret(monkeypatch: pytest.MonkeyPat
     assert _ci._bind_addrs("s3cret") == ["127.0.0.1", "10.0.0.5"]
 
 
-def test_pg_hba_body_no_scram_lines_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No secret -> local trust + loopback trust only; no scram host lines, and
-    no reachable/cidr lines either."""
+def test_pg_hba_body_authenticates_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No secret -> the data plane still authenticates: the OS user only by peer
+    on the owner-only socket, every other role SCRAM; no trust line anywhere and
+    no reachable/cidr lines (the bind stays loopback-only)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("")
-    assert "scram" not in body
-    assert body.splitlines() == [
-        "local all all trust",
-        "host all all 127.0.0.1/32 trust",
-        "host all all ::1/128 trust",
-    ]
+    assert "trust" not in body
+    assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
+
+
+def test_pg_ident_maps_only_the_os_user_to_the_monitoring_role() -> None:
+    """The ident map the monitor's peer line names admits exactly this OS user
+    as `ava_monitor`; it is the file's only mapping."""
+    import getpass
+
+    assert _ci._pg_ident_body() == f"ava_monitor {getpass.getuser()} ava_monitor\n"
 
 
 def test_pg_hba_body_scram_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a secret the posture is unchanged: scram everywhere TCP, including
-    the reachable host and trusted CIDRs. No replication rows without a PITR
-    replication URL (pinned explicitly — ambient prod env must not leak in)."""
+    """With a secret, the reachable host and trusted CIDRs join as SCRAM lines.
+    No replication rows without a PITR replication URL (pinned explicitly —
+    ambient prod env must not leak in)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("s3cret")
     assert body.splitlines() == [
-        "local all all trust",
-        "host all all 127.0.0.1/32 scram-sha-256",
-        "host all all ::1/128 scram-sha-256",
+        _admin_peer_line(),
+        *_ALWAYS_AUTH_LOOPBACK,
         "host all all 10.0.0.5/32 scram-sha-256",
         "host all all 10.0.0.0/8 scram-sha-256",
     ]
@@ -151,30 +186,27 @@ def test_pg_hba_body_emits_replication_rows_for_pitr_role(monkeypatch: pytest.Mo
 def test_pg_hba_body_no_replication_rows_without_pitr_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No PITR replication URL -> no replication rows; the existing posture is
-    unchanged (and pre-PITR clusters stay exactly as tightened)."""
+    """No PITR replication URL -> no replication rows."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "127.0.0.1")
     monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("s3cret")
     assert "replication" not in body
-    assert body.splitlines() == [
-        "local all all trust",
-        "host all all 127.0.0.1/32 scram-sha-256",
-        "host all all ::1/128 scram-sha-256",
-    ]
+    assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
 
 
-def test_pg_hba_body_no_replication_rows_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A no-secret cluster stays replication-free even with a PITR URL in
-    ambient settings — its unauthenticated posture must not gain scram rows."""
+def test_pg_hba_body_replication_rows_follow_pitr_whatever_the_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The always-authenticated posture carries PITR's SCRAM replication rows on
+    a no-secret cluster too; the secret decides only reach."""
     monkeypatch.setattr(
         settings.physical_backup,
         "pitr_replication_db_url",
         "postgresql://ava_pitr_repl:s3cret@127.0.0.1:5433/ava_main",
     )
     body = _ci._pg_hba_body("")
-    assert "replication" not in body
+    assert "host replication ava_pitr_repl 127.0.0.1/32 scram-sha-256" in body.splitlines()
 
 
 # ─── Task #1113: the passed secret wins over ambient settings ────────────────
@@ -198,19 +230,14 @@ def test_pg_hba_body_follows_passed_secret_not_ambient_settings(
 ) -> None:
     """The hba is written from the passed cluster secret, never from ambient
     settings — otherwise a no-secret cluster born from a prod-sourced shell
-    gets scram lines keyed to a FOREIGN secret (its own first-start migration
-    then fails `fe_sendauth: no password supplied` against the active hba)."""
+    gains LAN-reachable host lines keyed to a FOREIGN cluster's posture."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("")
-    assert "scram" not in body
-    assert "foreign" not in body
-    assert body.splitlines() == [
-        "local all all trust",
-        "host all all 127.0.0.1/32 trust",
-        "host all all ::1/128 trust",
-    ]
+    assert "10.0.0" not in body
+    assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
 
 
 # ─── task #1469: macOS retains its loopback Redis workaround ──────────────────
@@ -253,14 +280,45 @@ def _redis_bind_arg(command: list[str]) -> list[str]:
 def test_start_redis_binds_loopback_only_without_secret(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An unauthenticated Redis start uses exactly the loopback bind."""
+    """A no-secret Redis start uses exactly the loopback bind, and still
+    authenticates: the bearer decides reach, never whether Redis has a password."""
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
-    assert _ci._start_redis(6380, "", "", "", "ava") == 0
+    assert _ci._start_redis(6380, "redis-admin", "redis-runtime", "", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
     assert "--save" not in started[0]  # persistence rides the rendered conf, not argv
-    assert (tmp_path / "redis.conf").read_text().startswith("save 900 1")
+    conf = (tmp_path / "redis.conf").read_text()
+    assert conf.startswith("save 900 1")
+    assert conf.endswith('requirepass "redis-admin"\n')
+
+
+@pytest.mark.parametrize(
+    ("admin", "runtime"), [("", ""), ("", "redis-runtime"), ("redis-admin", "")]
+)
+def test_start_redis_refuses_missing_credentials_before_effects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, admin: str, runtime: str
+) -> None:
+    """Redis never starts, or is re-affirmed, without both generated passwords;
+    there is no password-less posture to fall back to."""
+    started = _wire_redis_start(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        _ci,
+        "_ensure_redis_acl",
+        lambda *_a, **_kw: pytest.fail("ACL effect without credentials"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    with pytest.raises(ValueError, match="password"):
+        _ci._start_redis(6380, admin, runtime, "", "ava")
+    assert started == []
+    assert not (tmp_path / "redis.conf").exists()
+
+
+def test_redis_admin_helpers_refuse_an_empty_password(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="admin password"):
+        _ci._write_redis_conf(tmp_path, "")
+    with pytest.raises(ValueError, match="admin password"):
+        _ci._redis_cli_env("")
+    assert not (tmp_path / "redis.conf").exists()
 
 
 def test_macos_start_redis_binds_loopback_only_with_secret(
@@ -304,7 +362,7 @@ def test_linux_redis_bind_uses_caller_secret_not_inherited_config(
         return True
 
     monkeypatch.setattr(_ci, "_wait_for_reachable_bind", address_ready)
-    assert _ci._start_redis(6380, "admin" if secret else "", "runtime", secret, "ava") == 0
+    assert _ci._start_redis(6380, "admin", "runtime", secret, "ava") == 0
     expected = ["--bind", "127.0.0.1", "10.0.0.5"] if secret else ["--bind", "127.0.0.1"]
     assert _redis_bind_arg(started[0]) == expected
     assert waits == ([True] if secret else [])
@@ -358,14 +416,41 @@ def test_redis_config_keeps_previous_complete_value_when_replace_fails(
 def test_redis_conf_always_renders_rdb_save_schedule(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A no-secret cluster still persists: the RDB save schedule must survive
-    every conf render, or a restart silently loses persistence (task #2027)."""
+    """A no-secret cluster still persists and authenticates: the RDB save
+    schedule and requirepass survive every conf render, or a restart silently
+    loses persistence (task #2027) or comes back without a password."""
     monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _ci._start_redis(6380, "", "", "", "ava") == 0
-    assert (tmp_path / "redis.conf").read_text() == "save 900 1\nsave 300 10\nsave 60 10000\n"
+    assert _ci._start_redis(6380, "admin", "runtime", "", "ava") == 0
+    assert (tmp_path / "redis.conf").read_text() == (
+        'save 900 1\nsave 300 10\nsave 60 10000\nrequirepass "admin"\n'
+    )
+
+
+def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime URL's ACL user can neither AUTH as `default` nor SHUTDOWN, so
+    the explicit force teardown must authenticate with the admin password."""
+    monkeypatch.setattr(
+        settings.data_plane, "redis_url", "redis://ava:runtime-pw@127.0.0.1:16380/0"
+    )
+    monkeypatch.setattr(settings.data_plane, "redis_admin_password", "admin-pw")
+    monkeypatch.setattr(_ci.owned_postgres, "stop", lambda _data: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._pgbouncer.stop_pgbouncer", lambda: None)
+    monkeypatch.setattr(_ci, "_redis_cli_bin", lambda: "redis-cli")
+    shutdowns: list[tuple[list[str], str]] = []
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        env = cast("dict[str, str]", kwargs["env"])
+        shutdowns.append((cmd[1:], env["REDISCLI_AUTH"]))
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(_ci.subprocess, "run", _run)
+    assert _ci.stop_cluster_instance() == 0
+    assert shutdowns == [(["-p", "16380", "shutdown", "nosave"], "admin-pw")]
 
 
 # ─── task #1303: postgres gets the same secret-gated reachable-bind wait ──────
@@ -404,11 +489,12 @@ def test_start_probes_receive_the_url_hosts(
         calls.append(cmd)
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
+    monkeypatch.setattr(_ci.owned_postgres, "start", _no_native_effect)
     monkeypatch.setattr(_ci.subprocess, "run", _run)
 
     assert _ci._start_pg(15433, "") == 0
     assert _ci._start_redis(16380, "admin", "runtime", "", "ava") == 0
-    assert seen == {"pg": (15433, "10.0.0.7"), "redis": (16380, "10.0.0.7")}
+    assert seen == {"redis": (16380, "10.0.0.7")}
 
 
 def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -458,6 +544,11 @@ def _wire_pg_start(
     """Common mocks for _start_pg: a not-running pg on a scratch data dir, with
     subprocess.run captured."""
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+
+    def captured(*_args: object, **_kwargs: object) -> SimpleNamespace | None:
+        return SimpleNamespace(pid=123, live=lambda: True) if running else None
+
+    monkeypatch.setattr(_ci.ownership, "require_postgres", captured)
     monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: running)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []
@@ -466,7 +557,12 @@ def _wire_pg_start(
         calls.append(cmd)
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
-    monkeypatch.setattr(_ci.subprocess, "run", _run)
+    def start(
+        _data: Path, _port: int, argv: list[str], _env: dict[str, str], **_kw: object
+    ) -> None:
+        calls.append(argv)
+
+    monkeypatch.setattr(_ci.owned_postgres, "start", start)
     return calls
 
 
@@ -494,8 +590,9 @@ def test_start_pg_sets_owner_only_socket_permissions(
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
     assert _ci._start_pg(5433, "") == 0
-    options = calls[0][calls[0].index("-o") + 1]
-    assert "unix_socket_permissions=0700" in options
+    assert "unix_socket_permissions=0700" in calls[0]
+    assert Path(calls[0][0]).name == "postgres"
+    assert "pg_ctl" not in calls[0]
 
 
 def test_start_pg_waits_and_fails_fast_on_timeout(
@@ -536,10 +633,10 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     assert calls != []
 
 
-def test_start_pg_hands_the_built_start_env_to_pg_ctl(
+def test_start_pg_hands_the_built_start_env_to_owned_launch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: object
 ) -> None:
-    """Task #3754: pg_ctl start gets pg_start_env() — the postmaster env is
+    """Task #3754: direct postgres gets pg_start_env() — the postmaster env is
     built explicitly (the macOS locale fallback for launchd / non-interactive
     ssh starts) instead of inheriting whatever process brought the cluster up."""
     monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
@@ -550,11 +647,12 @@ def test_start_pg_hands_the_built_start_env_to_pg_ctl(
     monkeypatch.setattr(_ci, "pg_start_env", lambda: sentinel)
     envs: list[object] = []
 
-    def _run(cmd: list[str], **kwargs: object) -> object:
-        envs.append(kwargs.get("env"))
-        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+    def start(
+        _data: Path, _port: int, _argv: list[str], env: dict[str, str], **_kw: object
+    ) -> None:
+        envs.append(env)
 
-    monkeypatch.setattr(_ci.subprocess, "run", _run)
+    monkeypatch.setattr(_ci.owned_postgres, "start", start)
 
     assert _ci._start_pg(5433, "") == 0
     assert envs == [sentinel]

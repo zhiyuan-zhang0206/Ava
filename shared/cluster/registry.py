@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 from shared import cluster
-from shared.config import settings
 from shared.platform import file_lock
 
 
@@ -36,16 +35,18 @@ class ClusterRecord:
 
 
 def registry_path() -> Path:
+    from shared.config import settings
+
     return Path(settings.general.cluster_registry).expanduser()
 
 
-def load_registry() -> dict[str, ClusterRecord]:
+def load_registry(*, path: Path | None = None) -> dict[str, ClusterRecord]:
     """The registry, keyed IN MEMORY by gateway_home path. The record's own
     `gateway_home` is the only identity — a file key written by an older
     (name-keyed) build still loads because every row is re-keyed from its
     `gateway_home` — and truly-retired fields the dataclass no longer declares
     (`redis_db_index` / `redis_prefix`) are dropped."""
-    p = cluster.registry_path()
+    p = path if path is not None else cluster.registry_path()
     if not p.exists():
         return {}
     raw = json.loads(p.read_text())
@@ -79,21 +80,20 @@ def _registry_disk_form(reg: dict[str, ClusterRecord]) -> dict[str, dict[str, An
     return {home: asdict(rec) for home, rec in reg.items()}
 
 
-def _dump_registry(reg: dict[str, ClusterRecord]) -> None:
-    p = cluster.registry_path()
+def _dump_registry(reg: dict[str, ClusterRecord], *, path: Path | None = None) -> None:
+    p = path if path is not None else cluster.registry_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(_registry_disk_form(reg), indent=2)
-    # atomic write so a concurrent reader never sees a half-written file
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(data)
-    tmp.replace(p)
+    from shared.atomic_io import write_text_atomic
+
+    write_text_atomic(p, data, mode=0o600, sync_parent=True)
 
 
 def save_record(rec: ClusterRecord) -> None:
     """Insert/update a cluster's record — self-serializing: the registry
     read-modify-write runs under registry_lock() internally, so a caller that
     does NOT hold the lock cannot clobber a concurrent birth (audit 2026-08-08
-    P2: _converge_gate._ensure_app_port called save_record without the lock,
+    A port-block backfill called save_record without the lock,
     and a lost update resurrected/dropped records mid-race). Callers that
     already hold the lock (a birth's allocate+save critical section) use
     save_record_locked."""
@@ -101,11 +101,11 @@ def save_record(rec: ClusterRecord) -> None:
         save_record_locked(rec)
 
 
-def save_record_locked(rec: ClusterRecord) -> None:
+def save_record_locked(rec: ClusterRecord, *, path: Path | None = None) -> None:
     """save_record for a caller that already holds registry_lock()."""
-    reg = load_registry()
+    reg = load_registry(path=path)
     reg[rec.gateway_home] = rec
-    _dump_registry(reg)
+    _dump_registry(reg, path=path)
 
 
 def delete_record(home: Path) -> bool:
@@ -131,16 +131,16 @@ def get_record(home: Path) -> ClusterRecord | None:
 
 
 @contextlib.contextmanager
-def registry_lock() -> Generator[None]:
+def registry_lock(*, path: Path | None = None, timeout_s: float = 30) -> Generator[None]:
     """Host-level advisory file lock serializing registry read-modify-write.
 
-    Cluster birth (install) does load_registry -> allocate ports -> save_record
+    Cluster start does load_registry -> allocate ports -> save_record
     as one critical section; without a lock two concurrent births both read the
     same registry, allocate the same port block, and the second save_record
     clobbers the first. Hold this across the whole allocate+save.
     """
-    lock_path = cluster.registry_path().with_suffix(".lock")
+    lock_path = (path if path is not None else cluster.registry_path()).with_suffix(".lock")
     # Cross-platform advisory lock (fcntl on POSIX, msvcrt on Windows) — see
     # shared.platform.file_lock. Serializes the registry read-modify-write.
-    with file_lock(lock_path):
+    with file_lock(lock_path, timeout_s=timeout_s):
         yield

@@ -21,14 +21,11 @@ from typing import Any
 from pydantic import BaseModel
 
 import shared.cluster
-import shared.cluster_lock
 import shared.db
 import shared.host_deploy_state
-from ops import cluster_pause, cluster_session
-from ops.cluster_session import OrchestrationKind
-from ops.controllers.schema_mismatch import status as schema_mismatch_status
+from ops import cluster_pause
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
-from ops.updater_outcome import UpdaterOutcome, last_updater_outcome
+from ops.schema_mismatch import status as schema_mismatch_status
 from shared.api_contracts.status import PausedReason, SchemaMismatchStatus
 from shared.config import cluster_tz
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
@@ -77,38 +74,15 @@ class ClusterStatus(BaseModel):
     # serving gate (`startup`) legible from a deliberate pause, instead of one
     # opaque bool that a consumer can only guess at.
     paused_reason: PausedReason | None = None
-    # The whole-cluster orchestration alive on this host ('rollout' / 'restart' /
-    # 'update'), or None when idle. This endpoint bypasses the cluster-paused 503
-    # middleware, so it is the one status source readable *during* a pause — which
-    # lets a consumer tell a normal in-flight rollout (paused + orchestration set,
-    # wait) from a stranded pause (paused + orchestration None, a hard-killed
-    # rollout left the flag; recoverable via /api/cluster/recover).
-    current_orchestration: OrchestrationKind | None = None
-    # How this host's last updater session ended, when this host is paused and the
-    # log speaks for the *current* update — or freshly-idle within the
-    # no-progress window, so a just-converged host's COMPLETED stage breakdown
-    # rides the probe that saw it resume (Task #1820); None otherwise.
-    #
-    # It rides beside `paused` / `current_orchestration` because those two are what
-    # produce the rollout poll's `POLL_STALLED` verdict, and that verdict is exactly
-    # where the reason was missing: a preflight that refused (host untouched, still
-    # serving) and an updater that died mid-flight (checkout moved, processes not)
-    # both read as "reachable, still paused, no updater running". The orchestrator
-    # already has this response in hand at the moment it decides, so the reason
-    # arrives with the verdict rather than needing a second dial.
-    last_updater_outcome: UpdaterOutcome | None = None
     # This host's prod-source HEAD commit (`$AVA_HOME/source`), or None when it
-    # cannot be read (no prod source / git unavailable). Compared against the
-    # cluster pin (`cluster_target_sha`) to surface a node drifted off the
-    # cluster's pinned commit; threaded to the roster so the multi-machine view
-    # shows per-node drift.
+    # cannot be read (no prod source / git unavailable); threaded to the roster so
+    # the multi-machine view shows each node's checkout.
     head_sha: str | None = None
     # The commit the process answering this probe actually loaded, frozen at its
     # own boot (`shared.process_sha`), or None when it never froze one. Distinct
-    # from head_sha: head_sha is the checkout the pin is compared against,
-    # running_sha is code the live process holds. They differ when the checkout
-    # advanced (git pull / rollout) but the process was not restarted — the roster
-    # shows a node "on pin ✓" that is nonetheless running stale code.
+    # from head_sha: head_sha is the checkout, running_sha is code the live
+    # process holds. They differ when the checkout advanced (`git pull`) but the
+    # process was not restarted — the roster marks that node's code as stale.
     #
     # This speaks only for the answering process (the ops daemon on an
     # agent-runner, the gateway on a pure gateway). A sibling daemon respawned at
@@ -123,7 +97,7 @@ class ClusterStatus(BaseModel):
     # per-machine in the roster; central-only daemons (labeler/memory-indexer) are not
     # here — they live in the gateway services panel.
     agent_host_online: bool | None = None
-    watchdog_online: bool | None = None
+    supervisor_online: bool | None = None
     # Agent-runner detail surfaced on the Status Page. `agent_count` is this
     # host's non-terminated agent identities, including idle and paused agents.
     # `session_count` counts live service and persistent terminal sessions.
@@ -381,7 +355,6 @@ def _read_deploy_snapshot(
     pool: Any | None,
 ) -> tuple[
     shared.host_deploy_state.HostDeployState | None,
-    shared.cluster_lock.DeployLease | None,
     int,
     SchemaMismatchStatus | None,
 ]:
@@ -394,16 +367,23 @@ def _read_deploy_snapshot(
         )
         with connection as conn:
             state = shared.host_deploy_state.read(conn=conn)
-            lease = shared.cluster_lock.read_update_lease(conn=conn)
             agent_count = _count_local_agents(conn) if is_agent_runner() else 0
             schema_status = schema_mismatch_status(conn=conn)
-        return state, lease, agent_count, schema_status
-    except Exception:  # fail-fast-ok: status degrades when the central DB is unavailable
+        return state, agent_count, schema_status
+    except Exception as exc:  # fail-fast-ok: status degrades when the central DB is unavailable
         # Deploy state and agent count share one bounded connection. During a
         # data-plane outage the snapshot remains readable with no deploy claim
         # and the existing zero-count default.
         _log.warning("deploy-state snapshot read failed; using degraded status", exc_info=True)
-        return None, None, 0, None
+        return (
+            None,
+            0,
+            SchemaMismatchStatus(
+                kind="unavailable",
+                machine=machine_name(),
+                detail=f"schema comparison unavailable: status database snapshot failed ({type(exc).__name__})",
+            ),
+        )
 
 
 def _read_resource_sample() -> ResourceSample | None:
@@ -440,6 +420,16 @@ def _paused_reason(state: shared.host_deploy_state.HostDeployState | None) -> Pa
     return None
 
 
+def _supervisor_online() -> bool | None:
+    """An observed native root is online; unavailable inspection stays unknown."""
+    from shared.root_control.client import RootClientError, root_process
+
+    try:
+        return root_process() is not None
+    except (RootClientError, RuntimeError):
+        return None
+
+
 def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
@@ -455,17 +445,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     agent_host_alive = (
         _check_pidfile(str(settings.services.agent_host_pidfile))[0] if is_agent_runner() else None
     )
-    # One watchdog per capability now; `watchdog_online` (single bool for the
-    # frontend dot) means "every watchdog this host should run is alive". A
-    # single-box host requires BOTH; a split unit requires only its own.
-    watchdog_pidfiles: list[str] = []
-    if is_gateway():
-        watchdog_pidfiles.append(str(settings.services.gateway_watchdog_pidfile))
-    if is_agent_runner():
-        watchdog_pidfiles.append(str(settings.services.agent_runner_watchdog_pidfile))
-    watchdog_alive = (
-        all(_check_pidfile(p)[0] for p in watchdog_pidfiles) if watchdog_pidfiles else False
-    )
+    supervisor_alive = _supervisor_online()
     sessions, shell_count, session_total = _collect_sessions()
     # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays
     # an open dict list so the frontend-facing status schema (and its generated TS
@@ -476,7 +456,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
         resource_future = executor.submit(_read_resource_sample)
-        state, lease, agent_count, schema_status = _read_deploy_snapshot(pool)
+        state, agent_count, schema_status = _read_deploy_snapshot(pool)
         resource = resource_future.result()
     # One source of truth for the pair: `paused` is exactly "a clause fired",
     # so the bool can never drift from its reason.
@@ -488,14 +468,12 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
         serve_observability_station=is_observability_station(),
         paused=paused_reason is not None,
         paused_reason=paused_reason,
-        current_orchestration=cluster_session.current_orchestration(state, lease),
-        last_updater_outcome=last_updater_outcome(state),
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
         schema_mismatch=schema_status,
         shell_count=shell_count,
         agent_host_online=agent_host_alive,
-        watchdog_online=watchdog_alive,
+        supervisor_online=supervisor_alive,
         agent_count=agent_count,
         session_count=session_total,
         agent_groups=agent_groups,

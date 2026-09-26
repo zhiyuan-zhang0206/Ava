@@ -37,25 +37,11 @@ ActivationPhase = Literal[
     "rolled_back",
 ]
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _FIELDS_ERROR = "PITR activation record fields differ"
 _STRING_FIELD_ERROR = "PITR activation {name} must be a string"
 _OPTIONAL_STRING_FIELD_ERROR = "PITR activation {name} must be a string or null"
 _INTEGER_FIELD_ERROR = "PITR activation {name} must be an integer"
-_V2_FIELDS = {
-    "schema_version",
-    "operation_id",
-    "phase",
-    "started_at",
-    "updated_at",
-    "origin",
-    "pre_activation_snapshot",
-    "pre_activation_pg_settings",
-    "pre_activation_credential_evidence",
-    "switched_wal",
-    "protected_manifest",
-    "error",
-}
 
 _PHASES = frozenset(
     {
@@ -177,11 +163,10 @@ class ActivationRecord:
     config_apply_applied: dict[str, str] | None = None
     rollback_setting_intent: dict[str, str] | None = None
     rollback_settings_applied: dict[str, str] | None = None
-    restart_handoff: str | None = None
-    restart_orchestration: str | None = None
+    home_operation: str | None = None
+    home_action: str | None = None
+    home_generation: int | None = None
     rollback_postmaster_started_at: str | None = None
-    restart_handoff_consumed_at: str | None = None
-    restart_dispatch_session: str | None = None
     wal_exact_evidence: dict[str, str] | None = None
     wal_verification_deadline: str | None = None
     wal_ack_evidence: dict[str, str] | None = None
@@ -210,7 +195,7 @@ class ActivationRecord:
     def from_json(cls, payload: str) -> ActivationRecord:
         raw_value: object = json.loads(payload)
         fields = strict_decode.object_fields(raw_value, error_type=TypeError, message=_FIELDS_ERROR)
-        raw = cls._upgrade_schema(fields)
+        raw = fields
         record = cls._from_fields(raw)
         # Keep validation order: corrupt records can violate several invariants.
         record._validate_schema_and_timestamps()
@@ -226,44 +211,6 @@ class ActivationRecord:
         record._validate_rollback_evidence(rollback_names)
         record._validate_manifests()
         return record
-
-    @classmethod
-    def _upgrade_schema(cls, raw: dict[str, object]) -> dict[str, object]:
-        if set(raw) == _V2_FIELDS and raw.get("schema_version") == 2:
-            if raw.get("phase") not in {
-                "shadow",
-                "snapshot_pending",
-                "snapshot_verified",
-                "wal_config_pending",
-            }:
-                raise ValueError("PITR activation v2 operation cannot be safely upgraded")
-            raw = {**dict.fromkeys(cls.__dataclass_fields__), **raw}
-            raw["schema_version"] = _SCHEMA_VERSION
-        if (
-            set(raw) == set(cls.__dataclass_fields__) - {"error_message"}
-            and raw.get("schema_version") == 3
-        ):
-            # v3 -> v4 adds only the optional error_message field; every phase
-            # upgrades in place (a base_pending v3 operation must stay
-            # resumable across the schema bump).
-            raw = {**dict.fromkeys(cls.__dataclass_fields__), **raw}
-            raw["schema_version"] = _SCHEMA_VERSION
-        evidence = raw.get("pre_activation_credential_evidence")
-        if isinstance(evidence, dict) and "viewer_client_email" in evidence:
-            # GCS-vocabulary credential evidence (pre-Baidu-backend records):
-            # the same identities under backend-neutral keys, so a live
-            # activation record stays readable across the backend field (QA #1147).
-            legacy = cast(dict[str, object], evidence)
-            raw["pre_activation_credential_evidence"] = {
-                "backend": "gcs",
-                "uploader_identity": str(legacy.get("uploader_client_email") or ""),
-                "viewer_identity": str(legacy.get("viewer_client_email") or ""),
-                "store_target": str(legacy.get("bucket_name") or ""),
-                "object_prefix": str(legacy.get("object_prefix") or ""),
-                "backup_key_id": str(legacy.get("backup_key_id") or ""),
-                "backup_key_sha256": str(legacy.get("backup_key_sha256") or ""),
-            }
-        return raw
 
     @classmethod
     def _from_fields(cls, raw: dict[str, object]) -> ActivationRecord:
@@ -330,11 +277,19 @@ class ActivationRecord:
             config_apply_applied=string_map("config_apply_applied"),
             rollback_setting_intent=string_map("rollback_setting_intent"),
             rollback_settings_applied=string_map("rollback_settings_applied"),
-            restart_handoff=opt_string("restart_handoff"),
-            restart_orchestration=opt_string("restart_orchestration"),
+            home_operation=opt_string("home_operation"),
+            home_action=opt_string("home_action"),
+            home_generation=(
+                None
+                if raw["home_generation"] is None
+                else strict_decode.strict_int(
+                    raw,
+                    "home_generation",
+                    error_type=TypeError,
+                    message_template=_INTEGER_FIELD_ERROR,
+                )
+            ),
             rollback_postmaster_started_at=opt_string("rollback_postmaster_started_at"),
-            restart_handoff_consumed_at=opt_string("restart_handoff_consumed_at"),
-            restart_dispatch_session=opt_string("restart_dispatch_session"),
             wal_exact_evidence=string_map("wal_exact_evidence"),
             wal_verification_deadline=opt_string("wal_verification_deadline"),
             wal_ack_evidence=string_map("wal_ack_evidence"),
@@ -357,6 +312,7 @@ class ActivationRecord:
     def _validate_schema_and_timestamps(self) -> None:
         if self.schema_version != _SCHEMA_VERSION:
             raise ValueError("unsupported PITR activation record schema")
+        self._validate_home_binding()
         started = datetime.fromisoformat(self.started_at)
         updated = datetime.fromisoformat(self.updated_at)
         if started.tzinfo is None or updated.tzinfo is None:
@@ -382,6 +338,16 @@ class ActivationRecord:
             ):
                 raise ValueError("PITR WAL intent has a non-canonical segment")
 
+    def _validate_home_binding(self) -> None:
+        binding = (self.home_operation, self.home_action, self.home_generation)
+        if any(value is not None for value in binding) and (
+            not self.home_operation
+            or self.home_action not in {"activate", "rollback"}
+            or self.home_generation is None
+            or self.home_generation < 1
+        ):
+            raise ValueError("PITR home operation binding is incomplete")
+
     def _validate_config_journals(self) -> None:
         for journal, label in (
             (self.config_apply_intent, "intent"),
@@ -396,7 +362,7 @@ class ActivationRecord:
                 if journal.get("kind") == "env" and label == "intent"
                 else {"kind", "digest"}
                 if journal.get("kind") == "env"
-                else {"kind", "name", "expected_digest", "desired_value"}
+                else {"kind", "name", "expected_digest", "desired_digest", "desired_value"}
                 if label == "intent"
                 else {"kind", "name", "digest"}
             )
@@ -405,7 +371,7 @@ class ActivationRecord:
 
     def _validate_rollback_journals(self, rollback_names: set[str]) -> None:
         intent = self.rollback_setting_intent
-        intent_fields = {"name", "expected_digest", "current_value", "desired_value"}
+        intent_fields = {"name", "expected_digest", "desired_digest", "desired_value"}
         if intent is not None and set(intent) != intent_fields:
             raise ValueError("PITR rollback setting intent fields differ")
         if intent is not None and intent["name"] not in rollback_names:
@@ -496,14 +462,14 @@ class ActivationRecord:
 
     def _validate_restart_and_wal_evidence(self, phase_index: int) -> None:
         if phase_index >= _FORWARD_PHASES.index("wal_restart_pending") and (
-            not self.restart_handoff
-            or not self.restart_orchestration
+            not self.home_operation
+            or self.home_action not in {"activate", "rollback"}
+            or self.home_generation is None
+            or self.home_generation < 1
             or not self.rollback_expected_env_digest
             or not self.rollback_expected_auto_conf_digest
         ):
             raise ValueError("PITR activation phase is missing restart orchestration evidence")
-        if (self.restart_handoff_consumed_at is None) != (self.restart_dispatch_session is None):
-            raise ValueError("PITR restart handoff binding is incomplete")
         if phase_index >= _FORWARD_PHASES.index("wal_ack_pending") and (
             not self.wal_exact_evidence or not self.wal_verification_deadline
         ):
@@ -525,7 +491,7 @@ class ActivationRecord:
 
     def _validate_rollback_evidence(self, rollback_names: set[str]) -> None:
         if self.phase in {"rollback_pending", "rollback_restart_pending"} and (
-            not self.wal_config_before_digest or self._missing_rollback_restart(consumed=False)
+            not self.wal_config_before_digest or self._missing_rollback_restart()
         ):
             raise ValueError("PITR rollback phase is missing restart evidence")
         if self.phase == "rollback_restart_pending" and (
@@ -536,18 +502,16 @@ class ActivationRecord:
         if (
             self.phase == "rolled_back"
             and self.wal_config_before_digest is not None
-            and self._missing_rollback_restart(consumed=True)
+            and self._missing_rollback_restart()
         ):
             raise ValueError("mutated PITR rollback is missing full ownership evidence")
 
-    def _missing_rollback_restart(self, *, consumed: bool) -> bool:
+    def _missing_rollback_restart(self) -> bool:
         return (
-            not self.restart_handoff
-            or not self.restart_orchestration
-            or (
-                consumed
-                and (not self.restart_handoff_consumed_at or not self.restart_dispatch_session)
-            )
+            not self.home_operation
+            or self.home_action not in {"activate", "rollback"}
+            or self.home_generation is None
+            or self.home_generation < 1
             or not self.rollback_postmaster_started_at
             or not self.rollback_expected_env_digest
             or not self.rollback_expected_auto_conf_digest
@@ -707,14 +671,22 @@ def load_record(home: Path) -> ActivationRecord | None:
 
 def write_record(home: Path, record: ActivationRecord) -> None:
     ActivationRecord.from_json(json.dumps(asdict(record)))
-    directory = ensure_private_dir(activation_root(home))
+    from shared.release_operation import note_pitr_write
+    from shared.verified_file import regular_bytes
+
     path = record_path(home)
+    try:
+        before = regular_bytes(path)
+    except FileNotFoundError:
+        before = None
+    encoded = json.dumps(asdict(record), sort_keys=True, separators=(",", ":")) + "\n"
+    note_pitr_write(home, before, encoded.encode())
+    directory = ensure_private_dir(activation_root(home))
     fd, raw = tempfile.mkstemp(prefix=".operation-", suffix=".partial", dir=directory)
     partial = Path(raw)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as output:
-            json.dump(asdict(record), output, sort_keys=True, separators=(",", ":"))
-            output.write("\n")
+            output.write(encoded)
             output.flush()
             os.fsync(output.fileno())
         partial.chmod(0o600)
@@ -739,47 +711,6 @@ def write_record_cas(
     if replacement.operation_id != expected.operation_id:
         raise RuntimeError("PITR activation CAS cannot change operation identity")
     write_record(home, replacement)
-
-
-def consume_restart_handoff(
-    home: Path, expected: ActivationRecord, *, session: str
-) -> ActivationRecord:
-    if expected.phase not in {"wal_restart_pending", "rollback_restart_pending"}:
-        raise ValueError("PITR restart handoff is not pending")
-    if expected.restart_handoff_consumed_at is not None:
-        raise RuntimeError("PITR restart handoff token was already consumed")
-    raw = asdict(expected)
-    now = datetime.now(UTC).isoformat()
-    raw["restart_handoff_consumed_at"] = now
-    raw["restart_dispatch_session"] = session
-    raw["updated_at"] = now
-    replacement = ActivationRecord.from_json(json.dumps(raw))
-    write_record_cas(home, expected=expected, replacement=replacement)
-    return replacement
-
-
-def rearm_restart_handoff(
-    home: Path, expected: ActivationRecord, *, session: str
-) -> ActivationRecord:
-    """Rearm a bound handoff after the orchestration seam proved no child exists.
-
-    The caller must hold the cluster lifecycle lock.  This CAS is deliberately
-    separate from consumption: a retry can only clear the exact session it is
-    about to bind again, never turn an arbitrary consumed token back into work.
-    """
-
-    if expected.phase not in {"wal_restart_pending", "rollback_restart_pending"}:
-        raise ValueError("PITR restart handoff is not pending")
-    if expected.restart_handoff_consumed_at is None or expected.restart_dispatch_session != session:
-        raise RuntimeError("PITR restart handoff is not bound to this session")
-    raw = asdict(expected)
-    now = datetime.now(UTC).isoformat()
-    raw["restart_handoff_consumed_at"] = None
-    raw["restart_dispatch_session"] = None
-    raw["updated_at"] = now
-    replacement = ActivationRecord.from_json(json.dumps(raw))
-    write_record_cas(home, expected=expected, replacement=replacement)
-    return replacement
 
 
 def mark_pre_mutation_rolled_back(home: Path, expected: ActivationRecord) -> ActivationRecord:

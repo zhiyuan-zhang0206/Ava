@@ -7,7 +7,7 @@ status: current
 
 # Update straggler reap — truncation, honest receipts, successor settle
 
-An update-family drain (a rollout's Phase A, `spawn_update`) may reap its
+An explicitly authorized update-family drain may reap its
 stragglers (task #4016; user ruling 2026-09-19): a native hosted cohort member
 still un-landed `update_straggler_reap_seconds` (default 15; 0 disables) after
 ITS restart command was issued is truncated and released with the honest

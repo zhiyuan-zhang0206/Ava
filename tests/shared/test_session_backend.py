@@ -54,7 +54,9 @@ def test_get_shell_backend_returns_platform_appropriate_singleton():
     b2 = get_shell_backend()
     assert b1 is b2  # singleton
     if IS_WINDOWS:
-        assert isinstance(b1, WinprocSessionBackend)
+        from shared.windows_terminal.backend import WindowsTerminalBackend
+
+        assert isinstance(b1, WindowsTerminalBackend)
     else:
         assert isinstance(b1, PtySessionBackend)
     assert b1 is not get_backend()

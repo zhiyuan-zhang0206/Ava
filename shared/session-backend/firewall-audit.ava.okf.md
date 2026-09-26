@@ -1,7 +1,7 @@
 ---
 type: doc
 title: macOS Firewall Manifest
-description: shared/macos_firewall.py — the declarative per-binary Application Firewall allow-list manifest, renderer, and rootless-first reconciliation behind converge and OFF_BOX_UNREACHABLE attribution.
+description: shared/macos_firewall.py — the declarative per-binary Application Firewall allow-list manifest, renderer, and rootless-first reconciliation behind converge and `ava firewall`.
 tags:
 - shared
 - macos
@@ -32,9 +32,9 @@ mutations are retried with bounded, non-interactive `sudo -n`; if that also
 fails, converge reports the exact manual command (or points at the popup, for
 identifier-colliding families) and continues rather than blocking unattended
 startup.
-`cli/commands/_converge_firewall.py` uses the reconciler proactively, while
-`_gateway_ready.py` uses the same audit to explain an `OFF_BOX_UNREACHABLE`
-verdict — see [[cli/commands/commands.ava.okf.md]].
+`cli/commands/_converge_firewall.py` uses the reconciler proactively, and
+`ava firewall status` / `sync` run the same audit on demand — see
+[[cli/commands/commands.ava.okf.md]].
 
 
 Parent: [[shared/session-backend/session-backend.ava.okf.md|session backend]].

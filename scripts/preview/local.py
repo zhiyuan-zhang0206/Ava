@@ -24,16 +24,13 @@ from typing import TextIO
 ENV_KEYS = ("HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "TMPDIR", "TZ")
 PROFILE = {
     "AVA_OS_JOBS_ENABLED": "0",
-    "AVA_START_GUI_HANDOVER": "0",
-    "AVA_ROOT_DRIVER_ENABLED": "0",
-    "AVA_PERMISSIONS_HELPER_ENABLED": "0",
-    "AVA_PERMISSIONS_HELPER_SPAWN": "0",
+    "AVA_PROVISION_BUILTIN_SCHEDULES": "0",
     "AVA_BROWSER_ENABLED": "0",
     "AVA_MEMORY_KEEP_LOCAL": "1",
     "AVA_CROSS_MACHINE_TRANSFER_BACKEND": "none",
     "AVA_REQUIRE_GITHUB_PR": "0",
-    "AVA_MACHINE_HOST": "127.0.0.1",
     "AVA_LLM_OVERRIDE": "tests.e2e.fakes.scenarios.message_flow:build",
+    "AVA_TELEMETRY_OTLP_ENABLED": "0",
 }
 
 
@@ -89,11 +86,14 @@ class Preview:
         self.home = self.run / "home"
         self.manifest = self.run / "run.json"
         self.data = json.loads(self.manifest.read_text())
-        if self.data["format"] != "ava-local-preview-v1" or self.data["run"] != str(self.run):
+        if self.data["format"] != "ava-local-preview-v2" or self.data["run"] != str(self.run):
             raise ValueError("Not an owned preview run")
         if self.home.is_symlink() or self.source.is_symlink():
             raise ValueError("Preview paths must not be symlinks")
-        self.env = clean_env() | {"AVA_HOME": str(self.home)}
+        self.env = clean_env() | {
+            "AVA_HOME": str(self.home),
+            "AVA_CLUSTER_REGISTRY": str(self.run / "clusters.json"),
+        }
 
     def save(self) -> None:
         write_json(self.manifest, self.data)
@@ -157,20 +157,35 @@ class Preview:
         )
         self.command("python", ["uv", "venv", "--python", "3.12", ".venv"])
         self.command(
-            "install",
-            ["bash", "scripts/install.sh", "--worktree", "--path", str(self.home), "--no-seed"],
+            "python-dependencies",
+            [
+                str(self.source / ".venv/bin/python"),
+                "cli/python_install.py",
+                "--locked",
+                "--inexact",
+            ],
         )
-        self.runtime("configure")
         self.command("frontend-dependencies", ["npm", "ci"], cwd=self.source / "ui/web")
         self.data["state"] = "prepared"
         self.save()
 
     def start(self) -> None:
         self.assert_checkout()
+        flags = [arg for name in self.data["services"] for arg in ("--only-service", name)]
+        self.cli(
+            "start",
+            [
+                "start",
+                "--worktree",
+                "--machine-host",
+                "127.0.0.1",
+                "--config-file",
+                str(self.run / "profile.env"),
+                *flags,
+            ],
+        )
+        self.runtime("describe")
         config = json.loads((self.run / "config.json").read_text())
-        flags = [arg for name in config["disabled_services"] for arg in ("--disable-service", name)]
-        self.cli("start", ["start", *flags])
-        self.runtime("check")
         self.data["state"] = "ready"
         self.save()
         print(f"Preview: {config['frontend_url']}\nGateway: {config['gateway_url']}", flush=True)
@@ -180,12 +195,11 @@ class Preview:
         self.data["cleanup"] = "running"
         self.save()
         try:
-            # Installation may fail after creating the data plane but before
-            # writing .ava_home. The explicit home still scopes the target CLI.
+            # Start persists identity before any native effect. Its normal stop
+            # owns cleanup even when startup failed; preview never kills daemons.
             if (self.home / ".env").exists():
-                self.cli("stop", ["stop", "-y", "--force", "--timeout", "15"])
-            else:
-                self.runtime("stop-incomplete-install")
+                self.cli("stop", ["stop", "-y", "--stop-browser"])
+                self.cli("destroy", ["cluster", "destroy", "--path", str(self.home)])
             self.runtime("verify-stopped")
             self.data["cleanup"] = "passed"
             self.data["state"] = "stopped"
@@ -201,14 +215,19 @@ def create(repo: Path, ref: str, root: Path) -> Preview:
     root.mkdir(parents=True, exist_ok=True)
     run = root.resolve() / f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     run.mkdir(mode=0o700)
+    profile = PROFILE | {"AVA_PERMISSIONS_HELPER_ARTIFACT_DIR": str(run / "helper-artifact")}
+    profile_path = run / "profile.env"
+    profile_path.write_text("".join(f"{key}={value}\n" for key, value in profile.items()))
+    profile_path.chmod(0o600)
     write_json(
         run / "run.json",
         {
-            "format": "ava-local-preview-v1",
+            "format": "ava-local-preview-v2",
             "run": str(run),
             "repo": str(repo.resolve()),
             "requested_ref": ref,
-            "profile": PROFILE,
+            "profile": profile,
+            "services": ["gateway", "frontend", "ops", "agent-host"],
             "commit": commit,
             "controller_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "adapter_sha256": hashlib.sha256(
@@ -237,6 +256,7 @@ def run_preview(preview: Preview, *, keep: bool) -> None:
         preview.prepare()
         preview.start()
         preview.runtime("smoke")
+        preview.runtime("check")
         preview.data["verification"] = "passed"
         preview.save()
     except BaseException:
@@ -248,7 +268,7 @@ def run_preview(preview: Preview, *, keep: bool) -> None:
             if (preview.source / ".venv/bin/python").exists():
                 preview.stop()
             else:
-                preview.data["cleanup"] = "not-installed"
+                preview.data["cleanup"] = "not-started"
                 preview.save()
 
 
@@ -259,7 +279,7 @@ def interrupted(_signum: int, _frame: FrameType | None) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
-    run = sub.add_parser("run", help="Resolve a local ref once, install, start, verify and stop")
+    run = sub.add_parser("run", help="Resolve a local ref once, prepare, start, verify and stop")
     run.add_argument("--ref", required=True, help="Local branch, fetched remote ref or commit")
     run.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
     run.add_argument("--root", type=Path, default=Path.home() / ".ava-previews")

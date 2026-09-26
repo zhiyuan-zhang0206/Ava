@@ -18,7 +18,6 @@ from cli.commands._maintenance_stop import (
     deadline_after,
     remaining,
     require_no_terminals,
-    service_names,
     stop_data_plane,
     stop_services,
 )
@@ -220,13 +219,12 @@ def _driver_ref(ref: hold_driver.ProcessRef | None) -> dict[str, object] | None:
 def _stop_data(
     holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
 ) -> None:
-    from shared.session_backend import get_backend
+    from cli.commands._root_driver import _require_root_absent
 
     _gateway_last(confirmed=gateway_last)
     if "gateway" not in machine_role() or _hold(holder, at).phase != "stopped":
         raise RuntimeError("data-plane stop requires this gateway's stopped maintenance hold")
-    if service_names(get_backend(), keep_terminals=keep_terminals):
-        raise RuntimeError("local services are still running; data plane left available")
+    _require_root_absent()
     if not keep_terminals:
         require_no_terminals()
     stopped = stop_data_plane(timeout)
@@ -251,6 +249,10 @@ def run(args: argparse.Namespace) -> int:
             )
         )
         return 0
+    from shared.paths import ava_home
+    from shared.release_operation import require_start_authorized
+
+    require_start_authorized(ava_home())
     at = datetime.fromisoformat(args.acquired_at)
     if at.tzinfo is None or not args.operation.strip():
         raise ValueError("maintenance requires a nonempty operation and timezone-aware timestamp")

@@ -174,27 +174,6 @@ def test_ops_concurrency_float_not_ok():
 
 
 # ---------------------------------------------------------------------------
-# watchdog_interval_seconds
-# ---------------------------------------------------------------------------
-
-
-def test_watchdog_interval_s_positive_ok():
-    assert validate("watchdog_interval_seconds", 30).ok
-    assert validate("watchdog_interval_seconds", 0.5).ok
-
-
-def test_watchdog_interval_s_zero_not_ok():
-    result = validate("watchdog_interval_seconds", 0)
-    assert not result.ok
-    assert result.reason is not None
-
-
-def test_watchdog_interval_s_negative_not_ok():
-    result = validate("watchdog_interval_seconds", -1)
-    assert not result.ok
-
-
-# ---------------------------------------------------------------------------
 # unregistered field (no-precondition case)
 # ---------------------------------------------------------------------------
 
@@ -240,7 +219,6 @@ def test_read_time_capability_other_host_fields_return_none():
     for field in (
         "chrome_binary",
         "ops_concurrency",
-        "watchdog_interval_seconds",
         "machine_description",
         "some_unknown_field",
     ):

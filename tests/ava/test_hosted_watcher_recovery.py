@@ -228,7 +228,7 @@ async def test_held_start_then_resume_restores_parked_watcher(
     _missing(agent_id, "cron")
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause-owner.json")
     at = datetime.now(UTC)
-    initial = pause_owner.begin_maintenance("watcher-test", at)
+    initial = pause_owner.begin_maintenance("watcher-test", at).snapshot
     assert initial.maintenance is not None
     pause_owner.change_maintenance(
         "watcher-test", at, initial.maintenance, MaintenanceHold("starting", parked=(agent_id,))

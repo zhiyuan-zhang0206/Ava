@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Pre-Stop Start-Readiness Preflight
-description: The read-only local checks of `ava start`, run before the stop by the self-update leg and by `ava restart` — refusing as RESTART_DECLINED while the host still serves.
+description: The read-only local checks of `ava start`, run before the stop by `ava restart` — refusing as RESTART_DECLINED while the host still serves.
 tags:
 - cli
 - update
@@ -10,10 +10,7 @@ tags:
 # Pre-Stop Start-Readiness Preflight
 
 `cli/commands/_start_readiness_preflight.py` is the local-state half of
-"validate before kill", for the two flows whose stop is followed by an
-`ava start`: the self-update leg (`cli/commands/_update_agent_runner.py` step
-3.1, after the gateway probes) and `ava restart` (`cli/commands/stop.py`, task
-#3165 — the operator verb, and on Windows the updater ladder's restart step).
+"validate before kill" for `ava restart` (`cli/commands/stop.py`).
 `ava start` is the only step that brings a stopped host back, so a start check
 that fails AFTER the stop fails on a host whose services are already down
 (macmini 2026-09-12: a stray workspace socket aborted converge after the stop
@@ -35,8 +32,8 @@ Checked, all read-only:
   names are already vetted at the target ref by `validate_migrations_at_ref`.
 - **prod-checkout anchor and the venv entry points** — `ava start`'s first
   refusal (`prod_service_checkout_error`), the interpreter every service
-  session launches through (`.venv/bin/python`, checked for both callers), and
-  — only when the caller's start execs it (`check_launcher`, the update leg) —
+  session launches through (`.venv/bin/python`, checked before restart), and
+  — only when the caller's start execs it (`check_launcher`, a caller executing the launcher) —
   the `.venv/bin/ava` launcher step 5 runs (its presence is step 3.5's report;
   this adds the exec bit).
 
@@ -52,7 +49,7 @@ are — this gate narrows the window, it does not replace them.
 
 Tests: `tests/cli/test_start_readiness_preflight.py` pins each check family's
 disposition and the `check_launcher` toggle; the caller-level refusal contracts
-live in `tests/cli/test_update_agent_runner_preflight.py` (update leg) and
+live in
 `tests/cli/test_commands_restart_stop.py::test_cmd_restart_aborts_when_start_readiness_fails`.
 
 ## Key Dependencies

@@ -1,15 +1,20 @@
 """Expected-record maintenance delivery uses the existing private-console helper."""
 
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import NoReturn
 
+import psutil
 import pytest
 
-from shared import winproc
+from shared import paths, winproc
+from shared.native_process.ownership import OwnedProcess
 from shared.session_backend import WinprocSessionBackend
 from shared.session_record import SessionRecord
+from shared.windows_terminal import record as terminal_record
+from shared.windows_terminal.backend import WindowsTerminalBackend
 
 
 def forbidden(*_args: object, **_kwargs: object) -> NoReturn:
@@ -104,69 +109,85 @@ def test_invalid_budget_never_calls_helper(
         winproc.graceful_signal("service", expected=record, timeout=timeout)
 
 
-def test_windows_terminal_filter_does_not_mistake_services_for_shells(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from cli.commands import _maintenance_stop as stop
-
-    backend = WinprocSessionBackend()
-    monkeypatch.setattr(stop, "run_dir", lambda: tmp_path)
-    monkeypatch.setattr(stop, "get_shell_backend", lambda: backend)
-    monkeypatch.setattr(backend, "list_sessions", lambda: ["ava-agent-host", "ava-watchdog"])
-    stop.require_no_terminals()
-    monkeypatch.setattr(
-        backend, "list_sessions", lambda: ["ava-agent-host", "ava-agent-123-shell-4"]
+def _windows_terminal(name: str, cwd: Path) -> Path:
+    """Publish one active root-brokered Windows terminal record (owner still pending)."""
+    birth = terminal_record.NativeBirth.capture(OwnedProcess.capture(psutil.Process()))
+    value = terminal_record.TerminalRecord(
+        name=name,
+        domain="a" * 32,
+        generation=None,
+        state="pending",
+        root=birth,
+        launcher=birth,
+        started_at=time.time(),
+        command="shell",
+        cwd=str(cwd),
     )
-    with pytest.raises(RuntimeError, match="will not kill or replay"):
-        stop.require_no_terminals()
+    path = terminal_record.record_path(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value.model_dump_json())
+    return path
 
 
-def test_keep_windows_terminals_excludes_them_from_every_service_stop_scan(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.fixture
+def windows_run_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Maintenance stop on Windows: terminals are the root-brokered records."""
+    from cli.commands import _maintenance_stop as stop
+
+    monkeypatch.setattr(paths, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(stop, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(stop, "get_shell_backend", WindowsTerminalBackend)
+    return tmp_path
+
+
+def test_windows_terminal_scan_does_not_mistake_services_for_shells(
+    windows_run_dir: Path,
 ) -> None:
     from cli.commands import _maintenance_stop as stop
 
-    backend = WinprocSessionBackend()
-    terminals = ["ava-agent-123-shell-4", "ava-schedule-7", "ava-agent-123-shell-5-old"]
-    services = ["ava-agent-host", "ava-schedule-indexer"]
-    names = [*services, *terminals]
-    for index, name in enumerate(names):
-        SessionRecord(900000 + index, 1.0, "fixture", str(tmp_path), 1.0).write(
-            tmp_path / "sessions" / f"{name}.json"
+    for index, name in enumerate(["ava-agent-host", "ava-schedule-indexer"]):
+        SessionRecord(900000 + index, 1.0, "fixture", str(windows_run_dir), 1.0).write(
+            windows_run_dir / "sessions" / f"{name}.json"
         )
-    monkeypatch.setattr(stop, "run_dir", lambda: tmp_path)
-    monkeypatch.setattr(stop, "get_backend", lambda: backend)
-    monkeypatch.setattr(stop, "get_shell_backend", lambda: backend)
-    monkeypatch.setattr(backend, "list_sessions", names.copy)
-    assert stop.service_names(backend) == sorted(names)
+    stop.require_no_terminals()
+    _windows_terminal("ava-schedule-7", windows_run_dir)
+    with pytest.raises(RuntimeError, match="will not kill or replay") as refused:
+        stop.require_no_terminals()
+    assert "['ava-schedule-7']" in str(refused.value)
+
+
+def test_keep_windows_terminals_excludes_them_from_the_root_service_stop(
+    windows_run_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli.commands import _maintenance_stop as stop
+    from cli.commands import _root_driver
+
+    terminals = {
+        name: _windows_terminal(name, windows_run_dir)
+        for name in ["ava-agent-123-shell-4", "ava-schedule-7", "ava-agent-123-shell-5-old"]
+    }
+    before = {name: path.read_bytes() for name, path in terminals.items()}
+    services = {"ava-agent-host": "agent-host", "ava-schedule-indexer": "schedule-indexer"}
+    calls: list[dict[str, object]] = []
+
+    def selection() -> dict[str, str]:
+        return dict(services)
+
+    def stop_tree(**kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(_root_driver, "_root_tree_selection", selection)
+    monkeypatch.setattr(_root_driver, "_stop_root_service_tree", stop_tree)
     with pytest.raises(RuntimeError, match="will not kill or replay"):
         stop.stop_services(1)
-
-    def live(_self: stop.OwnedProcess) -> bool:
-        return True
-
-    def capture(_identity: stop.OwnedProcess) -> set[stop.OwnedProcess]:
-        return set()
-
-    def groups(_records: dict[str, SessionRecord]) -> tuple[int, ...]:
-        return ()
-
-    monkeypatch.setattr(stop.OwnedProcess, "live", live)
-    monkeypatch.setattr(stop, "capture_tree", capture)
-    monkeypatch.setattr(stop, "_capture_groups", groups)
-    signalled: list[str] = []
-
-    def signal(name: str, *, expected: SessionRecord, timeout: float) -> bool:
-        assert name in services and timeout > 0
-        assert expected == SessionRecord.read(tmp_path / "sessions" / f"{name}.json")
-        signalled.append(name)
-        names.remove(name)
-        return True
-
-    monkeypatch.setattr(backend, "graceful_signal", signal)
+    assert not calls
     assert stop.stop_services(1, keep_terminals=True) == sorted(services)
-    assert sorted(signalled) == sorted(services)
-    assert names == terminals
+    assert len(calls) == 1
+    assert calls[0]["preserve"] == frozenset()
+    assert calls[0]["selected"] is None
+    assert calls[0]["force"] is False
+    assert WindowsTerminalBackend().list_sessions() == sorted(terminals)
+    assert {name: path.read_bytes() for name, path in terminals.items()} == before
 
 
 def test_drifted_create_time_is_not_a_replacement(

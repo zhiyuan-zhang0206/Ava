@@ -1,24 +1,29 @@
 """Unit tests for the bootstrap config allowlist (Plan B2)."""
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
 
 from shared import config
+from shared import runtime_config as rt
 from shared.envfile import upsert_env
 
 
-def _write_runner_password(home: Path) -> None:
-    upsert_env(
-        home / ".env",
-        {
-            "AVA_DB_URL": str(config.settings.data_plane.db_url),
-            "AVA_RUNNER_DB_PASSWORD": "runner-password",
-        },
-    )
+@pytest.fixture
+def serve_generation(seed_write_generation: Callable[[Path], Any]) -> Callable[[Path], None]:
+    """Make `home` a local gateway home serving its active generation's runner login."""
+
+    def serve(home: Path) -> None:
+        upsert_env(home / ".env", {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
+        seed_write_generation(home)
+
+    return serve
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
     vals = config.bootstrap_config_values()
     # DB/Redis URLs are required (always set in test env) → present, keyed by alias.
@@ -31,7 +36,7 @@ def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(expected)
-    assert served.username == "ava_runner"
+    assert served.username == "ava_g0_runner"
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path
@@ -39,6 +44,7 @@ def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
     assert all(isinstance(v, str) for v in vals.values())
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_excludes_machine_local_fields() -> None:
     # Machine-local / bootstrap / per-host fields must never be relayed.
     vals = config.bootstrap_config_values()
@@ -51,7 +57,7 @@ def test_bootstrap_excludes_machine_local_fields() -> None:
 
 
 def test_bootstrap_serves_explicit_set_to_empty(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, serve_generation: Callable[[Path], None]
 ) -> None:
     """A field explicitly set to empty on the gateway (e.g.
     AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT="" exported by the bench
@@ -59,23 +65,21 @@ def test_bootstrap_serves_explicit_set_to_empty(
     silently revert the recipient to the field default — a bench agent then
     got the default skill index back and crashed on the disabled ava.skills
     (issue #948)."""
-    from shared import runtime_config as rt
-
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)  # no .env overrides
-    _write_runner_password(tmp_path)
+    serve_generation(tmp_path)
     monkeypatch.setattr(config.settings.agent, "skills_to_inject_into_system_prompt", [])
 
     vals = config.bootstrap_config_values()
     assert vals["AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == ""
 
 
-def test_bootstrap_still_skips_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_bootstrap_still_skips_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, serve_generation: Callable[[Path], None]
+) -> None:
     """None (no value at all) stays unserved — env text can't express it; the
     recipient falls back to the field default. Distinct from set-to-empty."""
-    from shared import runtime_config as rt
-
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    _write_runner_password(tmp_path)
+    serve_generation(tmp_path)
     monkeypatch.setattr(config.settings.observability, "trace_tags", None)
 
     vals = config.bootstrap_config_values()
@@ -88,6 +92,7 @@ def test_bootstrap_fields_are_valid_field_names() -> None:
         assert name in config.FIELD_INFOS, name
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_includes_all_required_fields() -> None:
     # A gateway-sourced agent-runner builds Settings from ONLY this bundle (+ the
     # tiny bootstrap env). Every required no-default field's alias must be in the
@@ -108,6 +113,7 @@ def test_bootstrap_includes_all_required_fields() -> None:
     assert not missing, f"bundle omits required Settings fields: {sorted(missing)}"
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_serves_no_daemon_health_port() -> None:
     """No `AVA_*_HEALTH_PORT` travels from the gateway to a runner.
 
@@ -138,16 +144,14 @@ def test_bootstrap_serves_no_daemon_health_port() -> None:
 
 
 def test_bootstrap_serves_reachable_host_for_loopback_urls(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, serve_generation: Callable[[Path], None]
 ) -> None:
     """db/redis URLs served to a remote runner name the gateway's reachable
     address (host swapped, identity/port/db preserved verbatim)."""
     from urllib.parse import urlsplit
 
-    from shared import runtime_config as rt
-
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)  # no .env overrides
-    _write_runner_password(tmp_path)
+    serve_generation(tmp_path)
     monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
 
     db = str(config.settings.data_plane.db_url)
@@ -164,34 +168,30 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
 
 
 def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, serve_generation: Callable[[Path], None]
 ) -> None:
     """A gateway whose own reachable host is loopback (single box) serves the
     URLs as-is — there is no remote runner to reach it, and swapping to
     `localhost` would be a no-op."""
-    from shared import runtime_config as rt
-
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    _write_runner_password(tmp_path)
+    serve_generation(tmp_path)
     monkeypatch.setattr(config, "_self_machine_host", lambda: "localhost")
 
     vals = config.bootstrap_config_values()
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(config.settings.data_plane.db_url)
-    assert served.username == "ava_runner"
+    assert served.username == "ava_g0_runner"
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path
 
 
 def test_bootstrap_keeps_existing_reachable_url_host(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, serve_generation: Callable[[Path], None]
 ) -> None:
     """A .env URL that already names the reachable host (prod's historical
     hand-set URLs) passes through verbatim — no rewrite of a non-loopback host."""
-    from shared import runtime_config as rt
-
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
-    _write_runner_password(tmp_path)
+    serve_generation(tmp_path)
     monkeypatch.setattr(config, "_self_machine_host", lambda: "10.0.0.3")
     dp = config.settings.data_plane
     # parts-built, scanner-safe (same convention as tests/cli/test_converge.py)
@@ -201,7 +201,7 @@ def test_bootstrap_keeps_existing_reachable_url_host(
 
     vals = config.bootstrap_config_values()
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(host_url)
-    assert served.username == "ava_runner"
+    assert served.username == "ava_g0_runner"
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path

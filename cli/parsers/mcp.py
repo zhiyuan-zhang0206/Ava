@@ -13,7 +13,7 @@ import sys
 
 
 def _h_mcp_add(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_mcp_add
+    from cli.commands.mcp import cmd_mcp_add
 
     if args.command is None and (args.arg or args.env):
         print(
@@ -31,43 +31,43 @@ def _h_mcp_add(args: argparse.Namespace) -> int:
 
 
 def _h_mcp_list(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_mcp_list
+    from cli.commands.mcp import cmd_mcp_list
 
     return cmd_mcp_list()
 
 
 def _h_mcp_remove(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_mcp_remove
+    from cli.commands.mcp import cmd_mcp_remove
 
     return cmd_mcp_remove(name=args.name)
 
 
 def _h_mcp_enable(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_mcp_enable
+    from cli.commands.mcp import cmd_mcp_enable
 
     return cmd_mcp_enable(name=args.name)
 
 
 def _h_mcp_disable(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_mcp_disable
+    from cli.commands.mcp import cmd_mcp_disable
 
     return cmd_mcp_disable(name=args.name)
 
 
 def _h_mcp_install(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_mcp_install
+    from cli.commands.mcp import cmd_mcp_install
 
     return cmd_mcp_install(source=args.source, ref=args.ref, path=args.path, env_pairs=args.env)
 
 
 def _h_mcp_uninstall(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_mcp_uninstall
+    from cli.commands.mcp import cmd_mcp_uninstall
 
     return cmd_mcp_uninstall(name=args.name)
 
 
 def _h_mcp_upgrade(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_mcp_upgrade
+    from cli.commands.mcp import cmd_mcp_upgrade
 
     return cmd_mcp_upgrade(args.name, force=args.force)
 

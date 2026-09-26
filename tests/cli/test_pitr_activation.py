@@ -5,13 +5,16 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 from cli.commands import _pitr_activation as activation
 from cli.commands import _pitr_activation_config as activation_config
-from ops.pitr_restart import PitrRestartContinuation
+from services.gateway_side.backup import snapshot as _snapshot
 from services.pitr import activation_runtime
 from services.pitr.activation_observability import refusal_message, save_error
 from services.pitr.activation_runtime import (
@@ -28,6 +31,12 @@ from services.pitr.object_store import RemoteObjectAck
 from services.pitr.uploader import ack_manifest_from_raw
 from shared.config import FIELD_INFOS, field_alias, field_domain, settings
 from tests._pitr_fixtures import baidu_credential_evidence
+
+
+@pytest.fixture(autouse=True)
+def business_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep business tests independent of home executor setup; authority is tested separately."""
+    monkeypatch.setattr("shared.release_operation.require_pitr_authorized", lambda _home: None)
 
 
 def _credentials() -> dict[str, str]:
@@ -122,9 +131,11 @@ def test_validate_secrets_fails_closed_for_unknown_backend(
 
 def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
     digest = "0" * 64
-    monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
-    monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "off")
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", lambda _digest: b"a")
+    monkeypatch.setattr(
+        activation_config, "_apply_archive_settings", lambda _home, record, _desired: record
+    )
+    monkeypatch.setattr(activation_config, "_auto_conf_entries", lambda _home: [])
+    monkeypatch.setattr(activation_config, "_apply_env", lambda _home, _record: b"a")
     monkeypatch.setattr(activation_config, "_env_payload", lambda _home: b"a")
     monkeypatch.setattr(activation_config, "pitr_env_is_desired", lambda _payload: False)
     monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", digest))
@@ -149,21 +160,15 @@ def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
         },
     )
 
-    def spawn_restart(*_args: object, **kwargs: object) -> dict[str, str]:
-        binder = kwargs["bind_continuation"]
-        assert callable(binder)
-        binder()
-        return {
-            "session": activation._restart_session(),
-            "log": "/tmp/restart.log",  # noqa: S108
-        }
-
-    monkeypatch.setattr("ops.cluster_deploy.spawn_restart", spawn_restart)
-
 
 def _wal_config_pending_record(credentials: dict[str, str] | None = None) -> ActivationRecord:
     return (
-        ActivationRecord.start(operation_id="op-1", origin="cli")
+        replace(
+            ActivationRecord.start(operation_id="op-1", origin="cli"),
+            home_operation="home-op",
+            home_action="activate",
+            home_generation=1,
+        )
         .advance(
             "snapshot_pending",
             pre_activation_pg_settings={
@@ -201,94 +206,13 @@ def _wal_restart_pending_record(credentials: dict[str, str] | None = None) -> Ac
         )
         .advance(
             "wal_restart_pending",
-            restart_handoff="handoff-1",
-            restart_orchestration="orchestration-1",
+            home_operation="home-op",
+            home_action="activate",
+            home_generation=1,
             rollback_expected_env_digest="owned-env-digest",
             rollback_expected_auto_conf_digest="owned-auto-digest",
         )
     )
-
-
-def test_typed_restart_handoff_binds_inside_spawn_before_dispatch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    record = _wal_restart_pending_record()
-    write_record(tmp_path, record)
-    observed: list[tuple[str, str, str | None, str]] = []
-
-    def spawn(origin: str, **kwargs: object) -> dict[str, str]:
-        continuation = kwargs["continuation"]
-        assert isinstance(continuation, PitrRestartContinuation)
-        binder = kwargs["bind_continuation"]
-        assert callable(binder)
-        binder()
-        bound = load_record(tmp_path)
-        assert bound is not None and bound.restart_handoff_consumed_at is not None
-        observed.append(
-            (
-                origin,
-                continuation.expected_phase,
-                continuation.expected_digest,
-                continuation.resume_origin(),
-            )
-        )
-        return {
-            "session": activation._restart_session(),
-            "log": "/tmp/restart.log",  # noqa: S108
-        }
-
-    monkeypatch.setattr("ops.cluster_deploy.spawn_restart", spawn)
-    replacement = activation._dispatch_restart_handoff(tmp_path, record)
-    assert replacement.restart_handoff_consumed_at is not None
-    assert replacement.restart_dispatch_session == activation._restart_session()
-    assert observed == [
-        (
-            "pitr-activation:op-1:orchestration-1",
-            "wal_restart_pending",
-            "desired",
-            "restart-continuation:op-1:orchestration-1:handoff-1:wal_restart_pending:desired",
-        )
-    ]
-
-    # A crash after durable binding but before the detached child exists retries
-    # the same deterministic orchestration session.  The lifecycle-locked binder
-    # rearms and consumes the same token instead of inventing a second owner.
-    retried = activation._dispatch_restart_handoff(tmp_path, replacement)
-    assert retried.restart_dispatch_session == activation._restart_session()
-    assert load_record(tmp_path) == retried
-
-
-def test_restart_handoff_retries_same_session_after_post_bind_spawn_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    record = _wal_restart_pending_record()
-    write_record(tmp_path, record)
-    calls = 0
-
-    def spawn(_origin: str, **kwargs: object) -> dict[str, str]:
-        nonlocal calls
-        calls += 1
-        binder = kwargs["bind_continuation"]
-        assert callable(binder)
-        binder()
-        if calls == 1:
-            raise RuntimeError("detached session declined after durable bind")
-        return {
-            "session": activation._restart_session(),
-            "log": "/tmp/restart.log",  # noqa: S108
-        }
-
-    monkeypatch.setattr("ops.cluster_deploy.spawn_restart", spawn)
-    with pytest.raises(RuntimeError, match="declined"):
-        activation._dispatch_restart_handoff(tmp_path, record)
-    bound = load_record(tmp_path)
-    assert bound is not None
-    assert bound.restart_dispatch_session == activation._restart_session()
-
-    retried = activation._dispatch_restart_handoff(tmp_path, bound)
-    assert calls == 2
-    assert retried.restart_handoff == record.restart_handoff
-    assert retried.restart_dispatch_session == activation._restart_session()
 
 
 def test_exact_file_rollback_is_digest_cas_and_crash_idempotent(tmp_path: Path) -> None:
@@ -368,7 +292,7 @@ def test_activate_persists_snapshot_before_wal_pending(
         "archive_timeout": "0",
         "wal_compression": "off",
         "system_identifier": "42",
-        "direct_db_url": "dbname=ava",
+        "dump_conninfo": "dbname=ava",
         "postmaster_started_at": "2026-08-29 00:00:00+00",
     }
     credentials = _credentials()
@@ -378,9 +302,7 @@ def test_activate_persists_snapshot_before_wal_pending(
         "_shadow_readiness",
         lambda: activation.ShadowReadiness(pg=pg, credentials=credentials),
     )
-    monkeypatch.setattr(
-        "cli.commands._update_git.snapshot_pre_activation_data", lambda **_kwargs: snapshot
-    )
+    monkeypatch.setattr(_snapshot, "create_pre_activation_snapshot", lambda **_kwargs: snapshot)
     monkeypatch.setattr("services.backup.activation_snapshot", lambda _operation_id: None)
     monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
     monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
@@ -389,7 +311,14 @@ def test_activate_persists_snapshot_before_wal_pending(
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
     _mock_activation_mutation(monkeypatch)
 
-    assert activation.cmd_pitr_activate(origin="agent:405") == 0
+    record = replace(
+        ActivationRecord.start(operation_id="op-1", origin="agent:405"),
+        home_operation="home-op",
+        home_action="activate",
+        home_generation=1,
+    )
+    write_record(tmp_path, record)
+    activation._advance_activation(tmp_path, record, "test", stop_at_restart=True)
     record = load_record(tmp_path)
     assert record is not None
     assert record.phase == "wal_restart_pending"
@@ -423,12 +352,15 @@ def test_activate_resume_never_repeats_snapshot(
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
     monkeypatch.setattr(
-        "cli.commands._update_git.snapshot_pre_activation_data",
+        _snapshot,
+        "create_pre_activation_snapshot",
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("snapshot repeated")),
     )
     _mock_activation_mutation(monkeypatch)
 
-    assert activation.cmd_pitr_activate(origin="cli") == 0
+    record = load_record(tmp_path)
+    assert record is not None
+    activation._advance_activation(tmp_path, record, "test", stop_at_restart=True)
 
 
 @pytest.mark.parametrize("drift", ["system_identifier", "bucket_name", "backup_key_id"])
@@ -550,7 +482,7 @@ def test_config_apply_journals_intent_before_alter_and_resumes_partial_crash(
         assert durable is not None and durable.config_apply_intent is not None
         raise RuntimeError("crash after intent")
 
-    monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "off")
+    monkeypatch.setattr(activation_config, "_auto_conf_entries", lambda _home: [])
     monkeypatch.setattr(activation_config, "_alter", crash_after_intent)
     with pytest.raises(RuntimeError, match="crash after intent"):
         activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
@@ -561,6 +493,9 @@ def test_config_apply_journals_intent_before_alter_and_resumes_partial_crash(
         "kind": "postgresql_auto_conf",
         "name": "archive_mode",
         "expected_digest": hashlib.sha256(b"").hexdigest(),
+        "desired_digest": hashlib.sha256(
+            activation_config._auto_conf_bytes([("archive_mode", "on")])
+        ).hexdigest(),
         "desired_value": "on",
     }
 
@@ -574,8 +509,8 @@ def test_rollback_preserves_snapshot_and_is_idempotent(
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
 
-    assert activation.cmd_pitr_rollback() == 0
-    assert activation.cmd_pitr_rollback() == 0
+    record = activation._rollback_record(tmp_path, record)
+    activation._rollback_record(tmp_path, record)
     rolled_back = load_record(tmp_path)
     assert rolled_back is not None
     assert rolled_back.phase == "rolled_back"
@@ -600,12 +535,17 @@ def test_rollback_setting_crash_matrix_resumes_each_owned_alter(
         "wal_compression": "__ABSENT__",
     }
     current = dict.fromkeys(baseline, "activation-owned")
+    auto = tmp_path / "pg/postgresql.auto.conf"
+    auto.parent.mkdir()
+    auto.write_bytes(activation_config._auto_conf_bytes(list(current.items())))
     record = _wal_restart_pending_record().advance(
         "rollback_pending",
         wal_config_before_digest="before",
-        restart_handoff="rollback-handoff",
-        restart_orchestration="rollback-orchestration",
+        home_operation="home-op",
+        home_action="rollback",
+        home_generation=2,
         rollback_postmaster_started_at="2026-08-29 01:00:00+00",
+        rollback_expected_auto_conf_digest=hashlib.sha256(auto.read_bytes()).hexdigest(),
     )
     write_record(tmp_path, record)
     crashed = False
@@ -615,21 +555,26 @@ def test_rollback_setting_crash_matrix_resumes_each_owned_alter(
     )
     monkeypatch.setattr(
         activation_config,
-        "_file_evidence",
-        lambda _path: (
-            "",
-            hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest(),
-        ),
+        "_auto_conf_entries",
+        lambda _home: [(name, value) for name, value in current.items() if value != "__ABSENT__"],
     )
+
+    def save(name: str, desired: str) -> None:
+        current[name] = desired
+        auto.write_bytes(
+            activation_config._auto_conf_bytes(
+                [(key, value) for key, value in current.items() if value != "__ABSENT__"]
+            )
+        )
 
     def alter(name: str, desired: str) -> None:
         nonlocal crashed
         if name == crash_setting and not crashed:
             crashed = True
             if window == "after_effect_before_journal":
-                current[name] = desired
+                save(name, desired)
             raise RuntimeError(window)
-        current[name] = desired
+        save(name, desired)
 
     monkeypatch.setattr(activation_config, "_alter_restore", alter)
     with pytest.raises(RuntimeError, match=window):
@@ -642,7 +587,7 @@ def test_rollback_setting_crash_matrix_resumes_each_owned_alter(
     assert durable.rollback_setting_intent == {
         "name": crash_setting,
         "expected_digest": intent["expected_digest"],
-        "current_value": "activation-owned",
+        "desired_digest": intent["desired_digest"],
         "desired_value": "__ABSENT__",
     }
     resumed = activation_config.restore_archive_settings(tmp_path, durable, baseline)
@@ -659,8 +604,9 @@ def test_rollback_leaves_config_owned_env_untouched(
     stop every PITR service mid-rollback)."""
     record = _wal_restart_pending_record().advance(
         "rollback_pending",
-        restart_handoff="rollback-handoff",
-        restart_orchestration="rollback-orchestration",
+        home_operation="home-op",
+        home_action="rollback",
+        home_generation=2,
         rollback_postmaster_started_at="2026-08-31 12:00:00+00",
         rollback_expected_auto_conf_digest="a" * 64,
         pre_activation_auto_conf_digest="a" * 64,
@@ -705,18 +651,21 @@ def test_rollback_leaves_config_owned_env_untouched(
     )
     monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("", "a" * 64))
 
-    def spawn_restart(*_args: object, **kwargs: object) -> dict[str, str]:
-        binder = kwargs["bind_continuation"]
-        assert callable(binder)
-        binder()
-        return {"session": activation._restart_session(), "log": "/tmp/restart.log"}  # noqa: S108
+    def restore(
+        _home: Path, current: ActivationRecord, baseline: dict[str, str]
+    ) -> ActivationRecord:
+        replacement = replace(
+            current,
+            rollback_settings_applied={
+                name: json.dumps({"desired_value": value, "post_digest": "a" * 64})
+                for name, value in baseline.items()
+            },
+        )
+        write_record(tmp_path, replacement)
+        return replacement
 
-    monkeypatch.setattr("ops.cluster_deploy.spawn_restart", spawn_restart)
-
-    assert activation.cmd_pitr_rollback() == 0
-    output = capsys.readouterr().out
-    assert "config-owned" in output
-    assert "ava config unset pitr_enabled" in output
+    monkeypatch.setattr(activation, "restore_archive_settings", restore)
+    activation._rollback_record(tmp_path, record)
     lines = (tmp_path / ".env").read_text().splitlines()
     assert lines == [
         "AVA_PITR_ENABLED=true",
@@ -796,7 +745,10 @@ def _env_apply_fixture(
     if valid_pitr_baseline:
         env_text += _valid_pitr_baseline(tmp_path)
     (tmp_path / "pg").mkdir()
-    (tmp_path / "pg" / "postgresql.auto.conf").write_text("")
+    (tmp_path / "pg" / "postgresql.auto.conf").write_bytes(
+        activation_config._auto_conf_bytes([("archive_mode", "on")])
+    )
+    auto = (tmp_path / "pg" / "postgresql.auto.conf").read_bytes()
     (tmp_path / ".env").write_text(env_text)
     record = _wal_config_pending_record().advance(
         "wal_config_applying",
@@ -809,16 +761,27 @@ def _env_apply_fixture(
             "archive_timeout": "__ABSENT__",
             "wal_compression": "__ABSENT__",
         },
-        pre_activation_env_b64="YQ==",
-        pre_activation_env_digest="env-digest",
-        pre_activation_auto_conf_b64="Yg==",
-        pre_activation_auto_conf_digest="auto-digest",
+        pre_activation_env_b64=base64.b64encode(env_text.encode()).decode(),
+        pre_activation_env_digest=hashlib.sha256(env_text.encode()).hexdigest(),
+        rollback_expected_env_digest=hashlib.sha256(env_text.encode()).hexdigest(),
+        pre_activation_auto_conf_b64=base64.b64encode(auto).decode(),
+        pre_activation_auto_conf_digest=hashlib.sha256(auto).hexdigest(),
+        rollback_expected_auto_conf_digest=hashlib.sha256(auto).hexdigest(),
     )
     write_record(tmp_path, record)
-    monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "on")
+    monkeypatch.setattr(
+        activation_config, "_auto_conf_entries", lambda _home: [("archive_mode", "on")]
+    )
     monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
-    monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", "0" * 64))
-    monkeypatch.setattr(activation_config, "_settings_digest", lambda _values: "0" * 64)
+    monkeypatch.setattr("shared.runtime_config.env_file_path", lambda: tmp_path / ".env")
+    if not valid_pitr_baseline:
+        monkeypatch.setattr(
+            "shared.config.candidate.validate_env_patch_for_write",
+            lambda *_args: SimpleNamespace(
+                errors=(),
+                expected_digest=hashlib.sha256((tmp_path / ".env").read_bytes()).hexdigest(),
+            ),
+        )
     return record
 
 
@@ -851,75 +814,73 @@ def test_env_apply_refuses_partial_pitr_keys(
 def test_env_apply_provisions_only_when_all_four_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The one-shot provisioning path survives: with no PITR keys in the env
-    the activation writes the desired set and advances to wal_restart_pending."""
-    called: list[str] = []
-
-    def enable(digest: str) -> bytes:
-        called.append(digest)
-        return b"a"
-
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", enable)
     record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
     replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
-    assert called == [hashlib.sha256(b"OTHER=kept\n").hexdigest()]
+    payload = (tmp_path / ".env").read_bytes()
+    assert payload.startswith(b"OTHER=kept\n") and pitr_env_is_desired(payload)
     assert replacement.phase == "wal_restart_pending"
     assert replacement.config_apply_applied == {
         "kind": "env",
-        "digest": hashlib.sha256(b"a").hexdigest(),
+        "digest": hashlib.sha256(payload).hexdigest(),
     }
 
 
+@pytest.mark.parametrize("after_write", [False, True])
 def test_env_apply_resumes_after_provisioning_crash(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, after_write: bool
 ) -> None:
-    """QA nit 1: the provisioning write crashes after the intent journal;
-    the resume re-run finds the durable intent and completes the write."""
-    calls: list[str] = []
+    from shared import envfile
 
-    def crash_after_intent(digest: str) -> bytes:
-        calls.append(digest)
+    record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
+    original = envfile.replace_env_bytes_cas
+
+    def interrupted(
+        path: Path,
+        *,
+        payload: bytes,
+        expected_digest: str,
+        target_digest: str,
+        audit_site: str | None = None,
+    ) -> None:
+        if after_write:
+            original(
+                path,
+                payload=payload,
+                expected_digest=expected_digest,
+                target_digest=target_digest,
+                audit_site=audit_site,
+            )
         raise RuntimeError("crash during env write")
 
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", crash_after_intent)
-    record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
+    monkeypatch.setattr(envfile, "replace_env_bytes_cas", interrupted)
     with pytest.raises(RuntimeError, match="crash during env write"):
         activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
     durable = load_record(tmp_path)
-    assert durable is not None
-    assert durable.config_apply_intent is not None
+    assert durable is not None and durable.config_apply_intent is not None
     assert durable.config_apply_intent["kind"] == "env"
-
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", lambda _digest: b"a")
+    payload = (tmp_path / ".env").read_bytes()
+    assert pitr_env_is_desired(payload) if after_write else payload == b"OTHER=kept\n"
+    monkeypatch.setattr(envfile, "replace_env_bytes_cas", original)
     replacement = activation_config.apply_wal_config(tmp_path, durable, {"archive_mode": "on"})
-    assert calls == [hashlib.sha256(b"OTHER=kept\n").hexdigest()]
     assert replacement.phase == "wal_restart_pending"
+    assert pitr_env_is_desired((tmp_path / ".env").read_bytes())
+    assert (tmp_path / ".env").read_text().count("AVA_PITR_ENABLED=") == 1
 
 
 def test_env_apply_noop_when_already_desired(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """QA nit 2: a desired env is adopted untouched — no provisioning write,
-    no intent journal, env bytes byte-identical after the apply."""
-
-    def unexpected_write(_digest: str) -> bytes:
-        raise AssertionError("provisioning write ran although the env was desired")
-
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", unexpected_write)
     desired = (
-        "AVA_PITR_ENABLED=true\n"
-        "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
-        "AVA_PITR_RESTORE_PROOF_ENABLED=true\n"
-        "AVA_PITR_RETENTION_PLANNER_ENABLED=false\n"
+        "AVA_PITR_ENABLED=true\nAVA_PITR_BASE_BACKUP_ENABLED=true\n"
+        "AVA_PITR_RESTORE_PROOF_ENABLED=true\nAVA_PITR_RETENTION_PLANNER_ENABLED=false\n"
     )
     record = _env_apply_fixture(monkeypatch, tmp_path, desired)
+    before = (tmp_path / ".env").stat()
     replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
     assert replacement.phase == "wal_restart_pending"
-    assert replacement.config_apply_applied == {
-        "kind": "env",
-        "digest": hashlib.sha256(desired.encode()).hexdigest(),
-    }
     assert (tmp_path / ".env").read_bytes() == desired.encode()
+    assert (tmp_path / ".env").stat().st_ino == before.st_ino
+    assert (tmp_path / ".env").stat().st_mtime_ns == before.st_mtime_ns
 
 
 def test_env_apply_provisioning_round_trips_real_env_bytes(
@@ -953,45 +914,22 @@ def test_rollback_effect_accepts_only_exact_pre_or_owned_postimage() -> None:
         rollback_effect_state(current="third-party", before="before", owned="after")
 
 
-def test_pg_auto_conf_baseline_preserves_absence_and_last_owned_line(
+def test_pg_auto_conf_baseline_uses_persisted_settings_before_restart(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pg = tmp_path / "pg"
-    pg.mkdir()
-    (pg / "postgresql.auto.conf").write_text(
-        "archive_mode = 'off'\narchive_mode = 'on' # last owner\n"
+    monkeypatch.setattr(
+        activation_config,
+        "_auto_conf_entries",
+        lambda _home: [("archive_mode", "off"), ("archive_mode", "on")],
     )
-    effective = {
-        "archive_mode": "on",
-        "archive_command": "",
-        "archive_timeout": "0",
-        "wal_compression": "off",
-    }
-    assert activation._pg_auto_conf_baseline(tmp_path, effective) == {
+    monkeypatch.setattr(activation, "_read_pg_state", lambda: {"archive_mode": "off"})
+    assert activation._pg_auto_conf_baseline(tmp_path) == {
         "archive_mode": "on",
         "archive_command": "__ABSENT__",
         "archive_timeout": "__ABSENT__",
         "wal_compression": "__ABSENT__",
     }
-
-
-def test_concurrent_activation_refuses_without_snapshot(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: False)
-    called = False
-
-    def snapshot(**_kwargs: object) -> Path:
-        nonlocal called
-        called = True
-        return tmp_path / "unexpected"
-
-    monkeypatch.setattr("cli.commands._update_git.snapshot_pre_activation_data", snapshot)
-    assert activation.cmd_pitr_activate(origin="cli") == 1
-    assert called is False
-    record = load_record(tmp_path)
-    assert record is not None and record.started_at and record.error == "RuntimeError"
 
 
 @pytest.mark.parametrize(
@@ -1034,23 +972,6 @@ def test_activation_error_diagnostics_are_stable_and_redacted(
         assert saved.error_message is None
 
 
-def test_concurrent_rollback_persists_error_and_preserves_phase(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    record = _wal_config_pending_record()
-    write_record(tmp_path, record)
-    monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: False)
-
-    assert activation.cmd_pitr_rollback() == 1
-    refused = load_record(tmp_path)
-    assert refused is not None
-    assert refused.operation_id == record.operation_id
-    assert refused.phase == "wal_config_pending"
-    assert refused.started_at == record.started_at
-    assert refused.error == "RuntimeError"
-
-
 def test_shadow_drift_fails_before_snapshot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1069,12 +990,13 @@ def test_shadow_drift_fails_before_snapshot(
         called = True
         return tmp_path / "unexpected"
 
-    monkeypatch.setattr("cli.commands._update_git.snapshot_pre_activation_data", snapshot)
-    assert activation.cmd_pitr_activate(origin="cli") == 1
+    monkeypatch.setattr(_snapshot, "create_pre_activation_snapshot", snapshot)
+    record = ActivationRecord.start(operation_id="op-1", origin="cli")
+    write_record(tmp_path, record)
+    with pytest.raises(RuntimeError, match="archive_mode"):
+        activation._advance_activation(tmp_path, record, "test", stop_at_restart=True)
     assert called is False
-    record = load_record(tmp_path)
-    assert record is not None and record.phase == "shadow"
-    assert record.error == "RuntimeError"
+    assert load_record(tmp_path) == record
 
 
 def test_shadow_pg_gate_accepts_pg17_disabled_archive_command() -> None:
@@ -1092,51 +1014,10 @@ def test_shadow_pg_gate_accepts_pg17_disabled_archive_command() -> None:
     )
 
 
-def test_release_failure_does_not_roll_back_durable_phase(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    snapshot = tmp_path / "verified.dump.enc"
-    pg = {
-        "archive_mode": "off",
-        "archive_command": "",
-        "archive_timeout": "0",
-        "wal_compression": "off",
-        "direct_db_url": "dbname=ava",
-        "postmaster_started_at": "2026-08-29 00:00:00+00",
-    }
-    credentials = _credentials()
-    monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(
-        activation,
-        "_shadow_readiness",
-        lambda: activation.ShadowReadiness(pg=pg, credentials=credentials),
-    )
-    _mock_activation_mutation(monkeypatch)
-    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
-    monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
-    monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
-    monkeypatch.setattr("services.backup.activation_snapshot", lambda _operation_id: None)
-    monkeypatch.setattr(
-        "cli.commands._update_git.snapshot_pre_activation_data", lambda **_kwargs: snapshot
-    )
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
-    monkeypatch.setattr(
-        "shared.cluster_lock.release_update_lock",
-        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("release failed")),
-    )
-
-    assert activation.cmd_pitr_activate(origin="cli") == 1
-    record = load_record(tmp_path)
-    assert record is not None
-    assert record.phase == "wal_restart_pending"
-    assert record.pre_activation_snapshot == str(snapshot)
-    assert record.error == "RuntimeError"
-
-
 def test_credential_evidence_changes_fail_independently_of_pg_state(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    pg = {"archive_mode": "off", "direct_db_url": "dbname=ava"}
+    pg = {"archive_mode": "off", "dump_conninfo": "dbname=ava"}
     record = ActivationRecord.start(operation_id="op-1", origin="cli").advance(
         "snapshot_pending",
         pre_activation_pg_settings=pg,
@@ -1153,12 +1034,13 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
 
-    assert activation.cmd_pitr_activate(origin="cli") == 1
+    with pytest.raises(RuntimeError, match="credential"):
+        activation._advance_activation(tmp_path, record, "test", stop_at_restart=True)
     failed = load_record(tmp_path)
     assert failed is not None
     assert failed.phase == "snapshot_pending"
     assert failed.pre_activation_pg_settings == pg
-    assert failed.error == "RuntimeError"
+    assert failed.error is None
 
 
 def test_alter_system_accepts_only_literal_values_on_real_pg17(
@@ -1171,7 +1053,6 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
     import shutil
     import subprocess
     import tempfile
-    from types import SimpleNamespace
 
     from shared.pg_tools import pg_tool
 
@@ -1205,16 +1086,17 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
         capture_output=True,
     )
     try:
+        import psycopg
+
         monkeypatch.setattr(activation_config, "ava_home", lambda: tmp_path)
+        # The scratch server has no home receipt: a plain admin session stands in
+        # for the custody-checked one.
         monkeypatch.setattr(
             activation_config,
-            "get_record",
-            lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
-        )
-        monkeypatch.setattr(
-            activation_config,
-            "pg_admin_url",
-            lambda _pg_port: f"postgresql://ava@/postgres?host={sock}&port={port}",
+            "_pg_connection",
+            lambda: psycopg.connect(
+                f"postgresql://ava@/postgres?host={sock}&port={port}", autocommit=True
+            ),
         )
 
         value = "cp %p /spool/%f --hard-bytes 123"
@@ -1258,47 +1140,77 @@ def test_frozen_pg_state_contract_with_real_reader(
     shape the old `current.update(credential_evidence)` merge produced — must
     FAIL the same comparison, so a re-merge is caught instead of hidden by a
     mock that copies the defect."""
+    import os
     import shutil
+
+    # Native listener ownership is part of the reader contract; bind a private
+    # loopback endpoint and fail if another process wins its allocation race.
+    import socket
     import subprocess
     import tempfile
     from types import SimpleNamespace
 
+    from shared.cluster import db_identity, postgres
     from shared.pg_tools import pg_tool
 
-    # TCP-free and isolated by this test's private socket directory. Releasing
-    # an ephemeral TCP socket before pg_ctl binds it races every xdist worker.
-    port = 39613
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
     # Short socket root: the default pytest tmp_path on macOS exceeds
     # PostgreSQL's 103-byte unix-socket path limit (QA #1076 nit 7 class).
     sock = Path(tempfile.mkdtemp(prefix="ava-pg-sock-", dir="/tmp"))
     data = tmp_path / "pg"
-    log = tmp_path / "pg.log"
     subprocess.run(  # noqa: S603 — resolved pg binaries + static flags
         [pg_tool("initdb"), "-D", str(data), "-U", "ava", "-A", "trust"],
         check=True,
         capture_output=True,
     )
-    subprocess.run(  # noqa: S603
-        [
-            pg_tool("pg_ctl"),
-            "-D",
-            str(data),
-            "-l",
-            str(log),
-            "-w",
-            "-t",
-            "30",
-            "start",
-            "-o",
-            f"-p {port} -c listen_addresses='' -c unix_socket_directories={sock} "
-            "-c fsync=off -c full_page_writes=off -c synchronous_commit=off",
-        ],
-        check=True,
-        capture_output=True,
-    )
+    argv = [
+        str(pg_tool("postgres")),
+        "-D",
+        str(data),
+        "-p",
+        str(port),
+        "-c",
+        "listen_addresses=127.0.0.1",
+        "-c",
+        f"unix_socket_directories={sock}",
+        "-c",
+        "fsync=off",
+        "-c",
+        "full_page_writes=off",
+        "-c",
+        "synchronous_commit=off",
+    ]
+
+    def ready() -> bool:
+        import psycopg
+
+        try:
+            with psycopg.connect(f"postgresql://ava@127.0.0.1:{port}/postgres", connect_timeout=1):
+                return True
+        except psycopg.OperationalError:
+            return False
+
+    postgres.start(data, port, argv, dict(os.environ), ready=ready, timeout=30)
     try:
+        # The reader dials the database the suite URL names (`db_identity`), owned
+        # by the NOLOGIN schema owner of that name its dump target acts as.
+        admin = ["-h", str(sock), "-p", str(port), "-U", "ava"]
         subprocess.run(  # noqa: S603
-            [pg_tool("createdb"), "-h", str(sock), "-p", str(port), "-U", "ava", "ava"],
+            [
+                pg_tool("psql"),
+                *admin,
+                "-d",
+                "postgres",
+                "-c",
+                f"CREATE ROLE {db_identity()} NOLOGIN",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(  # noqa: S603
+            [pg_tool("createdb"), *admin, "-O", db_identity(), db_identity()],
             check=True,
             capture_output=True,
         )
@@ -1310,10 +1222,14 @@ def test_frozen_pg_state_contract_with_real_reader(
         )
         monkeypatch.setattr(
             "cli.commands._cluster_instance.pg_admin_url",
-            lambda _pg_port: f"postgresql://ava@/postgres?host={sock}&port={port}",
+            lambda _pg_port: f"postgresql://ava@127.0.0.1:{port}/postgres",
         )
 
         frozen = activation._read_pg_state()
+        # The pre-activation dump reads as the NOLOGIN schema owner, password-free.
+        target = conninfo_to_dict(frozen["dump_conninfo"])
+        assert target["options"] == f"-c role={db_identity()}"
+        assert target["dbname"] == db_identity() and "password" not in target
         # Real PG17 masks archive_command as '(disabled)' while mode is off —
         # the shadow gate must accept exactly this display.
         assert frozen["archive_command"] == "(disabled)"
@@ -1327,11 +1243,7 @@ def test_frozen_pg_state_contract_with_real_reader(
                 {**frozen, "uploader_identity": "writer@example.test"}, "contract"
             )
     finally:
-        subprocess.run(  # noqa: S603
-            [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
-            check=False,
-            capture_output=True,
-        )
+        postgres.stop(data, timeout=30)
         shutil.rmtree(sock, ignore_errors=True)
 
 
@@ -1363,8 +1275,9 @@ def test_switch_wal_runs_on_pitr_admin_connection(
     """The 2026-08-30 failure: the switch ran on shared.db.direct_db_url (the
     runtime identity, no pg_switch_wal) while every read-only preflight check
     passed on the superuser connection. The mutation must dial the SAME admin
-    URL the privilege probe certifies."""
-    dialed: list[str] = []
+    URL the privilege probe certifies, bound to this home's postmaster before
+    the switch runs."""
+    events: list[tuple[str, object]] = []
 
     class _FakeRow:
         @staticmethod
@@ -1380,6 +1293,7 @@ def test_switch_wal_runs_on_pitr_admin_connection(
 
         def execute(self, query: str) -> _FakeRow:
             assert "pg_switch_wal" in query
+            events.append(("execute", query))
             return _FakeRow()
 
     monkeypatch.setattr(
@@ -1389,10 +1303,17 @@ def test_switch_wal_runs_on_pitr_admin_connection(
     )
     monkeypatch.setattr(
         "services.pitr.activation_runtime.psycopg.connect",
-        lambda conninfo, **_kw: (dialed.append(conninfo), _FakeConn())[1],
+        lambda conninfo, **_kw: (events.append(("dial", conninfo)), _FakeConn())[1],
     )
+
+    def custody(_conn: object, data: Path) -> None:
+        events.append(("custody", data))
+
+    monkeypatch.setattr("shared.cluster.ownership.require_postgres_connection", custody)
     assert activation._switch_wal() == "00000001000000A20000008D"
-    assert dialed == ["postgresql://super@/postgres?host=/sock&port=5433"]
+    assert [kind for kind, _ in events] == ["dial", "custody", "execute"]
+    assert events[0][1] == "postgresql://super@/postgres?host=/sock&port=5433"
+    assert events[1][1] == activation_runtime.ava_home() / "pg"
 
 
 def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1425,6 +1346,11 @@ def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
         "services.pitr.activation_runtime.psycopg.connect",
         fake_connect,
     )
+
+    def custody(_conn: object, _data: Path) -> None:
+        return None
+
+    monkeypatch.setattr("shared.cluster.ownership.require_postgres_connection", custody)
     with pytest.raises(RuntimeError, match="pg_switch_wal"):
         activation_runtime.probe_switch_privilege()
     assert "has_function_privilege" in called[0]
@@ -1527,16 +1453,26 @@ def test_probe_switch_privilege_against_real_pg(
         capture_output=True,
     )
     try:
-        admin_url = f"postgresql://ava@/postgres?host={sock}&port={port}"
-        monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: admin_url)
-        activation_runtime.probe_switch_privilege()  # superuser: passes
-        # A role without the grant: the probe must refuse (the prod failure shape).
         import psycopg
 
+        # The scratch server has no home receipt: plain sessions stand in for
+        # the custody-checked admin session.
+        admin_url = f"postgresql://ava@/postgres?host={sock}&port={port}"
+        monkeypatch.setattr(
+            activation_runtime,
+            "pitr_admin_session",
+            lambda: psycopg.connect(admin_url, autocommit=True),
+        )
+        activation_runtime.probe_switch_privilege()  # superuser: passes
+        # A role without the grant: the probe must refuse (the prod failure shape).
         with psycopg.connect(admin_url, autocommit=True) as conn:
             conn.execute("CREATE ROLE limited LOGIN")
         limited_url = f"postgresql://limited@/postgres?host={sock}&port={port}"
-        monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: limited_url)
+        monkeypatch.setattr(
+            activation_runtime,
+            "pitr_admin_session",
+            lambda: psycopg.connect(limited_url, autocommit=True),
+        )
         with pytest.raises(RuntimeError, match="pg_switch_wal"):
             activation_runtime.probe_switch_privilege()
     finally:
@@ -1637,10 +1573,7 @@ def _wire_proof_world(
 
     stem = ack_file_stem or str(ack_raw["archive_name"])
     monkeypatch.setattr(activation_runtime, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(
-        "services.pitr.activation_runtime.psycopg.connect",
-        lambda _conninfo, **_kw: _ArchiverConn(stem),
-    )
+    monkeypatch.setattr(activation_runtime, "pitr_admin_session", lambda: _ArchiverConn(stem))
     if observed is None:
         ack = ack_manifest_from_raw(ack_raw)
         observed = RemoteObjectAck(
@@ -1831,3 +1764,22 @@ def test_refusal_message_shows_the_tail_of_a_long_detail() -> None:
     assert len(message) <= len("RuntimeError: ") + 300 + 1
     # An empty detail stays type-only.
     assert refusal_message(RuntimeError("  \n")) == "RuntimeError"
+
+
+@pytest.mark.parametrize("ticks", ["80", "81", ""])
+def test_snapshot_identity_uses_native_tick_without_wall_clock_tolerance(
+    monkeypatch: pytest.MonkeyPatch, ticks: str
+) -> None:
+    expected = {
+        "postmaster_pid": "41",
+        "postmaster_create_time": "100.0",
+        "postmaster_starttime": "80",
+        "archive_mode": "off",
+    }
+    current = expected | {"postmaster_create_time": "101.0", "postmaster_starttime": ticks}
+    monkeypatch.setattr(activation, "_read_pg_state", lambda: current)
+    if ticks == "80":
+        activation._require_same_pg_state(expected, "snapshot")
+    else:
+        with pytest.raises(RuntimeError, match="changed"):
+            activation._require_same_pg_state(expected, "snapshot")

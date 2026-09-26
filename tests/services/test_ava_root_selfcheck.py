@@ -259,10 +259,11 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
 
     yield factory
     for supervisor in created:
-        await supervisor.shutdown()
+        if supervisor._running:  # a test may already have proved shutdown refuses
+            await supervisor.shutdown()
 
 
-async def test_integration_detects_a_disarmed_death_and_recovers(
+async def test_integration_detects_a_disarmed_death_and_refuses_a_duplicate(
     started: StartFactory, recorder: _Recorder
 ) -> None:
     supervisor = await started([_unit("svc")])
@@ -287,7 +288,13 @@ async def test_integration_detects_a_disarmed_death_and_recovers(
     assert chain["broken_units"] == ["svc"]
     assert len(recorder.events("root_chain_broken")) == 1
 
-    # `up()` spawns a fresh generation; the next round proves the chain again.
-    await supervisor.up("svc")
-    check.run_once()
-    assert _chain(check)["broken"] is False
+    # An unexplained death requires reconciliation, never a duplicate: the
+    # dead generation's custody blocks `up()` (no new pid; the unit reports
+    # down with the refusal), and shutdown refuses to call the uncaptured
+    # scope stopped.
+    result = cast("list[dict[str, object]]", (await supervisor.up("svc"))["units"])
+    assert result[0]["action"] == "failed"
+    assert result[0]["pid"] is None
+    assert "custody" in str(result[0]["error"])
+    with pytest.raises(RuntimeError, match="exited before scope capture; custody retained"):
+        await supervisor.shutdown()

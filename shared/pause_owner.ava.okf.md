@@ -21,15 +21,6 @@ no-op. Before unpausing, a fresh pending or live running local updater handoff
 blocks a stale deploy resume. Recovery clears only its captured exact journal
 after the normal no-live-owner proof and successful unpause.
 
-A rollout also ends a pause without a resume op: the Phase-B `ava start`
-returns the host to `idle` directly, and the gateway-local `finally` unpauses
-the co-located host itself. Both paths must record the journaled generation as
-`resumed` (the generation-scoped successful-finalize
-`pause_owner.finalize_natural_resume`), or the journal stays `paused` forever
-while the host serves — the 2026-08-26 residue. The finalize is generation-
-scoped by construction and never a force-clear: only a `paused` journal is
-transitioned, and only to its own generation.
-
 The first-adoption bridge is retired: an empty resume payload no longer routes
 to a legacy path — every resume carries the exact transition payload, and an
 empty payload fails closed (no pre-protocol orchestrator remains; fleet
@@ -44,12 +35,9 @@ adoption on every node.
 
 An explicit [maintenance hold](maintenance/maintenance.ava.okf.md) uses the same journal
 with a typed cohort/progress payload and the recorded shepherding process it
-was taken under (`shared/hold_driver.py`). It has no expiry timer, but a hold
-that is still pre-stop, whose shepherding process is gone and whose failures
-are empty is declared `abandoned` and, after a bounded observation window,
-released by the pause watchdog through the same cancel path (`resume
---cancel`'s twin — tasks #3270/#2343; see
-[[host_deploy_state/stranded-hold-recovery.ava.okf.md]]). Ordinary
-compensation, natural startup finalization, force-clear and a newer rollout
-still cannot release or overwrite it. This is distinct from a recoverable
-stranded rollout pause.
+was taken under (`shared/hold_driver.py`). It has no expiry timer and no
+automatic release (see
+[[host_deploy_state/stranded-hold-recovery.ava.okf.md]]); only its exact
+operation's explicit `ava maintenance resume` (or `resume --cancel`) ends it. Ordinary
+compensation, force-clear and a newer rollout cannot release or overwrite it.
+This is distinct from a recoverable stranded rollout pause.

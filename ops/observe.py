@@ -1,22 +1,8 @@
-"""Ops Status — the observed-state view over the Spec roster and the controllers.
+"""Read-only service status derived from the canonical root roster.
 
-Status is the read-only counterpart to Spec: given a host's capability set, it
-reports what is actually running (per-service liveness probes) and what the
-controllers last did (the reconcile results the manager recorded). It aggregates
-the *scheduling view* of ``services/healthchecks/`` — which services this host
-watches, via which healthcheck module, and how each is probed — without touching
-the healthcheck modules themselves (they keep their own probe+revive ``main()``;
-this is the read-only aggregation the ops layer and, later, ``ava status`` consume).
-
-Probe signal types mirror the existing ``ava status`` probes (``cli.commands._probe``):
-identity, HTTP 2xx/3xx, TCP connect, pidfile + ``process_alive`` — chosen per service
-by its ``ServiceSpec``. Identity comes first wherever the endpoint can carry one
-(``ServiceSpec.identity_probe``), because a 2xx from *something* is not evidence that
-the something is this unit's: that is the "verify the real contract, not liveness"
-principle, and the false-green class it catches is an occupant on this unit's port.
-The endpoints that cannot carry identity (Next.js, milvus gRPC, a watchdog's pidfile)
-report the weaker signal under its own ``kind``, so the difference stays visible
-rather than being flattened into one ✓. Layer: ``ops``, ``shared`` only.
+The observer preserves each service's probe kind, readiness verdict, failure
+detail and configuration gate. It neither launches services nor evaluates
+release decisions; root supervision owns process recovery.
 """
 
 from __future__ import annotations
@@ -42,7 +28,7 @@ class ProbeView:
         session: the service kebab.
         kind: probe signal type — ``"http"`` / ``"tcp"`` / ``"pid"`` / ``"none"``.
         target: the probe target (URL / ``str(port)`` / pidfile path / ``""``).
-        healthcheck_module: the watchdog keepalive module, or None if unmonitored.
+        healthcheck_module: the protocol healthcheck module, or None if unmonitored.
         gate_reason: None if the service is active, else why it is gated out
             (Status shows the reason rather than hiding the row).
     """
@@ -92,7 +78,7 @@ def _probe_kind_target(spec: ServiceSpec) -> tuple[str, str]:
 
 def probe_set(roles: MachineRoles) -> tuple[ProbeView, ...]:
     """The scheduling/probe view for a host's capabilities — the set of services
-    Status watches, each with how it is probed and its watchdog module. Derived from
+    Status watches, each with how it is probed and its healthcheck module. Derived from
     the Spec roster, so it can never drift from what ``ava start`` launches."""
     views: list[ProbeView] = []
     for spec, gate_reason in services_for_capabilities_annotated(roles):
@@ -121,7 +107,7 @@ def _run_probe(spec: ServiceSpec) -> tuple[bool | None, str]:
     if spec.identity_probe is not None:
         probe = spec.identity_probe()
         # `alive` only — never `terminal`. Whether a respawn could win is the
-        # watchdog's question; this layer reports what is observed.
+        # supervisor's question; this layer reports what is observed.
         return probe.alive, ("" if probe.alive else probe.detail)
     if spec.curl_url is not None:
         ok = _curl_ok(spec.curl_url)

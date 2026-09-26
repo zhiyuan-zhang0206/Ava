@@ -36,7 +36,7 @@ def _record_launchctl(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     return calls
 
 
-def _desired_plist(_interval_s: int, _threshold: int) -> str:
+def _desired_plist(_interval_s: int) -> str:
     return "<desired-plist/>"
 
 
@@ -47,9 +47,7 @@ def _never_descendant(_label: str) -> bool:
 def test_register_macos_never_reloads_its_own_launchd_job(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A health-probe-triggered rollback runs ``ava start`` below the probe's
-    launchd job. Reloading that label would terminate the rollback itself before
-    it can clear the update lease and resume the cluster."""
+    """Registration cannot boot out the job containing its own process."""
     slug = "ava-t-cafe0123"
     label = f"com.ava.{slug}.health-probe"
     plist = _plant_plist(fake_home, label)
@@ -59,7 +57,7 @@ def test_register_macos_never_reloads_its_own_launchd_job(
     monkeypatch.setattr(os_cron, "_launchd_plist_content", _desired_plist)
     calls = _record_launchctl(monkeypatch)
 
-    assert os_cron._register_macos(300, 3) == 0
+    assert os_cron._register_macos(300) == 0
     assert plist.read_text() == "<old-plist/>"
     assert calls == []
 
@@ -79,7 +77,7 @@ def test_register_macos_still_reloads_from_another_launchd_job(
     monkeypatch.setattr(os_cron, "descends_from_launchd_job", _never_descendant)
     calls = _record_launchctl(monkeypatch)
 
-    assert os_cron._register_macos(300, 3) == 0
+    assert os_cron._register_macos(300) == 0
     assert plist.read_text() == "<desired-plist/>"
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]
 
@@ -100,7 +98,7 @@ def test_register_linux_aborts_when_crontab_read_fails(
         raise AssertionError(f"must not reach a crontab write: {cmd}")
 
     monkeypatch.setattr(os_cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-    assert os_cron._register_linux(300, 3) == 1
+    assert os_cron._register_linux(300) == 1
     assert "avoid clobbering" in capsys.readouterr().err
 
 
@@ -120,7 +118,7 @@ def test_register_linux_treats_no_crontab_as_empty(monkeypatch: pytest.MonkeyPat
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(os_cron.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
-    assert os_cron._register_linux(300, 3) == 0
+    assert os_cron._register_linux(300) == 0
     assert "health-probe" in writes["input"]
 
 
@@ -205,8 +203,10 @@ def test_register_linux_stamps_the_owning_cluster(monkeypatch: pytest.MonkeyPatc
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, "", writes)
 
-    assert os_cron._register_linux(300, 3) == 0
+    assert os_cron._register_linux(300) == 0
     assert "# ava-health-probe.ava-mine" in writes["input"]
+    assert "--auto-rollback" not in writes["input"]
+    assert "--threshold" not in writes["input"]
 
 
 def test_register_linux_leaves_another_clusters_line_alone(
@@ -219,7 +219,7 @@ def test_register_linux_leaves_another_clusters_line_alone(
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, f"0 3 * * * backup\n{theirs}\n", writes)
 
-    assert os_cron._register_linux(300, 3) == 0
+    assert os_cron._register_linux(300) == 0
     body = writes["input"]
     assert theirs in body
     assert body.count("# ava-health-probe.ava-mine") == 1
@@ -236,9 +236,9 @@ def test_register_linux_clears_both_unmarked_legacy_forms_and_reports_success(
     writes: dict[str, str] = {}
     _crontab_stub(monkeypatch, f"{legacy_command}\n{legacy_script}\n{foreign}\n", writes)
 
-    assert os_cron._register_linux(300, 3) == 0
+    assert os_cron._register_linux(300) == 0
     assert capsys.readouterr() == (
-        "  . crontab entry added (every 5 min, threshold=3)\n",
+        "  . crontab entry added (every 5 min)\n",
         "",
     )
     assert legacy_command not in writes["input"]
@@ -282,7 +282,7 @@ def test_register_linux_failure_messages_and_rc(
         write_error=write_error,
     )
 
-    assert os_cron._register_linux(300, 3) == 1
+    assert os_cron._register_linux(300) == 1
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == (expected_out, expected_err)
     assert ("input" in writes) == (read_rc == 0)
@@ -293,7 +293,7 @@ def test_register_linux_missing_crontab_message_and_rc(
 ) -> None:
     monkeypatch.setattr(os_cron.shutil, "which", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert os_cron._register_linux(300, 3) == 0
+    assert os_cron._register_linux(300) == 0
     assert capsys.readouterr() == (
         "  ! health probe cron: crontab not installed on this host (skipping); cluster runs without a health-probe cron\n",
         "",
@@ -418,8 +418,8 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     calls: list[str] = []
 
     class _FakeBackend:
-        def register_cron(self, interval_s: int, threshold: int) -> None:  # type: ignore[no-untyped-def]
-            calls.append(f"{interval_s}/{threshold}")
+        def register_cron(self, interval_s: int) -> None:  # type: ignore[no-untyped-def]
+            calls.append(str(interval_s))
 
     monkeypatch.setattr("shared.platform_backend.get_backend", _FakeBackend)
     return calls
@@ -457,7 +457,7 @@ def test_register_allowed_from_prod_anchored_checkout(
 
     os_cron.register_os_cron()
 
-    assert calls == ["300/3"]
+    assert calls == ["300"]
 
 
 def test_register_allowed_for_non_prod_home(
@@ -472,7 +472,7 @@ def test_register_allowed_for_non_prod_home(
 
     os_cron.register_os_cron()
 
-    assert calls == ["300/3"]
+    assert calls == ["300"]
 
 
 def test_register_macos_defers_when_ancestry_proves_the_job(
@@ -495,7 +495,7 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
     monkeypatch.setattr(os_cron, "descends_from_launchd_job", _is_current)
     calls = _record_launchctl(monkeypatch)
 
-    assert os_cron._register_macos(300, 3) == 0
+    assert os_cron._register_macos(300) == 0
     assert plist.read_text() == "<old-plist/>"
     assert calls == []
 
@@ -515,6 +515,6 @@ def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
     monkeypatch.setattr(os_cron, "descends_from_launchd_job", _never_descendant)
     calls = _record_launchctl(monkeypatch)
 
-    assert os_cron._register_macos(300, 3) == 0
+    assert os_cron._register_macos(300) == 0
     assert plist.read_text() == "<desired-plist/>"
     assert [call[1] for call in calls] == ["bootout", "bootstrap"]

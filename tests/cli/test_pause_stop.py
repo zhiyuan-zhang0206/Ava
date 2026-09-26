@@ -11,6 +11,8 @@ from unittest.mock import MagicMock
 import psutil
 import pytest
 
+import cli.commands._repo as _repo_commands
+import cli.commands._root_driver as _root_driver_commands
 from cli.commands import _temporary_stop as command
 from cli.commands import stop as entry
 from cli.commands._maintenance_stop import OwnedProcess
@@ -37,6 +39,8 @@ def drained() -> None:
 
 
 def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(command, "pause_agents", lambda _timeout, **_kw: drained())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(
@@ -52,18 +56,7 @@ def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.host_deploy_state.set_posture", lambda _value: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_retired_service_failure_prevents_native_drain(monkeypatch: pytest.MonkeyPatch) -> None:
-    dependencies(monkeypatch)
-    retired = MagicMock(side_effect=TimeoutError("retired service is still running"))
-    pause = MagicMock()
-    monkeypatch.setattr(command, "stop_retired_services", retired)
-    monkeypatch.setattr(command, "pause_agents", pause)
-    assert entry.cmd_pause(timeout=1) == 1
-    retired.assert_called_once()
-    pause.assert_not_called()
-
-
-def test_real_service_pause_preserves_unselected_orchestration_and_pty(
+def test_pause_preserves_unselected_process_and_real_pty(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
@@ -73,7 +66,7 @@ def test_real_service_pause_preserves_unselected_orchestration_and_pty(
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
-    service, orchestration = launch("ava-worker", _NORMAL), launch("ava-rollout", _IGNORE)
+    orchestration = launch("unowned-test-process", _IGNORE)
     terminal = PtySessionBackend()
     name = "ava-agent-987-shell-1"
     assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
@@ -89,7 +82,6 @@ def test_real_service_pause_preserves_unselected_orchestration_and_pty(
         time.sleep(0.05)
     try:
         assert entry.cmd_pause(timeout=5) == 0
-        assert service.poll() is not None
         assert orchestration.poll() is None
         assert terminal.has_session(name) and identity.live()
         current = maintenance.snapshot()
@@ -99,7 +91,7 @@ def test_real_service_pause_preserves_unselected_orchestration_and_pty(
         terminal.kill_session(name)
 
 
-def test_real_stubborn_service_fails_without_force_and_keeps_hold(
+def test_root_stop_refusal_keeps_hold_without_force(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
@@ -107,6 +99,12 @@ def test_real_stubborn_service_fails_without_force_and_keeps_hold(
     dependencies(monkeypatch)
     service = launch("ava-worker", _IGNORE)
     before = psutil.Process(service.pid).create_time()
+
+    def refuse(**kwargs: object) -> None:
+        assert kwargs.get("force", False) is False
+        raise RuntimeError("root service did not stop")
+
+    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", refuse)
     assert entry.cmd_pause(timeout=0.2) == 1
     assert service.poll() is None
     assert psutil.Process(service.pid).create_time() == before
@@ -126,7 +124,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     terminal = PtySessionBackend()
     monkeypatch.setattr(command, "get_shell_backend", lambda: terminal)
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
-    for name in ("stop_gate_service", "stop_permissions_helper", "stop_lgtm_services"):
+    for name in ("stop_permissions_helper",):
         monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
     name = "ava-agent-987-shell-2"
@@ -138,7 +136,6 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
         terminal.kill_session(name)
 
 
-@pytest.mark.real_cluster_spawn
 def test_normal_start_releases_hold_only_after_successful_readiness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -200,7 +197,7 @@ def test_only_explicit_force_enters_legacy_force_stop(monkeypatch: pytest.Monkey
     normal, force = MagicMock(return_value=0), MagicMock(return_value=0)
     monkeypatch.setattr(command, "stop", normal)
     monkeypatch.setattr(entry, "_force_stop", force)
-    assert entry._do_stop(Path("/unused"), graceful=False, force_reap_agents=True) == 0
+    assert entry._do_stop(Path("/unused")) == 0
     normal.assert_called_once()
     force.assert_not_called()
     assert entry.cmd_stop(force=True, require_confirmation=False) == 0
@@ -225,26 +222,6 @@ def test_repeated_stop_needs_no_live_database_or_host(
     assert entry.cmd_pause(timeout=1) == 0
 
 
-def test_failed_stop_blocks_checkout_and_migration(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import _update_local as local
-    from cli.commands import update
-    from shared.exit_codes import STOP_INCOMPLETE_EXIT_CODE
-
-    monkeypatch.setattr(update, "_do_stop", MagicMock(return_value=1))
-    checkout, boot = MagicMock(), MagicMock()
-    monkeypatch.setattr(local, "_checkout_and_sync", checkout)
-    monkeypatch.setattr(local, "_boot_gateway_fresh", boot)
-    assert (
-        local._run_gateway_local_update(
-            Path("/unused"), target_sha="new", pull_recover=("old", set(), None), pull=True
-        )
-        == STOP_INCOMPLETE_EXIT_CODE
-    )
-    checkout.assert_not_called()
-    boot.assert_not_called()
-
-
-@pytest.mark.real_cluster_spawn
 def test_failed_flush_cannot_be_released_by_a_healthy_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -267,7 +244,6 @@ def test_failed_flush_cannot_be_released_by_a_healthy_start(
     assert maintenance.held()
 
 
-@pytest.mark.real_cluster_spawn
 def test_two_pause_start_cycles_reuse_identity_not_old_operation(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -288,7 +264,6 @@ def test_two_pause_start_cycles_reuse_identity_not_old_operation(
     assert holders[0] != holders[1]
 
 
-@pytest.mark.real_cluster_spawn
 def test_resource_stop_excludes_concurrent_start(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -330,28 +305,26 @@ def test_resource_stop_excludes_concurrent_start(
 @pytest.mark.parametrize("full_stop", [False, True])
 def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     home: Path,
-    launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
     full_stop: bool,
 ) -> None:
-    from cli import commands
-    from shared.session_backend import PosixProcSessionBackend
-
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr("shared.session_backend.get_backend", PosixProcSessionBackend)
     monkeypatch.setattr("shared.session_backend.get_shell_backend", PtySessionBackend)
-    monkeypatch.setattr(commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(entry, "build_services", lambda: [SimpleNamespace(session="agent-host")])
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
-    monkeypatch.setattr(entry, "_reap_orphan_step", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    for name in ("stop_gate_service", "stop_permissions_helper", "stop_lgtm_services"):
+    for name in ("stop_permissions_helper",):
         monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         command, "pause_agents", MagicMock(side_effect=AssertionError("force fabricated a drain"))
     )
-    host = launch("ava-agent-host", _IGNORE)
+    root_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        _root_driver_commands,
+        "_stop_root_service_tree",
+        lambda **kw: root_calls.append(kw),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
     terminal = PtySessionBackend()
     name = "ava-agent-987-shell-force"
     assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
@@ -361,10 +334,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
         else:
             rc = entry.cmd_pause(force=True)
         assert rc == 0
-        # The backend reaps its tracked process, so Popen cannot retain its
-        # signal exit code. Verify the original TERM-ignoring PID is gone.
-        host.wait(timeout=2)
-        assert not psutil.pid_exists(host.pid)
+        assert len(root_calls) == 1 and root_calls[0]["force"] is True
         assert terminal.has_session(name) is not full_stop
         assert not maintenance.held(), "force must not invent a durable flush receipt"
     finally:
@@ -389,12 +359,6 @@ def _stop_with_gateway_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
     """A gateway stop whose phases are real no-ops except what a test patches."""
     dependencies(monkeypatch)
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(command, "stop_retired_services", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        command,
-        "stop_services",
-        lambda _timeout, **_kw: None,  # pyright: ignore[reportUnknownArgumentType]
-    )
 
 
 @pytest.mark.parametrize(

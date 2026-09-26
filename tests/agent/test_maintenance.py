@@ -188,7 +188,6 @@ async def test_idle_hosted_cohort_consumes_restart_under_rollout_phase(
         db_conn.commit()
 
 
-@pytest.mark.real_cluster_spawn
 async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_receipt(  # noqa: PLR0915 — one real graph/exec/DB boundary
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],

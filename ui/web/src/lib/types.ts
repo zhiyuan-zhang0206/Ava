@@ -456,11 +456,6 @@ export interface TaskUpdatedEvent extends BaseEvent {
   readonly role: "task_updated";
   readonly task_id: number;
 }
-export interface ClusterUpdateStartedEvent extends BaseEvent {
-  readonly role: "cluster_update_started";
-  readonly kind: "rollout" | "restart";
-  readonly origin: string;
-}
 
 export type SystemEvent =
   | ChatStartEvent
@@ -492,8 +487,7 @@ export type SystemEvent =
   | NoticePostedEvent
   | NoticeResolvedEvent
   | TaskCreatedEvent
-  | TaskUpdatedEvent
-  | ClusterUpdateStartedEvent;
+  | TaskUpdatedEvent;
 
 
 
@@ -595,7 +589,6 @@ export type MachineStatus = Schemas["MachineStatus"];
 export type ResourceSample = Schemas["ResourceSample"];
 export type ClusterPanel = Schemas["ClusterPanel"];
 export type ClusterStatus = Schemas["ClusterStatus"];
-export type ClusterUpdateCheck = Schemas["UpdateCheck"];
 export type SystemStatus = Schemas["SystemStatus"];
 
 // --- Plugin console contributions (GET /api/ui/contributions) ---

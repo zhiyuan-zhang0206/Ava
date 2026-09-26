@@ -221,50 +221,41 @@ the window before changing anything.
 ## Start, stop, and rollback
 
 ```bash
-ava lgtm on                 # install current native pins, then start native backends
-bash deploy/lgtm/start.sh   # idempotent native-only lifecycle launcher
-bash deploy/lgtm/stop.sh    # stop native backends
-ava lgtm off                # remove marker first, then stop deliberately
+ava stop -y                  # planned shutdown before changing the root generation
+ava lgtm on                  # enable backend intent and invoke normal start
+ava lgtm status              # root-owned protocol readiness
+ava stop -y
+ava lgtm off                 # disable backend intent; preserve data and other choices
 ```
 
-`start.sh` and `stop.sh` are native-only. The launcher rejects a missing native
-binary, Grafana launch script, or missing/ambiguous home-scoped launchd plist;
-on Darwin it bootstraps Loki, Prometheus, or Grafana unless its launchd job is loaded
-and its HTTP listener answers. Before any Loki start or restart it runs
-`loki -config.file=$AVA_HOME/lgtm/native/config/loki.yaml -verify-config` and
-fails loudly if the rendered config is rejected — a bad `loki.yaml` field
-would otherwise crash-loop the launchd job (2026-08-25 incident). The Darwin script checks
-that Grafana provisioned at least 18 alert rules when its admin password file
-is available. A newly bootstrapped job
-must answer within 30 seconds or the launcher fails loudly. Neither script
-touches the Docker daemon or compose.
+All three local backends are ordinary root services. Converge prepares assets and
+configuration; it never registers or restarts per-backend OS jobs. A repeated
+start reuses an unchanged root generation. A changed service set or configuration
+requires normal stop before start; it cannot terminate active agent work implicitly.
 
-A converge that changes the rendered Grafana config (INI, runtime env, or the
-provisioning tree) kickstarts the running Grafana automatically so the change
-takes effect — a running instance never re-reads its INI. For a manual
-restart, run `launchctl kickstart -k gui/$(id -u)/com.ava.grafana.<home-slug>`.
-The watchdog does not restart a working backend just to apply a configuration
-change.
+The native Loki binary validates its rendered config before the root is started.
+Readiness combines a live root-owned listener with the backend's successful
+protocol response. A response from an unrelated process or an HTTP 503 cannot
+certify readiness. The local Loki write/read diagnostic is separate from process
+lifecycle and never launches or restarts the stack.
 
 Tempo is remote and selected by `AVA_TELEMETRY_TEMPO_ENDPOINT`; native Grafana
 and Prometheus use `AVA_TELEMETRY_TEMPO_QUERY_URL` for queries and scraping.
 The local lifecycle neither probes nor manages Tempo. The collector's filelog
-receivers ship session and orchestration logs directly to Loki.
+receivers ship session logs directly to Loki.
 
 ## Session logs in Loki
 
 The collector splits raw output into disjoint receivers. `filelog/sessions`
 admits only `$AVA_HOME/logs/ava-agent-*-shell-*.out.log` transcripts;
 `filelog/services` admits the broad `*.out.log` service set but excludes every
-`ava-agent-*` file and the collector's own output; `filelog/orchestration`
-ships updater/rollout tees. Agent main stdout is banner-only on this surface,
-and its structured records already arrive through OTLP, so excluding it loses
-no diagnostic stream while avoiding content-fingerprint collisions.
+`ava-agent-*` file and the collector's own output. Agent main stdout is
+banner-only on this surface, and its structured records already arrive through
+OTLP, so excluding it loses no diagnostic stream while avoiding
+content-fingerprint collisions.
 
-All three filelog receivers poll every 30 seconds (orchestration included as of
-task #3290 - it previously ran at the unset default of 200ms). The session and
-service receivers archive 50 generations of EOF metadata and cap discovery at
-200 concurrent files. The slower poll cuts discovery churn 150x, the archive
+Both filelog receivers poll every 30 seconds, archive 50 generations of EOF
+metadata and cap discovery at 200 concurrent files. The slower poll cuts discovery churn 150x, the archive
 lets a returning EOF file reuse its reader metadata, and the cap bounds the
 discovered set. File names become resource
 `service.name`, which Loki exposes as `service_name`; read offsets persist under
@@ -337,7 +328,7 @@ on this surface. Status of each, as of WP3:
 | Gateway OTLP ingress + runner relay `:4318` | `cli/commands/_otel_collector.py` | Parameterized — same setting |
 | Roster gate + healthcheck probes `:4318` | `ops/spec.py`, `services/healthchecks/otel_collector.py` | Parameterized — same setting |
 | Agent export endpoint default `http://127.0.0.1:4318` | `shared/config/observability.py` | Default derived from the same constant; the full URL stays a separate override (`AVA_TELEMETRY_OTLP_ENDPOINT`) |
-| Loki/Prometheus/Grafana probes `127.0.0.1:3100/9090/3003` | `deploy/lgtm/start.sh` | Parameterized — probe URLs follow `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` / `AVA_TELEMETRY_GRAFANA_URL` (same source as the lgtm healthcheck's readiness probes) |
+| Loki/Prometheus/Grafana readiness | `shared/lgtm_local.py` | Local native listen settings; external query URLs do not select process ownership. |
 | Grafana `root_url` `http://localhost:3003` | `deploy/lgtm/native/config/run.sh` | Deliberately NOT parameterized into a converge render: it is the browser-facing redirect base, resolved at runtime from `GRAFANA_ROOT_URL` (migration section above). Rendered run.sh is asserted byte-identical in `tests/cli/test_converge_lgtm.py` |
 | Tempo container-internal OTLP receiver `0.0.0.0:4318` | `deploy/lgtm/config/tempo.yaml` (docker-compose rollback path) | Cannot be parameterized: it is the container-internal contract the compose file maps host `14318` → container `4318`; the host-visible OTLP entry on the LGTM host is `14318` (`AVA_TELEMETRY_TEMPO_ENDPOINT`), and `4318` on the host belongs to the sidecar |
 | Test pins `http://127.0.0.1:3200` / `http://127.0.0.1:14318` / `localhost` / `AVA_TELEMETRY_OTLP_PORT=4318` | `tests/conftest.py` | Reviewed WP3: every pin exists to neutralize the operator's ambient `.env` on a dev box (login-shell leak class) and is asserted against both env and settings so a weakened pin fails loudly. `GRAFANA_ROOT_URL` is deliberately not pinned — it never reaches renders (script-level default), only runtime Grafana |

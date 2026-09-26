@@ -26,7 +26,7 @@ Runs the full doc tree on every commit and in CI (any PR touching a tracked
 stale from a move anywhere else). ~0.1s over ~430 docs, so `--all-files` on
 every job is free.
 
-Three doc axes get exemptions, not a blanket skip:
+Four doc trees get exemptions, not a blanket skip:
 
 - `decisions/` is skipped entirely (flags and links both). A decision
   record legitimately names the flag it removed or the file it deleted (see
@@ -38,6 +38,8 @@ Three doc axes get exemptions, not a blanket skip:
   of the fix. Because nothing checks those links, the template requires
   unreachable anchors to be labelled (`(pre-cutover)`, `(summarized)`) in the
   prose.
+- `docs/history/` is skipped entirely: dated snapshots are point-in-time
+  records like `decisions/`.
 - `future/` skips CLI-flag checks only — a plan may propose a flag that
   does not exist yet — but its relative links resolve like any other doc's. A
   link to a file that exists-but-moved is rot, not a plan (issue #1045: two
@@ -50,7 +52,7 @@ Three doc axes get exemptions, not a blanket skip:
 
 1. **CLI flags.** Every `--flag` written as part of a command invocation,
    checked against the live source of truth: the argparse tree from
-   `cli.main._build_parser` (plus `cli/enroll.py`, routed before the parser) and
+   `cli.main._build_parser` and
    each `scripts/*.sh`'s own case arms.
 
    Three things this gets right that the obvious version does not, each a false
@@ -154,10 +156,6 @@ def ava_flags() -> dict[tuple[str, ...], set[str]]:
                     child = (*path, name)
                     by_path[child] = _options(sub)
                     stack.append((child, sub))
-    # `ava enroll` is routed before the main parser (it must not import Settings),
-    # so its options are not in the tree above.
-    enroll_src = (REPO / "cli" / "enroll.py").read_text()
-    by_path[("ava", "enroll")] = set(re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', enroll_src))
     return by_path
 
 
@@ -451,7 +449,8 @@ def main() -> int:
         # it deleted; a postmortem names the code path as it stood during the
         # incident). Fully exempt: neither axis describes what IS true now, and a
         # CLI rename must not force history to be re-written to satisfy the linter.
-        if rel.parts[0] in ("decisions", "postmortems"):
+        # docs/history/<date>/ holds dated snapshots of the same kind.
+        if rel.parts[0] in ("decisions", "postmortems") or rel.parts[:2] == ("docs", "history"):
             continue
         # future/ — plans. A flag it proposes may not exist yet (skip_flags),
         # but a link it names must resolve UNLESS marked `(planned)`

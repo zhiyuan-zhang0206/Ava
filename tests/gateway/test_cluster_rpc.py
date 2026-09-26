@@ -333,36 +333,6 @@ async def test_two_connection_resets_exhaust_single_retry(
 
 
 @pytest.mark.asyncio
-async def test_fetch_retries_are_warning_other_kinds_stay_debug(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """`cluster_fetch` intermediate retries log at WARNING while every other
-    kind stays DEBUG — a fetch retry is not cheap retry machinery, it is a full
-    30s host-side `git fetch` that ran and died (two timeouts then success on
-    win/wsl, 2026-08-27), and the rollout log only carries WARNING+ from the
-    detached session. Every attempt must be visible where Phase 0 is read."""
-
-    def _flaky(_r: httpx.Request) -> httpx.Response:
-        raise httpx.ReadTimeout("no answer")
-
-    _patch(monkeypatch, handler=_flaky)
-    _pin_retry(monkeypatch)
-
-    with caplog.at_level(logging.DEBUG, logger="ops.cluster_rpc"):
-        with pytest.raises(cluster_rpc.ClusterOpUnreachable):
-            await cluster_rpc.dispatch_to_machine("win", "cluster_fetch", {}, retries=1)
-        with pytest.raises(cluster_rpc.ClusterOpUnreachable):
-            await cluster_rpc.dispatch_to_machine("win", "status_probe", {}, retries=1)
-
-    retry_lines = [r for r in caplog.records if "retrying in" in r.getMessage()]
-    assert len(retry_lines) == 2  # one intermediate retry line per dispatch
-    fetch_line = [r for r in retry_lines if "cluster_fetch" in r.getMessage()]
-    probe_line = [r for r in retry_lines if "status_probe" in r.getMessage()]
-    assert fetch_line and fetch_line[0].levelno == logging.WARNING
-    assert probe_line and probe_line[0].levelno == logging.DEBUG
-
-
-@pytest.mark.asyncio
 async def test_retries_exhausted_raises_after_all_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -492,7 +462,7 @@ def test_versioned_launch_key_is_stable_within_attempt_and_rotates_between_attem
 async def test_only_spawn_launch_reuses_a_business_idempotency_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Failed lifecycle and update retries get new dispatch keys to run again."""
+    """Separate lifecycle requests get fresh dispatch keys to run again."""
     import json
 
     captured = _patch(
@@ -501,7 +471,6 @@ async def test_only_spawn_launch_reuses_a_business_idempotency_key(
     )
 
     operations: tuple[tuple[cluster_rpc.OpKind, dict[str, Any]], ...] = (
-        ("cluster_update", {"target_sha": "abc123", "mode": "smooth"}),
         ("lifecycle", {"trigger_inbound_id": 17, "action": "restart"}),
     )
     for kind, payload in operations:
@@ -510,9 +479,7 @@ async def test_only_spawn_launch_reuses_a_business_idempotency_key(
 
     keys = [json.loads(request.content)["idempotency_key"] for request in captured["requests"]]
     assert keys[0] != keys[1]
-    assert keys[2] != keys[3]
-    assert keys[0].startswith("cluster_update:")
-    assert keys[2].startswith("lifecycle:")
+    assert keys[0].startswith("lifecycle:")
 
 
 @pytest.mark.asyncio

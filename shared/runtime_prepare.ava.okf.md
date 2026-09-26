@@ -23,6 +23,16 @@ Python launches use isolated mode and disable bytecode writes. Failure preserves
 the serving pointer and retains the failed generation for operator inspection;
 it is never silently reused or deleted.
 
+Preparation commands run through the stdlib-only
+[[process-group-closure.ava.okf.md|group-closure core]]; captured source
+acquisition and application building use `posix_command.run_owned_command`,
+whose exec domain closes through the same core. Each owns a launch-time process
+group, retains its leader unreaped until confirmed group closure, and waits
+for ordinary children to finish naturally within the command deadline.
+Timeout/interruption closes that group before propagating failure; a successful
+parent exit alone cannot certify unfinished child work. This does not contain
+trusted build code that deliberately creates an independent session or group.
+
 For a dynamically linked managed Mac Python, a copied venv executable resolves
 `libpython` beside that venv. Preparation retains the declared dylib in the
 venv's own `lib/` and verifies it against the trusted interpreter inventory

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import os_autostart, os_cron, os_logs_job, os_packages, os_watchdog_probe
+from shared import os_autostart, os_cron, os_logs_job, os_packages
 from shared.config import settings
 
 
@@ -31,9 +31,6 @@ class _ExplodingBackend:
     def register_packages_job(self) -> None:
         raise AssertionError("register_packages_job reached the OS with the gate off")
 
-    def register_watchdog_probe(self, _role: str, **_kw: object) -> None:
-        raise AssertionError("register_watchdog_probe reached the OS with the gate off")
-
 
 class _RecordingBackend:
     def __init__(self) -> None:
@@ -51,23 +48,17 @@ class _RecordingBackend:
     def register_packages_job(self) -> None:
         self.calls.append("packages-refresh")
 
-    def register_watchdog_probe(self, role: str, **_kw: object) -> None:
-        self.calls.append(f"watchdog-probe.{role}")
-
     def unregister_cron(self, slug: str) -> None:
         self.calls.append(f"unregister-cron:{slug}")
 
-    def unregister_autostart(self, slug: str) -> None:
-        self.calls.append(f"unregister-autostart:{slug}")
+    def unregister_autostart(self, home: Path) -> None:
+        self.calls.append(f"unregister-autostart:{home}")
 
     def unregister_logs_job(self, slug: str) -> None:
         self.calls.append(f"unregister-logs-maintenance:{slug}")
 
     def unregister_packages_job(self, slug: str) -> None:
         self.calls.append(f"unregister-packages-refresh:{slug}")
-
-    def unregister_watchdog_probe(self, role: str, slug: str) -> None:
-        self.calls.append(f"unregister-watchdog-probe:{role}:{slug}")
 
 
 @pytest.fixture()
@@ -103,7 +94,6 @@ def test_suite_default_is_off() -> None:
         pytest.param(os_autostart.register_autostart, id="autostart"),
         pytest.param(os_logs_job.register_logs_job, id="logs-maintenance"),
         pytest.param(os_packages.register_packages_job, id="packages-refresh"),
-        pytest.param(lambda: os_watchdog_probe.register_watchdog_probe("gateway"), id="watchdog"),
     ],
 )
 def test_registration_never_reaches_the_backend_when_gated(
@@ -118,13 +108,11 @@ def test_registration_dispatches_when_enabled(gate_on: None, backend: _Recording
     os_cron.register_os_cron()
     os_autostart.register_autostart()
     os_logs_job.register_logs_job()
-    os_watchdog_probe.register_watchdog_probe("agent-runner")
     os_packages.register_packages_job()
     assert backend.calls == [
         "cron",
         "autostart",
         "logs-maintenance",
-        "watchdog-probe.agent-runner",
         "packages-refresh",
     ]
 
@@ -136,13 +124,11 @@ def test_deregistration_is_never_gated(backend: _RecordingBackend, tmp_path: Pat
     os_cron.unregister_os_cron(home)
     os_autostart.unregister_autostart(home)
     os_logs_job.unregister_logs_job(home)
-    os_watchdog_probe.unregister_watchdog_probe("gateway", home)
     os_packages.unregister_packages_job(home)
     assert [c.split(":")[0] for c in backend.calls] == [
         "unregister-cron",
         "unregister-autostart",
         "unregister-logs-maintenance",
-        "unregister-watchdog-probe",
         "unregister-packages-refresh",
     ]
 
@@ -176,13 +162,18 @@ def test_ava_binary_path_falls_back_to_path_without_a_venv(
 
 
 def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The leaked plists set no environment at all, so the probe they ran would
-    have resolved `$AVA_HOME` to the PROD home and driven `--auto-rollback`
-    there."""
+    """An OS probe observes its owning home and carries no release policy."""
     monkeypatch.setattr(settings.general, "ava_home", tmp_path / ".ava-x")
     monkeypatch.setattr(os_cron, "ava_binary_path", lambda: "/x/ava")
     monkeypatch.setattr(os_cron, "_home_slug", lambda: "ava-x")
-    body = os_cron._launchd_plist_content(300, 3)
+    body = os_cron._launchd_plist_content(300)
+    import plistlib
+
+    assert plistlib.loads(body.encode())["ProgramArguments"] == [
+        "/x/ava",
+        "cluster",
+        "health-probe",
+    ]
     assert "<key>AVA_HOME</key>" in body
     assert f"<string>{tmp_path / '.ava-x'}</string>" in body
     assert "<key>PATH</key>" in body
@@ -192,7 +183,6 @@ def test_health_probe_plist_pins_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_p
     "render",
     [
         pytest.param(os_autostart._autostart_plist_content, id="autostart"),
-        pytest.param(lambda: os_watchdog_probe._plist_content("gateway", 60), id="watchdog"),
     ],
 )
 def test_every_launchagent_pins_ava_home(
@@ -201,9 +191,7 @@ def test_every_launchagent_pins_ava_home(
     monkeypatch.setattr(settings.general, "ava_home", tmp_path / ".ava-x")
     monkeypatch.setattr(os_cron, "ava_binary_path", lambda: "/x/ava")
     monkeypatch.setattr(os_autostart, "ava_binary_path", lambda: "/x/ava")
-    monkeypatch.setattr(os_watchdog_probe, "ava_binary_path", lambda: "/x/ava")
     monkeypatch.setattr(os_autostart, "_home_slug", lambda: "ava-x")
-    monkeypatch.setattr(os_watchdog_probe, "_home_slug", lambda: "ava-x")
     assert callable(render)
     body = render()
     assert isinstance(body, str)
@@ -220,3 +208,33 @@ def test_cron_env_prefix_scopes_to_one_command(
     prefix = os_cron.cron_env_prefix()
     assert prefix == f"AVA_HOME={tmp_path / '.ava-x'} "
     assert not prefix.startswith("\n")
+
+
+@pytest.mark.parametrize("boundary", ["converge", "build", "sign", "launchd", "windows"])
+def test_helper_native_effects_require_explicit_test_boundary(boundary: str) -> None:
+    from services import permissions_helper
+    from services.permissions_helper import launchd_job, lifecycle
+    from services.permissions_helper.windows import lifecycle as windows_lifecycle
+
+    with pytest.raises(pytest.fail.Exception, match="native effect forbidden"):
+        if boundary == "converge":
+            permissions_helper.converge()
+        elif boundary == "build":
+            lifecycle._run(["swiftc", "unreachable.swift"])
+        elif boundary == "sign":
+            lifecycle._run(["codesign", "--sign", "unreachable"])
+        elif boundary == "launchd":
+            launchd_job._retirement_command(["bootout", "gui/0/unreachable"], float("inf"))
+        else:
+            windows_lifecycle._stop_running_helper()
+
+
+@pytest.mark.native_permissions_helper
+def test_native_helper_opt_in_exposes_real_boundaries_without_running_them() -> None:
+    from services import permissions_helper
+    from services.permissions_helper import launchd_job, lifecycle
+    from shared.proc import run_bounded
+
+    assert permissions_helper.converge.__module__ == "services.permissions_helper"
+    assert lifecycle.run_bounded is run_bounded
+    assert launchd_job.run_bounded is run_bounded

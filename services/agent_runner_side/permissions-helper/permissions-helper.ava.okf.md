@@ -8,9 +8,14 @@ tags: []
 # Permissions Helper — macOS Desktop Automation Daemon
 
 ## What is it
-A macOS permissions helper on agent-runner — a signed Swift `.app` owned by **launchd**, outside the session roster, holding Screen Recording / Accessibility permissions. The agent-runner watchdog pings its real protocol, classifies the launchd job state on failure (an LWCR/EX_CONFIG spawn-failed loop is named; a failed repair escalates and retries under backoff), and can reload its launchd job. The root era watches the same job through a total probe (task #3393). Desktop-driving and protected-file skills call it via Unix socket, centralizing privileged actions in this process.
+A signed Swift `.app` owned by launchd holds macOS Screen Recording and
+Accessibility grants and is the required ancestor of `ava-root` on every macOS
+role. Desktop and protected-file skills call its Unix socket. Root diagnostics
+observe its protocol and native job state; they never reload their ancestor.
 
-**Role affiliation**: agent-runner side (macOS only) — launched by launchd, not in the session service roster (`build_services`), with capability probe `permissions_helper_incapability` gating.
+**Role affiliation**: the macOS ancestry owner is required for gateway and runner
+roles. Desktop capability probes remain distinct from service ownership. The
+helper is outside the application manifest because it owns root's lifetime.
 
 ## Why launchd + Stable Signing is Required
 The launchd-ownership and stable-signing constraint set moved to its own node: [[launchd-and-stable-signing.ava.okf.md]].
@@ -24,19 +29,43 @@ The helper has two independent macOS TCC grants:
 
 `ping` reports both facts as `preflight_screen` and `ax_trusted`. The Swift dispatch gate refuses every Accessibility-gated operation with an explicit error when `ax_trusted=false`, and triggers the System Settings authorization prompt at most once per 30 seconds. The request never waits for a human response. Converge preflights both grants with `_ensure_screen_capture` and `_ensure_accessibility`, then agent startup reports either unavailable axis (or one combined notice when both fail).
 
-TCC keys grants on the helper's code identity. A stable certificate plus fixed bundle id preserves both grants across rebuilds; ad-hoc signing or a regenerated identity drops them once and the operator must re-grant in System Settings. Accessibility applies to the already running helper immediately. Screen Recording needs `launchctl kickstart -k` for the helper's launchd job after it is granted.
+TCC keys grants on the helper's code identity. A stable certificate plus fixed bundle id preserves both grants across rebuilds; ad-hoc signing or a regenerated identity drops them once and the operator must re-grant in System Settings. Accessibility applies to the already running helper immediately. A changed Screen Recording grant may require an externally coordinated stop and helper restart. A descendant must not kickstart its own ancestor.
 
 ## Three Components
 - `helper/main.swift` — the Swift daemon body (+ `helper/Info.plist`). A socket-less launch (no `AVA_PERMISSIONS_HELPER_SOCKET`, no argv[1]) becomes the user-facing panel instance rather than exiting: [[panel.ava.okf.md|panel mode]]. Wire method names: `ping` (with `preflight_screen` and `ax_trusted`), `screencapture_region`, `file_list`, `file_read`, `click`, `type` (the Python client function is named `type_text`, but the wire method sent is `type`), `key`, `scroll`, `ax_window_info`, `window_info`, `session_info`. Accessibility-gated methods are explicitly refused when the helper lacks that grant. File access is limited to `~/Downloads`, `~/Desktop`, and `~/.ava/incoming`; both the requested path and roots are symlink-resolved, then checked as the exact root or the root plus a `/` boundary. `file_list` returns sorted entry metadata; `file_read` returns base64 content for regular files up to 32 MiB.
 - `client.py` — Python client. Connects to the local cluster helper via Unix socket, each call one line JSON request/response; `PermissionsHelperError` represents unreachable/timeout/remote error. Its `list_dir()` and `read_file()` wrappers expose the whitelisted file operations. `check_screen_capture()` turns `ping().preflight_screen` into a `shared.host.converge.screen_capture.ScreenCaptureStatus`; `check_accessibility()` turns `ping().ax_trusted` into a `shared.host.converge.accessibility.AccessibilityStatus`. Each result keeps grant denial distinct from helper unreachability. On Windows, the absent `ax_trusted` wire key means Accessibility is granted because `SendInput` is not TCC-gated.
-- `lifecycle.py` — build + codesign + launchd management, all idempotent: ensure certificate → preflight real signing and designated-requirement recovery when a rebuild is needed → compile main.swift, copy `helper/locales/*.lproj` into `Contents/Resources`, and sign .app with that certificate → write per-home LaunchAgent plist and (re)load. Skips compile+sign and the signing smoke when the bundle is current AND already signed by the stable certificate, so a no-op converge never churns the cdhash or requires keychain access; an ad-hoc-signed leftover fails that check and is re-signed onto the stable identity. The launchd job label is `<bundle-id>.<home_slug>` (`home_slug()` = basename + 8-hex hash; under path-only cluster identity, no longer uses cluster name). Every shell-out (swiftc / codesign / security / launchctl / openssl) is bounded via `shared.proc.run_bounded` with a per-tool ceiling in `_TIMEOUTS_S` — these are local tools with no network leg, so a long-running one is waiting on a GUI prompt, and the bound turns that into a failed converge step instead of a stalled rollout.
+- `lifecycle.py` — bounded certificate checks, compilation, stable signing, and
+  initial LaunchAgent registration. A current signed artifact is reused. An
+  existing artifact with different source is immutable: prepare a new explicit
+  `AVA_PERMISSIONS_HELPER_ARTIFACT_DIR`, then externally stop and unregister the
+  old exact-home job before activation. A loaded changed job is refused before
+  any plist write. Isolated preview artifacts never overwrite the normal
+  home or production bundle. IPC paths must fit Darwin's 103-byte usable Unix
+  socket name limit before signing or native registration.
+
 
 ## Root seeding
 The helper also seeds `ava-root` (`root_seed` / `root_status` / `root_stop`): [[root-seeding.ava.okf.md]].
 
+## Finite Executor Mode
+The same signed binary doubles as a one-shot release executor: invoked as
+`--finite-executor v1 --cwd DIR --env K=V ... -- ARGV`, entered before the
+normal serve path — no TCC registration, no socket, no root keeper. It
+requires being a launchd job process-group leader and refuses otherwise. It
+spawns one executor into that same process group (no `SETSID`/`SETPGROUP`),
+environment built only from the explicit `--env` pairs, and forwards
+`TERM`/`INT`/`HUP` to the unreaped child under a lock that also gates
+reaping, so a forwarded signal can never land on a reused PID.
+
+Exit codes: `0` executor ok, `80` executor failed, `81` executor killed by
+signal, plus its own refusal codes (`64` usage, `65` not a job leader, `71`
+spawn failed, `75` interrupted before spawn, `82` custody lost). `ping`
+advertises `finite_executor_v1: true`. Full custody protocol (launch,
+readback, closure/retirement): [[cli/release_transition/launcher_macos.ava.okf.md|macOS release executor custody]].
+
 ## Key Dependencies
 - [[tool-calls.ava.okf.md]] — skills that drive the desktop call this helper via `services.permissions_helper.client`
-- [[../../cli/cli.ava.okf.md|CLI/converge]] — the converge phase (`cli/commands/_converge.py:_ensure_permissions_helper`) builds+signs+loads during `ava start`/`ava update`; the following `_ensure_screen_capture` and `_ensure_accessibility` steps probe both helper grants and record unavailable statuses for the next agent startup to report
+- [[cli/cli.ava.okf.md|CLI/converge]] — the converge phase (`cli/commands/_converge.py:_ensure_permissions_helper`) builds+signs+loads during `ava start`/`ava cluster update`; the following `_ensure_screen_capture` and `_ensure_accessibility` steps probe both helper grants and record unavailable statuses for the next agent startup to report
 
 ## Entry Points
 - `services/permissions_helper/lifecycle.py` — bring-up called by converge
@@ -48,4 +77,4 @@ The helper also seeds `ava-root` (`root_seed` / `root_status` / `root_stop`): [[
 ## Notes
 - macOS + Windows; configuration gate `AVA_PERMISSIONS_HELPER_ENABLED`, capability probe `shared.platform_probes.permissions_helper_incapability` (macOS: swift/codesign/display; Windows: csc.exe — the helper's session capability is checked at runtime, converge runs in Session 0).
 - Windows: C# helper (`services/permissions_helper/windows/helper.cs`, built with the .NET Framework csc.exe every Windows install ships; DPI-aware via SetProcessDPIAware so click coordinates are physical pixels), served over the named pipe `\\.\pipe\ava-permissions-helper`, registered as the logon scheduled task `AvaPermissionsHelper` (`/IT` so it starts in the user's interactive session). Client dials the pipe automatically (`_IS_WINDOWS` transport switch in `client.py`).
-- Outside `ServiceSpec`: launchd owns keepalive; the agent-runner watchdog adds a DB-free protocol check that classifies launchd failures (LWCR-stuck named), repairs at failure three, and escalates a failed repair with backoff retries (verified again next round).
+- Outside `ServiceSpec`: launchd owns helper keepalive. Root records read-only protocol/job diagnostics; no diagnostic may repair, re-sign, bootout, or force-restart its ancestor.

@@ -5,10 +5,11 @@ the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
 R1-R3, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
 line under `{service_name="unknown_service"}`, body = the full event JSON, so
 `| json` flattens each line to labels), while R4, the gateway-metrics silence
-rule, and the watchdog-tick staleness rule query **Prometheus** (the
+rule, and the root-health round freshness rule query **Prometheus** (the
 `ava_llm_usage_latency_milliseconds` histogram,
 `ava_gateway_latency_count_total` heartbeat,
-`ava_watchdog_tick_last_tick_timestamp_seconds` gauge, and R18 turn-duration
+`ava_root_health_tick_last_tick_timestamp_seconds` and
+`ava_root_health_expected_expected_since_timestamp_seconds` gauges, and R18 turn-duration
 histogram); R24 queries Prometheus's own too-old-samples counter. The retired
 Postgres events read path (#1197) is gone — nothing
 queries the `ops` datasource from these rules.
@@ -44,11 +45,12 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (41)
+## Rules (43)
 
-The rules are split between `ava-ops` (31 rules, evaluated every minute:
+The rules are split between `ava-ops` (33 rules, evaluated every minute:
 R1-R6, the watchdog-tick and gateway-metrics silence rules, the checkpoint
-guards, R8-R12, R14-R16, and R24) and
+guards, R8-R12, R14-R16, R24, and the R25/R26 backup-operation custody
+rules) and
 `ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
 fast-route tiers, R18, and R19's two slow-route tiers, plus the PITR-storage / Tempo-backend / LLM-rate-limit checks). Each rule retains its
 own `for` window.
@@ -77,6 +79,8 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-fleet-graph-stale` | `ava-ops` | fleet graph served stale | `fleet_graph_stale` episodes in 10m > 1 (Loki) | 0m | warning |
 | `ava-ops-telemetry-queue-loss` | `ava-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
 | `ava-ops-recovery-drill-failed` | `ava-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
+| `ava-ops-backup-operation-blocked` | `ava-ops` | backup/PITR operation kind blocked on unproven closure | `backup_operation_custody` custody=blocked (level=error) by operation in 1h > 0 (Loki) | 0m | error |
+| `ava-ops-backup-operation-quarantined` | `ava-ops` | backup/PITR operation failed or cancelled, quarantined | `backup_operation_custody` custody=quarantined (level=error) by operation in 1h > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
 | `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage growth | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
 | `ava-ops-llm-stall-pair` | `ava-ops` | LLM stream stall pair | `stream_stall_pair_terminated` in 15m > 0 (Loki) | 0m | warning |
@@ -227,12 +231,10 @@ a new provider is covered by adding its string there, with no edit to
 
 ## Sync to the live Grafana
 
-There is no copy step: native Grafana reads this directory from the source
-checkout. Alert-rule provisioning does **not** hot-reload file changes
-(verified 2026-08-04), so restart it after editing `rules.yml` with
-`launchctl kickstart -k gui/$(id -u)/com.ava.grafana.<home-slug>` (first run
-`launchctl bootstrap gui/$(id -u) <plist>` if the job is not loaded).
-Datasource and contact-point provisioning do hot-reload.
+Converge renders the provisioning tree into this home's native configuration.
+Alert-rule changes require a new root generation. Use normal `ava stop -y` then
+`ava start`; readiness alone cannot prove that a running Grafana reloaded a file.
+There is no independent launchd or systemd Grafana restart path.
 
 ## How to add a rule
 

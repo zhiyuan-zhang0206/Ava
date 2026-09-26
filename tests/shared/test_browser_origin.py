@@ -53,8 +53,33 @@ def test_build_and_cors_use_entry_without_changing_gateway(monkeypatch: pytest.M
 
 def test_explicit_cors_remains_authoritative(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.gateway, "browser_origin", "https://console.example")
+    monkeypatch.setattr(settings.services, "app_port", 18069)
     monkeypatch.setattr(settings.gateway, "cors_allowed_origins", ["https://other.example"])
     assert cors_allowed_origins() == ["https://other.example"]
+
+
+@pytest.mark.parametrize(("app_port", "app_origins"), [(18069, True), (None, False)])
+def test_derived_cors_allows_only_the_reserved_app_port_on_loopback(
+    monkeypatch: pytest.MonkeyPatch, app_port: int | None, app_origins: bool
+) -> None:
+    """A browser loading Next.js from the reserved app port reaches its gateway.
+
+    The port is the one start reserved (AVA_APP_PORT), only on the loopback
+    hosts Next.js binds — never another host — and nothing is guessed without it.
+    """
+    monkeypatch.setattr(settings.gateway, "cors_allowed_origins", [])
+    monkeypatch.setattr(settings.gateway, "browser_origin", "")
+    monkeypatch.setattr(settings.services, "frontend_healthcheck_url", "http://localhost:18055")
+    monkeypatch.setattr(settings.services, "app_port", app_port)
+    monkeypatch.setattr(settings.gateway, "gateway_url", "http://192.0.2.2:18054")
+    app = ["http://localhost:18069", "http://127.0.0.1:18069"] if app_origins else []
+    assert cors_allowed_origins() == [
+        "http://localhost:18055",
+        "http://127.0.0.1:18055",
+        *app,
+        "http://192.0.2.2:18054",
+        "http://192.0.2.2:18055",
+    ]
 
 
 def test_https_cookie_policy_preserves_direct_http(monkeypatch: pytest.MonkeyPatch) -> None:

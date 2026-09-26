@@ -11,6 +11,7 @@ here spawns or stops anything.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
@@ -18,6 +19,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
+
+from services.ava_root.inputs import InputSeal, parse_inputs
 
 # The implicit tree root. Units attach here by default; it is never a unit
 # itself and cannot be declared as one.
@@ -31,8 +34,8 @@ _UNIT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 # validators reject anything else, so field drift fails loudly instead of
 # being carried around silently.
 _REQUIRED_FIELDS = frozenset({"id", "exec", "restart"})
-_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach"}
-_FILE_FIELDS = frozenset({"units"})
+_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach", "env", "inputs"}
+_FILE_FIELDS = frozenset({"units", "launch_digest"})
 
 
 class ManifestError(ValueError):
@@ -71,6 +74,24 @@ class UnitManifest:
     exec: tuple[str, ...]
     restart: RestartPolicy
     attach: str
+    env: tuple[tuple[str, str], ...] = ()
+    inputs: tuple[InputSeal, ...] = ()
+
+    def digest(self) -> str:
+        """Bind executable and private environment without exposing credentials."""
+        body = json.dumps(
+            {
+                "id": self.id,
+                "exec": self.exec,
+                "restart": self.restart.value,
+                "attach": self.attach,
+                "env": self.env,
+                "inputs": [item.as_mapping() for item in self.inputs],
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(body.encode()).hexdigest()
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object], *, origin: str) -> UnitManifest:
@@ -94,15 +115,6 @@ class UnitManifest:
                 "(start with [a-z0-9], then [a-z0-9._-])"
             )
 
-        exec_raw = raw["exec"]
-        if not isinstance(exec_raw, list) or not exec_raw:
-            raise ManifestError(f"{origin}: exec must be a non-empty argv list")
-        argv: list[str] = []
-        for index, part in enumerate(cast("list[object]", exec_raw)):
-            if not isinstance(part, str) or not part:
-                raise ManifestError(f"{origin}: exec[{index}] must be a non-empty string")
-            argv.append(part)
-
         restart_raw = _require_str(raw, "restart", origin)
         try:
             restart = RestartPolicy(restart_raw)
@@ -118,7 +130,43 @@ class UnitManifest:
         if attach != ROOT_ID and not _UNIT_ID_RE.match(attach):
             raise ManifestError(f"{origin}: attach {attach!r} is not a valid unit id")
 
-        return cls(id=unit_id, exec=tuple(argv), restart=restart, attach=attach)
+        try:
+            inputs = parse_inputs(raw.get("inputs", []))
+        except (ValueError, TypeError) as exc:
+            raise ManifestError(f"{origin}: {exc}") from exc
+        return cls(
+            id=unit_id,
+            exec=_parse_exec(raw["exec"], origin),
+            restart=restart,
+            attach=attach,
+            env=_parse_environment(raw.get("env", {}), origin),
+            inputs=inputs,
+        )
+
+
+def _parse_exec(raw: object, origin: str) -> tuple[str, ...]:
+    if not isinstance(raw, list) or not raw:
+        raise ManifestError(f"{origin}: exec must be a non-empty argv list")
+    argv: list[str] = []
+    for index, part in enumerate(cast("list[object]", raw)):
+        if not isinstance(part, str) or not part:
+            raise ManifestError(f"{origin}: exec[{index}] must be a non-empty string")
+        argv.append(part)
+    return tuple(argv)
+
+
+def _parse_environment(raw: object, origin: str) -> tuple[tuple[str, str], ...]:
+    if not isinstance(raw, dict) or any(
+        not isinstance(key, str)
+        or not key
+        or "=" in key
+        or "\0" in key
+        or not isinstance(value, str)
+        or "\0" in value
+        for key, value in cast("dict[object, object]", raw).items()
+    ):
+        raise ManifestError(f"{origin}: env must contain valid string keys and values")
+    return tuple(sorted(cast("dict[str, str]", raw).items()))
 
 
 def _require_str(raw: Mapping[str, object], field: str, origin: str) -> str:
@@ -135,7 +183,12 @@ class UnitRegistry:
     unknown units, and attach cycles all raise ManifestError.
     """
 
-    def __init__(self, manifests: Sequence[UnitManifest]) -> None:
+    def __init__(
+        self, manifests: Sequence[UnitManifest], *, launch_digest: str | None = None
+    ) -> None:
+        if launch_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", launch_digest):
+            raise ManifestError("launch_digest must be a lowercase SHA256")
+        self.launch_digest = launch_digest
         by_id: dict[str, UnitManifest] = {}
         for manifest in manifests:
             if manifest.id in by_id:
@@ -233,4 +286,7 @@ def load_manifests(path: Path) -> UnitRegistry:
                 cast("dict[str, object]", item), origin=f"{path}: units[{index}]"
             )
         )
-    return UnitRegistry(manifests)
+    digest = document.get("launch_digest")
+    if digest is not None and not isinstance(digest, str):
+        raise ManifestError("launch_digest must be a string")
+    return UnitRegistry(manifests, launch_digest=digest)

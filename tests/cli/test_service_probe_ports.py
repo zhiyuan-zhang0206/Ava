@@ -101,6 +101,7 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(repo.settings.services, "browser_enabled", True)
     sessions = {s.session for s in repo.build_services()}
     expected = {
+        "gate",
         "gateway",
         "im-bridge",
         "labeler",
@@ -112,8 +113,6 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "memory-search",
         "memory-indexer",
         "frontend",
-        "gateway-watchdog",
-        "agent-runner-watchdog",
         "ops",
         "browser",
         "browser-mcp",
@@ -125,6 +124,10 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "pitr-base-candidate",
         "otel-collector",
         "agent-host",
+        # The native LGTM backends are root units of an observability station.
+        "loki",
+        "prometheus",
+        "grafana",
     }
     assert sessions == expected
 

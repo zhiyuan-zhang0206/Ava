@@ -71,8 +71,7 @@ class PlatformBackend(abc.ABC):
         """Register a boot-time job that runs ``ava start`` on reboot.
 
         macOS: launchd RunAtLoad LaunchAgent plist.
-        Linux: a distro-level systemd boot unit when installed and enabled
-        (``shared.os_boot_unit``), else an ``@reboot`` crontab entry.
+        Linux: the enabled distro-level systemd unit (``shared.os_boot_unit``).
         Windows: Task Scheduler ``/SC ONLOGON`` job.
 
         Reached only through ``shared.os_autostart.register_autostart``, which
@@ -83,11 +82,10 @@ class PlatformBackend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def unregister_autostart(self, slug: str) -> None:
-        """Remove the boot-time autostart job of the cluster whose home slug is
-        ``slug``. Safe when none is registered.
+    def unregister_autostart(self, home: Path) -> None:
+        """Remove the boot-time autostart job bound to the explicit ``home``. Safe when none is registered.
 
-        The slug is passed in rather than re-derived from ``$AVA_HOME``: the only
+        The home is passed in rather than re-derived from ``$AVA_HOME``: the only
         caller that removes *another* cluster's jobs (``ava cluster destroy``)
         runs inside a process whose own settings were frozen at import.
         """
@@ -96,7 +94,7 @@ class PlatformBackend(abc.ABC):
     # -- cron ---------------------------------------------------------------
 
     @abc.abstractmethod
-    def register_cron(self, interval_s: int = 300, threshold: int = 3) -> None:
+    def register_cron(self, interval_s: int = 300) -> None:
         """Register the periodic OS cron job for the cluster health probe.
 
         macOS: launchd StartInterval LaunchAgent plist.
@@ -106,7 +104,7 @@ class PlatformBackend(abc.ABC):
         Reached only through ``shared.os_cron.register_os_cron``, which applies
         the ``os_jobs_enabled()`` gate — call that, not this.
 
-        Idempotent — re-running updates the interval/threshold. Raises
+        Idempotent — re-running updates the interval. Raises
         ``RuntimeError`` on registration failure.
         """
         ...
@@ -161,48 +159,6 @@ class PlatformBackend(abc.ABC):
     def unregister_pr_flow_job(self, slug: str) -> None:
         """Remove the daily PR-flow sampler job for ``slug``. Safe when none is
         registered."""
-        ...
-
-    # -- watchdog jobs ------------------------------------------------------
-
-    @abc.abstractmethod
-    def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
-        """Register the OS-scheduled probe that revives ``role``'s dead watchdog.
-
-        One job per capability the host carries — the watchdog daemons are
-        per-capability, so their probes are too.
-
-        macOS: launchd StartInterval LaunchAgent plist.
-        Linux: user crontab entry (minute granularity).
-        Windows: Task Scheduler ``/SC MINUTE`` job (minute granularity).
-
-        Reached only through
-        ``shared.os_watchdog_probe.register_watchdog_probe``, which applies the
-        ``os_jobs_enabled()`` gate — call that, not this.
-
-        Idempotent — re-running updates the interval. Raises ``RuntimeError`` on
-        registration failure.
-        """
-        ...
-
-    @abc.abstractmethod
-    def unregister_watchdog_probe(self, role: str, slug: str) -> None:
-        """Remove ``role``'s watchdog probe job on the cluster whose home slug is
-        ``slug``. Safe when none is registered."""
-        ...
-
-    @abc.abstractmethod
-    def register_hold_watchdog(self, interval_s: int) -> None:
-        """Register the OS job that completes an orphaned hold; one per HOME.
-
-        Host-level (unlike the per-capability probes); the verdict is ``shared.hold_watchdog``,
-        the public path ``shared.os_hold_watchdog`` applying the ``os_jobs_enabled()`` gate.
-        Idempotent; POSIX raises on failure, the Windows backend degrades to a loud warning."""
-        ...
-
-    @abc.abstractmethod
-    def unregister_hold_watchdog(self, slug: str) -> None:
-        """Remove home ``slug``'s hold-watchdog job; safe when none is registered."""
         ...
 
     # -- process ------------------------------------------------------------
@@ -285,17 +241,18 @@ class MacPlatformBackend(PlatformBackend):
         if rc != 0:
             raise RuntimeError("autostart registration failed on macOS")
 
-    def unregister_autostart(self, slug: str) -> None:
+    def unregister_autostart(self, home: Path) -> None:
+        from shared.cluster import home_slug
         from shared.os_autostart import _unregister_macos
 
-        _unregister_macos(slug)
+        _unregister_macos(home_slug(home))
 
     # -- cron --
 
-    def register_cron(self, interval_s: int = 300, threshold: int = 3) -> None:
+    def register_cron(self, interval_s: int = 300) -> None:
         from shared.os_cron import _register_macos
 
-        rc = _register_macos(interval_s, threshold)
+        rc = _register_macos(interval_s)
         if rc != 0:
             raise RuntimeError("cron registration failed on macOS")
 
@@ -340,31 +297,6 @@ class MacPlatformBackend(PlatformBackend):
 
     def unregister_pr_flow_job(self, slug: str) -> None:
         from shared.os_pr_flow import _unregister_macos
-
-        _unregister_macos(slug)
-
-    # -- watchdog jobs --
-
-    def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
-        from shared.os_watchdog_probe import _register_macos
-
-        rc = _register_macos(role, interval_s)
-        if rc != 0:
-            raise RuntimeError(f"watchdog-probe registration failed on macOS for {role}")
-
-    def unregister_watchdog_probe(self, role: str, slug: str) -> None:
-        from shared.os_watchdog_probe import _unregister_macos
-
-        _unregister_macos(role, slug)
-
-    def register_hold_watchdog(self, interval_s: int) -> None:
-        from shared.os_hold_watchdog import _register_macos
-
-        if _register_macos(interval_s) != 0:
-            raise RuntimeError("hold-watchdog registration failed on macOS")
-
-    def unregister_hold_watchdog(self, slug: str) -> None:
-        from shared.os_hold_watchdog import _unregister_macos
 
         _unregister_macos(slug)
 
@@ -415,25 +347,21 @@ class LinuxPlatformBackend(PlatformBackend):
     # -- autostart --
 
     def register_autostart(self) -> None:
-        """Systemd boot unit when installed+enabled, else the cron entry --
-        the branch lives in `shared.os_autostart._register_linux`."""
-        from shared.os_autostart import _register_linux
+        from shared.os_boot_unit import install
 
-        rc = _register_linux()
-        if rc != 0:
-            raise RuntimeError("autostart registration failed on Linux")
+        install()
 
-    def unregister_autostart(self, slug: str) -> None:
-        from shared.os_autostart import _unregister_linux
+    def unregister_autostart(self, home: Path) -> None:
+        from shared.os_boot_unit import uninstall
 
-        _unregister_linux(slug)
+        uninstall(home)
 
     # -- cron --
 
-    def register_cron(self, interval_s: int = 300, threshold: int = 3) -> None:
+    def register_cron(self, interval_s: int = 300) -> None:
         from shared.os_cron import _register_linux
 
-        rc = _register_linux(interval_s, threshold)
+        rc = _register_linux(interval_s)
         if rc != 0:
             raise RuntimeError("cron registration failed on Linux")
 
@@ -481,31 +409,6 @@ class LinuxPlatformBackend(PlatformBackend):
 
         _unregister_linux(slug)
 
-    # -- watchdog jobs --
-
-    def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
-        from shared.os_watchdog_probe import _register_linux
-
-        rc = _register_linux(role, interval_s)
-        if rc != 0:
-            raise RuntimeError(f"watchdog-probe registration failed on Linux for {role}")
-
-    def unregister_watchdog_probe(self, role: str, slug: str) -> None:
-        from shared.os_watchdog_probe import _unregister_linux
-
-        _unregister_linux(role, slug)
-
-    def register_hold_watchdog(self, interval_s: int) -> None:
-        from shared.os_hold_watchdog import _register_linux
-
-        if _register_linux(interval_s) != 0:
-            raise RuntimeError("hold-watchdog registration failed on Linux")
-
-    def unregister_hold_watchdog(self, slug: str) -> None:
-        from shared.os_hold_watchdog import _unregister_linux
-
-        _unregister_linux(slug)
-
     # -- process --
 
     def process_alive(self, pid: int) -> bool:
@@ -545,7 +448,7 @@ class LinuxPlatformBackend(PlatformBackend):
 class WindowsPlatformBackend(PlatformBackend):
     """Windows backend.
 
-    The four OS-scheduled job kinds (autostart, health probe, watchdog probe,
+    The OS-scheduled jobs (autostart, health probe, package refresh, and
     logs maintenance)
     route through ``shared.os_schtasks``. The data plane is still not wired here
     and stays a deliberate no-op — callers need no ``if IS_WINDOWS`` guards.
@@ -594,17 +497,18 @@ class WindowsPlatformBackend(PlatformBackend):
 
             logger.error("autostart registration failed on Windows: {}", reason)
 
-    def unregister_autostart(self, slug: str) -> None:
+    def unregister_autostart(self, home: Path) -> None:
+        from shared.cluster import home_slug
         from shared.os_autostart import _unregister_windows
 
-        _unregister_windows(slug)
+        _unregister_windows(home_slug(home))
 
     # -- cron --
 
-    def register_cron(self, interval_s: int = 300, threshold: int = 3) -> None:
+    def register_cron(self, interval_s: int = 300) -> None:
         from shared.os_cron import _register_windows
 
-        reason = _register_windows(interval_s, threshold)
+        reason = _register_windows(interval_s)
         if reason is not None:
             # Degrade, do not fail the bring-up — see register_autostart for
             # the policy and its rationale (transient failure class, cluster
@@ -688,51 +592,6 @@ class WindowsPlatformBackend(PlatformBackend):
         from loguru import logger
 
         logger.debug("PR-flow sampler job: no Windows registration path (slug={})", slug)
-
-    # -- watchdog jobs --
-
-    def register_watchdog_probe(self, role: str, interval_s: int = 60) -> None:
-        from shared.os_watchdog_probe import _register_windows
-
-        reason = _register_windows(role, interval_s)
-        if reason is not None:
-            # Degrade, do not fail the bring-up — see register_autostart for
-            # the policy and its rationale. Without this job a dead watchdog
-            # is not revived automatically; the cluster still runs, and the
-            # warning is loud + every start retries.
-            print(  # noqa: T201
-                f"  ! watchdog probe ({role}): schtasks registration failed — "
-                "continuing without it; a dead watchdog will not be revived "
-                f"automatically (next `ava start` retries): {reason}",
-                file=sys.stderr,
-            )
-            from loguru import logger
-
-            logger.error("watchdog-probe registration failed on Windows for {}: {}", role, reason)
-
-    def unregister_watchdog_probe(self, role: str, slug: str) -> None:
-        from shared.os_watchdog_probe import _unregister_windows
-
-        _unregister_windows(role, slug)
-
-    def register_hold_watchdog(self, interval_s: int) -> None:
-        from shared.os_hold_watchdog import _register_windows
-
-        reason = _register_windows(interval_s)
-        if reason is not None:
-            print(  # noqa: T201
-                "  ! hold watchdog: schtasks registration failed — continuing without it; "
-                f"an orphaned hold will not complete automatically: {reason}",
-                file=sys.stderr,
-            )
-            from loguru import logger
-
-            logger.error("hold-watchdog registration failed on Windows: {}", reason)
-
-    def unregister_hold_watchdog(self, slug: str) -> None:
-        from shared.os_hold_watchdog import _unregister_windows
-
-        _unregister_windows(slug)
 
     # -- process --
 

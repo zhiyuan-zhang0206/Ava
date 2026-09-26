@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import ast
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
-from unittest.mock import Mock
+from types import SimpleNamespace
 
 import psutil
 import pytest
 
+from shared.native_process import ownership, pid_starttime_ticks
+from shared.native_process.ownership import OwnedProcess
 from shared.paths import run_dir
 from shared.platform import IS_LINUX, IS_WINDOWS
 from shared.proc import (
@@ -30,7 +34,7 @@ from shared.proc import (
 from shared.proc import (
     timeout_stderr_tail as proc_timeout_stderr_tail,
 )
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import SessionRecord
 
 
 def test_own_pid_is_alive() -> None:
@@ -44,6 +48,24 @@ def test_unused_pid_is_dead() -> None:
     # probe still returns a bool — the assertion below just checks the typical
     # "no such process" path.
     assert process_alive(2_000_000_000) is False
+
+
+def test_hosting_supervised_session_resolves_home_when_called(unit_home: Path) -> None:
+    """The settings-free proc module loads its home reader only at this boundary."""
+    name = "ava-test-hosting-current"
+    path = run_dir() / "sessions" / f"{name}.json"
+    SessionRecord(
+        pid=os.getpid(),
+        create_time=psutil.Process().create_time(),
+        cmd="test",
+        cwd=str(unit_home),
+        started_at=time.time(),
+        starttime=pid_starttime_ticks(os.getpid()),
+    ).write(path)
+    try:
+        assert hosting_supervised_session() == name
+    finally:
+        path.unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
@@ -275,6 +297,18 @@ def test_kill_process_tree_on_an_absent_pid_is_a_noop() -> None:
     kill_process_tree(2_000_000_000)
 
 
+def test_unreadable_tree_cannot_report_completed_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared import proc
+
+    def unreadable(_parent: OwnedProcess) -> set[OwnedProcess]:
+        raise psutil.AccessDenied(5252)
+
+    monkeypatch.setattr(proc, "capture_tree", unreadable)
+    # It is safe to name this test process: the failure must precede any signal.
+    with pytest.raises(psutil.AccessDenied):
+        proc.kill_process_tree(os.getpid())
+
+
 def test_kill_process_tree_skips_stale_ancestry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -317,31 +351,88 @@ def test_kill_process_tree_skips_changed_identity(
     monkeypatch: pytest.MonkeyPatch, changed_before: str
 ) -> None:
     """A PID with different birth evidence is spared at either signal boundary."""
-    parent = Mock(spec=psutil.Process, pid=100)
-    captured = Mock(spec=psutil.Process, pid=200)
-    captured.create_time.return_value = 1.0
-    current = Mock(spec=psutil.Process, pid=200)
-    current.create_time.return_value = 2.0 if changed_before == "terminate" else 1.0
-    current.is_running.return_value = True
-    current.parents.return_value = [parent]
-    parent.children.return_value = [captured]
+    from shared import proc
 
-    def process_at_pid(pid: int) -> Mock:
-        return parent if pid == 100 else current
+    parent, child = OwnedProcess(100, 1.0, 100), OwnedProcess(200, 1.0, 200)
+    ticks = {100: 100, 200: 201 if changed_before == "terminate" else 200}
+    delivered: list[int] = []
 
+    def read_ticks(pid: int) -> int:
+        return ticks[pid]
+
+    def process_at_pid(pid: int) -> SimpleNamespace:
+        return SimpleNamespace(pid=pid, create_time=lambda: 1.0, status=lambda: "running")
+
+    def captured_tree(_parent: OwnedProcess) -> set[OwnedProcess]:
+        return {parent, child}
+
+    def open_pidfd(_pid: int) -> int:
+        return os.open(os.devnull, os.O_RDONLY)
+
+    def deliver(_fd: int, sig: int) -> None:
+        delivered.append(sig)
+
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(ownership, "pid_starttime_ticks", read_ticks)
     monkeypatch.setattr(psutil, "Process", process_at_pid)
+    monkeypatch.setattr(proc, "capture_tree", captured_tree)
+    monkeypatch.setattr(ownership.pidfd, "open_process", open_pidfd)
+    monkeypatch.setattr(ownership.pidfd, "send_signal", deliver)
 
-    def wait_procs(
-        processes: list[psutil.Process], *, timeout: float
-    ) -> tuple[list[psutil.Process], list[psutil.Process]]:
-        current.create_time.return_value = 2.0  # PID reused during the grace wait.
-        return [], processes
+    def wait_owned(members: list[OwnedProcess], _timeout: float) -> list[OwnedProcess]:
+        ticks[200] = 201
+        return members
 
-    monkeypatch.setattr(psutil, "wait_procs", wait_procs)
+    monkeypatch.setattr(proc, "_wait_owned", wait_owned)
     kill_process_tree(100, include_root=False)
-    assert captured.terminate.call_count == (0 if changed_before == "terminate" else 1)
-    captured.kill.assert_not_called()
-    parent.terminate.assert_not_called()
+    assert delivered == ([] if changed_before == "terminate" else [signal.SIGTERM])
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="POSIX signal escalation")
+def test_tree_escalation_survives_birth_wall_clock_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The captured process ignores TERM; changing its wall reading cannot spare it."""
+    ready, terminated = tmp_path / "ready", tmp_path / "term"
+    source = (
+        "import pathlib,signal,time,sys; "
+        "signal.signal(signal.SIGTERM,lambda *_: pathlib.Path(sys.argv[2]).touch()); "
+        "pathlib.Path(sys.argv[1]).touch(); time.sleep(30)"
+    )
+    child = subprocess.Popen(  # noqa: S603 -- test-owned interpreter and fixed fixture source.
+        [sys.executable, "-I", "-c", source, str(ready), str(terminated)]
+    )
+    shifted = threading.Event()
+    real_birth = psutil.Process.create_time
+
+    def moved_birth(process: psutil.Process) -> float:
+        return real_birth(process) + 3600
+
+    def move_clock() -> None:
+        deadline = time.monotonic() + 5
+        while not terminated.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if terminated.exists():
+            monkeypatch.setattr(psutil.Process, "create_time", moved_birth)
+            shifted.set()
+
+    watcher = threading.Thread(target=move_clock)
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        watcher.start()
+        kill_process_tree(child.pid, grace_s=0.5)
+        watcher.join(timeout=6)
+        assert shifted.is_set()
+        assert _dead(child.pid), "clock drift spared the exact captured process at escalation"
+    finally:
+        if watcher.ident is not None:
+            watcher.join(timeout=6)
+        monkeypatch.setattr(psutil.Process, "create_time", real_birth)
+        child.kill()
+        child.wait(timeout=5)
 
 
 # --- the subprocess.run-shaped surface -----------------------------------
@@ -423,9 +514,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # reappearing in any of them is the regression, and it is invisible on review
 # because it looks exactly like a correct bound.
 _GIT_DRIVING_MODULES = (
-    "ops/cluster_deploy.py",
     "ops/ops_cluster.py",
-    "cli/commands/_update_git.py",
     "shared/cluster_drift.py",
 )
 

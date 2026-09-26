@@ -655,7 +655,6 @@ class LmSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -668,7 +667,6 @@ class LmSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -684,7 +682,6 @@ class LmSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -697,7 +694,6 @@ class LmSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -710,7 +706,6 @@ class LmSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -723,7 +718,6 @@ class LmSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -736,7 +730,6 @@ class LmSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -752,7 +745,6 @@ class LmSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
-            "seed": True,
         },
     )
 
@@ -773,12 +765,6 @@ class LmSettings(EnvSettings):
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
-            # Seeded despite not being a secret: it is the other half of
-            # DASHSCOPE_API_KEY, which IS seeded. A workspace key is minted for
-            # one host and means nothing to the public default, so copying the
-            # key alone into a fresh worktree cluster hands it a key it cannot
-            # spend — the same lockout this field exists to fix.
-            "seed": True,
             "scope": "cluster-pinned",
         },
     )

@@ -161,7 +161,7 @@ def health_port(name: str) -> int:
                     "health port for %s is not declared in this unit's .env — using the "
                     "shared default %d (the 8100s are a shared segment; a co-located unit "
                     "on this localhost namespace may already hold it). Pin a per-unit port "
-                    "with `ava enroll --health-port-base <block-base>` or set "
+                    "with `ava start --health-port-base <block-base>` or set "
                     "AVA_%s_HEALTH_PORT in this unit's .env",
                     name,
                     port,

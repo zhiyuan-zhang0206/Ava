@@ -4,211 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import signal
-import subprocess
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import TracebackType
-from typing import Self
-from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-import psutil
 import pytest
-from pydantic import SecretStr, ValidationError
 
-from services.agent_ops import bootstrap
-from services.agent_ops.bootstrap import ObserverProjection, PreparedObservation
 from shared.daemon_http import start_daemon_http
-from shared.managed_writer_barrier import RolloutIdentity
 from shared.managed_writer_observation import (
     ExpectedLauncher,
-    ExpectedProcess,
     ExpectedSession,
     ExpectedUnitWriters,
     LauncherObservation,
     ObservationChallenge,
     UnitObserver,
     observe_launcher,
-    observe_process,
     observe_session,
 )
 from shared.native_job_observation import NativeReadUnavailableError
-from shared.platform import IS_LINUX
-from shared.session_record import pid_starttime_ticks
-from shared.transport_encryption import TransportEncryptionUndeclared
-
-
-class _StoppedServer:
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        return None
-
-    async def serve_forever(self) -> None:
-        return None
-
-
-def _prepared_observation(tmp_path: Path) -> PreparedObservation:
-    now = datetime.now(UTC)
-    return PreparedObservation(
-        expected=ExpectedUnitWriters(
-            machine="test",
-            home=str(tmp_path.resolve()),
-            artifact_digest="a" * 64,
-            manifest_digest="b" * 64,
-            processes=(),
-            sessions=(),
-            launchers=(),
-        ),
-        operation=RolloutIdentity(holder="test", acquired_at=now, target_sha="c" * 40),
-        challenge=ObservationChallenge(challenge=uuid4(), valid_until=now + timedelta(minutes=1)),
-        schema_digest="d" * 64,
-    )
-
-
-def _projected_observer(mode: str | None) -> ObserverProjection:
-    environment = {
-        "AVA_DB_URL": "postgresql://projected.invalid/test",
-        "AVA_CLUSTER_SECRET": "test-cluster-secret",
-        "AVA_OPS_HEALTH_PORT": "18106",
-    }
-    if mode is not None:
-        environment["AVA_TRANSPORT_ENCRYPTION"] = mode
-    # This is the Settings-free entry's contract: exercise its raw child
-    # projection before ordinary Settings exists rather than mutating Settings.
-    with patch.dict("os.environ", environment, clear=True):
-        return ObserverProjection.from_environment()
-
-
-def _skip_validate_entry(_context: PreparedObservation, _projection: ObserverProjection) -> None:
-    return None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", (None, "", "none", "wireguard"))
-async def test_secret_bootstrap_observer_refuses_undeclared_off_box_bind(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None
-) -> None:
-    projection = _projected_observer(mode)
-    start = AsyncMock(return_value=_StoppedServer())
-    monkeypatch.setattr(bootstrap, "validate_entry", _skip_validate_entry)
-    monkeypatch.setattr(bootstrap, "start_daemon_http", start)
-
-    with pytest.raises(TransportEncryptionUndeclared):
-        await bootstrap.serve(_prepared_observation(tmp_path), projection)
-
-    start.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ("tls", "mtls", "overlay"))
-async def test_secret_bootstrap_observer_accepts_declared_encrypted_off_box_bind(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    projection = _projected_observer(mode)
-    start = AsyncMock(return_value=_StoppedServer())
-    monkeypatch.setattr(bootstrap, "validate_entry", _skip_validate_entry)
-    monkeypatch.setattr(bootstrap, "start_daemon_http", start)
-
-    await bootstrap.serve(_prepared_observation(tmp_path), projection)
-
-    assert projection.transport_encryption == mode
-    awaited = start.await_args
-    assert awaited is not None
-    assert awaited.kwargs["host"] == "0.0.0.0"  # noqa: S104 — asserted test value
-
-
-@pytest.mark.parametrize("url", ["", "  "])
-def test_empty_projected_db_url_cannot_use_ambient_postgres_defaults(url: str) -> None:
-    with pytest.raises(ValidationError):
-        ObserverProjection(db_url=SecretStr(url), cluster_secret=SecretStr(""), ops_port=8106)
-
-
-def test_exact_live_exited_and_reused_identity() -> None:
-    child = subprocess.Popen(
-        [sys.executable, "-I", "-c", "import sys;sys.stdin.read()"], stdin=subprocess.PIPE
-    )
-    try:
-        expected = ExpectedProcess(
-            pid=child.pid,
-            create_time=psutil.Process(child.pid).create_time(),
-            starttime=pid_starttime_ticks(child.pid),
-        )
-        assert observe_process(expected) == "alive"
-        mismatch = expected.model_copy(
-            update={"starttime": None, "create_time": expected.create_time + 60}
-        )
-        assert observe_process(mismatch) == "identity_mismatch"
-        assert child.stdin is not None
-        child.stdin.close()
-        child.wait(timeout=5)
-        assert observe_process(expected) == "exited"
-    finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait(timeout=5)
-
-
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
-def test_observe_process_reads_a_vanished_entry_as_exited(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The stop-race window in the managed-writer observation: psutil validated
-    the pid, then the raw read found no /proc entry because the process was
-    reaped in between — that is the exit itself, not a lost observation."""
-    from shared import managed_writer_observation as observation
-
-    child = subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(30)"])
-    pid = child.pid
-    expected = ExpectedProcess(
-        pid=pid,
-        create_time=psutil.Process(pid).create_time(),
-        starttime=pid_starttime_ticks(pid),
-    )
-    assert expected.starttime is not None
-    real_read = pid_starttime_ticks
-
-    def reaping_read(reading_pid: int) -> int | None:
-        if reading_pid == pid:
-            os.kill(pid, signal.SIGKILL)
-            child.wait()
-        return real_read(reading_pid)
-
-    monkeypatch.setattr(observation, "pid_starttime_ticks", reaping_read)
-    try:
-        assert observe_process(expected) == "exited"
-    finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait(timeout=5)
-
-
-@pytest.mark.skipif(not IS_LINUX, reason="Linux /proc start-time identity")
-def test_observe_process_keeps_unknown_when_a_present_process_cannot_be_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A pid that still exists while its start time cannot be read stays a
-    full unknown — never collapsed into the exit it does not prove."""
-    from shared import managed_writer_observation as observation
-
-    expected = ExpectedProcess(
-        pid=os.getpid(), create_time=psutil.Process().create_time(), starttime=1
-    )
-
-    def unreadable_read(_pid: int) -> int | None:
-        return None
-
-    monkeypatch.setattr(observation, "pid_starttime_ticks", unreadable_read)
-    assert observe_process(expected) == "unknown"
+from shared.process_evidence import ExpectedProcess
 
 
 def test_session_malformed_or_changed_is_not_absent(tmp_path: Path) -> None:
@@ -285,22 +99,6 @@ async def test_actual_observation_socket_requires_fresh_authenticated_challenge(
     finally:
         server.close()
         await server.wait_closed()
-
-
-def test_whole_second_create_time_drift_is_still_the_expected_process() -> None:
-    """A create_time re-read within the tolerance is the expected process, not a reuse."""
-    child = subprocess.Popen(
-        [sys.executable, "-I", "-c", "import sys;sys.stdin.read()"], stdin=subprocess.PIPE
-    )
-    try:
-        live = psutil.Process(child.pid).create_time()
-        for offset in (-1.0, 1.0):
-            expected = ExpectedProcess(pid=child.pid, create_time=live + offset, starttime=None)
-            assert observe_process(expected) == "alive"
-    finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait(timeout=5)
 
 
 def test_observe_launcher_passes_absent_through_and_unknowns_refuse(

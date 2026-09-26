@@ -1,4 +1,17 @@
-"""Cluster Postgres admin-plane dialing — the provisioning admin connection.
+"""Cluster Postgres admin authority — the one place DDL-capable dials are built.
+
+Two forms, both over this home's owner-only Unix socket as the OS-user
+bootstrap superuser (the initdb user):
+
+- `connect` — the administrator as itself, for what only a superuser may do:
+  roles, databases, extensions, grants on the cluster's behalf.
+- `owner_session` / `OwnerAuthority` — the administrator ACTING AS the schema
+  owner (`role=<owner>` in the startup options): schema baseline, checkpoint
+  setup, migrations, start-time derived-cache DDL, logical backups, PITR
+  probes and rollback-snapshot retirement, and password-free owner-equivalent
+  `pg_dump`. Objects are created owner-owned and privilege checks see exactly
+  the owner's rights, but the owner itself never logs in, so it can later lose
+  LOGIN without breaking these paths.
 
 Moved down from `cli.commands._cluster_instance` (tech audit 2026-08-31, QA
 #1133 P2 observation): the PITR services reach for the admin URL but must not
@@ -9,11 +22,23 @@ private-storage), so the admin dial lives beside the identity it serves.
 from __future__ import annotations
 
 import getpass
+import re
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from shared.cluster import home_slug
-from shared.paths import ava_home
+import psycopg
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
+from psycopg.rows import tuple_row
+
 from shared.private_storage import ensure_private_dir
+
+# The owner travels as a libpq startup option (`-c role=<owner>`), where spaces
+# and backslashes are syntax. Cluster identities are plain identifiers; anything
+# else is refused rather than escaped.
+_PLAIN_ROLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def pg_socket_dir(socket_root: Path | None = None, *, home: Path | None = None) -> Path:
@@ -21,53 +46,179 @@ def pg_socket_dir(socket_root: Path | None = None, *, home: Path | None = None) 
     (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so it cannot live under a
     deep `$AVA_HOME` / pytest-tmp data dir — a short `/tmp/ava-pg-<home-slug>`
     (keyed on the cluster home path, never a name) stays well under the cap. The
-    socket only serves local provisioning (the runtime connects over TCP); 0700
-    keeps it owner-only. `home` defaults to `ava_home()` resolved in THIS module;
+    socket serves only the OS user's peer logins — local provisioning and the
+    collector's monitoring role (the runtime connects over TCP); 0700 keeps it
+    owner-only. `home` defaults to `ava_home()` resolved in THIS module;
     the cli thin shell passes its own resolution so cli-layer steering (tests
     patch `cli.commands._cluster_instance.ava_home`) keeps flowing."""
     if home is None:
+        from shared.paths import ava_home
+
         home = ava_home()
+    return ensure_private_dir(pg_socket_path(home, socket_root))
+
+
+def pg_socket_path(home: Path, socket_root: Path | None = None) -> Path:
+    """`pg_socket_dir`'s path for `home`, computed without touching the filesystem
+    (for renderers that only name the socket, such as the collector config)."""
+    # Lazy: `shared.cluster` imports this module (provisioning dials through
+    # it), so a module-level import would make `shared.pg_admin` unimportable
+    # before `shared.cluster`.
+    from shared.cluster.derive import home_slug
+
     root = Path("/tmp") if socket_root is None else socket_root  # noqa: S108 — OS-fixed production socket root
-    d = root / f"ava-pg-{home_slug(home)}"
-    return ensure_private_dir(d)
-
-
-def live_pg_socket_dir(
-    pg_port: int,
-    probe_root: Path = Path("/tmp"),  # noqa: S108 — the OS-fixed short socket root
-    *,
-    canonical: Path | None = None,
-) -> Path:
-    """The socket dir the RUNNING pg instance on `pg_port` actually listens on.
-
-    Normally the canonical `pg_socket_dir()`. A pg started by pre-path-only code
-    still listens under the old name-keyed `/tmp/ava-pg-<cluster>` until its next
-    restart, so the admin dial probes every `<probe_root>/ava-pg-*` dir for a live
-    `.s.PGSQL.<pg_port>` socket — the port is this cluster's own allocated one,
-    so a match is unambiguous (data, not a name). `canonical` overrides the
-    canonical-dir source (the cli thin shell binds its monkeypatchable
-    `_pg_socket_dir` through it). Falls back to the canonical dir when nothing
-    is listening yet (fresh birth: the socket appears when `_start_pg` starts
-    pg there). `probe_root` is /tmp in production (where the short socket dirs
-    live); tests inject a scratch root."""
-    if canonical is None:
-        canonical = pg_socket_dir()
-    if (canonical / f".s.PGSQL.{pg_port}").exists():
-        return canonical
-    for d in probe_root.glob("ava-pg-*"):
-        if (d / f".s.PGSQL.{pg_port}").exists():
-            return d
-    return canonical
+    return root / f"ava-pg-{home_slug(home)}"
 
 
 def pg_admin_url(pg_port: int) -> str:
-    """The provisioning admin connection for this cluster's instance: the initdb
-    superuser over the local unix socket (trust), so provisioning is passwordless.
-    psycopg reads `host=<socket-dir>` + `port` from the query string. Dials the
-    socket dir the running instance actually listens on (`live_pg_socket_dir`),
-    so an admin call keeps working while a pre-cutover pg is still up on the old
-    name-keyed dir."""
-    return (
-        f"postgresql://{getpass.getuser()}@/postgres"
-        f"?host={live_pg_socket_dir(pg_port)}&port={pg_port}"
+    """Dial only this home's canonical owner-only Unix socket directory."""
+    return f"postgresql://{getpass.getuser()}@/postgres?host={pg_socket_dir()}&port={pg_port}"
+
+
+@contextmanager
+def connect(
+    url: str, *, expected_data_dir: Path | None = None, **kwargs: Any
+) -> Generator[psycopg.Connection[Any]]:
+    """Open explicit admin authority; owned startup validates the actual connection.
+
+    A caller managing native storage must supply its recorded data directory.
+    Provider-managed provisioning helpers retain their explicit URL authority.
+    Psycopg connections never reconnect, so validated custody lasts until close.
+    """
+    with psycopg.connect(url, **kwargs) as conn:
+        if expected_data_dir is not None:
+            from shared.cluster.ownership import require_postgres_connection
+
+            require_postgres_connection(conn, expected_data_dir)
+        yield conn
+
+
+def owner_conninfo(admin_url: str, *, database: str, owner: str) -> str:
+    """Conninfo for the administrator acting as `owner` on `database`.
+
+    The role is a startup option rather than a later `SET ROLE`, so it is the
+    session's own default: no transaction rollback can undo it, and a `RESET
+    ROLE` returns to the owner, not to the superuser. libpq tools accept the
+    same string (`pg_dump --dbname`), and no password is involved. A pooler that drops startup options would silently lose the
+    role, so DDL goes through `owner_session`, which verifies it.
+
+    Raises:
+        ValueError: `owner` is not a plain identifier, or `admin_url` already
+            carries startup options this would override.
+    """
+    if _PLAIN_ROLE.fullmatch(owner) is None:
+        raise ValueError(f"schema owner {owner!r} is not a plain role identifier")
+    if "options" in conninfo_to_dict(admin_url):
+        raise ValueError("the admin URL must not carry its own startup options")
+    return make_conninfo(admin_url, dbname=database, options=f"-c role={owner}")
+
+
+@contextmanager
+def owner_session(
+    admin_url: str,
+    *,
+    database: str,
+    owner: str,
+    expected_data_dir: Path | None = None,
+    **kwargs: Any,
+) -> Generator[psycopg.Connection[Any]]:
+    """Open the administrator acting as the schema owner — the DDL authority.
+
+    Dials `owner_conninfo` with `connect`'s custody check, then proves the
+    effective role before the caller runs anything: every object the caller
+    creates is owned by `owner`, and every privilege check (DDL, GRANT, default
+    privileges declared without `FOR ROLE`) sees the owner's rights, exactly as
+    if the owner had logged in. The dial carries no statement ceiling.
+
+    Raises:
+        RuntimeError: the session's effective role is not `owner`.
+    """
+    conninfo = owner_conninfo(admin_url, database=database, owner=owner)
+    with connect(conninfo, expected_data_dir=expected_data_dir, **kwargs) as conn:
+        with conn.cursor(row_factory=tuple_row) as cursor:
+            row = cursor.execute("SELECT current_user").fetchone()
+        if row is None or row[0] != owner:
+            raise RuntimeError(f"admin session did not assume schema owner {owner!r}")
+        if not conn.autocommit:
+            # Reading current_user opened a transaction; hand the caller a clean
+            # session so its first statement starts its own transaction.
+            conn.commit()
+        yield conn
+
+
+@dataclass(frozen=True)
+class OwnerAuthority:
+    """This home's administrator acting as its schema owner.
+
+    `admin_url` dials the home's owner-only socket, `database` and `owner` are
+    read as data from the cluster's own URL, and `data_dir` binds every session
+    to the home's postmaster.
+    """
+
+    admin_url: str
+    database: str
+    owner: str
+    data_dir: Path
+
+    @property
+    def conninfo(self) -> str:
+        """Password-free conninfo for libpq tools and read-only verification."""
+        return owner_conninfo(self.admin_url, database=self.database, owner=self.owner)
+
+    def verified_conninfo(self) -> str:
+        """`conninfo` for a client that cannot run the custody check itself.
+
+        A libpq tool (`pg_dump`) or a worker process dials the conninfo on its
+        own, so one custody-checked `session` first proves that the home's
+        owner-only socket reaches this home's postmaster and assumes the owner.
+
+        Raises:
+            RuntimeError: the backend is not owned by this home, or the session
+                did not assume the owner.
+        """
+        with self.session():
+            pass
+        return self.conninfo
+
+    @contextmanager
+    def session(self, **kwargs: Any) -> Generator[psycopg.Connection[Any]]:
+        """A custody-checked `owner_session` on this home's database."""
+        with owner_session(
+            self.admin_url,
+            database=self.database,
+            owner=self.owner,
+            expected_data_dir=self.data_dir,
+            **kwargs,
+        ) as conn:
+            yield conn
+
+
+def local_owner_authority() -> OwnerAuthority:
+    """Resolve this home's owner authority for its locally owned Postgres.
+
+    The socket port comes from this home's registry record; the owner and
+    database are the cluster URL's username and database (names as data).
+
+    Raises:
+        RuntimeError: the data plane is remote-managed (its provider URL is
+            the only authority), or this home has no registry record.
+    """
+    from shared.cluster import db_identity, get_record, record_postgres_port
+    from shared.config import settings
+    from shared.paths import ava_home
+
+    if settings.data_plane.is_remote:
+        raise RuntimeError("a remote-managed data plane has no local owner authority")
+    home = ava_home()
+    record = get_record(home)
+    if record is None:
+        raise RuntimeError(f"no registry record for home {home}; cannot dial its Postgres")
+    database = conninfo_to_dict(settings.data_plane.db_url).get("dbname")
+    if not isinstance(database, str) or not database:
+        raise RuntimeError("AVA_DB_URL names no database")
+    return OwnerAuthority(
+        admin_url=pg_admin_url(record_postgres_port(record)),
+        database=database,
+        owner=db_identity(),
+        data_dir=home / "pg",
     )

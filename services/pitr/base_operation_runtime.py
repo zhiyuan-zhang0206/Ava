@@ -2,43 +2,58 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
-import os
-import shutil
-import signal
-import subprocess
-import sys
-import tempfile
-import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import NoReturn, cast
-
-import psutil
-import psycopg
+from typing import cast
 
 from services.pitr.base_manifest import CandidateManifest
+from services.pitr.operation_custody import OperationKind
+from services.pitr.restore_drill import validate_drill_inputs
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.restore_proof import (
     ProtectedManifestPublisher,
     RestoreSpaceBudget,
     publish_candidate_proof,
+    quarantine_restore_staging,
+    retire_restore_work,
     verify_candidate_proof,
 )
 from services.pitr.store_factory import get_store_group
+from services.pitr.worker_process import run_operation
 from shared.config import settings
 from shared.config.physical_backup import PhysicalBackupSettings
-from shared.db import direct_db_url
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
-from shared.proc_tree import create_time_matches, stable_create_time
 from shared.process_env import forwarded_proxy_env, restricted_process_env
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
+# A stopped drill stops its sandbox postmaster (bounded at 20 s), scans for
+# residue and writes its evidence before the controller's confirmed close.
+DRILL_GRACE_S = 45.0
+
+
+def restore_kind(root: Path) -> OperationKind:
+    """Scheduled and activation restore proofs share one physical-backup root."""
+    return OperationKind(
+        "restore-proof",
+        root / "restore-control",
+        root / "quarantine" / "restore-proof",
+        partial(quarantine_restore_staging, root),
+    )
+
+
+def drill_kind(root: Path) -> OperationKind:
+    """Operator drills keep their evidence in the operator's scratch tree."""
+    return OperationKind(
+        "pitr-drill",
+        root / "drill-control",
+        root / "quarantine" / "pitr-drill",
+        grace_s=DRILL_GRACE_S,
+    )
 
 
 @dataclass(frozen=True)
@@ -54,12 +69,6 @@ class RestoreWorkerInput:
     data_directory: str
     pg_ctl: Path
     pg_verifybackup: Path
-
-
-def tree_bytes(path: Path) -> int:
-    if not path.exists():
-        return 0
-    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
 
 
 def restore_key_path(config: PhysicalBackupSettings) -> Path:
@@ -140,29 +149,40 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
         config.pitr_store_backend,
         store_args,
         RestoreSpaceBudget(config.pitr_spool_hard_bytes, logical_peak, _EMERGENCY_FLOOR_BYTES),
-        direct_db_url(),
+        live_probe_conninfo(),
         live_data_directory(),
         pg_tool("pg_ctl"),
         pg_tool("pg_verifybackup"),
     )
 
 
+def live_probe_conninfo() -> str:
+    """The dial the restricted worker's live probes (identity, live counts) use.
+
+    This home's administrator acting as the schema owner over the owner-only
+    socket (`shared.pg_admin`): password-free, so the worker's stdin carries
+    no credential, and independent of the write generations a rollout
+    revokes. The worker cannot run the custody check itself, so it runs here
+    before the conninfo is handed over. PITR is local-only: a remote-managed
+    plane has no local owner authority and refuses.
+    """
+    from shared.pg_admin import local_owner_authority
+
+    return local_owner_authority().verified_conninfo()
+
+
 def live_data_directory() -> str:
     """The live instance's PGDATA, certified on the admin connection.
 
-    The restore worker's live-identity probe runs on the runtime role
-    (AVA_DB_URL), which must stay free of settings-read privileges:
-    PG 17 gates `current_setting('data_directory')` behind
-    pg_read_all_settings, and the 2026-08-30 activation died on exactly that
-    grant gap. The controller reads the value once on the admin connection
-    and hands it to the worker in its request instead."""
-    from shared.cluster import get_record, record_postgres_port
-    from shared.pg_admin import pg_admin_url
+    The restore worker's live probes run as the schema owner, which must stay
+    free of settings-read privileges: PG 17 gates
+    `current_setting('data_directory')` behind pg_read_all_settings, and the
+    2026-08-30 activation died on exactly that grant gap. The controller reads
+    the value once on the custody-checked admin session and hands it to the
+    worker in its request instead."""
+    from services.pitr.activation_runtime import pitr_admin_session
 
-    record = get_record(ava_home())
-    if record is None:
-        raise RuntimeError("cluster registry record is missing")
-    with psycopg.connect(pg_admin_url(record_postgres_port(record))) as conn:
+    with pitr_admin_session() as conn:
         row = conn.execute("SELECT current_setting('data_directory')").fetchone()
     if row is None:
         raise RuntimeError("PostgreSQL omitted its data directory")
@@ -182,7 +202,6 @@ def _request(inputs: RestoreWorkerInput) -> dict[str, object]:
             "logical_backup_peak": inputs.budget.logical_backup_peak,
             "emergency_floor": inputs.budget.emergency_floor,
         },
-        "live_db_url": inputs.live_db_url,
         "data_directory": inputs.data_directory,
         "pg_ctl": str(inputs.pg_ctl),
         "pg_verifybackup": str(inputs.pg_verifybackup),
@@ -193,111 +212,92 @@ async def run_restore(candidate: CandidateManifest) -> dict[str, str]:
     return await run_restore_input(input_for(candidate))
 
 
+def _secrets(inputs: RestoreWorkerInput) -> dict[str, str]:
+    """The live dial reaches the worker on stdin only, never the retained request.
+
+    It is the password-free owner conninfo (`live_probe_conninfo`); stdin still
+    keeps every dial out of the operation's persisted controls.
+    """
+    return {"live_db_url": inputs.live_db_url}
+
+
 async def run_restore_input(inputs: RestoreWorkerInput) -> dict[str, str]:
-    control_root = inputs.root / "restore-control"
-    control_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    work = Path(tempfile.mkdtemp(prefix=".proof-", dir=control_root))
-    request, result = work / "request.json", work / "result.json"
-    acknowledgement = result.with_suffix(".ack")
-    request.write_text(json.dumps(_request(inputs), sort_keys=True, separators=(",", ":")))
-    request.chmod(0o600)
-    process = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-m", "services.pitr.restore_worker", str(request), str(result)],
-        cwd=Path(__file__).resolve().parents[2],
+    completed = await run_operation(
+        "services.pitr.restore_worker",
+        _request(inputs),
+        kind=restore_kind(inputs.root),
         env=restricted_process_env() | forwarded_proxy_env(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-        close_fds=True,
-        text=True,
+        secrets=_secrets(inputs),
     )
-    leader_created_at = stable_create_time(psutil.Process(process.pid))
-    try:
-        while not result.is_file():
-            if process.poll() is not None:
-                stderr = process.stderr.read() if process.stderr is not None else ""
-                return restore_result(process.returncode, stderr, result)
-            await asyncio.sleep(0.25)
-        if [member for member in group_members(process.pid) if member.pid != process.pid]:
-            reap_restore_group(process, leader_created_at)
-            _reject_restore_descendants()
-        acknowledgement.write_text("accepted")
-        acknowledgement.chmod(0o600)
-        while process.poll() is None:
-            await asyncio.sleep(0.05)
-        if group_members(process.pid):
-            _raise_surviving_restore_group()
-        stderr = process.stderr.read() if process.stderr is not None else ""
-        return restore_result(process.returncode, stderr, result)
-    except BaseException:
-        if process.poll() is None or group_members(process.pid):
-            reap_restore_group(process, leader_created_at)
-        raise
-    finally:
-        if process.stderr is not None:
-            process.stderr.close()
-        shutil.rmtree(work, ignore_errors=True)
+    candidate = CandidateManifest.from_json(inputs.candidate_json)
+
+    def accept() -> dict[str, str]:
+        outcome = restore_result(completed.work / "result.json")
+        retire_restore_work(
+            root=inputs.root, candidate=candidate, worker=completed.worker, outcome=outcome
+        )
+        return outcome
+
+    # Scratch removal is bounded local I/O; commit keeps the health loop live.
+    return await completed.commit(accept)
 
 
-def reap_restore_group(process: subprocess.Popen[str], leader_created_at: float) -> None:
-    if process.pid == os.getpgrp():
-        raise RuntimeError("refusing to signal the controller process group")
-    try:
-        leader = psutil.Process(process.pid)
-        if not create_time_matches(stable_create_time(leader), leader_created_at):
-            raise RuntimeError("restricted restore worker PID identity changed")
-    except psutil.NoSuchProcess as exc:
-        if group_members(process.pid):
-            raise RuntimeError(
-                "restricted restore descendants outlived their verifiable leader"
-            ) from exc
-        process.wait(timeout=1)
-        return
-    deadline = time.monotonic() + 20
-    with suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGTERM)
-    grace = min(deadline, time.monotonic() + 5)
-    while group_members(process.pid) and time.monotonic() < grace:
-        time.sleep(0.1)
-    while group_members(process.pid) and time.monotonic() < deadline:
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        time.sleep(0.1)
-    process.wait(timeout=max(0.1, deadline - time.monotonic()))
-    if group_members(process.pid):
-        raise RuntimeError("restricted restore worker process group could not be emptied")
+async def run_drill_input(
+    inputs: RestoreWorkerInput,
+    *,
+    scratch: Path,
+    target_lsn: str,
+    target_wall: str,
+    timeout_seconds: int,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, object]:
+    """Run one operator drill; accept only passing evidence for this candidate.
+
+    Operator input mistakes (a relative or used scratch, a target before the
+    chain start) are refused before any operation exists. `progress` receives
+    the drill's own progress lines while it runs.
+    """
+    candidate = CandidateManifest.from_json(inputs.candidate_json)
+    validate_drill_inputs(candidate, scratch, target_lsn)
+    request = _request(inputs)
+    request["drill"] = {
+        "scratch": str(scratch),
+        "target_lsn": target_lsn,
+        "target_wall": target_wall,
+        "timeout_seconds": timeout_seconds,
+    }
+    completed = await run_operation(
+        "services.pitr.restore_worker",
+        request,
+        kind=drill_kind(inputs.root),
+        env=restricted_process_env() | forwarded_proxy_env(),
+        secrets=_secrets(inputs),
+        progress=progress,
+    )
+
+    def accept() -> dict[str, object]:
+        payload = (scratch / "drill-evidence.json").read_bytes()
+        if completed.result != {"evidence_sha256": hashlib.sha256(payload).hexdigest()}:
+            raise RuntimeError("drill result differs from its retained evidence")
+        evidence = cast(dict[str, object], json.loads(payload))
+        if evidence["outcome"] != "pass" or evidence["chain_id"] != candidate.chain_id:
+            raise RuntimeError("drill did not complete the requested proof")
+        return evidence
+
+    return await completed.commit(accept)
 
 
-def group_members(pgid: int) -> list[psutil.Process]:
-    members: list[psutil.Process] = []
-    for process in psutil.process_iter(["pid"]):
-        try:
-            if os.getpgid(process.pid) == pgid:
-                members.append(process)
-        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
-            continue
-    return members
-
-
-def _reject_restore_descendants() -> NoReturn:
-    raise RuntimeError("restricted restore worker left live descendants")
-
-
-def _raise_surviving_restore_group() -> NoReturn:
-    raise RuntimeError("restricted restore worker group survived its owned leader")
-
-
-def restore_result(returncode: int, stderr: str, result: Path) -> dict[str, str]:
-    if returncode != 0:
-        raise RuntimeError(f"restricted restore worker exited {returncode}: {stderr}")
+def restore_result(result: Path) -> dict[str, str]:
+    """Validate the explicit completion result before acknowledging or reaping."""
     loaded: object = json.loads(result.read_text())
     if not isinstance(loaded, dict):
         raise TypeError("restricted restore worker result must be an object")
     raw = cast(dict[str, object], loaded)
     if set(raw) != {"chain_id", "candidate_sha256", "pending_sha256"}:
         raise RuntimeError("restricted restore worker returned an invalid result")
-    return {key: str(value) for key, value in raw.items()}
+    if any(not isinstance(value, str) or not value for value in raw.values()):
+        raise RuntimeError("restricted restore worker returned an invalid result")
+    return cast(dict[str, str], raw)
 
 
 def publish(

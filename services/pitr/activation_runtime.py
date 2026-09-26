@@ -11,16 +11,20 @@ import shlex
 import tempfile
 import threading
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from dotenv import dotenv_values
 
 from services.pitr.activation_evidence import stored_digest_matches
 from services.pitr.activation_state import ActivationRecord
-from services.pitr.restore_manifest import candidate_sha256
+from services.pitr.base_manifest import CandidateManifest
+from services.pitr.restore_manifest import ProtectedManifest, candidate_sha256
 from services.pitr.uploader import AckManifest
 from shared.config import settings
 from shared.config.physical_backup import PhysicalBackupSettings
@@ -150,33 +154,6 @@ def _desired_archive_settings(home: Path) -> dict[str, str]:
     }
 
 
-def _enable_pitr_services(expected_digest: str) -> bytes:
-    from shared.config.candidate import validate_env_patch_for_write
-    from shared.runtime_config import write_fields
-
-    updates: dict[str, object] = {
-        "pitr_enabled": True,
-        "pitr_base_backup_enabled": True,
-        "pitr_restore_proof_enabled": True,
-        "pitr_retention_planner_enabled": False,
-    }
-    candidate = validate_env_patch_for_write(updates, set())
-    if candidate.errors:
-        raise RuntimeError("PITR activation refused: " + "; ".join(candidate.errors))
-    if candidate.expected_digest != expected_digest:
-        raise RuntimeError("PITR activation refused: .env changed before candidate validation")
-    captured = write_fields(
-        updates,
-        set(),
-        capture_bytes=True,
-        expected_digest=candidate.expected_digest,
-        audit_site="pitr_activation",
-    )
-    if captured is None:
-        raise RuntimeError("PITR environment write did not return owned bytes")
-    return captured
-
-
 _PITR_ENV_FIELDS = {
     "pitr_enabled": "AVA_PITR_ENABLED",
     "pitr_base_backup_enabled": "AVA_PITR_BASE_BACKUP_ENABLED",
@@ -261,7 +238,7 @@ def pitr_admin_url() -> str:
     reads through).
 
     Deliberately NOT `shared.db.direct_db_url()` — that derives from
-    `AVA_DB_URL`, whose identity is the runtime role, which lacks
+    `AVA_DB_URL`, whose identity is a write-generation login, which lacks
     `pg_switch_wal` (2026-08-30 activation failure: the WAL-switch step
     crashed with InsufficientPrivilege while every read-only preflight check
     had passed on the superuser connection). One URL for both the probe and
@@ -277,11 +254,28 @@ def pitr_admin_url() -> str:
     return pg_admin_url(record_postgres_port(record))
 
 
+@contextmanager
+def pitr_admin_session() -> Generator[psycopg.Connection[Any]]:
+    """`pitr_admin_url()` as an autocommit session bound to this home's postmaster.
+
+    `shared.pg_admin.connect` proves the backend is a native child of the
+    home's recorded postmaster before any probe or mutation runs, so a server
+    that is not this home's can neither certify the activation nor receive its
+    WAL switch or configuration.
+    """
+    from shared import pg_admin
+
+    with pg_admin.connect(
+        pitr_admin_url(), expected_data_dir=ava_home() / "pg", autocommit=True
+    ) as conn:
+        yield conn
+
+
 def prepare_wal_switch() -> dict[str, str]:
     """Capture the exact WAL segment the proof will demand, on the admin
     connection the switch runs on (2026-08-30: the old runtime-identity dial
     made this capture and the switch diverge from the certified connection)."""
-    with psycopg.connect(pitr_admin_url(), autocommit=True) as conn:
+    with pitr_admin_session() as conn:
         row = conn.execute(
             "SELECT timeline_id::text, pg_walfile_name(pg_current_wal_lsn()), "
             "pg_current_wal_lsn()::text, failed_count::text, archived_count::text "
@@ -305,7 +299,7 @@ def prepare_wal_switch() -> dict[str, str]:
 def switch_wal() -> str:
     """Force-rotate the current WAL segment on the admin connection — the
     runtime identity lacks pg_switch_wal (2026-08-30 InsufficientPrivilege)."""
-    with psycopg.connect(pitr_admin_url(), autocommit=True) as conn:
+    with pitr_admin_session() as conn:
         row = conn.execute("SELECT pg_switch_wal()::text").fetchone()
     if row is None:
         raise RuntimeError("PostgreSQL omitted pg_switch_wal result")
@@ -320,7 +314,7 @@ def probe_switch_privilege() -> None:
     future provisioning change that strips the grant fails the shadow gate
     closed BEFORE any config mutation, instead of failing the activation
     mid-flight (the 2026-08-30 failure mode)."""
-    with psycopg.connect(pitr_admin_url(), autocommit=True) as conn:
+    with pitr_admin_session() as conn:
         row = conn.execute("SELECT has_function_privilege('pg_switch_wal()', 'EXECUTE')").fetchone()
     if row is None or not row[0]:
         raise RuntimeError(
@@ -383,7 +377,6 @@ def remote_wal_proof(
 ) -> tuple[dict[str, str], dict[str, str]]:
     from services.pitr.store_factory import get_store_group
     from services.pitr.uploader import ack_manifest_from_raw
-    from shared.db import direct_db_url
 
     exact, deadline_text = record.wal_exact_evidence, record.wal_verification_deadline
     config = settings.physical_backup
@@ -399,7 +392,9 @@ def remote_wal_proof(
     while datetime.now(UTC) <= deadline:
         if stop is not None and stop.is_set():
             raise RuntimeError("PITR WAL proof lost its deployment lease")
-        with psycopg.connect(direct_db_url(), autocommit=True) as conn:
+        # The archiver's view is read on the same certified admin session the
+        # switch ran on, never through a write-generation login.
+        with pitr_admin_session() as conn:
             row = conn.execute(
                 "SELECT last_archived_wal, failed_count::text, archived_count::text "
                 "FROM pg_stat_archiver"
@@ -458,21 +453,62 @@ def remote_wal_proof(
 
 
 def forced_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[str, str]:
-    from services.pitr.activation_base import build_activation_candidate
+    from services.pitr.base_worker import run_candidate
 
-    if record.candidate_chain_id is None:
+    chain_id = record.candidate_chain_id
+    if chain_id is None:
         raise RuntimeError("activation candidate intent is missing")
-    candidate = build_activation_candidate(
-        operation_id=record.operation_id, chain_id=record.candidate_chain_id, stop=stop
-    )
+    if not chain_id.endswith(f"-{record.operation_id}"):
+        raise RuntimeError("activation candidate chain differs from operation")
+    manifest_path = ava_home() / "physical-backup" / "base-manifests" / f"{chain_id}.candidate.json"
+    if manifest_path.is_file():
+        candidate = CandidateManifest.from_json(manifest_path.read_text())
+        if candidate.chain_id != chain_id:
+            raise RuntimeError("durable activation candidate differs from intent")
+    else:
+        candidate = asyncio.run(run_candidate(chain_id=chain_id, stop=stop))
     payload = candidate.to_json()
     return payload, hashlib.sha256(payload.encode()).hexdigest()
 
 
-def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[str, str]:
-    from services.pitr.activation_base import restore_activation_candidate
-    from services.pitr.base_manifest import CandidateManifest
+async def _restore_activation_candidate(
+    candidate: CandidateManifest, stop: threading.Event
+) -> ProtectedManifest:
+    """Prove the exact activation candidate; lease loss never publishes.
 
+    A cancelled proof reports its custody: an unresolved group closure names
+    the blocked controls instead of hiding behind the cancellation.
+    """
+    from services.pitr.base_operation_runtime import publish_restore, run_restore
+    from services.pitr.operation_custody import OperationCustodyError
+
+    task = asyncio.create_task(run_restore(candidate))
+    while not task.done():
+        await asyncio.wait({task}, timeout=1)
+        if stop.is_set():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError as cancelled:
+                # An unresolved closure rides as the stop's cause: name it.
+                custody = cancelled.__cause__
+                detail = f"; {custody}" if isinstance(custody, OperationCustodyError) else ""
+                raise RuntimeError(
+                    f"PITR restore cancelled after deployment lease loss{detail}"
+                ) from custody
+            raise RuntimeError("PITR restore finished after deployment lease loss; not published")
+    outcome = task.result()
+
+    def require_ownership() -> None:
+        if stop.is_set():
+            raise RuntimeError("PITR protected publication lost its deployment lease")
+
+    publish_restore(candidate, outcome, require_ownership=require_ownership)
+    path = ava_home() / "physical-backup" / "protected-manifests" / f"{candidate.chain_id}.json"
+    return ProtectedManifest.from_json(path.read_text())
+
+
+def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[str, str]:
     if record.protected_manifest is None or record.candidate_digest is None:
         raise RuntimeError("activation candidate evidence is incomplete")
     candidate = CandidateManifest.from_json(record.protected_manifest)
@@ -485,7 +521,7 @@ def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[
         )
     ):
         raise RuntimeError("restore candidate differs from durable activation intent")
-    protected = asyncio.run(restore_activation_candidate(candidate, stop))
+    protected = asyncio.run(_restore_activation_candidate(candidate, stop))
     if (
         protected.chain_id != candidate.chain_id
         or protected.candidate != candidate

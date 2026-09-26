@@ -300,7 +300,7 @@ async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResp
     """The versioned ``resurrect-billing-v1`` action (home runner), also used
     as the in-process fallback when the local ops server is unreachable."""
     from ops.agent_wake import resurrect_agent
-    from ops.resurrection_retry import ResurrectExitDeferredError
+    from ops.resurrection_retry import ResurrectSettlementDeferredError
     from shared.agents import MachinePaused, ResurrectAlreadyAlive, ResurrectRefused
 
     try:
@@ -313,7 +313,7 @@ async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResp
         return BillingResurrectAgentResponse(status="refused", reason=exc.reason)
     except MachinePaused as exc:
         return BillingResurrectAgentResponse(status="refused", reason=f"machine_paused: {exc}")
-    except ResurrectExitDeferredError as exc:
+    except ResurrectSettlementDeferredError as exc:
         return BillingResurrectAgentResponse(status="deferred", reason=str(exc))
     return BillingResurrectAgentResponse(status="spawned")
 

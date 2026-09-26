@@ -13,10 +13,18 @@ Ava cluster HTTP API gateway—FastAPI service running on **port 8000** (loopbac
 
 > This is the authoritative terminology for the gateway domain.
 
-- **Gateway** — central gateway process: one FastAPI app, one port. Named gateway but after cutover it is **more than an adapter** — it is both the HTTP surface and the cluster orchestrator (`gateway/routers/cluster.py` — `/api/cluster/*` endpoints; `ops/cluster_rpc.py` — cross-machine RPC via POST to the target's agent-ops `/ops`). **Keeping the old name** because `gateway` is already the established identifier for 170+ files / service session names / Python packages, renaming churn far outweighs the benefit. Three key "not's": gateway **is not the lifecycle owner** (the `agents_meta` table is the truth, agents themselves spawn/terminate/heartbeat via DB + the native supervisor), **does not route inter-agent messages** (the `inbound_messages` table is the bus; gateway sits on the **write** path — `gateway/routers/_delivery.py:deliver_chat_inbound` inserts chat inbound for send_message / UI replies — but never routes between agents), **stateless** (restart loses no state). Browser chat writes optionally carry a `client_message_id` committed under a unique constraint with the inbound; `POST .../messages/reconcile` returns the stable `inbound_id` after an ambiguous response and replays the pending wake/exact-trigger resurrection tail, so a gateway death cannot turn an HTTP retry into a duplicate chat.
+- **Gateway** — one FastAPI process owns HTTP admission, cluster observations and maintenance APIs. Cross-machine requests use `ops/cluster_rpc.py`; release decisions execute outside the gateway in a retained native operation. Agent runtime identity lives in `agents_meta`, with process custody held by the native supervisor. Gateway inserts inter-agent messages into `inbound_messages`; that durable bus owns delivery. Browser chat can carry `client_message_id`, committed with its inbound under a unique constraint. The messages/reconcile endpoint returns the stable inbound ID after an ambiguous response and resumes its pending wake or resurrection, preventing a gateway restart from duplicating chat.
 - **Client** — HTTP consumers of the gateway (more than one): Next.js browser frontend + agent SDK on agent-runner, both directly connect to `/api/*` over private network. Client **does not** talk to agents directly — everything goes through gateway HTTP.
 
 ## Core Responsibilities
+
+HTTP admission reads the home's durable maintenance journal on each business
+request. `stopping`, `stopped`, `starting` and `ready` block it; drain phases
+keep SDK dependencies available to the remaining fleet. Atomic resume releases
+this same authority immediately, without a cached database posture delaying it.
+Unreadable or incomplete paused records block business requests. Control-plane
+routes bypass the admission read so health and repair remain reachable. The
+database posture is a status projection, not this gate's authority.
 
 - **Agent lifecycle management**: unified handling of spawn, send_message, terminate, resurrect, restart via `/api/agents/*`
 - **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results

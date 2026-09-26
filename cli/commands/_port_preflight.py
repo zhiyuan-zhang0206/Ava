@@ -68,7 +68,7 @@ def collect_port_conflicts(ctx: ConvergeCtx) -> list[str]:
     - the cluster's port block (`expected_cluster_ports`: the registry
       record, or the legacy block for a record-less default home);
     - this unit's health ports from its `.env` (`health_port`), the per-machine
-      layer that `ava enroll --health-port-base` moves.
+      layer that `ava start --health-port-base` moves.
     """
     repo = str(ctx.repo.resolve())
     home = str(ctx.ava_home.resolve())

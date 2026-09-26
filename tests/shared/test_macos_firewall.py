@@ -148,8 +148,8 @@ def test_loopback_only_host_is_a_no_op(
 def test_firewall_off_rules_itself_out(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """With ALF off nothing is filtered, so a missing rule is not a defect.
 
-    This verdict is load-bearing beyond staying quiet: it is what lets the rollout's
-    OFF_BOX_UNREACHABLE report say the firewall is *not* the cause and send the
+    This verdict is load-bearing beyond staying quiet: it is what lets an off-box
+    reachability diagnosis say the firewall is *not* the cause and send the
     operator to the address configuration instead.
     """
     _darwin(monkeypatch)

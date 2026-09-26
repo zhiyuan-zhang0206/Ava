@@ -9,10 +9,9 @@ import pytest
 
 from shared.cluster_drift import (
     _prod_source_dir,
+    checkout_head_sha,
     prod_source_branch_drift,
-    prod_source_fetch,
     prod_source_head_sha,
-    prod_source_pin_relation,
 )
 
 
@@ -103,89 +102,7 @@ def test_prod_source_dir_falls_back_to_ava_home(
     assert _prod_source_dir() == tmp_path / "avahome" / "source"
 
 
-def test_pin_relation_aligned(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    source = tmp_path / "source"
-    sha_a = _init_prod_source(source)
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source)
-    assert prod_source_pin_relation(sha_a, sha_a) == "aligned"
-
-
-def test_pin_relation_ahead(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Checkout moved past the pin (a stray `git pull`): pin=A is an ancestor of head=B."""
-    source = tmp_path / "source"
-    sha_a = _init_prod_source(source)
-    sha_b = _commit(source, "b", "B")
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source)
-    assert prod_source_pin_relation(sha_a, sha_b) == "ahead"
-
-
-def test_pin_relation_behind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Missed a rollout: head=A is an ancestor of pin=B."""
-    source = tmp_path / "source"
-    sha_a = _init_prod_source(source)
-    sha_b = _commit(source, "b", "B")
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source)
-    assert prod_source_pin_relation(sha_b, sha_a) == "behind"
-
-
-def test_pin_relation_diverged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """B (main) and C (side branch off A) share ancestor A but neither is the other's."""
-    source = tmp_path / "source"
-    sha_a = _init_prod_source(source)
-    sha_b = _commit(source, "b", "B")
-    _git(source, "checkout", "-b", "side", sha_a)
-    sha_c = _commit(source, "c", "C")
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source)
-    assert prod_source_pin_relation(sha_b, sha_c) == "diverged"
-
-
-def test_pin_relation_unknown_pin_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Pin commit not present in this checkout (never fetched) → unknown."""
-    source = tmp_path / "source"
-    sha_a = _init_prod_source(source)
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source)
-    assert prod_source_pin_relation("0" * 40, sha_a) == "unknown"
-
-
-def test_pin_relation_unknown_no_repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """No readable git repo → unknown (best-effort, never raises)."""
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "nope")
-    assert prod_source_pin_relation("a" * 40, "b" * 40) == "unknown"
-
-
-def test_fetch_brings_absent_pin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """`prod_source_fetch` pulls the track ref into the checkout, turning an
-    unknown pin into a decidable one — the pin-drift self-heal's missing step
-    (#621): a host whose checkout never fetched the new pin used to read
-    unknown and defer forever."""
-    source = tmp_path / "source"
-    sha_a = _init_prod_source(source)
-    origin = tmp_path / "origin"
-    _git(source, "clone", str(source), str(origin))
-    # A clone does not inherit the source repo's local identity config (CI
-    # runners have no global user.name/email either) — set it before commit.
-    _git(origin, "config", "user.email", "t@t")
-    _git(origin, "config", "user.name", "t")
-    sha_b = _commit(origin, "b", "B")  # origin/main advances past the source
-    _git(source, "remote", "add", "origin", str(origin))
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source)
-    assert prod_source_pin_relation(sha_b, sha_a) == "unknown"
-    assert prod_source_fetch("origin", "main") is True
-    assert prod_source_pin_relation(sha_b, sha_a) == "behind"
-
-
-def test_fetch_fails_without_a_remote(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A checkout with no remote can't fetch — False, never raises (the caller
-    keeps its prior judgment)."""
-    source = tmp_path / "source"
-    _init_prod_source(source)
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: source)
-    assert prod_source_fetch("origin", "main") is False
-
-
-def test_fetch_absent_checkout_returns_false(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """No source repo → False (nothing to fetch into)."""
-    monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "nope")
-    assert prod_source_fetch("origin", "main") is False
+def test_checkout_head_sha_reads_an_explicit_checkout(tmp_path: Path) -> None:
+    sha = _init_prod_source(tmp_path / "wt")
+    assert checkout_head_sha(tmp_path / "wt") == sha
+    assert checkout_head_sha(tmp_path / "absent") is None

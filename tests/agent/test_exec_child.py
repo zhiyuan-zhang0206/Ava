@@ -41,8 +41,10 @@ def _child_env(
     *,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
+    launcher_env: dict[str, str] | None = None,
 ) -> dict[str, str]:
     env = os.environ.copy()
+    env.update(launcher_env or {})
     env.update(
         {
             "AVA_HOME": str(tmp_path / "home"),
@@ -70,6 +72,7 @@ def _spawn(
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
     write_request_file: bool = True,
+    launcher_env: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Write a request, run the real child, return (proc, request, result)."""
     exec_dir = tmp_path / "exec"
@@ -87,6 +90,7 @@ def _spawn(
             result_path,
             config_overlay=config_overlay,
             birth_config=birth_config,
+            launcher_env=launcher_env,
         ),
         timeout=120,
         check=False,
@@ -191,7 +195,16 @@ def test_boot_config_failure_writes_crashed_envelope(
         encoding="utf-8",
     )
 
-    proc, _request, result = _spawn(tmp_path, "pass", write_request_file=False)
+    # The agent launcher injects the least-privilege `ava_runner` projection into
+    # every agent-profile process; the unit `.env` owner URL never replaces it.
+    # Without it the eager build fails earlier, on DataPlaneSettings refusing an
+    # owner URL with the cluster secret but no (agent-stripped) admin password.
+    proc, _request, result = _spawn(
+        tmp_path,
+        "pass",
+        write_request_file=False,
+        launcher_env={"AVA_DB_URL": "postgresql://ava_runner@127.0.0.1:1/x"},
+    )
 
     assert proc.returncode == 0, proc.stderr
     payload = read_result(result)

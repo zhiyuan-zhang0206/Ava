@@ -3,12 +3,15 @@ on:
   pull_request:
     paths:
       - 'shared/runtime_prepare.py'
+      - 'shared/process_group_closure.py'
       - 'shared/runtime_release.py'
+      - 'shared/release_identity.py'
       - 'shared/runtime_interpreter.py'
       - 'shared/runtime_publication_input.py'
       - 'shared/verified_file.py'
       - 'shared/migration_layout.py'
       - 'cli/release_build.py'
+      - 'cli/release_prepare/build-tools.txt'
       - 'tests/integration/test_release_build.py'
       - 'scripts/prove_runtime_publication_input.py'
       - 'scripts/prove_exec_owner_installed.py'
@@ -33,18 +36,8 @@ on:
       - 'scripts/prove_release_inventory.py'
       - 'cli/commands/_release_inventory.py'
       - 'scripts/prepare_plugin_fixture.py'
-      - 'scripts/prove_ops_bootstrap.py'
-      - 'scripts/prove_normal_release.py'
-      - 'scripts/prove_updater_bootstrap.py'
-      - 'cli/commands/_update_bootstrap/**'
-      - 'cli/commands/_update_agent_runner.py'
       - 'shared/updater_handoff.py'
-      - 'services/agent_ops/bootstrap.py'
       - 'services/agent_ops/daemon.py'
-      - 'cli/commands/_update_normal_release.py'
-      - 'cli/commands/_release_services.py'
-      - 'cli/commands/_release_selector.py'
-      - 'shared/spawn_receipt.py'
       - 'shared/updater_recovery.py'
       - 'shared/managed_writer_activation.py'
       - 'shared/managed_writer_publication.py'
@@ -52,11 +45,8 @@ on:
       - 'shared/managed_writer_observation.py'
       - 'shared/managed_writer_closure.py'
       - 'shared/native_job_observation.py'
-      - 'cli/commands/_update_publication.py'
-      - 'scripts/prove_managed_writer_chain.py'
       - 'scripts/prove_runtime_migration.py'
       - 'shared/runtime_migration.py'
-      - 'cli/commands/_release_candidate.py'
       - 'scripts/verify_runtime_wheel.py'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -102,7 +92,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/prepare/wheels"
-          uv build --wheel --out-dir "$RUNNER_TEMP/prepare/wheels"
+          # Cache the reviewed build closure with its hashes: the offline build
+          # below requires exactly these pinned, hash-checked build tools.
+          uv build --wheel --build-constraints cli/release_prepare/build-tools.txt --require-hashes --out-dir "$RUNNER_TEMP/prepare/wheels"
           uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/prepare/source-requirements.txt"
           uv run --no-project --with pip python -m pip wheel --require-hashes -r "$RUNNER_TEMP/prepare/source-requirements.txt" --wheel-dir "$RUNNER_TEMP/prepare/wheels"
           python3 - <<'PY'
@@ -138,8 +130,20 @@ jobs:
           prepareFrontend(source, node, path.join(process.env.RUNNER_TEMP, 'prepare/frontend-input'), frontendInputs(source, node));
           JS
       - name: Download the existing pinned collector outside maintenance
+        id: collector
         shell: bash
-        run: uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
+        run: |
+          set -euo pipefail
+          uv run --locked --no-dev python scripts/prepare_otel_release.py "$RUNNER_TEMP/prepare/otel-input"
+          # Capture trusted input bytes here; later preparation verifies this value.
+          uv run --locked --no-dev python - <<'PYINPUT'
+          import os
+          from pathlib import Path
+          from shared.runtime_prepare import inventory_digest, tree_inventory
+          digest = inventory_digest(tree_inventory(Path(os.environ['RUNNER_TEMP']) / 'prepare/otel-input'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'digest={digest}\n')
+          PYINPUT
       - name: Build the committed application input offline
         shell: bash
         run: |
@@ -147,7 +151,8 @@ jobs:
           uv run --locked --no-dev python -m cli.release_build \
             --repo "$GITHUB_WORKSPACE" --commit "$(git rev-parse HEAD)" \
             --output "$RUNNER_TEMP/prepare/application-build" \
-            --uv "$(command -v uv)" --python "$GITHUB_WORKSPACE/.venv/bin/python" --cache-dir "$(uv cache dir)"
+            --uv "$(command -v uv)" --python "$GITHUB_WORKSPACE/.venv/bin/python" --cache-dir "$(uv cache dir)" \
+            --build-constraints "$GITHUB_WORKSPACE/cli/release_prepare/build-tools.txt"
           python3 - <<'PY'
           import json, os, pathlib, shutil
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
@@ -158,35 +163,31 @@ jobs:
           PY
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py scripts/prove_normal_release.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py cli/commands/_update_bootstrap cli/commands/_update_agent_runner.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/_release_inventory.py
       - name: Type-check publication input reader
         run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/prove_runtime_publication_input.py
-      - name: Type-check managed-writer activation chain proof
-        run: uv run --locked pyright scripts/prove_managed_writer_chain.py
       - name: Publication selector compatibility
         if: runner.os == 'Linux'
         run: uv run --locked pytest tests/shared/test_runtime_publication_input.py -q
       - name: Real offline prepare, retained interpreter and failure isolation
         shell: bash
+        env:
+          COLLECTOR_INPUT_DIGEST: ${{ steps.collector.outputs.digest }}
         run: |
           set -euo pipefail
           # The proof retires the checkout, including .venv. Resolve its base
           # interpreter outside that tree, using the same Python as validation.
           proof_python=$(uv run --locked --no-dev python -c 'import pathlib, sys; p = pathlib.Path(sys.executable).resolve(strict=True); assert not p.is_relative_to(pathlib.Path.cwd()); print(p)')
           "$proof_python" scripts/prepare_plugin_fixture.py "$RUNNER_TEMP/prepare/plugin-input"
-          "$proof_python" scripts/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$proof_python" --uv "$(command -v uv)"
+          "$proof_python" scripts/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$proof_python" --uv "$(command -v uv)" --otel-input-digest "$COLLECTOR_INPUT_DIGEST"
           test -s "$RUNNER_TEMP/prepare/proof.json"
-          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/ops-bootstrap-proof.json"; fi
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/inventory-proof.json"; fi
-          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/updater-bootstrap-proof.json"; fi
-          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/managed-writer-chain-proof.json"; fi
-          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/normal-release-proof.json"; fi
       - name: Verify committed source identity survived runtime preparation
         shell: bash
         run: |
           uv run --locked --no-dev python - <<'PY'
           import json, os, pathlib, platform
-          from cli.release_build import read_application_identity
+          from shared.release_identity import read_application_identity
           from shared.runtime_release import verify_release
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
           build = json.loads((root / 'application-build/build-receipt.json').read_bytes())
@@ -199,10 +200,10 @@ jobs:
           assert all(build[key] == value for key, value in identity.items())
           (root / 'application-identity-proof.json').write_text(json.dumps(identity) + '\n')
           PY
-      - name: Updater bootstrap regression cases
+      - name: Publication ownership regression cases
         if: runner.os == 'Linux'
         shell: bash
-        run: uv run --locked pytest tests/cli/test_update_bootstrap.py tests/cli/test_update_agent_runner.py tests/shared/test_updater_handoff.py tests/shared/test_posixproc_expected_signal.py -q
+        run: uv run --locked pytest tests/shared/test_updater_handoff.py tests/shared/test_posixproc_expected_signal.py -q
       - name: Retain independent resolver proof even when inherited hop fails
         if: always() && runner.os == 'Linux'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -222,17 +223,7 @@ jobs:
             ${{ runner.temp }}/prepare/plugin-proof.json
             ${{ runner.temp }}/prepare/inventory-proof.json
             ${{ runner.temp }}/frontend-proof.json
-            ${{ runner.temp }}/prepare/ops-bootstrap-proof.json
-            ${{ runner.temp }}/prepare/updater-bootstrap-proof.json
-            ${{ runner.temp }}/prepare/managed-writer-chain-proof.json
-            ${{ runner.temp }}/prepare/normal-release-proof.json
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: always() && runner.os == 'Linux'
-        with:
-          name: updater-hop-observations-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/prepare/hop-observation-*.json
-          if-no-files-found: ignore
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always() && runner.os == 'Linux'
         with:

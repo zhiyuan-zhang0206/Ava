@@ -7,18 +7,17 @@ running `ava start` by hand. Each cluster owns its Postgres+Redis under its
 service), so this one boot job covers the whole cluster — data plane included.
 
 - macOS: a launchd User LaunchAgent (RunAtLoad) in ~/Library/LaunchAgents/
-- Linux: a distro-level systemd boot unit when installed and enabled
-  (`shared.os_boot_unit`), else a user crontab `@reboot` entry
+- Linux: the enabled distro-level systemd unit (`shared.os_boot_unit`);
+  automatic startup requires systemd
 - Windows: a Task Scheduler `/SC ONLOGON` job (see shared/os_schtasks.py)
 
 The job **retries** — one boot-time `ava start` is not enough, because at boot
 its dependencies are not all up yet. See `shared/boot_policy.py` for the policy
 and for how each mechanism states it: launchd keys on macOS, systemd restart
-keys on a host with the distro-level unit, `ava boot` (`cli/boot_retry.py`)
-elsewhere.
+keys on Linux, `ava boot` (`cli/boot_retry.py`) on Windows.
 
 Mirrors shared/os_cron.py (the health-probe registrar) -- same launchd / crontab
-/ schtasks mechanics -- but fires once at boot (RunAtLoad / @reboot / ONLOGON)
+/ schtasks mechanics -- but fires at boot (RunAtLoad / systemd / ONLOGON)
 instead of on an interval, and runs `ava start`.
 
 Why the macOS path writes the plist but does NOT `launchctl bootstrap` it:
@@ -45,7 +44,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from loguru import logger
@@ -55,12 +53,8 @@ from shared.config import settings
 from shared.os_cron import (
     LAUNCHD_LABEL_PREFIX,
     ava_binary_path,
-    cron_env_prefix,
     launchd_env_block,
     os_jobs_enabled,
-    remove_crontab_entry,
-    replace_crontab_entry,
-    require_crontab,
     skip_os_job,
 )
 from shared.platform import IS_MACOS
@@ -94,14 +88,8 @@ def _autostart_plist_content() -> str:
     `shared/boot_policy.py`, with launchd rather than a loop of ours doing the
     retrying — which is why this job runs plain `ava start` and not `ava boot`.
 
-    `--no-readiness-gate` is exactly why that distinction needs handling here rather
-    than only in `cli.boot_retry`. `SuccessfulExit` is a boolean: launchd cannot tell
-    `ava start`'s "a step failed" (1, retry it) from "services launched, one is not
-    serving yet" (`SERVICES_NOT_READY_EXIT_CODE`, do not retry forever). So the boot
-    path opts out of the readiness verdict on every platform, and the three keep the
-    single behaviour `boot_policy` insists they share. The flag suppresses only the
-    exit code; the wait still happens and the unready services are still named in
-    `autostart.log`.
+    Start remains unsuccessful until readiness passes. Its idempotent root
+    reconciliation preserves healthy units on subsequent boot attempts.
     """
     label = _autostart_label(_home_slug())
     ava = ava_binary_path()
@@ -117,7 +105,6 @@ def _autostart_plist_content() -> str:
     <array>
         <string>{ava}</string>
         <string>start</string>
-        <string>--no-readiness-gate</string>
     </array>
 {launchd_env_block()}
     <key>RunAtLoad</key>
@@ -171,85 +158,13 @@ def _unregister_macos(slug: str) -> int:
     return 0
 
 
-_CRON_MARKER = "# ava-autostart"
-
-
-def _register_linux() -> int:
-    """Add a `@reboot` crontab entry that runs `ava boot` for this cluster --
-    or defer to this home's distro-level systemd boot unit when one is
-    installed and enabled (`shared.os_boot_unit`).
-
-    `ava boot`, not `ava start`: a `@reboot` line fires exactly once and cron
-    offers no retry, so the retry loop is ours (`cli/boot_retry.py`).
-
-    The unit, when installed AND enabled, OWNS the boot path: registering both
-    would race two converge runs at every boot, so the crontab entry is not
-    registered here and a stale one is removed. An installed-but-not-enabled
-    unit is a staged install -- the crontab entry stays live until the unit is
-    enabled (and this branch takes over on the first converge after).
-
-    A `@reboot` line only fires at boot, so writing it never triggers an
-    immediate run (unlike macOS RunAtLoad) -- no recursion guard needed. When
-    crontab is absent (a minimal box such as a hermetic bench / CI container),
-    warn and skip rather than fail the whole bring-up, matching os_cron.
-    """
-    from shared.os_boot_unit import boot_unit_owns_boot_path, unit_name
-
-    if boot_unit_owns_boot_path():
-        from shared.paths import ava_home
-
-        _unregister_linux(_home_slug())  # drop a stale entry from the cron era
-        print(  # noqa: T201
-            f"  . cluster boot autostart: {unit_name(ava_home())} (enabled)"
-        )
-        return 0
-    missing = require_crontab(
-        "  ! autostart: crontab not installed on this host (skipping); "
-        "cluster will not auto-start on reboot",
-        missing_returncode=0,
-        missing_stream=sys.stdout,
-    )
-    if missing is not None:
-        return missing
-    ava_path = ava_binary_path()
-    slug = _home_slug()
-    # `cron_env_prefix()` first (the assignment must precede the command for cron
-    # to scope it to this line), then `boot` rather than `start` — the retry loop.
-    entry = f"@reboot {cron_env_prefix()}{ava_path} boot  {_CRON_MARKER}.{slug}"
-
-    rc = replace_crontab_entry(
-        f"{_CRON_MARKER}.{slug}",
-        entry,
-        skip_phrase="autostart registration",
-        update_failure=lambda err: logger.error("crontab update failed: {}", err),
-    )
-    if rc == 0:
-        logger.info("crontab @reboot entry added ({}.{})", _CRON_MARKER, slug)
-    return rc
-
-
-def _unregister_linux(slug: str) -> int:
-    try:
-        return remove_crontab_entry(
-            f"{_CRON_MARKER}.{slug}",
-            write_failure_rc=0,
-            on_removed=lambda: logger.info("crontab @reboot entry removed"),
-        )
-    except FileNotFoundError:
-        # No crontab binary -> nothing was ever registered, so removal is a
-        # no-op. Keeps minimal hosts destroyable and the unit-owned branch
-        # (which cleans up a stale entry) crash-free.
-        return 0
-
-
 def _register_windows() -> str | None:
     """Register cluster autostart as a Windows scheduled task.
 
-    `/SC ONLOGON` — the user-session analog of launchd RunAtLoad and the Linux
-    `@reboot` line. Unlike macOS, creating the task never runs it, so there is no
+    `/SC ONLOGON` — the user-session analog of launchd RunAtLoad and Linux boot target. Unlike macOS, creating the task never runs it, so there is no
     recursion guard to worry about (see the module docstring).
 
-    Runs `ava boot`, not `ava start`, for the same reason as Linux: an ONLOGON
+    Runs `ava boot`, not `ava start`, because an ONLOGON
     trigger cannot repeat. `schtasks /RI` — the only repetition knob the command
     line offers — is documented as "not applicable for schedule types: MINUTE,
     HOURLY, ONSTART, ONLOGON, ONIDLE, and ONEVENT", and wrapping the command in
@@ -258,7 +173,7 @@ def _register_windows() -> str | None:
 
     That loop is also why this is the one job registered with NO execution time
     limit. `ava boot` retries with no attempt cap deliberately (`boot_policy` —
-    the three platforms must agree, and neither launchd nor cron bounds their
+    the three platforms must agree, and neither launchd nor systemd bounds their
     equivalent's runtime), and nothing else recovers a host whose boot start never
     succeeded. Any finite limit would be a Windows-only attempt cap imposed by the
     scheduler on exactly that job; the default it replaces was a 72-hour one.
@@ -298,10 +213,8 @@ def register_autostart() -> None:
 
 
 def unregister_autostart(home: Path | None = None) -> None:
-    """Remove a cluster's boot-time autostart job (crontab / launchd / task).
+    """Remove this exact home's boot job (systemd / launchd / task).
 
-    The Linux distro-level systemd boot unit, when one exists, is removed by
-    `shared.os_boot_unit.uninstall` -- which `ava cluster destroy` also runs.
     Safe when none is registered.
 
     `home` selects WHICH cluster's job to remove; it defaults to this process's
@@ -309,10 +222,10 @@ def unregister_autostart(home: Path | None = None) -> None:
     as an argument and not in `AVA_HOME`, and why `register_autostart` has no
     matching parameter.
     """
-    from shared.cluster import slug_for_home
+    from shared.paths import ava_home
     from shared.platform_backend import get_backend
 
-    get_backend().unregister_autostart(slug_for_home(home))
+    get_backend().unregister_autostart(home if home is not None else ava_home())
 
 
 def gui_domain_kickstart_command() -> str:

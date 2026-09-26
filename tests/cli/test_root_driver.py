@@ -1,633 +1,635 @@
-"""The root-driven start/stop path (W1.2e-2).
-
-The switch is off by default and the session path must stay byte-identical
-when it is; when it is on, start/stop drive the ava-root supervisor instead of
-named sessions. These tests cover the fork, the ensure/reconcile semantics,
-the readiness contract on the root's status surface, and the stop mapping —
-all against fakes: nothing here launches a real daemon.
-
-The conftest readiness guard stubs both waits at the `cli.commands` namespace;
-the unit tests below call the root wait directly (not through the guard's
-name), and the integration tests re-pin the names they assert on.
-"""
+"""The sole service owner, exact launch inputs, and fresh readiness."""
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-import cli.commands as _cli
-from cli.commands import _root_driver as _root_mod
-from cli.commands._probe import ReadinessWait
+from cli.commands import _root_driver as driver
 from cli.commands._repo import ServiceSpec
-from cli.commands._session_lifecycle import LaunchOutcome
-from ops.service_spec import _GATEWAY
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from shared.daemon_health import DaemonProbe
+
+# The repo-wide readiness guard replaces `_wait_for_root_services_ready` itself;
+# without this opt-out every readiness test here would assert on that stub.
+pytestmark = pytest.mark.real_service_readiness_gate
 
 
-def _spec(service: str) -> ServiceSpec:
+def spec(*, probe: Any = None) -> ServiceSpec:
     return ServiceSpec(
-        session=service,
-        cmd="x",
-        capabilities=_GATEWAY,
+        session="gateway",
+        cmd="python -m gateway",
+        capabilities=frozenset({"gateway"}),
         requires_db=False,
-        curl_url="http://localhost:1/",
+        identity_probe=probe,
     )
 
 
-def _unit(state: str = "running", **extra: object) -> dict[str, Any]:
-    return {"state": state, "desired": "running", "last_error": None, **extra}
-
-
-def _status(
-    units: dict[str, dict[str, Any]], *, health: dict[str, Any] | None = None
-) -> dict[str, Any]:
+def status(*, pid: int = 100, state: str = "running") -> dict[str, Any]:
     return {
-        "root": {"pid": 4242, "running": True},
-        "units": [{"id": unit_id, **unit} for unit_id, unit in units.items()],
-        "health": health or {},
+        "root": {"pid": 90},
+        "units": [
+            {"id": "gateway", "state": state, "pid": pid, "create_time": 12.0, "starttime": None}
+        ],
     }
 
 
-class _FakeRootClient:
-    """A scripted stand-in for the K1 client: status answers rotate, verbs record."""
-
-    def __init__(self, statuses: list[dict[str, Any]]) -> None:
-        self._statuses = statuses
-        self.calls: list[tuple[str, str | None]] = []
-        self.up_calls: list[str] = []
-        self.down_calls: list[str] = []
-
-    def status(self) -> dict[str, Any]:
-        self.calls.append(("status", None))
-        result = self._statuses.pop(0) if len(self._statuses) > 1 else self._statuses[0]
-        return {"ok": True, "result": result}
-
-    def up(self, name: str) -> dict[str, Any]:
-        self.calls.append(("up", name))
-        self.up_calls.append(name)
-        return {"ok": True, "result": {"verb": "up"}}
-
-    def down(self, name: str) -> dict[str, Any]:
-        self.calls.append(("down", name))
-        self.down_calls.append(name)
-        return {"ok": True, "result": {"verb": "down"}}
+@pytest.mark.parametrize("verdict", [None, "unavailable", "down", "port-taken"])
+def test_no_missing_or_failed_health_is_ready(verdict: str | None) -> None:
+    assert not driver._unit_ready({"state": "running"}, verdict)
 
 
-class _NoRootClient:
-    """The K1 client with nothing answering (the root is down)."""
-
-    def status(self) -> dict[str, Any]:
-        from services.ava_root.client import RootClientError
-
-        raise RootClientError("unreachable in test")
-
-
-@pytest.fixture
-def roots(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
-    """Point the module at a tmp run dir and no helper, with a client seam."""
-    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path)
-    monkeypatch.setattr("shared.paths.root_manifests_path", lambda: tmp_path / "manifests.json")
-    monkeypatch.setattr(
-        _root_mod,
-        "_write_tree_manifests",
-        lambda *_a, **_k: tmp_path / "manifests.json",  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(_root_mod, "_helper_spawn_committed", lambda: False)
-    monkeypatch.setattr(_root_mod, "_poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
-    box: dict[str, Any] = {}
-    monkeypatch.setattr(_root_mod, "_root_client", lambda **_k: box["client"])  # pyright: ignore[reportUnknownArgumentType]
-    return box
-
-
-# ─── the switch + roster ────────────────────────────────────────────────────
-
-
-def test_switch_defaults_off_and_env_flips(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.config import settings
-
-    assert _root_mod._root_driven_enabled() is False
-    monkeypatch.setattr(settings.services, "root_driver_enabled", True)
-    assert _root_mod._root_driven_enabled() is True
-
-
-def test_tree_roster_drops_absorbed_watchdogs_and_respects_the_skip() -> None:
-    from services.ava_root_glue.manifests import ABSORBED_WATCHDOGS
-
-    roles = frozenset({"gateway", "agent-runner"})
-    roster = _root_mod._root_tree_roster(roles, {"labeler"})
-    names = {spec.session for spec in roster}
-    assert not (names & set(ABSORBED_WATCHDOGS))
-    assert "labeler" not in names
-    assert "gateway" in names
-
-
-# ─── ensure_root: adopt / reconcile / replace ───────────────────────────────
-
-
-def test_adopts_a_running_root_without_respawning(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+def test_readiness_probes_now_instead_of_believing_cached_health(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    roster = (_spec("gateway"), _spec("frontend"))
-    roots["client"] = _FakeRootClient([_status({"gateway": _unit(), "frontend": _unit()})])
-    spawns: list[object] = []
-    monkeypatch.setattr(_root_mod, "_spawn_direct", lambda *a, **_k: spawns.append(a))  # pyright: ignore[reportUnknownArgumentType]
+    snapshot = status()
+    snapshot["health"] = {"gateway": {"last_verdict": "alive"}}
+    monkeypatch.setattr(driver, "_root_client", object)
 
-    outcome = _root_mod._ensure_root_service_tree(
-        roster, Path("/repo"), roles=frozenset({"gateway"}), reconcile=True
+    def read_status(_client: object) -> dict[str, Any]:
+        return snapshot
+
+    monkeypatch.setattr(driver, "_root_status", read_status)
+    result = driver._wait_for_root_services_ready(
+        (spec(probe=lambda: DaemonProbe.down("unready")),), 0
     )
-
-    assert outcome.started == roster
-    assert outcome.failed == ()
-    assert spawns == []
-    assert roots["client"].up_calls == []
-    assert roots["client"].down_calls == []
+    assert result.unready
 
 
-def test_operator_start_brings_down_stale_units(roots: dict[str, Any]) -> None:
-    roster = (_spec("gateway"),)
-    roots["client"] = _FakeRootClient([_status({"gateway": _unit(), "labeler": _unit()})])
+def test_fresh_readiness_rejects_generation_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    snapshots = iter([status(pid=100), status(pid=101)])
+    monkeypatch.setattr(driver, "_root_client", object)
 
-    _root_mod._ensure_root_service_tree(
-        roster, Path("/repo"), roles=frozenset({"gateway"}), reconcile=True
-    )
+    def read_status(_client: object) -> dict[str, Any]:
+        return next(snapshots)
 
-    assert roots["client"].down_calls == ["labeler"]
-
-
-def test_internal_restart_leaves_stale_units_alone(roots: dict[str, Any]) -> None:
-    roster = (_spec("gateway"),)
-    roots["client"] = _FakeRootClient([_status({"gateway": _unit(), "labeler": _unit()})])
-
-    _root_mod._ensure_root_service_tree(
-        roster, Path("/repo"), roles=frozenset({"gateway"}), reconcile=False
-    )
-
-    assert roots["client"].down_calls == []
+    monkeypatch.setattr(driver, "_root_status", read_status)
+    result = driver._wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    assert result.unready
 
 
-def test_stopped_unit_is_brought_up(roots: dict[str, Any]) -> None:
-    roster = (_spec("gateway"), _spec("heartbeat"))
-    roots["client"] = _FakeRootClient(
-        [_status({"gateway": _unit(), "heartbeat": {"state": "stopped", "desired": "stopped"}})]
-    )
+def test_fresh_ready_generation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(driver, "_root_client", object)
 
-    _root_mod._ensure_root_service_tree(
-        roster, Path("/repo"), roles=frozenset({"gateway"}), reconcile=True
-    )
+    def read_status(_client: object) -> dict[str, Any]:
+        return status()
 
-    assert roots["client"].up_calls == ["heartbeat"]
+    monkeypatch.setattr(driver, "_root_status", read_status)
+    result = driver._wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    assert not result.unready
 
 
-def test_missing_desired_unit_replaces_the_generation(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("later", ["stopped", "new-generation"])
+def test_noncritical_readiness_must_still_hold_when_critical_becomes_ready(
+    monkeypatch: pytest.MonkeyPatch, later: str
 ) -> None:
-    roster = (_spec("gateway"), _spec("labeler"))
-    roots["client"] = _FakeRootClient(
-        [
-            _status({"gateway": _unit()}),
-            _status({"gateway": _unit(), "labeler": _unit()}),
-        ]
-    )
-    events: list[str] = []
-    monkeypatch.setattr(
-        _root_mod,
-        "_stop_root_process",
-        lambda *_a, **_k: events.append("stop"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(
-        _root_mod,
-        "_bring_up_root",
-        lambda *_a, **_k: events.append("up") or _status({"gateway": _unit(), "labeler": _unit()}),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    round_number = 0
 
-    outcome = _root_mod._ensure_root_service_tree(
-        roster, Path("/repo"), roles=frozenset({"gateway"}), reconcile=True
-    )
-
-    assert events == ["stop", "up"]
-    assert outcome.failed == ()
-
-
-def test_bring_up_failure_reports_every_unit_failed(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    roster = (_spec("gateway"), _spec("frontend"))
-    roots["client"] = _NoRootClient()
-
-    def _boom(*_a: object, **_kw: object) -> object:
-        raise _root_mod._RootDriverError("no root for you")
-
-    monkeypatch.setattr(_root_mod, "_bring_up_root", _boom)
-
-    outcome = _root_mod._ensure_root_service_tree(
-        roster, Path("/repo"), roles=frozenset({"gateway"}), reconcile=True
-    )
-
-    assert outcome.started == roster
-    assert outcome.failed == ("ava-gateway", "ava-frontend")
-    assert "no root for you" in capsys.readouterr().err
-
-
-def test_spawn_failed_units_are_named(roots: dict[str, Any]) -> None:
-    roster = (_spec("gateway"), _spec("labeler"))
-    roots["client"] = _FakeRootClient(
-        [
-            _status(
-                {
-                    "gateway": _unit(),
-                    "labeler": {
-                        "state": "backoff",
-                        "desired": "running",
-                        "last_error": "spawn failed: nope",
-                    },
-                }
-            )
-        ]
-    )
-
-    outcome = _root_mod._ensure_root_service_tree(
-        roster, Path("/repo"), roles=frozenset({"gateway"}), reconcile=True
-    )
-
-    assert outcome.failed == ("ava-labeler",)
-
-
-def test_direct_spawn_argv_is_the_k3_face(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    created: list[dict[str, Any]] = []
-
-    class _FakePopen:
-        pid = 777
-        returncode = None
-
-        def __init__(self, argv: list[str], **kwargs: Any) -> None:
-            created.append({"argv": argv, **kwargs})
-
-        def poll(self) -> None:
-            return None
-
-    class _SubprocessShim:
-        PIPE = -1
-        STDOUT = -2
-        DEVNULL = -3
-        Popen = _FakePopen
-
-    monkeypatch.setattr(_root_mod, "subprocess", _SubprocessShim())
-    monkeypatch.setattr(_root_mod, "_root_child_env", lambda: {"AVA_HOME": "/tmp/home"})  # noqa: S108 — a fake path, never created
-    roots["client"] = _FakeRootClient([_status({})])
-
-    _root_mod._bring_up_root(tmp_path, Path("/repo"), tmp_path / "manifests.json", roots["client"])
-
-    argv = created[0]["argv"]
-    assert argv[1:3] == ["-m", "services.ava_root"]
-    assert "--run-dir" in argv and "--manifests" in argv and "--wiring" in argv
-    assert created[0]["start_new_session"] is True
-
-
-def test_helper_refuses_a_loud_fall_back(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(_root_mod, "_helper_spawn_committed", lambda: True)
-    monkeypatch.setattr(_root_mod, "_helper_wire_ok", lambda: False)
-    roots["client"] = _NoRootClient()
-
-    with pytest.raises(_root_mod._RootDriverError, match="refusing to fall back"):
-        _root_mod._bring_up_root(
-            Path("/run"), Path("/repo"), Path("/run/manifests.json"), roots["client"]
+    def snapshot(_client: object) -> dict[str, Any]:
+        nonlocal round_number
+        round_number += 1
+        row = status()
+        row["units"].append(
+            {
+                "id": "browser-mcp",
+                "state": "running",
+                "pid": 110,
+                "create_time": 13.0,
+                "starttime": None,
+            }
         )
+        if round_number >= 3:
+            child = row["units"][1]
+            if later == "stopped":
+                child["state"] = "stopped"
+            elif round_number % 2 == 0:
+                child["pid"] = 111
+        return row
+
+    def gateway() -> DaemonProbe:
+        return DaemonProbe.up("ready") if round_number >= 3 else DaemonProbe.down("starting")
+
+    background = ServiceSpec(
+        session="browser-mcp",
+        cmd="unused",
+        capabilities=frozenset({"gateway"}),
+        requires_db=False,
+        identity_probe=lambda: DaemonProbe.up("sampled ready"),
+    )
+    times = iter((0.0, 1.0, 50.0))
+
+    def sleep(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "_root_status", snapshot)
+    monkeypatch.setattr(driver, "_poll_sleep", sleep)
+    monkeypatch.setattr(driver.time, "monotonic", lambda: next(times))
+    result = driver._wait_for_root_services_ready((spec(probe=gateway), background), 100)
+    assert not result.unready
+    assert result.non_critical_unready == (background,)
 
 
-def test_helper_branch_seeds_with_the_daemon_config(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+def test_mac_helper_protocol_refuses_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    seeds: list[dict[str, Any]] = []
-
-    class _HelperClientShim:
-        @staticmethod
-        def seed_root(config: dict[str, Any], **_k: Any) -> dict[str, Any]:
-            seeds.append(config)
-            return {"state": "running", "seeded": True, "restarts": 0, "stop_requested": False}
-
-    monkeypatch.setattr(_root_mod, "_helper_spawn_committed", lambda: True)
-    monkeypatch.setattr(_root_mod, "_helper_wire_ok", lambda: True)
-    monkeypatch.setattr(_root_mod, "_root_child_env", lambda: {"AVA_HOME": "/tmp/home"})  # noqa: S108 — a fake path, never created
-
-    import services.permissions_helper.client as _helper_client
-
-    monkeypatch.setattr(_helper_client, "seed_root", _HelperClientShim.seed_root)
-    roots["client"] = _FakeRootClient([_status({})])
-
-    _root_mod._bring_up_root(
-        Path("/run"), Path("/repo"), Path("/run/manifests.json"), roots["client"]
-    )
-
-    assert seeds and seeds[0]["run_dir"] == "/run"
-    assert seeds[0]["argv"][1:3] == ["-m", "services.ava_root"]
-    assert seeds[0]["stdout"] == "/run/root.stdout.log"
+    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
+    monkeypatch.setattr(driver, "_helper_wire_ok", lambda: False)
+    with pytest.raises(RuntimeError, match="root_stop_intent_v1"):
+        driver._bring_up_root(tmp_path, tmp_path, tmp_path / "manifest", object(), {})
 
 
-# ─── readiness on the root status surface ───────────────────────────────────
-
-
-def _wait(
-    roots: dict[str, Any], specs: tuple[ServiceSpec, ...], timeout_s: float = 0.0
-) -> ReadinessWait:
-    return _root_mod._wait_for_root_services_ready(specs, timeout_s)
-
-
-def test_ready_roster_passes_immediately(roots: dict[str, Any]) -> None:
-    roots["client"] = _FakeRootClient(
-        [
-            _status(
-                {"gateway": _unit(), "labeler": _unit()},
-                health={"gateway": {"last_verdict": "alive"}},
-            )
-        ]
-    )
-    wait = _wait(roots, (_spec("gateway"), _spec("labeler")))
-    assert wait.unready == () and wait.non_critical_unready == ()
-
-
-def test_running_but_verdict_down_is_unready(roots: dict[str, Any]) -> None:
-    roots["client"] = _FakeRootClient(
-        [
-            _status(
-                {"gateway": _unit()},
-                health={"gateway": {"last_verdict": "down", "last_detail": "not serving"}},
-            )
-        ]
-    )
-    wait = _wait(roots, (_spec("gateway"),), timeout_s=0.0)
-    assert [s.session for s in wait.unready] == ["gateway"]
-    assert wait.sessions_gone is False
-
-
-def test_running_but_verdict_port_taken_is_unready(roots: dict[str, Any]) -> None:
-    roots["client"] = _FakeRootClient(
-        [
-            _status(
-                {"gateway": _unit()},
-                health={
-                    "gateway": {"last_verdict": "port-taken", "last_detail": "another listener"}
-                },
-            )
-        ]
-    )
-    wait = _wait(roots, (_spec("gateway"),), timeout_s=0.0)
-    assert [s.session for s in wait.unready] == ["gateway"]
-    assert wait.sessions_gone is False
-
-
-def test_a_spawn_failing_critical_is_a_gone_verdict(roots: dict[str, Any]) -> None:
-    roots["client"] = _FakeRootClient(
-        [
-            _status(
-                {
-                    "gateway": {
-                        "state": "backoff",
-                        "desired": "running",
-                        "last_error": "spawn failed: nope",
-                    }
-                }
-            )
-        ]
-    )
-    wait = _wait(roots, (_spec("gateway"),), timeout_s=30.0)
-    assert [s.session for s in wait.unready] == ["gateway"]
-    assert wait.sessions_gone is True
-    assert wait.elapsed_s < 5.0  # the early exit, not the bound
-
-
-def test_non_critical_failure_never_gates(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("missing", ["root_stop_intent_v1", "helper_shutdown_v1", None])
+def test_helper_admission_requires_normal_retirement_protocol(
+    monkeypatch: pytest.MonkeyPatch, missing: str | None
 ) -> None:
-    monkeypatch.setattr("shared.deploy_timing.NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 0.0)
-    roots["client"] = _FakeRootClient(
-        [_status({"gateway": _unit(), "labeler": {"state": "stopped", "desired": "running"}})]
-    )
-    wait = _wait(roots, (_spec("gateway"), _spec("labeler")), timeout_s=0.0)
-    assert wait.unready == ()
-    assert [s.session for s in wait.non_critical_unready] == ["labeler"]
+    capabilities = {"root_stop_intent_v1": True, "helper_shutdown_v1": True}
+    if missing is not None:
+        del capabilities[missing]
+    monkeypatch.setattr("services.permissions_helper.client.ping", lambda: capabilities)
+    assert driver._helper_wire_ok() is (missing is None)
 
 
-# ─── the stop leg ───────────────────────────────────────────────────────────
-
-
-def test_stop_without_a_root_is_a_noop(
-    roots: dict[str, Any], capsys: pytest.CaptureFixture[str]
+def test_collector_config_bytes_change_the_live_unit_generation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    roots["client"] = _NoRootClient()
-    _root_mod._stop_root_service_tree(preserve=frozenset(), timeout_s=1.0)
-    assert "not running" in capsys.readouterr().out
+    from ops import roster
+    from services.ava_root.manifest import UnitManifest
+
+    config = tmp_path / "collector.yaml"
+    config.write_text("receivers: {otlp: {}}\n")
+    monkeypatch.setattr(roster, "otel_collector_config", lambda: config)
+    monkeypatch.setattr(roster, "_plugin_services", tuple)
+    collector = next(s for s in roster.build_services() if s.session == "otel-collector")
+    before = driver._tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
+    rows = cast("list[dict[str, object]]", before["units"])
+    unit = UnitManifest.from_mapping(rows[0], origin="test")
+    live = {"units": [{"id": unit.id, "manifest_digest": unit.digest()}]}
+    assert not driver._changed_units(before, live)
+    config.write_text("receivers: {otlp: {protocols: {http: {}}}}\n")
+    after = driver._tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
+    assert driver._changed_units(after, live) == {"otel-collector"}
 
 
-def test_stop_preserved_units_stay_up(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+def test_windows_adapter_gap_is_explicit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(driver.sys, "platform", "win32")
+    with pytest.raises(RuntimeError, match="Windows root supervision requires"):
+        driver._bring_up_root(tmp_path, tmp_path, tmp_path / "manifest", object(), {})
+
+
+def test_unresponsive_root_with_custody_is_not_an_absent_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    roots["client"] = _FakeRootClient(
-        [_status({"gateway": _unit(), "browser": _unit(), "frontend": _unit()})]
+    directory = tmp_path / "custody"
+    directory.mkdir()
+    (directory / "gateway.json").write_text("unknown")
+    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path)
+
+    def make_client(**_kwargs: object) -> object:
+        return object()
+
+    monkeypatch.setattr(driver, "_root_client", make_client)
+
+    def read_status(_client: object) -> None:
+        return None
+
+    monkeypatch.setattr(driver, "_root_status", read_status)
+    with pytest.raises(RuntimeError, match="custody"):
+        driver._stop_root_service_tree(preserve=frozenset())
+
+
+def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None:
+    from services.ava_root.manifest import load_manifests
+    from services.ava_root_glue.manifests import generate
+
+    path = tmp_path / "manifest.json"
+    generate(
+        path,
+        capabilities={"gateway"},
+        repo_root=tmp_path,
+        specs=[spec()],
+        environments={"gateway": {"AVA_PROCESS_PROFILE": "gateway"}},
     )
-    torn_down: list[object] = []
-    monkeypatch.setattr(_root_mod, "_stop_root_process", lambda *a, **_k: torn_down.append(a))  # pyright: ignore[reportUnknownArgumentType]
+    manifest = load_manifests(path).units[0]
+    snapshot = status()
+    snapshot["units"][0]["manifest_digest"] = manifest.digest()
+    assert not driver._changed_units(json.loads(path.read_text()), snapshot)
+    generate(
+        path,
+        capabilities={"gateway"},
+        repo_root=tmp_path,
+        specs=[spec()],
+        environments={"gateway": {"AVA_PROCESS_PROFILE": "agent"}},
+    )
+    assert driver._changed_units(json.loads(path.read_text()), snapshot) == {"gateway"}
+    assert path.stat().st_mode & 0o777 == 0o600
 
-    _root_mod._stop_root_service_tree(preserve=frozenset({"browser"}), timeout_s=1.0)
 
-    assert roots["client"].down_calls == ["frontend", "gateway"]
-    assert torn_down == []
+def test_missing_root_ipc_is_unknown_not_positive_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(driver, "_root_client", object)
+
+    def unavailable(_client: object) -> None:
+        return None
+
+    monkeypatch.setattr(driver, "_root_status", unavailable)
+    outcome = driver._wait_for_root_services_ready((spec(),), 0)
+    assert outcome.unready and not outcome.sessions_gone
 
 
-def test_stop_without_preserve_tears_the_root_down(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+def test_service_stopping_during_probe_invalidates_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    snapshots = iter([status(), status(state="stopped")])
+    monkeypatch.setattr(driver, "_root_client", object)
+
+    def read_status(_client: object) -> dict[str, Any]:
+        return next(snapshots)
+
+    monkeypatch.setattr(driver, "_root_status", read_status)
+    result = driver._wait_for_root_services_ready((spec(probe=lambda: DaemonProbe.up("ready")),), 0)
+    assert result.unready
+
+
+def test_helper_seed_is_durable_before_wire_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    roots["client"] = _FakeRootClient([_status({"gateway": _unit()})])
-    torn_down: list[object] = []
-    monkeypatch.setattr(_root_mod, "_stop_root_process", lambda *a, **_k: torn_down.append(a))  # pyright: ignore[reportUnknownArgumentType]
+    import json
 
-    _root_mod._stop_root_service_tree(preserve=frozenset(), timeout_s=1.0)
+    from services.permissions_helper import client
 
-    assert torn_down, "a full stop must stop the root process itself"
-    assert roots["client"].down_calls == []
+    monkeypatch.setattr(driver, "_root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
+
+    def seed(config: client.RootSeedConfig) -> client.RootStatus:
+        path = tmp_path / "seed.json"
+        assert json.loads(path.read_text()) == config
+        assert path.stat().st_mode & 0o777 == 0o600
+        return {"state": "running", "seeded": True, "restarts": 0, "stop_requested": False}
+
+    monkeypatch.setattr(client, "seed_root", seed)
+    driver._seed_via_helper(
+        tmp_path, tmp_path, tmp_path / "manifests.json", {"AVA_HOME": str(tmp_path)}
+    )
 
 
-def test_stop_root_process_sigterms_a_direct_root(
-    roots: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+def test_stop_without_root_ipc_cancels_pending_helper_restart(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = {"alive": True}
-    killed: list[tuple[int, int]] = []
-    monkeypatch.setattr(_root_mod, "_root_status", lambda _client: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.proc.process_alive", lambda _pid: state["alive"])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        os,
-        "kill",
-        lambda pid, sig: (killed.append((pid, sig)), state.update(alive=False)),  # pyright: ignore[reportUnknownArgumentType]
+    from services.permissions_helper import client
+
+    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
+    monkeypatch.setattr(driver, "_helper_wire_ok", lambda: True)
+    monkeypatch.setattr(driver, "_require_root_absent", lambda: None)
+    calls: list[str] = []
+
+    def keeper() -> client.RootStatus:
+        return {"state": "backoff", "seeded": True, "restarts": 1, "stop_requested": False}
+
+    def stop() -> client.RootStatus:
+        calls.append("durable stop")
+        return {"state": "stopped", "seeded": True, "restarts": 1, "stop_requested": True}
+
+    monkeypatch.setattr(client, "root_status", keeper)
+    monkeypatch.setattr(client, "stop_root", stop)
+    driver._stop_dormant_helper_root(float("inf"))
+    assert calls == ["durable stop"]
+
+
+def test_linux_root_launch_never_consults_a_helper(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(driver.sys, "platform", "linux")
+    spawned: list[Path] = []
+
+    def spawn(
+        run_dir: Path,
+        _repo: Path,
+        _manifests: Path,
+        _env: dict[str, str],
+        _runtime: object = None,
+    ) -> SimpleNamespace:
+        spawned.append(run_dir)
+        return SimpleNamespace(pid=123)
+
+    def helper() -> bool:
+        raise AssertionError("Linux root must not consult a helper")
+
+    def await_status(_client: object, _run_dir: Path, **_kwargs: object) -> dict[str, Any]:
+        return status()
+
+    monkeypatch.setattr(driver, "_spawn_direct", spawn)
+    monkeypatch.setattr(driver, "_helper_wire_ok", helper)
+    monkeypatch.setattr(driver, "_await_root_status", await_status)
+    assert (
+        driver._bring_up_root(tmp_path, tmp_path, tmp_path / "manifest", object(), {}) == status()
     )
+    assert spawned == [tmp_path]
 
-    _root_mod._stop_root_process(
-        Path("/run"),
-        roots.get("client") or _NoRootClient(),
-        _status({"gateway": _unit()}),
-        timeout_s=1.0,
+
+def test_selected_stop_preserves_exact_home_qualified_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cli.commands._maintenance_stop import stop_services
+
+    captured: list[frozenset[str]] = []
+
+    def selection() -> dict[str, str]:
+        return {"ava-home-abc-gateway": "gateway", "ava-home-abc-browser": "browser"}
+
+    def stop(
+        *, preserve: frozenset[str], timeout_s: float, force: bool, selected: frozenset[str] | None
+    ) -> None:
+        assert selected == frozenset({"gateway"})
+        assert timeout_s > 0 and force is False
+        captured.append(preserve)
+
+    monkeypatch.setattr(driver, "_root_tree_selection", selection)
+    monkeypatch.setattr(driver, "_stop_root_service_tree", stop)
+    assert stop_services(1, keep_terminals=True, selected=frozenset({"ava-home-abc-gateway"})) == [
+        "ava-home-abc-gateway"
+    ]
+    assert captured == [frozenset({"browser"})]
+    assert stop_services(1, keep_terminals=True, selected=frozenset({"ava-neighbor-gateway"})) == []
+    assert len(captured) == 1
+
+
+@pytest.mark.parametrize("removed", [False, True])
+def test_generation_change_refuses_without_signal_or_seed_publication(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, removed: bool
+) -> None:
+    from services.ava_root.manifest import UnitManifest
+    from services.ava_root_glue.manifests import build_manifest
+
+    requested = (spec(),)
+    manifest = build_manifest(capabilities={"gateway"}, repo_root=tmp_path, specs=requested)
+    snapshot = status()
+    row = cast("list[dict[str, object]]", manifest["units"])[0]
+    snapshot["units"][0]["manifest_digest"] = (
+        UnitManifest.from_mapping(row, origin="test").digest() if removed else "old-digest"
     )
+    if removed:
+        snapshot["units"].append({"id": "agent-host", "state": "running"})
+    published = tmp_path / "manifests.json"
+    published.write_text("old generation")
+    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path)
+    monkeypatch.setattr("shared.paths.root_manifests_path", lambda: published)
 
-    assert killed == [(4242, signal.SIGTERM)]
+    def tree(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return manifest
+
+    def snapshot_now(_client: object) -> dict[str, Any]:
+        return snapshot
+
+    def owned(_status: object) -> None:
+        pass
+
+    def no_stop(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("no stop")
+
+    def source_identity(_repo: Path) -> str:
+        return "a" * 64
+
+    monkeypatch.setattr("cli.commands._start_generation.source_digest", source_identity)
+    monkeypatch.setattr(driver, "_root_child_env", dict)
+    monkeypatch.setattr(driver, "_tree_manifest", tree)
+    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "_root_status", snapshot_now)
+    monkeypatch.setattr(driver, "_require_root_owner", owned)
+    monkeypatch.setattr(driver, "_stop_root_process", no_stop)
+    result = driver._ensure_root_service_tree(
+        requested, tmp_path, roles=frozenset({"gateway"}), reconcile=True
+    )
+    assert result.failed
+    assert published.read_text() == "old generation"
 
 
-# ─── the config field ───────────────────────────────────────────────────────
+def test_mac_boot_tail_does_not_read_or_notify(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(driver.sys, "platform", "darwin")
+    monkeypatch.setattr(driver, "_root_client", lambda: pytest.fail("no root read"))
+    driver.complete_boot_start()
 
 
-def test_root_driver_field_shape_and_default_off() -> None:
-    from shared.config import FIELD_INFOS, field_alias
-    from shared.config.services import ServiceSettings
+def test_root_launch_digest_controls_reuse(tmp_path: Path) -> None:
+    import hashlib
 
-    assert ServiceSettings.model_fields["root_driver_enabled"].default is False
-    assert field_alias("root_driver_enabled") == "AVA_ROOT_DRIVER_ENABLED"
-    assert FIELD_INFOS["root_driver_enabled"].json_schema_extra == {
-        "capability": "common",
-        "restart_required": "",
-        "writable": False,
-        "sensitive": False,
-        "scope": "host",
-        "remote_writable": True,
-    }
+    from services.ava_root.manifest import UnitManifest
+    from services.ava_root_glue.manifests import build_manifest, write_manifest
+
+    requested = (spec(),)
+    manifest = build_manifest(capabilities={"gateway"}, repo_root=tmp_path, specs=requested)
+    launch_env = {"AVA_HOME": str(tmp_path), "AVA_TOKEN": "test-private-value"}
+    digest = hashlib.sha256(
+        json.dumps(launch_env, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    manifest["launch_digest"] = digest
+    snapshot = status()
+    row = cast("list[dict[str, object]]", manifest["units"])[0]
+    snapshot["units"][0]["manifest_digest"] = UnitManifest.from_mapping(row, origin="test").digest()
+    snapshot["root"]["launch_digest"] = digest
+    path = write_manifest(tmp_path / "manifest.json", manifest)
+    before = path.read_bytes()
+    driver._require_same_generation(manifest, snapshot, requested, reconcile=True)
+    manifest["launch_digest"] = "0" * 64
+    with pytest.raises(RuntimeError, match="root launch inputs"):
+        driver._require_same_generation(manifest, snapshot, requested, reconcile=True)
+    assert path.read_bytes() == before
+    assert b"test-private-value" not in before
 
 
-# ─── the fork inside cmd_start ──────────────────────────────────────────────
+def test_root_launch_path_uses_home_declaration_across_callers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
+    monkeypatch.setenv("PATH", str(tmp_path / "interactive"))
+    interactive = driver._root_child_env()
+    monkeypatch.setenv("PATH", str(tmp_path / "systemd"))
+    assert driver._root_child_env() == interactive
+    monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "changed"))
+    assert driver._root_child_env() != interactive
 
 
-class _FakeResult:
-    def __init__(self, returncode: int = 0) -> None:
-        self.returncode = returncode
-        self.stdout = ""
-        self.stderr = ""
+@pytest.mark.parametrize("loaded", [False, True])
+def test_unusable_helper_socket_requires_positive_native_absence(
+    monkeypatch: pytest.MonkeyPatch, loaded: bool
+) -> None:
+    from services.permissions_helper import client, launchd_job
+
+    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
+
+    def unavailable() -> client.RootStatus:
+        raise client.PermissionsHelperError("AF_UNIX path too long")
+
+    def query(_target: str, _deadline: float) -> str | None:
+        return "state = spawn scheduled" if loaded else None
+
+    monkeypatch.setattr(client, "root_status", unavailable)
+    monkeypatch.setattr(launchd_job, "_retirement_query", query)
+    if loaded:
+        with pytest.raises(RuntimeError, match="custody is unavailable"):
+            driver._stop_dormant_helper_root(float("inf"))
+    else:
+        driver._stop_dormant_helper_root(float("inf"))
 
 
-class _FakeSessionBackend:
-    def __init__(self) -> None:
-        self.alive: set[str] = set()
-        self.created: list[str] = []
+def _mock_pidfd_delivery(monkeypatch: pytest.MonkeyPatch, signals: list[str]) -> None:
+    from shared.native_process import ownership as proc_tree
 
-    def has_session(self, name: str) -> bool:
-        return name in self.alive
+    def open_pidfd(_pid: int) -> int:
+        return os.open(os.devnull, os.O_RDONLY)
 
-    def new_session(self, name: str, _cmd: str, _cwd: object, *, env: object, **_: object) -> bool:
-        self.created.append(name)
+    def deliver(descriptor: int, signum: int) -> None:
+        os.fstat(descriptor)  # The native handle must remain open during delivery.
+        signals.append("term" if signum == signal.SIGTERM else "kill")
+
+    monkeypatch.setattr(proc_tree, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(proc_tree.pidfd, "open_process", open_pidfd)
+    monkeypatch.setattr(proc_tree.pidfd, "send_signal", deliver)
+
+
+@pytest.mark.parametrize("target", ["root", "service", "force-service"])
+def test_signals_reject_reuse_inside_legacy_birth_tolerance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: str
+) -> None:
+    import psutil
+
+    from services.ava_root.supervisor import Supervisor
+    from shared.native_process.ownership import OwnedProcess
+
+    old = OwnedProcess(12345, 10.0, 100)
+    replacement = OwnedProcess(12345, 10.01, 101)
+    signals: list[str] = []
+    _mock_pidfd_delivery(monkeypatch, signals)
+
+    class NativeProcess:
+        def terminate(self) -> None:
+            signals.append("term")
+
+        def kill(self) -> None:
+            signals.append("kill")
+
+        def send_signal(self, signum: int) -> None:
+            signals.append("term" if signum == signal.SIGTERM else "kill")
+
+    def process(_pid: int) -> NativeProcess:
+        return NativeProcess()
+
+    def live(_self: OwnedProcess) -> bool:
+        # The old generation was alive at the pre-observation. PID reuse happens
+        # before the signal's psutil handle is captured.
         return True
 
-    def kill_session(
-        self, _name: str, *, graceful: bool = False, expected: bool = False, **_: object
-    ) -> tuple[bool, str]:
-        return True, "forced"
+    def capture(_process: object) -> OwnedProcess:
+        return replacement
 
-    def list_sessions(self, prefix: str = "") -> list[str]:
-        return sorted(n for n in self.alive if n.startswith(prefix))
+    def legacy_match(_self: OwnedProcess, _process: object) -> bool:
+        return True  # Both births fit the retired +/- 2 second compatibility window.
+
+    def owned(_status: object) -> None:
+        pass
+
+    monkeypatch.setattr(psutil, "Process", process)
+    monkeypatch.setattr(OwnedProcess, "live", live)
+    monkeypatch.setattr(OwnedProcess, "capture", staticmethod(capture))
+    monkeypatch.setattr(OwnedProcess, "birth_matches", legacy_match)
+    monkeypatch.setattr(driver, "_require_root_owner", owned)
+    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: False)
+    with pytest.raises(RuntimeError, match="identity changed"):
+        if target == "root":
+            snapshot = {
+                "root": {"pid": old.pid, "create_time": old.birth, "starttime": old.starttime}
+            }
+            driver._stop_root_process(tmp_path, object(), snapshot, timeout_s=0)
+        else:
+            Supervisor._signal_owned(old, force=target == "force-service")
+    assert signals == []
 
 
-def _stub_start_preconditions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Everything `_cmd_start_body` needs before the launch fork is decided."""
+@pytest.mark.parametrize("target", ["root", "service", "force-service"])
+def test_signals_keep_linux_custody_when_wall_birth_moves(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: str
+) -> None:
+    import psutil
+
+    from services.ava_root.supervisor import Supervisor
+    from shared.native_process.ownership import OwnedProcess
+
+    captured = OwnedProcess(12345, 10.0, 100)
+    observed = OwnedProcess(12345, 3610.0, 100)
+    signals: list[str] = []
+    _mock_pidfd_delivery(monkeypatch, signals)
+
+    class NativeProcess:
+        def terminate(self) -> None:
+            signals.append("term")
+
+        def kill(self) -> None:
+            signals.append("kill")
+
+        def send_signal(self, signum: int) -> None:
+            signals.append("term" if signum == signal.SIGTERM else "kill")
+
+    def process(_pid: int) -> NativeProcess:
+        return NativeProcess()
+
+    def capture(_process: object) -> OwnedProcess:
+        return observed
+
+    def live(_self: OwnedProcess) -> bool:
+        return not signals
+
+    def ignore(_value: object) -> None:
+        return None
+
+    monkeypatch.setattr(psutil, "Process", process)
+    monkeypatch.setattr(OwnedProcess, "capture", staticmethod(capture))
+    monkeypatch.setattr(OwnedProcess, "live", live)
+    monkeypatch.setattr(driver, "_require_root_owner", ignore)
+    monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: False)
+    monkeypatch.setattr(driver, "_root_status", ignore)
+    if target == "root":
+        snapshot = {"root": {"pid": captured.pid, "create_time": captured.birth, "starttime": 100}}
+        driver._stop_root_process(tmp_path, object(), snapshot, timeout_s=1)
+    else:
+        Supervisor._signal_owned(captured, force=target == "force-service")
+    assert signals == ["kill" if target == "force-service" else "term"]
+
+
+def test_direct_child_cannot_be_reaped_by_an_unrelated_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import gc
     import subprocess
+    import sys
+    import time
 
-    import shared.session_backend as _sb
-    from cli.commands import _session_lifecycle as _session_mod
-    from cli.commands import start as _start_mod
+    import psutil
 
-    monkeypatch.setattr(
-        _cli,
-        "_collect_setup_values",
-        lambda _a: (  # pyright: ignore[reportUnknownArgumentType]
-            {
-                "machine_name": "test-machine",
-                "machine_role": "gateway",
-                "memory_remote": "git@github.com:test/AvaMemory.git",
-                "gateway_url": "http://test-gateway:8000",
-            },
-            [],
-        ),
-    )
-    monkeypatch.setattr(_cli, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_register_machine_or_die", lambda _r, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_assert_schema_current_or_die", lambda: 0)
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
-    monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
-    monkeypatch.setattr(_start_mod, "cmd_migrations_apply", lambda: None)
-    monkeypatch.setattr(_start_mod, "cmd_status", lambda: None)
-    monkeypatch.setattr(_start_mod, "SERVICE_READY_TIMEOUT_S", 0.0)
-    monkeypatch.setattr(_start_mod, "_update_in_flight", lambda: False)
-    monkeypatch.setattr(_session_mod, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sb, "get_backend", _FakeSessionBackend)
-    monkeypatch.setattr(_sb, "get_shell_backend", _FakeSessionBackend)
+    if sys.platform == "win32":
+        pytest.skip("POSIX child reaping contract")
 
+    def command(_run: Path, _manifest: Path, _runtime: object = None) -> list[str]:
+        return [sys.executable, "-c", "pass"]
 
-def test_start_switch_off_uses_the_session_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_start_preconditions(monkeypatch)
-
-    session_calls: list[object] = []
-
-    def _fake_launch(roles: object, skip: object, repo: object) -> LaunchOutcome:
-        session_calls.append((roles, skip, repo))
-        return LaunchOutcome((), ())
-
-    monkeypatch.setattr(_cli, "_launch_sessions", _fake_launch)
-    monkeypatch.setattr(
-        _cli,
-        "_ensure_root_service_tree",
-        lambda *_a, **_k: pytest.fail("the root path must not run with the switch off"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(
-        _cli,
-        "_wait_for_services_ready",
-        lambda *_a, **_k: ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    rc = _cli.cmd_start()
-
-    assert rc == 0
-    assert len(session_calls) == 1
-
-
-def test_start_switch_on_uses_the_root_legs(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_start_preconditions(monkeypatch)
-    from shared import launch_failures
-
-    monkeypatch.setattr(_cli, "_root_driven_enabled", lambda: True)
-    root_calls: list[dict[str, object]] = []
-
-    def _fake_root(
-        roster_arg: tuple[ServiceSpec, ...], repo_arg: Path, *, roles: object, reconcile: bool
-    ) -> LaunchOutcome:
-        root_calls.append({"roster": roster_arg, "reconcile": reconcile})
-        return LaunchOutcome(roster_arg, ("ava-gateway",))
-
-    monkeypatch.setattr(_cli, "_ensure_root_service_tree", _fake_root)
-    monkeypatch.setattr(
-        _cli,
-        "_launch_sessions",
-        lambda *_a, **_k: pytest.fail("the session path must not run with the switch on"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    wait_calls: list[tuple[object, float]] = []
-    monkeypatch.setattr(
-        _cli,
-        "_wait_for_root_services_ready",
-        lambda specs, timeout_s: (  # pyright: ignore[reportUnknownArgumentType]
-            wait_calls.append((specs, timeout_s)),  # pyright: ignore[reportUnknownArgumentType]
-            ReadinessWait((), 0.0, sessions_gone=False),
-        )[1],
-    )
-    recorded: list[list[str]] = []
-    monkeypatch.setattr(launch_failures, "record", lambda names: recorded.append(list(names)))  # pyright: ignore[reportUnknownArgumentType]
-
-    rc = _cli.cmd_start()
-
-    assert root_calls and root_calls[0]["reconcile"] is True
-    assert wait_calls, "the root wait must be the readiness leg"
-    assert recorded == [["ava-gateway"]]
-    assert rc == SERVICES_NOT_READY_EXIT_CODE
+    monkeypatch.setattr(driver, "_root_argv", command)
+    monkeypatch.setattr(driver, "_direct_root_child", None)
+    process = driver._spawn_direct(tmp_path, tmp_path, tmp_path / "manifest", {})
+    pid = process.pid
+    del process
+    gc.collect()
+    deadline = time.monotonic() + 5
+    try:
+        while psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
+            assert time.monotonic() < deadline, "child did not exit"
+            time.sleep(0.01)
+        # Popen cleans its abandoned-child table here. Our retained child must
+        # stay unreaped, keeping this PID unavailable until the CLI exits.
+        subprocess.run([sys.executable, "-c", "pass"], check=True, timeout=5)
+        assert psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    finally:
+        retained = driver._direct_root_child
+        if retained is not None:
+            retained.wait(timeout=5)

@@ -15,9 +15,9 @@ from typing import Literal, cast
 
 from pydantic import Field
 
-from shared.managed_writer_barrier import Digest, EvidenceModel
 from shared.managed_writer_observation import ExcludedRegistration, ExpectedUnitWriters
 from shared.managed_writer_publication import PublishedUnit
+from shared.process_evidence import Digest, EvidenceModel
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
 from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
 from shared.verified_file import regular_bytes

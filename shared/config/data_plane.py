@@ -7,6 +7,7 @@ env alias so the .env surface is unchanged. Aggregated by shared/config.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -15,7 +16,7 @@ from pydantic import Field, field_validator, model_validator
 from shared.config._base import EnvSettings, _unit_home
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.netutil import is_ipv4_literal, is_loopback_host
-from shared.url_secret import url_host, url_with_host, url_with_password, url_with_query_param
+from shared.url_secret import url_host, url_with_host, url_with_query_param
 
 
 def _self_machine_host() -> str:
@@ -36,17 +37,21 @@ def _self_machine_host() -> str:
     return "localhost"
 
 
+# A runner-class login: a local plane's write-generation runner login
+# (`ava_g<n>_runner`, shared.cluster.authority.model.generation_names) or a
+# remote-managed plane's provider-provisioned `ava_runner`. Duplicated at this
+# leaf because this module runs DURING the Settings build.
+_RUNNER_LOGIN = re.compile(r"ava_runner|ava_g(?:0|[1-9][0-9]*)_runner")
+
+
 def _is_runner_db_url(url: str) -> bool:
-    """Whether `url` carries the least-privilege `ava_runner` identity.
+    """Whether `url` carries a runner-class login.
 
     Read as data from the URL's username (the same names-as-data read every
-    consumer uses), never from a cluster name. The runner role is FIXED — it is
-    part of the bootstrap projection contract (GET /api/bootstrap?role=runner),
-    not a per-cluster fact. The literal mirrors `shared.cluster.derive.RUNNER_ROLE`;
-    duplicated at this leaf because shared.cluster imports shared.config.settings
-    and this module runs DURING the Settings build (the same reason
-    `_self_machine_host` duplicates reachable_host)."""
-    return urlsplit(url).username == "ava_runner"
+    consumer uses), never from a cluster name. The name shape only classifies a
+    projection a launcher or bootstrap already delivered; the database decides
+    what that login may do."""
+    return _RUNNER_LOGIN.fullmatch(urlsplit(url).username or "") is not None
 
 
 def _loopback_if_self(url: str) -> str:
@@ -126,15 +131,15 @@ def gateway_url_host() -> str:
 
 
 class AgentProfileOwnerDbUrlRefusedError(ValueError):
-    """An agent-profile process at the default home refused a local owner DB URL.
+    """An agent-profile process at the default home refused a local non-runner DB URL.
 
-    Raised by `_apply_data_plane_passwords` when the owner URL would combine
-    with the cluster secret — a deliberate fail-fast, not a decode failure. A
-    `ValueError` subclass so the config-service read path
-    (`shared/config/service_read.py`) can classify this EXPECTED topology
-    precisely (type test, never a message match) and serve the boot-time value
-    silently for the agent-profile process's own `.env` line, while every other
-    decode failure still surfaces as an operator warning (#4332).
+    Raised by `_refuse_agent_owner_url` when an agent-profile process would dial
+    the local plane as anything but a runner-class login — a deliberate
+    fail-fast, not a decode failure. A `ValueError` subclass so the
+    config-service read path (`shared/config/service_read.py`) can classify this
+    EXPECTED topology precisely (type test, never a message match) and serve the
+    boot-time value silently for the agent-profile process's own `.env` line,
+    while every other decode failure still surfaces as an operator warning (#4332).
     """
 
 
@@ -281,16 +286,14 @@ class DataPlaneSettings(EnvSettings):
         default="",
         alias="AVA_CLUSTER_SECRET",
         description=(
-            "Single per-cluster pre-shared secret. EMPTY = a fully unauthenticated "
-            "cluster: the gateway API and /ops serve without auth, Postgres/Redis "
-            "run without scram/requirepass (loopback-trust only), and every surface "
-            "binds loopback alone — the single-box no-secret posture. NON-EMPTY = "
-            "the bearer authenticating cross-machine control surfaces (/ops dials and "
-            "runner /api/bootstrap). Data-plane credentials are independent: the owner "
-            "and Redis default-user passwords remain gateway-local, while runner "
-            "credentials are projected inside their connection URLs. Set the secret on "
-            "the gateway and hand it to each runner out-of-band as AVA_CLUSTER_SECRET "
-            "for `ava enroll`."
+            "Single per-cluster pre-shared secret: the human/control-plane bearer "
+            "(gateway API, frontend login, /ops dials, runner /api/bootstrap). EMPTY = "
+            "the single-box posture: the user-facing API and /ops serve without auth "
+            "and every data-plane listener binds loopback alone. The internal data "
+            "plane authenticates whatever the secret: Postgres/PgBouncer admit only "
+            "SCRAM write-generation logins delivered by the launcher, and Redis "
+            "requires its generated passwords. Set the secret on the gateway and hand "
+            "it to each runner out-of-band as AVA_CLUSTER_SECRET for `ava start`."
         ),
         json_schema_extra={
             "restart_required": "all",
@@ -300,29 +303,14 @@ class DataPlaneSettings(EnvSettings):
         },
     )
 
-    db_admin_password: str = Field(
-        default="",
-        alias="AVA_DB_ADMIN_PASSWORD",
-        description=(
-            "Password for the main Postgres owner role. Gateway-local only: it is "
-            "never distributed by bootstrap or passed to agent processes."
-        ),
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": False,
-            "sensitive": True,
-            "scope": "cluster-pinned",
-            "bootstrap": False,
-        },
-    )
-
     redis_admin_password: str = Field(
         default="",
         alias="AVA_REDIS_ADMIN_PASSWORD",
         description=(
             "Password for Redis's default administrative user and requirepass. "
-            "Gateway-local only: it is never distributed by bootstrap or passed to "
-            "agent processes."
+            "Minted at first start for every local data plane, including an empty "
+            "cluster secret. Gateway-local only: it is never distributed by "
+            "bootstrap or passed to agent processes."
         ),
         json_schema_extra={
             "restart_required": "all",
@@ -472,38 +460,22 @@ class DataPlaneSettings(EnvSettings):
         return self
 
     @model_validator(mode="after")
-    def _apply_data_plane_passwords(self) -> DataPlaneSettings:
-        """Re-apply the main Postgres owner password on every load,
-        keeping the URL's username and database untouched.
+    def _refuse_agent_owner_url(self) -> DataPlaneSettings:
+        """Refuse a local non-runner DB URL in an agent-profile process at the
+        default home.
 
-        Names-as-data (path-only identity): the db/role/ACL identifier a cluster
-        uses is whatever its `.env` URLs carry — an existing cluster on the
-        historical `ava_main`, a fresh one on the fixed `ava` — and nothing
-        re-derives it from a name. Only the owner password is re-derived, so an
-        out-of-date DB URL self-heals after owner-password rotation while a
-        data-plane rename stays a pure ops edit of the URLs. Redis is left
-        verbatim because its URL carries the independent runtime ACL password.
+        Names-as-data: the URL's username and database are whatever the cluster
+        `.env` or the launcher's delivery carries; nothing here re-derives or
+        re-applies a credential. A local plane's `.env` URL is a credential-free
+        endpoint — every process dials as the write-generation login its launcher
+        delivered (`shared.cluster.authority`).
 
-        One identity is exempt: the least-privilege `ava_runner` db role (Task
-        #1236). Its URL is projected by the gateway's /api/bootstrap?role=runner
-        with the runner's OWN password (AVA_RUNNER_DB_PASSWORD), freshly read
-        from the gateway .env at every fetch — never stale, and deliberately NOT
-        the owner password. Overwriting it with the owner password would make
-        every runner SASL-fail: the role's stored
-        verifier is its own password, not the secret. The runner is identified by
-        its URL username (names-as-data — the same read the rest of the system
-        uses), so an ops rename of the main identity cannot mis-classify it.
-
-        No-op when cluster_secret is empty (a no-auth cluster's URLs already carry
-        the identity username with no password; tests / an unprovisioned checkout
-        leave the URLs verbatim), for db_url when it is the unanchored sentinel
-        (it carries no userinfo and must stay byte-identical for the connect
-        guard), or when the URL names a FOREIGN host — a remote/SaaS plane's
-        credential is the provider's, so the URL is authoritative and must never
-        be replaced by the local owner password (Task #1752). The self-dial
-        loopback rewrite runs before this validator, so a URL naming this
-        machine's own reachable address is already loopback here and keeps the
-        local password self-heal; only a genuinely foreign host is exempt.
+        An agent-profile process must hold a runner-class login (`_is_runner_db_url`).
+        At the default home with a bearer set, anything else on a loopback URL is
+        a missing projection, refused here by name instead of failing later as an
+        unexplained authentication error. Non-default homes are test/e2e clusters
+        that deliberately keep other topologies. The unanchored sentinel and a
+        FOREIGN host (a remote/SaaS plane: the URL is the provider's) are exempt.
 
         Runs after `_dial_self_host_via_loopback` (declared above it), so the
         local/foreign decision sees the dial host the cluster will actually use.
@@ -522,20 +494,9 @@ class DataPlaneSettings(EnvSettings):
             os.environ.get("AVA_PROCESS_PROFILE") == "agent" and on_default_home
         )
         if agent_profile_on_default_home and self.cluster_secret and local_owner_url:
-            # Agent-profile startup protects launcher-injected AVA_DB_URL from
-            # dotenv replacement. Without this check, a missing projection would
-            # combine the owner username with the cluster secret after agent
-            # hygiene removes the owner password, granting the wrong identity.
-            # Non-default homes are test/e2e clusters that deliberately retain
-            # the owner URL topology to exercise password derivation.
             raise AgentProfileOwnerDbUrlRefusedError(
-                "agent-profile processes must receive an ava_runner AVA_DB_URL; "
-                "refusing a local owner URL derived from AVA_CLUSTER_SECRET "
-                "at the default home"
-            )
-        if self.cluster_secret and local_owner_url:
-            self.db_url = url_with_password(
-                self.db_url, self.db_admin_password or self.cluster_secret
+                "agent-profile processes must receive a runner-class AVA_DB_URL; "
+                "refusing a local non-runner URL at the default home"
             )
         return self
 

@@ -51,6 +51,7 @@ from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_
 from psycopg import sql
 
 from shared.agents import AgentStatus
+from shared.cluster.derive import runner_db_url_projection
 from shared.config import settings
 from tests.e2e._env import E2EEnv
 from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_SOCKET, GATEWAY_URL
@@ -161,9 +162,7 @@ def _apply_e2e_seq_offset() -> None:
 
 
 @pytest.fixture(scope="package", autouse=True)
-def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore sequence; each step is one statement
-    _provisioned_db: str, _provisioned_redis: str
-) -> Iterator[None]:
+def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
     """Layer e2e-specific process config on the root conftest's session Postgres +
     Redis (provisioned by its autouse fixtures). The DB/Redis
     URLs are already in settings + os.environ (AVA_DB_URL / AVA_REDIS_URL), so the
@@ -222,7 +221,6 @@ def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore se
         "AVA_MACHINE_SERVE_AGENT_RUNNER",
         "AVA_MACHINE_NAME",
         "AVA_NODE_STALL_DUMP_SECONDS",
-        "AVA_RUNNER_DB_PASSWORD",
     )
     prev_events = settings.data_plane.events_channel
     prev_env = {k: os.environ.get(k) for k in _env_keys}
@@ -292,25 +290,6 @@ def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore se
     _health_port_keys: frozenset[str] = frozenset(
         f"AVA_{attr.upper()}" for attr in _HEALTH_PORT_OVERRIDES.values()
     )
-    # Task #1236: the e2e home mirrors a BORN cluster — the gateway's .env must
-    # carry the runner credential and the least-privilege ava_runner role must
-    # exist in the e2e Postgres, or the spawned agents' bootstrap fetches
-    # (?role=runner — the runner projection) get a 400 and every agent dies at
-    # boot. The throwaway pg's db/role identifier is `ava_citest` (the URL
-    # username is the throwaway admin, not the identity — read the db name).
-    import secrets
-    from urllib.parse import urlsplit
-
-    from shared.cluster import ensure_runner_role
-
-    runner_pw = secrets.token_urlsafe(32)
-    _e2e_db_url = settings.data_plane.db_url
-    ensure_runner_role(
-        urlsplit(_e2e_db_url).path.strip("/"),
-        base_admin_url=_e2e_db_url.rsplit("/", 1)[0] + "/postgres",
-        runner_password=runner_pw,
-    )
-    os.environ["AVA_RUNNER_DB_PASSWORD"] = runner_pw
     # Cluster-scoped CORS origins must be in the unit .env before gateway boot.
     os.environ["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (
         f"http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}"
@@ -325,10 +304,6 @@ def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore se
         for key in sorted(cluster_scope_aliases())
         if key in os.environ and key not in _health_port_keys
     ]
-    # The runner credential is NOT a cluster-scope alias (it is a gateway-.env
-    # secret that only travels inside the projected URL) — write it explicitly
-    # so the gateway's bootstrap projection can read it from the file.
-    env_lines.append(f"AVA_RUNNER_DB_PASSWORD={runner_pw}")
     (_AVA_HOME / ".env").write_text("\n".join(env_lines) + "\n")
     try:
         yield
@@ -517,20 +492,22 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
     function-scoped rather than session: each test restarts gateway to pick up new scenario env.
     Startup ~2-3s acceptable.
     """
-    from shared import start_serving
 
     global _previous_gateway  # noqa: PLW0603 — retain the exact prior fixture child, not just its PID.
     if _previous_gateway is not None and _previous_gateway.poll() is None:
         raise RuntimeError("previous exact gateway fixture has not exited")
 
-    # The pytest process imported Settings before this package redirected
-    # AVA_HOME. Keep its marker writes in the exact home inherited by the
-    # gateway, restarter, and agent-host subprocesses.
+    # This direct-process fixture gate lives in the private E2E home.
+    # It grants no production root custody or local birth evidence.
     monkeypatch.setattr(settings.general, "ava_home", _AVA_HOME)
-    generation = start_serving.begin_start()
+    fixture_gate = _AVA_HOME / "e2e-serving"
+    fixture_gate.unlink(missing_ok=True)
+    generation = str(fixture_gate)
     cmd = [
         sys.executable,
         "-m",
+        "tests.e2e._proc",
+        generation,
         "uvicorn",
         "gateway.app:app",
         "--host",
@@ -583,7 +560,7 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
             evidence_path.write_text(json.dumps(listener_evidence(GATEWAY_PORT, "http-ready")))
             yield generation
         finally:
-            start_serving.clear_serving()
+            fixture_gate.unlink(missing_ok=True)
 
 
 @pytest.fixture
@@ -622,13 +599,12 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
 @pytest.fixture
 def agent_host_proc(gateway_proc: str) -> Iterator[None]:
     """Run the local agent host with this test's model and machine identity."""
-    cmd = [sys.executable, "-m", "services.agent_host.daemon"]
+    cmd = [sys.executable, "-m", "tests.e2e._proc", gateway_proc, "services.agent_host.daemon"]
     env = os.environ.copy()
-    # Prod-shaped profile construction: the healthcheck launches the daemon with
-    # the `agent` profile (it runs the agent kernel in-process). Marker-less
-    # full construction here masked the consumption-matrix gap that crashed a
-    # `runner`-profile launch at soak startup (2026-08-30).
+    # Prod-shaped launch: the `agent` profile (marker-less construction masked a
+    # `runner`-profile soak crash, 2026-08-30) with the launcher's runner DB URL.
     env["AVA_PROCESS_PROFILE"] = "agent"
+    env["AVA_DB_URL"] = runner_db_url_projection(settings.data_plane.db_url)
     # pidfile placed in e2e tmp dir, avoids conflict with dev daemon / cross-test residue
     env["AVA_AGENT_HOST_PIDFILE"] = str(_AVA_HOME / "agent_host.pid")
     # Kernel-assigned per worker, avoiding a shared health port across tests.
@@ -646,10 +622,8 @@ def agent_host_proc(gateway_proc: str) -> Iterator[None]:
             raise RuntimeError(
                 f"{e}; agent-host daemon {state}; log tail:\n{proc_log_tail(str(log_path))}"
             ) from e
-        from shared import start_serving
-
-        if not start_serving.mark_serving(gateway_proc):
-            raise RuntimeError("e2e agent-host lost the gateway start generation")
+        # Direct-process fixture gate: this suite does not prove root custody.
+        Path(gateway_proc).write_text("ready\n")
         yield
 
 
@@ -684,7 +658,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
         conn.commit()
     log_path = _LOG_DIR / f"ops-{_E2E_SUFFIX}.log"
     with managed_proc(
-        [sys.executable, "-m", "services.agent_ops.daemon"],
+        [sys.executable, "-m", "tests.e2e._proc", gateway_proc, "services.agent_ops.daemon"],
         env=env,
         label="ops",
         log_path=str(log_path),

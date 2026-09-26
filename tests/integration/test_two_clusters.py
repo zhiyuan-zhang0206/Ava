@@ -17,7 +17,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands.cluster_lifecycle import _ensure_record
+from cli.start_identity import IdentityInput, prepare_identity
 from shared import cluster
 from shared.port_block import BLOCK_SIZE
 
@@ -34,9 +34,19 @@ def test_two_clusters_disjoint_ports_db(monkeypatch: pytest.MonkeyPatch, tmp_pat
     )
 
     h1, h2 = tmp_path / ".ava-t1", tmp_path / ".ava-t2"
-    r1, created1 = _ensure_record(h1)
-    r2, created2 = _ensure_record(h2)
-    assert created1 and created2
+    for home in (h1, h2):
+        prepare_identity(
+            IdentityInput(
+                home,
+                tmp_path / "clusters.json",
+                tmp_path,
+                False,
+                frozenset({"gateway", "agent-runner"}),
+                {"AVA_MACHINE_NAME": home.name},
+            )
+        )
+    records = cluster.load_registry()
+    r1, r2 = records[str(h1)], records[str(h2)]
     p1 = cast("dict[str, int]", r1.ports)
     p2 = cast("dict[str, int]", r2.ports)
 

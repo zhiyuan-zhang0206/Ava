@@ -14,13 +14,19 @@ behavior).
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
+import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._interrupt import InterruptEvent
+from shared.config import settings
+from shared.test_db_guard import assert_test_db_url
+from tests._containers import grant_runner_login
 
 
 @pytest.fixture
@@ -62,3 +68,18 @@ def _fresh_unresolved_skill_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent.graph import _capabilities
 
     monkeypatch.setattr(_capabilities, "_warned_unresolved", set())  # pyright: ignore[reportUnknownArgumentType]
+
+
+@pytest.fixture
+def runner_exec_env(db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give real exec children the launcher's runner projection, preserving setup authority."""
+    url = settings.data_plane.db_url
+    assert_test_db_url(url, context="real agent exec fixture")
+    password = "impersonation-test-runner-password"  # noqa: S105 — private test DB only
+    runner_url = grant_runner_login(
+        url, owner="ava_citest", login="ava_g0_runner", password=password
+    )
+    # The real exec child builds its environment from the live os.environ (agent/graph/_exec_subprocess.py),
+    # not from the Settings singleton, so the raw-env seam (not monkeypatch.setenv) is the one that reaches it.
+    monkeypatch.setitem(os.environ, "AVA_DB_URL", runner_url)
+    assert db_conn.info.user != "ava_g0_runner"

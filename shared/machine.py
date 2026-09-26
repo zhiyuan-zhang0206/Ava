@@ -237,7 +237,7 @@ def reachable_host() -> str:
 
     Precedence:
     1. `settings.general.machine_host` (env `AVA_MACHINE_HOST`), when non-empty
-    2. `$AVA_HOME/machine_host` file (written by `ava enroll --machine-host`)
+    2. `$AVA_HOME/machine_host` file (written by `ava start --machine-host`)
     3. `localhost` — a single box is reachable only at loopback (zero-config).
 
     The operator declares this address; it is not auto-detected, so the codebase
@@ -375,7 +375,7 @@ def _resolve_host() -> str:
         if host:
             return host
     # Zero-config single box: reachable only at loopback. This fallback is last
-    # so the `machine_host` file (written by `ava enroll --machine-host`) wins —
+    # so the `machine_host` file (written by `ava start --machine-host`) wins —
     # the config field's default is empty for the same reason (a non-empty
     # default would shadow the file). A remote runner that wrongly lands here is
     # rejected at registration time by the loopback guard in
@@ -421,7 +421,7 @@ def gateway_api_base() -> str:
     url = _resolve_gateway_url()
     if url is None:
         raise GatewayApiBaseMissing(
-            "gateway_url unset — `ava enroll` writes it on an agent-runner; "
+            "gateway_url unset — `ava start` writes it on an agent-runner; "
             "or `export AVA_GATEWAY_URL=<gateway url>` (a gateway host sets its "
             "own reachable URL there too)."
         )

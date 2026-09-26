@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import (
+from cli.commands.skill import (
     cmd_skill_install,
     cmd_skill_register,
     cmd_skill_scan,
@@ -136,7 +136,7 @@ def test_register_and_enable_fold_the_typed_name_onto_the_real_directory(
     typing the canonical dash form has to reach a directory still spelled with
     underscores — and the row must be written under the DIRECTORY's spelling,
     since that is what the loader reads back."""
-    from cli.commands import cmd_skill_disable, cmd_skill_enable
+    from cli.commands.skill import cmd_skill_disable, cmd_skill_enable
 
     _write(unit_home / "skills" / "wechat_ocr", "wechat_ocr", _BENIGN)
 

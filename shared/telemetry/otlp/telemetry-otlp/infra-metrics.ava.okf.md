@@ -31,15 +31,20 @@ Ava code participates and a box with no agents running still reports.
   new drops must not hide behind a receiver that merely remains alive.
 - `postgresql` + `redis`, every 60 s, on a **gateway-capable unit only** —
   this cluster's own data plane. Postgres is dialed DIRECT (never PgBouncer:
-  `pg_stat_*` over a transaction-pooled session is not trustworthy) as the
-  cluster's NOSUPERUSER owner role; Redis authenticates with the gateway-local
-  Redis-admin password, which is also its `requirepass`. A pure agent-runner's URLs point at
-  the GATEWAY's data plane, so rendering those receivers there would only
-  duplicate the gateway's series — `_data_plane_receivers` in
-  `cli/commands/_otel_collector.py` omits them, and the rendered config is
-  0600 because it carries the secret. The Postgres contrib receiver is also
-  omitted when the direct URL has an empty password because that receiver
-  rejects empty credentials; Redis remains enabled and unauthenticated.
+  `pg_stat_*` over a transaction-pooled session is not trustworthy) over the
+  home's owner-only unix socket as the stable monitoring role `ava_monitor`,
+  admitted by `peer` (`shared/cluster/authority/monitor.py`): no password
+  exists, the config's `password` is a fixed non-secret placeholder the contrib
+  receiver's validation demands, and a write-generation rollout does not touch
+  it. The role reads statistics (`pg_read_all_stats`) and no application row.
+  A remote-managed plane has no such socket or role here and omits the Postgres
+  receiver. Redis authenticates with the gateway-local Redis-admin password,
+  which is also its `requirepass`. A pure agent-runner's URLs point at the
+  GATEWAY's data plane, so rendering those receivers there would only duplicate
+  the gateway's series — `_data_plane_receivers` in
+  `cli/commands/_otel_collector.py` omits them, and the rendered config is 0600
+  because it carries the Redis admin password (and, on split units, the
+  cluster bearer).
 
 Not a node_exporter / postgres_exporter / redis_exporter trio: the pinned
 contrib collector already carries equivalent receivers, and one supervised

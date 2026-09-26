@@ -73,15 +73,6 @@ def _validate_ops_concurrency(value: object) -> ValidationResult:
     return ValidationResult(ok=False, reason="must be an integer in [1, 64]")
 
 
-def _validate_watchdog_interval_seconds(value: object) -> ValidationResult:
-    """Must be a positive number."""
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
-        return ValidationResult(ok=False, reason="must be > 0")
-    if value > 0:
-        return ValidationResult(ok=True)
-    return ValidationResult(ok=False, reason="must be > 0")
-
-
 _TRANSFER_BACKENDS = frozenset({"drive", "none"})
 
 
@@ -102,7 +93,6 @@ VALIDATORS: dict[str, Callable[[object], ValidationResult]] = {
     "browser_enabled": _validate_browser_enabled,
     "chrome_binary": _validate_chrome_binary,
     "ops_concurrency": _validate_ops_concurrency,
-    "watchdog_interval_seconds": _validate_watchdog_interval_seconds,
     "cross_machine_transfer_backend": _validate_cross_machine_transfer_backend,
     # "machine_description" has no entry: free text, always ok.
 }

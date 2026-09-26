@@ -33,7 +33,7 @@ def test_friendly_template_lists_missing_vars(capsys):
     assert "AVA_DB_URL=<value>" in err
     assert "AVA_REDIS_URL=<value>" in err
     # The enroll path is the recommended fix, not a raw traceback.
-    assert "ava enroll" in err
+    assert "ava start --serve-agent-runner" in err
     assert "Traceback" not in err
 
 
