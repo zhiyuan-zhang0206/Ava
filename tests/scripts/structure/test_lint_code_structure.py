@@ -39,6 +39,8 @@ def _baseline(
                 "files": files or {},
                 "complexity": complexity or {},
                 "nesting": nesting or {},
+                "private_imports": {},
+                "owner_bypasses": {},
             },
             indent=2,
             sort_keys=True,
