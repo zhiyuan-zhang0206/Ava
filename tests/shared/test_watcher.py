@@ -305,9 +305,9 @@ def _exec_watcher(
     The generated scripts import `datetime` / `time` at the top; `datetime.datetime`
     is an immutable C type, so instead of patching it we substitute the two imports
     with fakes before exec — the template itself stays untouched. `_wake`'s delivery
-    is stubbed through ava._gateway_client; pass `send` to script a failing stub
+    is stubbed through ava.gateway_client; pass `send` to script a failing stub
     (the wake-retry tests, task #3525)."""
-    from ava import _gateway_client, agent_identity
+    from ava import agent_identity, gateway_client
 
     script = script.replace("import datetime as _dt\n", "_dt = _FakeDT\n").replace(
         "import time as _time\n", "_time = _fake_time\n"
@@ -321,7 +321,7 @@ def _exec_watcher(
         sent.append((a, k))
 
     monkeypatch.setattr(agent_identity, "agent_id", lambda: 3115)
-    monkeypatch.setattr(_gateway_client, "send_message", send if send is not None else _record)
+    monkeypatch.setattr(gateway_client, "send_message", send if send is not None else _record)
     monkeypatch.setenv("AVA_WATCHER_SESSION_ID", "77")
     exec(script, {"__name__": "__watcher__", "_FakeDT": _FakeDT, "_fake_time": fake_time})
     return sent

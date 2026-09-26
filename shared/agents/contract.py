@@ -134,7 +134,7 @@ class ErrorReason(StrEnum):
 
 
 # Reverse lookup table from wire reason -> exception class; used by
-# SDK `_raise_from_response`. `AvaAgentError.__init_subclass__` writes
+# SDK `raise_from_response`. `AvaAgentError.__init_subclass__` writes
 # entries automatically at class-declaration time; do **not** maintain
 # by hand — adding a new error only requires "add enum + add class
 # with reason/http_status", and registration follows on import.
@@ -283,7 +283,7 @@ class GatewayUnavailable(Exception):  # noqa: N818 — state description, no Err
     gateway and must be up before spawn / resurrect /
     send_message. This does not go into
     `EXCEPTION_BY_REASON` — it never appears in a gateway response
-    body (the response never arrives). SDK `_gateway_client` raises
+    body (the response never arrives). SDK `gateway_client` raises
     this to the caller on the `httpx.TransportError` family (general
     network-layer failure); the agent decides whether to retry / exit.
     """

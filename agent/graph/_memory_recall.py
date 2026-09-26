@@ -33,7 +33,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent.graph._memory_filter import Candidate, filter_candidates
 from agent.messages import NoteTag, system_note_message
-from ava import _gateway_client
+from ava import gateway_client
 from shared.agents import GatewayUnavailable, IndexerUnavailable
 from shared.config.turn_view import turn_settings
 from shared.lm.content import content_blocks
@@ -139,7 +139,7 @@ async def passive_memory_recall(
 
     search_started = time.monotonic()
     try:
-        results = await asyncio.to_thread(_gateway_client.memory_search, query, retrieve_k)
+        results = await asyncio.to_thread(gateway_client.memory_search, query, retrieve_k)
     except (GatewayUnavailable, IndexerUnavailable) as exc:
         # Recall is an enhancement; a memory-index outage must not crash the
         # turn. Skip this turn and let the next one retry. Debug level because
@@ -154,7 +154,7 @@ async def passive_memory_recall(
         return None
     except httpx.HTTPStatusError as exc:
         # The endpoint failed in a way it does not model: a status whose body
-        # carries no wire `reason`, so `_raise_from_response` re-raises the raw
+        # carries no wire `reason`, so `raise_from_response` re-raises the raw
         # HTTP error to fail fast. Fail-fast is right for a call the agent made
         # on purpose, but recall runs before the LLM on every inbound turn, so
         # here it took the whole process down with it -- one intermittent 500
@@ -163,7 +163,7 @@ async def passive_memory_recall(
         # gateway bug someone has to see.
         #
         # Only the status-code half of `httpx.HTTPError` is caught. Its
-        # transport half never reaches here: `_gateway_client._post` retries
+        # transport half never reaches here: `gateway_client.post` retries
         # those and converts them to `GatewayUnavailable`, which the branch
         # above already takes.
         logger.error(

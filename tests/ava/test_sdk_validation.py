@@ -413,7 +413,7 @@ class TestUiEntries:
     def test_close_unwraps_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            _ui._gateway_client,
+            _ui.gateway_client,
             "close_page",
             lambda _aid, name: seen.update(name=name),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
@@ -569,12 +569,12 @@ class TestUnderstandEntries:
 
 class TestMemoryEntries:
     def test_search_query_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import _gateway_client
+        from ava import gateway_client
         from ava_builtins.plugins.ava_memory import sdk as memory_plugin
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            _gateway_client,
+            gateway_client,
             "memory_search",
             lambda q, k, **_kw: seen.update(q=q, k=k) or [],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
@@ -583,10 +583,10 @@ class TestMemoryEntries:
         assert seen["q"] == "query"
 
     def test_search_query_multi_element_type_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import _gateway_client
+        from ava import gateway_client
         from ava_builtins.plugins.ava_memory import sdk as memory_plugin
 
-        monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="query must be a string"):
             memory_plugin._search(("a", "b"))  # pyright: ignore[reportArgumentType]
 
@@ -692,16 +692,16 @@ class TestTasksEntries:
 
 class TestNoticeEntries:
     def test_notify_title_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import _gateway_client
+        from ava import gateway_client
         from ava_builtins.plugins.ava_fleet import plugin as fleet_plugin
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            _gateway_client,
-            "_post",
+            gateway_client,
+            "post",
             lambda *_a, **_kw: seen.update(body=_a[1]) or _FakeResp(),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(_gateway_client, "_raise_from_response", lambda _resp: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "raise_from_response", lambda _resp: None)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
 
         notice = fleet_plugin.notify(("Hi",), ("detail",), priority=("P2",))  # pyright: ignore[reportArgumentType]

@@ -67,7 +67,7 @@ def _records(journal: Path) -> list[outbox.OutboxEntry]:
 
 @patch("ava._gateway_transport._client")
 def test_failed_send_records_with_the_key_it_used(mock_client: MagicMock, journal: Path) -> None:
-    from ava._gateway_client import send_message
+    from ava.gateway_client import send_message
 
     mock_client.post.side_effect = httpx.ConnectError("refused")
     with pytest.raises(GatewayUnavailable):
@@ -86,7 +86,7 @@ def test_failed_send_records_with_the_key_it_used(mock_client: MagicMock, journa
 def test_retry_chain_shares_one_key_and_success_retires_the_record(
     mock_client: MagicMock, journal: Path
 ) -> None:
-    from ava._gateway_client import send_message
+    from ava.gateway_client import send_message
 
     mock_client.post.side_effect = httpx.ConnectError("refused")
     with pytest.raises(GatewayUnavailable):
@@ -112,7 +112,7 @@ def test_retry_chain_shares_one_key_and_success_retires_the_record(
 
 @patch("ava._gateway_transport._client")
 def test_permanent_wire_failure_is_not_recorded(mock_client: MagicMock, journal: Path) -> None:
-    from ava._gateway_client import send_message
+    from ava.gateway_client import send_message
 
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = 404
@@ -129,7 +129,7 @@ def test_permanent_wire_failure_is_not_recorded(mock_client: MagicMock, journal:
 def test_broken_outbox_never_changes_the_send_outcome(
     mock_client: MagicMock, journal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ava._gateway_client import send_message
+    from ava.gateway_client import send_message
 
     def _boom(**_kwargs: object) -> str:
         raise RuntimeError("outbox on fire")
@@ -145,7 +145,7 @@ def test_broken_outbox_never_changes_the_send_outcome(
 def test_disabled_outbox_records_nothing_and_never_reuses_keys(
     mock_client: MagicMock, journal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ava._gateway_client import send_message
+    from ava.gateway_client import send_message
 
     monkeypatch.setattr(outbox, "limits", lambda: _limits(enabled=False))
     outbox._reset_caches_for_tests()

@@ -136,10 +136,10 @@ def _live_cron_session(
 
 def _notify_missed_watcher(agent_id: int, session_id: int, content: str) -> None:
     """Best-effort platform completion notice for a one-shot that cannot run."""
-    from ava import _gateway_client
+    from ava import gateway_client
 
     with contextlib.suppress(Exception):
-        _gateway_client.send_message(
+        gateway_client.send_message(
             agent_id,
             content=content,
             source=f"watcher:{session_id}",

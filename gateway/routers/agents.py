@@ -198,7 +198,7 @@ def _spawn_preflight_blocking(
     # reason via the app's AvaAgentError handler) straight out of lookup_role.
     if "agent-runner" not in lookup_role(target):
         # A proper wire error (carries `reason`) — not a bare HTTPException, whose
-        # reason-less body trips the SDK's `_raise_from_response` into a confusing
+        # reason-less body trips the SDK's `raise_from_response` into a confusing
         # `KeyError: 'reason'` that masks this message.
         raise SpawnTargetNotAgentRunner(
             f"spawn target {target!r} has no agent-runner capability; agents run on "
