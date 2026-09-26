@@ -23,6 +23,9 @@ which one works.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
+
+import pytest
 
 
 def test_materialization_is_not_a_converge_step() -> None:
@@ -39,27 +42,74 @@ def test_materialization_is_not_a_converge_step() -> None:
     )
 
 
-def test_start_materializes_after_the_schema_check() -> None:
-    """The ordering inside `ava start`, asserted on the real source.
+def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
+    """Stub every `_prepare_cold_start` seam, recording the ones this invariant
+    is about. Mirrors the monkeypatched-seam style of
+    `test_release_cold_start_uses_same_storage_readiness_without_source_or_schema_writes`
+    in `tests/cli/test_start_runtime.py` rather than inspecting source text."""
+    import cli.commands._converge as _converge_commands
+    import cli.commands._repo as _repo_commands
+    import cli.commands.start as _start_commands
+    from cli.commands import _converge_extensions, _data_plane
 
-    Brittle-looking on purpose: the invariant IS the order of two calls, and
+    def converge_host(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def ensure_gateway_data_plane() -> int:
+        return 0
+
+    def prepare_gateway_schema() -> None:
+        return None
+
+    def migrate() -> None:
+        calls.append("migrate")
+
+    def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
+        del refresh_schema
+
+    def schema_check() -> int:
+        calls.append("schema-check")
+        return 0
+
+    def adopt() -> None:
+        calls.append("adopt")
+
+    def materialize() -> None:
+        calls.append("materialize")
+
+    monkeypatch.setattr(_converge_commands, "converge_host", converge_host)
+    monkeypatch.setattr(_start_commands, "_ensure_gateway_data_plane", ensure_gateway_data_plane)
+    monkeypatch.setattr(_data_plane, "prepare_gateway_schema", prepare_gateway_schema)
+    monkeypatch.setattr(_start_commands, "cmd_migrations_apply", migrate)
+    monkeypatch.setattr(_data_plane, "complete_gateway_data_plane", complete_gateway_data_plane)
+    monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", schema_check)
+    monkeypatch.setattr(_converge_extensions, "adopt_local_extensions", adopt)
+    monkeypatch.setattr(_converge_extensions, "materialize_cluster_extensions", materialize)
+
+
+def test_start_materializes_after_the_schema_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ordering inside `_prepare_cold_start`, asserted via monkeypatched seams.
+
+    Brittle-looking on purpose: the invariant IS the order of three calls, and
     nothing else in the process can observe it. If someone moves the
-    materialization above the migration apply, the registry read starts hitting
-    a schema that may predate the `extensions` table, and the symptom is a
-    warning that looks transient rather than a failure.
+    materialization above the migration apply or the schema check, the
+    registry read starts hitting a schema that may predate the `extensions`
+    table, and the symptom is a warning that looks transient rather than a
+    failure.
     """
-    from cli.commands.start import _cmd_start_body
+    from cli.commands.start import _prepare_cold_start
 
-    src = inspect.getsource(_cmd_start_body)
-    migrate_at = src.index("cmd_migrations_apply()")
-    schema_at = src.index("_assert_schema_current_or_die()")
-    materialize_at = src.index("materialize_cluster_extensions()")
+    calls: list[str] = []
+    _instrument_cold_start_seams(monkeypatch, calls)
 
-    assert migrate_at < materialize_at, (
+    rc = _prepare_cold_start(Path("/repo"), frozenset({"gateway"}), (), runtime=None)
+
+    assert rc == 0
+    assert calls.index("migrate") < calls.index("materialize"), (
         "materialization must run AFTER pending migrations apply — otherwise the "
         "rollout that creates the extensions table reads it before it exists"
     )
-    assert schema_at < materialize_at, (
+    assert calls.index("schema-check") < calls.index("materialize"), (
         "materialization must run AFTER the schema-current check — reading the "
         "registry against a schema this checkout does not understand is exactly "
         "what that check exists to prevent"
@@ -84,7 +134,7 @@ def test_the_materializer_lives_beside_its_siblings() -> None:
     assert hasattr(_converge_extensions, "materialize_cluster_extensions")
 
 
-def test_start_adopts_before_it_materializes() -> None:
+def test_start_adopts_before_it_materializes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Both orders are correct, and one of them is tidier.
 
     An unclaimed local name is invisible to the materializer (it has no row) and
@@ -93,10 +143,15 @@ def test_start_adopts_before_it_materializes() -> None:
     cluster agreeing; materializing first leaves the machine one converge behind
     on the names it just uploaded.
     """
-    from cli.commands.start import _cmd_start_body
+    from cli.commands.start import _prepare_cold_start
 
-    src = inspect.getsource(_cmd_start_body)
-    assert src.index("adopt_local_extensions()") < src.index("materialize_cluster_extensions()")
+    calls: list[str] = []
+    _instrument_cold_start_seams(monkeypatch, calls)
+
+    rc = _prepare_cold_start(Path("/repo"), frozenset({"gateway"}), (), runtime=None)
+
+    assert rc == 0
+    assert calls.index("adopt") < calls.index("materialize")
 
 
 def test_standalone_converge_adopts_too() -> None:

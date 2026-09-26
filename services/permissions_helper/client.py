@@ -79,6 +79,12 @@ def _connect(path: str) -> socket.socket:
         try:
             s.connect(path)
             return s
+        except PermissionError:
+            # Not an unreachability signal — the socket exists and answers, but
+            # this caller's ACLs are wrong. Surface it raw instead of closing
+            # the socket and relabeling it "not reachable": that message would
+            # send an operator chasing a dead helper instead of a permissions fix.
+            raise
         except OSError:
             phase[0] = "close"
             s.close()
@@ -88,6 +94,8 @@ def _connect(path: str) -> socket.socket:
     last: OSError | None = None
     try:
         return retry(policy)(once)
+    except PermissionError:
+        raise
     except OSError as exc:
         if phase[0] != "connect":
             raise
