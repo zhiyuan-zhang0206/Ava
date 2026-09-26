@@ -11,7 +11,7 @@ import httpx
 import psycopg
 import pytest
 
-from ava import _impersonation_events as recorded
+from ava import impersonation_replay as recorded
 from shared import telemetry
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
