@@ -62,7 +62,7 @@ def test_install_skill_records_and_surfaces(
     # .git stripped from the installed copy
     assert not (unit_home / "skills" / "demo" / ".git").exists()
     # scanner surfaces it live (no restart)
-    assert "demo" in {s["name"] for s in skills_mod._names()}
+    assert "demo" in {s["name"] for s in skills_mod.names()}
 
 
 def test_install_disabled_skill_hidden_from_scanner(unit_home: Path, tmp_path: Path) -> None:
@@ -71,7 +71,7 @@ def test_install_disabled_skill_hidden_from_scanner(unit_home: Path, tmp_path: P
     reg.register(
         reg.InstalledPackage(name="demo", type="skill", source=url, ref=None, enabled=False)
     )
-    assert "demo" not in {s["name"] for s in skills_mod._names()}
+    assert "demo" not in {s["name"] for s in skills_mod.names()}
 
 
 def test_install_rejects_duplicate(unit_home: Path, tmp_path: Path) -> None:
@@ -230,7 +230,7 @@ def test_install_claude_code_plugin_from_subdir_surfaces_skill(
     body = (refs / "code-reviewer.md").read_text()
     assert body.startswith("# code-reviewer") and "model: opus" not in body
     # scanner surfaces the generated orchestrator skill live (source-4, no restart)
-    assert "pr-toolkit" in {s["name"] for s in skills_mod._names()}
+    assert "pr-toolkit" in {s["name"] for s in skills_mod.names()}
 
 
 def test_install_claude_code_plugin_without_anything_refused(
@@ -257,7 +257,7 @@ def test_install_claude_code_plugin_skills_only_surfaces(
     assert (base / "brainstorming" / "helper.md").is_file()
     assert (base / "writing-plans" / "SKILL.md").is_file()
     # scanner surfaces both shipped skills live (source-4, no restart)
-    surfaced = {s["name"] for s in skills_mod._names()}
+    surfaced = {s["name"] for s in skills_mod.names()}
     assert {"brainstorming", "writing-plans"} <= surfaced
     # install message itemizes the shipped skills
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -322,7 +322,7 @@ def test_install_claude_code_plugin_mcp_only(unit_home: Path, tmp_path: Path) ->
     assert (unit_home / "plugins" / "pr-toolkit" / ".mcp.json").is_file()
     assert "demo-server" in load_mcp_config()
     # nothing for the skill scanner to surface
-    assert "pr-toolkit" not in {s["name"] for s in skills_mod._names()}
+    assert "pr-toolkit" not in {s["name"] for s in skills_mod.names()}
 
 
 def test_install_claude_code_plugin_commands_surface(unit_home: Path, tmp_path: Path) -> None:

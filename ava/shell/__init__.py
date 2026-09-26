@@ -14,7 +14,7 @@ from ava.security import scan_content
 from shared.paths import workspace_dir
 from shared.platform import CREATE_NO_WINDOW
 
-from . import _background
+from . import background
 from . import sessions as sessions
 
 # Back-compat re-exports for `ava.shell.kill_all` / `ava.shell.send` style
@@ -117,10 +117,10 @@ def run(
     # ingestion surface like `files.read` and `web.fetch` — and the widest one,
     # since any fetcher a command happens to invoke lands here. The scan returns
     # the text byte-for-byte and only records findings, so output is unaffected.
-    # Same baseline as `ava.files._resolve`: with no explicit cwd and no
+    # Same baseline as `ava.files.resolve`: with no explicit cwd and no
     # plugin-tracked cwd layered on top, commands run in the agent's
     # workspace; pre-identity (test / dev REPL without a bootstrap) falls
-    # back to $HOME — the same base files._resolve uses, never the process
+    # back to $HOME — the same base files.resolve uses, never the process
     # cwd, so the two surfaces agree in every state.
     if cwd is None:
         aid = agent_identity.agent_id()
@@ -198,15 +198,15 @@ def run_background(
     cwd = coerce_str(cwd, "cwd", allow_none=True, allow_types=(os.PathLike,))
     keep = coerce_typed(keep, "keep", bool)
     ttl = coerce_typed(ttl, "ttl", (int, float))
-    notify = _background.validate_notify(coerce_str(notify, "notify", allow_none=True))
+    notify = background.validate_notify(coerce_str(notify, "notify", allow_none=True))
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
     aid = agent_identity.require_agent_id()
     if cwd is None:
         cwd = str(workspace_dir(aid))
-    session_id, _full = sessions._create_session(name, cwd=cwd, ttl=ttl)
-    output_path = _background.allocate_output_path(session_id, name)
-    line = _background.notified_line(
+    session_id, _full = sessions.create_session(name, cwd=cwd, ttl=ttl)
+    output_path = background.allocate_output_path(session_id, name)
+    line = background.notified_line(
         cmd,
         agent_id=aid,
         label=f"Background command '{name}'",

@@ -163,7 +163,7 @@ def _fake_skill(name: str, namespace: tuple[str, ...] = ()):
 
 def test_skill_as_command_bare(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(composer_commands, "_command_dirs", list)  # no file commands
-    monkeypatch.setattr(composer_commands.skills, "_names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
     out = {c["name"]: c for c in composer_commands.discover_commands()}
     assert out["goal"]["skill_target"] == "goal"
     assert "ava.help(ava.skills.goal)" in composer_commands.expand_command("/goal")
@@ -172,7 +172,7 @@ def test_skill_as_command_bare(monkeypatch: pytest.MonkeyPatch):
 def test_skill_as_command_namespaced(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(composer_commands, "_command_dirs", list)
     monkeypatch.setattr(
-        composer_commands.skills, "_names", lambda: [_fake_skill("brainstorming", ("demo",))]
+        composer_commands.skills, "names", lambda: [_fake_skill("brainstorming", ("demo",))]
     )
     out = {c["name"]: c for c in composer_commands.discover_commands()}
     assert "demo:brainstorming" in out
@@ -187,7 +187,7 @@ def test_skill_as_command_dotted_input_still_resolves(monkeypatch: pytest.Monkey
     expands — matching folds dash/underscore/colon."""
     monkeypatch.setattr(composer_commands, "_command_dirs", list)
     monkeypatch.setattr(
-        composer_commands.skills, "_names", lambda: [_fake_skill("brainstorming", ("demo",))]
+        composer_commands.skills, "names", lambda: [_fake_skill("brainstorming", ("demo",))]
     )
     expanded = composer_commands.expand_command("/demo.brainstorming a login form")
     assert "ava.help(ava.skills.demo.brainstorming)" in expanded
@@ -197,7 +197,7 @@ def test_skill_as_command_hyphen_maps_to_underscore_target(monkeypatch: pytest.M
     monkeypatch.setattr(composer_commands, "_command_dirs", list)
     monkeypatch.setattr(
         composer_commands.skills,
-        "_names",
+        "names",
         lambda: [_fake_skill("test-driven-development", ("demo",))],
     )
     out = composer_commands.expand_command("/demo.test-driven-development")
@@ -210,7 +210,7 @@ def test_explicit_command_overrides_skill_as_command(
     # a skill 'foo' AND an explicit foo.md — the file (source 1-5) wins over source 0
     _write(tmp_path, "foo.md", "explicit prompt body")
     monkeypatch.setattr(composer_commands, "_command_dirs", lambda: [(tmp_path, ())])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(composer_commands.skills, "_names", lambda: [_fake_skill("foo")])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("foo")])  # pyright: ignore[reportUnknownArgumentType]
     out = {c["name"]: c for c in composer_commands.discover_commands()}
     assert out["foo"]["skill_target"] is None
     assert out["foo"]["body"] == "explicit prompt body"
@@ -222,7 +222,7 @@ def test_explicit_command_overrides_skill_as_command(
 def test_discover_empty_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _write(tmp_path, "recap.md", "Recap it.")
     monkeypatch.setattr(composer_commands, "_command_dirs", lambda: [(tmp_path, ())])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(composer_commands.skills, "_names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(composer_commands.settings.agent, "commands_enabled", False)
     assert composer_commands.discover_commands() == []
 
@@ -283,7 +283,7 @@ def test_single_command_expands_unchanged(monkeypatch: pytest.MonkeyPatch):
 
 def test_chain_mixes_file_command_and_skill_as_command(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(composer_commands, "_command_dirs", list)
-    monkeypatch.setattr(composer_commands.skills, "_names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         composer_commands,
         "discover_commands",
@@ -401,7 +401,7 @@ def test_expand_is_source_neutral(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         composer_commands, "discover_commands", lambda: [_file_command("recap", "Recap it.")]
     )
-    monkeypatch.setattr(composer_commands.skills, "_names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(composer_commands.skills, "names", lambda: [_fake_skill("goal")])  # pyright: ignore[reportUnknownArgumentType]
     for raw in ("/recap context", "/goal context"):
         assert "User" not in composer_commands.expand_command(raw)
 

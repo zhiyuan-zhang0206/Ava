@@ -96,7 +96,7 @@ def _own_sessions() -> builtins.list[str]:
     return [s for s in _list_all_sessions() if s.startswith(prefix)]
 
 
-def _session_generation(session_id: int) -> str | None:
+def session_generation(session_id: int) -> str | None:
     """Persisted generation of one live shell session, if the backend tracks it."""
     try:
         target = _resolve(session_id)
@@ -105,14 +105,14 @@ def _session_generation(session_id: int) -> str | None:
     return get_shell_backend().session_generation(target)
 
 
-def _current_session_generation() -> str | None:
+def current_session_generation() -> str | None:
     """Host flip generation used to classify desired session records."""
     from shared.sessions.pty.allocation_freeze import current_generation
 
     return current_generation()
 
 
-def _reap(session_id: int) -> bool:
+def reap(session_id: int) -> bool:
     """Reap one exact session without changing its desired-state record.
 
     Desired-state reconcilers use this for a superseded generation, then retain
@@ -199,7 +199,7 @@ def _record_ttl(session_id: int, ttl: float) -> None:
         raise RuntimeError(f"failed to track TTL for session {session_id}") from exc
 
 
-def _create_session(
+def create_session(
     name: str | None = None,
     *,
     cwd: str | None = None,
@@ -285,7 +285,7 @@ def new(name: str, *, ttl: float) -> int:
             passes, with `renew(id, ttl=)`."""
     name = coerce_str(name, "name")
     ttl = coerce_typed(ttl, "ttl", (int, float))
-    session_id, _ = _create_session(name, ttl=ttl)
+    session_id, _ = create_session(name, ttl=ttl)
     return session_id
 
 

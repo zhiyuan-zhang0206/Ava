@@ -61,7 +61,7 @@ from shared.log import logger
 from . import _code_namespace
 from ._walk import find_context_files_along_path, project_skill_roots
 
-_files_resolve = _ava_files_mod._resolve
+_files_resolve = _ava_files_mod.resolve
 
 # ── ava.cwd SDK namespace registration — runs before the agent-runtime face's
 # register_plugin_state (loaded right after this surface), so a plugin
@@ -367,7 +367,7 @@ ava.extend.wrap("shell.run", _wrapped_shell_run)
 
 
 # ── wrap ava.files.edit / write / append / delete / glob ──────────────────
-# The SDK core (ava.files._resolve) resolves relative paths against the
+# The SDK core (ava.files.resolve) resolves relative paths against the
 # agent's workspace; these wraps layer cwd *tracking* on top — after
 # `ava.cwd.set("<repo>")` every file op follows the tracked cwd instead of
 # staying pinned to the workspace.

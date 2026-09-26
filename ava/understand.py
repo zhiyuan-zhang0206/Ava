@@ -266,7 +266,7 @@ def _understand_paths(paths: list[str | Path], prompt: str, effort: str | Reason
     parts: list[Any] = []
     mimes: list[str] = []
     for path in paths:
-        p = _files._resolve(path)
+        p = _files.resolve(path)
         if not p.is_file():
             raise FileNotFoundError(f"path {str(path)!r} does not name an existing file ({p})")
         mime = _MEDIA_MIME.get(p.suffix.lower())

@@ -33,7 +33,7 @@ def fake_repo(tmp_path: Path) -> Path:
 
 
 def _loaded_names(unit_home: Path) -> set[str]:
-    return {s["name"] for s in skills_mod._names()}
+    return {s["name"] for s in skills_mod.names()}
 
 
 def _entry(name: str) -> reg.InstalledPackage:

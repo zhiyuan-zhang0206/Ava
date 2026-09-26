@@ -288,7 +288,7 @@ def _reap_superseded_watcher(row: dict[str, Any], alive: set[int]) -> str:
 
     session_id = row["session_id"]
     if session_id in alive:
-        if not _sessions_mod._reap(session_id):
+        if not _sessions_mod.reap(session_id):
             logger.warning(
                 "watcher reconcile: could not reap superseded session %s (%s)",
                 session_id,
@@ -407,7 +407,7 @@ def reconcile() -> list[str]:
 
     actions: list[str] = []
     now = datetime.datetime.now(datetime.UTC)
-    current_generation = _sessions_mod._current_session_generation()
+    current_generation = _sessions_mod.current_session_generation()
     for row in rows:
         if row["status"] != "running":
             # rebuilt / missed are terminal history: a rebuilt row's live
@@ -425,8 +425,8 @@ def reconcile() -> list[str]:
             # Session liveness alone cannot make an exact record current: a
             # stale host can retain the old name across a flip. Reap that
             # record, then let the still-current desired row rebuild below.
-            if _sessions_mod._session_generation(session_id) != current_generation:
-                if not _sessions_mod._reap(session_id):
+            if _sessions_mod.session_generation(session_id) != current_generation:
+                if not _sessions_mod.reap(session_id):
                     logger.warning(
                         "watcher reconcile: could not reap stale session %s (%s)",
                         session_id,

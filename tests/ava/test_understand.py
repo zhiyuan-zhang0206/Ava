@@ -210,7 +210,7 @@ def test_single_call_keywords_rejected(tmp_path: Path) -> None:
 def test_relative_path_resolves_to_workspace(
     mock_deepseek: dict[str, Any], workspace: Path
 ) -> None:
-    """Relative path resolved through ava.files._resolve using the same baseline —
+    """Relative path resolved through ava.files.resolve using the same baseline —
     relative filenames in the workspace are read, consistent with ava.files.read's resolution."""
     workspace.mkdir(parents=True)
     (workspace / "notes.md").write_text("workspace material", encoding="utf-8")

@@ -126,7 +126,7 @@ def resolve_prompt_skills(wanted: list[str], *, config_field: str) -> list[Any]:
 
     import ava
 
-    loaded = ava.skills._names()
+    loaded = ava.skills.names()
     if "*" in wanted:
         # Wildcard: select the whole catalog — a human asked one agent to see
         # every loaded skill, so skip per-name resolution entirely.
@@ -158,7 +158,7 @@ def indexed_skills() -> list[Any]:
     """The skills `# Capabilities` covers, resolved against the catalog as it is
     **right now**.
 
-    `ava.skills._names()` is an uncached filesystem scan, so this is a live
+    `ava.skills.names()` is an uncached filesystem scan, so this is a live
     answer; the rendered index is one frozen sample of it, taken when
     `init_context` builds the SystemMessage. Everything that has to reason about
     the distance between the two — the snapshot `init_context` records, the drift
