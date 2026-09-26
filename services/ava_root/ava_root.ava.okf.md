@@ -90,6 +90,12 @@ protocol, client and native pipe/custody primitives sit below every consumer:
 Root records custody before spawning and preserves captured native births before
 signals. Normal stop is bounded TERM and exact observed closure; only explicit
 force permits KILL. Failed closure retains custody and blocks a replacement.
+
+POSIX units each lead a process group (setpgid; same session and macOS
+responsible process). Stop is certified only once the leader is reaped and the
+kernel reports that group empty (`exec_process_domain.process_group_closed`): a
+child forked during TERM must exit too, or stop refuses with its PID; only force
+kills it. `setsid()` escapes by construction; exec domains keep their own groups.
 Root also keeps its control transport alive after failed ordinary shutdown;
 new service or resource birth remains closed. An operator can inspect the same
 owner, explicitly close its captured domains, then request shutdown again.

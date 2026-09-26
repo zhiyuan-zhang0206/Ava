@@ -87,6 +87,42 @@ def _darwin_group_listing(pgid: int) -> list[int]:
     return list(buffer[: filled // width])
 
 
+def process_group_closed(pgid: int) -> bool:
+    """Whether no process, live or zombie, remains in group `pgid`.
+
+    Only meaningful once the group's leader was reaped: the number stays
+    reserved while any member exists, so no other group can take it. macOS
+    reads the kernel group listing (`_darwin_group_listing`). Linux sends the
+    group a null signal, which walks the group under the tasklist lock that
+    fork holds to add a child to it, so a member mid-fork keeps the answer
+    false. Neither is an enumerate-then-read scan.
+    """
+    if sys.platform == "darwin":
+        return not _darwin_group_listing(pgid)
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def process_group_pids(pgid: int) -> list[int]:
+    """Name the members of a group that `process_group_closed` found occupied.
+
+    For capturing and reporting survivors only; never a proof of closure. On
+    Linux this is a process-table scan, so a member can exit or appear during it.
+    """
+    if sys.platform == "darwin":
+        return sorted(_darwin_group_listing(pgid))
+    members: list[int] = []
+    for process in psutil.process_iter(["pid"]):
+        pid = cast("int", process.info["pid"])
+        with contextlib.suppress(ProcessLookupError, psutil.NoSuchProcess):
+            if os.getpgid(pid) == pgid:
+                members.append(pid)
+    return sorted(members)
+
+
 @dataclass
 class ExecProcessDomain:
     """Direct launch authority; a retained receipt alone cannot create it."""

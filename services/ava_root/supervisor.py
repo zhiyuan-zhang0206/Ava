@@ -9,6 +9,7 @@ requires reconciliation rather than permission to launch a duplicate.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -34,6 +35,7 @@ from shared.env_registry import (
     MANIFEST_CERTIFICATION_SECRET_ENV,
     manifest_certification_secret_env,
 )
+from shared.exec_process_domain import process_group_closed, process_group_pids
 from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from shared.process_env import inherited_process_env
 from shared.root_control.ipc import (
@@ -385,8 +387,10 @@ class Supervisor:
         """Fork+exec one fresh generation of `runtime`.
 
         The caller holds the mutation lock. Units are spawned as plain
-        children — no new session, no detaching, `close_fds=True` so the
-        instance lock cannot leak into the tree.
+        children, each leading its own process group (setpgid, never a new
+        session, so the permission ancestry and session are root's), with
+        `close_fds=True` so the instance lock cannot leak into the tree. The
+        group is the unit's stop scope: see `_stop_posix_generation`.
         """
         manifest = runtime.manifest
         for item in manifest.inputs:
@@ -411,6 +415,7 @@ class Supervisor:
                     stderr=asyncio.subprocess.STDOUT,
                     env=env,
                     close_fds=True,
+                    process_group=0,
                 )
         finally:
             os.close(log_fd)
@@ -517,25 +522,36 @@ class Supervisor:
         *,
         force: bool,
     ) -> None:
+        """Bounded TERM, then certified closure of the unit's process group.
+
+        The leader leads the unit's group; its group number stays reserved
+        while any member exists. After the leader is reaped, only the kernel
+        reporting that group empty certifies the stop: a child forked while
+        the leader handled TERM is still a member, so it is captured, signalled
+        like any tracked descendant and must exit too. Only explicit force
+        escalates, and only to those captured members. A member that calls
+        setsid() leaves the group by construction and is not covered.
+        """
         self._signal_owned(identity, force=False)
         deadline = monotonic() + self._config.stop_timeout_s
         while True:
             living = {item for item in generation.tracked if item.live()}
             if not living:
                 await generation.exited.wait()
-                custody.clear()
-                runtime.generation = None
-                runtime.state = UnitState.STOPPED
-                return
+                if process_group_closed(identity.pid):
+                    custody.clear()
+                    runtime.generation = None
+                    runtime.state = UnitState.STOPPED
+                    return
+                living = _capture_group(generation.tracked, identity.pid)
             for item in living:
                 retain_processes(generation.tracked, capture_tree(item))
             custody.retain(generation.tracked)
             expired = monotonic() >= deadline
             if expired and not force:
-                raise RuntimeError(f"unit {runtime.manifest.id} did not stop; ownership retained")
+                raise _ownership_retained(runtime.manifest.id, living, identity.pid)
             if not identity.live() or expired:
-                for item in living:
-                    self._signal_owned(item, force=expired and force)
+                self._signal_all(living, force=expired and force)
             if expired:
                 force = False
                 deadline = monotonic() + self._config.stop_timeout_s
@@ -544,6 +560,11 @@ class Supervisor:
     @staticmethod
     def _signal_owned(identity: OwnedProcess, *, force: bool) -> None:
         identity.send_signal(signal.SIGKILL if force else signal.SIGTERM)
+
+    @classmethod
+    def _signal_all(cls, living: set[OwnedProcess], *, force: bool) -> None:
+        for item in living:
+            cls._signal_owned(item, force=force)
 
     @staticmethod
     def _is_active(runtime: _UnitRuntime) -> bool:
@@ -571,6 +592,21 @@ class Supervisor:
         if runtime.last_error is not None:
             result["error"] = runtime.last_error
         return result
+
+
+def _ownership_retained(unit_id: str, living: set[OwnedProcess], pgid: int) -> RuntimeError:
+    survivors = sorted(item.pid for item in living) or process_group_pids(pgid)
+    return RuntimeError(f"unit {unit_id} did not stop; ownership retained (pids {survivors})")
+
+
+def _capture_group(tracked: set[OwnedProcess], pgid: int) -> set[OwnedProcess]:
+    """Retain the named members of an occupied unit group; return the live ones."""
+    members: set[OwnedProcess] = set()
+    for pid in process_group_pids(pgid):
+        with contextlib.suppress(psutil.NoSuchProcess):
+            members.add(OwnedProcess.capture(psutil.Process(pid)))
+    retain_processes(tracked, members)
+    return {item for item in members if item.live()}
 
 
 def _describe_exit(returncode: int) -> str:
