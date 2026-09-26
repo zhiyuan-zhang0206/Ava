@@ -158,7 +158,10 @@ def remind_expiring_impersonations(
             ):
                 continue
             home = machine_home(conn, machine)
-            python = f"{home}/source/.venv/bin/python" if home else "~/.ava/source/.venv/bin/python"
+            invoked_python = lease["process_metadata"].get("invoked_python")
+            python = invoked_python or (
+                f"{home}/source/.venv/bin/python" if home else "~/.ava/source/.venv/bin/python"
+            )
             prefix = [python, "-m", "cli", "impersonate"]
             renew = shlex.join(
                 [*prefix, "renew", str(session_id), "--agent", str(agent_id), "--ttl", "3600"]
@@ -166,7 +169,7 @@ def remind_expiring_impersonations(
             release = shlex.join(
                 [*prefix, "release", str(session_id), "--agent", str(agent_id), "--summary", "..."]
             )
-            if home is None:
+            if home is None and invoked_python is None:
                 # shlex quotes '~'; leave this fixed prefix unquoted for shell expansion.
                 quoted_fallback = shlex.quote(python)
                 renew = renew.replace(quoted_fallback, python, 1)

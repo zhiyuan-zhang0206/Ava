@@ -47,6 +47,12 @@ emit only after commit. System, user, malformed, and external client sources
 stay untagged. The static audit-root census rejects an unclassified constructor.
 
 Each agent-host reconciliation pass monitors incomplete local v1 leases.
+Expiry closes admission immediately without waiting for participant seals.
+For an ended lease whose manifest is not frozen, replay freezes the union once
+all participants have sealed, then performs the same indexed/consumed comparison
+as normal release. Open or failed receipts remain pending; a sealed receipt on
+a live lease does not close admission. This also repairs a release interrupted
+between admission closure and freezing without changing recorded lifecycle facts.
 Never-activated, rejected, and non-automatic leases remain untouched: they are
 outside both the event-sweep filters (`automatic`, `activated_at`) and the v1
 monitor, so no terminal stamp is written for them.

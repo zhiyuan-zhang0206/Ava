@@ -1,5 +1,6 @@
 """Host-specific command rendering in lease-expiry reminders."""
 
+import shlex
 import sys
 from uuid import uuid4
 
@@ -25,12 +26,14 @@ from tests.impersonation_support import recorded_tree
         ("macbook-air", "/Users/live-newest/.ava", None, "/Users/null-uptime/.ava"),
     ],
 )
-def test_reminder_uses_lease_machine_home(
+@pytest.mark.parametrize("invoked_python", [None, "/Users/runner/preview source/.venv/bin/python"])
+def test_reminder_uses_request_interpreter_or_legacy_machine_home(
     db_conn: psycopg.Connection,
     machine: str,
     home: str | None,
     stopped_home: str | None,
     null_home: str | None,
+    invoked_python: str | None,
 ) -> None:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -46,7 +49,10 @@ def test_reminder_uses_lease_machine_home(
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=300,
         reason="Handle the next message",
-        process_metadata=recorded_tree(),
+        process_metadata={
+            **recorded_tree(),
+            **({"invoked_python": invoked_python} if invoked_python is not None else {}),
+        },
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
@@ -83,8 +89,20 @@ def test_reminder_uses_lease_machine_home(
     ).fetchone()
     assert reminder is not None
     content: str = reminder[0]
-    python = f"{home}/source/.venv/bin/python" if home else "~/.ava/source/.venv/bin/python"
-    prefix = f"{python} -m cli impersonate"
+    _assert_reminder_commands(content, invoked_python, home, stopped_home, null_home)
+
+
+def _assert_reminder_commands(
+    content: str,
+    invoked_python: str | None,
+    home: str | None,
+    stopped_home: str | None,
+    null_home: str | None,
+) -> None:
+    python = invoked_python or (
+        f"{home}/source/.venv/bin/python" if home else "~/.ava/source/.venv/bin/python"
+    )
+    prefix = f"{shlex.quote(python) if invoked_python else python} -m cli impersonate"
     assert f"\n{prefix} renew" in content
     assert f"\n{prefix} release" in content
     assert sys.executable not in content
