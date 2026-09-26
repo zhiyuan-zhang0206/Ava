@@ -39,6 +39,12 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
    not a clock at all (a flag name, a SQL key, a collection) or a genuinely
    independent clock with no lattice neighbour, each with a stated reason.
 
+The allowlists must stay current: a full scan (no path arguments, as pre-commit
+and CI run it) also fails when a `_FAMILY_MODULES` file or an
+`_INDEPENDENT_CLOCKS` file is gone, or an exempted constant is no longer defined
+at module level in its file — an exemption for a deleted symbol would silently
+pre-approve whatever next takes that name.
+
 Scope: non-test code only (tests monkeypatch clocks smaller on purpose).
 Settings fields are class-body definitions in `shared/config/` and are the
 operator-overridable configuration authority, not module constants — they are not
@@ -265,6 +271,40 @@ def _scan_file(path: Path) -> list[str]:
     return errors
 
 
+def _module_level_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names.update(t.id for t in targets if isinstance(t, ast.Name))
+    return names
+
+
+def _stale_allowlist_entries() -> list[str]:
+    """Allowlist entries whose file or exempted constant no longer exists."""
+    errors: list[str] = []
+    for rel in _FAMILY_MODULES:
+        if not (_REPO_ROOT / rel).is_file():
+            errors.append(f"{rel}: stale _FAMILY_MODULES entry — the file no longer exists")
+    for rel, name in _INDEPENDENT_CLOCKS:
+        path = _REPO_ROOT / rel
+        if not path.is_file():
+            errors.append(
+                f"{rel}: stale _INDEPENDENT_CLOCKS entry {name} — the file no longer exists"
+            )
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue  # unreadable or a syntax error the compiler owns: cannot judge
+        if name not in _module_level_names(tree):
+            errors.append(
+                f"{rel}: stale _INDEPENDENT_CLOCKS entry {name} — no module-level {name} "
+                "is defined there any more; drop the exemption"
+            )
+    return errors
+
+
 def _scan(paths: list[Path]) -> list[str]:
     errors: list[str] = []
     for path in paths:
@@ -291,6 +331,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     paths = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
     errors = _scan(paths)
+    if not argv:
+        errors.extend(_stale_allowlist_entries())
     for err in errors:
         print(err, file=sys.stderr)
     return 1 if errors else 0
