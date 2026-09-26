@@ -267,11 +267,13 @@ def __getattr__(name: str) -> Any:
 # Submodule imports must come after DB / REDIS (they read these
 # globals when importing ava). The `# isort: split` above prevents ruff
 # from merging / reordering the two import blocks.
-# `_extend` intentionally carries the underscore prefix: it's a plugin-author +
-# framework module, should not appear in the `help()` view the agent sees. Its
-# curated author surface is assembled as `ava.extend` further down.
+# `ava.sdk_surface.wraps` and `ava.sdk_surface.plugin_loader` are public names
+# (agent visibility is the `__all_for_ava__` whitelist below, not the
+# underscore) reached across the `ava` package boundary by the agent kernel
+# (`agent/state.py`, `agent/_process_boot.py`, `agent/_extensions.py`).
+# `wraps`' curated plugin-author surface is assembled as `ava.extend` further
+# down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection
-from . import _extend as _extend
 from . import agents as agents
 from . import attachment_transport as attachment_transport
 from . import files as files
@@ -283,19 +285,21 @@ from . import skills as skills
 from . import ui as ui
 from . import watcher as watcher
 from . import web as web
+from .sdk_surface import wraps as _wraps
 from .understand import understand as understand
 
 # ── ava.extend — the plugin extension surface ──────────────────────────────
-# Curated view of `_extend` for plugin authors: the wrap registration primitive
-# plus its introspection. Deliberately NOT added to `__all_for_ava__` (and not a
-# `register_namespace` call) — this is a plugin-author API, so it stays out of
-# the `help(ava)` view the agent sees, the same posture as the `_extend` module
-# itself. `_extend.scan_and_load` / `clear_wraps` are framework-internal and
-# reached via `ava._extend`, so they are absent from this surface.
+# Curated view of `ava.sdk_surface.wraps` for plugin authors: the wrap
+# registration primitive plus its introspection. Deliberately NOT added to
+# `__all_for_ava__` (and not a `register_namespace` call) — this is a
+# plugin-author API, so it stays out of the `help(ava)` view the agent sees.
+# `ava.sdk_surface.plugin_loader.scan_and_load` and `wraps.clear_wraps` are
+# framework-internal (reached via `ava.sdk_surface.plugin_loader` /
+# `ava.sdk_surface.wraps`), so they are absent from this surface.
 extend = SimpleNamespace(
-    wrap=_extend.wrap,
-    stack=_extend.stack,
-    wrappers=_extend.wrappers,
+    wrap=_wraps.wrap,
+    stack=_wraps.stack,
+    wrappers=_wraps.wrappers,
 )
 extend._qualname = "ava.extend"  # type: ignore[attr-defined]  # agent-facing name for help() resolution
 

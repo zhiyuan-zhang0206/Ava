@@ -16,7 +16,7 @@ references go stale here:
   1. `agent_visible_names(ava)` — the agent-facing top-level surface (`agents`, `shell`,
      `self`, ...), read from `ava.__all_for_ava__` plus any plugin registrations;
   2. real submodule names — every `ava/<x>.py` file and `ava/<x>/` package (this also
-     covers the private `_settings` / `_extend` modules the design docs legitimately cite);
+     covers the private `_settings` module the design docs legitimately cite);
   3. public attributes on the `ava` module object — module-level names like `state`,
      `state_update`, `register_namespace`, `const`, `help`;
   4. plugin-registered namespace names — the strings in `ava.register_namespace("X", ...)`

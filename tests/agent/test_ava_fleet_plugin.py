@@ -80,7 +80,7 @@ def _load_activity_plugin() -> Iterator[None]:
 
     yield
 
-    # clear_plugin_registrations() runs ava._extend.clear_wraps(), which restores
+    # clear_plugin_registrations() runs ava.sdk_surface.wraps.clear_wraps(), which restores
     # ava.agents.spawn to the captured core original — no reload needed.
     clear_plugin_registrations()
     ava.clear_registered_namespaces()
