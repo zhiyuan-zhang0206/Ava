@@ -160,26 +160,26 @@ first and ask "what changed that made it worth doing".
   self-hosted viewer out-of-band. That is span recording, not a metrics pipeline;
   the metrics/dashboard/anomaly rejection above still stands.)
 
-- **Folding the flat `shared/` (~50 files) / `scripts/` (~27 files) dirs into subpackages**
+- **Grouping `shared/` / `scripts/` files into subpackages by folder shape alone**
   (proposed groupings `cluster_*` / `machine_*` / `plugin_*`, or scripts by lint/devops/delete):
-  not done — keep them flat. Trigger: a candidate group develops genuine internal cohesion that a
+  not done on that basis. Trigger: a candidate group develops genuine internal cohesion that a
   package `__init__` could hide behind a narrow surface. Reasons: (a) a "deep module" (Ousterhout) is
   a narrow interface over a thick implementation — that's the interface/impl ratio of one module,
   **orthogonal to directory depth**; the pre-2026-08 `shared/cluster.py` was already deep, and
   moving it to `shared/cluster/core.py` would have changed only the import path, not its depth
   (the actual 2026-08 split into `shared/cluster/{registry,ports,derive,provision}.py` was
   line-count + cohesion driven — the package `__init__` preserved the single import surface).
-  50 flat files can be 50 deep
-  leaves. (b) Folder grouping only adds depth if the package hides internal files; empirically the
-  candidate groups have **zero internal cohesion and wide independent external surfaces** (each
-  `cluster_*` / `plugin_*` module is imported directly by different external consumers), so wrapping
-  them yields a pass-through barrel (a *shallow* module) + churn across all import sites, depth gain
-  zero. (c) `scripts/` has no `from scripts.X import` anywhere — pure standalone entrypoints; the
-  `lint_*` prefix already groups them; triage found no dead scripts. A **file-count / subfolder-count
-  lint** was rejected for the same reason: it's ownerless accumulation = Sweeper territory, not a
-  commit-blocking wall (see [`lint-vs-sweeper.md`](lint-vs-sweeper.md)). General rule: when a
-  restructure is proposed off a file-count or folder-shape proxy, push back — the real axis is
-  per-module interface width and genuine cohesion, not folder shape.
+  A flat directory of many files can be many deep leaves. (b) Folder grouping only adds depth if
+  the package hides internal files; a candidate group with zero internal cohesion and wide
+  independent external surfaces (each module imported directly by different external consumers)
+  wraps into a pass-through barrel (a *shallow* module) plus churn across import sites, for zero
+  depth gain. (c) `scripts/` files are standalone entrypoints; the `lint_*` prefix already groups
+  them. The [directory budget](python-conventions.md#directory-budget-20-direct-entries) now caps
+  flat growth, so over-budget directories do get split — but the split follows cohesion, so each
+  new package `__init__` is a real door, never a barrel formed by name prefix. The axis that
+  matters, per-module interface width, is enforced separately by the
+  [locality rules](python-conventions.md#locality-package-doors-and-single-owners): a private
+  reach-in or a bypassed single owner fails whichever directory it crosses.
 
 - ~~**Add observability columns to `agents` table (terminated_at / total_turns / token usage etc.)**~~:
   done by event sourcing path (2026-05-07). No new observability columns; new observability dimensions =
