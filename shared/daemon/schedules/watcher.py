@@ -299,7 +299,7 @@ import sys as _sys
 import time as _time
 
 from ava import agent_identity
-from ava import _gateway_client as _gateway_client
+from ava import gateway_client
 
 # A wake must survive a gateway restart: until 2026-09-15 the bare
 # send_message call raised GatewayUnavailable out of this helper and killed
@@ -314,7 +314,7 @@ _WAKE_BACKOFF_S = (10.0, 40.0)
 def _wake(message):
     for _attempt in range(_WAKE_ATTEMPTS):
         try:
-            _gateway_client.send_message(
+            gateway_client.send_message(
                 agent_identity.agent_id(),
                 content=message,
                 source="watcher:" + _os.environ["AVA_WATCHER_SESSION_ID"],

@@ -7,8 +7,8 @@ Every AvaAgentError subclass is parametrized to run two assertions:
   1. **handler encoding correct**: register handler on an isolated FastAPI app + a synthetic
      endpoint that raises cls; TestClient hits it; checks the typed envelope plus
      body.reason==cls.reason / body.detail matches the raised message
-  2. **SDK reconstruction correct**: feed a synthetic httpx.Response to _gateway_client.
-     _raise_from_response; checks the raised exception is the same cls + same message
+  2. **SDK reconstruction correct**: feed a synthetic httpx.Response to gateway_client.
+     raise_from_response; checks the raised exception is the same cls + same message
 
 When adding a new AvaAgentError subclass, must also add it to EXCEPTION_BY_REASON — this test
 auto-parametrizes and won't miss coverage.
@@ -23,7 +23,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from ava._gateway_transport import _raise_from_response
+from ava._gateway_transport import raise_from_response
 from gateway.app import _ava_agent_error_handler
 from shared.agents import EXCEPTION_BY_REASON, AgentLaunchFailed, AvaAgentError
 
@@ -66,7 +66,7 @@ def test_handler_emits_expected_wire(reason, cls):
     ids=[r.value for r in EXCEPTION_BY_REASON],
 )
 def test_sdk_reconstructs_from_wire(reason, cls):
-    """client-side: feed synthetic wire body to _raise_from_response; it reconstructs same
+    """client-side: feed synthetic wire body to raise_from_response; it reconstructs same
     cls + message."""
     body = {"detail": "forced wire-test message", "reason": reason.value}
     resp = httpx.Response(
@@ -75,7 +75,7 @@ def test_sdk_reconstructs_from_wire(reason, cls):
         headers={"content-type": "application/json"},
     )
     with pytest.raises(cls, match="forced wire-test message"):
-        _raise_from_response(resp)
+        raise_from_response(resp)
 
 
 def test_sdk_launch_failure_retains_committed_identity_and_state() -> None:
@@ -88,7 +88,7 @@ def test_sdk_launch_failure_retains_committed_identity_and_state() -> None:
     }
     response = httpx.Response(502, json=body)
     with pytest.raises(AgentLaunchFailed) as raised:
-        _raise_from_response(response)
+        raise_from_response(response)
     assert raised.value.agent_id == 123
     assert raised.value.state == body["state"]
     assert raised.value.retry_launch_path == body["retry_launch_path"]

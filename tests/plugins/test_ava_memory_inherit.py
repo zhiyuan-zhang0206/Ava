@@ -1,6 +1,6 @@
 """Inherited memory — the `inheritable` block parser and the chain-read note.
 
-The chain is faked at the client seam (`ava._gateway_client.get_born_chain`)
+The chain is faked at the client seam (`ava.gateway_client.get_born_chain`)
 and entry files are written into the test home's workspaces, so the note
 builder runs end to end minus the network and the DB. What the real claim node
 does with the note (strip on fork + regraft) is pinned in
@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ava import _gateway_client
+from ava import gateway_client
 from ava_builtins.plugins.ava_memory import inherit
 from shared.agents import GatewayUnavailable
 from shared.config import settings
@@ -94,7 +94,7 @@ def _fresh_chain_cache() -> Iterator[None]:
 @pytest.fixture
 def chain(monkeypatch: pytest.MonkeyPatch) -> _FakeChain:
     fake = _FakeChain()
-    monkeypatch.setattr(_gateway_client, "get_born_chain", fake)
+    monkeypatch.setattr(gateway_client, "get_born_chain", fake)
     return fake
 
 

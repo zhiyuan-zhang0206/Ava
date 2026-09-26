@@ -23,7 +23,7 @@ import psycopg
 import pytest
 
 import ava
-from ava import _gateway_client, _watcher_reconcile, watcher
+from ava import _watcher_reconcile, gateway_client, watcher
 from ava.shell import _background
 from shared.platform import IS_WINDOWS
 
@@ -1158,7 +1158,7 @@ def test_reconcile_notifies_when_a_superseded_one_shot_is_reaped(
     monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
     monkeypatch.setattr(_sessions, "_reap", lambda _session_id: True)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
     if kind == "at":
         register_watcher(
             _agent_row,
@@ -1237,7 +1237,7 @@ def test_reconcile_drops_already_fired_one_shot_without_alert(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
     register_watcher(_agent_row, 424245, kind="at", name="fired", message="go", fires_at=past)
@@ -1267,7 +1267,7 @@ def test_reconcile_completion_notice_does_not_count_as_delivered(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
     register_watcher(
@@ -1299,7 +1299,7 @@ def test_reconcile_marks_missed_one_shot_and_alerts(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
     from shared.daemon.schedules.watcher_registry import register_watcher
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
@@ -1336,7 +1336,7 @@ def test_reconcile_never_reruns_launch(_agent_row: int, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "launch", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     from shared.daemon.schedules.watcher_registry import register_watcher
