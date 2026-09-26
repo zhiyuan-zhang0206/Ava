@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
-from ava import _external_state, agent_identity, external
-from ava._external_state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
+from ava import agent_identity, external, external_state
+from ava.external_state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
 from shared import telemetry
 from shared.config.turn_view import bind_agent_config, current_agent_config_pins, turn_settings
 from shared.plugin_config_view import bind_agent_plugin_config, current_plugin_config_view
@@ -646,7 +646,7 @@ def test_external_delta_rejects_full_history_reset_before_any_mutation(
             # A persisted envelope must pass the same check before native replay.
             import base64
 
-            encoding, payload = _external_state._serializer().dumps_typed(delta)
+            encoding, payload = external_state._serializer().dumps_typed(delta)
             decode_plugin_delta(
                 {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
             )

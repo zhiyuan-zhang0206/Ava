@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
-from ava import _skill_sources
+from ava import skill_sources
 from shared.log import logger
 from shared.packages.skills.skill_names import SkillIdentity, display_name, match_key
 from shared.paths import ava_home
@@ -142,7 +142,7 @@ def _skills_dir() -> Path:
 
 
 # Plugin-contributed skill-root providers. The registry storage lives in
-# `ava._skill_sources` (framework-internal) so the kernel's plugin reload can
+# `ava.skill_sources` (framework-internal) so the kernel's plugin reload can
 # clear it without importing this disable-able `ava.skills` module; the
 # functions here are the agent/plugin-facing client over it.
 
@@ -156,18 +156,18 @@ def register_skill_source(provider: Callable[[], list[Path]]) -> None:
     between projects. Provider roots are scanned last, so a project-local skill
     overrides a same-named built-in one.
     """
-    _skill_sources.register(provider)
+    skill_sources.register(provider)
 
 
 def clear_skill_sources() -> None:
     """Drop all registered skill-source providers, so the next plugin load
     re-registers from empty state."""
-    _skill_sources.clear()
+    skill_sources.clear()
 
 
 def _provider_roots() -> list[Path]:
     """Flatten all registered providers' roots into one list (scan order)."""
-    return _skill_sources.roots()
+    return skill_sources.roots()
 
 
 # ─── scanning: folder tree = namespace tree ────────────────────────────────
@@ -656,7 +656,7 @@ def read(name: str) -> str:
     spelling that folds to it (`"web_ai.deep_research"`, bare frontmatter name
     for a flat skill). Returns the same shape a proxy's `__doc__` carries.
     Unknown names raise ValueError."""
-    from ava._sdk_validation import coerce_str
+    from ava.sdk_validation import coerce_str
 
     key = match_key(coerce_str(name, "name"))
     for skill in _names():

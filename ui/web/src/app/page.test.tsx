@@ -823,7 +823,7 @@ describe("pasted image routing", () => {
 // ── Multi-command dispatch ──
 // One send is one message. Text invoking several commands goes to the agent
 // whole; expanding it into the individual commands is the backend's job
-// (ava._commands.expand_command), inside that single inbound. Splitting here
+// (ava.composer_commands.expand_command), inside that single inbound. Splitting here
 // would make the agent claim each command as its own turn, blind to the rest.
 
 describe("multi-command dispatch", () => {

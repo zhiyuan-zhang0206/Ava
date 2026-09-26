@@ -932,7 +932,7 @@ def _restore_sdk_metering() -> Iterator[None]:
     """Per-test isolation for the process-global `ava` singleton's metering state:
     whatever a test wrapped, the next test sees the bare callables again.
 
-    `agent._extensions.load_extensions()` calls `ava._sdk_metering.install()` as
+    `agent._extensions.load_extensions()` calls `ava.sdk_metering.install()` as
     a side effect, which replaces every public `ava.*` callable — plus the
     `ava.mcps._call_raw` MCP funnel — with a recording proxy, and nothing ever put
     them back. `_load_extensions()` is reached directly *and* lazily, via
@@ -952,7 +952,7 @@ def _restore_sdk_metering() -> Iterator[None]:
     process that never pulled in the agent layer does not pull it in here.
     """
     yield
-    metering = sys.modules.get("ava._sdk_metering")
+    metering = sys.modules.get("ava.sdk_metering")
     if metering is not None:
         metering.uninstall()
 

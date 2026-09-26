@@ -455,8 +455,8 @@ def _run(request_path: str, result_path: str) -> None:
     code, write the result envelope."""
     _import_runtime()
     from agent.graph._exec_protocol import ResultPayload, read_request, write_result
-    from ava._attach import media_gated_members, take_attachments
     from ava._exports.discovery import _hidden_surface_members
+    from ava.attachment_transport import media_gated_members, take_attachments
     from ava.security import take_findings
 
     _line_buffered_output()

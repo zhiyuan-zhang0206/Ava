@@ -7,7 +7,7 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-from ava import _commands as ava_commands
+from ava import composer_commands as ava_commands
 from gateway.app import app
 from gateway.routers import commands as commands_router
 

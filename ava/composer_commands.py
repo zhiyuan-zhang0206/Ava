@@ -7,8 +7,8 @@ argument — the free-text natural-language instruction typed after `/name`; the
 `instruction-hint` is the placeholder for it (Claude Code's `argument-hint` key
 is also read, for imported CC-plugin commands).
 
-This module is private (`_`) and is never registered on the `ava.*` namespace;
-the expansion machinery is an implementation detail. The web Composer sends the
+This module is framework-internal and is never registered on the `ava.*`
+namespace; the expansion machinery is an implementation detail. The web Composer sends the
 raw `/<name> <free text>` a human typed; `expand_command` rewrites it (here, in
 the agent's claim node, before the message is wrapped for the model) into the
 final prompt. The model only ever sees that expanded string. The gateway reuses

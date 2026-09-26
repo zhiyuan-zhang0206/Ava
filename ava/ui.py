@@ -18,7 +18,7 @@ from pathlib import Path
 import ava
 import ava.agent_identity
 from ava import _gateway_client
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava.sdk_validation import coerce_str, coerce_typed
 from shared.machine import reachable_host
 
 _NAME_RE = _re.compile(r"^[a-zA-Z0-9_-]+$")
