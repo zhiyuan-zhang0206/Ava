@@ -41,8 +41,12 @@ See [host setup](agent-impersonation-hosts.md).
 The resident Claude wrapper consumes one request per session. A second request
 from that session is rejected before creating a lease when its stub is pending
 or already consumed. Finish or cancel the current takeover, then launch a fresh
-Claude session in a separate workspace for another agent. A new launch clears
-the previous session's stub and consumption marker after claiming the workspace.
+Claude session in a separate workspace for another agent. Each launch keeps its stub in its own
+generation's private state dir (`$AVA_HOME/run/coding-tools/claude/…/<generation>/`),
+never the shared workspace, so a wrapper orphaned by an earlier session there can
+never consume the new credential; cancelling a generation removes that dir. The
+launch also runs `claude auth status` before starting Claude and refuses a
+signed-out CLI immediately.
 
 The response returns a per-agent integer `id` / `session_id`, starting at zero.
 There is no controller credential: control commands are authorized by the

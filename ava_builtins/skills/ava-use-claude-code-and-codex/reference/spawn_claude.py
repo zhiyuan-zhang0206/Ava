@@ -73,6 +73,12 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from _claude_first_run import _preset_claude_first_run  # noqa: E402
+from _claude_launch_checks import (  # noqa: E402
+    _check_login_marker,
+    _claude_ui_ready,
+    _generation_relay_stub,
+    _login_marker,
+)
 
 _DEFAULT_TTL_SECONDS = 24 * 3600
 
@@ -156,15 +162,6 @@ def _contract_path() -> Path:
     return Path(__file__).resolve().parent / "collaboration_protocol.md"
 
 
-def _claude_ui_ready(output: str) -> bool:
-    """Require the title and a composer cue, normalizing Unicode prompt spacing."""
-    normalized = re.sub(r"[^\S\r\n]", " ", output)
-    composer = "? for shortcuts" in normalized or (
-        bool(re.search(r"(?m)^ *\u276f ", normalized)) and "bypass permissions on" in normalized
-    )
-    return bool(re.search(r"\bClaude\s+Code\b", normalized)) and composer
-
-
 def _check_missing_claude(failure_marker: Path | None, output: str = "") -> None:
     # A launched shell has a private marker. Its echoed command can wrap into
     # arbitrary screen lines, so its screen text is never failure evidence.
@@ -203,6 +200,7 @@ def _wait_for_ready(sid: int, timeout: float = 30.0, *, failure_marker: Path | N
                 "in PATH or $HOME/.local/bin/claude"
             ) from exc
         _check_missing_claude(failure_marker, output)
+        _check_login_marker(failure_marker)
         if _claude_ui_ready(output):
             time.sleep(2)  # brief stability pause
             try:
@@ -333,15 +331,6 @@ def _owner_terminated(agent_id: int) -> bool:
         return False
 
 
-_RELAY_STUB_NAME = ".ava-relay.env"
-"""Resident relay credential stub: `impersonate request` writes it 0600; the wrapper consumes it once."""
-
-
-def _relay_stub_path(workspace: Path) -> Path:
-    """The per-session relay credential stub; cleared before each takeover launch."""
-    return workspace / _RELAY_STUB_NAME
-
-
 def _relay_options(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> tuple[bool, Path | None]:
@@ -359,14 +348,17 @@ def _claude_command(
     caller_instance: str | None = None,
     *,
     failure_marker: Path | None = None,
+    relay_stub: Path | None = None,
     relay_plugin_dir: Path | None = None,
 ) -> str:
     from shared.external_caller import launch_caller_assignment
 
     resident = ""
     plugin_flag = ""
-    if relay_plugin_dir is not None:
-        stub = _relay_stub_path(workspace)
+    if (relay_stub is None) != (relay_plugin_dir is None):
+        raise ValueError("the resident relay needs both its stub path and its plugin dir")
+    if relay_stub is not None and relay_plugin_dir is not None:
+        stub = relay_stub
         resident = (
             f"export AVA_IMPERSONATION_RELAY_STUB={shlex.quote(stub.as_posix())} "
             f"AVA_IMPERSONATION_RELAY_PY={shlex.quote(sys.executable)} && "
@@ -374,6 +366,13 @@ def _claude_command(
         plugin_flag = f" --plugin-dir {shlex.quote(relay_plugin_dir.as_posix())}"
     mark_failure = (
         f"printf '%s\\n' 'claude executable not found' > {shlex.quote(failure_marker.as_posix())}; "
+        if failure_marker is not None
+        else ""
+    )
+    # A signed-out CLI still renders a ready panel and only fails on its first
+    # turn, so ask it directly before exec (exit 1 when logged out).
+    mark_logout = (
+        f"printf '%s\\n' 'not logged in' > {shlex.quote(_login_marker(failure_marker).as_posix())}; "
         if failure_marker is not None
         else ""
     )
@@ -387,6 +386,9 @@ def _claude_command(
         f"{mark_failure}"
         "printf '%s\\n' 'error: claude executable not found in PATH or "
         "$HOME/.local/bin/claude' >&2; exit 127; fi; "
+        'if ! "$claude_bin" auth status >/dev/null 2>&1; then '
+        f"{mark_logout}"
+        "printf '%s\\n' 'error: claude is not logged in; run claude auth login' >&2; exit 126; fi; "
         f"{launch_caller_assignment('claude_code', caller_instance)}"
         f'exec "$claude_bin" --dangerously-skip-permissions{plugin_flag} || exit $?'
     )
@@ -574,10 +576,7 @@ def _run_takeover_launch(
     owner_agent_id = owner.owner_agent_id
     sid: int | None = None
     try:
-        if plugin_dir is not None:
-            stub = _relay_stub_path(workspace)
-            stub.unlink(missing_ok=True)  # never consume a stale credential
-            Path(f"{str(stub).removesuffix('.env')}.pid").unlink(missing_ok=True)
+        relay_stub = None if plugin_dir is None else _generation_relay_stub(owner.state_dir)
         _pretrust(workspace)
         sid = ava.shell.sessions.new(name=expected_suffix, ttl=ttl_seconds)
         full_name = coding_session_owner.full_session_name(owner_agent_id, sid, expected_suffix)
@@ -595,6 +594,7 @@ def _run_takeover_launch(
                     workspace,
                     caller_instance,
                     failure_marker=marker,
+                    relay_stub=relay_stub,
                     relay_plugin_dir=plugin_dir,
                 ),
             )

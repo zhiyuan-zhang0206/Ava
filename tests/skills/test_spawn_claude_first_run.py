@@ -422,3 +422,65 @@ def test_existing_file_keeps_its_permissions(tmp_path: Path) -> None:
     _settings(home).chmod(0o640)
     spawn_claude._preset_claude_first_run(home)
     assert stat.S_IMODE(_settings(home).stat().st_mode) == 0o640
+
+
+_PANEL_2_1_283 = (
+    " ▐▛███▜▌   Claude Code v2.1.283\n"
+    "▝▜█████▛▘  Opus 5.5 (1M context)\n"
+    "  ~/.ava-previews/run/home/workspaces/4\n"
+    "────────────\n"
+    "\u276f\n"
+    "────────────\n"
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n"
+)
+
+
+def test_ready_accepts_bare_composer_of_recorded_claude_2_1_283_panel() -> None:
+    # Captures strip trailing blanks, so the empty composer is a lone glyph.
+    assert spawn_claude._claude_ui_ready(_PANEL_2_1_283)
+
+
+def test_signed_out_claude_fails_fast_instead_of_timing_out(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A signed-out CLI still renders a ready panel; the launch command's
+    # `claude auth status` preflight leaves the marker the wait refuses on.
+    marker = tmp_path / "missing-claude"
+    spawn_claude._login_marker(marker).write_text("not logged in\n")
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return _PANEL_2_1_283
+
+    def _no_sleep(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="not logged in on this host"):
+        spawn_claude._wait_for_ready(7, timeout=30, failure_marker=marker)
+
+
+def test_claude_command_refuses_a_signed_out_cli_before_exec(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    path = tmp_path / "bin"
+    path.mkdir()
+    fake = path / "claude"
+    fake.write_text('#!/bin/sh\n[ "$1" = auth ] && exit 1\nprintf "launched\\n"\n')
+    fake.chmod(0o755)
+    marker = tmp_path / "missing-claude"
+
+    result = subprocess.run(  # noqa: S603 - isolated shell tests the fail-closed launcher command
+        ["/bin/bash", "-c", spawn_claude._claude_command(tmp_path, failure_marker=marker)],
+        env={"HOME": str(home), "PATH": str(path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 126
+    assert "launched" not in result.stdout
+    assert "claude is not logged in" in result.stderr
+    assert spawn_claude._login_marker(marker).read_text() == "not logged in\n"

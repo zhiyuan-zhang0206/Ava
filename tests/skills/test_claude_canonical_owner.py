@@ -97,10 +97,12 @@ def test_relay_command_wiring_is_default_on_and_opt_out_clean(tmp_path: Path) ->
     record = _owner(tmp_path)
     workspace = Path(record.key.workspace)
     plugin = spawn_claude._HERE / "ava-relay"
-    stub = spawn_claude._relay_stub_path(workspace)
+    stub = tmp_path / "generation" / "relay.env"
 
-    resident = spawn_claude._claude_command(workspace, relay_plugin_dir=plugin)
+    resident = spawn_claude._claude_command(workspace, relay_stub=stub, relay_plugin_dir=plugin)
     manual = spawn_claude._claude_command(workspace)
+    with pytest.raises(ValueError, match="stub path and its plugin dir"):
+        spawn_claude._claude_command(workspace, relay_plugin_dir=plugin)
 
     assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in resident
     assert "AVA_IMPERSONATION_RELAY_PY=" in resident
@@ -158,6 +160,7 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
         caller_instance: str | None = None,
         *,
         failure_marker: Path,
+        relay_stub: Path | None = None,
         relay_plugin_dir: Path | None = None,
     ) -> str:
         failure_marker.write_text("claude executable not found\n")
@@ -165,6 +168,7 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
             workspace,
             caller_instance,
             failure_marker=failure_marker,
+            relay_stub=relay_stub,
             relay_plugin_dir=relay_plugin_dir,
         )
 
@@ -290,11 +294,12 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     assert rebuilt == [message]
 
 
-def test_resident_launch_clears_a_stale_credential_stub(
+def test_resident_launch_scopes_the_credential_stub_to_its_generation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A new takeover never consumes an earlier session's stub: cleared before the session starts."""
+    """An earlier session's wrapper, orphaned in the same workspace, polls its own
+    generation's dir; the new stub lives only in the new generation's private dir."""
     active = _owner(tmp_path)
     launching = replace(active, status="launching", session_id=None, session_name=None)
     sent: list[str] = []
@@ -335,16 +340,15 @@ def test_resident_launch_clears_a_stale_credential_stub(
     monkeypatch.setattr(spawn_claude.coding_session_owner, "publish_active", _publish)
 
     workspace = Path(launching.key.workspace)
-    stub = spawn_claude._relay_stub_path(workspace)
-    stub.write_text("SID=9\nAGENT=41\nAVA_IMPERSONATION_RELAY_TOKEN=stale\n", encoding="utf-8")
-    marker = workspace / ".ava-relay.pid"
-    marker.write_text("1234\n", encoding="utf-8")
+    assert launching.state_dir is not None
+    stub = launching.state_dir / "relay.env"
 
     assert spawn_claude._launch(workspace, None, None, 3600, None, "Fix login", "brief") == 0
 
-    assert not stub.exists()
-    assert not marker.exists()
+    assert launching.state_dir.is_dir()
+    assert launching.state_dir.stat().st_mode & 0o777 == 0o700
     assert f"export AVA_IMPERSONATION_RELAY_STUB={stub.as_posix()} " in sent[0]
+    assert workspace.as_posix() not in stub.as_posix()
     assert "--plugin-dir" in sent[0]
 
 
