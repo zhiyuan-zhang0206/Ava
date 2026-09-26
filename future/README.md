@@ -44,6 +44,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [PG backup — off-site leg](infra/pg-backup.md) | Off-site leg (GCS / R2) for the disk-loss scenario; the local daily `pg_dump` landed |
 | [Release-directory atomic code swap](infra/release-dir-atomic-code-swap.md) | Deferred, not started — document the immutable-artifact swap mechanism |
 | [Release cadence: self-scheduling by Ava](infra/release-self-scheduling.md) | Once bootstrapping is done, Ava schedules its own releases |
+| [Locality](infra/locality.md) | Package-door and single-owner rules landed with frozen baselines. Left: Postgres door burn-down (29 modules), reach-in burn-down (347 keys), a co-change sweeper index, core contract snapshots, a PR-description locality note |
 | [Living tech-debt ledger](tech-debt/ledger.md) | Single "what debt is open now" register maintained by the sweeper engine |
 | [Checkpoint storage rebuild](infra/checkpoint-storage-rebuild.md) | **Observation-window calibrations (Section 7)** — delta-channel storage, keep-everything retention (R1–R4), read-time fold, and the reader-first write switch are all landed and deployed (write switch 2026-09-14, task #3180) |
 | [Heartbeat design](infra/heartbeat-design.md) | Research record; Tier 2 shipped as a simpler opt-out design. Kept for the rejected two-tier proposal |

@@ -47,6 +47,61 @@ scope; an explicit directory target checks itself and its descendants, and
 an explicit file target checks the file and its containing directory. The
 baseline guard runs in both modes.
 
+## Locality: package doors and single owners
+
+Two AST rules keep a change, or a reader tracing one, inside one package plus
+its neighbors' public doors. The authoritative rule text — what counts as
+private, what a bypass is, today's single-owner decision — lives in the
+`scripts/lint_code_structure.py` module docstring (Rules 4 and 5); this
+section covers fixing a violation and maintaining its baseline.
+
+- **Rule 4 — package doors.** Reaching a `_`-prefixed module or name from
+  outside the package that owns it fails, whether by import or by attribute
+  access on an imported module. Fix it either by using a public name through
+  the owner's `__init__.py`, or by promoting the name into the owner's
+  contract on purpose — export it / drop the underscore — so the widened
+  contract shows up in the diff. There is no inline escape hatch and no
+  per-site allowlist: a name another package genuinely needs is, by
+  definition, part of that package's contract, so the fix is to make the
+  contract honest rather than to excuse the reach-in. `ava` is no exception:
+  what the agent sees is the `__all_for_ava__` whitelist
+  ([SDK surface](sdk-docstring-discipline.md)), not the underscore, so an
+  `ava/_*.py` module another package needs is promoted to a public module name
+  without becoming agent-visible. Files under a `tests/` directory are
+  exempt.
+- **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
+  names design decisions with exactly one owning module — today,
+  `postgres-dial` (`shared/db_connections.py`). Any other module making that
+  decision is a bypass; fix it by routing through the owner. A site that
+  genuinely cannot goes in that decision's `allowed` map with a one-line
+  reason — an allowed module that stops bypassing (or disappears) fails as
+  stale, so the map cannot rot into a permission wall. Add a new single-owner
+  decision only once its owner exists: an entry in `DECISIONS` with its owning
+  module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
+
+Both rules freeze today's sites in the `private_imports` / `owner_bypasses`
+sections of `scripts/structure/baseline.json` as exact `path::target -> site
+count` maps. Unlike the line/directory budgets, the count must match reality
+exactly in both directions: a new or grown site fails, and a shrunk or removed
+site fails too until its baseline entry is lowered or deleted — so a fixed
+reach-in cannot silently return uncounted. Against the base revision both
+sections are shrink-only: a new key is accepted only against a same-file
+removal of the same private name with equal or greater value (the private
+owner module moved), and a git `-M` rename carries keys once they are migrated
+to the new path by hand.
+
+What this means for common edits:
+
+- **Splitting a file, or moving code to another file**, cannot carry a frozen
+  site to the new file — fix the reach-in or bypass as part of the split.
+- **Moving a module into a subpackage** narrows its owner: siblings that
+  imported its privates become outside importers. Promote what they need, or
+  keep them inside the new package.
+- **A new CLI command** binds its `_h_*` handler directly in
+  `cli/parsers/<domain>.py` instead of adding another re-export to
+  `cli/main.py` (the existing re-exports are frozen debt); its tests patch the
+  parser module before `build_parser()` runs.
+
 ## Function quality budgets: complexity and nesting
 
 Every function and method in the same recursive `.py` scope has two budgets:
