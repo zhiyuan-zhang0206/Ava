@@ -11,11 +11,11 @@ tags:
 ## One loader contract, three production call sites
 `agent/_extensions.py:load_extensions()` imports every enabled plugin's
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
-path, and `ava._extend.scan_and_load()` does the same for the external plugins
-at host boot (`agent/_process_boot.py:load_process_extensions`). The
+path, and `ava.sdk_surface.plugin_loader.scan_and_load()` does the same for the external
+plugins at host boot (`agent/_process_boot.py:load_process_extensions`). The
 agent-launched child enters through the same loader (`ava.ensure_plugins_loaded`);
 its stateless form loads surfaces only ([[okf/plugins/module-loading/two-faces.ava.okf.md]]).
-All drive the same primitives (`ava/_extend.py`), so a plugin sees the same
+All drive the same primitives (`ava/sdk_surface/plugin_loader.py`), so a plugin sees the same
 module name, `__package__`, `sys.modules` identity, and containment whichever
 production path imports it (issue #2161 — before unification the boot loader
 exec'd plugins under a top-level name and relative imports crashed the agent
@@ -57,7 +57,7 @@ Machine-level roster paths sit outside the enable plane by design: the
 enable-state (`ops/spec.py:_plugin_services`).
 
 ## The external `plugins` prefix is registered, not resolved from sys.path
-`register_plugin_parent_packages` (`ava/_extend.py`, applied by the loader for
+`register_plugin_parent_packages` (`ava/sdk_surface/plugin_loader.py`, applied by the loader for
 external plugins) registers `plugins` over `$AVA_HOME/plugins` and
 `plugins.<name>` over the plugin's directory before executing `plugin.py`. It
 does not rely on `$AVA_HOME` being on `sys.path`: the exec child boots with

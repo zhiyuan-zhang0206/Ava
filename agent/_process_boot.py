@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import ava
-from ava.sdk_surface import sdk_disable
+from ava.sdk_surface import plugin_loader, sdk_disable
 from ava.shell import sessions
 from shared.config.turn_view import turn_settings
 from shared.daemon.schedules.watcher import TEMPLATE_VERSION
@@ -178,7 +178,7 @@ def load_process_extensions() -> None:
     known = set(plugins_config.installed_plugin_dirs())
     config = plugins_config.load_for_runtime(known)
     enabled = {name for name, entry in config.plugins.items() if entry.enabled}
-    ava._extend.scan_and_load(enabled=enabled)
+    plugin_loader.scan_and_load(enabled=enabled)
     # Each loaded surface's agent-runtime face (state fields / hooks / prompt
     # sections). Faces of plugins whose surface loads later (the built-in set,
     # via build_graph's full `load_extensions`) are picked up there — the face

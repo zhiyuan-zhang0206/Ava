@@ -1,4 +1,4 @@
-"""`ava.extend` wrap primitive + `ava._extend.scan_and_load` behavior guards.
+"""`ava.extend` wrap primitive behavior guards (`ava/sdk_surface/wraps.py`).
 
 Wrap primitive:
 - register + install: `wrap(target, wrapper)` replaces the ava callable
@@ -14,26 +14,20 @@ Wrap primitive:
 - clear_wraps restores originals + empties the registry (the reload-free teardown)
 - target errors: malformed dotted path, non-callable target
 
-scan_and_load: dir scan + plugin.py import side effects, enabled-set filtering,
-relative-sibling imports, and the fail-soft skip of a broken plugin.
-
 A fake `ava.probe` namespace holds the wrap targets so the real SDK is never
 patched; the fixture clears wraps then removes the namespace.
 """
 
 import inspect
-import sys
-import textwrap
 import types
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 import ava
-from ava import _extend
-from ava._extend import scan_and_load, wrap
+from ava.sdk_surface import wraps
+from ava.sdk_surface.wraps import wrap
 from shared import plugin_activation
 from shared.plugin_context import PluginContext
 
@@ -57,23 +51,8 @@ def probe() -> Iterator[tuple[Any, Any]]:
     ava_any: Any = ava
     ava_any.probe = ns  # direct bind — bypasses register_namespace to isolate the wrap primitive
     yield ns, fn
-    _extend.clear_wraps()  # restore probe.fn before the namespace disappears
+    wraps.clear_wraps()  # restore probe.fn before the namespace disappears
     delattr(ava, "probe")
-
-
-@pytest.fixture(autouse=True)
-def _drop_fake_plugin_modules() -> Iterator[None]:
-    """The `scan_and_load` tests import the fake plugin packages they write under
-    tmp dirs (`plugins.codex_usage.plugin` / `.refresh`); a leftover in
-    `sys.modules` poisons a later same-process file's negatives (a boot loader
-    must never import a *disabled* plugin — `test_plugin_load_containment` read
-    the leftovers as exactly that). Drop whatever a test here adds."""
-    before = {name for name in sys.modules if name == "plugins" or name.startswith("plugins.")}
-    yield
-    for name in [
-        n for n in sys.modules if (n == "plugins" or n.startswith("plugins.")) and n not in before
-    ]:
-        del sys.modules[name]
 
 
 def test_wrap_installs_and_stack_lists(probe: tuple[Any, Any]):
@@ -86,13 +65,13 @@ def test_wrap_installs_and_stack_lists(probe: tuple[Any, Any]):
     returned = wrap("probe.fn", w)  # pyright: ignore[reportUnknownArgumentType]
     assert returned is w  # returns the wrapper so the caller keeps a reference
     assert ns.fn is not fn  # target replaced by the chained closure
-    assert _extend.stack("probe.fn") == [("<unknown>", w)]
+    assert wraps.stack("probe.fn") == [("<unknown>", w)]
     assert ava.probe.fn(9) == "fn(9,1,2)"  # still calls through
 
 
 def test_wrappers_maps_all_targets(probe: tuple[Any, Any]):
     wrap("probe.fn", lambda inner, *a, **k: inner(*a, **k))  # pyright: ignore[reportUnknownArgumentType]
-    allmap = _extend.wrappers()
+    allmap = wraps.wrappers()
     assert set(allmap) == {"probe.fn"}
     assert len(allmap["probe.fn"]) == 1
 
@@ -105,7 +84,7 @@ def test_plugin_attribution_from_context(probe: tuple[Any, Any]):
 
     with PluginContext("myplugin"):
         wrap("probe.fn", w)  # pyright: ignore[reportUnknownArgumentType]
-    assert _extend.stack("probe.fn") == [("myplugin", w)]
+    assert wraps.stack("probe.fn") == [("myplugin", w)]
 
 
 def test_signature_drops_inner(probe: tuple[Any, Any]):
@@ -184,7 +163,7 @@ def test_stack_last_registered_is_outermost(probe: tuple[Any, Any]):
         wrap("probe.fn", inner_layer)  # pyright: ignore[reportUnknownArgumentType]
     with PluginContext("plugin_b"):
         wrap("probe.fn", outer_layer)  # pyright: ignore[reportUnknownArgumentType]
-    assert [p for p, _ in _extend.stack("probe.fn")] == ["plugin_a", "plugin_b"]
+    assert [p for p, _ in wraps.stack("probe.fn")] == ["plugin_a", "plugin_b"]
     ns.fn(0)
     assert calls == ["outer-pre", "inner-pre", "inner-post", "outer-post"]
 
@@ -322,10 +301,10 @@ def test_clear_wraps_restores_and_empties(probe: tuple[Any, Any]):
     wrap("probe.fn", lambda _inner, *_a, **_k: "wrapped")  # pyright: ignore[reportUnknownArgumentType]
     assert ns.fn(1) == "wrapped"
 
-    _extend.clear_wraps()
+    wraps.clear_wraps()
     assert ns.fn is fn  # restored to the captured original
-    assert _extend.stack("probe.fn") == []
-    assert _extend.wrappers() == {}
+    assert wraps.stack("probe.fn") == []
+    assert wraps.wrappers() == {}
 
 
 def test_wrap_captures_the_base_callable_below_a_metering_recorder(
@@ -343,143 +322,22 @@ def test_wrap_captures_the_base_callable_below_a_metering_recorder(
     with PluginContext("myplugin"):
         wrap("probe.fn", lambda inner, *a, **kw: inner(*a, **kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _extend._ORIGINALS["probe.fn"] is fn  # the base, not the proxy
+    assert wraps._ORIGINALS["probe.fn"] is fn  # the base, not the proxy
     assert ns.fn("x") == "fn(x,1,2)"  # the chain still runs
 
-    _extend.clear_wraps()
+    wraps.clear_wraps()
     assert ns.fn is fn
 
 
 def test_wrap_invalid_target_raises(probe: tuple[Any, Any]):
-    with pytest.raises(_extend.WrapTargetError, match="dotted path"):
+    with pytest.raises(wraps.WrapTargetError, match="dotted path"):
         wrap("probe..fn", lambda inner: inner())  # pyright: ignore[reportUnknownArgumentType]
-    with pytest.raises(_extend.WrapTargetError, match="dotted path"):
+    with pytest.raises(wraps.WrapTargetError, match="dotted path"):
         wrap("_private.fn", lambda inner: inner())  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_wrap_noncallable_target_raises(probe: tuple[Any, Any]):
     ns, _ = probe
     ns.value = 3
-    with pytest.raises(_extend.WrapTargetError, match="not callable"):
+    with pytest.raises(wraps.WrapTargetError, match="not callable"):
         wrap("probe.value", lambda inner: inner())  # pyright: ignore[reportUnknownArgumentType]
-
-
-# ---- scan_and_load (moved from ava._wraps into ava._extend) ----------------
-
-
-def test_scan_and_load_returns_empty_when_dir_missing(tmp_path: Path):
-    assert scan_and_load(tmp_path / "nope") == []
-
-
-def test_scan_and_load_loads_plugins_in_sorted_order(tmp_path: Path):
-    for name in ("zebra", "alpha", "mango"):
-        plugin_dir = tmp_path / name
-        plugin_dir.mkdir()
-        (plugin_dir / "plugin.py").write_text(
-            textwrap.dedent(f"""
-                # plugin {name} loaded
-                LOADED = "{name}"
-            """).strip()
-        )
-    assert scan_and_load(tmp_path) == ["alpha", "mango", "zebra"]
-
-
-def test_scan_and_load_skips_non_directories_and_missing_plugin_py(tmp_path: Path):
-    (tmp_path / "not_a_plugin.txt").write_text("noise")
-    empty = tmp_path / "empty_subdir"
-    empty.mkdir()
-    (empty / "other.py").write_text("# no plugin.py here")
-    valid = tmp_path / "valid"
-    valid.mkdir()
-    (valid / "plugin.py").write_text("VALID = True")
-    assert scan_and_load(tmp_path) == ["valid"]
-
-
-def test_scan_and_load_skips_broken_plugin_and_loads_the_rest(
-    tmp_path: Path, loguru_records: list[dict]
-):
-    """Fail-soft contract (user ruling 2026-09-11, after the 2026-08-28 and
-    2026-09-10 incidents): a plugin that raises at import is skipped with a
-    loud report; the remaining plugins still load. This loader is the agent
-    host's boot path, where a propagating error used to take the whole host
-    down on every restart."""
-    bad = tmp_path / "bad"
-    bad.mkdir()
-    (bad / "plugin.py").write_text("raise RuntimeError('plugin bug')")
-    good = tmp_path / "good"
-    good.mkdir()
-    (good / "plugin.py").write_text("LOADED = True")
-
-    assert scan_and_load(tmp_path) == ["good"]
-    # loud: an ERROR naming the plugin
-    assert any("bad" in r["message"] and "failed to load" in r["message"] for r in loguru_records)
-    # the half-executed module left nothing behind
-    assert "plugins.bad.plugin" not in sys.modules
-
-
-def test_scan_and_load_relative_sibling_import_resolves(tmp_path: Path):
-    """The boot loader execs plugin.py under the same dotted package name the
-    graph-build loader uses, so a package-relative sibling import works on
-    both production paths — one loader contract, no dev/prod mismatch
-    (issue #2161: the boot loader exec'd a top-level name and died on
-    `from . import refresh`)."""
-    plugin = tmp_path / "codex_usage"
-    plugin.mkdir()
-    (plugin / "plugin.py").write_text("from . import refresh\nMARK = refresh.MARK\n")
-    (plugin / "refresh.py").write_text("MARK = 'x'\n")
-
-    assert scan_and_load(tmp_path) == ["codex_usage"]
-    module = sys.modules["plugins.codex_usage.plugin"]
-    assert module.MARK == "x"
-    assert sys.modules["plugins.codex_usage.refresh"].MARK == "x"
-
-
-def test_scan_and_load_expands_user_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert scan_and_load("~/no_plugins") == []
-
-
-def _make_plugin(root: Path, name: str) -> None:
-    p = root / name
-    p.mkdir()
-    (p / "plugin.py").write_text(f'LOADED = "{name}"\n')
-
-
-def test_scan_and_load_default_uses_paths_plugins_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    from shared.config import settings
-
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path / "ava")
-    plugins = tmp_path / "ava" / "plugins"
-    plugins.mkdir(parents=True)
-    _make_plugin(plugins, "auto_discovered")
-    assert scan_and_load() == ["auto_discovered"]
-
-
-def test_scan_and_load_explicit_enabled_set(tmp_path: Path):
-    for name in ("foo", "bar", "baz"):
-        _make_plugin(tmp_path, name)
-    assert scan_and_load(tmp_path, enabled={"foo", "baz"}) == ["baz", "foo"]
-
-
-def test_scan_and_load_explicit_enabled_empty_set(tmp_path: Path):
-    _make_plugin(tmp_path, "foo")
-    assert scan_and_load(tmp_path, enabled=set()) == []
-
-
-def test_scan_and_load_enabled_skips_names_not_in_set(tmp_path: Path):
-    _make_plugin(tmp_path, "foo")
-    _make_plugin(tmp_path, "ghost")
-    assert scan_and_load(tmp_path, enabled={"foo"}) == ["foo"]
-
-
-def test_scan_and_load_skips_dot_prefixed_dirs(tmp_path: Path):
-    """Atomic-install residue (.name.staging / .name.backup-<pid>) must not be
-    exec'd by the agent-host boot loader — the same ghost-plugin guard as
-    _discover_plugins (QA nit, PR #880 review)."""
-    _make_plugin(tmp_path, "real")
-    ghost = tmp_path / ".real.backup-1234"
-    ghost.mkdir()
-    (ghost / "plugin.py").write_text('raise RuntimeError("ghost must not load")\n')
-    assert scan_and_load(tmp_path) == ["real"]
