@@ -2,7 +2,7 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -199,6 +199,40 @@ def test_consumer_retains_sdk_facts_without_sampling_or_reinstrumentation(
         "api_events": {"coverage": "unknown", "consumed_event_count": 1},
     }
     assert result["sdk_events"][0]["payload"] == events[0]
+
+
+def test_handoff_lists_events_in_call_order_not_ingestion_order(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
+) -> None:
+    """Upstream pages arrive newest first; the handoff reader needs call order."""
+    lease = start(owner)
+    first = datetime.now(UTC)
+    calls = [
+        {
+            "ts": (first + timedelta(milliseconds=offset)).isoformat(),
+            "agent_id": owner.agent_id,
+            "source": f"agent:{owner.agent_id}",
+            "category": "telemetry",
+            "id": 20 + offset,
+            "event_name": "sdk_call",
+            "attributes": {"fn": fn, "duration": 0.01},
+        }
+        for offset, fn in (
+            (0, "agents.list_agents"),
+            (1, "agents.get_status"),
+            (2, "agents.list_machines"),
+        )
+    ]
+    assert consume_events(owner.agent_id, 0, reversed(calls)) == 3
+    leases.release(str(lease["id"]), attested_caller(lease), "Three calls in order")
+    document = history.build_document(
+        history.resolve(owner.agent_id, 0), history.entries(str(lease["id"]), db_conn)
+    )
+    assert [row["payload"]["attributes"]["fn"] for row in document["sdk_events"]] == [
+        "agents.list_agents",
+        "agents.get_status",
+        "agents.list_machines",
+    ]
 
 
 def test_legacy_empty_events_never_certify_a_zero_call_claim(
