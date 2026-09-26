@@ -17,7 +17,8 @@ from pathlib import Path
 
 from cli.release_prepare.models import FileInput
 from shared.posix_command import run_owned_command
-from shared.runtime_release import ApplicationIdentity, ReleaseRejectedError, file_sha256
+from shared.release_identity import ApplicationIdentity
+from shared.runtime_release import ReleaseRejectedError, file_sha256
 
 _SOURCE_FILES = (
     "tests/e2e/__init__.py",

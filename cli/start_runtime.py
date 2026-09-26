@@ -125,7 +125,7 @@ def admit_loaded_release(home: Path) -> StartRuntime:
     """
     import platform
 
-    from shared.runtime_release import ApplicationIdentity
+    from shared.release_identity import ApplicationIdentity
     from shared.verified_file import regular_bytes
 
     selected = current_pointer(home / "releases")

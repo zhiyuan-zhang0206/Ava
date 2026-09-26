@@ -44,5 +44,9 @@ No claim of fully self-contained/offline rollback is made yet. OS ownership
 separation is still needed against an agent deliberately modifying its own image.
 
 CI exercises real temporary-file transitions on Linux, macOS and Windows without
-starting a cluster. Current runtime consumers are not wired until packaging and
+starting a cluster or installing the project environment, so `runtime_release.py`
+and `runtime_prepare.py` import only the standard library
+(`tests/lifecycle/images/test_stdlib_boundary.py` guards the chain). The
+builder-embedded application identity and its verified read live in
+`release_identity.py`. Current runtime consumers are not wired until packaging and
 resource closure, recovery and old-orchestrator bootstrapping gates are complete.

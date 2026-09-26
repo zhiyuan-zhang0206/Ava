@@ -32,13 +32,9 @@ from shared.migrations import (
     check_schema_version,
     required_migration_set,
 )
+from shared.release_identity import ApplicationIdentity
 from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
-from shared.runtime_release import (
-    ApplicationIdentity,
-    ReleaseRejectedError,
-    current_pointer,
-    verify_release,
-)
+from shared.runtime_release import ReleaseRejectedError, current_pointer, verify_release
 from shared.verified_file import regular_bytes
 
 

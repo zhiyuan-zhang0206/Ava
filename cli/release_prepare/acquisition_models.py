@@ -16,7 +16,7 @@ from cli.release_prepare.models import (
     _absolute,
     ordered_plugins,
 )
-from shared.runtime_release import ApplicationIdentity
+from shared.release_identity import ApplicationIdentity
 
 
 class FrontendTools(Record):

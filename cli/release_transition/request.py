@@ -36,7 +36,7 @@ class ReleaseRef(Record):
 
     def verify(self, home: Path, platform_tag: str) -> VerifiedRelease:
         """Verify all retained bytes and the separately captured source receipt."""
-        from shared.runtime_release import read_application_identity
+        from shared.release_identity import read_application_identity
 
         image = verify_release(
             home / "releases",

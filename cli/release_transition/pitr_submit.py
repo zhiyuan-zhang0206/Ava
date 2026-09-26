@@ -22,7 +22,7 @@ from shared.verified_file import regular_bytes
 
 def selected_image(home: Path) -> ReleaseRef:
     """Capture source/schema facts only through the selected verified inventory."""
-    from shared.runtime_release import (
+    from shared.release_identity import (
         ApplicationIdentity,
         application_identity_members,
         read_application_identity,

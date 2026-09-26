@@ -13,7 +13,8 @@ import pytest
 
 from cli.release_prepare.models import FileInput
 from scripts.preview import release_fixture as fixture
-from shared.runtime_release import ApplicationIdentity, ReleaseRejectedError, file_sha256
+from shared.release_identity import ApplicationIdentity
+from shared.runtime_release import ReleaseRejectedError, file_sha256
 
 
 def _archive(tmp_path: Path, *, invalid: bool = False) -> tuple[Path, ApplicationIdentity]:

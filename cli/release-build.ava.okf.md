@@ -38,7 +38,7 @@ cannot erase ownership of a reparented build child or turn unfinished work into
 a successful receipt.
 
 The emitted `build-receipt.json` binds the wheel digest. Failed output directories
-remain available for diagnosis and cannot be reused. `shared.runtime_release.read_application_identity`
+remain available for diagnosis and cannot be reused. `shared.release_identity.read_application_identity`
 requires an already verified runtime and rechecks the embedded member against
 that manifest and the expected target. Complete manifests have an explicit
 32 MiB read budget; ordinary unit receipts retain their smaller default budget.

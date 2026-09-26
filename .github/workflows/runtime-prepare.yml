@@ -4,11 +4,13 @@ on:
     paths:
       - 'shared/runtime_prepare.py'
       - 'shared/runtime_release.py'
+      - 'shared/release_identity.py'
       - 'shared/runtime_interpreter.py'
       - 'shared/runtime_publication_input.py'
       - 'shared/verified_file.py'
       - 'shared/migration_layout.py'
       - 'cli/release_build.py'
+      - 'cli/release_prepare/build-tools.txt'
       - 'tests/integration/test_release_build.py'
       - 'scripts/prove_runtime_publication_input.py'
       - 'scripts/prove_exec_owner_installed.py'
@@ -92,7 +94,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/prepare/wheels"
-          uv build --wheel --out-dir "$RUNNER_TEMP/prepare/wheels"
+          # Cache the reviewed build closure with its hashes: the offline build
+          # below requires exactly these pinned, hash-checked build tools.
+          uv build --wheel --build-constraints cli/release_prepare/build-tools.txt --require-hashes --out-dir "$RUNNER_TEMP/prepare/wheels"
           uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/prepare/source-requirements.txt"
           uv run --no-project --with pip python -m pip wheel --require-hashes -r "$RUNNER_TEMP/prepare/source-requirements.txt" --wheel-dir "$RUNNER_TEMP/prepare/wheels"
           python3 - <<'PY'
@@ -186,7 +190,7 @@ jobs:
         run: |
           uv run --locked --no-dev python - <<'PY'
           import json, os, pathlib, platform
-          from cli.release_build import read_application_identity
+          from shared.release_identity import read_application_identity
           from shared.runtime_release import verify_release
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
           build = json.loads((root / 'application-build/build-receipt.json').read_bytes())

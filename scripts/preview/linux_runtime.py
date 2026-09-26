@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from cli.release_prepare import PreparationReceipt
-from shared.runtime_release import VerifiedRelease, read_application_identity, verify_release
+from shared.release_identity import read_application_identity
+from shared.runtime_release import VerifiedRelease, verify_release
 from shared.session_env import frontend_toolchain_path, normalize_service_path
 from shared.verified_file import regular_bytes
 

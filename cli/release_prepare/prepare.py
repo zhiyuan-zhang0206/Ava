@@ -26,6 +26,7 @@ from cli.release_prepare.models import (
     PreparationReceipt,
     encode,
 )
+from shared.release_identity import ApplicationIdentity, read_application_identity
 from shared.runtime_prepare import (
     CollectorInput,
     FrontendInput,
@@ -34,11 +35,9 @@ from shared.runtime_prepare import (
     prepare_release,
 )
 from shared.runtime_release import (
-    ApplicationIdentity,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
-    read_application_identity,
     verify_release,
 )
 from shared.verified_file import regular_bytes

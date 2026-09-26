@@ -18,13 +18,8 @@ from pydantic import model_validator
 
 from shared.platform import IS_WINDOWS
 from shared.process_evidence import Digest, EvidenceModel
-from shared.runtime_release import (
-    ApplicationIdentity,
-    ReleaseRejectedError,
-    VerifiedRelease,
-    read_application_identity,
-    verify_release,
-)
+from shared.release_identity import ApplicationIdentity, read_application_identity
+from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.verified_file import regular_bytes
 
 _PREFIX = Path(sys.prefix).resolve()

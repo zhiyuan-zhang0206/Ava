@@ -13,13 +13,9 @@ import pytest
 
 # ruff: noqa: S603 -- fixed Git argv operate only on the generated fixture repository.
 from cli import release_build as build
+from shared.release_identity import read_application_identity
 from shared.runtime_prepare import _materialize_venv_links
-from shared.runtime_release import (
-    ReleaseRejectedError,
-    VerifiedRelease,
-    file_sha256,
-    read_application_identity,
-)
+from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
 
 
 @pytest.fixture
