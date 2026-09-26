@@ -1,5 +1,5 @@
 """Turn-scoped agent identity (shared/turn_identity.py) and its layering into
-`ava._boot` — Phase 1 of future/infra/agent-runner-as-server.md.
+`ava.agent_identity` — Phase 1 of future/infra/agent-runner-as-server.md.
 
 Locks the resolution order `turn contextvar > process slot > AVA_AGENT_ID env`
 at every identity read, the copied-context handoff to worker threads, and the
@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-import ava._boot as boot
+from ava import agent_identity
 from shared.turn_identity import (
     bind_turn_identity,
     current_turn_agent_id,
@@ -25,9 +25,9 @@ from shared.turn_identity import (
 @pytest.fixture(autouse=True)
 def _reset_process_slots(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate the process bootstrap slots and the env identity per test."""
-    monkeypatch.setattr(boot, "_agent_id", None)
-    monkeypatch.setattr(boot, "_owns_loop", True)
-    monkeypatch.setattr(boot, "_actor", None)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
+    monkeypatch.setattr(agent_identity, "_actor", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
 
@@ -53,59 +53,59 @@ class TestEffectiveAgentId:
 
 class TestBootLayering:
     def test_process_mode_unchanged(self) -> None:
-        boot.establish(11, owns_loop=True)
-        assert boot.agent_id() == 11
-        assert boot.require_agent_id() == 11
-        assert boot.require_actor() == "agent:11"
-        boot.assert_self_action("restart")  # does not raise
+        agent_identity.establish(11, owns_loop=True)
+        assert agent_identity.agent_id() == 11
+        assert agent_identity.require_agent_id() == 11
+        assert agent_identity.require_actor() == "agent:11"
+        agent_identity.assert_self_action("restart")  # does not raise
 
     def test_turn_binding_wins_over_process_slot(self) -> None:
-        boot.establish(11, owns_loop=True)
+        agent_identity.establish(11, owns_loop=True)
         with bind_turn_identity(22):
-            assert boot.agent_id() == 22
-            assert boot.require_agent_id() == 22
-            assert boot.require_actor() == "agent:22"
-            assert boot.default_actor() == "agent:22"
-        assert boot.agent_id() == 11
+            assert agent_identity.agent_id() == 22
+            assert agent_identity.require_agent_id() == 22
+            assert agent_identity.require_actor() == "agent:22"
+            assert agent_identity.default_actor() == "agent:22"
+        assert agent_identity.agent_id() == 11
 
     def test_turn_binding_provides_identity_without_process_slot(self) -> None:
         with bind_turn_identity(33):
-            assert boot.require_agent_id() == 33
-            boot.assert_self_action("terminate")  # turn context owns its loop
+            assert agent_identity.require_agent_id() == 33
+            agent_identity.assert_self_action("terminate")  # turn context owns its loop
 
     def test_no_identity_still_raises(self) -> None:
         with pytest.raises(RuntimeError, match="no established agent identity"):
-            boot.require_agent_id()
+            agent_identity.require_agent_id()
 
     def test_launched_child_semantics_survive(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A launched child (env identity, owns_loop False) still refuses
         # lifecycle self-actions — and a bound turn context is never a child.
         monkeypatch.setenv("AVA_AGENT_ID", "5")
-        assert boot.is_launched_child() is True
+        assert agent_identity.is_launched_child() is True
         with pytest.raises(RuntimeError, match="background script"):
-            boot.assert_self_action("restart")
+            agent_identity.assert_self_action("restart")
         with bind_turn_identity(5):
-            assert boot.is_launched_child() is False
-            boot.assert_self_action("restart")  # the host owns the turn loop
+            assert agent_identity.is_launched_child() is False
+            agent_identity.assert_self_action("restart")  # the host owns the turn loop
 
     def test_explicit_actor_still_wins_without_turn_context(self) -> None:
-        boot.establish_actor("schedule:7")
-        assert boot.require_actor() == "schedule:7"
+        agent_identity.establish_actor("schedule:7")
+        assert agent_identity.require_actor() == "schedule:7"
         with bind_turn_identity(9):
             # A turn context is more specific than the process actor: work done
             # inside agent 9's turn is agent 9's.
-            assert boot.require_actor() == "agent:9"
+            assert agent_identity.require_actor() == "agent:9"
 
 
 class TestPropagation:
     def test_bind_reaches_asyncio_tasks(self) -> None:
         async def scenario() -> tuple[Any, Any]:
             async def turn() -> Any:
-                return boot.agent_id()
+                return agent_identity.agent_id()
 
             with bind_turn_identity(77):
                 task = asyncio.create_task(turn())
-            return await task, boot.agent_id()
+            return await task, agent_identity.agent_id()
 
         inside, outside = asyncio.run(scenario())
         assert inside == 77
@@ -119,7 +119,7 @@ class TestPropagation:
         seen: list[Any] = []
         with bind_turn_identity(88):
             ctx = contextvars.copy_context()
-        t = threading.Thread(target=ctx.run, args=(lambda: seen.append(boot.agent_id()),))
+        t = threading.Thread(target=ctx.run, args=(lambda: seen.append(agent_identity.agent_id()),))
         t.start()
         t.join()
         assert seen == [88]

@@ -232,7 +232,7 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
     Returns True iff this call latched a load (caller should re-attempt
     `getattr`); a deferral — the loader module is still importing — returns
     False so the caller fails fast now and a later miss retries. Fires only in
-    an agent-launched child (`_boot.is_launched_child`), only after `import ava`
+    an agent-launched child (`agent_identity.is_launched_child`), only after `import ava`
     is complete (`_init_complete`), only once (`_plugins_loaded`), and never for
     underscore names — so gateway / cli / the agent process keep fail-fast on a
     genuinely-unknown attribute, `import ava` is untouched, and a dunder probe
@@ -240,9 +240,9 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
     """
     if name.startswith("_") or not _init_complete or _plugins_loaded:
         return False
-    from . import _boot
+    from . import agent_identity
 
-    if not _boot.is_launched_child():
+    if not agent_identity.is_launched_child():
         return False
     _ensure_plugins_loaded()
     # Retry the lookup only if a load was recorded: a deferral (the loader
@@ -369,10 +369,10 @@ _init_complete = True
 # backstop. The agent host binds identities per turn and does not
 # export a process-wide AVA_AGENT_ID; gateway / cli do not carry it either.
 # Only an agent-launched child reaches this load.
-from . import _boot as _boot_module
 from . import _sdk_metering
+from . import agent_identity as _agent_identity
 
 _sdk_metering.install()
 
-if _boot_module.is_launched_child():
+if _agent_identity.is_launched_child():
     _ensure_plugins_loaded()

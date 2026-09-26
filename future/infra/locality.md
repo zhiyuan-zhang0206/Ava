@@ -41,7 +41,7 @@ boundaries, already carried by codegen, and not debt.
    one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
    cover (`scripts/`, and any async pool left in `allowed`), or retire it if
    nothing remains.
-2. **Reach-in burn-down** (`private_imports`, 347 keys / 391 sites / 125
+2. **Reach-in burn-down** (`private_imports`, 333 keys / 366 sites / 122
    files), highest yield first: `cli/main.py` re-exports 121 private
    `cli.parsers.*._h_*` handlers so tests have one namespace to patch (a
    hand-maintained registry — bind handlers in their parser modules and patch
@@ -49,14 +49,19 @@ boundaries, already carried by codegen, and not debt.
    `shared.lm._plugin_providers`, `shared.agents.impersonation._impersonation_store`,
    `agent.graph._exec_protocol`, `agent._turn_progress`) each get a verdict:
    contract (export it) or internal (route callers through a door).
-   The `ava/_*.py` modules the framework and plugins reach into (42 keys;
-   `ava._boot` 25 sites, `ava._gateway_client` and `ava._mcp_config` 11 each)
-   are the clearest contract case: agent visibility is the `__all_for_ava__`
-   whitelist, so they can take public module names without entering the
-   agent's view. `lint_agent_docstrings` still keys its dev-facing exemption on
-   underscore path segments; switch it to agent-surface reachability
-   (`ava.agent_visible_names()`) first, so a renamed framework module is not
-   held to agent-docstring rules.
+   In `ava` (36 keys / 57 sites left), agent visibility is the
+   `__all_for_ava__` whitelist — `lint_agent_docstrings` keys on it too — so a
+   framework module the rest of the repo needs takes a public name without
+   entering the agent's view (`ava/agent_identity.py` was the first). Left, in
+   order: the modules reached only by public names (`_sdk_validation`,
+   `_commands`, `_attach`, `_skill_sources`, `_sdk_metering`,
+   `_external_state`); `_gateway_client`, whose `_post` / `_patch` /
+   `_raise_from_response` plugins also use; `_impersonation_events` /
+   `_impersonation_launch`, which nothing inside `ava` uses; `_mcp_config`,
+   read by `cli` / `ops` through private helpers; `_extend`, whose public name
+   is taken by the plugin-author `ava.extend` namespace; and the kernel's reads
+   and writes of `ava/__init__.py` private render state (`_COMPACT_CLASSES`,
+   `_hidden_surface_members`, the SDK-disable entries).
 3. **Locality sweeper class** — an index, not a wall: per-PR module spread and
    cross-package co-change pairs over a rolling window, reusing the lint's
    scanner per [lint-vs-sweeper](../../conventions/lint-vs-sweeper.md). Each
@@ -71,6 +76,6 @@ boundaries, already carried by codegen, and not debt.
    it or files a task (`write-a-pr-description` skill).
 6. **More single-owner decisions**, each added to `DECISIONS` only once its
    owner exists: the process identity key (one fix touched 21 files; its
-   natural owner is `ava/_boot.py` once that becomes a public module) is the
+   natural owner is `ava/agent_identity.py`, now a public module) is the
    next candidate; `shared/config` as a registration hub needs a design pass
    first.

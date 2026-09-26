@@ -181,10 +181,10 @@ def test_shell_session_index_passes_the_resilience_kwargs(
     """Configuration pin, not a behavioural assertion: `ava.shell.new()`'s
     session-index allocation hands libpq `PG_KEEPALIVE_KWARGS` and never
     prepares (`prepare_threshold=None`)."""
-    import ava._boot
+    import ava.agent_identity
     from ava.shell import sessions
 
-    monkeypatch.setattr(ava._boot, "agent_id", lambda: 1)
+    monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 1)
     seen = _record_connect_kwargs(monkeypatch)
     with pytest.raises(psycopg.OperationalError):
         sessions._next_session_index_from_db()

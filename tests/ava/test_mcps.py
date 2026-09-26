@@ -562,7 +562,7 @@ def test_read_cache_fills_defaults_for_missing_fields(fake_config: Path, tmp_pat
 
 
 def test_daemon_socket_path_none_when_identity_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ava._boot, "_agent_id", None)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", None)
     assert mcps_mod._daemon_socket_path() is None
 
 

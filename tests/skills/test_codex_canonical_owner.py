@@ -158,7 +158,7 @@ def test_codex_supervisor_uses_projected_session_environment(
     monkeypatch.setitem(os.environ, "AVA_HOME", str(unit_home))
     monkeypatch.setenv("HOME", str(unit_home))
     monkeypatch.setenv("VIRTUAL_ENV", str(unit_home / "foreign" / ".venv"))
-    monkeypatch.setattr(spawn_codex.ava._boot, "_agent_id", 41)
+    monkeypatch.setattr(spawn_codex.ava.agent_identity, "_agent_id", 41)
     monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 7)
     monkeypatch.setattr(sessions, "_shell_prefix", lambda: "ava-agent-41-shell-")
 
@@ -442,7 +442,7 @@ def test_codex_takeover_cli_rejects_files_and_requires_a_brief(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("ava._boot.require_agent_id", lambda: 41)
+    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 41)
     monkeypatch.setattr(
         sys,
         "argv",

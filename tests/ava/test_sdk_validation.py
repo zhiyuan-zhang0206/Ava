@@ -25,7 +25,7 @@ import psycopg
 import pytest
 
 import ava
-import ava._boot
+import ava.agent_identity
 from ava import agents
 from ava import files as _files
 from ava import shell as _shell
@@ -135,7 +135,7 @@ class TestAgentsEntries:
     ) -> None:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 1)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava._boot, "require_actor", lambda: "agent:1")
+        monkeypatch.setattr(ava.agent_identity, "require_actor", lambda: "agent:1")
 
         agents.spawn(prompt=("hello",))  # pyright: ignore[reportArgumentType]
         assert seen["prompt"] == "hello"
@@ -356,7 +356,7 @@ class TestShellEntries:
             "send",
             lambda sid, line: sent.update(sid=sid, line=line),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava._boot, "agent_id", lambda: 900001)
+        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
 
         run = _shell.run_background(("echo hi",), name=("bg",), ttl=60)  # pyright: ignore[reportArgumentType]
         assert run.session_id == 42
@@ -596,7 +596,7 @@ class TestMemoryEntries:
         from shared.paths import workspace_dir
 
         root = workspace_dir(900001) / "memory"
-        monkeypatch.setattr(ava._boot, "_agent_id", 900001)
+        monkeypatch.setattr(ava.agent_identity, "_agent_id", 900001)
         monkeypatch.setattr(
             memory_plugin,
             "_entry_path",
@@ -638,7 +638,7 @@ class TestTasksEntries:
             assert row is not None
             root_id = row[0]  # pyright: ignore[reportOptionalSubscript]
         db_conn.commit()
-        monkeypatch.setattr(ava._boot, "_agent_id", 900001)
+        monkeypatch.setattr(ava.agent_identity, "_agent_id", 900001)
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents (id) VALUES (900001) ON CONFLICT (id) DO NOTHING")
         db_conn.commit()
@@ -702,7 +702,7 @@ class TestNoticeEntries:
             lambda *_a, **_kw: seen.update(body=_a[1]) or _FakeResp(),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(_gateway_client, "_raise_from_response", lambda _resp: None)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava._boot, "agent_id", lambda: 900001)
+        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
 
         notice = fleet_plugin.notify(("Hi",), ("detail",), priority=("P2",))  # pyright: ignore[reportArgumentType]
         body = seen["body"]
@@ -746,7 +746,7 @@ class TestSelfEntries:
         from ava import self as self_mod
 
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(ava._boot, "assert_self_action", lambda _action: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ava.agent_identity, "assert_self_action", lambda _action: None)  # pyright: ignore[reportUnknownArgumentType]
 
         class _FakeCur:
             def execute(self, sql: str, params: tuple[object, ...]) -> None:
@@ -759,7 +759,7 @@ class TestSelfEntries:
             def __exit__(self, *exc: object) -> None:
                 return None
 
-        monkeypatch.setattr(ava._boot, "agent_id", lambda: 900001)
+        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
         monkeypatch.setattr(ava.DB, "cursor", _FakeCursor)
         monkeypatch.setattr(self_mod, "_publish_self_inbound_wake", lambda: None)
         import shared.audit_events as _audit

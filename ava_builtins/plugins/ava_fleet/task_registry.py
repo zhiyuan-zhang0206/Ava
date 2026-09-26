@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeGuard
 
 import ava
-import ava._boot
+import ava.agent_identity
 import ava.agents
 from ava._sdk_validation import coerce_str, coerce_typed
 from shared.tasks.task_owner_notifications import owner_change_notifications
@@ -281,7 +281,7 @@ def create(
         brief, description, remind_interval_seconds, priority
     )
     token_budget, usd_budget = _validate_budgets(token_budget, usd_budget)
-    actor = ava._boot.agent_id()
+    actor = ava.agent_identity.agent_id()
     effective_owner = owner if owner is not None else actor
     with ava.DB.transaction(), ava.DB.cursor() as cur:
         # parent is required: only the system root task (id 1) may parent the
@@ -458,7 +458,7 @@ def update(
     sets.append("reminder_count = 0")
     sets.append("escalated_at = NULL")
 
-    actor = ava._boot.agent_id()
+    actor = ava.agent_identity.agent_id()
     with ava.DB.transaction(), ava.DB.cursor() as cur:
         if parent_id is not _UNSET:
             sets.append("parent_id = %s")

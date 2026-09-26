@@ -111,7 +111,7 @@ def is_launched_child() -> bool:
     `AVA_AGENT_ID`, so no identity establishes).
 
     Establishes from the environment first (so a fresh child that has not
-    touched `_boot` yet reports correctly), then reports the launched-child
+    touched `agent_identity` yet reports correctly), then reports the launched-child
     signal. This gates the lazy plugin-namespace load in `ava.__getattr__`: only
     such a child self-loads plugins on first unknown-attribute access — so a bare
     `python x.py` in a persistent shell session gets `ava.tasks` et al. without a

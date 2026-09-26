@@ -93,7 +93,7 @@ def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
     import ava
     from agent.graph import _exec_output
 
-    monkeypatch.setattr(ava._boot, "_agent_id", 7)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
     monkeypatch.setattr(_exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
 
     limit = 1000
@@ -123,7 +123,7 @@ def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
     import ava
     from agent.graph import _exec_output
 
-    monkeypatch.setattr(ava._boot, "_agent_id", 7)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
     monkeypatch.setattr(_exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
     monkeypatch.setattr(_exec_output, "_OVERFLOW_KEEP", 3)
 

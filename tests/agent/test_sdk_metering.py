@@ -405,7 +405,7 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
 ) -> None:
     from typing import Any
 
-    from ava import _boot
+    from ava import agent_identity
     from shared import sdk_call_policy, telemetry
 
     rows: list[dict[str, Any]] = []
@@ -416,9 +416,9 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     def validate() -> int:
         pytest.fail("observational telemetry must not validate the lease")
 
-    monkeypatch.setattr(_boot, "_external_identity", validate)
-    monkeypatch.setattr(_boot, "_external_agent_id", 99)
-    monkeypatch.setattr(_boot, "_agent_id", 42)
+    monkeypatch.setattr(agent_identity, "_external_identity", validate)
+    monkeypatch.setattr(agent_identity, "_external_agent_id", 99)
+    monkeypatch.setattr(agent_identity, "_agent_id", 42)
     monkeypatch.setattr(telemetry, "emit", capture)
     monkeypatch.setattr(sdk_call_policy, "policy", sdk_call_policy.SamplingPolicy)
     wrapped = sdk_metering._make_recorder(lambda: "ok", "files.read")

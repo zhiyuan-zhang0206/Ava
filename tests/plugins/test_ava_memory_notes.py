@@ -296,7 +296,7 @@ def test_memory_index_note_is_suppressed_for_eval_isolation(
 def test_personal_index_uses_hosted_turn_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from ava import _boot
+    from ava import agent_identity
     from ava_builtins.plugins.ava_memory import notes
     from shared.config import settings
     from shared.turn_identity import bind_turn_identity
@@ -304,7 +304,7 @@ def test_personal_index_uses_hosted_turn_identity(
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
 
-    monkeypatch.setattr(_boot, "_agent_id", 17)
+    monkeypatch.setattr(agent_identity, "_agent_id", 17)
     monkeypatch.setattr(notes, "workspace_dir", workspace)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)
     index = tmp_path / "29" / "memory" / "MEMORY.md"
@@ -322,14 +322,14 @@ def test_personal_index_uses_hosted_turn_identity(
 def test_personal_index_skips_unestablished_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from ava import _boot
+    from ava import agent_identity
     from ava_builtins.plugins.ava_memory import notes
     from shared.config import settings
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
 
-    monkeypatch.setattr(_boot, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     monkeypatch.setattr(notes, "workspace_dir", workspace)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)

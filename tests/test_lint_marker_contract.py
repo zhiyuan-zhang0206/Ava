@@ -136,7 +136,7 @@ def test_send_system_note_rejects_unknown_notetag_before_gateway(
     """Changing the SDK guard to forward an unknown tag must fail this test."""
     from ava import agents
 
-    monkeypatch.setattr(agents.ava._boot, "require_actor", lambda: 1)
+    monkeypatch.setattr(agents.ava.agent_identity, "require_actor", lambda: 1)
 
     def unexpected_gateway_call(*_args: object, **_kwargs: object) -> int:
         pytest.fail("unknown note tag reached the gateway client")

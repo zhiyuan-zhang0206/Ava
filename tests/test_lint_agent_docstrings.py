@@ -214,9 +214,9 @@ def test_discover_agent_surface_modules(tmp_path: Path) -> None:
             """Start a session."""
         ''',
     )
-    # The key regression: a framework module renamed from `_boot.py` to a
-    # public name, with no marker and not listed as a namespace -> OUT.
-    _write(ava_dir / "boot.py", '"""Framework module with a public name."""\n')
+    # The key regression: a framework module with a public name, no marker,
+    # and not listed as a namespace -> OUT.
+    _write(ava_dir / "framework_core.py", '"""Framework module with a public name."""\n')
     # Private-prefixed, no marker -> OUT (underscore alone proves nothing).
     _write(ava_dir / "_extend.py", '"""Private framework module."""\n')
     # Annotated assignment form of the marker -> IN.
@@ -259,7 +259,7 @@ def test_is_in_scope_consults_provided_surface_set(
     surface = {(tmp_path / "ava" / "files.py").resolve()}
 
     assert _is_in_scope(Path("ava/files.py"), set(), surface) is True
-    assert _is_in_scope(Path("ava/boot.py"), set(), surface) is False
+    assert _is_in_scope(Path("ava/framework_core.py"), set(), surface) is False
 
 
 def test_is_in_scope_plugin_paths_unchanged(
@@ -288,14 +288,14 @@ def test_is_in_scope_plugin_paths_unchanged(
 def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> None:
     # Regression check against the actual repo tree: `ava/agents/__init__.py`
     # and `ava/shell/__init__.py` were previously excluded by the `_` rule
-    # (their path has no underscore segment, but `__init__.py` was special-
-    # cased out); `ava/_boot.py` and `ava/_extend.py` are framework-private
-    # and declare no marker, so they stay out under the new rule too.
+    # (`__init__.py` itself starts with an underscore); `ava/agent_identity.py`
+    # and `ava/_extend.py` declare no marker and are not listed as a namespace,
+    # so they stay out under the new rule too.
     repo_root = Path(__file__).resolve().parents[1]
 
     surface = _discover_agent_surface_modules(repo_root)
 
     assert (repo_root / "ava/agents/__init__.py").resolve() in surface
     assert (repo_root / "ava/shell/__init__.py").resolve() in surface
-    assert (repo_root / "ava/_boot.py").resolve() not in surface
+    assert (repo_root / "ava/agent_identity.py").resolve() not in surface
     assert (repo_root / "ava/_extend.py").resolve() not in surface

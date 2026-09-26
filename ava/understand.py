@@ -59,11 +59,11 @@ def _save_understand_output(prompt: str, result: str, *, source: str) -> Path | 
     is established (outside an agent process). Prunes old files to a ring of
     `_OVERFLOW_KEEP`."""
     try:
-        from ava import _boot
+        from ava import agent_identity
     except ImportError:
         return None
     try:
-        agent_id = _boot.require_agent_id()
+        agent_id = agent_identity.require_agent_id()
     except RuntimeError:
         return None
     from shared.paths import workspace_dir

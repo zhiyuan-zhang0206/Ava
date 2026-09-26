@@ -138,7 +138,7 @@ def _overflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     import ava
     from agent.graph import _exec_output
 
-    monkeypatch.setattr(ava._boot, "_agent_id", 7)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
     monkeypatch.setattr(_exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
     return tmp_path / "overflow"
 

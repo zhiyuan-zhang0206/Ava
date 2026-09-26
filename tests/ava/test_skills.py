@@ -1212,7 +1212,7 @@ def test_files_read_skill_md_attribution_deduped_per_run(
 
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     monkeypatch.setattr(skills_mod, "_recorded_skill_invocations", set[tuple[int, str]]())
-    monkeypatch.setattr("ava._boot.require_agent_id", lambda: 1)
+    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
     attempts: list[int] = []
 
@@ -1278,7 +1278,7 @@ def test_skills_read_deduped_across_spellings(
     per-(agent, skill) dedup, not the spelling, decides attribution."""
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     monkeypatch.setattr(skills_mod, "_recorded_skill_invocations", set[tuple[int, str]]())
-    monkeypatch.setattr("ava._boot.require_agent_id", lambda: 1)
+    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
     attempts: list[int] = []
 
@@ -1357,7 +1357,7 @@ def test_a_failed_write_is_retried_not_remembered(
     write that reported success, so the next access retries."""
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
     monkeypatch.setattr(skills_mod, "_recorded_skill_invocations", set[tuple[int, str]]())
-    monkeypatch.setattr("ava._boot.require_agent_id", lambda: 1)
+    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
     attempts: list[int] = []
 

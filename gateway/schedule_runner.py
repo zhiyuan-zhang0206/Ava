@@ -361,9 +361,9 @@ def run(schedule_id: int) -> int:
 
     # Bind the actor so ava.agents.* attributes this schedule's spawns/wakes to
     # `schedule:<id>` (a .py script, run in-process below, shares this binding).
-    import ava._boot
+    import ava.agent_identity
 
-    ava._boot.establish_actor(f"schedule:{schedule_id}")
+    ava.agent_identity.establish_actor(f"schedule:{schedule_id}")
 
     # Run history: one row per process execution, opened in-progress (ok=NULL)
     # here and closed with the outcome on every exit path below — including the

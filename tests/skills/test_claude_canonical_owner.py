@@ -587,7 +587,7 @@ def test_claude_takeover_cli_rejects_files_and_requires_a_brief(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("ava._boot.require_agent_id", lambda: 41)
+    monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 41)
     monkeypatch.setattr(
         sys,
         "argv",

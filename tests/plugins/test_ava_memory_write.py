@@ -21,9 +21,9 @@ from shared.plugin_context import PluginContext
 @pytest.fixture
 def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     """Load ava_memory through its registration path against isolated stores."""
-    import ava._boot as boot
     import shared.machine
     import shared.paths
+    from ava import agent_identity
 
     workspace = tmp_path / "workspace"
     pool = tmp_path / "pool"
@@ -44,7 +44,7 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     monkeypatch.setattr(shared.paths, "workspace_dir", isolated_workspace)
     monkeypatch.setattr(shared.paths, "memory_dir", isolated_pool)
     monkeypatch.setattr(shared.machine, "machine_name", isolated_machine_name)
-    monkeypatch.setattr(boot, "_agent_id", 17)
+    monkeypatch.setattr(agent_identity, "_agent_id", 17)
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -530,9 +530,9 @@ def test_plugin_loads_and_writes_without_fcntl(
 
     monkeypatch.setattr(builtins, "__import__", no_fcntl)
 
-    import ava._boot as boot
     import shared.machine
     import shared.paths
+    from ava import agent_identity
 
     workspace = tmp_path / "workspace"
     pool = tmp_path / "pool"
@@ -550,7 +550,7 @@ def test_plugin_loads_and_writes_without_fcntl(
     monkeypatch.setattr(shared.paths, "workspace_dir", isolated_workspace)
     monkeypatch.setattr(shared.paths, "memory_dir", isolated_pool)
     monkeypatch.setattr(shared.machine, "machine_name", lambda: "memory-host")
-    monkeypatch.setattr(boot, "_agent_id", 17)
+    monkeypatch.setattr(agent_identity, "_agent_id", 17)
 
     clear_plugin_registrations()
     for name in list(sys.modules):

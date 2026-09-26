@@ -574,10 +574,10 @@ _prewarm_full_settings()
 # ids are no longer reset between tests (see `_clean_state` — no RESTART IDENTITY),
 # so the first spawn is NOT guaranteed to be id 1. Any test that exercises
 # `ava.self.*` / `ava.agents.*` re-pins this to the id it actually created via
-# `ava._boot._agent_id = spawn_agent()` (the pattern used across tests/ava/*). Do
+# `ava.agent_identity._agent_id = spawn_agent()` (the pattern used across tests/ava/*). Do
 # not rely on "the first spawn is 1" — capture the returned id.
-ava._boot._agent_id = 1
-ava._boot._owns_loop = True
+ava.agent_identity._agent_id = 1
+ava.agent_identity._owns_loop = True
 # Remove AVA_AGENT_ID propagated from the agent process — any test that
 # temporarily clears _agent_id would re-establish from this env var with
 # owns_loop=False, corrupting subsequent tests.
@@ -1167,14 +1167,14 @@ def workspace(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ava.shell.run / ava.understand path mode), under the per-test unit home.
 
     Pins the agent id explicitly via monkeypatch instead of relying on the
-    session-global `ava._boot._agent_id = 1` staying unmutated across test
+    session-global `ava.agent_identity._agent_id = 1` staying unmutated across test
     ordering (a leak through that global is exactly what the `_isolated_agent`
     monkeypatch fix in tests/ava/conftest.py guards against). The dir is NOT
     pre-created — `workspace_dir` mkdirs on first resolution, and several
     tests assert exactly that; pre-create with `.mkdir(parents=True)` when a
     test seeds files into it.
     """
-    monkeypatch.setattr(ava._boot, "_agent_id", 1)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", 1)
     return unit_home / "workspaces" / "1"
 
 
