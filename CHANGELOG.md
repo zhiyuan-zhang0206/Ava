@@ -65,6 +65,14 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- Redis always authenticates, including a single box with an empty
+  `AVA_CLUSTER_SECRET`: first start mints `AVA_REDIS_ADMIN_PASSWORD` (the
+  `requirepass`) and the runtime ACL password in `AVA_REDIS_URL`, and no ACL user
+  is ever created `nopass`. The passwords do not rotate per rollout. `ava start`
+  refuses a home born without them; convert it once with
+  `scripts/cutover_db_authority.py --home <home> --execute` (application
+  stopped) or re-birth a disposable development home. The bearer still decides
+  only Redis's network reach.
 - The ops-facing `ava` CLI moves its remaining argument checks to the parse
   layer (task #4092 batch B4, user ruling 2026-09-20): `schedules create`
   requires exactly one of `--script` / `--script-file`; `schedules update`

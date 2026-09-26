@@ -23,6 +23,8 @@ from typing import cast
 import psycopg
 import pytest
 import redis
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 from cli.commands import _cluster_instance as ci
 from cli.commands._data_plane import ensure_gateway_data_plane
@@ -244,6 +246,67 @@ def test_gateway_cold_start_restores_redis_url_identity(
         assert admin.acl_getuser("ava_main") is None  # pyright: ignore[reportUnknownMemberType]
 
 
+def test_fresh_single_box_redis_refuses_unauthenticated_connections(
+    isolated_cluster: tuple[int, int], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A fresh single-box home (empty bearer) is born with generated Redis
+    credentials, and the official bring-up serves a Redis that refuses an
+    unauthenticated client; the runtime ACL user and the admin user authenticate."""
+    from cli.start_identity import IdentityInput, _gateway_values
+
+    pg_port, redis_port = isolated_cluster
+    home = Path(settings.general.ava_home)
+    ports = cluster.LEGACY_AVA_PORTS.copy()
+    ports.update(postgres=pg_port, redis=redis_port, pgbouncer=_free_port())
+    record = cluster.ClusterRecord(
+        ports=cast("cluster.ClusterPorts", ports), gateway_home=str(home), created_at="test"
+    )
+    values = _gateway_values(
+        record,
+        IdentityInput(
+            home,
+            tmp_path / "clusters.json",
+            tmp_path,
+            False,
+            frozenset({"gateway", "agent-runner"}),
+            {"AVA_PGBOUNCER_ENABLED": "false"},
+        ),
+    )
+    assert values["AVA_CLUSTER_SECRET"] == ""
+    admin = values["AVA_REDIS_ADMIN_PASSWORD"]
+    (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    monkeypatch.setattr(settings.data_plane, "db_admin_password", "")
+    monkeypatch.setattr(settings.data_plane, "db_url", values["AVA_DB_URL"])
+    monkeypatch.setattr(settings.data_plane, "redis_url", values["AVA_REDIS_URL"])
+    monkeypatch.setattr(settings.data_plane, "redis_admin_password", admin)
+    monkeypatch.setattr(settings.data_plane, "events_channel", values["AVA_EVENTS_CHANNEL"])
+
+    def _record(_home: Path) -> cluster.ClusterRecord:
+        return record
+
+    monkeypatch.setattr(cluster, "get_record", _record)
+    try:
+        assert ensure_gateway_data_plane() == 0
+        with (
+            redis.Redis(port=redis_port, retry=Retry(NoBackoff(), 0)) as anonymous,
+            pytest.raises(redis.AuthenticationError),
+        ):
+            anonymous.ping()  # pyright: ignore[reportUnknownMemberType]
+        with redis.Redis.from_url(values["AVA_REDIS_URL"]) as runtime:  # pyright: ignore[reportUnknownMemberType]
+            assert runtime.ping()  # pyright: ignore[reportUnknownMemberType]
+        with redis.Redis(port=redis_port, password=admin) as administrator:
+            assert administrator.ping()  # pyright: ignore[reportUnknownMemberType]
+        assert f'requirepass "{admin}"' in (home / "redis" / "redis.conf").read_text()
+    finally:
+        subprocess.run(  # noqa: S603
+            [ci._redis_cli_bin(), "-p", str(redis_port), "shutdown", "nosave"],
+            env=ci._redis_cli_env(admin),
+            check=False,
+            capture_output=True,
+        )
+
+
 def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
     isolated_cluster: tuple[int, int],
 ) -> None:
@@ -444,6 +507,8 @@ def test_birth_hba_follows_passed_secret_not_ambient_settings(
         pg_port=pg_port,
         redis_port=redis_port,
         cluster_secret="",
+        redis_admin_password=_REDIS_ADMIN,
+        redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
     )
     assert rc == 0
@@ -502,6 +567,8 @@ def test_fresh_install_migrations_apply_no_secret(
         pg_port=pg_port,
         redis_port=redis_port,
         cluster_secret=secret,
+        redis_admin_password=_REDIS_ADMIN,
+        redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
     )
     assert rc == 0
@@ -515,6 +582,8 @@ def test_fresh_install_migrations_apply_no_secret(
         pg_port=pg_port,
         redis_port=redis_port,
         cluster_secret=secret,
+        redis_admin_password=_REDIS_ADMIN,
+        redis_password=_REDIS_RUNTIME,
         redis_user="ava_tinst",
     )
     assert rc == 0

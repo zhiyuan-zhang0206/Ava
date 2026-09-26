@@ -175,6 +175,10 @@ PostgreSQL and pooler connections always authenticate, even when the
 frontend/control-plane bearer is empty
 ([decision](../../decisions/2026-09-26-internal-data-plane-always-authenticated.md)).
 The empty-secret convention in AGENTS.md changes when this lands.
+Implemented: Redis always authenticates with generated admin and runtime
+passwords, which do not rotate per rollout; existing homes convert through the
+one-time `scripts/cutover_db_authority.py`
+([credential split](../../conventions/data-plane-secret-split.md#convert-an-existing-home)).
 No database role, credential, schema or runtime-admission cutover is implemented
 by this plan. The first prerequisite is in place: schema-creating DDL
 (baseline, checkpoint setup, migrations, the pgvector memory table) runs as the

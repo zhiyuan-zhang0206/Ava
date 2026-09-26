@@ -58,10 +58,9 @@ def redis_acl() -> DaemonProbe:
     from services.healthchecks import redis_acl as check
     from shared.cluster import ownership
 
-    endpoint = instance._redis_endpoint()
-    if endpoint is None:
+    port = instance._redis_port()
+    if port is None:
         return DaemonProbe.unavailable("no explicit local Redis endpoint")
-    port, _ = endpoint
 
     async def capture() -> OwnedProcess | None:
         from redis.asyncio import Redis

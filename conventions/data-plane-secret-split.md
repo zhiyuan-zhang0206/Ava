@@ -22,57 +22,47 @@ secret-bearing cluster: profile hygiene intentionally removes owner credentials,
 so deriving an owner password from `AVA_CLUSTER_SECRET` there would create an
 invalid mixed credential instead of a legal runner connection.
 
-## Upgrade a legacy cluster
+Redis always authenticates, whatever the bearer: first start mints
+`AVA_REDIS_ADMIN_PASSWORD` and `AVA_REDIS_PASSWORD` for every local data plane,
+including an empty-bearer single box, and they do not rotate per rollout
+([decision](../decisions/2026-09-26-internal-data-plane-always-authenticated.md)).
+Postgres credentials still follow the bearer: an empty-bearer single box keeps
+its owner password empty and Postgres unauthenticated on loopback.
 
-On the first eligible gateway `ava start` after this version is installed, Ava
-brings up the legacy bearer-backed data plane, applies migrations, then mints
-missing DB owner, Redis admin, and Redis runtime passwords. It re-affirms the
-owner role, changes and rewrites Redis `requirepass`, re-creates the Redis ACL
-password, refreshes the PgBouncer owner entry, writes the split values and URLs
-to the gateway `.env`, and updates the running process before service sessions
-start.
+## Convert an existing home
 
-An update launched by a predecessor that does not advertise the versioned
-credential-handoff protocol is a compatibility install: its child leaves the
-legacy credentials unchanged. That installs a parent capable of adopting the
-transition. A later ordinary `ava start` or rollout may then perform the split.
-This predecessor gate prevents a surviving old rollout process from attempting
-pin/recovery writes with credentials only its child knows.
+A home born before Redis always authenticated has empty Redis credentials and a
+Redis without `requirepass`. `ava start` refuses it and names
+`scripts/cutover_db_authority.py`, the one explicit conversion; nothing converts
+implicitly. Development and preview homes can be destroyed and re-born instead.
 
-Deploy that compatibility revision by itself and monitor the rollout through
-completion before relying on the handoff for a later transition. The already
-running predecessor owns its imported recovery implementation: if this first
-compatibility rollout itself fails or is interrupted after service stop, the
-target revision cannot retrofit the predecessor's recovery ordering, and that
-old recovery may relaunch the restarter before the gateway is ready. Keep the
-rollout under operator supervision; after the compatibility revision completes,
-subsequent rollouts use the versioned handoff and the new recovery boundary.
+Run it from the checkout that owns the home (its `.venv`), in a gateway context,
+with the application stopped:
 
-Before the first external mutation, the complete five-field target is atomically
-journaled at `$AVA_HOME/run/data-plane-credential-split.json`. Every phase is
-idempotent. A later start retries native data-plane bring-up with the journaled
-passwords when the current `.env` credentials no longer work, then replays the
-journal before migrations. The journal is removed only after Postgres, Redis,
-PgBouncer, `.env`, process environment, and in-memory settings agree. No manual
-Redis restart or password rollback is required after an interruption; re-run
-`ava start` and let the journal finish forward.
+```bash
+ava stop --keep-infra
+.venv/bin/python scripts/cutover_db_authority.py --home "$AVA_HOME"            # dry-run
+.venv/bin/python scripts/cutover_db_authority.py --home "$AVA_HOME" --execute
+ava start
+```
 
-Failed-update schema recovery does not depend on the runtime owner password.
-It connects to the target database through this gateway's local Postgres trust
-socket as the instance administrator, so a failure after Postgres accepts the
-journaled password but before the parent adopts it can still roll migrations
-back, restore last-known-good code, and restart the gateway.
+`--home` must name the checkout's own home. The script refuses a remote-managed
+plane, a home without a registry record, an active release operation, a running
+application root and persistent terminals. The `redis` step mints both passwords
+into `.env` (the runtime one also inside `AVA_REDIS_URL`), stops the owned
+password-less Redis under native custody with a final save, restarts it from a
+`redis.conf` carrying `requirepass`, re-affirms the ACL user with its password,
+and proves that an unauthenticated client is refused. A home already born
+authenticated is only verified. Each step records its intent before its effect in
+`$AVA_HOME/db-authority/cutover.json` (0600): an interrupted run continues with
+the credentials it already wrote, and a completed run repeats as a verified
+no-op. Ambiguous state is refused before any change: partial Redis credentials,
+a URL whose password is not `AVA_REDIS_PASSWORD`, a Redis that demands a
+password the home does not record, credentials no journal claims while Redis
+still serves unauthenticated, or a journal that contradicts `.env`.
 
-Only failure to construct or open that local-admin connection proves rollback
-never began and the schema is unchanged. An unexpected error after rollback
-execution starts can arrive after commit or with an uncertain commit outcome;
-recovery leaves code on the new revision, reports schema state as unknown, and
-requires the operator to verify the applied migration set and schema before
-choosing reset or fix-forward.
-
-Fresh authenticated installs mint all three values at birth. Empty-bearer
-single-box clusters are intentionally a no-op: all data-plane credentials remain
-empty and local services stay unauthenticated.
+The rewritten `.env` changes the configuration digest, so a release request
+prepared before the cutover must be prepared again.
 
 Verify a completed split on the gateway without printing credentials:
 

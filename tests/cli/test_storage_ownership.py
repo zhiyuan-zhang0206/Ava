@@ -22,9 +22,11 @@ from shared.native_process.ownership import OwnedProcess
 from tests._containers import redis_server
 
 
-def test_foreign_no_auth_redis_keeps_acl_and_config(
+def test_foreign_redis_keeps_acl_and_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A foreign Redis that even accepts this home's admin password is not ours:
+    native ownership refuses before any ACL or config effect."""
     config = tmp_path / "redis.conf"
     config.write_text("original config\n")
     monkeypatch.setattr(instance, "_redis_data_dir", lambda: tmp_path)
@@ -34,8 +36,9 @@ def test_foreign_no_auth_redis_keeps_acl_and_config(
         port = urlsplit(url).port
         assert port is not None
         with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
+            client.config_set("requirepass", "admin")  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             before = client.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
-            assert instance._start_redis(port, "", "", "", "unowned") == 1
+            assert instance._start_redis(port, "admin", "runtime", "", "unowned") == 1
             assert client.execute_command("ACL", "LIST") == before  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
     assert config.read_text() == "original config\n"
 

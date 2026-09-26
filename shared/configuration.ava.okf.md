@@ -71,11 +71,11 @@ demotes a caller that declares its required capacity to the disk fallback
 home-authority projection as `AVA_REDIS_BIN_DIR`, so a parent's selection cannot
 leak into a sibling home.
 
-Authenticated Linux Redis uses the caller's cluster bearer posture to bind
-loopback plus this host's reachable address after the bounded address wait.
-macOS keeps its loopback relay workaround; an empty caller bearer stays
-loopback-only on either platform. Redis authentication still uses the separate
-admin and runtime passwords, not the bearer.
+Linux Redis uses the caller's cluster bearer posture to bind loopback plus this
+host's reachable address after the bounded address wait. macOS keeps its
+loopback relay workaround; an empty caller bearer stays loopback-only on either
+platform. Redis always authenticates with the separate admin and runtime
+passwords, whatever the bearer; the bearer decides only its reach.
 
 The local OTLP producer endpoint and collector port are host-scoped. Bootstrap
 publishes the read-only `AVA_GATEWAY_OTLP_ENDPOINT` derived from the gateway's

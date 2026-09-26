@@ -281,10 +281,11 @@ class DataPlaneSettings(EnvSettings):
         default="",
         alias="AVA_CLUSTER_SECRET",
         description=(
-            "Single per-cluster pre-shared secret. EMPTY = a fully unauthenticated "
-            "cluster: the gateway API and /ops serve without auth, Postgres/Redis "
-            "run without scram/requirepass (loopback-trust only), and every surface "
-            "binds loopback alone — the single-box no-secret posture. NON-EMPTY = "
+            "Single per-cluster pre-shared secret. EMPTY = the single-box no-secret "
+            "posture: the gateway API and /ops serve without auth, Postgres runs "
+            "without scram (loopback-trust only), and every surface binds loopback "
+            "alone; Redis requires its generated passwords whatever the secret. "
+            "NON-EMPTY = "
             "the bearer authenticating cross-machine control surfaces (/ops dials and "
             "runner /api/bootstrap). Data-plane credentials are independent: the owner "
             "and Redis default-user passwords remain gateway-local, while runner "
@@ -321,8 +322,9 @@ class DataPlaneSettings(EnvSettings):
         alias="AVA_REDIS_ADMIN_PASSWORD",
         description=(
             "Password for Redis's default administrative user and requirepass. "
-            "Gateway-local only: it is never distributed by bootstrap or passed to "
-            "agent processes."
+            "Minted at first start for every local data plane, including an empty "
+            "cluster secret. Gateway-local only: it is never distributed by "
+            "bootstrap or passed to agent processes."
         ),
         json_schema_extra={
             "restart_required": "all",

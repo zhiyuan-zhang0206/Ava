@@ -12,6 +12,7 @@ from pathlib import Path
 from threading import Event
 from typing import Any
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 import pytest
 from dotenv import dotenv_values
@@ -55,6 +56,12 @@ def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityIn
     assert db_url is not None and db_url.endswith(f":{rec.ports['pgbouncer']}/ava")
     assert env["AVA_CLUSTER_SECRET"] == ""
     assert env["AVA_RUNNER_DB_PASSWORD"]
+    # Redis always authenticates: a no-secret single box is still born with
+    # independent Redis admin and runtime passwords, the runtime one in its URL.
+    redis_admin, redis_runtime = env["AVA_REDIS_ADMIN_PASSWORD"], env["AVA_REDIS_PASSWORD"]
+    assert redis_admin and redis_runtime and redis_admin != redis_runtime
+    redis_url = urlsplit(env["AVA_REDIS_URL"] or "")
+    assert (redis_url.username, redis_url.password) == ("ava", redis_runtime)
     assert (inputs.checkout / ".ava_home").read_text().strip() == str(inputs.home)
     assert not (inputs.home / "pg").exists()
 

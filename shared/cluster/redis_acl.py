@@ -33,15 +33,20 @@ def ensure_cluster_redis_acl(
     password (this call is idempotent either way), and re-affirming with a
     rotated one actually invalidates the old one.
 
-    Empty secret (single-box no-auth): the user is created with `nopass` instead
-    of a password. The runtime URLs still carry the identity as username
-    (names-as-data holds with or without auth), and a URL with a username makes
-    redis-py send AUTH — a missing user would WRONGPASS forever and the wake bus
-    would never deliver. `nopass` lets that AUTH succeed while the posture stays
-    unauthenticated (requirepass is off and the `default` user is nopass too).
+    Redis always authenticates, whatever the control-plane bearer
+    (decisions/2026-09-26-internal-data-plane-always-authenticated.md): an empty
+    `runtime_password` is refused rather than creating a password-less user.
 
     redis_admin_url connects as the Redis `default` user with the independent
-    gateway-only Redis admin password."""
+    gateway-only Redis admin password.
+
+    Raises:
+        ValueError: `runtime_password` is empty."""
+    if not runtime_password:
+        raise ValueError(
+            "the Redis ACL user requires its generated runtime password; Redis always "
+            "authenticates and never creates a password-less user"
+        )
     import redis
     from redis.backoff import NoBackoff
     from redis.retry import Retry
@@ -76,7 +81,7 @@ def ensure_cluster_redis_acl(
             user,
             "on",
             "resetpass",
-            f">{runtime_password}" if runtime_password else "nopass",
+            f">{runtime_password}",
             "resetkeys",
             "~*",
             "resetchannels",

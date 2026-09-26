@@ -39,7 +39,8 @@ Ava code participates and a box with no agents running still reports.
   `cli/commands/_otel_collector.py` omits them, and the rendered config is
   0600 because it carries the secret. The Postgres contrib receiver is also
   omitted when the direct URL has an empty password because that receiver
-  rejects empty credentials; Redis remains enabled and unauthenticated.
+  rejects empty credentials; Redis always authenticates, so its receiver stays
+  enabled in every posture.
 
 Not a node_exporter / postgres_exporter / redis_exporter trio: the pinned
 contrib collector already carries equivalent receivers, and one supervised

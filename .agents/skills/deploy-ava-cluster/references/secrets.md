@@ -35,7 +35,7 @@ The first-start capabilities determine the initial control-plane secret:
 
 | First-start shape | Secret |
 |---|---|
-| `--serve-gateway --serve-agent-runner` | Empty bearer by default; unauthenticated loopback access. The runner DB credential remains independent. |
+| `--serve-gateway --serve-agent-runner` | Empty bearer by default; unauthenticated loopback API and Postgres. Redis still gets its generated admin and runtime passwords, and the runner DB credential remains independent. |
 | `--serve-gateway --no-serve-agent-runner` | Minted automatically. Transfer only the bearer to runners through the operator's secret channel. |
 | `--worktree` | Single-box defaults; no production secret or data is copied. |
 | `--serve-agent-runner --no-serve-gateway` | Supply the gateway bearer as `AVA_CLUSTER_SECRET` for the first start. |

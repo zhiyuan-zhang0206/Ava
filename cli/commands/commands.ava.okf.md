@@ -62,7 +62,7 @@ See [the coordinated operator procedure](../../conventions/graceful-maintenance.
 Gateway data-plane startup passes separate URL identities to `_cluster_instance`:
 Postgres db/role comes from `db_identity()`, Redis ACL user from `redis_identity()`.
 First-start identity persists each credential before effects; startup refuses
-missing owner credentials and never substitutes the bearer. The identity owner
+missing owner or Redis credentials and never substitutes the bearer. The identity owner
 writes each URL before bringing up storage; no runtime identity backfill exists.
 `shared.cluster.ownership` is the common startup/maintenance observer: home
 paths, native process birth and all listener PIDs must agree before config,

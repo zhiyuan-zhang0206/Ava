@@ -165,8 +165,8 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
         )
         receivers.append("postgresql")
     # The contrib postgresql receiver rejects an empty password, so no-auth
-    # single-box homes omit only that receiver. Redis supports an empty
-    # password and remains observable in the same posture.
+    # single-box homes omit only that receiver. Redis always authenticates
+    # with its admin password and stays observable in every posture.
     blocks.append(
         _REDIS_RECEIVER_BLOCK.format(
             redis_endpoint=_endpoint(redis_url, "redis"),

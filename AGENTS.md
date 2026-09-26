@@ -68,8 +68,9 @@ the Redis ACL credential embedded in `AVA_REDIS_URL`. Identity stays data in URL
 usernames, never derived from a name. The bearer still decides the network
 posture: Postgres and its pooler bind loopback + this host's reachable address
 only when set; Redis is always loopback-only with off-box inbound carried by the
-host-level relay bridge. An EMPTY secret (single-box default — off is fully off)
-keeps every credential empty and serves everything unauthenticated, loopback-only.
+host-level relay bridge. An EMPTY secret (single-box default) leaves Postgres and
+the API unauthenticated, loopback-only; Redis always authenticates with passwords
+minted at first start (older homes convert once: `scripts/cutover_db_authority.py`).
 Every `AVA_PROCESS_PROFILE=agent` process, including the single-box hosted
 agent-host, is launched with an explicit `ava_runner` DB URL projection; it must
 never combine an owner username with the cluster bearer.

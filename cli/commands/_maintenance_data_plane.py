@@ -124,10 +124,9 @@ async def _request_stop(
 async def _stop(deadline: float, *, save: bool = True) -> list[str]:
     pg = _capture_postgres()
     pgb = _capture_pooler()
-    endpoint = instance._redis_endpoint()
-    if endpoint is None:
+    port = instance._redis_port()
+    if port is None:
         raise RuntimeError("maintenance requires this home's explicit Redis endpoint")
-    port, _runtime_password = endpoint
     # The default user is the native instance's admin identity. The runtime URL
     # can carry a restricted ACL user's different password and is not admin auth.
     password = settings.data_plane.redis_admin_password or None

@@ -392,10 +392,23 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
     assert calls == ["provider:{'direct': True}", "prepare:provider-connection:768"]
 
 
-@pytest.mark.parametrize("missing", ["db_admin_password", "redis_admin_password", "redis_password"])
-def test_authenticated_storage_refuses_missing_credentials_before_effects(
-    monkeypatch: pytest.MonkeyPatch, missing: str
+@pytest.mark.parametrize(
+    ("secret", "missing", "reason"),
+    [
+        ("bearer-only", "db_admin_password", "explicit owner"),
+        ("bearer-only", "redis_admin_password", "cutover_db_authority"),
+        ("bearer-only", "redis_password", "cutover_db_authority"),
+        ("", "redis_admin_password", "cutover_db_authority"),
+        ("", "redis_password", "cutover_db_authority"),
+    ],
+)
+def test_storage_refuses_missing_credentials_before_effects(
+    monkeypatch: pytest.MonkeyPatch, secret: str, missing: str, reason: str
 ) -> None:
+    """Redis always authenticates, so an empty bearer does not excuse missing
+    Redis credentials: an unconverted home is refused (naming the one-time
+    cutover) before any native effect. Only the Postgres owner credential still
+    follows the bearer."""
     credentials = {
         "db_admin_password": "owner-value",
         "redis_admin_password": "admin-value",
@@ -407,11 +420,11 @@ def test_authenticated_storage_refuses_missing_credentials_before_effects(
         "_start_pg",
         lambda *_a: pytest.fail("storage started before validation"),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
-    with pytest.raises(ValueError, match="explicit owner"):
+    with pytest.raises(ValueError, match=reason):
         _ci.ensure_cluster_storage(
             pg_port=5433,
             redis_port=6380,
-            cluster_secret="bearer-only",  # noqa: S106 — isolated test credential
+            cluster_secret=secret,
             redis_user="ava",
             **credentials,
         )

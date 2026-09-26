@@ -400,6 +400,8 @@ def watcher_runner_env() -> dict[str, str]:
     agent launch tree may explicitly forward them. A profile-less process on
     the secured default-home gateway can carry the owner URL after config
     import; refuse that launch before it creates a doomed watcher session.
+    Redis always authenticates, so only a named, password-carrying runtime ACL
+    URL is forwarded, never the `default` admin user, whatever the bearer.
     """
     db_url = os.environ.get("AVA_DB_URL")
     redis_url = os.environ.get("AVA_REDIS_URL")
@@ -411,13 +413,11 @@ def watcher_runner_env() -> dict[str, str]:
     ):
         try:
             db_host = urlsplit(db_url).hostname
-            redis_user = urlsplit(redis_url).username
+            redis_parts = urlsplit(redis_url)
+            redis_user, redis_password = redis_parts.username, redis_parts.password
         except ValueError:
-            db_host = None
-            redis_user = None
-        if db_host and (
-            not os.environ.get("AVA_CLUSTER_SECRET") or redis_user not in (None, "default")
-        ):
+            db_host = redis_user = redis_password = None
+        if db_host and redis_user not in (None, "default") and redis_password:
             return {"AVA_DB_URL": db_url, "AVA_REDIS_URL": redis_url}
 
     if _HOME.resolve() == (Path.home() / ".ava").resolve() and os.environ.get("AVA_CLUSTER_SECRET"):

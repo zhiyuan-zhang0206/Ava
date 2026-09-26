@@ -235,10 +235,9 @@ def redis_admin_url() -> str:
     per-cluster runtime identity.
 
     Every cluster owns its Redis instance. Its `default` user password is an
-    independent gateway-only credential; a pre-split .env temporarily falls
-    back to the bearer until `ava start` mints the split. Host/port come from
-    this cluster's own `redis_url` (loopback + its per-cluster port), never a
-    hardcoded 6379."""
+    independent gateway-only credential (`AVA_REDIS_ADMIN_PASSWORD`, also the
+    instance's `requirepass`). Host/port come from this cluster's own
+    `redis_url` (loopback + its per-cluster port), never a hardcoded 6379."""
     from shared.config import settings
 
     parts = urlsplit(settings.data_plane.redis_url)
@@ -252,7 +251,10 @@ def redis_admin_url() -> str:
 
 
 def redis_password_from_env() -> str:
-    """This gateway home's file-only Redis ACL runtime password (empty for no-auth)."""
+    """This gateway home's file-only Redis ACL runtime password.
+
+    Empty only on a home born before Redis always authenticated; storage
+    bring-up refuses it and names the one-time cutover script."""
     from dotenv import dotenv_values
 
     from shared.paths import ava_home
@@ -353,8 +355,8 @@ def derive_env(
     base_redis_url: str,
     cluster_secret: str,
     db_admin_password: str = "",
-    redis_admin_password: str = "",
-    redis_password: str = "",
+    redis_admin_password: str,
+    redis_password: str,
     pgbouncer_enabled: bool = True,
 ) -> dict[str, str]:
     """Map a cluster record to the env vars a unit needs. Daemons read these via
@@ -367,15 +369,21 @@ def derive_env(
     **as data**: every consumer reads the identity back from these URLs; nothing
     re-derives it from a name. The three data-plane passwords are independently
     persisted so their rotation self-heals the matching URLs without changing
-    the bearer. An empty secret writes empty data-plane passwords and still
-    retains the identity username — names-as-data holds without auth. Pub/sub
+    the bearer. Redis always authenticates, so both Redis passwords are required
+    whatever the bearer; an empty secret still writes an empty Postgres owner
+    password and retains the identity username (names-as-data). Pub/sub
     channels are fixed (`ava:*`).
 
     `AVA_DB_URL` is the ONE access URL every process dials as-is;
     `pgbouncer_enabled` decides its port at generation — pooler (default) or
     direct Postgres. No pgbouncer-port env key."""
     p = rec.ports
-    if cluster_secret and not all((db_admin_password, redis_admin_password, redis_password)):
+    if not (redis_admin_password and redis_password):
+        raise ValueError(
+            "identity requires explicit data-plane credentials: Redis always "
+            "authenticates with its admin and runtime passwords"
+        )
+    if cluster_secret and not db_admin_password:
         raise ValueError("authenticated identity requires explicit data-plane credentials")
     db_password = db_admin_password
     redis_default_password = redis_admin_password

@@ -298,15 +298,21 @@ compatibility. Keep the selected directory available across boot and updates;
 the config selects tools but neither downloads nor upgrades them.
 
 The data-plane posture is uniform — the default is multi-machine, a single box is just
-the case where the reachable address is loopback (no single-vs-multi branch). When the
-control-plane bearer is set, Postgres authenticates its owner role with the gateway-only
-`AVA_DB_ADMIN_PASSWORD`; Redis authenticates its `default` administrative user and
-`requirepass` with the gateway-only `AVA_REDIS_ADMIN_PASSWORD`; and the Redis ACL runtime
-identity uses `AVA_REDIS_PASSWORD` embedded in `AVA_REDIS_URL`. The runner database role
-has its separate `AVA_RUNNER_DB_PASSWORD`, embedded only in its projected URL. The bearer
-never authenticates the data plane. An EMPTY bearer — the single-box default — keeps all
-credentials empty and serves everything unauthenticated on loopback. Postgres loopback
-stays `trust`, so the owner password is consulted on TCP connections. Settings re-applies
+the case where the reachable address is loopback (no single-vs-multi branch). Redis
+always authenticates, whatever the bearer: its `default` administrative user and
+`requirepass` use the gateway-only `AVA_REDIS_ADMIN_PASSWORD`, and the Redis ACL runtime
+identity uses `AVA_REDIS_PASSWORD` embedded in `AVA_REDIS_URL`; first start mints both,
+and they do not rotate per rollout. When the control-plane bearer is set, Postgres
+authenticates its owner role with the gateway-only `AVA_DB_ADMIN_PASSWORD`. The runner
+database role has its separate `AVA_RUNNER_DB_PASSWORD`, embedded only in its projected
+URL. The bearer never authenticates the data plane. An EMPTY bearer — the single-box
+default — keeps the Postgres credentials empty and serves the API and Postgres
+unauthenticated on loopback. Postgres loopback stays `trust`, so the owner password is
+consulted on TCP connections. A home born before Redis always authenticated is refused
+by `ava start` until it is converted once: stop its application (`ava stop --keep-infra`),
+then run `.venv/bin/python scripts/cutover_db_authority.py --home <home>` (dry-run) and
+again with `--execute` from the checkout that owns the home, then `ava start`
+([details](data-plane-secret-split.md#convert-an-existing-home)). Settings re-applies
 only the owner password to a main-identity DB URL; it leaves the Redis runtime URL
 verbatim. On the same load, a data-plane URL whose host is this machine's own reachable
 address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead (`shared/config/data_plane.py`):
@@ -353,13 +359,10 @@ live at `ava start` (`ensure_cluster_redis_acl`), scoped to
 the cluster's pub/sub channels (`ava:*`); it is re-affirmed on every start (not persisted
 to redis.conf) and by the `redis-acl` gateway-watchdog healthcheck, so a redis restart
 that drops the in-memory ACL is repaired before agents reconnect. Provisioning uses that
-instance's own `default` user (the independent Redis admin password). A legacy `.env`
-whose redis_url carries no username (`redis://:<runtime-password>@host/0`, born before the
-names-as-data ACL model) dials as that `default` user. If the healthcheck encounters
-that URL, `redis_identity()` raises `ValueError` and the watchdog reports a failure.
-`ava start` converge backfills the username into the URL (from the db_url identity)
-so the cluster adopts the scoped ACL user. The same startup process adopts the repaired
-URL before provisioning Redis; no-auth homes receive a named `nopass` identity.
+instance's own `default` user (the independent Redis admin password). The ACL user always
+carries its runtime password; no identity is ever created `nopass`. A `.env` whose
+redis_url carries no username has no ACL identity: `redis_identity()` raises
+`ValueError`, so startup and the healthcheck fail instead of guessing one.
 **Postgres and PgBouncer bind loopback + this
 host's reachable address (`AVA_MACHINE_HOST`, default `localhost`), de-duplicated**
 (never all interfaces): a single box resolves to loopback alone, while a split node
@@ -1570,7 +1573,8 @@ resources. It fans out:
   data plane, so its config omits those two receivers entirely rather than
   duplicating the gateway's series. A gateway whose Postgres URL has an empty
   password omits the contrib Postgres receiver (which rejects an empty
-  password) but keeps its unauthenticated Redis receiver.
+  password) but keeps its Redis receiver, which always authenticates with the
+  Redis-admin password.
 - **collector delivery metrics** — every sidecar scrapes its per-unit loopback
   self-metrics endpoint every 30s into `metrics/infra`
   (`AVA_OTELCOL_METRICS_PORT`, default 8888). The local watchdog probes the same

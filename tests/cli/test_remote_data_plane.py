@@ -206,7 +206,10 @@ def test_stop_remote_warns_about_orphaned_local_instance(
     )
     monkeypatch.setattr(cluster, "get_record", lambda _home: rec)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "_pg_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(ci, "_redis_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
+    # The remote-managed home carries no local Redis admin password, so the
+    # leftover Redis is detected by its listener, never by an authenticated PING.
+    monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
+    monkeypatch.setattr(dp, "_local_listener", lambda port: port == 18012)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = ci.stop_cluster_instance()
 
@@ -214,5 +217,5 @@ def test_stop_remote_warns_about_orphaned_local_instance(
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "remote-managed" in combined
-    assert "still running" in combined
+    assert "local postgres + redis from before the switch is still running" in combined
     assert "no longer managed" in combined

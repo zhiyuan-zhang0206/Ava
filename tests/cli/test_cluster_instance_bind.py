@@ -9,6 +9,7 @@ fails fast on timeout. A loopback-only single box never waits.
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -264,14 +265,45 @@ def _redis_bind_arg(command: list[str]) -> list[str]:
 def test_start_redis_binds_loopback_only_without_secret(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An unauthenticated Redis start uses exactly the loopback bind."""
+    """A no-secret Redis start uses exactly the loopback bind, and still
+    authenticates: the bearer decides reach, never whether Redis has a password."""
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
-    assert _ci._start_redis(6380, "", "", "", "ava") == 0
+    assert _ci._start_redis(6380, "redis-admin", "redis-runtime", "", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
     assert "--save" not in started[0]  # persistence rides the rendered conf, not argv
-    assert (tmp_path / "redis.conf").read_text().startswith("save 900 1")
+    conf = (tmp_path / "redis.conf").read_text()
+    assert conf.startswith("save 900 1")
+    assert conf.endswith('requirepass "redis-admin"\n')
+
+
+@pytest.mark.parametrize(
+    ("admin", "runtime"), [("", ""), ("", "redis-runtime"), ("redis-admin", "")]
+)
+def test_start_redis_refuses_missing_credentials_before_effects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, admin: str, runtime: str
+) -> None:
+    """Redis never starts, or is re-affirmed, without both generated passwords;
+    there is no password-less posture to fall back to."""
+    started = _wire_redis_start(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        _ci,
+        "_ensure_redis_acl",
+        lambda *_a, **_kw: pytest.fail("ACL effect without credentials"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    with pytest.raises(ValueError, match="password"):
+        _ci._start_redis(6380, admin, runtime, "", "ava")
+    assert started == []
+    assert not (tmp_path / "redis.conf").exists()
+
+
+def test_redis_admin_helpers_refuse_an_empty_password(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="admin password"):
+        _ci._write_redis_conf(tmp_path, "")
+    with pytest.raises(ValueError, match="admin password"):
+        _ci._redis_cli_env("")
+    assert not (tmp_path / "redis.conf").exists()
 
 
 def test_macos_start_redis_binds_loopback_only_with_secret(
@@ -315,7 +347,7 @@ def test_linux_redis_bind_uses_caller_secret_not_inherited_config(
         return True
 
     monkeypatch.setattr(_ci, "_wait_for_reachable_bind", address_ready)
-    assert _ci._start_redis(6380, "admin" if secret else "", "runtime", secret, "ava") == 0
+    assert _ci._start_redis(6380, "admin", "runtime", secret, "ava") == 0
     expected = ["--bind", "127.0.0.1", "10.0.0.5"] if secret else ["--bind", "127.0.0.1"]
     assert _redis_bind_arg(started[0]) == expected
     assert waits == ([True] if secret else [])
@@ -369,14 +401,41 @@ def test_redis_config_keeps_previous_complete_value_when_replace_fails(
 def test_redis_conf_always_renders_rdb_save_schedule(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A no-secret cluster still persists: the RDB save schedule must survive
-    every conf render, or a restart silently loses persistence (task #2027)."""
+    """A no-secret cluster still persists and authenticates: the RDB save
+    schedule and requirepass survive every conf render, or a restart silently
+    loses persistence (task #2027) or comes back without a password."""
     monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _ci._start_redis(6380, "", "", "", "ava") == 0
-    assert (tmp_path / "redis.conf").read_text() == "save 900 1\nsave 300 10\nsave 60 10000\n"
+    assert _ci._start_redis(6380, "admin", "runtime", "", "ava") == 0
+    assert (tmp_path / "redis.conf").read_text() == (
+        'save 900 1\nsave 300 10\nsave 60 10000\nrequirepass "admin"\n'
+    )
+
+
+def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime URL's ACL user can neither AUTH as `default` nor SHUTDOWN, so
+    the explicit force teardown must authenticate with the admin password."""
+    monkeypatch.setattr(
+        settings.data_plane, "redis_url", "redis://ava:runtime-pw@127.0.0.1:16380/0"
+    )
+    monkeypatch.setattr(settings.data_plane, "redis_admin_password", "admin-pw")
+    monkeypatch.setattr(_ci.owned_postgres, "stop", lambda _data: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._pgbouncer.stop_pgbouncer", lambda: None)
+    monkeypatch.setattr(_ci, "_redis_cli_bin", lambda: "redis-cli")
+    shutdowns: list[tuple[list[str], str]] = []
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        env = cast("dict[str, str]", kwargs["env"])
+        shutdowns.append((cmd[1:], env["REDISCLI_AUTH"]))
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(_ci.subprocess, "run", _run)
+    assert _ci.stop_cluster_instance() == 0
+    assert shutdowns == [(["-p", "16380", "shutdown", "nosave"], "admin-pw")]
 
 
 # ─── task #1303: postgres gets the same secret-gated reachable-bind wait ──────

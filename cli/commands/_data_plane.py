@@ -11,6 +11,7 @@ and `ava stop` — both must never touch a foreign service.
 
 from __future__ import annotations
 
+import socket
 import sys
 from urllib.parse import urlsplit
 
@@ -135,6 +136,15 @@ def remote_redis_reachable() -> tuple[bool, str]:
         return False, f"redis ({host}:{port}) connect failed: {detail}"
 
 
+def _local_listener(port: int) -> bool:
+    """Whether anything accepts TCP connections on loopback `port`."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
 def warn_orphaned_local_instance() -> None:
     """Best-effort warning when a local instance still runs under this home.
 
@@ -155,14 +165,13 @@ def warn_orphaned_local_instance() -> None:
         # The signal is a live process answering on this cluster's own instance
         # ports — whatever it is, it is not the remote-managed plane and not
         # something this cluster will ever manage again.
-        from cli.commands._cluster_instance import _pg_running, _redis_running
+        from cli.commands._cluster_instance import _pg_running
 
         if _pg_running(rec.ports["postgres"], "127.0.0.1"):
             leftovers.append("postgres")
-        # The admin credential is a variable read, not a literal — the name
-        # avoids GitGuardian's generic-password detector tripping on `password`.
-        redis_admin = settings.data_plane.redis_admin_password
-        if _redis_running(rec.ports["redis"], redis_admin, "127.0.0.1"):
+        # A plain listener check: the left-behind Redis always requires its admin
+        # password, which a remote-managed home no longer carries.
+        if _local_listener(rec.ports["redis"]):
             leftovers.append("redis")
         if leftovers:
             print(

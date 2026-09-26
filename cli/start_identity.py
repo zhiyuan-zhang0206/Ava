@@ -211,16 +211,17 @@ def _gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[s
     secret = vals.get("AVA_CLUSTER_SECRET", "")
     if not secret and inputs.roles != frozenset({"gateway", "agent-runner"}):
         secret = secrets.token_urlsafe(32)
-    passwords = [secrets.token_urlsafe(32) if secret else "" for _ in range(3)]
     db, redis = cluster.per_cluster_base_urls(rec)
     derived = cluster.derive_env(
         rec,
         base_db_url=db,
         base_redis_url=redis,
         cluster_secret=secret,
-        db_admin_password=passwords[0],
-        redis_admin_password=passwords[1],
-        redis_password=passwords[2],
+        db_admin_password=secrets.token_urlsafe(32) if secret else "",
+        # Redis always authenticates, whatever the bearer (decisions/
+        # 2026-09-26-internal-data-plane-always-authenticated.md).
+        redis_admin_password=secrets.token_urlsafe(32),
+        redis_password=secrets.token_urlsafe(32),
         pgbouncer_enabled=vals.get("AVA_PGBOUNCER_ENABLED", "true").lower()
         in {"1", "true", "yes", "on"},
     )
