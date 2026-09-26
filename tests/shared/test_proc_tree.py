@@ -156,3 +156,48 @@ def test_capture_and_verify_span_clock_epochs(
     identity = OwnedProcess.capture(psutil.Process())
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
     assert identity.live()
+
+
+class _FakeProcess:
+    """A psutil.Process stand-in for one link of a recorded parent chain."""
+
+    def __init__(self, pid: int, name: str, argv: list[str], parent: _FakeProcess | None) -> None:
+        self.pid = pid
+        self._name = name
+        self._argv = argv
+        self._parent = parent
+
+    def name(self) -> str:
+        return self._name
+
+    def exe(self) -> str:
+        return f"/usr/bin/{self._name}"
+
+    def ppid(self) -> int:
+        return self._parent.pid if self._parent is not None else 0
+
+    def parent(self) -> _FakeProcess | None:
+        return self._parent
+
+    def cmdline(self) -> list[str]:
+        return self._argv
+
+
+def test_process_metadata_records_the_script_of_a_node_ancestor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Node controller (DeepSeek Harness) is only identifiable by its script."""
+    shell = _FakeProcess(10, "zsh", ["-zsh"], None)
+    node = _FakeProcess(20, "node", ["node", "/opt/homebrew/bin/dsh", "web"], shell)
+    caller = _FakeProcess(30, "python3.12", ["python", "-m", "cli"], node)
+    monkeypatch.setattr(proc_tree.psutil, "Process", lambda: caller)
+
+    def stable(_process: object) -> float:
+        return 1.0
+
+    monkeypatch.setattr(proc_tree, "stable_create_time", stable)
+    metadata = proc_tree.process_metadata()
+    assert metadata["pid"] == 30 and "script" not in metadata
+    node_facts, shell_facts = metadata["ancestors"]
+    assert node_facts["name"] == "node" and node_facts["script"] == "/opt/homebrew/bin/dsh"
+    assert "script" not in shell_facts

@@ -17,7 +17,7 @@ A set of skills that **break large tasks into multi-agent / long tasks and drive
 | ava-workflow | Three actors (agents / human / real world), three phases (Calibrate / Align / Plan) with Evaluation threaded through all of them; Plan is only for very large or parallel tasks; sub: calibrate / align / plan / work-eval | [[ava_builtins/skills/orchestration/ava-workflow.ava.okf.md]] |
 | ava-dynamic-workflow | Orchestrate parallel workers: explore→fork→join→reduce | [[ava_builtins/skills/orchestration/ava-dynamic-workflow.ava.okf.md]] |
 | ava-goal | Supervise another agent to achieve a goal (watcher wakes up on target idle to judge) | [[ava_builtins/skills/orchestration/ava-goal.ava.okf.md]] |
-| ava-use-claude-code-and-codex | Drive Claude Code / OpenAI Codex CLI for long tasks | [[ava_builtins/skills/orchestration/ava-use-claude-code-and-codex.ava.okf.md]] |
+| ava-use-other-agents | Drive Claude Code / OpenAI Codex CLI for long tasks; hand the agent's identity to Codex, Claude Code or DeepSeek Harness | [[ava_builtins/skills/orchestration/ava-use-other-agents.ava.okf.md]] |
 
 ## Key dependencies
 - [[ava/skills.ava.okf.md|Skill System]] — skill mechanism and core-vs-instance origin axis

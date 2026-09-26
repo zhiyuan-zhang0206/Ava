@@ -25,7 +25,10 @@ briefing, which arrives inline in your launch message.
   watch; watch for the heartbeat it names, and only if none starts follow the
   manual fallback (`timeout_ms 1800000`, re-armed at each expiry notice) that
   the request output describes. Executor-armed launches say so and proceed as
-  before.
+  before. A DeepSeek Harness (dsh) takeover has nothing to arm: run the request
+  from your shell tool and the Ava relay plugin loaded into your session starts
+  the relay itself; if the request refuses because `DSH_AVA_RELAY_STUB` is
+  unset, the plugin is not loaded — stop and report that instead of retrying.
 - **End.** You end by releasing control with a summary. The release summary is
   your end message: what you did, what you verified, what remains open and
   where to resume from. Release resumes the Ava agent: one system note wakes it

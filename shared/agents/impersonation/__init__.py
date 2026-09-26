@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 from shared import redis_client
 from shared.agents.impersonation._impersonation_store import (
     OPEN,
+    SESSION_RELAY_PROVIDERS,
     authenticate,
     dismiss_reminders,
     expire,
@@ -81,7 +82,7 @@ def request(
         or not 0 <= relay_batch_window_seconds <= 300
     ):
         raise ValueError("relay_batch_window_seconds must be an integer from 0 through 300")
-    relay_token = secrets.token_urlsafe(32) if relay_provider == "claude" else None
+    relay_token = secrets.token_urlsafe(32) if relay_provider in SESSION_RELAY_PROVIDERS else None
     lease_id = uuid4()
     delivery_config = current_field_values()
     event_delivery_protocol_version = _manifest_protocol_version(automatic=automatic)

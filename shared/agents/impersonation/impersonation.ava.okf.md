@@ -32,7 +32,10 @@ native return, renewal, and operator closure.
 `shared/agents/impersonation/relay.py` owns relay credential provisioning and
 re-provisioning, relay reads, heartbeats, failure stamps, and aborting a lease
 when a component dies. The package door exposes this surface to callers through
-`shared.agents.impersonation`.
+`shared.agents.impersonation`. Providers: `codex` relays are spawned by the
+accepting runtime into the owning app server; `claude` and `dsh` relays run
+inside the controller session (`SESSION_RELAY_PROVIDERS`), so the request mints
+their credential and the activation gate only waits for a heartbeat.
 
 ## Bounded delivery
 

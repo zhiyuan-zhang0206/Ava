@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import json
 import math
 import shlex
 import subprocess
@@ -204,6 +205,13 @@ def monitor_claude(message: str) -> None:
     print(message, flush=True)
 
 
+def plugin_dsh(message: str) -> None:
+    """One JSON string per stdout line: the dsh ava-relay plugin steers each
+    decoded line into the session that started the relay, so a multi-line
+    envelope stays one message."""
+    print(json.dumps(message, ensure_ascii=False), flush=True)
+
+
 def host_emitter(
     provider: str, thread_id: str | None, *, codex_remote: str | None = None
 ) -> Callable[[str], None]:
@@ -225,12 +233,12 @@ def host_emitter(
                 raise RuntimeError(f"Codex Steer delivery failed: {reason}")
 
         return emit_codex
-    if provider == "claude":
-        if codex_remote is not None:
-            raise ValueError("Claude Monitor does not use --codex-remote")
-        if thread_id is not None:
-            raise ValueError("Claude Monitor routes to its owner; omit --thread-id")
-        return monitor_claude
+    if provider in ("claude", "dsh"):
+        if codex_remote is not None or thread_id is not None:
+            raise ValueError(
+                f"The {provider} relay routes to its owner; omit --thread-id/--codex-remote"
+            )
+        return monitor_claude if provider == "claude" else plugin_dsh
     raise ValueError(f"Unknown relay provider: {provider}")
 
 

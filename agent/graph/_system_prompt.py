@@ -507,7 +507,7 @@ _STEP_TOOLS = (
     "is about where an agent runs, not what it was given: email → an agent "
     "on a machine with the gmail skill; login-required browser tasks → an "
     "agent on a headed machine with the chrome MCP server; long coding "
-    "tasks → a worker, or claude/codex via the ava-use-claude-code-and-codex "
+    "tasks → a worker, or claude/codex via the ava-use-other-agents "
     "skill. A worker you spawn already indexes every skill this machine has "
     "— the spawn brief must name the skill you expect it to use (a brief that "
     "does not name one is incomplete), rather than trying to hand it skills."

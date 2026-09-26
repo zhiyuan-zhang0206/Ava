@@ -1755,12 +1755,12 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
         AND manifest_envelope_floor_at IS NOT NULL
     )),
     CHECK ((relay_minted_generation IS NULL) = (relay_minted_owner IS NULL)),
-    CHECK (
+    CONSTRAINT agent_impersonations_relay_spec CHECK (
         (relay_provider IS NULL
             AND relay_thread_id IS NULL
             AND relay_codex_remote IS NULL)
         OR (relay_provider = 'codex' AND relay_thread_id IS NOT NULL)
-        OR (relay_provider = 'claude'
+        OR (relay_provider IN ('claude', 'dsh')
             AND relay_thread_id IS NULL
             AND relay_codex_remote IS NULL)
     )
@@ -2492,3 +2492,4 @@ INSERT INTO schema_migrations (name) VALUES ('20260923T205208_impersonation-even
 INSERT INTO schema_migrations (name) VALUES ('20260924T070003_hierarchy-worker-breaker');
 INSERT INTO schema_migrations (name) VALUES ('20260924T150840_impersonation-receipt-lock-door');
 INSERT INTO schema_migrations (name) VALUES ('20260924T193804_task-escalation-marker');
+INSERT INTO schema_migrations (name) VALUES ('20260926T135638_impersonation-dsh-relay');

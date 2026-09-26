@@ -1,6 +1,7 @@
 """Cluster-local client for trusted named impersonation sessions.
 
-Only request prints the scoped relay credential (claude). Controller commands
+Only request hands out the scoped relay credential (claude prints it; dsh
+writes it to a private stub). Controller commands
 run under the session id with caller-presence attestation: no controller
 credential is minted, delivered, or stored. Session history is retained by the
 shared service.
@@ -57,11 +58,15 @@ def _emit(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, default=_json_value))
 
 
-def _write_relay_stub(path: Path, *, agent_id: int, session_id: int, token: str) -> None:
+def _write_relay_stub(
+    path: Path, *, agent_id: int, session_id: int, token: str, interpreter: str | None = None
+) -> None:
     """Write the resident-relay credential stub the session plugin consumes once.
 
-    The takeover launcher scopes the path per session through
-    ``AVA_IMPERSONATION_RELAY_STUB``; the plugin wrapper deletes the file
+    The claude takeover launcher scopes the path per session through
+    ``AVA_IMPERSONATION_RELAY_STUB``; a dsh request uses the per-session path
+    its dsh plugin exports (``DSH_AVA_RELAY_STUB``) and names the relay
+    interpreter. The plugin deletes the file
     immediately after loading it into the relay's environment. The file is
     created 0600 (``fchmod`` defeats the umask): the credential is never
     briefly world-readable between create and write.
@@ -76,6 +81,8 @@ def _write_relay_stub(path: Path, *, agent_id: int, session_id: int, token: str)
             stream.write(
                 f"SID={session_id}\nAGENT={agent_id}\nAVA_IMPERSONATION_RELAY_TOKEN={token}\n"
             )
+            if interpreter is not None:
+                stream.write(f"AVA_IMPERSONATION_RELAY_PY={interpreter}\n")
     except BaseException:
         if fd != -1:
             os.close(fd)
@@ -136,6 +143,25 @@ def _print_claude_relay_instructions(response: dict[str, Any], *, agent_id: int)
         "Preparation fails without its heartbeat.",
         file=sys.stderr,
     )
+
+
+def _dsh_relay_stub() -> Path:
+    """The stub path the dsh session's ava-relay plugin exports to its shell commands.
+
+    Checked before the request creates a lease: without the plugin nothing
+    would start the relay. DeepSeek Harness uploads session logs with its
+    model requests by default, so the credential goes into this private
+    per-session stub instead of the printed response.
+    """
+    # env-ok: per-session relay stub handoff from the dsh plugin, not cluster configuration
+    stub = os.environ.get("DSH_AVA_RELAY_STUB")
+    if not stub:
+        raise ValueError(
+            "the dsh relay needs the Ava relay plugin (ava-relay.mjs) loaded into this "
+            "DeepSeek Harness session and the request run from that session's shell tool "
+            "(DSH_AVA_RELAY_STUB is unset; see the host conventions)"
+        )
+    return Path(stub)
 
 
 async def _wait_inbox(
@@ -203,6 +229,62 @@ def _send(args: argparse.Namespace) -> int:
     return 0
 
 
+def _request(args: argparse.Namespace) -> int:
+    """`impersonate request` — create the lease, then hand its relay the credential."""
+    from cli.commands.codex_app_server import require_control_endpoint
+    from shared.agents.impersonation import impersonation_sessions as sessions
+    from shared.proc_tree import process_metadata
+
+    _reject_used_resident_relay()
+    dsh_stub = _dsh_relay_stub() if args.relay_provider == "dsh" else None
+    endpoint = args.relay_codex_remote
+    if args.relay_provider == "codex":
+        endpoint = require_control_endpoint(endpoint)
+    response = sessions.request(
+        args.agent_id,
+        name=args.name,
+        executor_name=args.caller,
+        process_metadata=process_metadata(),
+        ttl_seconds=args.ttl,
+        reason=args.reason,
+        provider=args.relay_provider,
+        thread_id=args.relay_thread_id,
+        codex_remote=endpoint,
+        batch_window_seconds=args.relay_batch_window_seconds,
+    )
+    if dsh_stub is not None:
+        _write_relay_stub(
+            dsh_stub,
+            agent_id=args.agent_id,
+            session_id=int(response["session_id"]),
+            token=str(response.pop("relay_token")),
+            interpreter=sys.executable,
+        )
+    _emit(response)
+    if dsh_stub is not None:
+        print(
+            "The Ava relay plugin in this DeepSeek Harness session starts the dsh "
+            f"relay automatically from its credential stub ({dsh_stub}) and pushes "
+            "each inbound batch into this session as steering input. If no relay "
+            "heartbeat starts, preparation fails and the takeover is rejected.",
+            file=sys.stderr,
+        )
+    elif args.relay_provider == "codex":
+        print(
+            "The runtime starts the codex relay automatically at activation; "
+            "no relay process starts here. When your session runs an explicit app "
+            "server, pass --codex-remote with its endpoint so the relay reaches the "
+            "same server the session uses (Steer delivery, no Pending fallback; "
+            "see the host conventions). A relay "
+            "that cannot start rolls the takeover back loudly (status becomes "
+            "rejected with the reason).",
+            file=sys.stderr,
+        )
+    else:
+        _print_claude_relay_instructions(response, agent_id=args.agent_id)
+    return 0
+
+
 def _dispatch(args: argparse.Namespace) -> int:
     from shared.agents import impersonation as control
     from shared.agents.impersonation import impersonation_sessions as sessions
@@ -211,39 +293,7 @@ def _dispatch(args: argparse.Namespace) -> int:
 
     command = args.impersonation_cmd
     if command == "request":
-        from cli.commands.codex_app_server import require_control_endpoint
-
-        _reject_used_resident_relay()
-        endpoint = args.relay_codex_remote
-        if args.relay_provider == "codex":
-            endpoint = require_control_endpoint(endpoint)
-        response = sessions.request(
-            args.agent_id,
-            name=args.name,
-            executor_name=args.caller,
-            process_metadata=process_metadata(),
-            ttl_seconds=args.ttl,
-            reason=args.reason,
-            provider=args.relay_provider,
-            thread_id=args.relay_thread_id,
-            codex_remote=endpoint,
-            batch_window_seconds=args.relay_batch_window_seconds,
-        )
-        _emit(response)
-        if args.relay_provider == "codex":
-            print(
-                "The runtime starts the codex relay automatically at activation; "
-                "no relay process starts here. When your session runs an explicit app "
-                "server, pass --codex-remote with its endpoint so the relay reaches the "
-                "same server the session uses (Steer delivery, no Pending fallback; "
-                "see the host conventions). A relay "
-                "that cannot start rolls the takeover back loudly (status becomes "
-                "rejected with the reason).",
-                file=sys.stderr,
-            )
-        else:
-            _print_claude_relay_instructions(response, agent_id=args.agent_id)
-        return 0
+        return _request(args)
     if command == "list":
         _emit(sessions.list_sessions(args.agent_id, before=args.before, limit=args.limit))
         return 0

@@ -236,7 +236,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "through to the respawn); its only cadence reference, the 60s watchdog round it spans, "
     "is not a lattice clock, so no lattice neighbour",
     (
-        "ava_builtins/skills/ava-use-claude-code-and-codex/reference/watch_work.py",
+        "ava_builtins/skills/ava-use-other-agents/reference/watch_work.py",
         "STALL_SECONDS",
     ): "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour",
 }
