@@ -191,7 +191,9 @@ async def test_job_zero_count_still_waits_for_every_observed_native_exit(tmp_pat
 
     monkeypatch.setattr(process, "asyncio", SimpleNamespace(sleep=finish_exit))
     custody = ServiceCustody(tmp_path / "run", "application")
-    await application.close(custody, timeout=0.1, force=True)
+    # Sleep is stubbed, so the deadline only has to outlast two fsynced custody
+    # writes; 0.1 s did not on a loaded CI runner.
+    await application.close(custody, timeout=5.0, force=True)
     assert native_exited
     assert json.loads(custody.path.read_text())["processes"] == [
         {"pid": 100, "birth": 42.0, "starttime": None}
