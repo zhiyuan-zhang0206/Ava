@@ -4,6 +4,7 @@ on:
     paths:
       - 'shared/runtime_release.py'
       - 'shared/runtime_prepare.py'
+      - 'shared/process_group_closure.py'
       - 'shared/platform.py'
       - 'tests/lifecycle/images/**'
       - '.github/workflows/release-store.yml'

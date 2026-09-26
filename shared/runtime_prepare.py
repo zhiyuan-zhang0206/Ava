@@ -13,11 +13,14 @@ import os
 import platform
 import shutil
 import stat
+import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from shared.process_group_closure import close_unadmitted, group_members, wait_leader_exit
 from shared.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
@@ -53,32 +56,64 @@ def _write_json(path: Path, value: object) -> None:
         os.fsync(stream.fileno())
 
 
-def _run(argv: list[str], cwd: Path, *, timeout: int = 180) -> str:
-    from shared.posix_command import run_owned_command
+_CLOSE_SECONDS = 5.0
+_POLL_SECONDS = 0.05
 
-    # No inherited AVA_HOME, credentials, PYTHONPATH, uv configuration or indexes.
-    result = run_owned_command(
-        argv,
-        cwd=cwd,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "HOME": str(cwd),
-            "UV_NO_CONFIG": "1",
-            "UV_OFFLINE": "1",
-            "AVA_CONFIG_FETCH": "skip",
-            "AVA_TIMEZONE": "UTC",
-            "AVA_HOME": str(cwd / "probe-home"),
-            "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
-            "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
-        },
-        timeout=timeout,
-    )
-    if result.returncode:
-        # Dependency URLs/credentials must not leak from subprocess diagnostics.
-        raise ReleaseRejectedError(
-            f"preparation command failed: {Path(argv[0]).name} rc={result.returncode}"
+
+def _run(argv: list[str], cwd: Path, *, timeout: int = 180) -> str:
+    """Run one preparation tool as the owner of its own process group.
+
+    Standard library only: the checkout-retiring proof and the release-store
+    contract call this from a bare interpreter. Output goes to files, so an
+    inherited pipe cannot become another unbounded wait. The tool and whatever
+    it left in its group are closed (`close_unadmitted`) before this returns.
+    """
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        process = subprocess.Popen(  # noqa: S603 — verified local artifacts, argv without a shell.
+            argv,
+            cwd=cwd,
+            # No inherited AVA_HOME, credentials, PYTHONPATH, uv configuration or indexes.
+            env={
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(cwd),
+                "UV_NO_CONFIG": "1",
+                "UV_OFFLINE": "1",
+                "AVA_CONFIG_FETCH": "skip",
+                "AVA_TIMEZONE": "UTC",
+                "AVA_HOME": str(cwd / "probe-home"),
+                "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
+                "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
+            },
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            process_group=0,
         )
-    return result.stdout
+        finished = False
+        try:
+            finished = _finished(process, time.monotonic() + timeout)
+        finally:
+            code = close_unadmitted(process, time.monotonic() + _CLOSE_SECONDS)
+        name = Path(argv[0]).name
+        if not finished:
+            raise ReleaseRejectedError(f"preparation command timed out: {name}")
+        if code:
+            # Dependency URLs/credentials must not leak from subprocess diagnostics.
+            raise ReleaseRejectedError(f"preparation command failed: {name} rc={code}")
+        stdout.seek(0)
+        return stdout.read().decode("utf-8", errors="replace")
+
+
+def _finished(process: subprocess.Popen[bytes], deadline: float) -> bool:
+    """Natural completion: the leader exited and its group lists nothing else."""
+    if not wait_leader_exit(process, deadline):
+        return False
+    while group_members(process.pid) != [process.pid]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(_POLL_SECONDS, remaining))
+    return True
 
 
 def _copy_python(source: Path, target: Path) -> None:

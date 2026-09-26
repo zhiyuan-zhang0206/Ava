@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'shared/runtime_prepare.py'
+      - 'shared/process_group_closure.py'
       - 'shared/runtime_release.py'
       - 'shared/release_identity.py'
       - 'shared/runtime_interpreter.py'
