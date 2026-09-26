@@ -8,12 +8,42 @@ previous generation, proves its sessions closed, and mints the next one.
 
 Every catalog function takes the caller's admin connection (the OS-user
 superuser over the owner-only socket); this package never opens a connection.
-Ledger mutations take a typed authority token. Wiring into start, the pooler
-and the release transition lives with those callers.
+Ledger mutations take a typed authority token. ``delivery`` hands the active
+generation to the pooler, the launcher and admitted operator processes.
 """
 
 from __future__ import annotations
 
+from shared.cluster.authority.delivery import (
+    GENERATION_ENV as GENERATION_ENV,
+)
+from shared.cluster.authority.delivery import (
+    POOLER_ADMIN as POOLER_ADMIN,
+)
+from shared.cluster.authority.delivery import (
+    PoolerAdmin as PoolerAdmin,
+)
+from shared.cluster.authority.delivery import (
+    WriteGrant as WriteGrant,
+)
+from shared.cluster.authority.delivery import (
+    active_generation as active_generation,
+)
+from shared.cluster.authority.delivery import (
+    consume as consume,
+)
+from shared.cluster.authority.delivery import (
+    ensure_pooler_admin as ensure_pooler_admin,
+)
+from shared.cluster.authority.delivery import (
+    read_pooler_admin as read_pooler_admin,
+)
+from shared.cluster.authority.delivery import (
+    render_userlist as render_userlist,
+)
+from shared.cluster.authority.delivery import (
+    write_grant as write_grant,
+)
 from shared.cluster.authority.fence import (
     close_revoked as close_revoked,
 )
@@ -118,6 +148,9 @@ from shared.cluster.authority.roles import (
 )
 from shared.cluster.authority.roles import (
     prune as prune,
+)
+from shared.cluster.authority.roles import (
+    scram_verifier as scram_verifier,
 )
 from shared.cluster.authority.roles import (
     sweep as sweep,

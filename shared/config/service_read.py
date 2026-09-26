@@ -20,6 +20,7 @@ pattern as `shared/runtime_config.py`.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -284,13 +285,13 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     default — exactly the distinction between "unset" and "set to empty".
 
     `role` selects the credential projection: `None` and `"runner"` both rewrite the served
-    `AVA_DB_URL` to the least-privilege `ava_runner` role with its own password
-    (the gateway .env AVA_RUNNER_DB_PASSWORD — carried INSIDE the URL, never
-    served as a standalone key), so every bootstrap recipient dials exactly the
-    surface its role grants and nothing more (Task #1236). A request on a cluster
-    that has no runner credential yet raises: serving an empty password would fail
-    at first connect with an unexplained auth error, so the operator is told to
-    provision the role instead.
+    `AVA_DB_URL` to a runner-class login carried INSIDE the URL, never served as a
+    standalone key, so every bootstrap recipient dials exactly the surface its role
+    grants and nothing more (Task #1236). A local plane serves its active write
+    generation's runner login; a remote-managed plane serves the provider's
+    `ava_runner` with the gateway .env AVA_RUNNER_DB_PASSWORD. A cluster without
+    that authority raises rather than serving an endpoint that fails at first
+    connect with an unexplained auth error.
     """
     from pydantic import SecretStr
 
@@ -332,28 +333,66 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     for binding in provider_api.REGISTRY.bindings.values():
         if binding.key_env in aliases and binding.key_env not in out:
             out[binding.key_env] = aliases[binding.key_env]
-    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, project_runner_db_url
-
-    runner_password = aliases.get(RUNNER_DB_PASSWORD_ENV) or ""
-    if not runner_password:
-        if _is_remote_data_plane(out):
-            raise ValueError(
-                "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — on a "
-                "remote-managed data plane the runner role is provisioned at the "
-                "provider and its password must be written into the gateway .env "
-                "as the explicit first-start credential."
-            )
-        raise ValueError(
-            "AVA_RUNNER_DB_PASSWORD is missing from the gateway initialization; "
-            "restore its recorded credential before serving runner bootstrap."
-        )
     db_url = out.get("AVA_DB_URL")
     if not db_url:
         raise ValueError(
             "AVA_DB_URL is not served by bootstrap — cannot project the runner credential onto it"
         )
-    out["AVA_DB_URL"] = project_runner_db_url(db_url, runner_password)
+    out["AVA_DB_URL"] = _runner_projection(db_url, aliases)
     return out
+
+
+def _runner_projection(db_url: str, aliases: dict[str, str]) -> str:
+    """The served runner login: the active write generation's on a local plane
+    (its home keeps the ledger), the provider's `ava_runner` on a
+    remote-managed plane; anything else refuses."""
+    from shared import runtime_config
+    from shared.cluster.authority import load_ledger
+    from shared.config import settings
+
+    home = runtime_config.env_file_path().parent.resolve()
+    if load_ledger(home) is not None:
+        return _generation_runner_url(db_url, home)
+    if settings.data_plane.is_remote:
+        return _provider_runner_url(db_url, aliases)
+    raise ValueError(
+        "this gateway home has no database authority ledger, so it has no runner "
+        "login to serve; birth it with `ava start` or convert it once with "
+        "scripts/cutover_db_authority.py"
+    )
+
+
+def _generation_runner_url(db_url: str, home: Path) -> str:
+    """A local plane's runner projection: the active write generation's runner
+    login on the served endpoint.
+
+    Interim (dbgen slice 4): a networked cluster's runners still acquire their
+    login here, so a stale runner holding the bearer can reacquire the current
+    generation until per-unit delivery retires this exchange (slice 6).
+    """
+    from shared.cluster.authority import AuthorityRefusedError, write_grant
+
+    try:
+        grant = write_grant(home, "runner")
+    except AuthorityRefusedError as exc:
+        raise ValueError(f"cannot serve the runner database login: {exc}") from exc
+    return grant.dsn(db_url)
+
+
+def _provider_runner_url(db_url: str, aliases: dict[str, str]) -> str:
+    """A remote-managed plane's runner projection: the provider-provisioned
+    `ava_runner` with the gateway's recorded provider credential."""
+    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, project_runner_db_url
+
+    runner_password = aliases.get(RUNNER_DB_PASSWORD_ENV) or ""
+    if not runner_password:
+        raise ValueError(
+            "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — on a "
+            "remote-managed data plane the runner role is provisioned at the "
+            "provider and its password must be written into the gateway .env "
+            "as the explicit first-start credential."
+        )
+    return project_runner_db_url(db_url, runner_password)
 
 
 def _gateway_otlp_projection(aliases: dict[str, str]) -> str:
@@ -368,18 +407,3 @@ def _gateway_otlp_projection(aliases: dict[str, str]) -> str:
         raise ValueError("AVA_TELEMETRY_OTLP_PORT must be between 1 and 65535")
     host = aliases.get("AVA_MACHINE_HOST") or _self_machine_host()
     return url_with_host(f"http://localhost:{port}", host)
-
-
-def _is_remote_data_plane(env: dict[str, str]) -> bool:
-    """Whether the served env's data-plane URLs name a foreign host — the
-    bootstrap payload is the raw `.env` text, so the remote predicate is read
-    from it directly (mirrors `settings.data_plane.is_remote` on the serving
-    side)."""
-    from shared.netutil import is_loopback_host
-    from shared.url_secret import url_host
-
-    for key in ("AVA_DB_URL", "AVA_REDIS_URL"):
-        url = (env.get(key) or "").strip()
-        if url and url_host(url) and not is_loopback_host(url_host(url)):
-            return True
-    return False

@@ -19,13 +19,12 @@ from psycopg import sql
 
 from shared.cluster import _swap_db, drop_database, provision_database
 from shared.config import settings
-from shared.url_secret import url_with_userinfo
+from shared.pg_admin import owner_conninfo
 
-# A URL-safe secret for the cluster role's password (provision_database creates
-# an owning role sharing the db identifier and applies the schema as that role).
-# The identifier is passed in full (names-as-data) — production callers read it
-# from the cluster's own URLs or pass DATA_PLANE_IDENTITY at birth.
-_SECRET = "provtestsecret"  # noqa: S105 — test fixture, not a real credential
+# provision_database creates a NOLOGIN owning role sharing the db identifier and
+# applies the schema acting as that role. The identifier is passed in full
+# (names-as-data) — production callers read it from the cluster's own URLs or
+# pass DATA_PLANE_IDENTITY at birth.
 
 
 def _admin_url() -> str:
@@ -46,10 +45,7 @@ def test_provision_database_creates_db_and_applies_schema(_provisioned_db: str) 
     db_url = f"{base_url}/{expected_db}"
 
     try:
-        assert (
-            provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
-            is True
-        )
+        assert provision_database(identity, base_admin_url=admin_url) is True
 
         # Verify the database was created
         with psycopg.connect(admin_url, autocommit=True) as conn:
@@ -87,7 +83,7 @@ def test_drop_database_removes_db_idempotent(_provisioned_db: str) -> None:
     expected_db = identity
     admin_url = _admin_url()
 
-    provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
+    provision_database(identity, base_admin_url=admin_url)
     with psycopg.connect(admin_url, autocommit=True) as conn:
         assert (
             conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (expected_db,)).fetchone()
@@ -112,15 +108,9 @@ def test_provision_database_idempotent(_provisioned_db: str) -> None:
     admin_url = _admin_url()
 
     try:
-        assert (
-            provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
-            is True
-        )
+        assert provision_database(identity, base_admin_url=admin_url) is True
         # Second call: DB already exists — must be a no-op, no exception.
-        assert (
-            provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
-            is False
-        )
+        assert provision_database(identity, base_admin_url=admin_url) is False
 
         # DB still exists after both calls.
         with psycopg.connect(admin_url, autocommit=True) as conn:
@@ -142,17 +132,20 @@ def test_provision_database_idempotent(_provisioned_db: str) -> None:
 
 
 def test_provisioned_role_is_nosuperuser_and_owns_db(_provisioned_db: str) -> None:
-    """The cluster role is created LOGIN NOSUPERUSER and owns its
-    database — so it bypasses no grant and reaches only its own cluster's data."""
+    """The cluster role is created NOLOGIN NOSUPERUSER without a password and owns
+    its database — it never logs in, bypasses no grant, and application logins
+    reach the data only through the capability groups."""
     role = expected_db = _fresh_identity()  # db and role share the identifier
     admin_url = _admin_url()
     try:
-        provision_database(role, base_admin_url=admin_url, db_admin_password=_SECRET)
+        provision_database(role, base_admin_url=admin_url)
         with psycopg.connect(admin_url, autocommit=True) as conn:
             attrs = conn.execute(
-                "SELECT rolsuper, rolcanlogin FROM pg_roles WHERE rolname = %s", (role,)
+                "SELECT rolsuper, rolcanlogin, rolpassword IS NULL FROM pg_authid"
+                " WHERE rolname = %s",
+                (role,),
             ).fetchone()
-            assert attrs == (False, True), "role must be LOGIN NOSUPERUSER"
+            assert attrs == (False, False, True), "role must be NOLOGIN NOSUPERUSER, no password"
             owner = conn.execute(
                 "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = %s", (expected_db,)
             ).fetchone()
@@ -171,10 +164,10 @@ def test_role_cannot_read_another_clusters_database(_provisioned_db: str) -> Non
     admin_url = _admin_url()
     db_a, role_b = a, b
     try:
-        provision_database(a, base_admin_url=admin_url, db_admin_password=_SECRET)
-        provision_database(b, base_admin_url=admin_url, db_admin_password=_SECRET)
-        # Connect to A's database AS B's role (loopback trust ignores the password).
-        url_a_as_b = url_with_userinfo(_swap_db(admin_url, db_a), role_b, _SECRET)
+        provision_database(a, base_admin_url=admin_url)
+        provision_database(b, base_admin_url=admin_url)
+        # Act as B's (NOLOGIN) role on A's database through the administrator.
+        url_a_as_b = owner_conninfo(admin_url, database=db_a, owner=role_b)
         with (
             psycopg.connect(url_a_as_b, autocommit=True) as conn,
             pytest.raises(psycopg.errors.InsufficientPrivilege),
@@ -293,12 +286,11 @@ def test_interrupted_empty_database_requires_initialization_authority(_provision
         conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(identity)))
     try:
         with pytest.raises(RuntimeError, match="without initialization authority"):
-            provision_database(identity, base_admin_url=admin_url, db_admin_password=_SECRET)
+            provision_database(identity, base_admin_url=admin_url)
         assert (
             provision_database(
                 identity,
                 base_admin_url=admin_url,
-                db_admin_password=_SECRET,
                 resume_initialization=True,
             )
             is False
@@ -322,7 +314,6 @@ def test_interrupted_database_with_unknown_objects_is_preserved(_provisioned_db:
             provision_database(
                 identity,
                 base_admin_url=admin_url,
-                db_admin_password=_SECRET,
                 resume_initialization=True,
             )
         with psycopg.connect(_swap_db(admin_url, identity)) as conn:

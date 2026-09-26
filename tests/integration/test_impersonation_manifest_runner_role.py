@@ -23,17 +23,19 @@ from shared.agents.impersonation_manifest import (
     unbind_local_participant,
 )
 from shared.agents.impersonation_manifest_grants import grant_manifest_runner_access
-from shared.cluster import ensure_runner_role
 from shared.config import settings
 from shared.db import create_agent
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
-from shared.url_secret import url_with_userinfo
+from tests._containers import grant_runner_login
 from tests.impersonation_support import attested_caller
 from tests.shared import test_impersonation_history as history_cases
 
+# The capability group the receipt grants target, and the generation-shaped
+# login that inherits it (the only identity that logs in).
 _RECEIPT_RUNNER = "ava_runner"
+_RECEIPT_LOGIN = "ava_g0_runner"
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 
 
@@ -104,10 +106,11 @@ def restricted_receipt(
         participant.lease_id, agent_id=owner.agent_id, source_key=participant.source_key
     )
     owner_url = settings.data_plane.db_url
-    ensure_runner_role(
-        "ava_citest",
-        base_admin_url=owner_url.rsplit("/", 1)[0] + "/postgres",
-        runner_password="test-runner-password",  # noqa: S106 -- throwaway role credential
+    runner_url = grant_runner_login(
+        owner_url,
+        owner="ava_citest",
+        login=_RECEIPT_LOGIN,
+        password="test-runner-password",  # noqa: S106 -- throwaway role credential
     )
     db_conn.execute(
         sql.SQL(
@@ -116,9 +119,8 @@ def restricted_receipt(
         ).format(sql.Identifier(_RECEIPT_RUNNER))
     )
     db_conn.commit()
-    runner_url = url_with_userinfo(owner_url, _RECEIPT_RUNNER, "test-runner-password")
     with psycopg.connect(runner_url) as conn:
-        assert conn.execute("SELECT current_user").fetchone() == (_RECEIPT_RUNNER,)
+        assert conn.execute("SELECT current_user").fetchone() == (_RECEIPT_LOGIN,)
         assert conn.execute(
             "SELECT has_table_privilege(current_user, "
             "'agent_impersonation_event_participants', 'UPDATE')"

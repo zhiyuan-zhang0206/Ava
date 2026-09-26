@@ -114,16 +114,13 @@ def test_pool_size_explicit_wins() -> None:
     assert resolved_pool_size(2, None, 1, 8) == (2, 8)
 
 
-# ─── P1 (QA #867): the local owner password must never clobber a provider URL ─
+# ─── Settings never rewrite a database credential (QA #867, always-auth) ─────
 
 
 def test_foreign_url_password_survives_a_nonempty_cluster_secret() -> None:
-    """On a secret-bearing cluster (this deployment's own posture), the settings
-    validator `_apply_data_plane_passwords` used to replace EVERY db_url
-    password with the local owner password / cluster secret — which destroys a
-    remote/SaaS provider's credential at every settings load, so the remote
-    probe always failed auth. A foreign-host URL is authoritative: its
-    password must pass through untouched."""
+    """On a secret-bearing cluster, a remote/SaaS provider's credential must
+    survive every settings load: a foreign-host URL is authoritative, so its
+    password passes through untouched (QA #867)."""
     s = DataPlaneSettings(
         AVA_DB_URL=_FOREIGN_DB,
         AVA_REDIS_URL=_FOREIGN_REDIS,
@@ -136,15 +133,23 @@ def test_foreign_url_password_survives_a_nonempty_cluster_secret() -> None:
     )
 
 
-def test_loopback_url_password_still_self_heals_from_secret() -> None:
-    """The local self-heal is untouched: a loopback URL on a secret cluster
-    keeps re-deriving its password from the owner password / secret (the
-    historical behavior)."""
+def test_local_url_credentials_are_never_rederived() -> None:
+    """A local plane's `.env` carries only the credential-free endpoint, and every
+    process dials the write-generation login its launcher delivered. Settings
+    never inject the cluster secret or an owner password into a loopback URL:
+    the endpoint stays credential-free (a dial then fails by name), and a
+    delivered login passes through byte-for-byte."""
+    endpoint = "postgresql://ava@127.0.0.1:5432/ava"
     s = DataPlaneSettings(
-        AVA_DB_URL=_LOOPBACK_DB,
+        AVA_DB_URL=endpoint,
         AVA_REDIS_URL=_LOOPBACK_REDIS,
         AVA_CLUSTER_SECRET=_LOCAL_SECRET,
     )
-    assert s.db_url == (
-        "postgresql://ava:" + _LOCAL_SECRET + "@127.0.0.1:5432/ava?hostaddr=127.0.0.1"
+    assert s.db_url == endpoint + "?hostaddr=127.0.0.1"
+    delivered = "postgresql://ava_g3_gateway:delivered-login@127.0.0.1:5432/ava"
+    s = DataPlaneSettings(
+        AVA_DB_URL=delivered,
+        AVA_REDIS_URL=_LOOPBACK_REDIS,
+        AVA_CLUSTER_SECRET=_LOCAL_SECRET,
     )
+    assert s.db_url == delivered + "?hostaddr=127.0.0.1"

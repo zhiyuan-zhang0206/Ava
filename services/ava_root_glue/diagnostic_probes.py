@@ -107,7 +107,8 @@ def redis_acl() -> DaemonProbe:
 def pgbouncer() -> DaemonProbe:
     from cli.commands import _pgbouncer as pooler
     from services.healthchecks import owned_service
-    from shared.cluster import db_identity, get_record, ownership, record_pgbouncer_port
+    from shared.cluster import get_record, ownership, record_pgbouncer_port
+    from shared.cluster.authority import AuthorityRefusedError, read_pooler_admin
     from shared.paths import ava_home
 
     record = get_record(ava_home())
@@ -117,14 +118,15 @@ def pgbouncer() -> DaemonProbe:
     if owner is None:
         return DaemonProbe.down("no native PgBouncer generation in this home's PID record")
     port = record_pgbouncer_port(record)
-    identity = db_identity()
+    try:
+        admin_password = read_pooler_admin(ava_home().resolve()).password
+    except AuthorityRefusedError as exc:
+        return DaemonProbe.unavailable(f"no pooler admin credential: {exc}")
 
     def protocol() -> DaemonProbe:
-        loopback = pooler.pgbouncer_listener_reachable(
-            port, identity, settings.data_plane.db_admin_password
-        )
+        loopback = pooler.pgbouncer_listener_reachable(port, admin_password)
         public = loopback and pooler.pgbouncer_public_listener_reachable(
-            port, identity, settings.data_plane.cluster_secret
+            port, pooler.POOLER_ADMIN, settings.data_plane.cluster_secret
         )
         if loopback and public:
             return DaemonProbe.up("native pooler admin console and required listeners answered")

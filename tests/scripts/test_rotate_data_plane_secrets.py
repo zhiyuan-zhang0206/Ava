@@ -1,8 +1,15 @@
-"""Contracts for independent data-plane credential rotation."""
+"""Contracts for the independent Redis data-plane credential rotation.
+
+PostgreSQL has nothing to rotate here: the owner is NOLOGIN, the administrator
+is the OS user over the owner-only socket, and application logins are write
+generations that rotate with release transitions.
+"""
 
 from __future__ import annotations
 
+import json
 import stat
+from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
@@ -13,33 +20,23 @@ from scripts import rotate_data_plane_secrets as rotate
 from shared import cluster
 from shared.config import settings
 
-_OLD_DB = "old-db"
-_NEW_DB = "def"
 _OLD_REDIS_ADMIN = "old-redis-admin"
 _NEW_REDIS_ADMIN = "new-redis-admin"
-_OLD_RUNNER_DB = "old-runner-db"
-_NEW_RUNNER_DB = "ghi"
 _OLD_REDIS_RUNTIME = "old-redis-runtime"
 _NEW_REDIS_RUNTIME = "new-redis-runtime"
+_ENV = f"AVA_REDIS_ADMIN_PASSWORD={_OLD_REDIS_ADMIN}\nAVA_REDIS_PASSWORD={_OLD_REDIS_RUNTIME}\n"
 
 
 def _state(scope: str = "both") -> rotate.RotationState:
     return rotate.RotationState(
         scope=scope,
-        identity="ava_main",
-        redis_user="ava_main",
-        old_db_admin_password=_OLD_DB,
-        new_db_admin_password=_NEW_DB,
         old_redis_admin_password=_OLD_REDIS_ADMIN,
         new_redis_admin_password=_NEW_REDIS_ADMIN,
-        old_runner_db_password=_OLD_RUNNER_DB,
-        new_runner_db_password=_NEW_RUNNER_DB,
         old_redis_password=_OLD_REDIS_RUNTIME,
         new_redis_password=_NEW_REDIS_RUNTIME,
-        pg_port=15433,
         redis_port=16380,
-        pgbouncer_enabled=False,
-        pgbouncer_port=16433,
+        redis_host="127.0.0.1",
+        redis_user="ava",
     )
 
 
@@ -48,60 +45,42 @@ def _patch_gateway_home(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
 
     def _record(_home: Path) -> cluster.ClusterRecord:
         return cluster.ClusterRecord(
-            ports=cast(
-                "cluster.ClusterPorts", {"postgres": 15433, "redis": 16380, "pgbouncer": 16433}
-            ),
+            ports=cast("cluster.ClusterPorts", {"postgres": 15433, "redis": 16380}),
             gateway_home=str(home),
             created_at="now",
         )
 
+    monkeypatch.setattr(rotate, "get_record", _record)
+    monkeypatch.setattr(settings, "profile", None)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:16433/ava")
     monkeypatch.setattr(
-        rotate,
-        "get_record",
-        _record,
+        settings.data_plane, "redis_url", "redis://ava:old-redis-runtime@127.0.0.1:16380/0"
     )
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "control-bearer")
-    monkeypatch.setattr(
-        settings.data_plane, "db_url", "postgresql://ava_main:old-db@127.0.0.1:16433/ava_main"
-    )
-    monkeypatch.setattr(
-        settings.data_plane,
-        "redis_url",
-        "redis://ava_main:old-redis-runtime@127.0.0.1:16380/0",
-    )
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
 
 
-def test_build_state_keeps_the_bearer_out_of_new_values(
+def test_build_state_mints_fresh_redis_values_even_without_a_bearer(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Redis always authenticates, so a no-secret single box rotates too."""
     _patch_gateway_home(monkeypatch, tmp_path)
-    (tmp_path / ".env").write_text(
-        "AVA_DB_ADMIN_PASSWORD=old-db\n"
-        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
-        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
-        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
-    )
+    (tmp_path / ".env").write_text(_ENV)
 
     state = rotate.build_state()
 
     assert state.scope == "both"
-    assert state.new_db_admin_password not in {"control-bearer", state.old_db_admin_password}
-    assert state.new_redis_admin_password not in {"control-bearer", state.old_redis_admin_password}
-    assert state.new_runner_db_password not in {"control-bearer", state.old_runner_db_password}
-    assert state.new_redis_password not in {"control-bearer", state.old_redis_password}
+    assert state.new_redis_admin_password not in {"", state.old_redis_admin_password}
+    assert state.new_redis_password not in {"", state.old_redis_password}
+    assert (state.redis_port, state.redis_user) == (16380, "ava")
 
 
-def test_runner_scope_requires_the_existing_runner_db_password(
+def test_build_state_refuses_a_home_without_redis_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _patch_gateway_home(monkeypatch, tmp_path)
-    (tmp_path / ".env").write_text(
-        "AVA_DB_ADMIN_PASSWORD=old-db\nAVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
-    )
-
-    with pytest.raises(RuntimeError, match="ensure-db-role"):
-        rotate.build_state("runner")
+    (tmp_path / ".env").write_text(f"AVA_REDIS_ADMIN_PASSWORD={_OLD_REDIS_ADMIN}\n")
+    with pytest.raises(RuntimeError, match="cutover_db_authority"):
+        rotate.build_state()
 
 
 def test_build_state_refuses_an_agent_process_profile(
@@ -109,34 +88,7 @@ def test_build_state_refuses_an_agent_process_profile(
 ) -> None:
     _patch_gateway_home(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "profile", "agent")
-    (tmp_path / ".env").write_text(
-        "AVA_DB_ADMIN_PASSWORD=old-db\n"
-        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
-        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
-        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
-    )
-
-    with pytest.raises(RuntimeError, match="gateway context"):
-        rotate.build_state()
-
-
-def test_build_state_refuses_a_runner_projected_database_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _patch_gateway_home(monkeypatch, tmp_path)
-    monkeypatch.setattr(settings, "profile", None)
-    monkeypatch.setattr(
-        settings.data_plane,
-        "db_url",
-        "postgresql://ava_runner:old-runner-db@127.0.0.1:16433/ava_main",
-    )
-    (tmp_path / ".env").write_text(
-        "AVA_DB_ADMIN_PASSWORD=old-db\n"
-        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
-        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
-        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
-    )
-
+    (tmp_path / ".env").write_text(_ENV)
     with pytest.raises(RuntimeError, match="gateway context"):
         rotate.build_state()
 
@@ -150,7 +102,6 @@ def test_main_reports_an_agent_context_guard_cleanly(
 ) -> None:
     _patch_gateway_home(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "profile", "agent")
-
     args = ["--resume", str(tmp_path / "missing-state.json")] if resume else []
 
     assert rotate.main(args) == 1
@@ -160,9 +111,8 @@ def test_main_reports_an_agent_context_guard_cleanly(
     assert "Traceback" not in err
 
 
-def test_admin_scope_changes_owner_and_redis_default_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_admin_scope_changes_the_redis_default_user_only(monkeypatch: pytest.MonkeyPatch) -> None:
     state = _state("admin")
-    role_calls: list[dict[str, object]] = []
     redis_commands: list[tuple[str, ...]] = []
 
     class _Redis:
@@ -178,65 +128,50 @@ def test_admin_scope_changes_owner_and_redis_default_only(monkeypatch: pytest.Mo
         def execute_command(self, *args: str) -> None:
             redis_commands.append(args)
 
-    def _pg_admin_url(_port: int) -> str:
-        return "postgresql://admin"
-
-    def _ensure_cluster_role(*_args: object, **kwargs: object) -> None:
-        role_calls.append(kwargs)
-
     def _working_redis_admin_password(_state: rotate.RotationState) -> str:
-        return "old-redis-admin"
+        return _OLD_REDIS_ADMIN
 
-    monkeypatch.setattr(rotate, "pg_admin_url", _pg_admin_url)
-    monkeypatch.setattr(rotate, "ensure_cluster_role", _ensure_cluster_role)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
     monkeypatch.setattr(rotate.redis, "Redis", _Redis)
 
     rotate.apply_admin(state)
+    rotate.apply_runner(state)  # admin scope: no ACL effect
 
-    assert role_calls == [{"base_admin_url": "postgresql://admin", "db_admin_password": "def"}]
-    assert redis_commands == [("CONFIG", "SET", "requirepass", "new-redis-admin")]
-    assert state.runner_db_password == _OLD_RUNNER_DB
+    assert redis_commands == [("CONFIG", "SET", "requirepass", _NEW_REDIS_ADMIN)]
     assert state.redis_password == _OLD_REDIS_RUNTIME
 
 
-def test_runner_scope_rotates_both_runtime_credentials_and_acl(
+def test_runner_scope_rotates_the_acl_user_of_the_redis_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _state("runner")
-    runner_calls: list[dict[str, object]] = []
-    acl_calls: list[dict[str, object]] = []
-
-    def _pg_admin_url(_port: int) -> str:
-        return "postgresql://admin"
-
-    def _ensure_runner_role(*_args: object, **kwargs: object) -> None:
-        runner_calls.append(kwargs)
+    acl_calls: list[tuple[str, dict[str, object]]] = []
 
     def _working_redis_admin_password(_state: rotate.RotationState) -> str:
-        return "old-redis-admin"
+        return _OLD_REDIS_ADMIN
 
-    def _ensure_cluster_redis_acl(*_args: object, **kwargs: object) -> None:
-        acl_calls.append(kwargs)
+    def _ensure_cluster_redis_acl(user: str, **kwargs: object) -> None:
+        acl_calls.append((user, kwargs))
 
-    monkeypatch.setattr(rotate, "pg_admin_url", _pg_admin_url)
-    monkeypatch.setattr(rotate, "ensure_runner_role", _ensure_runner_role)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
     monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
 
+    rotate.apply_admin(state)  # runner scope: no requirepass effect
     rotate.apply_runner(state)
 
-    assert runner_calls == [{"base_admin_url": "postgresql://admin", "runner_password": "ghi"}]
     assert acl_calls == [
-        {
-            "redis_admin_url": "redis://default:old-redis-admin@127.0.0.1:16380",
-            "runtime_password": "new-redis-runtime",
-            "channel_prefix": settings.data_plane.events_channel.removesuffix(":events"),
-        }
+        (
+            "ava",
+            {
+                "redis_admin_url": f"redis://default:{_OLD_REDIS_ADMIN}@127.0.0.1:16380",
+                "runtime_password": _NEW_REDIS_RUNTIME,
+                "channel_prefix": settings.data_plane.events_channel.removesuffix(":events"),
+            },
+        )
     ]
 
 
-def test_write_env_syncs_urls_with_the_active_scoped_passwords(
+def test_write_env_syncs_the_redis_url_with_the_active_passwords(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _patch_gateway_home(monkeypatch, tmp_path)
@@ -250,13 +185,39 @@ def test_write_env_syncs_urls_with_the_active_scoped_passwords(
 
     rotate.write_env(state)
 
-    write = writes[0]
-    assert write["AVA_DB_ADMIN_PASSWORD"] == _OLD_DB
-    assert write["AVA_REDIS_ADMIN_PASSWORD"] == _OLD_REDIS_ADMIN
-    assert write["AVA_RUNNER_DB_PASSWORD"] == _NEW_RUNNER_DB
-    assert write["AVA_REDIS_PASSWORD"] == _NEW_REDIS_RUNTIME
-    assert urlsplit(write["AVA_DB_URL"]).password == _OLD_DB
-    assert urlsplit(write["AVA_REDIS_URL"]).password == _NEW_REDIS_RUNTIME
+    assert writes == [
+        {
+            "AVA_REDIS_ADMIN_PASSWORD": _OLD_REDIS_ADMIN,
+            "AVA_REDIS_PASSWORD": _NEW_REDIS_RUNTIME,
+            "AVA_REDIS_URL": writes[0]["AVA_REDIS_URL"],
+        }
+    ]
+    assert urlsplit(writes[0]["AVA_REDIS_URL"]).password == _NEW_REDIS_RUNTIME
+
+
+def test_preflight_and_verify_probe_the_state_host_as_the_url_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Probes dial the URL-derived host (asserted against a foreign host) as the
+    Redis `default` admin and as the redis_url ACL user, old then new values."""
+    state = _state()
+    state.redis_host = "10.0.0.7"
+    probes: list[tuple[str, str, str]] = []
+
+    def _redis_probe(host: str, _port: int, password: str, *, username: str) -> bool:
+        probes.append((host, username, password))
+        return True
+
+    monkeypatch.setattr(rotate, "_redis_probe", _redis_probe)
+
+    assert rotate.preflight(state) is True
+    rotate.verify(state)
+    assert probes == [
+        ("10.0.0.7", "default", _OLD_REDIS_ADMIN),
+        ("10.0.0.7", "ava", _OLD_REDIS_RUNTIME),
+        ("10.0.0.7", "default", _NEW_REDIS_ADMIN),
+        ("10.0.0.7", "ava", _NEW_REDIS_RUNTIME),
+    ]
 
 
 def test_dry_run_never_calls_a_mutating_phase(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,154 +227,19 @@ def test_dry_run_never_calls_a_mutating_phase(monkeypatch: pytest.MonkeyPatch) -
     def _build_state(_scope: str) -> rotate.RotationState:
         return state
 
-    def _print_plan(*_args: object, **_kwargs: object) -> None:
-        return None
-
     def _preflight(_state: rotate.RotationState) -> bool:
         return True
 
     def _apply_admin(_state: rotate.RotationState) -> None:
         mutations.append("admin")
 
+    monkeypatch.setattr(settings, "profile", None)
     monkeypatch.setattr(rotate, "build_state", _build_state)
-    monkeypatch.setattr(rotate, "print_plan", _print_plan)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(rotate, "preflight", _preflight)
     monkeypatch.setattr(rotate, "apply_admin", _apply_admin)
 
     assert rotate.main([]) == 0
     assert mutations == []
-
-
-def test_preflight_verify_and_dials_use_the_state_hosts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The rotation probes must be WIRED through preflight/verify to the
-    URL-derived state hosts (QA nit: direct probe calls would prove the probe
-    signature, not the wiring), and the admin dials must hit the same hosts —
-    asserted against a foreign host, so a re-hardcoded loopback literal fails
-    (the loopback default alone would be vacuous)."""
-    state = _state()
-    state.pg_host = "10.0.0.7"
-    state.redis_host = "10.0.0.7"
-
-    pg_urls: list[str] = []
-    redis_hosts: list[str] = []
-    acl_urls: list[str] = []
-
-    class _PgConn:
-        def __enter__(self) -> _PgConn:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def execute(self, _sql: str) -> None:
-            return None
-
-    def _connect(url: str, **_kwargs: object) -> _PgConn:
-        pg_urls.append(url)
-        return _PgConn()
-
-    class _Redis:
-        def __init__(self, **kwargs: object) -> None:
-            redis_hosts.append(str(kwargs["host"]))
-
-        def __enter__(self) -> _Redis:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def ping(self) -> bool:
-            return True
-
-        def execute_command(self, *_args: str) -> None:
-            return None
-
-    def _ensure_cluster_role(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    def _ensure_runner_role(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    def _working_redis_admin_password(_state: rotate.RotationState) -> str:
-        return "old-redis-admin"
-
-    def _ensure_cluster_redis_acl(*_args: object, **kwargs: object) -> None:
-        acl_urls.append(str(kwargs["redis_admin_url"]))
-
-    monkeypatch.setattr(rotate.psycopg, "connect", _connect)
-    monkeypatch.setattr(rotate.redis, "Redis", _Redis)
-    monkeypatch.setattr(rotate, "ensure_cluster_role", _ensure_cluster_role)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(rotate, "ensure_runner_role", _ensure_runner_role)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
-    monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
-
-    # scope=both: preflight probes owner + runner, verify re-probes both with
-    # the NEW credentials — every probe must carry the state's URL-derived host.
-    # preflight returns bool; verify returns None and RAISES on any failed probe.
-    assert rotate.preflight(state) is True
-    rotate.verify(state)
-    assert pg_urls == [
-        # preflight: owner (old creds), then runner (old creds)
-        "postgresql://ava_main:old-db@10.0.0.7:15433/ava_main",
-        "postgresql://ava_runner:old-runner-db@10.0.0.7:15433/ava_main",
-        # verify: owner + runner with the rotated credentials
-        "postgresql://ava_main:def@10.0.0.7:15433/ava_main",
-        "postgresql://ava_runner:ghi@10.0.0.7:15433/ava_main",
-    ]
-    assert redis_hosts == ["10.0.0.7"] * 4
-
-    rotate.apply_admin(state)
-    rotate.apply_runner(state)
-    # The CONFIG SET dial and the ACL-provisioning admin URL both hit the host.
-    assert redis_hosts == ["10.0.0.7"] * 5
-    assert acl_urls == ["redis://default:old-redis-admin@10.0.0.7:16380"]
-
-
-def test_build_state_derives_hosts_from_the_cluster_urls(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """build_state snapshots the dial hosts from this cluster's own URLs — the
-    replaceable-source contract (external data plane, Task #1752)."""
-    _patch_gateway_home(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        settings.data_plane, "db_url", "postgresql://ava_main:old-db@10.0.0.7:16433/ava_main"
-    )
-    monkeypatch.setattr(
-        settings.data_plane, "redis_url", "redis://ava_main:old-redis-runtime@10.0.0.7:16380/0"
-    )
-    (tmp_path / ".env").write_text(
-        "AVA_DB_ADMIN_PASSWORD=old-db\n"
-        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
-        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
-        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
-    )
-
-    state = rotate.build_state()
-
-    assert state.pg_host == "10.0.0.7"
-    assert state.redis_host == "10.0.0.7"
-
-
-def test_old_journal_without_host_fields_resumes_loopback(tmp_path: Path) -> None:
-    """A rotation journal written before the host fields existed (no pg_host /
-    redis_host) resumes with the loopback default — an in-flight rotation must
-    survive the upgrade."""
-    import json
-    from dataclasses import asdict
-
-    state = _state()
-    data = asdict(state)
-    del data["pg_host"]
-    del data["redis_host"]
-    path = tmp_path / "data-plane-old.json"
-    path.write_text(json.dumps(data))
-
-    loaded = rotate.RotationState.load(path)
-
-    assert loaded.pg_host == "127.0.0.1"
-    assert loaded.redis_host == "127.0.0.1"
 
 
 def test_recovery_state_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -425,6 +251,14 @@ def test_recovery_state_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert rotate.RotationState.load(path) == state
 
 
+def test_a_postgres_era_journal_is_refused_by_name(tmp_path: Path) -> None:
+    data = {**asdict(_state()), "old_db_admin_password": "x", "pg_port": 5433}
+    path = tmp_path / "data-plane-old.json"
+    path.write_text(json.dumps(data))
+    with pytest.raises(RuntimeError, match="not a Redis-only rotation journal"):
+        rotate.RotationState.load(path)
+
+
 def test_main_refuses_remote_managed_data_plane(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -432,87 +266,7 @@ def test_main_refuses_remote_managed_data_plane(
     the provider and the script must refuse to touch it (Task #1752)."""
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:pw@10.9.8.7:5432/ava")
     monkeypatch.setattr(settings.data_plane, "redis_url", "rediss://ava:pw@10.9.8.7:6380/0")
-    rc = rotate.main(["--scope", "admin"])
-    assert rc == 1
+    assert rotate.main(["--scope", "admin"]) == 1
     err = capsys.readouterr().err
     assert "remote-managed" in err
     assert "rotates credentials at the provider" in err
-
-
-def test_redis_faces_use_the_url_derived_redis_user_not_the_db_identity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The Redis ACL probes and the ACL write must dial as the cluster's own
-    redis_url user: it can legitimately differ from the Postgres identity
-    (2026-09-24 gateway preflight — probes written as the db identity cannot
-    authenticate, and an ACL write under it would provision the wrong user)."""
-    _patch_gateway_home(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        settings.data_plane, "redis_url", "redis://ava:old-redis-runtime@127.0.0.1:16380/0"
-    )
-    (tmp_path / ".env").write_text(
-        "AVA_DB_ADMIN_PASSWORD=old-db\n"
-        "AVA_REDIS_ADMIN_PASSWORD=old-redis-admin\n"
-        "AVA_RUNNER_DB_PASSWORD=old-runner-db\n"
-        "AVA_REDIS_PASSWORD=old-redis-runtime\n"
-    )
-    state = rotate.build_state()
-    assert state.identity == "ava_main"
-    assert state.redis_identity == "ava"
-
-    redis_probes: list[tuple[str, str]] = []
-    acl_users: list[str] = []
-
-    def _redis_probe(_host: str, _port: int, password: str, *, username: str) -> bool:
-        redis_probes.append((username, password))
-        return True
-
-    def _pg_probe(*_args: object, **_kwargs: object) -> bool:
-        return True
-
-    def _ensure_runner_role(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    def _working_redis_admin_password(_state: rotate.RotationState) -> str:
-        return "old-redis-admin"
-
-    def _ensure_cluster_redis_acl(user: str, **_kwargs: object) -> None:
-        acl_users.append(user)
-
-    monkeypatch.setattr(rotate, "_redis_probe", _redis_probe)
-    monkeypatch.setattr(rotate, "_pg_probe", _pg_probe)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(rotate, "ensure_runner_role", _ensure_runner_role)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(rotate, "_working_redis_admin_password", _working_redis_admin_password)
-    monkeypatch.setattr(rotate, "ensure_cluster_redis_acl", _ensure_cluster_redis_acl)  # pyright: ignore[reportUnknownArgumentType]
-
-    # preflight re-probes the OLD runtime password as the redis_url user.
-    assert rotate.preflight(state) is True
-    assert redis_probes == [("default", "old-redis-admin"), ("ava", "old-redis-runtime")]
-
-    # verify re-probes the NEW runtime password the same way.
-    redis_probes.clear()
-    rotate.verify(state)
-    assert [username for username, _ in redis_probes] == ["default", "ava"]
-    assert redis_probes[1][1] == state.redis_password
-
-    # the ACL write provisions the redis_url user, not the db identity.
-    rotate.apply_runner(state)
-    assert acl_users == ["ava"]
-
-
-def test_old_journal_without_redis_user_falls_back_to_identity(tmp_path: Path) -> None:
-    """A rotation journal written before the redis_user field existed resumes
-    with the db identity as the Redis user — the behavior it ran with."""
-    import json
-    from dataclasses import asdict
-
-    state = _state()
-    data = asdict(state)
-    del data["redis_user"]
-    path = tmp_path / "data-plane-old-redis-user.json"
-    path.write_text(json.dumps(data))
-
-    loaded = rotate.RotationState.load(path)
-
-    assert loaded.redis_user == ""
-    assert loaded.redis_identity == loaded.identity

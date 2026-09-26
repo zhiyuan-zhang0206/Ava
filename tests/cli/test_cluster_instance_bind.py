@@ -25,6 +25,22 @@ def _no_native_effect(*_args: object, **_kwargs: object) -> None:
 def _native_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_ci.ownership, "require_listener", _no_native_effect)
     monkeypatch.setattr(_ci.ownership, "require_postgres", _no_native_effect)
+    # The loaded-hba proof dials the postmaster; real Postgres covers it
+    # (tests/lifecycle/db_authority/test_single_box.py).
+    monkeypatch.setattr(_ci, "require_authenticated_hba", _no_native_effect)
+
+
+def _admin_peer_line() -> str:
+    import getpass
+
+    return f"local all {getpass.getuser()} peer"
+
+
+_ALWAYS_AUTH_LOOPBACK = [
+    "local all all scram-sha-256",
+    "host all all 127.0.0.1/32 scram-sha-256",
+    "host all all ::1/128 scram-sha-256",
+]
 
 
 def _pg_socket_path(root: Path, home: Path) -> Path:
@@ -113,32 +129,29 @@ def test_bind_addrs_includes_reachable_with_secret(monkeypatch: pytest.MonkeyPat
     assert _ci._bind_addrs("s3cret") == ["127.0.0.1", "10.0.0.5"]
 
 
-def test_pg_hba_body_no_scram_lines_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No secret -> local trust + loopback trust only; no scram host lines, and
-    no reachable/cidr lines either."""
+def test_pg_hba_body_authenticates_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No secret -> the data plane still authenticates: the OS user only by peer
+    on the owner-only socket, every other role SCRAM; no trust line anywhere and
+    no reachable/cidr lines (the bind stays loopback-only)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("")
-    assert "scram" not in body
-    assert body.splitlines() == [
-        "local all all trust",
-        "host all all 127.0.0.1/32 trust",
-        "host all all ::1/128 trust",
-    ]
+    assert "trust" not in body
+    assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
 
 
 def test_pg_hba_body_scram_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a secret the posture is unchanged: scram everywhere TCP, including
-    the reachable host and trusted CIDRs. No replication rows without a PITR
-    replication URL (pinned explicitly — ambient prod env must not leak in)."""
+    """With a secret, the reachable host and trusted CIDRs join as SCRAM lines.
+    No replication rows without a PITR replication URL (pinned explicitly —
+    ambient prod env must not leak in)."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
     monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("s3cret")
     assert body.splitlines() == [
-        "local all all trust",
-        "host all all 127.0.0.1/32 scram-sha-256",
-        "host all all ::1/128 scram-sha-256",
+        _admin_peer_line(),
+        *_ALWAYS_AUTH_LOOPBACK,
         "host all all 10.0.0.5/32 scram-sha-256",
         "host all all 10.0.0.0/8 scram-sha-256",
     ]
@@ -163,30 +176,27 @@ def test_pg_hba_body_emits_replication_rows_for_pitr_role(monkeypatch: pytest.Mo
 def test_pg_hba_body_no_replication_rows_without_pitr_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No PITR replication URL -> no replication rows; the existing posture is
-    unchanged (and pre-PITR clusters stay exactly as tightened)."""
+    """No PITR replication URL -> no replication rows."""
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "127.0.0.1")
     monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("s3cret")
     assert "replication" not in body
-    assert body.splitlines() == [
-        "local all all trust",
-        "host all all 127.0.0.1/32 scram-sha-256",
-        "host all all ::1/128 scram-sha-256",
-    ]
+    assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
 
 
-def test_pg_hba_body_no_replication_rows_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A no-secret cluster stays replication-free even with a PITR URL in
-    ambient settings — its unauthenticated posture must not gain scram rows."""
+def test_pg_hba_body_replication_rows_follow_pitr_whatever_the_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The always-authenticated posture carries PITR's SCRAM replication rows on
+    a no-secret cluster too; the secret decides only reach."""
     monkeypatch.setattr(
         settings.physical_backup,
         "pitr_replication_db_url",
         "postgresql://ava_pitr_repl:s3cret@127.0.0.1:5433/ava_main",
     )
     body = _ci._pg_hba_body("")
-    assert "replication" not in body
+    assert "host replication ava_pitr_repl 127.0.0.1/32 scram-sha-256" in body.splitlines()
 
 
 # ─── Task #1113: the passed secret wins over ambient settings ────────────────
@@ -210,19 +220,14 @@ def test_pg_hba_body_follows_passed_secret_not_ambient_settings(
 ) -> None:
     """The hba is written from the passed cluster secret, never from ambient
     settings — otherwise a no-secret cluster born from a prod-sourced shell
-    gets scram lines keyed to a FOREIGN secret (its own first-start migration
-    then fails `fe_sendauth: no password supplied` against the active hba)."""
+    gains LAN-reachable host lines keyed to a FOREIGN cluster's posture."""
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "foreign-sibling-secret")
     monkeypatch.setattr(settings.data_plane, "trusted_cidrs", "10.0.0.0/8")
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
+    monkeypatch.setattr(settings.physical_backup, "pitr_replication_db_url", None)
     body = _ci._pg_hba_body("")
-    assert "scram" not in body
-    assert "foreign" not in body
-    assert body.splitlines() == [
-        "local all all trust",
-        "host all all 127.0.0.1/32 trust",
-        "host all all ::1/128 trust",
-    ]
+    assert "10.0.0" not in body
+    assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
 
 
 # ─── task #1469: macOS retains its loopback Redis workaround ──────────────────

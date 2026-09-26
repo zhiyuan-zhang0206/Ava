@@ -54,8 +54,12 @@ def test_fresh_identity_committed_before_native_work(inputs: identity.IdentityIn
     assert "pgbouncer" in rec.ports
     db_url = env["AVA_DB_URL"]
     assert db_url is not None and db_url.endswith(f":{rec.ports['pgbouncer']}/ava")
+    # The database endpoint is credential-free: the owner is NOLOGIN and the
+    # first start mints write generation 0; no DB password is ever minted here.
+    assert urlsplit(db_url).password is None
     assert env["AVA_CLUSTER_SECRET"] == ""
-    assert env["AVA_RUNNER_DB_PASSWORD"]
+    assert "AVA_DB_ADMIN_PASSWORD" not in env
+    assert "AVA_RUNNER_DB_PASSWORD" not in env
     # Redis always authenticates: a no-secret single box is still born with
     # independent Redis admin and runtime passwords, the runtime one in its URL.
     redis_admin, redis_runtime = env["AVA_REDIS_ADMIN_PASSWORD"], env["AVA_REDIS_PASSWORD"]
@@ -74,14 +78,9 @@ def test_repeat_preserves_identity_credentials_and_bytes(inputs: identity.Identi
     identity.prepare_identity(inputs)
     assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths] == before
     env = dotenv_values(paths[0])
-    keys = (
-        "AVA_CLUSTER_SECRET",
-        "AVA_DB_ADMIN_PASSWORD",
-        "AVA_REDIS_ADMIN_PASSWORD",
-        "AVA_REDIS_PASSWORD",
-        "AVA_RUNNER_DB_PASSWORD",
-    )
+    keys = ("AVA_CLUSTER_SECRET", "AVA_REDIS_ADMIN_PASSWORD", "AVA_REDIS_PASSWORD")
     assert len({env[k] for k in keys}) == len(keys)
+    assert all(env[k] for k in keys)
 
 
 def test_stale_inputs_cannot_rebind_checkout_across_private_registries(

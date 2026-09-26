@@ -28,6 +28,8 @@ import pytest
 from cli.commands import _pgbouncer as _pb
 
 _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
+_ADMIN = "pooler-admin-fixture"
+_USERLIST = b'"ava_pooler_admin" "SCRAM-SHA-256$4096:c2FsdA==$a:b"\n'
 
 
 class _ReloadProcess:
@@ -44,8 +46,8 @@ def _noop_write(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never touch the real $AVA_HOME/pgbouncer dir from a unit test."""
     monkeypatch.setattr(_pb.ownership, "require_listener", Mock(return_value=frozenset({4242})))
     monkeypatch.setattr(_pb.OwnedPooler, "_stop_requested", Mock(return_value=False))
-    monkeypatch.setattr(_pb, "_write_config", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_pb, "_report_backend_verification", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    # Unchanged files: the reload-vs-restart decision is the bind posture alone.
+    monkeypatch.setattr(_pb, "_write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     # ensure_pgbouncer's binary-exists guard must pass on every runner: the fake
     # `pgbouncer_bin` path only exists on macOS (brew), and CI is Linux without
     # pgbouncer installed. `shutil.which` answering non-None satisfies the guard.
@@ -89,9 +91,9 @@ def test_fresh_start_waits_for_reachable_bind_and_fails_fast_on_timeout(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        role="ava_main",
         cluster_secret=_SECRET,
-        db_admin_password="owner",  # noqa: S106 — test credential
+        userlist=_USERLIST,
+        admin_password=_ADMIN,
     )
 
     assert rc == 1
@@ -150,9 +152,9 @@ def test_fresh_start_degraded_to_loopback_only_is_a_loud_failure(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        role="ava_main",
         cluster_secret=_SECRET,
-        db_admin_password="owner",  # noqa: S106 — test credential
+        userlist=_USERLIST,
+        admin_password=_ADMIN,
     )
 
     assert rc == 1
@@ -177,9 +179,9 @@ def test_fresh_start_with_public_listener_is_success(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        role="ava_main",
         cluster_secret=_SECRET,
-        db_admin_password="owner",  # noqa: S106 — test credential
+        userlist=_USERLIST,
+        admin_password=_ADMIN,
     )
 
     assert rc == 0
@@ -217,6 +219,7 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
         SimpleNamespace(Process=Mock(return_value=_ReloadProcess(4242, sighups))),
     )
     monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "_admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _pb,
         "_wait_for_reachable_bind_gated",
@@ -229,9 +232,9 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        role="ava_main",
         cluster_secret=_SECRET,
-        db_admin_password="owner",  # noqa: S106 — test credential
+        userlist=_USERLIST,
+        admin_password=_ADMIN,
     )
 
     assert rc == 0
@@ -281,9 +284,9 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        role="ava_main",
         cluster_secret=_SECRET,
-        db_admin_password="owner",  # noqa: S106 — test credential
+        userlist=_USERLIST,
+        admin_password=_ADMIN,
     )
 
     assert rc == 0
@@ -312,11 +315,52 @@ def test_running_degraded_pooler_surviving_terminate_is_reported(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        role="ava_main",
         cluster_secret=_SECRET,
-        db_admin_password="owner",  # noqa: S106 — test credential
+        userlist=_USERLIST,
+        admin_password=_ADMIN,
     )
 
     assert rc == 1
     assert calls == [], "no fresh start may follow a terminate that did not take"
-    assert "could not stop the degraded pooler" in capsys.readouterr().err
+    assert "could not stop the running pooler" in capsys.readouterr().err
+
+
+def test_running_pooler_with_changed_userlist_is_restarted_never_reloaded(
+    monkeypatch: pytest.MonkeyPatch, _noop_write: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """E11: a SIGHUP reload keeps a removed user that already authenticated and
+    still admits its new sessions, so changed userlist bytes RESTART a healthy
+    pooler; only a fresh process revokes."""
+    killed: list[int] = []
+    sighups: list[int] = []
+
+    def record_stop(custodian: _pb.OwnedPooler, **_kwargs: object) -> bool:
+        killed.append(custodian.identity.pid)
+        return True
+
+    monkeypatch.setattr(_pb, "_write_config", lambda **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _pb.ownership, "pooler", Mock(return_value=SimpleNamespace(pid=4242, live=lambda: True))
+    )
+    monkeypatch.setattr(_pb.OwnedPooler, "stop", record_stop)
+    monkeypatch.setattr(
+        _pb, "psutil", SimpleNamespace(Process=Mock(return_value=_ReloadProcess(4242, sighups)))
+    )
+    monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "_admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    calls = _fake_start(monkeypatch)
+
+    rc = _pb.ensure_pgbouncer(
+        pg_port=5433,
+        listen_port=6433,
+        db_name="ava_main",
+        cluster_secret=_SECRET,
+        userlist=_USERLIST,
+        admin_password=_ADMIN,
+    )
+
+    assert rc == 0
+    assert killed == [4242] and sighups == [], "a changed userlist restarts, never reloads"
+    assert len(calls) == 1, "a fresh pooler process serves the new userlist"
+    assert "a reload never revokes" in capsys.readouterr().out

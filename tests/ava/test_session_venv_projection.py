@@ -292,7 +292,7 @@ def test_unprojected_agent_child_still_hits_owner_url_guard(
             "try:\n"
             "    settings.data_plane.db_url\n"
             "except Exception as exc:\n"
-            "    print(type(exc).__name__, 'agent-profile processes must receive an ava_runner' in str(exc))\n",
+            "    print(type(exc).__name__, 'agent-profile processes must receive a runner-class' in str(exc))\n",
         ],
         env=env,
         cwd=Path(__file__).resolve().parents[2],

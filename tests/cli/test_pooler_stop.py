@@ -63,7 +63,7 @@ def _pooler_config(directory: Path, port: int, backend_port: int) -> str:
         "[pgbouncer]\nlisten_addr=127.0.0.1\n"
         f"listen_port={port}\nauth_type=trust\nauth_file={directory / 'userlist.txt'}\n"
         f"pidfile={directory / 'pgbouncer.pid'}\nlogfile={directory / 'pgbouncer.log'}\n"
-        "pool_mode=transaction\nunix_socket_dir=\nadmin_users=ava\n"
+        "pool_mode=transaction\nunix_socket_dir=\nadmin_users=ava,ava_pooler_admin\n"
     )
 
 
@@ -137,7 +137,7 @@ def native_pooler(
     directory = tmp_path / "pgbouncer"
     directory.mkdir()
     config = directory / "pgbouncer.ini"
-    (directory / "userlist.txt").write_text('"ava" ""\n')
+    (directory / "userlist.txt").write_text('"ava" ""\n"ava_pooler_admin" ""\n')
     with throwaway_postgres() as direct:
         backend_port = urlsplit(direct).port
         assert backend_port is not None

@@ -1,12 +1,15 @@
-"""Contract tests for the ava_runner least-privilege role (Task #1236).
+"""Contract tests for the `ava_runner` capability group's matrix (Task #1236).
 
-Prove the design's grant matrix on a throwaway Postgres: the runner role can
-write exactly its audited surface — checkpoint tables (full CRUD), inbound
-claim (SELECT/UPDATE), agents_meta status (SELECT/UPDATE), machine_units
-(INSERT/UPDATE/SELECT), the compact-boundary enqueue, and SELECT everywhere —
-and NOTHING else: agents INSERT, agents_meta INSERT and any DDL fail with a
-permission error. Also covers idempotent provisioning and the checkpoint-
-schema ensure that makes a fresh birth's grants target existing tables.
+Prove the design's grant matrix on a throwaway Postgres, exercised through a
+write-generation-shaped runner login that inherits the NOLOGIN `ava_runner`
+group: it can write exactly its audited surface — checkpoint tables (full
+CRUD), inbound claim (SELECT/UPDATE), agents_meta status (SELECT/UPDATE),
+machine_units (INSERT/UPDATE/SELECT), the compact-boundary enqueue, and SELECT
+everywhere — and NOTHING else: agents INSERT, agents_meta INSERT and any DDL
+fail with a permission error. The grants come from
+`shared.cluster.authority.ensure_groups` (the start-path refresh after
+migrations). Also covers the checkpoint-schema ensure that makes a fresh
+birth's grants target existing tables.
 """
 
 from __future__ import annotations
@@ -19,20 +22,22 @@ from typing import cast
 import psycopg
 import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg import sql
 
 from shared.cluster import (
     drop_database,
     ensure_checkpoint_schema,
-    ensure_runner_role,
     provision_database,
 )
+from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
 from shared.managed_writer_publication import LegacyProtocolZero, publication_admission
 from shared.metrics.observed_metrics import MetricObservation, write_observations
+from shared.pg_admin import owner_conninfo
 from shared.pg_tools import throwaway_postgres
 from shared.url_secret import url_with_userinfo
 
 _RUNNER_PW = "runner-pw-fixture"
-_ROTATED_PW = "rotated-pw-fixture"
+_RUNNER_LOGIN = "ava_g0_runner"
 _CLUSTER_SECRET = "cluster-secret-x"  # noqa: S105 — test fixture, not a real credential
 _IDENTITY = "ava_citest"  # the throwaway db/role the fixture births
 
@@ -55,28 +60,48 @@ def _admin_url(url: str) -> str:
 
 
 def _runner_url(url: str) -> str:
-    return url_with_userinfo(url, "ava_runner", _RUNNER_PW)
+    return url_with_userinfo(url, _RUNNER_LOGIN, _RUNNER_PW)
 
 
-def test_ensure_runner_role_provisions_idempotently(runner_db: str) -> None:
-    """One call creates ava_runner LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
-    a second call is a no-op, not an error."""
-    admin = _admin_url(runner_db)
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+def _grant_runner(url: str, identity: str = _IDENTITY) -> None:
+    """The start-path grant refresh (`ensure_groups` after migrations) on the
+    `identity` database, plus one runner login inheriting the group the way a
+    write generation's login does (INHERIT TRUE, SET FALSE, ADMIN FALSE)."""
+    groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
+    with psycopg.connect(url.rsplit("/", 1)[0] + "/" + identity, autocommit=True) as conn:
+        ensure_groups(conn, owner=identity, database=identity, groups=groups)
+        if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (_RUNNER_LOGIN,)).fetchone():
+            return
+        conn.execute(
+            sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+                sql.Identifier(_RUNNER_LOGIN), sql.Literal(_RUNNER_PW)
+            )
+        )
+        conn.execute(
+            sql.SQL("GRANT {} TO {} WITH INHERIT TRUE, SET FALSE, ADMIN FALSE").format(
+                sql.Identifier(RUNNER_GROUP), sql.Identifier(_RUNNER_LOGIN)
+            )
+        )
 
-    with psycopg.connect(admin, autocommit=True) as conn:
+
+def test_runner_group_is_a_nologin_capability_and_the_refresh_is_idempotent(
+    runner_db: str,
+) -> None:
+    """The refresh creates `ava_runner` as a NOLOGIN group; running it again is
+    a no-op, not an error, and the login's privileges are the group's."""
+    _grant_runner(runner_db)
+    _grant_runner(runner_db)
+
+    with psycopg.connect(_admin_url(runner_db), autocommit=True) as conn:
         attrs = conn.execute(
             "SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole"
             " FROM pg_roles WHERE rolname = 'ava_runner'"
         ).fetchone()
-    assert attrs == (True, False, False, False), (
-        "ava_runner must be LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE"
-    )
+    assert attrs == (False, False, False, False), "ava_runner is a NOLOGIN capability group"
 
 
 def test_runner_projects_observations_and_records_actual_lifecycle(runner_db: str) -> None:
-    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("INSERT INTO agents (id) VALUES (712345)")
         conn.execute("INSERT INTO agents_meta (id,status) VALUES (712345,'running')")
@@ -109,25 +134,6 @@ def test_runner_projects_observations_and_records_actual_lifecycle(runner_db: st
             conn.execute("DELETE FROM agent_metric_observations")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE agent_metric_collection SET started_at=now()")
-
-
-def test_ensure_runner_role_reauths_password_on_rerun(runner_db: str) -> None:
-    """Re-running with a different password rotates the role's stored verifier —
-    the normal gateway start grant refresh."""
-    admin = _admin_url(runner_db)
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
-
-    def verifier() -> str:
-        with psycopg.connect(admin, autocommit=True) as conn:
-            row = conn.execute(
-                "SELECT rolpassword FROM pg_authid WHERE rolname = 'ava_runner'"
-            ).fetchone()
-        assert row is not None
-        return row[0]
-
-    before = verifier()
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_ROTATED_PW)
-    assert verifier() != before
 
 
 def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: str) -> None:
@@ -174,10 +180,10 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
 
         # The runner grants now target the freshly-created tables — the birth order
         # install_cluster uses (checkpoint schema first, grants second).
-        ensure_runner_role(identity, base_admin_url=admin, runner_password=_RUNNER_PW)
+        _grant_runner(runner_db, identity)
         with psycopg.connect(
             url_with_userinfo(
-                runner_db.rsplit("/", 1)[0] + "/" + identity, "ava_runner", _RUNNER_PW
+                runner_db.rsplit("/", 1)[0] + "/" + identity, _RUNNER_LOGIN, _RUNNER_PW
             ),
             autocommit=True,
         ) as conn:
@@ -280,15 +286,11 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
     """Real PG: caught autocommit setup failure leaves no half-born database."""
     admin = _admin_url(runner_db)
     identity = "ava_runner_ct4"
-    db_url = url_with_userinfo(
-        runner_db.rsplit("/", 1)[0] + "/" + identity, identity, _CLUSTER_SECRET
-    )
+    # The provisioned owner is NOLOGIN: the administrator acts as it.
+    db_url = owner_conninfo(admin, database=identity, owner=identity)
     original_setup = PostgresSaver.setup
 
-    assert (
-        provision_database(identity, base_admin_url=admin, db_admin_password=_CLUSTER_SECRET)
-        is True
-    )
+    assert provision_database(identity, base_admin_url=admin) is True
 
     def fail_after_v0(_self: PostgresSaver) -> None:
         with psycopg.connect(db_url, autocommit=True) as conn:
@@ -309,10 +311,7 @@ def test_new_database_setup_failure_is_dropped_then_retry_converges(
 
     monkeypatch.setattr(PostgresSaver, "setup", original_setup)
     try:
-        assert (
-            provision_database(identity, base_admin_url=admin, db_admin_password=_CLUSTER_SECRET)
-            is True
-        )
+        assert provision_database(identity, base_admin_url=admin) is True
         ensure_checkpoint_schema(
             identity,
             base_admin_url=admin,
@@ -345,7 +344,7 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
     )
     from shared.config import settings
 
-    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
 
     trace_id = "f" * 32
     checkpoint = empty_checkpoint()
@@ -402,7 +401,7 @@ def test_runner_checkpoint_schema_assertion_requires_exact_set(
     from shared.cluster import assert_checkpoint_schema_current
     from shared.cluster.provision import CheckpointSchemaMismatchError
 
-    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute(corruption_sql)  # type: ignore[arg-type]
 
@@ -414,7 +413,7 @@ def test_runner_accepts_exact_checkpoint_schema_read_only(runner_db: str) -> Non
     """A pure runner can pass the start gate with checkpoint SELECT alone."""
     from shared.cluster import assert_checkpoint_schema_current
 
-    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
     assert_checkpoint_schema_current(_runner_url(runner_db))
 
 
@@ -495,8 +494,7 @@ def test_birth_retry_refuses_non_prefix_checkpoint_state(
 
 def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one grant-matrix litany; each line is one exercised surface
     """The design's grant matrix, exercised as ava_runner over the wire."""
-    admin = _admin_url(runner_db)
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
 
     # Seed rows as the admin (the gateway side): an agent + its meta + an inbound.
     with psycopg.connect(runner_db, autocommit=True) as conn:
@@ -659,11 +657,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
 
 def test_runner_publication_admission_locks_without_rollout_write(runner_db: str) -> None:
     """Admission may serialize on deployment state without granting its writes."""
-    ensure_runner_role(
-        _IDENTITY,
-        base_admin_url=_admin_url(runner_db),
-        runner_password=_RUNNER_PW,
-    )
+    _grant_runner(runner_db)
 
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
         with conn.transaction():
@@ -844,7 +838,7 @@ def test_read_grant_reaches_a_table_created_after_provisioning(runner_db: str) -
     invisible to `ava_runner` (found on `20260820T175737`, the first
     post-baseline migration to CREATE a table).
     """
-    ensure_runner_role(_IDENTITY, base_admin_url=_admin_url(runner_db), runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
 
     # ... and then a migration creates a table, as the cluster's main identity.
     with psycopg.connect(_identity_url(runner_db), autocommit=True) as conn:
@@ -869,12 +863,11 @@ def test_pause_log_write_grant_reaches_a_cluster_born_before_the_table(
     Fresh-birth coverage lives in `test_runner_grant_matrix`. The prod shape
     is the reverse: the cluster was born, THEN the migration created the
     table — and the runner's write grant for it is a per-table entry in
-    `ensure_runner_role`, so nothing covered the new table until the
+    the runner group's matrix, so nothing covered the new table until the
     start-path refresh re-ran the grant layer, and the fleet-wide
     `pause_heartbeat` INSERT failed with InsufficientPrivilege.
     """
-    admin = _admin_url(runner_db)
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
 
     # Simulate a cluster born BEFORE the pause table existed: the fixture's
     # fresh schema already carries it, so drop it first; the "migration" then
@@ -906,9 +899,9 @@ def test_pause_log_write_grant_reaches_a_cluster_born_before_the_table(
                 (agent_id,),
             )
 
-    # The start-path refresh (`refresh_runner_grants_after_migration` ->
-    # ensure_runner_role) re-runs the grant layer with the table now present.
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    # The start-path refresh (ensure_groups) re-runs the grant layer with the
+    # table now present.
+    _grant_runner(runner_db)
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
         conn.execute(
             "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, 1800)",
@@ -931,8 +924,7 @@ def test_impersonation_entry_grant_reaches_a_cluster_born_before_the_table(
     agent_impersonation_entries until the start-path refresh re-ran the grant
     layer.
     """
-    admin = _admin_url(runner_db)
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
 
     # Simulate a cluster born BEFORE the trail table existed: drop it, then
     # re-create it AS the main identity (the role the migration applier dials
@@ -979,7 +971,7 @@ def test_impersonation_entry_grant_reaches_a_cluster_born_before_the_table(
             create_lease(conn)
 
     # The start-path refresh re-runs the grant layer with the table present.
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
         lease = create_lease(conn)
         assert lease is not None
@@ -998,8 +990,7 @@ def test_alert_write_grant_reaches_a_cluster_born_before_the_entry(runner_db: st
     resolve failed with InsufficientPrivilege until the start-path refresh
     re-ran the grant layer with the entry present.
     """
-    admin = _admin_url(runner_db)
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
 
     # Simulate a cluster whose surface predates this entry: the role's alerts
     # grants as they were — the blanket read grant, no write grants.
@@ -1014,9 +1005,9 @@ def test_alert_write_grant_reaches_a_cluster_born_before_the_entry(runner_db: st
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             _exercise_alert_grants(conn)
 
-    # The start-path refresh (`refresh_runner_grants_after_migration` ->
-    # ensure_runner_role) re-runs the grant layer with the alerts entry.
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    # The start-path refresh (ensure_groups) re-runs the grant layer with the
+    # alerts entry.
+    _grant_runner(runner_db)
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
         _exercise_alert_grants(conn)
 
@@ -1028,8 +1019,7 @@ def test_hierarchy_jobs_insert_grant_reaches_a_cluster_born_before_the_entry(
     hierarchy_jobs INSERT entry — every enqueue failed with InsufficientPrivilege
     and the trigger went dark until the start-path refresh re-ran the grant
     layer."""
-    admin = _admin_url(runner_db)
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
     # The role's surface as it was: blanket reads, no INSERT on hierarchy_jobs.
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("REVOKE INSERT ON hierarchy_jobs FROM ava_runner")
@@ -1040,6 +1030,6 @@ def test_hierarchy_jobs_insert_grant_reaches_a_cluster_born_before_the_entry(
     ):
         _exercise_hierarchy_job_grants(conn, 880_040)
 
-    ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
+    _grant_runner(runner_db)
     with psycopg.connect(_runner_url(runner_db), autocommit=True) as conn:
         _exercise_hierarchy_job_grants(conn, 880_040)

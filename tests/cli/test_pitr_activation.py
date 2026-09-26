@@ -1149,7 +1149,7 @@ def test_frozen_pg_state_contract_with_real_reader(
     import tempfile
     from types import SimpleNamespace
 
-    from shared.cluster import postgres
+    from shared.cluster import db_identity, postgres
     from shared.pg_tools import pg_tool
 
     with socket.socket() as listener:
@@ -1193,8 +1193,9 @@ def test_frozen_pg_state_contract_with_real_reader(
 
     postgres.start(data, port, argv, dict(os.environ), ready=ready, timeout=30)
     try:
+        # The reader dials the database the suite URL names (`db_identity`).
         subprocess.run(  # noqa: S603
-            [pg_tool("createdb"), "-h", str(sock), "-p", str(port), "-U", "ava", "ava"],
+            [pg_tool("createdb"), "-h", str(sock), "-p", str(port), "-U", "ava", db_identity()],
             check=True,
             capture_output=True,
         )

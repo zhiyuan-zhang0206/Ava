@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -177,3 +179,45 @@ assert 'shared.config' not in sys.modules
     subprocess.run(  # noqa: S603 — fixed argv in private test repository/interpreter
         [sys.executable, "-c", program], check=True, timeout=20
     )
+
+
+def test_generation_binds_the_delivered_write_generation(
+    tmp_path: Path, seed_write_generation: Callable[[Path], Any]
+) -> None:
+    """A changed write generation alone changes the launch digest; only its
+    number and credential digest are bound, never a password."""
+    from shared.cluster.authority import load_ledger
+    from shared.cluster.authority.ledger import ledger_path
+
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)  # noqa: S603 — test-owned repository
+    (repo / "app.py").write_text("value = 1\n")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)  # noqa: S603 — test-owned repository
+    subprocess.run(  # noqa: S603 — test-owned repository and explicit local identity
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "source fixture",
+        ],
+        check=True,
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text("AVA_SSE_THROTTLE_RATE=10\n")
+    unborn = launch_digest(repo, {}, home=home)
+    seed_write_generation(home)
+    born = launch_digest(repo, {}, home=home)
+    assert born != unborn
+    ledger = load_ledger(home.resolve())
+    assert ledger is not None and ledger.active is not None
+    # Another credential digest for the same number is another generation.
+    record = ledger_path(home.resolve())
+    record.write_text(record.read_text().replace(ledger.active.credential_digest, "0" * 64))
+    assert launch_digest(repo, {}, home=home) != born

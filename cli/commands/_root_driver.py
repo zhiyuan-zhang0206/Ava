@@ -13,7 +13,7 @@ from typing import Any, NamedTuple, cast
 from cli.commands._probe import ReadinessWait
 from cli.commands._repo import ServiceSpec, session_name
 from cli.start_runtime import StartRuntime
-from ops.service_spec import profile_marker
+from ops.service_spec import db_access, profile_marker
 from shared.cluster.derive import runner_db_url_projection
 from shared.config import settings
 from shared.machine import MachineRoles
@@ -64,14 +64,19 @@ class LaunchOutcome(NamedTuple):
 
 
 def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
-    """Bind profile and runner credentials to one service, never its parent."""
+    """Bind profile and database login to one service, never its parent."""
+    from cli.commands._data_plane import db_delivery
     from shared.lgtm_local import BACKENDS, service_environment
 
     extra = service_environment(spec.session) if spec.session in BACKENDS else {}
     marker = profile_marker(spec)
     if marker is not None:
         extra["AVA_PROCESS_PROFILE"] = marker
-    if marker == "agent":
+    cls = db_access(spec)
+    delivery = db_delivery(cls) if cls is not None else {}
+    if delivery:
+        extra.update(delivery)
+    elif marker == "agent":
         extra["AVA_DB_URL"] = runner_db_url_projection(settings.data_plane.db_url)
     return extra
 

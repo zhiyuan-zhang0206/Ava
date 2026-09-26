@@ -21,6 +21,8 @@ from shared.cluster import postgres as pg
 from shared.native_process.ownership import OwnedProcess
 from tests._containers import redis_server
 
+_UNUSED_ADMIN = "unused-admin-credential"
+
 
 def test_foreign_redis_keeps_acl_and_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -66,9 +68,9 @@ def test_foreign_pooler_listener_refuses_before_config_or_signal(
             pg_port=15433,
             listen_port=16433,
             db_name="ava",
-            role="ava",
             cluster_secret="",
-            runner_password="",
+            userlist=b"",
+            admin_password=_UNUSED_ADMIN,
         )
 
 
@@ -83,7 +85,7 @@ def test_pooler_birth_change_prevents_reload(
         lambda *_a: SimpleNamespace(pid=123, live=lambda: False),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     )
     monkeypatch.setattr(ownership, "require_listener", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-    monkeypatch.setattr(pooler, "_write_config", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(pooler, "_write_config", lambda **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(pooler, "pgbouncer_public_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(
         pooler,
@@ -99,9 +101,9 @@ def test_pooler_birth_change_prevents_reload(
             pg_port=15433,
             listen_port=16433,
             db_name="ava",
-            role="ava",
             cluster_secret="",
-            runner_password="",
+            userlist=b"",
+            admin_password=_UNUSED_ADMIN,
         )
 
 

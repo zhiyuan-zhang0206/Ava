@@ -9,8 +9,8 @@ per-cluster instance with native custody:
 - the result is privilege-identical to the pre-authority procedure that logged
   in as the owner (the application roles' surface does not move);
 - re-running provisioning is a no-op;
-- the owner can lose LOGIN and migrations, provisioning, `pg_dump` and a
-  restore of that dump keep working — the precondition for demoting it.
+- the owner is born NOLOGIN, and migrations, provisioning, `pg_dump` and a
+  restore of that dump keep working without it ever logging in.
 """
 
 from __future__ import annotations
@@ -38,16 +38,16 @@ from shared import cluster
 from shared.cluster import (
     ensure_checkpoint_schema,
     ensure_pgvector_extension,
-    ensure_runner_role,
     provision_database,
 )
+from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
 from shared.config import settings
 from shared.migrations import apply_pending_migrations, required_migration_set
 from shared.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
 from shared.pg_tools import pg_tool
 
 _OWNER_PASSWORD = "owner-login-fixture"  # noqa: S105 — test fixture, not a real credential
-_RUNNER_PASSWORD = "runner-login-fixture"  # noqa: S105 — test fixture, not a real credential
+_GROUPS = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
 
 # Every catalog fact an application role's privileges depend on. A NULL ACL
 # reads as its built-in default, so an explicit owner-only ACL and an untouched
@@ -175,12 +175,22 @@ def _vector_available(pg_port: int) -> bool:
         return row.fetchone() is not None
 
 
+def _normalized(value: object, owner: str) -> str:
+    """The owner's name normalized; an ACL array's items sorted (their order is
+    grant order — the capability groups are cluster-wide, so a second database
+    sees them before its schema grants run)."""
+    text = str(value).replace(owner, "<owner>")
+    if text.startswith("{") and text.endswith("}") and "=" in text:
+        return "{" + ",".join(sorted(text[1:-1].split(","))) + "}"
+    return text
+
+
 def _snapshot(conninfo: str, owner: str) -> dict[str, list[tuple[str, ...]]]:
     """Every privilege-bearing catalog fact, with the owner's name normalized."""
     with psycopg.connect(conninfo) as conn:
         return {
             name: [
-                tuple(str(value).replace(owner, "<owner>") for value in row)
+                tuple(_normalized(value, owner) for value in row)
                 for row in conn.execute(query).fetchall()
             ]
             for name, query in _SNAPSHOT.items()
@@ -203,13 +213,17 @@ def _prepared_state(conninfo: str) -> tuple[set[str], bool]:
 def _provision_by_owner_login(pg_port: int, identity: str, dim: int) -> None:
     """The procedure before the admin authority: DDL by logging in as the owner.
 
-    Role, database, extension and runner grants were already admin work; the
+    Role, database, extension and group grants were already admin work; the
     schema baseline, checkpoint setup, migrations and the indexer's memory
-    table ran over the owner's own login.
+    table ran over the owner's own login (a LOGIN owner with a password).
     """
     admin = ci.pg_admin_url(pg_port)
-    cluster.ensure_cluster_role(identity, base_admin_url=admin, db_admin_password=_OWNER_PASSWORD)
     with psycopg.connect(admin, autocommit=True) as conn:
+        conn.execute(
+            sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER PASSWORD {}").format(
+                sql.Identifier(identity), sql.Literal(_OWNER_PASSWORD)
+            )
+        )
         conn.execute(
             sql.SQL("CREATE DATABASE {} OWNER {}").format(
                 sql.Identifier(identity), sql.Identifier(identity)
@@ -224,20 +238,20 @@ def _provision_by_owner_login(pg_port: int, identity: str, dim: int) -> None:
         saver.setup()
     with psycopg.connect(login) as conn:
         apply_pending_migrations(conn)
-    ensure_runner_role(identity, base_admin_url=admin, runner_password=_RUNNER_PASSWORD)
+    _grant_groups(pg_port, identity)
     with psycopg.connect(login) as conn:
         prepare_table(conn, dim)
+
+
+def _grant_groups(pg_port: int, identity: str) -> None:
+    with psycopg.connect(_admin_on(pg_port, identity), autocommit=True) as conn:
+        ensure_groups(conn, owner=identity, database=identity, groups=_GROUPS)
 
 
 def _provision_by_authority(pg_port: int, identity: str) -> bool:
     """Today's start order through the admin authority; returns database creation."""
     admin = ci.pg_admin_url(pg_port)
-    created = provision_database(
-        identity,
-        base_admin_url=admin,
-        db_admin_password=_OWNER_PASSWORD,
-        expected_data_dir=_data_dir(),
-    )
+    created = provision_database(identity, base_admin_url=admin, expected_data_dir=_data_dir())
     _prepare_by_authority(pg_port, identity, database_created=created)
     return created
 
@@ -254,12 +268,7 @@ def _prepare_by_authority(pg_port: int, identity: str, *, database_created: bool
     cmd_migrations_apply()
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=_data_dir())
     prepare_memory_vectors()
-    ensure_runner_role(
-        identity,
-        base_admin_url=admin,
-        runner_password=_RUNNER_PASSWORD,
-        expected_data_dir=_data_dir(),
-    )
+    _grant_groups(pg_port, identity)
 
 
 def test_authority_matches_owner_login_privileges_and_is_idempotent(
@@ -290,20 +299,18 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(
 def test_owner_without_login_keeps_every_admin_path(
     owned_pg: int, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Slice-4 precondition: a NOLOGIN owner still migrates, provisions and dumps."""
+    """The owner is born NOLOGIN; it still migrates, provisions and dumps."""
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
     identity = "ava_nolg"
     _bind_cluster_url(monkeypatch, owned_pg, identity)
     admin = ci.pg_admin_url(owned_pg)
-    created = provision_database(
-        identity,
-        base_admin_url=admin,
-        db_admin_password=_OWNER_PASSWORD,
-        expected_data_dir=_data_dir(),
-    )
+    created = provision_database(identity, base_admin_url=admin, expected_data_dir=_data_dir())
     with psycopg.connect(admin, autocommit=True) as conn:
-        conn.execute(sql.SQL("ALTER ROLE {} NOLOGIN").format(sql.Identifier(identity)))
-    with pytest.raises(psycopg.OperationalError, match="not permitted to log in"):
+        assert conn.execute(
+            "SELECT rolcanlogin, rolpassword IS NULL FROM pg_authid WHERE rolname = %s",
+            (identity,),
+        ).fetchone() == (False, True)
+    with pytest.raises(psycopg.OperationalError):
         psycopg.connect(
             f"postgresql://{identity}:{_OWNER_PASSWORD}@127.0.0.1:{owned_pg}/{identity}"
         )
@@ -385,7 +392,8 @@ def test_owner_conninfo_refuses_what_startup_options_cannot_carry() -> None:
 def test_local_owner_authority_reads_record_and_url_as_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Socket port from the registry record; owner and database from the URL."""
+    """Socket port from the registry record; owner and database from the URL's
+    database name."""
     home = tmp_path / "home"
     monkeypatch.setattr(settings.general, "ava_home", str(home))
     record = cluster.ClusterRecord(
@@ -398,13 +406,15 @@ def test_local_owner_authority_reads_record_and_url_as_data(
         return record
 
     monkeypatch.setattr(cluster, "get_record", _record)
+    # A delivered generation login replaces the URL's username; the owner is the
+    # database's same-named identity.
     monkeypatch.setattr(
-        settings.data_plane, "db_url", "postgresql://ava_main:pw@127.0.0.1:6999/ava_db"
+        settings.data_plane, "db_url", "postgresql://ava_g2_gateway:pw@127.0.0.1:6999/ava_db"
     )
 
     authority = local_owner_authority()
 
-    assert (authority.database, authority.owner) == ("ava_db", "ava_main")
+    assert (authority.database, authority.owner) == ("ava_db", "ava_db")
     assert authority.data_dir == home / "pg"
     assert conninfo_to_dict(authority.admin_url)["port"] == "5999"
     assert "pw" not in authority.conninfo

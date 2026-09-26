@@ -11,6 +11,7 @@ printing a false `:0` (the 2026-07-20 symptom class).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -20,6 +21,8 @@ import cli.commands._data_plane as dp
 import cli.commands._pgbouncer as pgb
 import shared.cluster as cl
 from shared.config import settings
+
+_ADMIN = "pooler-admin-fixture"
 
 
 def test_pgbouncer_line_uses_registry_port(
@@ -44,19 +47,24 @@ def test_pgbouncer_line_uses_registry_port(
     monkeypatch.setattr(cl, "get_record", lambda _home: fake_rec)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(cl, "record_pgbouncer_port", lambda _rec: 6433)  # pyright: ignore[reportUnknownArgumentType]
 
-    probed: dict[str, int] = {}
+    monkeypatch.setattr(
+        "shared.cluster.authority.read_pooler_admin",
+        lambda _home: SimpleNamespace(password=_ADMIN),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    probed: dict[str, object] = {}
 
-    def _reachable(port, *_a):  # type: ignore[no-untyped-def]
-        probed["port"] = port
+    def _reachable(port: int, password: str) -> bool:
+        probed.update(port=port, password=password)
         return True
 
-    monkeypatch.setattr(pgb, "pgbouncer_reachable", _reachable)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pgb, "pgbouncer_listener_reachable", _reachable)
 
     ci.print_data_plane_status()
     out = capsys.readouterr().out
     assert "pgbouncer (127.0.0.1:6433" in out
     assert "127.0.0.1:0" not in out  # never the stale-settings zero
-    assert probed["port"] == 6433  # the reachability probe hit the real listen port
+    # The admin-console probe hit the real listen port as the operator entry.
+    assert probed == {"port": 6433, "password": _ADMIN}
 
 
 def test_status_remote_urls_probe_the_urls_themselves(
@@ -98,7 +106,7 @@ def test_pgbouncer_line_without_registry_record_says_so(
     monkeypatch.setattr(ci, "_redis_reachable", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
     monkeypatch.setattr(cl, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(pgb, "pgbouncer_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pgb, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
 
     ci.print_data_plane_status()
     out = capsys.readouterr().out
@@ -113,8 +121,8 @@ def test_postgres_probe_dials_pooled_front_door(
     when enabled, the direct URL when not) — never `connect(direct=True)`.
 
     F8a (user ruling 2026-08 "always PgBouncer"): the pooled SELECT 1 proves the
-    path every consumer dials (client scram at the pooler + the trust-socket
-    backend hop); a direct probe would test a path no consumer uses."""
+    path every consumer dials (client scram at the pooler + the SCRAM
+    pass-through backend hop); a direct probe would test a path no consumer uses."""
     import shared.db
 
     monkeypatch.setattr(ci, "_pg_running", lambda _p, _h: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -145,7 +153,11 @@ def test_postgres_probe_dials_pooled_front_door(
     # pgbouncer on: the probe still dials the pooled URL, never direct.
     calls.clear()
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
-    monkeypatch.setattr(pgb, "pgbouncer_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pgb, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        "shared.cluster.authority.read_pooler_admin",
+        lambda _home: SimpleNamespace(password=_ADMIN),  # pyright: ignore[reportUnknownArgumentType]
+    )
     ci.print_data_plane_status()
     out = capsys.readouterr().out
     assert calls and "direct" not in calls[0]

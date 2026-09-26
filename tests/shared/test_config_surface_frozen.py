@@ -6,6 +6,8 @@ key, or reshaped the restart_completed snapshot fails loudly here.
 
 from __future__ import annotations
 
+import pytest
+
 from shared import config
 
 # Critical aliases whose exact spelling IS the user-facing `.env` contract — a
@@ -13,7 +15,6 @@ from shared import config
 # the config PUT. Spot-check across domains.
 _FROZEN_ALIASES = {
     "db_url": "AVA_DB_URL",
-    "db_admin_password": "AVA_DB_ADMIN_PASSWORD",
     "redis_admin_password": "AVA_REDIS_ADMIN_PASSWORD",
     "redis_url": "AVA_REDIS_URL",
     "events_channel": "AVA_EVENTS_CHANNEL",
@@ -87,6 +88,7 @@ def test_effective_config_snapshot_is_flat_framework_keys() -> None:
     assert "data_plane" not in snap
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_payload_keys_are_modeled_or_enabled_plugin_aliases() -> None:
     """Bootstrap serves Settings aliases plus declared enabled-provider keys."""
     from shared.env_registry import _enabled_provider_key_envs

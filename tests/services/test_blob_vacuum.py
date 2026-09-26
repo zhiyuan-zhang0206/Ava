@@ -192,6 +192,30 @@ def test_run_vacuums_in_window(pool: ConnectionPool[Any]) -> None:
     assert result.dead_tuples >= 0
 
 
+def test_vacuum_without_maintain_is_a_failure_not_a_silent_skip(
+    pool: ConnectionPool[Any],
+) -> None:
+    """The daemon dials as a gateway-class login, not the owner. PostgreSQL 17
+    skips a VACUUM the session may not MAINTAIN with only a WARNING; the pass
+    must fail instead of reporting a reclamation that never ran."""
+    from shared.cluster.authority import VacuumSkippedError
+
+    with pool.connection() as conn:
+        url = conn.info.dsn
+        conn.execute("CREATE ROLE vacuum_without_maintain LOGIN")
+        conn.execute("GRANT SELECT ON ALL TABLES IN SCHEMA public TO vacuum_without_maintain")
+    try:
+        with (
+            psycopg.connect(url, user="vacuum_without_maintain", autocommit=True) as conn,
+            pytest.raises(VacuumSkippedError, match="did not run"),
+        ):
+            vacuum_checkpoint_tables(conn)
+    finally:
+        with pool.connection() as conn:
+            conn.execute("DROP OWNED BY vacuum_without_maintain")
+            conn.execute("DROP ROLE vacuum_without_maintain")
+
+
 def test_vacuum_emits_checkpoint_table_physical_sizes(
     monkeypatch: pytest.MonkeyPatch, pool: ConnectionPool[Any]
 ) -> None:

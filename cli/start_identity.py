@@ -217,9 +217,10 @@ def _gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[s
         base_db_url=db,
         base_redis_url=redis,
         cluster_secret=secret,
-        db_admin_password=secrets.token_urlsafe(32) if secret else "",
         # Redis always authenticates, whatever the bearer (decisions/
-        # 2026-09-26-internal-data-plane-always-authenticated.md).
+        # 2026-09-26-internal-data-plane-always-authenticated.md). Postgres
+        # needs no minted password: its owner is NOLOGIN and the first start
+        # mints write generation 0 into the home's database authority store.
         redis_admin_password=secrets.token_urlsafe(32),
         redis_password=secrets.token_urlsafe(32),
         pgbouncer_enabled=vals.get("AVA_PGBOUNCER_ENABLED", "true").lower()
@@ -227,12 +228,8 @@ def _gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[s
     )
     if "AVA_DB_URL" in vals:
         # Provider credentials are explicit inputs, never locally fabricated.
-        for key in ("AVA_DB_ADMIN_PASSWORD", "AVA_REDIS_ADMIN_PASSWORD", "AVA_REDIS_PASSWORD"):
+        for key in ("AVA_REDIS_ADMIN_PASSWORD", "AVA_REDIS_PASSWORD"):
             derived.pop(key)
-    else:
-        # The runner projection requires a durable credential even when local
-        # trust authentication means the loopback listener does not challenge it.
-        derived["AVA_RUNNER_DB_PASSWORD"] = secrets.token_urlsafe(32)
     # Explicit remote-managed URLs are never rewritten into local URLs.
     derived.update(vals)
     return derived

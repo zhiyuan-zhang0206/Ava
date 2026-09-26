@@ -2,13 +2,12 @@
 place after the unit's `.env` was rewritten under the process.
 
 The 2026-08-25 rollout incident: the local leg's `ava start` ran a
-data-plane credential rotation (secret split) that rewrote `$AVA_HOME/.env`
-and rotated the owner password in Postgres, while the orchestrating rollout
-process kept its startup-built Settings singleton — every later data-plane
-write (pin advance, compensating unpause, update-lock release) then failed
-with SASL authentication. These tests pin the refresh contract: re-read the
-new `.env`, rebuild only `settings.data_plane` in place, leave every other
-domain untouched.
+data-plane credential rotation (secret split) that rewrote `$AVA_HOME/.env`,
+while the orchestrating rollout process kept its startup-built Settings
+singleton — every later data-plane write then failed authentication. These
+tests pin the refresh contract with the credential `.env` still carries (the
+Redis runtime password): re-read the new `.env`, rebuild only
+`settings.data_plane` in place, leave every other domain untouched.
 """
 
 from __future__ import annotations
@@ -66,11 +65,10 @@ def _restore_env_after_refresh(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
     """Restore os.environ after every refresh test.
 
     `refresh_data_plane_settings` re-runs the boot env load, which writes the
-    fake unit's keys (AVA_DB_ADMIN_PASSWORD etc.) into os.environ for the rest
+    fake unit's keys (the rotated Redis URL etc.) into os.environ for the rest
     of the process. A later test that builds a fresh DataPlaneSettings from env
-    (tests/shared/test_url_secret.py) would otherwise inherit the rotated admin
-    password and fail on its re-derived URL (observed when the two files share
-    a pytest worker)."""
+    (tests/shared/test_url_secret.py) would otherwise inherit them (observed
+    when the two files share a pytest worker)."""
     saved = dict(os.environ)
     yield
     os.environ.clear()
@@ -81,37 +79,36 @@ def _point_env_at(monkeypatch: pytest.MonkeyPatch, env_text: str, tmp_path: Path
     env_file = tmp_path / "unit.env"
     env_file.write_text(env_text)
     merged = tmp_path / "merged.env"
-    merged.write_text(env_text + "\n".join(_IDENTITY_LINES) + "\n")
+    # The unit's own lines come last: a later duplicate key wins.
+    merged.write_text("\n".join(_IDENTITY_LINES) + "\n" + env_text)
     monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", merged)
     monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
 
 
-def _env_text(admin_password: str) -> str:
+def _env_text(runtime_password: str) -> str:
     return (
         "AVA_CLUSTER_SECRET=sekret\n"
-        "AVA_DB_URL=postgresql://ava_main:oldpass@127.0.0.1:6433/ava_main\n"
-        f"AVA_DB_ADMIN_PASSWORD={admin_password}\n"
+        f"AVA_REDIS_URL=redis://ava:{runtime_password}@127.0.0.1:6380/0\n"
     )
 
 
-def test_refresh_picks_up_rotated_admin_password(
+def test_refresh_picks_up_rotated_redis_password(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A data-plane credential rotation on disk (the 2026-08-25 secret split)
-    is visible to the process after refresh: the in-memory db_url password is
-    re-derived from the new AVA_DB_ADMIN_PASSWORD, and the old password is gone."""
+    """A Redis credential rotation on disk (scripts/rotate_data_plane_secrets.py)
+    is visible to the process after refresh: the in-memory redis_url carries the
+    new runtime password, and the old one is gone."""
     _point_env_at(monkeypatch, _env_text("first-pass"), tmp_path)
     config.refresh_data_plane_settings()
     from shared.config import settings
 
-    assert "first-pass" in settings.data_plane.db_url
-    assert "oldpass" not in settings.data_plane.db_url
+    assert "first-pass" in settings.data_plane.redis_url
 
     # Rotate on disk, refresh again — the same process now dials the new password.
     _point_env_at(monkeypatch, _env_text("rotated-pass"), tmp_path)
     config.refresh_data_plane_settings()
-    assert "rotated-pass" in settings.data_plane.db_url
-    assert "first-pass" not in settings.data_plane.db_url
+    assert "rotated-pass" in settings.data_plane.redis_url
+    assert "first-pass" not in settings.data_plane.redis_url
 
 
 def test_refresh_is_in_place_and_leaves_other_domains_untouched(
@@ -126,4 +123,4 @@ def test_refresh_is_in_place_and_leaves_other_domains_untouched(
     _point_env_at(monkeypatch, _env_text("first-pass"), tmp_path)
     config.refresh_data_plane_settings()
     assert settings.lm is old_lm  # other domains untouched
-    assert "first-pass" in settings.data_plane.db_url  # but data plane refreshed
+    assert "first-pass" in settings.data_plane.redis_url  # but data plane refreshed

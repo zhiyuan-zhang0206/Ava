@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Rotate independent data-plane credentials on a gateway host.
+"""Rotate the independent Redis data-plane credentials on a gateway host.
 
-Dry-run is the default. ``--scope admin`` rotates the owner Postgres password
-and Redis ``default``/requirepass password. ``--scope runner`` rotates the
-least-privilege Postgres runner password and Redis ACL password. The default
-rotates both. It never changes ``AVA_CLUSTER_SECRET``: that is the separate,
-emergency-only control-plane bearer rotation.
+Dry-run is the default. ``--scope admin`` rotates the Redis ``default`` /
+requirepass password; ``--scope runner`` rotates the Redis runtime ACL
+password; the default rotates both. It never changes ``AVA_CLUSTER_SECRET``:
+that is the separate, emergency-only control-plane bearer rotation.
+
+PostgreSQL has no rotatable password here: the schema owner is NOLOGIN, the
+administrator is the OS user over the owner-only socket, and application
+logins are write generations that rotate with each release transition
+(``shared.cluster.authority``). Redis credentials do not rotate per rollout;
+this script is the explicit operator action
+(decisions/2026-09-27-write-generation-rollout-choices.md).
 """
 
 from __future__ import annotations
@@ -19,22 +25,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-import psycopg
 import redis
 from dotenv import dotenv_values
 
-from cli.commands._cluster_instance import pg_admin_url
-from cli.commands._pgbouncer import ensure_pgbouncer, pgbouncer_reachable
 from shared.cluster import (
-    RUNNER_DB_PASSWORD_ENV,
-    RUNNER_ROLE,
     ensure_cluster_redis_acl,
-    ensure_cluster_role,
-    ensure_runner_role,
     get_record,
-    identity_from_url,
-    record_pgbouncer_port,
-    record_postgres_port,
     record_redis_port,
     redis_identity,
 )
@@ -42,47 +38,31 @@ from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.config import settings
 from shared.envfile import upsert_env
 from shared.paths import ava_home
-from shared.url_secret import url_host, url_with_password, url_with_userinfo
+from shared.url_secret import url_host, url_with_password
 
 _TOKEN_BYTES = 32
 _SCOPES = frozenset({"admin", "runner", "both"})
 _GATEWAY_CONTEXT_ERROR = (
     "data-plane secret rotation must run on the gateway host in a gateway context, not from "
     "an agent shell. Run:\n"
-    "cd <gateway checkout (e.g. ~/.ava/source)> && unset AVA_PROCESS_PROFILE && set -a; "
-    ". ~/.ava/.env; set +a && .venv/bin/python scripts/rotate_data_plane_secrets.py ..."
+    "cd <gateway checkout (e.g. ~/.ava/source)> && unset AVA_PROCESS_PROFILE && "
+    ".venv/bin/python scripts/rotate_data_plane_secrets.py ..."
 )
 
 
 @dataclass
 class RotationState:
     """All mutable values needed to resume safely. Kept in a 0600 file because
-    it includes both the old and replacement data-plane passwords."""
+    it includes both the old and replacement Redis passwords."""
 
     scope: str
-    identity: str
-    old_db_admin_password: str
-    new_db_admin_password: str
     old_redis_admin_password: str
     new_redis_admin_password: str
-    old_runner_db_password: str
-    new_runner_db_password: str
     old_redis_password: str
     new_redis_password: str
-    pg_port: int
     redis_port: int
-    pgbouncer_enabled: bool
-    pgbouncer_port: int
-    # The hosts the probes/dials go to, derived from this cluster's own URLs at
-    # build_state (Task #1752 external data plane). Defaulted loopback so a
-    # journal written before these fields existed resumes unchanged.
-    pg_host: str = "127.0.0.1"
-    redis_host: str = "127.0.0.1"
-    # The Redis ACL user the runtime dials as, read from this cluster's own
-    # redis_url — it can differ from the Postgres identity. Defaulted blank so a
-    # journal written before this field existed resumes as the db identity (the
-    # behavior those journals ran with).
-    redis_user: str = ""
+    redis_host: str
+    redis_user: str
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     phase: str = "minted"
 
@@ -100,7 +80,13 @@ class RotationState:
 
     @classmethod
     def load(cls, path: Path) -> RotationState:
-        return cls(**json.loads(path.read_text()))
+        try:
+            return cls(**json.loads(path.read_text()))
+        except TypeError as exc:
+            raise RuntimeError(
+                f"{path} is not a Redis-only rotation journal (Postgres credentials no "
+                "longer rotate here); start a new rotation"
+            ) from exc
 
     @property
     def rotates_admin(self) -> bool:
@@ -111,24 +97,10 @@ class RotationState:
         return self.scope in {"runner", "both"}
 
     @property
-    def db_admin_password(self) -> str:
-        return self.new_db_admin_password if self.rotates_admin else self.old_db_admin_password
-
-    @property
     def redis_admin_password(self) -> str:
         return (
             self.new_redis_admin_password if self.rotates_admin else self.old_redis_admin_password
         )
-
-    @property
-    def runner_db_password(self) -> str:
-        return self.new_runner_db_password if self.rotates_runner else self.old_runner_db_password
-
-    @property
-    def redis_identity(self) -> str:
-        """The Redis ACL user the runtime dials as; a journal written before the
-        field existed resumes as the db identity — the behavior it ran with."""
-        return self.redis_user or self.identity
 
     @property
     def redis_password(self) -> str:
@@ -139,70 +111,36 @@ def mint_secret() -> str:
     return secrets.token_urlsafe(_TOKEN_BYTES)
 
 
-def _env_password(values: dict[str, str | None], key: str, fallback: str) -> str:
-    return (values.get(key) or "").strip() or fallback
-
-
-def _gateway_identity() -> str:
+def _require_gateway_context() -> None:
     if settings.profile == "agent":
         raise RuntimeError(_GATEWAY_CONTEXT_ERROR)
-    identity = identity_from_url(settings.data_plane.db_url)
-    if identity == RUNNER_ROLE:
-        raise RuntimeError(_GATEWAY_CONTEXT_ERROR)
-    return identity
 
 
 def build_state(scope: str = "both") -> RotationState:
     if scope not in _SCOPES:
         raise ValueError(f"unsupported scope {scope!r}")
-    identity = _gateway_identity()
-    if not settings.data_plane.cluster_secret:
-        raise RuntimeError("this is a no-auth cluster; it has no data-plane passwords to rotate")
+    _require_gateway_context()
     record = get_record(ava_home())
     if record is None:
         raise RuntimeError("no cluster registry record — cannot resolve data-plane ports")
     values = dotenv_values(ava_home() / ".env")
-    bearer = settings.data_plane.cluster_secret
-    old_db_admin = _env_password(values, "AVA_DB_ADMIN_PASSWORD", bearer)
-    old_redis_admin = _env_password(values, "AVA_REDIS_ADMIN_PASSWORD", bearer)
-    old_runner_db = _env_password(values, RUNNER_DB_PASSWORD_ENV, "")
-    old_redis_runtime = _env_password(values, REDIS_PASSWORD_ENV, bearer)
-    if scope in {"runner", "both"} and not old_runner_db:
+    old_admin = (values.get("AVA_REDIS_ADMIN_PASSWORD") or "").strip()
+    old_runtime = (values.get(REDIS_PASSWORD_ENV) or "").strip()
+    if not (old_admin and old_runtime):
         raise RuntimeError(
-            f"{RUNNER_DB_PASSWORD_ENV} is missing; run `ava cluster ensure-db-role` before "
-            "rotating runner credentials"
+            "this home records no Redis credentials; convert it first with "
+            "scripts/cutover_db_authority.py"
         )
     return RotationState(
         scope=scope,
-        identity=identity,
-        old_db_admin_password=old_db_admin,
-        new_db_admin_password=mint_secret() if scope in {"admin", "both"} else old_db_admin,
-        old_redis_admin_password=old_redis_admin,
-        new_redis_admin_password=(mint_secret() if scope in {"admin", "both"} else old_redis_admin),
-        old_runner_db_password=old_runner_db,
-        new_runner_db_password=(mint_secret() if scope in {"runner", "both"} else old_runner_db),
-        old_redis_password=old_redis_runtime,
-        new_redis_password=(mint_secret() if scope in {"runner", "both"} else old_redis_runtime),
-        pg_port=record_postgres_port(record),
+        old_redis_admin_password=old_admin,
+        new_redis_admin_password=mint_secret() if scope in {"admin", "both"} else old_admin,
+        old_redis_password=old_runtime,
+        new_redis_password=mint_secret() if scope in {"runner", "both"} else old_runtime,
         redis_port=record_redis_port(record),
-        pg_host=url_host(settings.data_plane.db_url),
         redis_host=url_host(settings.data_plane.redis_url),
         redis_user=redis_identity(),
-        pgbouncer_enabled=settings.data_plane.pgbouncer_enabled,
-        pgbouncer_port=record_pgbouncer_port(record),
     )
-
-
-def _pg_probe(host: str, user: str, db_name: str, port: int, password: str) -> bool:
-    try:
-        with psycopg.connect(
-            url_with_userinfo(f"postgresql://@{host}:{port}/{db_name}", user, password),
-            connect_timeout=3,
-        ) as connection:
-            connection.execute("SELECT 1")
-        return True
-    except Exception:
-        return False
 
 
 def _redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
@@ -220,71 +158,28 @@ def _redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
         return False
 
 
-def _pgbouncer_probe(state: RotationState, role: str, password: str) -> bool:
-    return pgbouncer_reachable(state.pgbouncer_port, state.identity, role, password)
+def _checks(state: RotationState, admin: str, runtime: str) -> list[tuple[str, bool]]:
+    checks = [
+        (
+            "Redis default",
+            _redis_probe(state.redis_host, state.redis_port, admin, username="default"),
+        )
+    ]
+    if state.rotates_runner:
+        checks.append(
+            (
+                "Redis ACL user",
+                _redis_probe(
+                    state.redis_host, state.redis_port, runtime, username=state.redis_user
+                ),
+            )
+        )
+    return checks
 
 
 def preflight(state: RotationState) -> bool:
     """Refuse to rotate over pre-existing credential drift."""
-    checks = [
-        (
-            "Postgres owner",
-            _pg_probe(
-                state.pg_host,
-                state.identity,
-                state.identity,
-                state.pg_port,
-                state.old_db_admin_password,
-            ),
-        ),
-        (
-            "Redis default",
-            _redis_probe(
-                state.redis_host,
-                state.redis_port,
-                state.old_redis_admin_password,
-                username="default",
-            ),
-        ),
-    ]
-    if state.rotates_runner:
-        checks.extend(
-            [
-                (
-                    "Postgres runner",
-                    _pg_probe(
-                        state.pg_host,
-                        RUNNER_ROLE,
-                        state.identity,
-                        state.pg_port,
-                        state.old_runner_db_password,
-                    ),
-                ),
-                (
-                    "Redis ACL user",
-                    _redis_probe(
-                        state.redis_host,
-                        state.redis_port,
-                        state.old_redis_password,
-                        username=state.redis_identity,
-                    ),
-                ),
-            ]
-        )
-    if state.pgbouncer_enabled:
-        checks.append(
-            (
-                "PgBouncer owner",
-                _pgbouncer_probe(state, state.identity, state.old_db_admin_password),
-            )
-        )
-        if state.rotates_runner:
-            checks.append(
-                (
-                    "PgBouncer runner",
-                    _pgbouncer_probe(state, RUNNER_ROLE, state.old_runner_db_password),
-                )
-            )
+    checks = _checks(state, state.old_redis_admin_password, state.old_redis_password)
     for label, ok in checks:
         print(f"  {'✓' if ok else '✗'} {label}")
     return all(ok for _label, ok in checks)
@@ -297,31 +192,10 @@ def _working_redis_admin_password(state: RotationState) -> str:
     raise RuntimeError("Redis default user rejects both recorded admin passwords")
 
 
-def _refresh_pgbouncer(state: RotationState) -> None:
-    if not state.pgbouncer_enabled:
-        return
-    rc = ensure_pgbouncer(
-        pg_port=state.pg_port,
-        listen_port=state.pgbouncer_port,
-        db_name=state.identity,
-        role=state.identity,
-        cluster_secret=settings.data_plane.cluster_secret,
-        db_admin_password=state.db_admin_password,
-        runner_password=state.runner_db_password,
-    )
-    if rc != 0:
-        raise RuntimeError("PgBouncer userlist refresh failed")
-
-
 def apply_admin(state: RotationState) -> None:
-    """Rotate the owner role and Redis default user, keeping runtime users live."""
+    """Rotate the Redis default user, keeping the runtime ACL user live."""
     if not state.rotates_admin:
         return
-    ensure_cluster_role(
-        state.identity,
-        base_admin_url=pg_admin_url(state.pg_port),
-        db_admin_password=state.new_db_admin_password,
-    )
     current = _working_redis_admin_password(state)
     with redis.Redis(
         host=state.redis_host,
@@ -332,103 +206,41 @@ def apply_admin(state: RotationState) -> None:
         socket_timeout=3,
     ) as client:
         client.execute_command("CONFIG", "SET", "requirepass", state.new_redis_admin_password)
-    _refresh_pgbouncer(state)
 
 
 def apply_runner(state: RotationState) -> None:
-    """Rotate both runner credentials and synchronize PgBouncer's userlist."""
+    """Rotate the Redis runtime ACL password."""
     if not state.rotates_runner:
         return
-    ensure_runner_role(
-        state.identity,
-        base_admin_url=pg_admin_url(state.pg_port),
-        runner_password=state.new_runner_db_password,
-    )
     admin_password = _working_redis_admin_password(state)
     ensure_cluster_redis_acl(
-        state.redis_identity,
+        state.redis_user,
         redis_admin_url=(f"redis://default:{admin_password}@{state.redis_host}:{state.redis_port}"),
         runtime_password=state.new_redis_password,
         channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
     )
-    _refresh_pgbouncer(state)
 
 
 def verify(state: RotationState) -> None:
-    checks = [
-        (
-            "Postgres owner",
-            _pg_probe(
-                state.pg_host,
-                state.identity,
-                state.identity,
-                state.pg_port,
-                state.db_admin_password,
-            ),
-        ),
-        (
-            "Redis default",
-            _redis_probe(
-                state.redis_host,
-                state.redis_port,
-                state.redis_admin_password,
-                username="default",
-            ),
-        ),
+    failed = [
+        label
+        for label, ok in _checks(state, state.redis_admin_password, state.redis_password)
+        if not ok
     ]
-    if state.rotates_runner:
-        checks.extend(
-            [
-                (
-                    "Postgres runner",
-                    _pg_probe(
-                        state.pg_host,
-                        RUNNER_ROLE,
-                        state.identity,
-                        state.pg_port,
-                        state.runner_db_password,
-                    ),
-                ),
-                (
-                    "Redis ACL user",
-                    _redis_probe(
-                        state.redis_host,
-                        state.redis_port,
-                        state.redis_password,
-                        username=state.redis_identity,
-                    ),
-                ),
-            ]
-        )
-    if state.pgbouncer_enabled:
-        checks.append(
-            ("PgBouncer owner", _pgbouncer_probe(state, state.identity, state.db_admin_password))
-        )
-        if state.rotates_runner:
-            checks.append(
-                ("PgBouncer runner", _pgbouncer_probe(state, RUNNER_ROLE, state.runner_db_password))
-            )
-    failed = [label for label, ok in checks if not ok]
     if failed:
         raise RuntimeError(f"rotation verification failed: {', '.join(failed)}")
 
 
 def write_env(state: RotationState) -> None:
     values = dotenv_values(ava_home() / ".env")
-    db_url = url_with_password(
-        (values.get("AVA_DB_URL") or settings.data_plane.db_url).strip(), state.db_admin_password
-    )
     redis_url = url_with_password(
         (values.get("AVA_REDIS_URL") or settings.data_plane.redis_url).strip(), state.redis_password
     )
     upsert_env(
         ava_home() / ".env",
         {
-            "AVA_DB_ADMIN_PASSWORD": state.db_admin_password,
             "AVA_REDIS_ADMIN_PASSWORD": state.redis_admin_password,
-            RUNNER_DB_PASSWORD_ENV: state.runner_db_password,
             REDIS_PASSWORD_ENV: state.redis_password,
-            "AVA_DB_URL": db_url,
             "AVA_REDIS_URL": redis_url,
         },
         audit_site="rotate_data_plane_secrets",
@@ -445,15 +257,13 @@ def _run_phase(state: RotationState, phase: str, fn: Callable[[RotationState], N
 
 def print_plan(state: RotationState, *, dry_run: bool) -> None:
     print(f"scope:             {state.scope}")
-    print(f"identity:          {state.identity!r}")
-    print(f"redis user:        {state.redis_identity!r}")
-    print(f"postgres port:     {state.pg_port}")
+    print(f"redis user:        {state.redis_user!r}")
     print(f"redis port:        {state.redis_port}")
     print(f"mode:              {'DRY RUN (read-only)' if dry_run else 'EXECUTE'}")
     if state.rotates_runner:
         print(
             "runner follow-up: refresh every enrolled runner after this rotation; "
-            "the refreshed PgBouncer userlist alone cannot update cached runner URLs."
+            "cached runner Redis URLs keep the old password until they refetch."
         )
 
 
@@ -461,20 +271,19 @@ def main(argv: list[str] | None = None) -> int:
     if settings.data_plane.is_remote:
         print(
             "✗ this cluster's data plane is remote-managed — rotation is a "
-            "local-instance operation (ALTER ROLE / ACL / pooler userlist). A "
-            "remote/SaaS plane rotates credentials at the provider; update "
-            "AVA_DB_URL / AVA_REDIS_URL here.",
+            "local-instance operation (requirepass / ACL). A remote/SaaS plane "
+            "rotates credentials at the provider; update AVA_REDIS_URL here.",
             file=sys.stderr,
         )
         return 1
-    parser = argparse.ArgumentParser(description="Rotate independent data-plane credentials.")
+    parser = argparse.ArgumentParser(description="Rotate the Redis data-plane credentials.")
     parser.add_argument("--scope", choices=sorted(_SCOPES), default="both")
     parser.add_argument("--execute", action="store_true", help="perform the rotation")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     parser.add_argument("--resume", metavar="STATE_FILE", help="resume a saved rotation")
     args = parser.parse_args(argv)
     try:
-        _gateway_identity()
+        _require_gateway_context()
     except RuntimeError:
         print(_GATEWAY_CONTEXT_ERROR, file=sys.stderr)
         return 1
@@ -506,9 +315,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\n✓ data-plane rotation complete.")
     if state.rotates_runner:
-        print(
-            "NEXT: restart every enrolled runner so it refetches the runner URLs and credentials."
-        )
+        print("NEXT: restart every enrolled runner so it refetches the runner Redis URL.")
     return 0
 
 

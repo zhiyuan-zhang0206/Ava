@@ -10,12 +10,12 @@ Model (mirrors `shared.pg_tools.throwaway_postgres`, but persistent + authed):
 - Postgres `initdb`s into `$AVA_HOME/pg` (cold) — cached through a host-level
   template dir so a new cluster / a test spins up by directory copy, not a fresh
   multi-second init — and is launched directly with durable native custody on its pg port.
-  pg_hba: the local unix socket is `trust` (provisioning by the initdb superuser
-  is passwordless), every TCP connection is `scram-sha-256` when the cluster has
-  a bearer (a co-located cluster hitting the port still needs its role password).
-  A no-secret
-  cluster writes local + loopback `trust` only, and binds loopback alone. The
-  owner role carries its independent password; provisioning connects over the socket.
+  pg_hba ALWAYS authenticates, whatever the bearer: the OS-user bootstrap
+  superuser is the sole passwordless identity (`peer` on the 0700 owner-only
+  socket — the administrator authority), and every other role is SCRAM over
+  the socket and TCP. The schema owner is NOLOGIN; application processes log in
+  only as the home's write generation (`shared.cluster.authority`). A no-secret
+  cluster differs only in binding loopback alone.
 - Redis runs `redis-server` on the cluster's redis port and ALWAYS authenticates,
   whatever the bearer: `requirepass` = the gateway-only Redis admin password, and
   the cluster's ACL user has its own runtime password. Both are minted at first
@@ -208,44 +208,97 @@ def _wait_for_reachable_bind() -> bool:
 
 
 def _pg_hba_body(cluster_secret: str) -> str:
-    """The local socket is trust (the initdb superuser provisions passwordless);
-    every TCP connection is scram (a co-located cluster needs its role password).
-    Reachable/trusted ranges get the same scram treatment.
+    """Always-authenticated pg_hba, whatever the bearer.
 
-    A no-secret cluster has NO scram host lines at all: local trust + loopback
-    trust only. There is no credential to check, and the data plane binds
-    loopback alone (`_bind_addrs`), so no remote host can reach it anyway — the
-    auth-less posture never extends past this machine.
+    The OS user (the initdb bootstrap superuser) reaches Postgres only through
+    `peer` on the owner-only socket — the administrator authority provisioning,
+    migrations and the authority fence use. Every other role authenticates with
+    SCRAM over the socket and loopback TCP; `NOLOGIN` roles (the schema owner,
+    the capability groups, revoked generations) never log in under any method.
+
+    The bearer decides only reach: a secret cluster adds its reachable address
+    and `trusted_cidrs` as SCRAM host lines, matching its bind posture
+    (`_bind_addrs`); a no-secret cluster has loopback lines only.
 
     PITR adds loopback `replication` rows for its role (see
     `pitr_replication_hba_lines`): pg_basebackup's PHYSICAL replication
     connection matches only the literal `replication` keyword, never `all`.
     `cluster_secret` is the CALLER-PASSED cluster secret, never read from
     `settings`: install-time birth has no `.env` yet, so `settings` would see an
-    inherited sibling secret (a prod-sourced shell) and write scram lines into a
-    no-secret cluster's hba — the hba must always mirror the cluster the caller
-    is actually birthing/bringing up (Task #1113). `trusted_cidrs` stays a
-    settings read: it is a cluster-scope field the env-authority pass drops when
-    undeclared, so it has no ambient-leak vector."""
-    if not cluster_secret:
-        return "local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n"
+    inherited sibling secret (a prod-sourced shell) and widen a no-secret
+    cluster's hba (Task #1113). `trusted_cidrs` stays a settings read: it is a
+    cluster-scope field the env-authority pass drops when undeclared, so it has
+    no ambient-leak vector."""
     lines = [
-        "local all all trust",
+        f"local all {getpass.getuser()} peer",
+        "local all all scram-sha-256",
         "host all all 127.0.0.1/32 scram-sha-256",
         "host all all ::1/128 scram-sha-256",
     ]
-    host = reachable_host()
-    if host not in _LOOPBACK_ALIASES:
-        lines.append(f"host all all {host}/32 scram-sha-256")
-    for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
-        lines.append(f"host all all {cidr} scram-sha-256")
+    if cluster_secret:
+        host = reachable_host()
+        if host not in _LOOPBACK_ALIASES:
+            lines.append(f"host all all {host}/32 scram-sha-256")
+        for cidr in (c.strip() for c in settings.data_plane.trusted_cidrs.split(",") if c.strip()):
+            lines.append(f"host all all {cidr} scram-sha-256")
     lines += pitr_replication_hba_lines()
     return "\n".join(lines) + "\n"
 
 
+# The server asks a password-less client for one; libpq reports either wording.
+_PASSWORD_DEMANDED = ("no password supplied", "password authentication failed")
+_HBA_PROOF_TIMEOUT_S = 10.0
+
+
+def require_authenticated_hba(pg_port: int, dial_host: str) -> None:
+    """Prove the RUNNING postmaster enforces password authentication.
+
+    `pg_hba_file_rules` shows the file, not what the postmaster loaded, and a
+    retained postmaster reloads asynchronously after SIGHUP. So the proof is
+    behavioral: a password-less dial as a role name that cannot exist must be
+    asked for a password over loopback TCP and over the socket. A trust line
+    would instead answer that the role does not exist. Bounded; raises
+    RuntimeError naming each path that did not demand a password.
+    """
+    import secrets
+
+    import psycopg
+
+    probe = f"ava_hba_probe_{secrets.token_hex(4)}"
+    # A path that never exists: no ~/.pgpass entry can answer the challenge.
+    passfile = str(_pg_socket_dir() / "no-passfile")
+    deadline = time.monotonic() + _HBA_PROOF_TIMEOUT_S
+    while True:
+        unproven: list[str] = []
+        for host in (dial_host, str(_pg_socket_dir())):
+            try:
+                psycopg.connect(
+                    host=host,
+                    port=pg_port,
+                    user=probe,
+                    password="",
+                    passfile=passfile,
+                    dbname="postgres",
+                    connect_timeout=3,
+                ).close()
+                unproven.append(f"{host}: admitted without a password")
+            except psycopg.OperationalError as exc:
+                if not any(marker in str(exc) for marker in _PASSWORD_DEMANDED):
+                    unproven.append(f"{host}: {str(exc).strip().splitlines()[-1]}")
+        if not unproven:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "postgres does not enforce password authentication after its pg_hba "
+                "rewrite: " + "; ".join(unproven)
+            )
+        time.sleep(0.1)
+
+
 def _initdb(target: Path) -> None:
-    """Fresh initdb at `target` with the OS user as the trust bootstrap superuser
-    (mirrors throwaway_postgres / the brew install convention)."""
+    """Fresh initdb at `target` with the OS user as the bootstrap superuser
+    (mirrors throwaway_postgres / the brew install convention). The `trust`
+    default is never served: `_start_pg` writes the always-auth hba first."""
     target.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
@@ -354,7 +407,8 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
         expected=owner,
     )
     ownership.require_postgres(data, pg_port)
-    print(f"  ✓ postgres ready ({dial_host}:{pg_port})")
+    require_authenticated_hba(pg_port, dial_host)
+    print(f"  ✓ postgres ready ({dial_host}:{pg_port}, password authentication enforced)")
     return 0
 
 
@@ -511,55 +565,22 @@ def _ensure_redis_acl(
     return 0
 
 
-def _start_pgbouncer(
-    *,
-    pg_port: int,
-    listen_port: int,
-    cluster_secret: str,
-    db_admin_password: str,
-    identity: str,
-    runner_password: str | None = None,
-) -> int:
-    """Bring up (or reload) this cluster's PgBouncer pooler in front of the local
-    Postgres. Only reached when AVA_PGBOUNCER_ENABLED; the db name and role (the
-    pooled front door's scram identity) are the caller-passed data-plane
-    identity (names-as-data — db and role share the identifier).
-
-    `runner_password` (the gateway .env AVA_RUNNER_DB_PASSWORD) is threaded at
-    first-start identity and resolved from the
-    home's .env file on every later bring-up (the userlist carries an
-    `ava_runner` entry only once the cluster has a runner credential)."""
-    from cli.commands._pgbouncer import ensure_pgbouncer, runner_password_from_env
-
-    return ensure_pgbouncer(
-        pg_port=pg_port,
-        listen_port=listen_port,
-        db_name=identity,
-        role=identity,
-        cluster_secret=cluster_secret,
-        db_admin_password=db_admin_password,
-        runner_password=runner_password
-        if runner_password is not None
-        else runner_password_from_env(),
-    )
-
-
 def ensure_cluster_storage(
     *,
     pg_port: int,
     redis_port: int,
     cluster_secret: str,
-    db_admin_password: str = "",
     redis_admin_password: str,
     redis_password: str,
     redis_user: str,
 ) -> int:
-    """Ensure owned Postgres and Redis; schema and pooler follow in start order.
+    """Ensure owned Postgres and Redis; schema, authority and pooler follow in
+    start order (`cli.commands._data_plane`).
 
     Raises:
         ValueError: a required credential is missing, before any native effect.
-            Redis always needs its admin and runtime passwords; Postgres needs its
-            owner password when the cluster has a bearer."""
+            Redis always needs its admin and runtime passwords. Postgres needs
+            none: its administrator is the OS user over the owner-only socket."""
     if not get_backend().supports_data_plane():
         # Naming the supported topology, not the missing feature: this used to
         # read as an unfinished TODO ("Follow-up: bundle or Docker-host ..."),
@@ -585,8 +606,6 @@ def ensure_cluster_storage(
             f"`.venv/bin/python scripts/cutover_db_authority.py --home {ava_home()} "
             "--execute` (see conventions/data-plane-secret-split.md)."
         )
-    if cluster_secret and not db_admin_password:
-        raise ValueError("authenticated storage requires an explicit owner credential")
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
     if (rc := _start_pg(pg_port, cluster_secret)) != 0:
         return rc
@@ -625,20 +644,17 @@ def print_data_plane_status() -> None:
     Postgres is probed in two stages: `pg_isready` (the server accepts connections)
     then an authenticated `SELECT 1` over the cluster's POOLED front door
     (`connect()` — PgBouncer when enabled, the direct URL when not; the same swap
-    every consumer dials). A server that is up but whose client credential has
-    drifted from the owner password reports `✗ ... connect failed` rather than a
-    false `✓` — that drift silently fails every DB-backed endpoint while pg_isready
-    alone (loopback `trust`) stays green. Redis pings with its admin password. Both
-    ports come from this cluster's own db_url / redis_url (its per-cluster
-    instance).
+    every consumer dials) as this process's delivered gateway login. A server that
+    is up but refuses that login reports `✗ ... connect failed` rather than a
+    false `✓`: `pg_isready` alone answers without authenticating. Redis pings with
+    its admin password. Both ports come from this cluster's own db_url / redis_url
+    (its per-cluster instance). The pooler line authenticates to its admin console
+    with the operator entry from the home's database authority store.
 
     The probe goes POOLED, never `direct=True` (user ruling 2026-08: every consumer
     sits behind PgBouncer): the pooled `SELECT 1` proves the path consumers
-    actually use — client scram against the pooler's userlist (rewritten every
-    start from the owner password) plus the pooler → Postgres trust-socket hop.
-    PG-side scram verifier drift is unreachable through the pooler by design (the
-    backend hop carries no credential), so a direct probe would test a path no
-    consumer dials. With PgBouncer disabled `pooled_db_url == db_url` and the probe
+    actually use — client SCRAM against the userlist plus the SCRAM pass-through
+    backend hop. With PgBouncer disabled `pooled_db_url == db_url` and the probe
     is direct anyway."""
     import shared.db
 
@@ -677,29 +693,28 @@ def print_data_plane_status() -> None:
         f"redis ({redis_host}:{redis_port})"
     )
     if settings.data_plane.pgbouncer_enabled:
-        from cli.commands._pgbouncer import pgbouncer_reachable
-        from shared.cluster import db_identity, get_record, record_pgbouncer_port
+        _print_pooler_status()
 
-        # The pooler LISTENS on the registry-derived port (`ensure_cluster_storage`
-        # is called with `record_pgbouncer_port(rec)`), so probe/display that same
-        # port — the pooler port is a registry fact only (AVA_PGBOUNCER_PORT is no
-        # longer materialized in .env; AVA_DB_URL carries the pooler port when
-        # enabled). No registry record (an unusual host) means the pooler port is
-        # unknowable — say so instead of printing a false `:0`. The db/role
-        # identity is read from this cluster's own db_url (names-as-data).
-        rec = get_record(ava_home())
-        if rec is None:
-            print("  - pgbouncer: no registry record — cannot resolve its port")
-        else:
-            port = record_pgbouncer_port(rec)
-            identity = db_identity()
-            ok = pgbouncer_reachable(
-                port,
-                identity,
-                identity,
-                settings.data_plane.db_admin_password,
-            )
-            print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
+
+def _print_pooler_status() -> None:
+    """The pooler line: its registry-derived listen port, probed through the
+    admin console as the operator entry from the home's authority store. No
+    registry record means the port is unknowable — say so instead of a false `:0`."""
+    from cli.commands._pgbouncer import pgbouncer_listener_reachable
+    from shared.cluster import get_record, record_pgbouncer_port
+    from shared.cluster.authority import AuthorityRefusedError, read_pooler_admin
+
+    rec = get_record(ava_home())
+    if rec is None:
+        print("  - pgbouncer: no registry record — cannot resolve its port")
+        return
+    port = record_pgbouncer_port(rec)
+    try:
+        ok = pgbouncer_listener_reachable(port, read_pooler_admin(ava_home()).password)
+    except AuthorityRefusedError as exc:
+        print(f"  ✗ pgbouncer (127.0.0.1:{port}): {exc}")
+        return
+    print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
 
 
 def _redis_port() -> int | None:

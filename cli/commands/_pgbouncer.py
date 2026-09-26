@@ -5,29 +5,27 @@ Postgres connections; see `agent/db.py`).
 PgBouncer is the third per-cluster data-plane process — a peer of this cluster's
 own Postgres and Redis (`_cluster_instance.py`) — brought up on the cluster's own
 `pgbouncer` port (a registry-record fact; the port is no longer materialized in
-`.env` — AVA_DB_URL carries it) after schema preparation and runner grants whenever
+`.env` — AVA_DB_URL carries it) after schema preparation and group grants whenever
 `AVA_PGBOUNCER_ENABLED` (ON by default: past ~50 agents pooling is the density
 path). Setting it false is a kill-switch: nothing here runs, converge rewrites
 AVA_DB_URL to the direct Postgres port, and every consumer talks to Postgres
 directly through the one URL.
 
-Auth (mirrors the redis requirepass model, avoiding a scram-verifier auth_query):
+Auth — always authenticated, whatever the cluster secret (decisions/
+2026-09-26-internal-data-plane-always-authenticated.md):
 
 - **client → pgbouncer**: `auth_type = scram-sha-256` against a `userlist.txt`
-  holding the cluster owner role with its independent DB-admin password in
-  plain text (0600, rewritten every start), plus the least-privilege `ava_runner`
-  role with its own password (`AVA_RUNNER_DB_PASSWORD`, Task #1236) once the
-  cluster has one — the credential the projected runner `AVA_DB_URL` dials
-  with. PgBouncer derives the SCRAM server-side verification from the
-  plaintext, so an external / LAN client still needs its role's password; there is no
-  passwordless pooled front door. A no-secret cluster (single-box, no auth
-  anywhere) sets `auth_type = trust` instead and binds loopback only — the
-  pooler never opens a passwordless front door to the LAN.
-- **pgbouncer → postgres**: over Postgres's local unix socket (`local all all
-  trust` — the same 0700 owner-only provisioning socket), so PgBouncer needs no
-  server credential at all and can never drift off a rotated scram verifier. This
-  ties PgBouncer to the same host as its Postgres, which it always is (both are
-  this cluster's data plane on the gateway box).
+  (0600) rendered by `shared.cluster.authority.render_userlist`: exactly the
+  delivered write generation's two logins with their stored SCRAM verifiers,
+  plus the operator admin-console entry `ava_pooler_admin` (a userlist-only
+  name, never a PostgreSQL role). No plaintext password, no owner entry.
+- **pgbouncer → postgres**: over the owner-only unix socket with SCRAM
+  pass-through — the userlist verifier equals `pg_authid.rolpassword`, so the
+  client's SCRAM keys authenticate the backend hop (`local all all
+  scram-sha-256`); the pooler holds no server credential of its own.
+- **userlist change = restart**: a SIGHUP reload keeps a removed user that
+  already authenticated and still admits its new sessions, so changed userlist
+  (or ini) bytes restart the pooler; unchanged bytes only reload.
 
 `pool_mode = transaction`: agent/daemon client pools collapse onto a small set of
 real Postgres backends. Every pooled consumer connects with `prepare_threshold=None`
@@ -61,7 +59,7 @@ from cli.commands._cluster_instance import (
 from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._pooler_stop import OwnedPooler
 from shared.cluster import ownership
-from shared.cluster.derive import RUNNER_ROLE
+from shared.cluster.authority import POOLER_ADMIN
 from shared.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_tools import brew_prefix, is_macos
@@ -76,18 +74,6 @@ _DEFAULT_POOL_SIZE = 25
 # libpq/psycopg send these startup parameters; PgBouncer rejects unknown ones unless
 # told to ignore them. Real GUCs (search_path etc.) are deliberately NOT here.
 _IGNORE_STARTUP_PARAMETERS = "extra_float_digits,options"
-
-
-def runner_password_from_env() -> str:
-    """This home's AVA_RUNNER_DB_PASSWORD from its .env FILE, or "".
-
-    Kept as a pooler-local seam for callers and tests; the secret ownership is
-    in ``shared.cluster`` so non-CLI consumers never import this CLI module.
-    An empty value is valid only for the explicit unauthenticated identity.
-    """
-    from shared.cluster import runner_password_from_env as read_runner_password
-
-    return read_runner_password(ava_home())
 
 
 def _pgbouncer_dir() -> Path:
@@ -127,41 +113,12 @@ def pgbouncer_bin() -> str:
     return "pgbouncer"  # last resort — subprocess will surface a clear error
 
 
-def _render_userlist(
-    role: str,
-    db_admin_password: str,
-    runner_role: str | None = None,
-    runner_password: str | None = None,
-) -> str:
-    """`"user" "password"` lines — the cluster role with its DB-admin password, plus the
-    `ava_runner` entry with its own password once the cluster has one. PgBouncer
-    double-quotes both fields; escape any embedded quote.
-
-    An explicit owner-only userlist omits the runner entry. Normal start passes
-    the independent runner credential already recorded in the home identity.
-    """
-    esc = db_admin_password.replace('"', '""')
-    lines = [f'"{role}" "{esc}"']
-    if runner_role and runner_password:
-        esc_runner = runner_password.replace('"', '""')
-        lines.append(f'"{runner_role}" "{esc_runner}"')
-    return "\n".join(lines) + "\n"
-
-
-def _render_ini(
-    *, pg_port: int, listen_port: int, db_name: str, role: str, cluster_secret: str
-) -> str:
+def _render_ini(*, pg_port: int, listen_port: int, db_name: str, cluster_secret: str) -> str:
     """The pgbouncer.ini for this cluster's pooler. One [databases] entry mapping the
-    cluster db to the local Postgres over its trust unix socket; [pgbouncer] sets
-    transaction pooling, client auth against the userlist, and loopback +
-    reachable binds (never all interfaces), matching Postgres's posture.
-
-    Client auth follows the authenticated-cluster posture: `scram-sha-256` when
-    a bearer is set (the pooled front door then requires the independent owner
-    or runner DB password), `trust` when the cluster has none — a no-secret
-    cluster is fully unauthenticated, so the pooler cannot demand a credential
-    the cluster does not have (and its `listen_addr` is loopback-only, gated by
-    the same posture flag, so trust never reaches the LAN).
+    cluster db to the local Postgres over its owner-only unix socket; [pgbouncer]
+    sets transaction pooling, SCRAM client auth against the userlist (always), and
+    loopback + reachable binds (never all interfaces), matching Postgres's posture.
+    The cluster secret decides only the bind: loopback alone without one.
 
     The backend socket dir is the one the RUNNING pg actually listens on
     (`_pg_socket_dir`, the exact directory the admin dial uses): `_start_pg` skips a
@@ -202,8 +159,8 @@ def _render_ini(
     return "\n".join(
         [
             "[databases]",
-            # host=<socket dir> routes pgbouncer -> Postgres over the trust unix
-            # socket, so the pooler needs no server credential; connect_query
+            # host=<socket dir> routes pgbouncer -> Postgres over the owner-only
+            # unix socket with SCRAM pass-through (no server credential); connect_query
             # births every pooled backend with the 60s statement ceiling (the
             # pooler drops the client's `options` startup parameter).
             f"{db_name} = host={socket_dir} port={pg_port} dbname={db_name} {connect_query}",
@@ -211,7 +168,7 @@ def _render_ini(
             "[pgbouncer]",
             f"listen_addr = {listen_addr}",
             f"listen_port = {listen_port}",
-            "auth_type = scram-sha-256" if cluster_secret else "auth_type = trust",
+            "auth_type = scram-sha-256",
             f"auth_file = {_userlist_path()}",
             "pool_mode = transaction",
             server_reset,
@@ -220,10 +177,10 @@ def _render_ini(
             f"max_client_conn = {_MAX_CLIENT_CONN}",
             f"default_pool_size = {_DEFAULT_POOL_SIZE}",
             f"ignore_startup_parameters = {_IGNORE_STARTUP_PARAMETERS}",
-            # Admin/stats console reachable as the cluster role (over the same TCP
-            # listener) for `SHOW POOLS` etc.
-            f"admin_users = {role}",
-            f"stats_users = {role}",
+            # Admin/stats console (`SHOW POOLS` etc.) for the userlist-only
+            # operator entry; no database role can reach it.
+            f"admin_users = {POOLER_ADMIN}",
+            f"stats_users = {POOLER_ADMIN}",
             "log_connections = 0",
             "log_disconnections = 0",
             f"logfile = {_logfile_path()}",
@@ -234,32 +191,25 @@ def _render_ini(
 
 
 def _write_config(
-    *,
-    pg_port: int,
-    listen_port: int,
-    db_name: str,
-    role: str,
-    cluster_secret: str,
-    db_admin_password: str = "",
-    runner_role: str | None = None,
-    runner_password: str | None = None,
-) -> None:
-    """Write pgbouncer.ini + userlist.txt (0600) fresh every start, so a
-    DB-admin or runner-password rotation or port change is reflected (a running
-    pooler is then reloaded)."""
-    self_ini = _ini_path()
-    self_ini.write_text(
-        _render_ini(
-            pg_port=pg_port,
-            listen_port=listen_port,
-            db_name=db_name,
-            role=role,
-            cluster_secret=cluster_secret,
-        )
-    )
-    userlist = _userlist_path()
-    userlist.write_text(_render_userlist(role, db_admin_password, runner_role, runner_password))
-    userlist.chmod(0o600)
+    *, pg_port: int, listen_port: int, db_name: str, cluster_secret: str, userlist: bytes
+) -> bool:
+    """Write pgbouncer.ini + userlist.txt (0600); True when either file's bytes
+    changed, which requires a pooler restart (a reload never revokes a user)."""
+    from shared.private_storage import write_private_bytes
+
+    ini = _render_ini(
+        pg_port=pg_port, listen_port=listen_port, db_name=db_name, cluster_secret=cluster_secret
+    ).encode()
+    changed = False
+    for path, body in ((_ini_path(), ini), (_userlist_path(), userlist)):
+        try:
+            current = path.read_bytes()
+        except FileNotFoundError:
+            current = None
+        if current != body:
+            write_private_bytes(path, body)
+            changed = True
+    return changed
 
 
 def _pid_is_our_pooler(pid: int) -> bool:
@@ -342,19 +292,19 @@ def _running_pid() -> int | None:
     return None
 
 
-def _admin_reachable(
-    listen_port: int, role: str, cluster_secret: str, host: str = "127.0.0.1"
-) -> bool:
+def _admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.1") -> bool:
     """Authenticate to the pooler's admin console without opening a backend.
 
-    Backend readiness is verified separately after schema and role provisioning.
-    Public bind verification reads the socket table, never a network self-dial.
+    Backend readiness is proven separately by the caller, as each delivered
+    login. Public bind verification reads the socket table, never a self-dial.
     """
     import psycopg
 
     from shared.url_secret import url_with_userinfo
 
-    url = url_with_userinfo(f"postgresql://@{host}:{listen_port}/pgbouncer", role, cluster_secret)
+    url = url_with_userinfo(
+        f"postgresql://@{host}:{listen_port}/pgbouncer", POOLER_ADMIN, admin_password
+    )
     try:
         with psycopg.connect(url, connect_timeout=3, autocommit=True, prepare_threshold=None):
             return True
@@ -393,26 +343,6 @@ def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_sec
     return bool(addrs & {reachable, "0.0.0.0", "::", "*"})  # noqa: S104 — matching OS wildcard binds, not opening one
 
 
-def _reachable(listen_port: int, db_name: str, role: str, cluster_secret: str) -> bool:
-    """True if the pooler answers an authenticated SELECT 1 through the listener to the
-    cluster db — end-to-end proof that client scram + the trust socket server hop both
-    work. Used by the `ava status` probe, where the runtime role/db already exist (not
-    for bring-up readiness, which predates provisioning — see `_admin_reachable`)."""
-    import psycopg
-
-    from shared.url_secret import url_with_userinfo
-
-    url = url_with_userinfo(
-        f"postgresql://@127.0.0.1:{listen_port}/{db_name}", role, cluster_secret
-    )
-    try:
-        with psycopg.connect(url, connect_timeout=3, prepare_threshold=None) as conn:
-            conn.execute("SELECT 1")
-        return True
-    except Exception:
-        return False
-
-
 def _wait_for_reachable_bind_gated(cluster_secret: str) -> bool:
     """Bounded wait for the configured reachable bind address — only when needed.
 
@@ -445,44 +375,40 @@ def ensure_pgbouncer(
     pg_port: int,
     listen_port: int,
     db_name: str,
-    role: str,
     cluster_secret: str,
-    db_admin_password: str = "",
-    runner_password: str | None = None,
+    userlist: bytes,
+    admin_password: str,
 ) -> int:
     """Bring up (or reload) this cluster's PgBouncer on `listen_port`, pooling in
     front of the local Postgres on `pg_port`. Idempotent. Returns 0 on success.
 
-    Three outcomes for a running pooler, only one of which touches its sockets:
+    `userlist` is the exact `auth_file` (`shared.cluster.authority.render_userlist`)
+    and `admin_password` the admin-console credential it carries. Outcomes for a
+    running pooler:
 
-    - **Healthy + fully bound** (verified on the reachable address too) — SIGHUP
-      reload (re-reads auth_file + settings), live connections never bounce.
+    - **Unchanged + fully bound** — SIGHUP reload, live connections never bounce.
+    - **Changed config or userlist** — RESTARTED, never reloaded: PgBouncer keeps
+      a removed user that already authenticated after a SIGHUP and still admits
+      its new sessions, so only a fresh process revokes it.
     - **Degraded** (answering on loopback but missing the reachable listener) —
-      RESTARTED, not reloaded: a SIGHUP reload does not retry a listen_addr that
-      failed to bind at startup (verified on pgbouncer 1.25.2), so only a process
-      restart re-binds it. The restart waits (bounded) for the reachable address
-      first, and a terminate that did not take is reported, not papered over.
+      restarted: a SIGHUP reload does not retry a listen_addr that failed to bind
+      at startup (verified on pgbouncer 1.25.2). The restart waits (bounded) for
+      the reachable address first, and a stop that did not take is reported.
     - **Not running** — started fresh.
+
+    A restart uses the safe shutdown only; a pooler that will not stop (a client
+    holding a transaction) keeps custody and fails this call rather than being
+    killed underneath an ordinary start.
 
     Boot-time address race (task #1288): pgbouncer treats a failed bind on one
     `listen_addr` entry as a WARNING and keeps running on the rest, so a pooler
     born before the private network assigned the reachable address degrades to
-    loopback-only while a loopback-only probe reads it as healthy — the pooled
-    `AVA_DB_URL` public path stays silently dead for every remote agent-runner.
-    The wait guards ONLY the paths that (re)start a pooler; a running pooler
-    whose public listener verifies reloads without ever consulting the address,
-    so a transient network blip cannot hold `ava start` hostage. After any
-    (re)start the pooler must prove it listens on the reachable address too.
-
-    When `runner_password` is omitted, it is resolved from this home's `.env`
-    before the userlist rewrite.
+    loopback-only while a loopback-only probe reads it as healthy. The wait guards
+    ONLY the paths that (re)start a pooler. After any (re)start the pooler must
+    prove it listens on the reachable address too.
 
     Only called when AVA_PGBOUNCER_ENABLED (gated by the caller in
     `complete_gateway_data_plane`)."""
-    if cluster_secret and not db_admin_password:
-        raise ValueError("authenticated pooler requires an explicit database owner credential")
-    if runner_password is None:
-        runner_password = runner_password_from_env()
     binary = pgbouncer_bin()
     if not Path(binary).exists() and shutil.which(binary) is None:
         # Enabled but pgbouncer is not installed. Fail fast (do NOT silently fall back
@@ -495,37 +421,34 @@ def ensure_pgbouncer(
         )
         return 1
     custodian = _accepting_pooler(listen_port)
-    _write_config(
+    changed = _write_config(
         pg_port=pg_port,
         listen_port=listen_port,
         db_name=db_name,
-        role=role,
         cluster_secret=cluster_secret,
-        db_admin_password=db_admin_password,
-        runner_role=RUNNER_ROLE if runner_password else None,
-        runner_password=runner_password,
+        userlist=userlist,
     )
     if custodian is not None:
         owner = custodian.identity
         pid = owner.pid
-        # A running pooler whose public listener verifies is reloaded, never waited
-        # on: a transient blip on the private network must not hold `ava start`
-        # hostage behind an already-serving pooler (P1).
-        if pgbouncer_public_listener_reachable(listen_port, role, cluster_secret):
+        public = pgbouncer_public_listener_reachable(listen_port, POOLER_ADMIN, cluster_secret)
+        # A running pooler whose files are unchanged and whose public listener
+        # verifies is reloaded, never waited on: a transient blip on the private
+        # network must not hold `ava start` hostage behind a serving pooler (P1).
+        if public and not changed:
             process = psutil.Process(pid)
             if not owner.live():
                 raise RuntimeError("PgBouncer identity changed before reload")
             process.send_signal(signal.SIGHUP)
+            if not _admin_reachable(listen_port, admin_password):
+                print(
+                    f"  ✗ pgbouncer (127.0.0.1:{listen_port}) refused its admin credential",
+                    file=sys.stderr,
+                )
+                return 1
             print(f"  ✓ pgbouncer already running (127.0.0.1:{listen_port}), reloaded")
-            _report_backend_verification(listen_port, db_name, role, db_admin_password)
             return 0
-        # A running pooler that is not on the reachable address is a degraded one
-        # (born in a boot-time address race). Reload cannot fix it — pgbouncer
-        # never retries a listen_addr that failed to bind — so tear it down and
-        # restart below. Wait for the address first; the terminate result is
-        # checked so a survivor is reported as the real cause, not a generic
-        # start failure (P7).
-        if not _wait_for_reachable_bind_gated(cluster_secret):
+        if not public and not _wait_for_reachable_bind_gated(cluster_secret):
             print(
                 f"  ✗ reachable bind address {reachable_host()!r} is not assigned to any "
                 f"local interface after {int(_BIND_WAIT_TIMEOUT_S)}s — the degraded "
@@ -535,26 +458,29 @@ def ensure_pgbouncer(
                 file=sys.stderr,
             )
             return 1
-        print(
-            f"  ✗ pgbouncer is NOT listening on the reachable address "
-            f"{reachable_host()!r} — it degraded to loopback-only (task #1288) and "
-            "remote agent-runners cannot reach the pooled AVA_DB_URL. Reload cannot "
-            "re-bind it; restarting the pooler",
-            file=sys.stderr,
-        )
+        if public:
+            print(
+                "  · pgbouncer configuration or userlist changed — restarting (a reload never revokes)"
+            )
+        else:
+            print(
+                f"  ✗ pgbouncer is NOT listening on the reachable address "
+                f"{reachable_host()!r} — it degraded to loopback-only (task #1288) and "
+                "remote agent-runners cannot reach the pooled AVA_DB_URL. Reload cannot "
+                "re-bind it; restarting the pooler",
+                file=sys.stderr,
+            )
         if not custodian.stop(deadline=time.monotonic() + 5.0):
             print(
-                f"  ✗ could not stop the degraded pooler (pid {pid}) — it survived the "
+                f"  ✗ could not stop the running pooler (pid {pid}) — it survived the "
                 "graceful stop; custody retained, not starting a second pooler on the same port",
                 file=sys.stderr,
             )
             return 1
-    return _launch_pooler(listen_port, db_name, role, cluster_secret, db_admin_password)
+    return _launch_pooler(listen_port, cluster_secret, admin_password)
 
 
-def _launch_pooler(
-    listen_port: int, db_name: str, role: str, cluster_secret: str, db_admin_password: str
-) -> int:
+def _launch_pooler(listen_port: int, cluster_secret: str, admin_password: str) -> int:
     if not _wait_for_reachable_bind_gated(cluster_secret):
         # Fail fast BEFORE starting: a pooler born now would degrade to loopback-only
         # and the public AVA_DB_URL path would be silently dead (the 2026-08-16
@@ -582,10 +508,10 @@ def _launch_pooler(
             file=sys.stderr,
         )
         return 1
-    # -d daemonizes and returns immediately; wait for the listener to authenticate a
-    # client; schema and grants have already been provisioned by the caller.
+    # -d daemonizes and returns immediately; wait for the admin console to
+    # authenticate. The caller proves each delivered login's pooled backend.
     for _ in range(60):
-        if _admin_reachable(listen_port, role, db_admin_password):
+        if _admin_reachable(listen_port, admin_password):
             break
         time.sleep(0.1)
     else:
@@ -594,7 +520,7 @@ def _launch_pooler(
             file=sys.stderr,
         )
         return 1
-    if not pgbouncer_public_listener_reachable(listen_port, role, cluster_secret):
+    if not pgbouncer_public_listener_reachable(listen_port, POOLER_ADMIN, cluster_secret):
         # The pooler is up on loopback but NOT on the address consumers dial — the
         # silent degradation this whole function exists to never ship. Loud failure:
         # the boot retry / watchdog keeps re-running, and once the private network
@@ -610,43 +536,25 @@ def _launch_pooler(
         return 1
     ownership.require_listener(ownership.pooler(_ini_path(), _pidfile_path()), listen_port)
     print(f"  ✓ pgbouncer started (127.0.0.1:{listen_port}, transaction pooling)")
-    _report_backend_verification(listen_port, db_name, role, db_admin_password)
     return 0
 
 
-def _report_backend_verification(
-    listen_port: int, db_name: str, role: str, cluster_secret: str
-) -> None:
-    """Report the pooled backend result; final start readiness requires it."""
-    if _reachable(listen_port, db_name, role, cluster_secret):
-        print("  ✓ pgbouncer backend verified (pooled SELECT 1)")
-        return
-    print(
-        "  ⚠ pgbouncer backend not verifiable yet (role/db not provisioned yet, or the "
-        "backend route is broken — `ava status` probes the pooled path end-to-end)",
-        file=sys.stderr,
-    )
-
-
-def pgbouncer_reachable(listen_port: int, db_name: str, role: str, cluster_secret: str) -> bool:
-    """`ava status` probe: does the pooler answer an authenticated SELECT 1."""
-    return _reachable(listen_port, db_name, role, cluster_secret)
-
-
-def pgbouncer_listener_reachable(listen_port: int, role: str, cluster_secret: str) -> bool:
+def pgbouncer_listener_reachable(listen_port: int, admin_password: str) -> bool:
     """Is the POOLER itself up — the admin-console probe, with no server hop.
 
-    The watchdog healthcheck's question, and deliberately not
-    `pgbouncer_reachable`'s: an end-to-end `SELECT 1` also fails when Postgres is
-    down, and restarting the pooler is the wrong answer to that. This separates
-    "the pooler process is gone" (repairable here, by `ensure_pgbouncer`) from
-    "the pooler is fine and the backend behind it is not" (nothing this check
-    should touch)."""
-    return _admin_reachable(listen_port, role, cluster_secret)
+    The watchdog healthcheck's question: an end-to-end `SELECT 1` also fails when
+    Postgres is down, and restarting the pooler is the wrong answer to that. This
+    separates "the pooler process is gone" (repairable by `ensure_pgbouncer`) from
+    "the pooler is fine and the backend behind it is not"."""
+    return _admin_reachable(listen_port, admin_password)
 
 
-def stop_pgbouncer() -> None:
-    """Stop this home's captured pooler; a previous drain is only waited on."""
+def stop_pgbouncer(*, force: bool = False) -> None:
+    """Stop this home's captured pooler; a previous drain is only waited on.
+
+    `force` escalates a pooler that ignored the safe shutdown to SIGKILL; only a
+    caller that owns an already-quiescent, already-revoked data plane passes it.
+    """
     pid = _running_pid()
     if pid is None:
         return
@@ -654,7 +562,7 @@ def stop_pgbouncer() -> None:
     if owner is None:
         return
     custodian = OwnedPooler.from_config(owner, _ini_path())
-    if not custodian.stop(deadline=time.monotonic() + 5.0):
+    if not custodian.stop(deadline=time.monotonic() + 5.0, force=force):
         raise RuntimeError("PgBouncer stop incomplete; custody retained")
 
 

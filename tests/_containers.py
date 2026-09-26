@@ -177,3 +177,38 @@ def redis_server() -> Generator[str]:
             proc.kill()
             proc.wait(timeout=10)
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def grant_runner_login(url: str, *, owner: str, login: str, password: str) -> str:
+    """Give a throwaway database the runner capability and return a runner URL.
+
+    The production shape: `shared.cluster.authority.ensure_groups` converges the
+    NOLOGIN `ava_gateway` / `ava_runner` groups on `url`'s database (default
+    privileges declared FOR `owner`, the role that creates later tables), and
+    `login` inherits `ava_runner` exactly as a write generation's runner login
+    does (INHERIT TRUE, SET FALSE, ADMIN FALSE). Idempotent. `url` must dial a
+    superuser session.
+    """
+    from urllib.parse import urlsplit
+
+    from psycopg import sql
+
+    from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+    from shared.url_secret import url_with_userinfo
+
+    database = urlsplit(url).path.strip("/")
+    groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
+    with psycopg.connect(url, autocommit=True) as conn:
+        ensure_groups(conn, owner=owner, database=database, groups=groups)
+        if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (login,)).fetchone() is None:
+            conn.execute(
+                sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+                    sql.Identifier(login), sql.Literal(password)
+                )
+            )
+            conn.execute(
+                sql.SQL("GRANT {} TO {} WITH INHERIT TRUE, SET FALSE, ADMIN FALSE").format(
+                    sql.Identifier(RUNNER_GROUP), sql.Identifier(login)
+                )
+            )
+    return url_with_userinfo(url, login, password)

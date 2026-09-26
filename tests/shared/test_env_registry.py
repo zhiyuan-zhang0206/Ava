@@ -245,7 +245,6 @@ class TestConsumptionMatrixDeclarations:
             "AVA_PERMISSIONS_HELPER_PORT",
             "AVA_DB_URL",
             "AVA_REDIS_URL",
-            "AVA_DB_ADMIN_PASSWORD",
             "AVA_REDIS_ADMIN_PASSWORD",
             "AVA_REDIS_PASSWORD",
             "AVA_EVENTS_CHANNEL",

@@ -88,9 +88,6 @@ from shared.cluster.derive import (
     redis_password_from_env as redis_password_from_env,
 )
 from shared.cluster.derive import (
-    runner_password_from_env as runner_password_from_env,
-)
-from shared.cluster.derive import (
     session_name as session_name,
 )
 from shared.cluster.derive import (
@@ -152,9 +149,6 @@ from shared.cluster.provision import (
 )
 from shared.cluster.provision import (
     ensure_pgvector_extension as ensure_pgvector_extension,
-)
-from shared.cluster.provision import (
-    ensure_runner_role as ensure_runner_role,
 )
 from shared.cluster.provision import (
     provision_database as provision_database,

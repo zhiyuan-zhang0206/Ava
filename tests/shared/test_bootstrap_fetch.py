@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -15,6 +16,7 @@ from shared import bootstrap, config, resilience
 def test_fetch_bootstrap_config_against_live_endpoint(
     db_conn,
     monkeypatch: pytest.MonkeyPatch,
+    served_gateway_home: Any,
 ) -> None:
     # Suite runs multi-host on: the gateway requires the cluster secret, and the
     # fetch reads it from os.environ. Set both ends so the live fetch authenticates.
@@ -29,16 +31,14 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 
     monkeypatch.setattr(bootstrap, "dial_get", fake_get)  # pyright: ignore[reportUnknownArgumentType]
     values = bootstrap.fetch_bootstrap_config("http://cp")
-    # Bootstrap serves the runner projection. A multi-host gateway also rewrites
-    # its loopback host to the reachable address for remote runners.
-    from shared import runtime_config
-    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, RUNNER_ROLE
+    # Bootstrap serves the active write generation's runner login. A multi-host
+    # gateway also rewrites its loopback host to the reachable address for
+    # remote runners.
     from shared.url_secret import url_with_userinfo
 
+    runner = served_gateway_home.roles.runner
     expected = url_with_userinfo(
-        str(config.settings.data_plane.db_url),
-        RUNNER_ROLE,
-        runtime_config.read_env_aliases()[RUNNER_DB_PASSWORD_ENV],
+        str(config.settings.data_plane.db_url), runner.name, runner.password
     )
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):

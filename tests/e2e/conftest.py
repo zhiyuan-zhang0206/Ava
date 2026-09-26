@@ -162,9 +162,7 @@ def _apply_e2e_seq_offset() -> None:
 
 
 @pytest.fixture(scope="package", autouse=True)
-def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore sequence; each step is one statement
-    _provisioned_db: str, _provisioned_redis: str
-) -> Iterator[None]:
+def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[None]:
     """Layer e2e-specific process config on the root conftest's session Postgres +
     Redis (provisioned by its autouse fixtures). The DB/Redis
     URLs are already in settings + os.environ (AVA_DB_URL / AVA_REDIS_URL), so the
@@ -223,7 +221,6 @@ def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore se
         "AVA_MACHINE_SERVE_AGENT_RUNNER",
         "AVA_MACHINE_NAME",
         "AVA_NODE_STALL_DUMP_SECONDS",
-        "AVA_RUNNER_DB_PASSWORD",
     )
     prev_events = settings.data_plane.events_channel
     prev_env = {k: os.environ.get(k) for k in _env_keys}
@@ -293,25 +290,6 @@ def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore se
     _health_port_keys: frozenset[str] = frozenset(
         f"AVA_{attr.upper()}" for attr in _HEALTH_PORT_OVERRIDES.values()
     )
-    # Task #1236: the e2e home mirrors a BORN cluster — the gateway's .env must
-    # carry the runner credential and the least-privilege ava_runner role must
-    # exist in the e2e Postgres, or the spawned agents' bootstrap fetches
-    # (?role=runner — the runner projection) get a 400 and every agent dies at
-    # boot. The throwaway pg's db/role identifier is `ava_citest` (the URL
-    # username is the throwaway admin, not the identity — read the db name).
-    import secrets
-    from urllib.parse import urlsplit
-
-    from shared.cluster import ensure_runner_role
-
-    runner_pw = secrets.token_urlsafe(32)
-    _e2e_db_url = settings.data_plane.db_url
-    ensure_runner_role(
-        urlsplit(_e2e_db_url).path.strip("/"),
-        base_admin_url=_e2e_db_url.rsplit("/", 1)[0] + "/postgres",
-        runner_password=runner_pw,
-    )
-    os.environ["AVA_RUNNER_DB_PASSWORD"] = runner_pw
     # Cluster-scoped CORS origins must be in the unit .env before gateway boot.
     os.environ["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (
         f"http://localhost:{FRONTEND_PORT},http://127.0.0.1:{FRONTEND_PORT}"
@@ -326,10 +304,6 @@ def _e2e_process_env(  # noqa: PLR0915 -- one cohesive env-layering + restore se
         for key in sorted(cluster_scope_aliases())
         if key in os.environ and key not in _health_port_keys
     ]
-    # The runner credential is NOT a cluster-scope alias (it is a gateway-.env
-    # secret that only travels inside the projected URL) — write it explicitly
-    # so the gateway's bootstrap projection can read it from the file.
-    env_lines.append(f"AVA_RUNNER_DB_PASSWORD={runner_pw}")
     (_AVA_HOME / ".env").write_text("\n".join(env_lines) + "\n")
     try:
         yield

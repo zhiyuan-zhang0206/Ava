@@ -240,6 +240,7 @@ def test_current_field_values_coerces_bool(monkeypatch: pytest.MonkeyPatch, tmp_
     assert config.current_field_values()["trace_enabled"] is True
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_serves_comma_list_not_repr(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A NoDecode comma-list field set in .env reaches an agent as the raw "a,b"
     env text, not a Python list repr (which the agent would split into garbage)."""
@@ -248,13 +249,7 @@ def test_bootstrap_serves_comma_list_not_repr(monkeypatch: pytest.MonkeyPatch, t
 
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     rt.write_fields({"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
-    upsert_env(
-        tmp_path / ".env",
-        {
-            "AVA_DB_URL": str(config.settings.data_plane.db_url),
-            "AVA_RUNNER_DB_PASSWORD": "runner-password",
-        },
-    )
+    upsert_env(tmp_path / ".env", {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
 
     vals = config.bootstrap_config_values()
     assert vals["AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == "alpha,beta"
@@ -543,6 +538,7 @@ def test_physical_backup_cluster_pinned_fields_are_never_bootstrap_served() -> N
     assert not (set(BOOTSTRAP_FIELDS) & physical_backup_cluster_pinned)
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_distributes_a_behavior_knob(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-default agent-behavior knob is now distributed to agent-runners."""
     from shared import config as cfg
@@ -553,10 +549,7 @@ def test_bootstrap_distributes_a_behavior_knob(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         runtime_config,
         "read_env_aliases",
-        lambda: {
-            "AVA_DB_URL": str(cfg.settings.data_plane.db_url),
-            "AVA_RUNNER_DB_PASSWORD": "runner-password",
-        },
+        lambda: {"AVA_DB_URL": str(cfg.settings.data_plane.db_url)},
     )
     monkeypatch.setattr(cfg.settings.sandbox, "exec_timeout_seconds", 123.0)
     values = cfg.bootstrap_config_values()
@@ -991,6 +984,7 @@ def test_disabled_adapters_default_without_env(monkeypatch: pytest.MonkeyPatch) 
 # that raises exactly like the PR-B construction will.
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_service_reads_stay_full_when_singleton_domain_excluded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1175,6 +1169,7 @@ def test_explicit_none_profile_is_full(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.has_domain("agent") and s.has_domain("sandbox") and s.has_domain("web")
 
 
+@pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_and_panel_full_under_real_gateway_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

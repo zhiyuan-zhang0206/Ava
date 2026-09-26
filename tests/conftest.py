@@ -36,7 +36,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import AsyncIterator, Generator, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Generator, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -238,15 +238,14 @@ os.environ["AVA_REDIS_URL"] = "redis://127.0.0.1:1/0"
 # passes the cluster_secret validator. Individual auth tests monkeypatch it (incl.
 # to "" for the unset-fail-closed paths).
 os.environ["AVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — test fixture
-os.environ["AVA_DB_ADMIN_PASSWORD"] = "test-db-owner-password"  # noqa: S105 — test fixture
 # The suite's secret-bearing servers include the e2e ops daemon, which binds
 # non-loopback. The deployment precondition requires a declared mode; overlay
 # records the suite's private-network posture.
 os.environ["AVA_TRANSPORT_ENCRYPTION"] = "overlay"
 
 # The suite's data-plane identity is `ava_citest`, carried entirely by the URLs
-# the provisioning fixtures write (names-as-data — Settings keeps username/db
-# verbatim and re-applies only the password). The throwaway pg/redis provide the
+# the provisioning fixtures write (names-as-data — Settings keeps the URL
+# verbatim, credentials included). The throwaway pg/redis provide the
 # `ava_citest` role/db/ACL user (tests/_containers.py), while the prod-db guard
 # (tests/ava/conftest.py, which refuses `ava`/`ava_main`) still fires if a test
 # ever points at the real production database.
@@ -426,7 +425,6 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
             f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
             f"AVA_EVENTS_CHANNEL={_TEST_EVENTS_CHANNEL}",
             f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
-            f"AVA_DB_ADMIN_PASSWORD={os.environ['AVA_DB_ADMIN_PASSWORD']}",
             "AVA_RUNNER_DB_PASSWORD=test-runner-db-password",
             f"AVA_TRANSPORT_ENCRYPTION={os.environ['AVA_TRANSPORT_ENCRYPTION']}",
             f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
@@ -1847,3 +1845,57 @@ def serving_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> RootBirth:
     )
     monkeypatch.setattr(start_serving, "_observe_root", lambda: birth)
     return birth
+
+
+@pytest.fixture
+def seed_write_generation() -> Callable[[Path], Any]:
+    """Record an active write generation in a home's private ledger, no database.
+
+    For code that only READS the ledger (launch delivery, bootstrap projection,
+    operator consumption): the catalog side is proven on real PostgreSQL in
+    tests/lifecycle/db_authority/. Returns the generation's secret record.
+    """
+    from shared.cluster.authority import (
+        GATEWAY_GROUP,
+        RUNNER_GROUP,
+        BirthAuthority,
+        Groups,
+        VerifiedGeneration,
+        activate,
+        create_ledger,
+        read_secret,
+    )
+    from shared.cluster.authority.ledger import begin_mint
+
+    def seed(home: Path) -> Any:
+        home = home.resolve()
+        birth = BirthAuthority()
+        groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
+        create_ledger(home, owner="ava", groups=groups, authority=birth)
+        pending = begin_mint(
+            home, birth, encrypt=lambda name, _pw: f"SCRAM-SHA-256$4096:c2VlZA==${name}"
+        )
+        activate(
+            home,
+            birth,
+            VerifiedGeneration(pending.number, pending.credential_digest, pending.roles),
+        )
+        return read_secret(home, pending)
+
+    return seed
+
+
+@pytest.fixture
+def served_gateway_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, seed_write_generation: Callable[[Path], Any]
+) -> Any:
+    """The suite's gateway `.env` served from a private home that keeps an active
+    write generation: bootstrap's local runner projection reads that ledger.
+    Returns the generation's secret record."""
+    import shutil
+
+    from shared import runtime_config as rt
+
+    shutil.copy(rt.env_file_path(), tmp_path / ".env")
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    return seed_write_generation(tmp_path)

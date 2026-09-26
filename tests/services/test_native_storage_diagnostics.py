@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
 
@@ -64,7 +65,12 @@ async def test_native_pooler_diagnostic_uses_shared_custody(
     )
     monkeypatch.setattr(cluster, "get_record", Mock(return_value=record))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(settings.data_plane, "db_admin_password", "")
+    # The fixture pooler trusts its userlist; the probe authenticates as the
+    # admin-console operator entry with the home's recorded credential.
+    monkeypatch.setattr(
+        "shared.cluster.authority.read_pooler_admin",
+        Mock(return_value=SimpleNamespace(password="fixture-admin")),  # noqa: S106 — trusted fixture pooler
+    )
     before = custodian.config.read_bytes()
     result = await ProbeRunner().observe(probes.pgbouncer, 5)
     assert result.verdict.value == "alive", result.detail

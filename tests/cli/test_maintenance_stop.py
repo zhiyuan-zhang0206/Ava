@@ -590,17 +590,14 @@ def _launch_incident_shape_pooler(
     monkeypatch.setattr(pb, "_pg_socket_dir", lambda: home / "pg-socket")  # pyright: ignore[reportUnknownArgumentType] — private fixture home
 
     port = _free_port()
-    role = "ava_maintenance_test"
+    role = pb.POOLER_ADMIN
     secret = "s3cr3t"  # noqa: S105 — private ephemeral fixture
     pb._write_config(
         pg_port=15433,
         listen_port=port,
         db_name="ava_maintenance_test",
-        role=role,
         cluster_secret=secret,
-        db_admin_password=secret,
-        runner_role=None,
-        runner_password="",
+        userlist=f'"{role}" "{secret}"\n'.encode(),
     )
     subprocess.run(  # noqa: S603 — private config, test-owned process
         [binary, "-d", str(pb._ini_path())], check=True, capture_output=True, timeout=5
@@ -677,10 +674,9 @@ def test_real_start_retains_pooler_with_held_client(
                     pg_port=15433,
                     listen_port=port,
                     db_name="ava_maintenance_test",
-                    role=role,
                     cluster_secret=secret,
-                    db_admin_password=secret,
-                    runner_password="",
+                    userlist=f'"{role}" "{secret}"\n'.encode(),
+                    admin_password=secret,
                 )
             assert old.live(), "normal start must retain a pooler still draining its client"
             assert pb._running_pid() == pid, "no replacement may be launched"

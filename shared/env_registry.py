@@ -348,14 +348,11 @@ _DERIVED_FIELDS = frozenset(
         "permissions_helper_port",
         "db_url",
         "redis_url",
-        "db_admin_password",
         "redis_admin_password",
         "events_channel",
     }
 )
-ADMIN_DATA_PLANE_ALIASES = frozenset(
-    {"AVA_DB_ADMIN_PASSWORD", "AVA_REDIS_ADMIN_PASSWORD", REDIS_PASSWORD_ENV}
-)
+ADMIN_DATA_PLANE_ALIASES = frozenset({"AVA_REDIS_ADMIN_PASSWORD", REDIS_PASSWORD_ENV})
 
 
 def _scope_aliases(*scopes: str) -> frozenset[str]:

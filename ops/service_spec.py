@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from shared.daemon_health import DaemonProbe
 from shared.machine import MachineRole
@@ -15,6 +16,8 @@ from shared.machine import MachineRole
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 _AGENT_RUNNER: frozenset[MachineRole] = frozenset({"agent-runner"})
 _BOTH: frozenset[MachineRole] = frozenset({"gateway", "agent-runner"})
+
+DbAccess = Literal["gateway", "runner"]
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,12 @@ class ServiceSpec:
         requires_db: whether this service reads or writes the cluster's Postgres.
             Required because database-scoped blocks must hold dependent services
             while leaving independent services available for diagnosis.
+        db_access: the write-generation login class the launcher delivers
+            (``gateway`` or ``runner``). None = derived by ``db_access`` for a
+            ``requires_db`` service from its profile / capabilities; a service
+            carrying both capabilities must declare it. A service that only
+            sometimes dials the database (a selectable backend) declares it
+            without ``requires_db``, so a database outage does not hold it.
         pidfile: pidfile path (None = no daemon-specific pidfile).
         healthcheck_module: location of the service's protocol health probes.
             Presence opts the service into root health monitoring; modules do not
@@ -84,6 +93,7 @@ class ServiceSpec:
     profile: str | None = None
     no_profile_marker: bool = False
     config_inputs: tuple[Path, ...] = ()
+    db_access: DbAccess | None = None
 
 
 def profile_marker(spec: ServiceSpec) -> str | None:
@@ -108,3 +118,34 @@ def profile_marker(spec: ServiceSpec) -> str | None:
     if "agent-runner" in spec.capabilities and "gateway" not in spec.capabilities:
         return "runner"
     return None
+
+
+def db_access(spec: ServiceSpec) -> DbAccess | None:
+    """The write-generation login class the launcher delivers to ``spec``.
+
+    The explicit declaration first; else None for a service that does not use
+    the database; else the profile (``gateway`` -> gateway; ``runner`` / ``agent``
+    -> runner), else the single capability of a profile-less service. A
+    database service carrying both capabilities has no derivable class and must
+    declare one: there is no fallback to an owner or administrator credential.
+
+    Raises:
+        ValueError: a ``requires_db`` service whose class cannot be derived.
+    """
+    if spec.db_access is not None:
+        return spec.db_access
+    if not spec.requires_db:
+        return None
+    marker = profile_marker(spec)
+    if marker == "gateway":
+        return "gateway"
+    if marker in {"runner", "agent"}:
+        return "runner"
+    if spec.capabilities == _GATEWAY:
+        return "gateway"
+    if spec.capabilities == _AGENT_RUNNER:
+        return "runner"
+    raise ValueError(
+        f"service {spec.session!r} uses the database but declares no db_access and "
+        "its capabilities do not decide one"
+    )

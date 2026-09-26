@@ -7,9 +7,10 @@ Every application privilege is granted to one of two groups, never to a login:
   sequence; EXECUTE on every routine, including those revoked from PUBLIC;
   PostgreSQL 17 ``MAINTAIN`` on the checkpoint tables the blob vacuum
   maintains. No TRUNCATE, REFERENCES or TRIGGER.
-- ``ava_runner``: the audited runner matrix. The historical ``ava_runner``
-  login is demoted in place, so grants recorded by the schema and migrations
-  keep working.
+- ``ava_runner``: the audited runner matrix (the single definition; the
+  historical ``ava_runner`` login is demoted in place, so grants recorded by the
+  schema and migrations keep working), including ``EXECUTE`` on the
+  publication-admission lock while that function exists.
 
 Both groups hold CONNECT on the cluster database, which PUBLIC loses, and
 USAGE on schema ``public``. Standing ``ALTER DEFAULT PRIVILEGES FOR ROLE
@@ -160,6 +161,18 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
     grant_manifest_runner_access(conn, runner)
+    # Hosted runtime admission still takes the publication row lock through this
+    # narrow security-definer function; the grant goes with the publication
+    # graph, which deletes the function. Granted only while it exists.
+    row = conn.execute(
+        "SELECT to_regprocedure('public.lock_runtime_publication_admission()') IS NOT NULL"
+    ).fetchone()
+    if row is not None and row[0]:
+        _grant(
+            conn,
+            "GRANT EXECUTE ON FUNCTION public.lock_runtime_publication_admission() TO {}",
+            runner,
+        )
 
 
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:

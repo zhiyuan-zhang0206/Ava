@@ -31,6 +31,16 @@ class UnanchoredHomeError(RuntimeError):
     """
 
 
+class NoDatabaseAuthorityError(RuntimeError):
+    """This process holds no database login for its write-generation home.
+
+    The home's `.env` carries only the credential-free endpoint; logins are
+    delivered by the root launcher, or to an operator process running the
+    home's admitted runtime (`shared.dotenv_boot._deliver_operator_authority`).
+    Raised at the dial instead of an opaque authentication failure.
+    """
+
+
 # TCP keepalive + connect timeout applied to every cluster Postgres connection —
 # the psycopg/libpq mirror of shared/redis_client.py's `_RESILIENCE_KWARGS`. A
 # laptop-grade runner that sleeps or changes networks wakes holding dead TCP
@@ -167,12 +177,14 @@ DEFAULT_POOL_TIMEOUT_S = 30.0
 
 
 def _guard_db_url(url: str) -> str:
-    """Refuse the unanchored sentinel; return the url otherwise. The single point
-    every sanctioned connection passes through, so the prod-DB footgun is caught
-    once here rather than at each call site.
+    """Refuse the unanchored sentinel and an undelivered credential-free endpoint;
+    return the url otherwise. The single point every sanctioned connection passes
+    through, so both footguns are caught once here rather than at each call site.
 
     Raises:
         UnanchoredHomeError: url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger, no
+            login was delivered to this process, and url carries no password.
     """
     if url == UNANCHORED_DB_SENTINEL:
         raise UnanchoredHomeError(
@@ -184,6 +196,18 @@ def _guard_db_url(url: str) -> str:
             "(AVA_CONFIG_FETCH=skip, the maintenance verbs' gateway-down mode) and "
             "this operation needs the cluster config a fetch would have provided."
         )
+    from shared import dotenv_boot
+
+    refusal = dotenv_boot.db_authority_refusal()
+    if refusal is not None:
+        try:
+            password = urlsplit(url).password
+        except ValueError:
+            password = None
+        if not password:
+            raise NoDatabaseAuthorityError(
+                f"refusing to dial the credential-free database endpoint: {refusal}"
+            )
     return url
 
 

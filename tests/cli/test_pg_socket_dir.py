@@ -31,7 +31,6 @@ def test_pgbouncer_ini_uses_only_canonical_socket(
         pg_port=5433,
         listen_port=6433,
         db_name="ava",
-        role="ava",
         cluster_secret="",
     )
     assert f"host={canonical} port=5433" in ini

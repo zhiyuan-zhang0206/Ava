@@ -33,22 +33,16 @@ def test_pooler_protocol_requires_native_custody_and_both_listeners(
     def _fake_record_pgbouncer_port(_rec: ClusterRecord) -> int:
         return 6432
 
-    def _fake_db_identity() -> str:
-        return "owner"
+    admin = SimpleNamespace(password="pooler-admin-credential")  # noqa: S106 — test fixture
 
     monkeypatch.setattr("shared.cluster.get_record", _fake_get_record)
     monkeypatch.setattr("shared.cluster.record_pgbouncer_port", _fake_record_pgbouncer_port)
-    monkeypatch.setattr("shared.cluster.db_identity", _fake_db_identity)
+    monkeypatch.setattr("shared.cluster.authority.read_pooler_admin", Mock(return_value=admin))
     monkeypatch.setattr(ownership, "pooler", Mock(return_value=owner))
     monkeypatch.setattr(
         diagnostic_probes,
         "settings",
-        SimpleNamespace(
-            data_plane=SimpleNamespace(
-                db_admin_password="",
-                cluster_secret="",
-            )
-        ),
+        SimpleNamespace(data_plane=SimpleNamespace(cluster_secret="")),
     )
     seen: list[tuple[object, int]] = []
 
@@ -58,7 +52,8 @@ def test_pooler_protocol_requires_native_custody_and_both_listeners(
         seen.append((captured, port))
         return protocol()
 
-    def _fake_listener_reachable(*_a: object) -> bool:
+    def _fake_listener_reachable(port: int, password: str) -> bool:
+        assert (port, password) == (6432, admin.password)
         return loopback
 
     def _fake_public_listener_reachable(*_a: object) -> bool:

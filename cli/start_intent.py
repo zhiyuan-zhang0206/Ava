@@ -139,7 +139,9 @@ def _join(values: dict[str, str]) -> None:
         raise ValueError("joining a remote gateway requires AVA_CLUSTER_SECRET")
     os.environ["AVA_CLUSTER_SECRET"] = secret
     payload = fetch_bootstrap_config(gateway, role="runner")
-    if urlsplit(payload["AVA_DB_URL"]).username != "ava_runner":
+    from shared.config.data_plane import _is_runner_db_url
+
+    if not _is_runner_db_url(payload["AVA_DB_URL"]):
         raise ValueError("gateway did not return the runner database credential projection")
     if remote and any(
         is_loopback_host(urlsplit(payload[key]).hostname or "")
@@ -169,7 +171,6 @@ def _config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str]
             "AVA_HOME",
             "AVA_HOME_OVERRIDE",
             "AVA_CLUSTER_REGISTRY",
-            "AVA_DB_ADMIN_PASSWORD",
             "AVA_REDIS_ADMIN_PASSWORD",
         }
     ) - remote_keys

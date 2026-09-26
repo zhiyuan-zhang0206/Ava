@@ -1,6 +1,7 @@
 """PgBouncer config generation + the direct-connection exemption contract.
 
-Unit-level: the rendered pgbouncer.ini / userlist.txt content and the code paths
+Unit-level: the rendered pgbouncer.ini content (the userlist is rendered by
+`shared.cluster.authority.render_userlist`), and the code paths
 that MUST bypass the pooler. The end-to-end wire behaviour (a real pgbouncer in
 transaction pooling in front of Postgres) lives in test_pgbouncer_wire.py.
 """
@@ -13,33 +14,21 @@ import re
 from cli.commands import _pgbouncer
 
 
-def test_render_userlist_quotes_role_and_secret() -> None:
-    line = _pgbouncer._render_userlist("ava_main", "s3cr3t")
-    # PgBouncer double-quotes both fields; scram client auth derives from the plaintext.
-    assert line == '"ava_main" "s3cr3t"\n'
-
-
-def test_render_userlist_escapes_embedded_quote() -> None:
-    line = _pgbouncer._render_userlist("ava_main", 'a"b')
-    assert line == '"ava_main" "a""b"\n'
-
-
 def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     ini = _pgbouncer._render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        role="ava_main",
         cluster_secret="s3cr3t",  # noqa: S106 — test fixture
     )
     # Transaction pooling is the whole point.
     assert "pool_mode = transaction" in ini
-    # Client auth is scram against the userlist; the pooled front door needs the secret.
+    # Client auth is scram against the userlist of generation verifiers.
     assert "auth_type = scram-sha-256" in ini
     assert f"auth_file = {_pgbouncer._userlist_path()}" in ini
     assert "listen_port = 6433" in ini
     # The [databases] entry keys on the cluster db and forwards to the local pg over
-    # its trust unix socket (host=<socket dir>), so the server hop needs no credential.
+    # its owner-only unix socket (host=<socket dir>) with SCRAM pass-through.
     assert "[databases]" in ini
     assert "ava_main = host=/" in ini and "port=5433 dbname=ava_main" in ini
     # Every pooled backend is born with the statement ceiling (the pooler drops
@@ -72,22 +61,18 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     assert reset_line == "server_reset_query = DISCARD ALL"
     assert "log_connections = 0" in ini.splitlines()
     assert "log_disconnections = 0" in ini.splitlines()
-    # admin/stats console is the cluster role.
-    assert "admin_users = ava_main" in ini
+    # admin/stats console is the userlist-only operator entry, never a database role.
+    console = {"admin_users = ava_pooler_admin", "stats_users = ava_pooler_admin"}
+    assert console <= set(ini.splitlines())
 
 
-def test_render_ini_is_trust_without_secret() -> None:
-    """A no-secret cluster has no credential for scram — the pooled front door
-    must not demand one (the cluster's whole posture is unauthenticated)."""
-    ini = _pgbouncer._render_ini(
-        pg_port=5433,
-        listen_port=6433,
-        db_name="ava_main",
-        role="ava_main",
-        cluster_secret="",
-    )
-    assert "auth_type = trust" in ini
-    assert "auth_type = scram-sha-256" not in ini
+def test_render_ini_authenticates_without_secret_and_binds_loopback_only() -> None:
+    """The internal data plane always authenticates: an empty cluster secret
+    changes only the bind (loopback alone), never the SCRAM front door."""
+    ini = _pgbouncer._render_ini(pg_port=5433, listen_port=6433, db_name="ava", cluster_secret="")
+    assert "auth_type = scram-sha-256" in ini.splitlines()
+    assert "trust" not in ini
+    assert "listen_addr = 127.0.0.1" in ini.splitlines()
 
 
 def test_render_ini_binds_loopback_never_all_interfaces() -> None:
@@ -95,7 +80,6 @@ def test_render_ini_binds_loopback_never_all_interfaces() -> None:
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
-        role="ava_main",
         cluster_secret="s3cr3t",  # noqa: S106 — test fixture
     )
     listen = next(ln for ln in ini.splitlines() if ln.startswith("listen_addr ="))

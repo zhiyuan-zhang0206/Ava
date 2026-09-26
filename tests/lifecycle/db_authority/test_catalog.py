@@ -1,22 +1,18 @@
-"""Group grants and the fail-closed invariant on real PostgreSQL 17, the
-runner-matrix parity with legacy provisioning, MAINTAIN/VACUUM, and cutover."""
+"""Group grants and the fail-closed invariant on real PostgreSQL 17,
+MAINTAIN/VACUUM, and cutover. The runner matrix itself is exercised through a
+group login in tests/shared/test_runner_role.py."""
 
 from __future__ import annotations
-
-from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
 from psycopg import sql
 
-from shared.cluster import ensure_runner_role
 from shared.cluster.authority import (
     CatalogRefusedError,
     CutoverAuthority,
     VacuumSkippedError,
     activate,
-    apply_group_grants,
     check_invariant,
     create_ledger,
     ensure_groups,
@@ -25,11 +21,7 @@ from shared.cluster.authority import (
     retire_legacy_logins,
     vacuum_or_fail,
 )
-from shared.cluster.authority.model import Groups
-from shared.pg_tools import throwaway_postgres
 from tests.lifecycle.db_authority.conftest import OWNER, AuthorityCluster
-
-_LEGACY_RUNNER_PW = "legacy-runner-fixture"
 
 # (mutation run by the admin, expected violation fragment)
 _UNKNOWN_EFFECTS = [
@@ -211,63 +203,3 @@ def test_retire_refuses_a_superuser_owner(authority_unborn: AuthorityCluster) ->
     cluster = authority_unborn
     with cluster.admin() as conn, pytest.raises(CatalogRefusedError, match="superuser"):
         retire_legacy_logins(conn, owner="ava", groups=cluster.groups, authority=CutoverAuthority())
-
-
-_ACL_SNAPSHOT = """
-SELECT 'relation ' || c.oid::regclass::text, a.privilege_type
-FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a
-WHERE n.nspname = 'public' AND a.grantee = %(role)s::regrole
-UNION ALL
-SELECT 'column ' || c.oid::regclass::text || '.' || att.attname, a.privilege_type
-FROM pg_attribute att JOIN pg_class c ON c.oid = att.attrelid
-JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(att.attacl) a
-WHERE n.nspname = 'public' AND a.grantee = %(role)s::regrole
-UNION ALL
-SELECT 'routine ' || p.oid::regprocedure::text, a.privilege_type
-FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, aclexplode(p.proacl) a
-WHERE n.nspname = 'public' AND a.grantee = %(role)s::regrole
-UNION ALL
-SELECT 'schema public', a.privilege_type
-FROM pg_namespace n, aclexplode(n.nspacl) a
-WHERE n.nspname = 'public' AND a.grantee = %(role)s::regrole
-UNION ALL
-SELECT 'database', a.privilege_type
-FROM pg_database d, aclexplode(d.datacl) a
-WHERE d.datname = current_database() AND a.grantee = %(role)s::regrole
-UNION ALL
-SELECT 'default ' || d.defaclobjtype::text, a.privilege_type
-FROM pg_default_acl d, aclexplode(d.defaclacl) a
-WHERE a.grantee = %(role)s::regrole
-"""
-
-
-def _acl(conn: psycopg.Connection[Any], role: str) -> set[tuple[str, str]]:
-    return {(row[0], row[1]) for row in conn.execute(_ACL_SNAPSHOT, {"role": role})}
-
-
-def test_runner_group_matrix_equals_legacy_runner_provisioning() -> None:
-    """Until the start wiring retires ``ensure_runner_role``, both definitions of
-    the runner matrix must grant the same surface.
-
-    The only intended differences: the group drops the publication-admission
-    EXECUTE (deleted with the publication graph) and gains CONNECT and schema
-    USAGE (PUBLIC loses CONNECT).
-    """
-    schema = (Path(__file__).resolve().parents[3] / "db" / "schema.sql").read_text()
-    with throwaway_postgres(schema_sql=schema) as url:
-        admin = url.rsplit("/", 1)[0] + "/postgres"
-        ensure_runner_role("ava_citest", base_admin_url=admin, runner_password=_LEGACY_RUNNER_PW)
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute("CREATE ROLE ava_runner_parity NOLOGIN")
-            conn.execute("CREATE ROLE ava_gateway_parity NOLOGIN")
-            apply_group_grants(
-                conn,
-                owner="ava_citest",
-                database="ava_citest",
-                groups=Groups(gateway="ava_gateway_parity", runner="ava_runner_parity"),
-            )
-            legacy, group = _acl(conn, "ava_runner"), _acl(conn, "ava_runner_parity")
-    assert legacy - group == {
-        ("routine lock_runtime_publication_admission()", "EXECUTE"),
-    }
-    assert group - legacy == {("schema public", "USAGE"), ("database", "CONNECT")}
