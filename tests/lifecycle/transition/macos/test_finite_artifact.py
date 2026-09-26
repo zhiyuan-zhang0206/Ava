@@ -257,6 +257,7 @@ _PROTOCOLS = {
     # refuses a collection that differs between workers.
     ids=[
         "missing-finite-protocol",
+        "missing-root-seed-report",
         "boolean-pid",
         "missing-pid",
         "self-reported-other-pid",
