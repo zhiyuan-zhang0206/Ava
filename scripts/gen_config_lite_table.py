@@ -184,7 +184,9 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "eval_allowlist",
         "eval isolation network gate (conditional: isolation on)",
     ),
-    LiteField("llm_model", "literal", None, "ava/_attach.py model gate + lifecycle reads"),
+    LiteField(
+        "llm_model", "literal", None, "ava/attachment_transport.py model gate + lifecycle reads"
+    ),
     LiteField(
         "telemetry_otlp_enabled", "literal", None, "shared/telemetry/otlp/telemetry_otlp boot read"
     ),

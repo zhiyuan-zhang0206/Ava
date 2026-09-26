@@ -16,7 +16,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
 import ava._mcp_config as mcp_config
-from ava import _commands, skills
+from ava import composer_commands, skills
 from ops import ops_cluster
 from shared import mcp_enabled
 from shared.db import create_agent
@@ -45,7 +45,7 @@ def load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     _write_skill(root, "load-skill", "converged skill")
     monkeypatch.setattr(skills, "_skills_dir", lambda: root)
     monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"load-skill"})
-    monkeypatch.setattr(_commands, "_command_dirs", list)
+    monkeypatch.setattr(composer_commands, "_command_dirs", list)
     return root
 
 

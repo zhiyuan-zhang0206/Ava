@@ -103,7 +103,7 @@ def _extract_settings_reads(source: str) -> list[tuple[str, str]]:
         if _guarded_by_has_domain(tree, node, domain):
             # Sanctioned cross-profile read: the module first checks
             # `settings.has_domain("<domain>")` in an enclosing `if` and only
-            # reads the domain inside that branch (e.g. ava/_commands.py's
+            # reads the domain inside that branch (e.g. ava/composer_commands.py's
             # commands_enabled for the gateway's /api/commands dropdown).
             # The gate proves the author thought about the profile boundary.
             continue

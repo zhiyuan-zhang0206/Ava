@@ -225,9 +225,9 @@ def _base_callable(current: Callable[..., Any]) -> Callable[..., Any]:
     O(1) early-out dies) and would make `clear_wraps` restore a proxy where the
     registry promises the base callable. Recorders always carry `__wrapped__`
     (functools.wraps); the lazy import avoids the ava <-> submodule cycle."""
-    from ava import _sdk_metering
+    from ava import sdk_metering
 
-    while current in _sdk_metering._RECORDERS:
+    while current in sdk_metering._RECORDERS:
         current = current.__wrapped__  # pyright: ignore[reportFunctionMemberAccess]
     return current
 

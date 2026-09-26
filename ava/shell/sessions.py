@@ -13,7 +13,7 @@ from typing import Any
 
 import ava
 import ava.agent_identity
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava.sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.cluster import session_name
 from shared.config import settings

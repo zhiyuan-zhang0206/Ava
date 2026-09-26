@@ -40,7 +40,7 @@ One load directory: `~/.ava/skills/`; converge syncs repo built-ins (`ava_builti
 
 ## Key Dependencies
 - [[system-prompt.ava.okf.md]] — the capabilities section that indexes them (whole catalog by default)
-- Discovery/merging in `ava/skills.py` (`_scan_tree` / `_mount` / `_flatten`); `ava/_skill_sources.py` is just a registry for plugin skill-root providers (register/clear/roots), **unrelated to agents-contract**
+- Discovery/merging in `ava/skills.py` (`_scan_tree` / `_mount` / `_flatten`); `ava/skill_sources.py` is just a registry for plugin skill-root providers (register/clear/roots), **unrelated to agents-contract**
 
 ## Entry Points
 - `ava/skills.py` — scans `~/.ava/skills/` + provider roots, merges the skill tree; `help()` loads SKILL.md by path

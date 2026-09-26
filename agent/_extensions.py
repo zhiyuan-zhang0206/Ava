@@ -149,9 +149,9 @@ def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
     # plugin `ava.extend.wrap` layer (one count per agent call). Idempotent; a
     # plugin reload re-runs it after clear_wraps restores plugin-touched
     # targets.
-    from ava import _sdk_metering
+    from ava import sdk_metering
 
-    _sdk_metering.install()
+    sdk_metering.install()
 
     return config
 

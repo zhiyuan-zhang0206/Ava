@@ -54,7 +54,7 @@ from pathlib import Path
 import ava
 import ava.files as _ava_files_mod
 import ava.skills as _ava_skills
-from ava._sdk_validation import coerce_str
+from ava.sdk_validation import coerce_str
 from shared.config import settings
 from shared.log import logger
 

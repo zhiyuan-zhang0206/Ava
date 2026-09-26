@@ -288,9 +288,9 @@ def __getattr__(name: str) -> Any:
 # framework module, should not appear in the `help()` view the agent sees. Its
 # curated author surface is assembled as `ava.extend` further down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection
-from . import _attach as _attach
 from . import _extend as _extend
 from . import agents as agents
+from . import attachment_transport as attachment_transport
 from . import files as files
 from . import impersonation as impersonation
 from . import mcps as mcps
@@ -369,10 +369,9 @@ _init_complete = True
 # backstop. The agent host binds identities per turn and does not
 # export a process-wide AVA_AGENT_ID; gateway / cli do not carry it either.
 # Only an agent-launched child reaches this load.
-from . import _sdk_metering
-from . import agent_identity as _agent_identity
+from . import agent_identity, sdk_metering
 
-_sdk_metering.install()
+sdk_metering.install()
 
-if _agent_identity.is_launched_child():
+if agent_identity.is_launched_child():
     _ensure_plugins_loaded()

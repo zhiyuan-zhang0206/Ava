@@ -1,4 +1,4 @@
-"""Unit tests for ava/_sdk_metering.py — the per-call SDK usage recorder.
+"""Unit tests for ava/sdk_metering.py — the per-call SDK usage recorder.
 
 The recorder wraps every public `ava.*` callable to emit one `sdk_call` event per
 top-level invocation (counted by the `sdk_usage` metric). These tests pin the two
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 import ava
-from ava import _sdk_metering as sdk_metering
+from ava import sdk_metering
 from shared import sdk_telemetry
 
 
@@ -263,7 +263,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     """
     import ava.mcps
     from agent.graph import _build
-    from ava._sdk_metering import _RECORDERS
+    from ava.sdk_metering import _RECORDERS
 
     assert "_restore_sdk_metering" in request.fixturenames
 
