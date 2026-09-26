@@ -86,7 +86,8 @@ async def test_restart_refuses_changed_inputs_before_native_birth(
         (
             sys.executable,
             "-c",
-            f"import pathlib,time; pathlib.Path({str(output)!r}).write_text(pathlib.Path({str(value)!r}).read_text()); time.sleep(60)",
+            # Rename into place: the waiter polls for existence, not content.
+            f"import pathlib,time; t=pathlib.Path({str(output)!r} + '.tmp'); t.write_text(pathlib.Path({str(value)!r}).read_text()); t.replace({str(output)!r}); time.sleep(60)",
         ),
         RestartPolicy.ALWAYS,
         "root",
