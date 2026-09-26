@@ -1,7 +1,6 @@
 """Health observations cannot select, roll back, or publish a release."""
 
 import subprocess
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -52,12 +51,6 @@ def test_repeated_observations_never_mutate_release_state(
         return 1
 
     monkeypatch.setattr(subprocess, "run", forbidden)
-    monkeypatch.setattr(
-        "shared.cluster_pin.get_pending_known_good", lambda: ("candidate", datetime.now(UTC))
-    )
-    monkeypatch.setattr("shared.cluster_pin.promote_pending_known_good_if_ready", forbidden)
-    monkeypatch.setattr("shared.cluster_pin.set_last_known_good_sha", forbidden)
-    monkeypatch.setattr("shared.cluster_pin.set_cluster_target_sha", forbidden)
     if health == "gateway":
         monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
         monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: False)

@@ -273,19 +273,6 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
     assert service_selection.read_selection().names == frozenset({"gateway"})
 
 
-def test_startup_readiness_does_not_publish_a_release_decision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from shared import cluster_pin
-
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("ordinary startup cannot publish a known-good release")
-
-    monkeypatch.setattr(cluster_pin, "seed_last_known_good_sha_if_null", forbidden)
-    assert _start_commands.cmd_start() == 0
-    assert start_serving.is_serving()
-
-
 def test_lost_generation_never_reports_serving(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(start_serving, "mark_serving", _ignoring_args(lambda: False))
     assert _start_commands.cmd_start() == 1

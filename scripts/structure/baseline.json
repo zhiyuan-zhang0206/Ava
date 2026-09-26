@@ -203,7 +203,6 @@
     "cli/commands/skill.py::_update_one": 20,
     "cli/commands/skill.py::cmd_skill_update": 16,
     "cli/commands/start.py::_cmd_start_body": 47,
-    "cli/commands/status.py::cmd_status": 20,
     "cli/main.py::main": 29,
     "cli/python_install.py::install": 17,
     "gateway/_idempotency.py::idempotency_middleware": 15,

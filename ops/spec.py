@@ -371,12 +371,10 @@ def gate_reason_for_session(session: str) -> str | None:
 
 @dataclass(frozen=True)
 class Spec:
-    """A host's desired state — the roster it should run, plus the code revision
-    and (as they converge here) the data plane it should run against.
+    """A host's desired state — the roster it should run and (as it converges
+    here) the data plane it should run against.
 
-    Slice 1 fills in the service roster; the cluster-pin accessor is a read-through
-    to ``shared.cluster_pin`` (the pin's writer stays the rollout path). The
-    data-plane desired state (per-cluster instance / ports / bind / redis-ACL
+    Slice 1 fills in the service roster. The data-plane desired state (per-cluster instance / ports / bind / redis-ACL
     users) lands after the data-plane retirement PR, whose model it will read from
     rather than re-derive. See ``future/infra/ops-module.md`` for the full
     Spec content and the batch sequence.
@@ -391,16 +389,6 @@ class Spec:
     def services_annotated(self) -> tuple[tuple[ServiceSpec, str | None], ...]:
         """The diagnostic roster — every capability-matched service + its gate reason."""
         return services_for_capabilities_annotated(self.roles)
-
-    def cluster_pin(self) -> str | None:
-        """The SHA the cluster is pinned to (None = no rollout has pinned one yet).
-
-        A read-through to ``shared.cluster_pin`` — the pin is written by the rollout
-        path, not by Spec. The pin controller diffs a host's HEAD against this.
-        """
-        from shared.cluster_pin import get_cluster_target_sha
-
-        return get_cluster_target_sha()
 
 
 # Compatibility re-export: legacy importers (`from ops.spec import

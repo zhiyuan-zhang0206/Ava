@@ -34,7 +34,6 @@ from shared.cluster_lock import (
     self_holder,
     settle_update_lock,
     update_lock_holder,
-    update_lock_refusal_detail,
 )
 from shared.config import settings
 
@@ -271,78 +270,62 @@ def _seed_pending_rollout(
     db_conn.commit()
 
 
-def test_update_lock_refusal_detail_names_the_pending_recovery(
+def _acquire_refusals(loguru_records: list[dict[str, Any]], holder: str) -> list[str]:
+    return [
+        r["message"]
+        for r in loguru_records
+        if f"[cluster-lock] acquire by {holder} REFUSED" in r["message"]
+    ]
+
+
+def test_acquire_refusal_names_the_pending_publication_and_its_owner(
     db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """The refusal detail and the acquire warning must tell the pending story —
-    not send the operator hunting for a live holder that does not exist, nor to a
-    recovery verb that no longer exists. They name the durable fact and its owner:
-    no command clears it; resolving it is a manual cutover repair."""
+    """The acquire warning must tell the pending story — not send the operator
+    hunting for a live holder that does not exist, nor to a recovery verb that no
+    longer exists. It names the durable fact and its owner: no command clears it;
+    resolving it is a manual cutover repair."""
     _seed_pending_rollout(db_conn, _pending_operation())
 
     assert acquire_update_lock("next-rollout") is False
-    detail = update_lock_refusal_detail()
-    assert "managed_writer_evidence->'pending'" in detail
-    assert "no command clears it" in detail
-    assert "cutover repair" in detail
-    assert "recover-pending" not in detail
 
-    refusals = [
-        r["message"]
-        for r in loguru_records
-        if "[cluster-lock] acquire by next-rollout REFUSED" in r["message"]
-    ]
+    refusals = _acquire_refusals(loguru_records, "next-rollout")
     assert len(refusals) == 1
     assert "managed_writer_evidence->'pending'" in refusals[0]
+    assert "no command clears it" in refusals[0]
+    assert "cutover repair" in refusals[0]
     assert "recover-pending" not in refusals[0]
     assert "a live holder exists" not in refusals[0]
 
 
-def test_update_lock_refusal_detail_names_the_live_holder(db_conn: psycopg.Connection) -> None:
+def test_acquire_refusal_names_the_live_holder(
+    db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
+) -> None:
     assert acquire_update_lock("gateway-host:pid81319") is True
     assert acquire_update_lock("second-rollout") is False
 
-    detail = update_lock_refusal_detail()
+    refusals = _acquire_refusals(loguru_records, "second-rollout")
+    assert len(refusals) == 1
+    assert "a live holder exists (gateway-host:pid81319)" in refusals[0]
 
-    assert "gateway-host:pid81319" in detail
-    assert "auto-expires" in detail
 
-
-def test_update_lock_refusal_detail_leads_with_the_live_holder_when_pending_coexists(
+def test_acquire_refusal_leads_with_the_live_holder_when_pending_coexists(
     db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """A rollout that already opened its journal is normally still running.
+    """A holder that already opened its journal is normally still running.
 
     The live holder leads — a wait — and the durable pending publication is the
-    follow-up fact for the case that rollout never completes, never the headline.
+    follow-up fact for the case that holder never completes, never the headline.
     """
     _seed_pending_rollout(db_conn, _pending_operation(), expired=False)
 
     assert acquire_update_lock("next-rollout") is False
-    detail = update_lock_refusal_detail()
-    assert "gateway:pid123" in detail
-    assert "recover-pending" not in detail
-    assert detail.index("gateway:pid123") < detail.index("managed_writer_evidence")
 
-    refusals = [
-        r["message"]
-        for r in loguru_records
-        if "[cluster-lock] acquire by next-rollout REFUSED" in r["message"]
-    ]
+    refusals = _acquire_refusals(loguru_records, "next-rollout")
     assert len(refusals) == 1
     assert "a live holder exists" in refusals[0]
     assert "recover-pending" not in refusals[0]
     assert refusals[0].index("a live holder exists") < refusals[0].index("managed_writer_evidence")
-
-
-def test_update_lock_refusal_detail_reports_a_free_row_as_a_lost_race(
-    db_conn: psycopg.Connection,
-) -> None:
-    """The third shape: the acquire lost and the row is already free — another
-    orchestration took and released it in between, not a live holder."""
-    assert update_lock_refusal_detail() == (
-        "another orchestration just took the cluster update lock; aborting"
-    )
 
 
 # ─── the lease as a readable state, and the settle hold ──────────────────────

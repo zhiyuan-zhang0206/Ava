@@ -486,43 +486,6 @@ def _acquire_refusal_reason(cur: Any) -> str:
     return "the guarded row no longer matched at write time"
 
 
-def update_lock_refusal_detail() -> str:
-    """The operator sentence for a refused `acquire_update_lock`.
-
-    A live holder leads even when a durable pending managed-writer publication
-    is also recorded (wait it out, or `ava cluster recover` once its process is
-    provably gone), with the pending record named as the follow-up fact. A
-    pending-only row names the record and its owner (no command clears it; the
-    cutover repair does), and a row that is already free is a racing acquire.
-    Read-only companion of
-    `update_lock_holder`, for callers that print the refusal instead of logging
-    it.
-    """
-    with shared.db.connect(autocommit=True) as conn:
-        row = conn.execute(
-            "SELECT holder, "
-            "COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb, "
-            "(holder IS NOT NULL AND expires_at > now()) "
-            "FROM deployment_state WHERE id = 1"
-        ).fetchone()
-    if row is None:
-        return "the cluster deploy state row is missing; aborting"
-    holder, pending_absent, lease_live = row
-    if lease_live:
-        if not pending_absent:
-            return (
-                f"another cluster update is in progress (held by {holder}); "
-                f"{_PENDING_PUBLICATION_REPAIR}; aborting"
-            )
-        return (
-            f"another cluster update is in progress (held by {holder}); aborting "
-            "(the lock auto-expires after its TTL if that holder crashed)"
-        )
-    if not pending_absent:
-        return f"{_PENDING_PUBLICATION_REPAIR}; aborting"
-    return "another orchestration just took the cluster update lock; aborting"
-
-
 def release_update_lock(holder: str) -> None:
     """Release the lock iff `holder` still holds it — a no-op when another holder
     has since reclaimed it past a TTL expiry, so a slow release never clobbers a

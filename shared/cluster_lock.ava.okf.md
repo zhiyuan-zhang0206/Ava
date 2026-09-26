@@ -21,8 +21,8 @@ does not remove these SQL guards.
 - `renew_update_lock` and `release_update_lock` require the exact holder. Release,
   settle conversion and settle release cannot discard pending publication evidence.
 - `read_update_lease` returns holder, age, expiry, kind and structured settle facts.
-  `update_lock_holder` and `update_lock_refusal_detail` expose the same authority
-  to admission and diagnostics.
+  `update_lock_holder` exposes the same authority to admission and diagnostics;
+  a refused acquire logs which guard refused it.
 - Settle holds remain distinct from executing leases. Their host set and bounded
   TTL let `ops.deploy_window` clear a converged settle hold without releasing an
   executing operation's lease.

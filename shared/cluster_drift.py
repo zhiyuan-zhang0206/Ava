@@ -10,11 +10,9 @@ run out of. Facts about it that status surfaces show:
   an agent developed *in* the prod tree instead of a worktree (un-reviewed code
   on the running host).
 
-All are subprocess calls against a fixed path — local reads plus one
-best-effort fetch (`prod_source_fetch`, the only one that touches the network),
-with no dependency on the CLI or gateway layers, so the watchdog (a `services`
-daemon, which may not import `cli`) and the gateway roster can share them with
-`ava status`.
+All are local, read-only git subprocess calls against a fixed path, with no
+dependency on the CLI or gateway layers, so the gateway roster and the ops
+status probe can share them with `ava status`.
 """
 
 from __future__ import annotations
@@ -33,12 +31,6 @@ from shared.proc import run_bounded
 # the stub and leave the real git behind on every expiry, and a status probe runs
 # often enough to accumulate them.
 _GIT_TIMEOUT_S = 5.0
-
-# `prod_source_fetch`'s ceiling. A fetch is network I/O with no natural bound (a
-# wedged network hangs git until TCP gives up), so it cannot share the local-read
-# ceiling; 30s is generous enough for a real fetch while small enough that a
-# caller is delayed, not parked, when the remote is unreachable.
-_FETCH_TIMEOUT_S = 30.0
 
 
 def prod_source_dir() -> Path | None:
@@ -140,28 +132,3 @@ def prod_source_branch_drift() -> str | None:
     """
     branch = _git_ro("rev-parse", "--abbrev-ref", "HEAD")
     return branch if branch and branch != "main" else None
-
-
-def prod_source_fetch(*refs: str, repo: Path | None = None) -> bool:
-    """Best-effort `git fetch <refs...>` in the prod source checkout.
-
-    The one non-read in this module: it writes to the object store and
-    FETCH_HEAD (never the working tree — concurrent with a checkout it is the
-    fetch half of a `git pull`, which git already serializes). Returns False
-    when the checkout is absent / not a git repo / git is unavailable / the
-    fetch fails or times out.
-    """
-    source = repo if repo is not None else _prod_source_dir()
-    if source is None or not (source / ".git").exists():
-        return False
-    try:
-        result = run_bounded(  # git + fixed path + literal refs, no user input
-            ["git", "-C", str(source), "fetch", *refs],
-            capture_output=True,
-            text=True,
-            env=git_env(),
-            timeout=_FETCH_TIMEOUT_S,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
