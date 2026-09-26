@@ -41,9 +41,8 @@ become absent by convenience. No signal or session mutation is performed.
 
 The normal ops daemon has no bootstrap observation mode, restricted `/ops`
 allowlist or one-shot dispatch child. Unknown daemon arguments, including the
-retired bootstrap option, refuse before ordinary imports. Read-only prepared
-observation helpers (`services.agent_ops.bootstrap`) remain for the runtime-prepare
-CI proof; the generic transport mounts only routes explicitly supplied by a caller.
+retired bootstrap option, refuse before ordinary imports. The generic transport
+mounts only routes explicitly supplied by a caller.
 
 ## Native launcher observation
 

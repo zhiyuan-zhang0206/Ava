@@ -9,9 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from pydantic import SecretStr, ValidationError
 
-from services.agent_ops.bootstrap import ObserverProjection
 from shared.daemon_http import start_daemon_http
 from shared.managed_writer_observation import (
     ExpectedLauncher,
@@ -25,12 +23,6 @@ from shared.managed_writer_observation import (
 )
 from shared.native_job_observation import NativeReadUnavailableError
 from shared.process_evidence import ExpectedProcess
-
-
-@pytest.mark.parametrize("url", ["", "  "])
-def test_empty_projected_db_url_cannot_use_ambient_postgres_defaults(url: str) -> None:
-    with pytest.raises(ValidationError):
-        ObserverProjection(db_url=SecretStr(url), cluster_secret=SecretStr(""), ops_port=8106)
 
 
 def test_session_malformed_or_changed_is_not_absent(tmp_path: Path) -> None:

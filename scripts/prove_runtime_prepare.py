@@ -58,7 +58,6 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
     inventory_proof = _copy_proof(root, checkout, "prove_release_inventory.py")
     _copy_proof(root, checkout, "prove_runtime_publication_input.py")
     exec_owner = _copy_proof(root, checkout, "prove_exec_owner_installed.py")
-    bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -211,21 +210,6 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                         path.unlink(missing_ok=True)
                     else:
                         path.write_bytes(body)
-            subprocess.run(  # noqa: S603 — real retained ops entry, isolated old-schema CI database.
-                [
-                    str(release.interpreter),
-                    "-I",
-                    "-B",
-                    str(bootstrap),
-                    release.digest,
-                    release.manifest_digest,
-                    schema,
-                ],
-                cwd=root,
-                env=migration_env,
-                check=True,
-                timeout=600,
-            )
             result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
                 [
                     str(release.interpreter),
@@ -243,7 +227,7 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                 check=False,
                 # Native PG initialization, full schema migration, and admission
                 # invariant rejection checks can take >180s under noisy runner I/O.
-                # Align budget with bootstrap step (600s) to prevent false flakes (task #3281).
+                # 600s absorbs that noisy-runner variance without false flakes (task #3281).
                 timeout=600,
             )
             if result.returncode:

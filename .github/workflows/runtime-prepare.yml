@@ -35,9 +35,7 @@ on:
       - 'scripts/prove_release_inventory.py'
       - 'cli/commands/_release_inventory.py'
       - 'scripts/prepare_plugin_fixture.py'
-      - 'scripts/prove_ops_bootstrap.py'
       - 'shared/updater_handoff.py'
-      - 'services/agent_ops/bootstrap.py'
       - 'services/agent_ops/daemon.py'
       - 'shared/updater_recovery.py'
       - 'shared/managed_writer_activation.py'
@@ -182,7 +180,6 @@ jobs:
           "$proof_python" scripts/prepare_plugin_fixture.py "$RUNNER_TEMP/prepare/plugin-input"
           "$proof_python" scripts/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$proof_python" --uv "$(command -v uv)" --otel-input-digest "$COLLECTOR_INPUT_DIGEST"
           test -s "$RUNNER_TEMP/prepare/proof.json"
-          if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/ops-bootstrap-proof.json"; fi
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/inventory-proof.json"; fi
       - name: Verify committed source identity survived runtime preparation
         shell: bash
@@ -225,7 +222,6 @@ jobs:
             ${{ runner.temp }}/prepare/plugin-proof.json
             ${{ runner.temp }}/prepare/inventory-proof.json
             ${{ runner.temp }}/frontend-proof.json
-            ${{ runner.temp }}/prepare/ops-bootstrap-proof.json
           if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always() && runner.os == 'Linux'
