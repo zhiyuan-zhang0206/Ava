@@ -14,6 +14,7 @@ from cli.release_prepare import prepare as preparation
 from scripts.preview import linux_observer as observer
 from scripts.preview import linux_runtime as runtime
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
+from shared.session_env import normalize_service_path
 from tests.lifecycle.preparation.test_preparation import _assemble
 from tests.lifecycle.preparation.test_preparation import request_fixture as request_fixture
 
@@ -114,9 +115,14 @@ def test_bound_preflight_verifies_same_parsed_bytes_even_if_path_changes_during_
     assert result.evidence["source_commit"] == request_fixture.commit
 
 
+# The home stores the admitted, normalized host PATH (admit_service_path). On a
+# usrmerge Linux /bin resolves to /usr/bin, so the raw pair is not normalized.
+_DECLARED = normalize_service_path("/usr/bin:/bin")
+
+
 def _expected(run: Path, *, image: bool) -> runtime.ExpectedRuntime:
     (run / "home").mkdir()
-    (run / "home/.env").write_text("AVA_SERVICE_PATH=/usr/bin:/bin\n")
+    (run / "home/.env").write_text(f"AVA_SERVICE_PATH={_DECLARED}\n")
     if image:
         root = run / "home/releases" / ("a" * 64)
         interpreter, cwd = root / "venv/bin/python", root / "venv/lib/python3.12/site-packages"
@@ -153,7 +159,7 @@ def test_root_runtime_metadata_and_environment_must_match_even_with_live_birth(
 ) -> None:
     run = tmp_path.resolve()
     expected = _expected(run, image=image)
-    environment = expected.environment(run, "/usr/bin:/bin") | {"PRIVATE_KEY": "never-print-this"}
+    environment = expected.environment(run, _DECLARED) | {"PRIVATE_KEY": "never-print-this"}
     native: dict[str, Any] = {
         "argv": expected.argv(run),
         "cwd": str(expected.cwd),
