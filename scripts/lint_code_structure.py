@@ -44,8 +44,10 @@ so the list cannot rot into a permission wall.
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
 Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.
-Direct entries are .py/.pyi files and subdirectories; hidden entries, symlinks,
-__pycache__, and migrations subtrees are excluded. Each directory is independent.
+Direct entries are .py/.pyi files and subdirectories with content; hidden entries,
+symlinks, __pycache__, migrations subtrees, and a subdirectory holding nothing
+else (a local leftover CI never checks out) are excluded. Each directory is
+independent.
 AST rules retain their governed-package scope.
 
 scripts/structure/baseline.json freezes existing over-limit counts. New or growing
@@ -522,6 +524,16 @@ def _budget_error(value: int, ceiling: int, name: str, baseline: dict[str, int])
     return None
 
 
+def _counts_toward_budget(entry: Path) -> bool:
+    """A .py/.pyi file, or a subdirectory with content. A directory holding
+    nothing but `__pycache__` / hidden files (left behind locally when a package
+    is renamed or removed) or nothing at all is not a tree CI checks out, so it
+    never counts."""
+    if entry.is_dir():
+        return bool(_budget_entries(entry))
+    return entry.is_file() and entry.suffix in {".py", ".pyi"}
+
+
 def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> list[str]:
     files, directories = _budget_targets(targets)
     errors: list[str] = []
@@ -537,10 +549,7 @@ def _check_budgets(targets: list[Path], baseline: dict[str, dict[str, int]]) -> 
                 f"{name}:{count}: file is {count} lines, over the {_HARD_CEILING}-line hard ceiling: {error}"
             )
     for path in sorted(directories):
-        count = sum(
-            entry.is_dir() or (entry.is_file() and entry.suffix in {".py", ".pyi"})
-            for entry in _budget_entries(path)
-        )
+        count = sum(_counts_toward_budget(entry) for entry in _budget_entries(path))
         name = path.relative_to(_REPO_ROOT).as_posix()
         error = _budget_error(count, _DIRECTORY_CEILING, name, baseline["directories"])
         if error:

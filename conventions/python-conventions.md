@@ -34,9 +34,11 @@ once it is within budget. Enforced by `scripts/lint_code_structure.py`.
 
 Each directory in the same scope may have at most 20 direct entries:
 `.py` and `.pyi` files plus direct subdirectories. A subdirectory counts as
-one regardless of its contents; each level is checked independently.
-`__pycache__`, dot-prefixed entries, and symlinks do not count and are not
-traversed. `migrations` subtrees are entirely exempt. `docs/` and `ui/` are
+one regardless of its contents — unless it holds nothing but `__pycache__` /
+dot-prefixed entries (or nothing), the leftover a local package rename or
+removal leaves and a fresh checkout never has. Each level is checked
+independently. `__pycache__`, dot-prefixed entries, and symlinks do not count
+and are not traversed. `migrations` subtrees are entirely exempt. `docs/` and `ui/` are
 outside the scope.
 
 Existing over-limit directories are frozen in the `directories` object of
