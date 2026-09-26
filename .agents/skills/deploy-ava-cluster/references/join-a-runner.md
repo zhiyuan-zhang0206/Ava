@@ -20,8 +20,10 @@ unset AVA_CLUSTER_SECRET
 Transfer only the bearer through the operator's secret channel. Never copy the
 gateway's `.env`: it contains owner credentials a runner must not hold.
 
-First start fetches `GET /api/bootstrap?role=runner`, requires the `ava_runner`
-DB identity, and rejects a remote gateway returning loopback storage URLs. It
+First start fetches `GET /api/bootstrap?role=runner`, requires a runner-class
+DB login (the active write generation's `ava_g<n>_runner`, or a remote-managed
+plane's `ava_runner`), and rejects a remote gateway returning loopback storage
+URLs. It
 records the local identity before host convergence, registration, and root
 startup. `--machine-host` must be reachable from the gateway: the gateway calls
 the runner's `/ops` there with the cluster bearer. A remote join requires a
@@ -29,8 +31,9 @@ non-loopback address and nonempty bearer.
 
 The bootstrap response is not cached into the runner `.env`. Every process
 fetches current connection facts at Settings construction; gateway unavailability
-fails startup. The gateway projects an independent runner DB credential and
-runtime Redis ACL credential, never its owner passwords.
+fails startup. The gateway projects its active runner login and the runtime
+Redis ACL credential; its schema owner never logs in and its Redis-admin
+password never leaves the gateway.
 
 Optional first-start inputs:
 

@@ -174,17 +174,26 @@ generation boundary before claiming complete stale-writer exclusion.
 PostgreSQL and pooler connections always authenticate, even when the
 frontend/control-plane bearer is empty
 ([decision](../../decisions/2026-09-26-internal-data-plane-always-authenticated.md)).
-The empty-secret convention in AGENTS.md changes when this lands.
-Implemented: Redis always authenticates with generated admin and runtime
-passwords, which do not rotate per rollout; existing homes convert through the
-one-time `scripts/cutover_db_authority.py`
-([credential split](../../conventions/data-plane-secret-split.md#convert-an-existing-home)).
-No database role, credential, schema or runtime-admission cutover is implemented
-by this plan. The first prerequisite is in place: schema-creating DDL
-(baseline, checkpoint setup, migrations, the pgvector memory table) runs as the
-OS-user administrator acting as the schema owner over the home's socket
-(`shared.pg_admin`), so demoting the owner to NOLOGIN does not break it. Logical
-dumps, PITR reads and the release executor still dial the owner's URL.
+Implemented for a single local plane: Redis always authenticates with generated
+admin and runtime passwords, which do not rotate per rollout; `pg_hba` admits
+the OS-user administrator by `peer` and every other role by SCRAM; PgBouncer
+always uses SCRAM against the active generation's verifier userlist and
+restarts on a userlist change. The schema owner is `NOLOGIN`, the capability
+groups carry every grant, birth mints write generation 0
+([authority](../../shared/cluster/authority/authority.ava.okf.md)), an ordinary
+start re-grants, sweeps and checks the catalog invariant, the root launcher
+delivers each service its class login bound into the launch digest, and an
+admitted operator CLI consumes the gateway login. Existing homes convert
+through the one-time `scripts/cutover_db_authority.py` (steps `redis`, `db`;
+[credential split](../../conventions/data-plane-secret-split.md#convert-an-existing-home)).
+
+Remaining: the release transition's `fencing` / `authorizing` phases (revoke,
+pooler stop, closure proof, mint the next generation, restart the pooler) and
+its executor's admin DSN — until they land, the finite executor running a
+candidate image receives no database authority from the boot pass; per-unit
+delivery for remote runners, retiring the interim bootstrap projection (which
+still lets a bearer-holding stale runner reacquire the current runner login),
+and the networked cutover; per-generation API machine tokens.
 
 ## Remaining: qualify PITR custody and restart recovery
 

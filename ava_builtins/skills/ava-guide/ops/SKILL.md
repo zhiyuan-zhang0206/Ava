@@ -109,10 +109,11 @@ unset AVA_CLUSTER_SECRET
 
 First start presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
 authenticated `/api/bootstrap`, which returns the cluster's connection bundle
-(db / redis URLs, channels). The runner's database URL carries a separately
-minted least-privilege `ava_runner` password and its Redis URL carries the
-runtime ACL password. The cluster secret remains the HTTP bearer only; the
-gateway keeps independent Postgres-owner and Redis-admin credentials.
+(db / redis URLs, channels). The runner's database URL carries the active
+write generation's runner login (it inherits the least-privilege `ava_runner`
+group) and its Redis URL carries the runtime ACL password. The cluster secret
+remains the HTTP bearer only; the gateway's schema owner never logs in, and its
+Redis-admin credential stays gateway-local.
 `--machine-host` is the runner's own reachable address (how the gateway dials
 back to its ops server) and is **required**. The runner starts no gateway
 process of its own; it needs both network reachability to the gateway *and* the

@@ -59,23 +59,8 @@ releases normal startup admission only after readiness.
 They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
-Gateway data-plane startup passes separate URL identities to `_cluster_instance`:
-Postgres db/role comes from `db_identity()`, Redis ACL user from `redis_identity()`.
-First-start identity persists each credential before effects; startup refuses
-missing owner or Redis credentials and never substitutes the bearer. The identity owner
-writes each URL before bringing up storage; no runtime identity backfill exists.
-`shared.cluster.ownership` is the common startup/maintenance observer: home
-paths, native process birth and all listener PIDs must agree before config,
-reload or ACL effects. Redis ACL and maintenance shutdown each retain one
-observed connection; a reconnect loses authority and fails. PostgreSQL admin
-and pooler dials use only the home's canonical Unix socket directory. Owned
-provisioning, checkpoint, grant and migration dials verify their native
-backend against the home's postmaster before DDL, which acts as the schema
-owner (`shared.pg_admin`). Explicit
-remote-managed URLs retain provider authority. PgBouncer starts only after
-schema and runner grants exist. A live pooler with closed listeners retains
-custody: normal start cannot repeat its shutdown signal or escalate to force.
-A graceful stop timeout fails without killing the survivor.
+Gateway data-plane startup (`_cluster_instance`, `_data_plane`, `_pgbouncer`):
+[[cli/commands/data-plane-startup.ava.okf.md|Gateway data-plane startup]].
 
 `cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
 it runs as a step of `ava start`, so any restart crossing a

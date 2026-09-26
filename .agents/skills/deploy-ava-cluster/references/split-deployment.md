@@ -25,15 +25,16 @@ transport; the other supported declarations are `tls` and `mtls`. Then run:
   --config-file /absolute/path/gateway.env
 ```
 
-The gateway-only identity mints the control-plane bearer and independent
-Postgres-owner, runner, Redis-admin, and Redis-runtime credentials before
-provisioning. The configuration input is bound to this initialization; retry
+The gateway-only identity mints the control-plane bearer and the independent
+Redis-admin and Redis-runtime credentials before provisioning; the first start
+then mints Postgres write generation 0 (one gateway and one runner login) into
+the gateway's private `$AVA_HOME/db-authority/`. The schema owner never logs in. The configuration input is bound to this initialization; retry
 with the same bytes or omit it. Transfer the bearer through the operator's
 secret channel. Do not transfer the gateway environment file to a runner.
 
-For locally owned storage, keep the generated DB and Redis URLs. Bootstrap
-projects the runner's DB username and password and rewrites loopback hosts to
-the gateway's reachable `machine_host`. The gateway itself dials its local
+For locally owned storage, keep the generated DB and Redis URLs (the DB URL is
+a credential-free endpoint). Bootstrap projects the active runner login and
+rewrites loopback hosts to the gateway's reachable `machine_host`. The gateway itself dials its local
 storage. Off-box reachability requires both the configured private network and
 the credential for the caller's role.
 

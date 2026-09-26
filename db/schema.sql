@@ -33,7 +33,7 @@
 --     agent_tasks, agent_watchers, agent_pages, and agent_shell_ttls (SDK
 --     lifecycle); heartbeat_pause_log (pause history); and the LangGraph
 --     checkpoints, checkpoint_blobs, and checkpoint_writes (agent state).
---   - `shared.cluster.provision.ensure_runner_role` is the sole grant list and
+--   - `shared.cluster.authority.groups.ensure_groups` is the sole grant list and
 --     re-affirms it after migrations. All other writes travel through
 --     `ava_gateway`, so runner credentials cannot create agents, run DDL, or
 --     mutate gateway-owned tables.
@@ -265,8 +265,8 @@ CREATE INDEX heartbeat_pause_log_agent_created_idx
 -- row; the BIGSERIAL id draws from the owning sequence. UPDATE/DELETE stay
 -- out — the trail is append-only and no runner path rewrites rows.
 -- Gated on the role's existence: fresh bootstrap applies this baseline before
--- install birth creates ava_runner, and shared/cluster/provision.py's
--- ensure_runner_role grants the audited surface at birth.
+-- install birth creates ava_runner, and shared/cluster/authority/groups.py's
+-- ensure_groups grants the audited surface at birth.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
@@ -846,7 +846,7 @@ CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
 -- is an in-place status UPDATE and no runner path deletes rows, so the write
 -- surface is SELECT / INSERT / UPDATE, no DELETE. Gated on the role's
 -- existence: fresh bootstrap applies this baseline before install birth
--- creates ava_runner, and shared/cluster/provision.py's ensure_runner_role
+-- creates ava_runner, and shared/cluster/authority/groups.py's ensure_groups
 -- grants the audited surface at birth.
 DO $$
 BEGIN
@@ -1850,7 +1850,7 @@ CREATE INDEX agent_impersonation_entries_created ON agent_impersonation_entries(
 -- back. UPDATE/DELETE stay out — the preserve trigger rejects rewrites and no
 -- runner path updates rows. Gated on the role's existence: fresh bootstrap
 -- applies this baseline before install birth creates ava_runner, and
--- shared/cluster/provision.py's ensure_runner_role grants the surface at birth.
+-- shared/cluster/authority/groups.py's ensure_groups grants the surface at birth.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
@@ -2299,7 +2299,7 @@ COMMENT ON TABLE plugin_stats IS
 -- SELECT; no DELETE (a card that stops being reported keeps its last value and
 -- updated_at, which is what makes staleness visible). Gated on the role's
 -- existence: fresh bootstrap applies this baseline before install birth
--- creates ava_runner, and shared/cluster/provision.py's ensure_runner_role
+-- creates ava_runner, and shared/cluster/authority/groups.py's ensure_groups
 -- grants the same surface at birth.
 DO $$
 BEGIN
@@ -2357,7 +2357,7 @@ COMMENT ON TABLE understanding_nodes IS
 -- when a rebuild re-cuts the same stretch. Gated on the role's existence:
 -- fresh bootstrap applies this baseline before install birth creates
 -- ava_runner, and
--- shared/cluster/provision.py's ensure_runner_role grants the same surface at
+-- shared/cluster/authority/groups.py's ensure_groups grants the same surface at
 -- birth.
 DO $$
 BEGIN
@@ -2414,7 +2414,7 @@ COMMENT ON TABLE hierarchy_jobs IS
 -- (`mark_compact_boundary`'s async twin) — idempotent via the live partial
 -- unique index, best-effort by design. Gated on the role's existence (fresh
 -- bootstrap applies this baseline before install birth creates ava_runner),
--- and shared/cluster/provision.py's ensure_runner_role grants the same
+-- and shared/cluster/authority/groups.py's ensure_groups grants the same
 -- surface at birth.
 DO $$
 BEGIN

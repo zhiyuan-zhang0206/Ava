@@ -31,10 +31,9 @@ without `SET ROLE`. Custody of that connection belongs to the opener.
 Both groups hold `CONNECT` (PUBLIC loses it) and `USAGE` on `public`.
 `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` covers objects later migrations
 create; `groups.ensure_groups` re-runs the point-in-time `ALL` grants after a
-migration. A login's privileges equal its group's. Until start wiring retires
-`shared.cluster.provision.ensure_runner_role`, a real-PostgreSQL test holds
-the two runner matrices equal except the publication-admission `EXECUTE` (not
-carried forward) and the new `CONNECT`/`USAGE`.
+migration. A login's privileges equal its group's. The runner group also holds
+`EXECUTE` on the publication-admission lock while that function exists (it
+goes with the publication graph).
 
 `groups.vacuum_or_fail` turns PostgreSQL 17's VACUUM skip warning (missing
 `MAINTAIN`) into a failure.
@@ -98,10 +97,19 @@ membership, an auxiliary login that is a superuser, owns objects or can write
 (`EXECUTE`, `USAGE`, `TEMPORARY`) or an allowlisted read-only role, and PUBLIC
 `CONNECT`.
 
+## Delivery and wiring
+
+How the active generation reaches the pooler, launched services and operator
+processes, and where birth, ordinary start and the cutover call this library:
+[[shared/cluster/authority/wiring.ava.okf.md|Write-generation delivery and wiring]].
+
 ## Tests
 
 `tests/lifecycle/db_authority/` runs on real PostgreSQL 17 through
-`authority_postgres`. It uses a throwaway instance with peer-only admin and
+`authority_postgres`; `test_single_box.py` and `test_cutover.py` drive the real
+start steps and the cutover against a home-owned PostgreSQL, PgBouncer and
+Redis, and `test_delivery.py` covers delivery and the boot pass without a
+database. It uses a throwaway instance with peer-only admin and
 SCRAM for every other role, plus a template built by the superuser acting as
 the owner. Crash injection covers each durable boundary. A mutation of every
 guard turns at least one test red.

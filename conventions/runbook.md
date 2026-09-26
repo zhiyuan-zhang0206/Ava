@@ -67,9 +67,10 @@ the home's basename. A cluster's database and the Postgres role that owns it
 share one identifier, carried by its `.env` connection URLs **as data**
 (`shared.cluster.identity_from_url`): a fresh birth writes the fixed `ava`;
 prod stays on its historical `ava_main` until an ops rename edits the URLs.
-The role is `NOSUPERUSER` owning only its own database, provisioned by that
-instance's own `initdb` superuser over its private loopback-`trust` unix
-socket, never by the runtime role.
+The role is `NOLOGIN NOSUPERUSER` without a password, owning only its own
+database; that instance's own `initdb` superuser provisions it over the private
+owner-only unix socket (`peer`), acting as the owner for every schema object.
+No application process ever logs in as it.
 
 A **unit** is one install of Ava under its own `$AVA_HOME`, and `AVA_HOME`
 locates the unit's `.env`, logs, memory pool, milvus data, pidfiles, etc., all of
@@ -298,59 +299,57 @@ compatibility. Keep the selected directory available across boot and updates;
 the config selects tools but neither downloads nor upgrades them.
 
 The data-plane posture is uniform — the default is multi-machine, a single box is just
-the case where the reachable address is loopback (no single-vs-multi branch). Redis
-always authenticates, whatever the bearer: its `default` administrative user and
-`requirepass` use the gateway-only `AVA_REDIS_ADMIN_PASSWORD`, and the Redis ACL runtime
-identity uses `AVA_REDIS_PASSWORD` embedded in `AVA_REDIS_URL`; first start mints both,
-and they do not rotate per rollout. When the control-plane bearer is set, Postgres
-authenticates its owner role with the gateway-only `AVA_DB_ADMIN_PASSWORD`. The runner
-database role has its separate `AVA_RUNNER_DB_PASSWORD`, embedded only in its projected
-URL. The bearer never authenticates the data plane. An EMPTY bearer — the single-box
-default — keeps the Postgres credentials empty and serves the API and Postgres
-unauthenticated on loopback. Postgres loopback stays `trust`, so the owner password is
-consulted on TCP connections. A home born before Redis always authenticated is refused
-by `ava start` until it is converted once: stop its application (`ava stop --keep-infra`),
-then run `.venv/bin/python scripts/cutover_db_authority.py --home <home>` (dry-run) and
-again with `--execute` from the checkout that owns the home, then `ava start`
-([details](data-plane-secret-split.md#convert-an-existing-home)). Settings re-applies
-only the owner password to a main-identity DB URL; it leaves the Redis runtime URL
-verbatim. On the same load, a data-plane URL whose host is this machine's own reachable
-address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead (`shared/config/data_plane.py`):
-self-dial never leaves the box. The `.env` value, bootstrap payload, and registered
-address stay untouched, so remote runners keep dialing the gateway's real address.
+the case where the reachable address is loopback (no single-vs-multi branch). The internal
+data plane always authenticates, whatever the bearer
+([details](data-plane-secret-split.md)). Postgres `pg_hba` admits the OS user only by
+`peer` on the owner-only socket (the administrator) and every other role by SCRAM; PgBouncer
+is always `auth_type = scram-sha-256` against a userlist holding exactly the active write
+generation's two SCRAM verifiers plus the admin-console entry `ava_pooler_admin`, and a
+changed userlist restarts the pooler (a reload keeps a removed user that already
+authenticated). Redis `requirepass` is the gateway-only `AVA_REDIS_ADMIN_PASSWORD`; the ACL
+runtime identity uses `AVA_REDIS_PASSWORD` embedded in `AVA_REDIS_URL`. The bearer decides
+only reach: an EMPTY bearer — the single-box default — serves the user-facing API
+unauthenticated and binds every data-plane listener to loopback. `.env` holds only the
+credential-free database endpoint; the root launcher delivers each DB-using service its
+class login (gateway or runner) from `$AVA_HOME/db-authority/`, and an admitted operator
+CLI receives the gateway login (see the secret-split page). A home born before this is
+refused by `ava start` before any native effect until it is converted once: stop its
+application (`ava stop --keep-infra`), then run
+`.venv/bin/python scripts/cutover_db_authority.py --home <home>` (dry-run) and again with
+`--execute` from the checkout that owns the home, then `ava start`
+([details](data-plane-secret-split.md#convert-an-existing-home)). Settings never rewrites a
+database credential. On the same load, a data-plane URL whose host is this machine's own
+reachable address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead
+(`shared/config/data_plane.py`): self-dial never leaves the box. The `.env` value,
+bootstrap payload, and registered address stay untouched, so remote runners keep dialing
+the gateway's real address.
 
-**Least-privilege runner role** (`ava_runner`, Task #1236): runner processes do
-not dial the main data-plane identity. Every bootstrap projection returns
-`AVA_DB_URL` projected onto the fixed `ava_runner` role (LOGIN
-NOSUPERUSER NOCREATEDB NOCREATEROLE), whose grants cover exactly the audited
-runner surface: SELECT on every table (plus sequence USAGE), SELECT/UPDATE on
-`agents_meta` (status/liveness), SELECT/UPDATE/INSERT on `inbound_messages`
-(claim AND the agent-side self-lifecycle inbounds — `ava.self.terminate` /
-`restart` / `compact` insert their own rows), SELECT/UPDATE on `agents`
-(`ava.self.set_label` writes the agent's own row), INSERT/UPDATE/SELECT on
-`machine_units` + INSERT/UPDATE on `machines` (register_self / mark_stopping
-— `ava start` / `ava stop`), INSERT/UPDATE on `host_deploy_state`
-(set_posture), INSERT/UPDATE/DELETE on `api_idempotency` (the runner's ops
-server dedupes /ops calls), INSERT/UPDATE on `agent_tasks` (`ava.tasks`),
-INSERT/UPDATE/DELETE on `agent_watchers` (`ava.watcher`; DELETE is the
-runner-side row removal — clean-exit / kill / reconcile drops), UPDATE on
-`agent_pages` (page close at
-exit), INSERT on `agent_shell_ttls` (TTL deadline rows; the gateway
-reaper reads, re-aligns, and deletes them), and full CRUD on the LangGraph checkpoint
-tables. `agents` INSERT,
-`agents_meta` INSERT, notices writes, the cluster deploy-state tables and any
-DDL fail under it by construction — the 2026-08-12 pollution class (full write
-credential on the runner) is structurally impossible. That table-wide SELECT is
-granted per object rather than as a standing policy, so a migration that CREATES
-a table would otherwise leave the new table unreadable to every runner for the
-life of the cluster: `ava start` on a gateway host re-affirms the grants whenever
-it actually applied a migration, and an `ALTER DEFAULT PRIVILEGES` declared FOR
-the cluster's main identity (the role migrations run as) covers everything
-created after that first re-affirm. Its password (`AVA_RUNNER_DB_PASSWORD`) is minted
-by the first start intent,
-kept in the gateway's `.env`, and travels only inside the projected URL —
-never as a standalone bootstrap field. The pooler's userlist carries the
-matching entry; the gateway's own processes keep dialing the main identity.
+**Direct `psql` access.** The administrator: `psql "host=/tmp/ava-pg-<home-slug>
+port=<pg port> dbname=<db>"` as the OS user (peer; add `options='-c role=<owner>'` to act
+as the schema owner). An application role reproduction uses the active generation's
+login from `$AVA_HOME/db-authority/generations/<n>.json` (0600; `<n>` is
+`ledger.json`'s `active.number`) — read it, never paste it into tickets or argv.
+
+**Capability groups and write generations** (Task #1236, `shared/cluster/authority/`):
+application privileges live on two `NOLOGIN` groups, never on a login. `ava_gateway`
+holds DML on every table, `USAGE, SELECT, UPDATE` on sequences, `EXECUTE` on every
+routine and PostgreSQL 17 `MAINTAIN` on the checkpoint tables (the blob vacuum fails
+instead of silently skipping without it). `ava_runner` — the historical runner login,
+demoted in place — holds exactly the audited runner surface: SELECT on every table (plus
+sequence USAGE), SELECT/UPDATE on `agents_meta` (status/liveness), SELECT/UPDATE/INSERT on
+`inbound_messages` (claim AND the agent-side self-lifecycle inbounds), UPDATE on
+`agents` (`ava.self.set_label`), INSERT/UPDATE/SELECT on `machine_units` + INSERT/UPDATE
+on `machines` and `host_deploy_state`, INSERT/UPDATE/DELETE on `api_idempotency`,
+INSERT/UPDATE on `agent_tasks`, INSERT/UPDATE/DELETE on `agent_watchers`, UPDATE on
+`agent_pages`, the shell TTL rows, and full CRUD on the LangGraph checkpoint tables.
+`agents` INSERT, `agents_meta` INSERT, notices writes, the cluster deploy-state tables and
+any DDL fail under it by construction. Each write generation is one `ava_g<n>_gateway` and
+one `ava_g<n>_runner` login inheriting its group (`INHERIT TRUE, SET FALSE, ADMIN
+FALSE`); generation 0 is minted at birth (or by the cutover). The point-in-time `ALL`
+grants are re-run by every gateway `ava start` after migrations (`ensure_groups`), and
+standing `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` covers objects later migrations
+create; start then sweeps every non-active application login to `NOLOGIN` and holds on
+any catalog/ledger mismatch (`check_invariant`).
 
 The Redis ACL user comes from `AVA_REDIS_URL` independently of the Postgres
 db/role in `AVA_DB_URL` (for example, Redis `ava` and Postgres `ava_main`).

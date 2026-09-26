@@ -22,7 +22,7 @@ Ava's **key environment variables** and their propagation chain. These variables
 | Variable | Set at | Purpose |
 |------|--------|------|
 | `AVA_CLUSTER_SECRET` | `ava start` (own or, for a remote runner, its first join) | Control-plane bearer for the gateway API, `/ops`, bootstrap, and machine registration; never a Postgres or Redis password |
-| `AVA_DB_URL` | gateway `.env` / bootstrap | Gateway owner URL locally; `ava_runner` URL when projected to an agent-runner |
+| `AVA_DB_URL` | launch environment / bootstrap | The write generation's class login delivered by the launcher (runner class for agents); `.env` holds only the credential-free endpoint. Bootstrap projects the runner login to an agent-runner |
 | `AVA_REDIS_URL` | gateway `.env` / bootstrap | Redis runtime ACL URL; its password remains embedded and is never separately forwarded to agents |
 | `AVA_HOME` | `ava start` / converge | Data plane root directory, also **is** the cluster identity itself |
 

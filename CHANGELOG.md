@@ -7,6 +7,20 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 
 ## [Unreleased]
 
+### Changed
+- The internal database plane always authenticates, whatever
+  `AVA_CLUSTER_SECRET` says: `pg_hba` admits only the OS-user administrator by
+  peer on the owner-only socket and SCRAM application logins; PgBouncer always
+  uses SCRAM against the active write generation's verifier userlist (plus the
+  `ava_pooler_admin` console entry) and restarts when it changes. The schema
+  owner is NOLOGIN, `AVA_DB_ADMIN_PASSWORD` and local `AVA_RUNNER_DB_PASSWORD`
+  are retired, and `.env` holds a credential-free `AVA_DB_URL`. First start
+  mints write generation 0 (`ava_g0_gateway` / `ava_g0_runner`, inheriting the
+  NOLOGIN groups `ava_gateway` / `ava_runner`); the root launcher delivers each
+  service its class login. Existing homes are refused until converted once with
+  `scripts/cutover_db_authority.py` (new step `db`);
+  `scripts/rotate_data_plane_secrets.py` now rotates Redis credentials only.
+
 ### Added
 - The Ops dashboard gains a `Dev/CI` row backed by daily GitHub Actions run
   classification: per-PR duration and trigger percentiles, red/self-healed

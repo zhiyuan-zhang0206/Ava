@@ -70,8 +70,9 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
 - **Per-cluster role inside a shared instance** (the bootstrap-superuser-
   provisions-every-cluster's-role model; the legacy-role reassignment this model
   carried was retired 2026-09-20). Each instance
-  `initdb`s its own superuser; a slim role + db owned by it uses the independent
-  gateway-local DB-owner password for the scram TCP connection.
+  `initdb`s its own superuser; a NOLOGIN owner role owns the db, and processes
+  dial write-generation logins over SCRAM
+  ([authority](../../shared/cluster/authority/authority.ava.okf.md)).
 - **Shared-instance foreign/neighbour probes** — `_shared_infra_running`,
   `_foreign_redis_error`, `_redis_listening`. A per-cluster instance on its own
   port with its own data dir under `$AVA_HOME` is unambiguously this cluster's;
@@ -87,8 +88,9 @@ stay `host:port` — an asymmetry not worth its weight).
 
 `AVA_CLUSTER_SECRET` stays as the control-plane bearer. A per-cluster TCP port
 on loopback is reachable by *any* local process — including a co-located
-cluster — so each authenticated instance keeps independent data-plane locks:
-the Postgres owner password, Redis `default`/`requirepass` password, runner DB
+cluster — so every instance keeps independent data-plane locks, whatever the
+bearer: the write generation's SCRAM logins (the owner never logs in; the OS
+user administers over the owner-only socket), Redis `default`/`requirepass`
 password, and Redis runtime ACL password. Isolation comes from *each cluster
 having its own instance* (which kills cross-talk); authority is separated so a
 runner cannot use its bearer to become an owner or Redis administrator.

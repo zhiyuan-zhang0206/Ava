@@ -51,6 +51,7 @@ databases, extensions and grants. Object creation goes through
 option: the baseline, checkpoint setup, migrations and the pgvector memory
 table stay owner-owned and see only the owner's privileges. The session role
 survives transaction rollback and `RESET ROLE`, and is verified before use.
-The owner therefore never has to log in, which is what lets it lose `LOGIN`
-later. `OwnerAuthority.conninfo` gives password-free libpq tools such as
+The owner therefore never logs in: it is created `NOLOGIN` without a password,
+and application processes log in only as write generations
+(`shared.cluster.authority`). `OwnerAuthority.conninfo` gives password-free libpq tools such as
 `pg_dump` the same owner-equivalent view.

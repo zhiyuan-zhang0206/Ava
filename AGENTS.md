@@ -59,21 +59,20 @@ Windows unit carries `agent-runner` only
 ([setup](conventions/windows-setup.md)). Rationale + the remaining slice:
 [`future/infra/embedded-per-cluster-data-plane.md`](future/infra/embedded-per-cluster-data-plane.md).
 
-**Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the
-control-plane bearer for the gateway API, `/ops`, bootstrap, and machine
-registration. The gateway alone holds the independent Postgres owner password
-(`AVA_DB_ADMIN_PASSWORD`) and Redis default-user password
-(`AVA_REDIS_ADMIN_PASSWORD`); agents receive only the runner DB projection and
-the Redis ACL credential embedded in `AVA_REDIS_URL`. Identity stays data in URL
-usernames, never derived from a name. The bearer still decides the network
-posture: Postgres and its pooler bind loopback + this host's reachable address
-only when set; Redis is always loopback-only with off-box inbound carried by the
-host-level relay bridge. An EMPTY secret (single-box default) leaves Postgres and
-the API unauthenticated, loopback-only; Redis always authenticates with passwords
-minted at first start (older homes convert once: `scripts/cutover_db_authority.py`).
-Every `AVA_PROCESS_PROFILE=agent` process, including the single-box hosted
-agent-host, is launched with an explicit `ava_runner` DB URL projection; it must
-never combine an owner username with the cluster bearer.
+**Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the human/control-plane
+bearer (gateway API, frontend login, `/ops`, bootstrap, machine registration). An EMPTY
+secret (single-box default) leaves the user-facing API and frontend unauthenticated and
+binds every data-plane listener to loopback; a set secret adds this host's reachable
+address for Postgres and its pooler (Redis stays loopback, off-box inbound via the relay
+bridge). The internal data plane always authenticates: Postgres and PgBouncer admit only
+SCRAM application logins (the OS-user administrator uses `peer` on the owner-only socket),
+and Redis requires its generated passwords. Application processes never hold schema-owner
+or admin credentials: the owner is NOLOGIN, and each rollout's write generation — one
+gateway and one runner login inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`,
+recorded in `$AVA_HOME/db-authority/` — is delivered only in the launch environment of
+the admitted runtime; `.env` holds the credential-free endpoint. Every DB-using service is
+launched with its class's generation login; none inherits an owner or admin URL. Older
+homes convert once: `scripts/cutover_db_authority.py`.
 
 | Path | Role |
 |---|---|
