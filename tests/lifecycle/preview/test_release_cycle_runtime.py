@@ -11,6 +11,7 @@ import pytest
 from cli.release_transition import root_service
 from cli.release_transition.journal import Operation, Retirement
 from cli.release_transition.launcher_linux import LinuxJob
+from cli.release_transition.native import LINUX
 from cli.release_transition.request import ReleaseRef, Request
 from scripts.preview import release_cycle_runtime as runtime
 from scripts.preview import release_cycle_state as state
@@ -60,7 +61,7 @@ def test_already_retired_previous_operation_never_reacquires_mutation_authority(
     operation = Operation(
         request=request_record,
         phase="complete",
-        launch={"inert": True},
+        launch={"kind": LINUX, "inert": True},
         launch_attempted=True,
         retirement=Retirement(terminal=native.model_dump(mode="json"), state="absent"),
     )
@@ -277,12 +278,15 @@ def test_executor_finishing_between_journal_and_native_reads_uses_final_same_att
     request_record: Request, monkeypatch: pytest.MonkeyPatch, *, changed_attempt: bool
 ) -> None:
     before = Operation(
-        request=request_record, phase="resuming", launch={"unit": "same"}, launch_attempted=True
+        request=request_record,
+        phase="resuming",
+        launch={"kind": LINUX, "unit": "same"},
+        launch_attempted=True,
     )
     after = before.model_copy(
         update={
             "phase": "complete",
-            "launch": {"unit": "other"} if changed_attempt else before.launch,
+            "launch": {"kind": LINUX, "unit": "other"} if changed_attempt else before.launch,
         }
     )
     snapshots = iter((before, after))
