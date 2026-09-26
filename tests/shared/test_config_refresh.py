@@ -5,9 +5,9 @@ The 2026-08-25 rollout incident: the local leg's `ava start` ran a
 data-plane credential rotation (secret split) that rewrote `$AVA_HOME/.env`,
 while the orchestrating rollout process kept its startup-built Settings
 singleton — every later data-plane write then failed authentication. These
-tests pin the refresh contract with the credential `.env` still carries (the
-Redis runtime password): re-read the new `.env`, rebuild only
-`settings.data_plane` in place, leave every other domain untouched.
+tests pin the refresh contract with the one credential `.env` still carries,
+the Redis runtime credential. Refresh re-reads the new `.env`, rebuilds only
+`settings.data_plane` in place and leaves every other domain untouched.
 """
 
 from __future__ import annotations
