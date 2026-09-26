@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
-import asyncio
+import os
 import sys
 import threading
+from contextlib import suppress
+from functools import partial
+from pathlib import Path
 
-from services.pitr.base_candidate import commit_base_candidate, prepare_base_candidate
+from services.pitr.base_candidate import (
+    commit_base_candidate,
+    prepare_base_candidate,
+    quarantine_candidate_staging,
+)
 from services.pitr.base_manifest import CandidateManifest
-from services.pitr.space_budget import CandidateSpaceBudget
+from services.pitr.operation_custody import OperationDeferred, OperationKind, publish_result
+from services.pitr.space_budget import CandidateSpaceBudget, InsufficientCandidateSpaceError
 from services.pitr.store_factory import get_store_group
 from services.pitr.worker_process import (
+    CompletedOperation,
     StopSignal,
-    publish_result,
     run_operation,
     worker_request,
 )
@@ -21,9 +29,26 @@ from shared.paths import ava_home
 from shared.platform import LockTimeoutError
 from shared.process_env import inherited_process_env
 
-# Both backup-lock acquisitions in `prepare_base_candidate` precede any
-# candidate evidence, so a busy lock is a clean deferral, not a failed operation.
-_DEFERRED = {"deferred": "backup_lock"}
+
+def candidate_kind(root: Path | None = None) -> OperationKind:
+    """Base candidates for the weekly schedule and for activation share one root."""
+    root = ava_home() / "physical-backup" if root is None else root
+    return OperationKind(
+        "base-candidate",
+        root / "base-control",
+        root / "quarantine",
+        partial(quarantine_candidate_staging, root),
+    )
+
+
+def _tree_bytes(path: Path) -> int:
+    """Live PGDATA size; files may vanish while it is walked."""
+    total = 0
+    for directory, _dirs, files in os.walk(path):
+        for name in files:
+            with suppress(FileNotFoundError):
+                total += (Path(directory) / name).stat().st_size
+    return total
 
 
 def _prepare(chain_id: str | None) -> CandidateManifest:
@@ -36,7 +61,6 @@ def _prepare(chain_id: str | None) -> CandidateManifest:
     if key is None or config.pitr_gcs_credentials_file is None:
         raise RuntimeError("validated PITR secrets are missing")
     home = ava_home()
-    pgdata_bytes = sum(item.stat().st_size for item in (home / "pg").rglob("*") if item.is_file())
     logical_peak = max(
         (item.stat().st_size for item in (home / "backups" / "db").glob("*.enc")), default=0
     )
@@ -47,7 +71,7 @@ def _prepare(chain_id: str | None) -> CandidateManifest:
         key_id=config.pitr_backup_key_id,
         store=get_store_group().restartable_streaming_object_store(),
         budget=CandidateSpaceBudget(
-            pgdata_bytes, config.pitr_spool_hard_bytes, logical_peak, 4 * 1024**3
+            _tree_bytes(home / "pg"), config.pitr_spool_hard_bytes, logical_peak, 4 * 1024**3
         ),
         replication_db_url=config.pitr_replication_db_url,
         stop=threading.Event(),
@@ -58,30 +82,40 @@ def _prepare(chain_id: str | None) -> CandidateManifest:
 async def run_candidate(
     *, chain_id: str | None = None, stop: StopSignal | None = None
 ) -> CandidateManifest:
-    """Commit a prepared candidate only after its worker group closed cleanly."""
+    """Commit a prepared candidate only after its worker group closed cleanly.
+
+    A busy backup lock defers as `LockTimeoutError`, missing space as
+    `OperationDeferred`; neither leaves evidence behind.
+    """
     root = ava_home() / "physical-backup"
-    completed = await run_operation(
-        "services.pitr.base_worker",
-        {"chain_id": chain_id},
-        control_root=root / "base-control",
-        env=inherited_process_env(),
-        stop=stop,
-    )
-    if completed.result == _DEFERRED:
-        completed.retire()
-        raise LockTimeoutError("base candidate deferred while another backup owns the lock")
-    if set(completed.result) != {"candidate_json"} or not isinstance(
-        completed.result["candidate_json"], str
-    ):
-        raise RuntimeError(f"base worker returned an invalid candidate result: {completed.work}")
-    candidate = CandidateManifest.from_json(completed.result["candidate_json"])
+    try:
+        completed = await run_operation(
+            "services.pitr.base_worker",
+            {"chain_id": chain_id},
+            kind=candidate_kind(root),
+            env=inherited_process_env(),
+            stop=stop,
+        )
+    except OperationDeferred as deferred:
+        if deferred.reason == "backup_lock":
+            raise LockTimeoutError(deferred.detail) from deferred
+        raise
+    # Re-hashing the prepared tree is bounded local I/O off the health loop.
+    return await completed.commit(partial(_commit, root, completed, chain_id, stop))
+
+
+def _commit(
+    root: Path, completed: CompletedOperation, chain_id: str | None, stop: StopSignal | None
+) -> CandidateManifest:
+    result = completed.result
+    if set(result) != {"candidate_json"} or not isinstance(result["candidate_json"], str):
+        raise RuntimeError("base worker returned an invalid candidate result")
+    candidate = CandidateManifest.from_json(result["candidate_json"])
     if chain_id is not None and candidate.chain_id != chain_id:
         raise RuntimeError("base worker result differs from the requested activation chain")
     if stop is not None and stop.is_set():
         raise RuntimeError("base candidate lost ownership before controller commit")
-    # Re-hashing the prepared tree is bounded local I/O; keep the health loop live.
-    await asyncio.to_thread(commit_base_candidate, root, candidate, completed.worker)
-    completed.retire()
+    commit_base_candidate(root, candidate, completed.worker)
     return candidate
 
 
@@ -92,10 +126,14 @@ def main() -> None:
     chain_id = request["chain_id"]
     if chain_id is not None and not isinstance(chain_id, str):
         raise TypeError("invalid base worker chain")
+    # Both deferrals are raised before `_record_owner`: no evidence exists yet.
     try:
         candidate = _prepare(chain_id)
-    except LockTimeoutError:
-        publish_result(output, dict(_DEFERRED))
+    except LockTimeoutError as exc:
+        publish_result(output, {"deferred": "backup_lock", "detail": str(exc) or "busy"})
+        return
+    except InsufficientCandidateSpaceError as exc:
+        publish_result(output, {"deferred": "space", "detail": str(exc)})
         return
     publish_result(output, {"candidate_json": candidate.to_json()})
 

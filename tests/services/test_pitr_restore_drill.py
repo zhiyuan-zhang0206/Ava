@@ -14,6 +14,7 @@ import pytest
 
 from services.pitr import restore_drill
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
+from services.pitr.operation_custody import NativeProcess
 from services.pitr.restore_drill import (
     DRILL_TABLES,
     DrillError,
@@ -25,7 +26,6 @@ from services.pitr.restore_drill import (
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_postgres import SandboxPostgresIdentity
 from services.pitr.restore_proof import LivePostgresIdentity
-from services.pitr.worker_process import NativeProcess
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess
 
@@ -207,6 +207,33 @@ def test_fresh_scratch_is_required(tmp_path: Path) -> None:
     fresh = tmp_path / "fresh"
     restore_drill._require_fresh_scratch(fresh)
     assert fresh.is_dir()
+
+
+async def test_operator_input_mistakes_are_refused_before_any_operation(
+    tmp_path: Path,
+) -> None:
+    """A typo'd scratch or target never becomes a failed operation: the
+    controller refuses it before launch, so nothing needs retirement."""
+    from services.pitr import base_operation_runtime
+    from tests.services.test_pitr_operation_owner import _restore_inputs
+
+    used = tmp_path / "used"
+    used.mkdir()
+    (used / "drill-evidence.json").write_text("{}")
+    for scratch, lsn, message in (
+        (Path("relative"), "0/1000000", "absolute path"),
+        (used, "0/1000000", "not fresh"),
+        (tmp_path / "fresh", "0/0", "precedes the chain start"),
+    ):
+        with pytest.raises(DrillError, match=message):
+            await base_operation_runtime.run_drill_input(
+                _restore_inputs(tmp_path),
+                scratch=scratch,
+                target_lsn=lsn,
+                target_wall="2026-09-26T00:00:00+00:00",
+                timeout_seconds=5,
+            )
+    assert not (tmp_path / "drill-control").exists() and not (tmp_path / "fresh").exists()
 
 
 def test_prepare_pgdata_uses_the_extraction_return_value(

@@ -182,14 +182,19 @@ def _scratch_space_requirement(raw_dump: Path) -> int:
 
 
 def run_drill(
-    artifact: Path | None = None, *, foreground: bool = False
+    artifact: Path | None = None, *, foreground: bool = False, scratch_root: Path | None = None
 ) -> tuple[RestoreReport, float]:
-    """Run the complete decrypt, restore, and verification drill."""
+    """Run the complete decrypt, restore, and verification drill.
+
+    `scratch_root` places the decrypted dump inside a caller-owned private
+    directory, so a caller that proves the drill's closure can remove it even
+    when the drill was killed before its own cleanup.
+    """
     artifact = artifact or _newest_artifact()
     if not artifact.is_file():
         raise RuntimeError(f"backup artifact does not exist: {artifact.name}")
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="ava-restore-drill-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ava-restore-drill-", dir=scratch_root) as tmp:
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
         backup.decrypt_artifact(artifact, raw_dump)

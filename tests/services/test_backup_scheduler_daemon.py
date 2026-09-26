@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import errno
+import hashlib
 import json
 import os
 import socket
 import subprocess
 import sys
+from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,6 +20,7 @@ import pytest
 from services.backup_scheduler import daemon
 from shared import daemon_health
 from shared.config import settings
+from shared.platform import LockTimeoutError
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:
@@ -349,3 +354,71 @@ async def test_invalid_local_restore_marker_reports_failure_without_running_rest
             },
         )
     ]
+
+
+def _staged_dump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, str]:
+    from services import backup
+
+    staged = tmp_path / "controls" / "ava-20260926T000000Z.dump.enc"
+    staged.parent.mkdir()
+    staged.write_bytes(b"encrypted")
+    published = tmp_path / "db"
+    monkeypatch.setattr(backup, "backup_dir", lambda: published)
+
+    def keep_all(_directory: Path) -> list[Path]:
+        return []
+
+    monkeypatch.setattr(backup, "_prune", keep_all)
+    return staged, published, hashlib.sha256(b"encrypted").hexdigest()
+
+
+def test_cross_filesystem_commit_publishes_a_verified_private_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backup directory on another mount gets the same exclusive publication."""
+    from services.backup_scheduler import worker
+
+    staged, published, digest = _staged_dump(tmp_path, monkeypatch)
+    link = os.link
+
+    def cross_device(source: Path, target: Path) -> None:
+        if Path(source) == staged:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        link(source, target)
+
+    monkeypatch.setattr(worker.os, "link", cross_device)
+    target = worker.commit_scheduled_backup(staged, digest)
+    assert target.read_bytes() == b"encrypted" and target.stat().st_mode & 0o777 == 0o600
+    assert not staged.exists() and [path.name for path in published.iterdir()] == [target.name]
+    staged.write_bytes(b"encrypted")
+    with pytest.raises(FileExistsError):  # a prior artifact is never replaced
+        worker.commit_scheduled_backup(staged, digest)
+    assert staged.exists() and [path.name for path in published.iterdir()] == [target.name]
+
+
+def test_commit_defers_pruning_while_another_backup_holds_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A weekly base capture can hold the lock for hours; the commit never waits."""
+    from services import backup
+    from services.backup_scheduler import worker
+
+    staged, published, digest = _staged_dump(tmp_path, monkeypatch)
+    pruned: list[Path] = []
+
+    def prune(directory: Path) -> list[Path]:
+        pruned.append(directory)
+        return []
+
+    monkeypatch.setattr(backup, "_prune", prune)
+
+    @contextlib.contextmanager
+    def busy(*, timeout_s: float | None = None) -> Generator[None]:
+        assert timeout_s == 0
+        raise LockTimeoutError("held by a base capture")
+        yield
+
+    monkeypatch.setattr(backup, "backup_lock", busy)
+    target = worker.commit_scheduled_backup(staged, digest)
+    assert target.parent == published and target.read_bytes() == b"encrypted"
+    assert pruned == []

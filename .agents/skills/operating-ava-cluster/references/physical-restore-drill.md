@@ -14,7 +14,7 @@ acceptance criteria, no ad-hoc driver.
   end LSN).
 - On the operator's own schedule, or before a planned intervention.
 - Never overwriting anything: the command refuses a scratch tree that already
-  exists, publishes nothing, and never writes to the live cluster.
+  holds anything, publishes nothing, and never writes to the live cluster.
 
 ## Prerequisites
 
@@ -31,8 +31,9 @@ acceptance criteria, no ad-hoc driver.
 - Egress where the store needs it (WSL to OSS requires
   `HTTPS_PROXY=http://127.0.0.1:7897`); the command inherits the invoking
   shell's environment, so export the proxy variables there.
-- The command must be its process-group leader: run it under `setsid`, so the
-  sandbox postmaster shares the group and a crashed drill stays reapable.
+- The command owns the drill worker's process group; the sandbox postmaster is
+  a member, so a stopped drill closes it. Run it under `setsid nohup` only so
+  a long drill survives the terminal closing.
 
 ## Pick the target
 
@@ -65,8 +66,12 @@ cd "$AVA_HOME/source" && setsid nohup .venv/bin/ava pitr drill \
   --scratch "$HOME/pitr-drill-$(date -u +%Y%m%dT%H%M%SZ)" > drill.log 2>&1 &
 ```
 
-Progress goes to stderr and the final summary JSON to stdout. `--candidate
-<path>` overrides chain resolution from
+The command first prints the resolved chain, target and absolute scratch to
+stderr, then streams the drill's progress lines there while it runs. The
+final summary JSON on stdout carries the outcome, restored and live counts and
+timings; restored business rows stay in `drill-evidence.json` (0600). A
+relative `--scratch` is resolved against the invoking shell's directory.
+`--candidate <path>` overrides chain resolution from
 `$AVA_HOME/physical-backup/base-manifests/<chain>.candidate.json`.
 `--promotion-timeout` bounds both postmaster start and replay to the target.
 
@@ -92,12 +97,25 @@ Progress goes to stderr and the final summary JSON to stdout. `--candidate
 
 - The scratch tree is kept on every outcome; `drill-evidence.json` (0600)
   carries the per-step record, the criteria and the failure reasons. A re-run
-  needs a fresh scratch directory -- the evidence is never overwritten.
+  needs a fresh scratch directory -- the evidence is never overwritten. A
+  reused or relative scratch and a target before the chain start are refused
+  before anything starts.
+- A failed or stopped drill's operation record (request, worker logs, failure
+  note; no database material) moves to
+  `$AVA_HOME/physical-backup/quarantine/<stamp>-pitr-drill-*` and the next
+  drill starts normally. A stopped drill gets 45 s to stop its sandbox and
+  write its evidence; the failure line says whether the evidence was kept.
+- If the drill's group closure could not be proven, the failure names the
+  blocked controls and `ava pitr operations status` shows `pitr-drill`
+  blocked. Wait for any listed process to exit, then
+  `ava pitr operations retire` (preview) and `--confirm`.
 - Identity mismatch, a missing segment or a base-authentication failure are
   chain-integrity findings: report them before any cleanup and keep the tree.
-- A surviving sandbox postmaster is reported by the residue scan. Stop it
-  manually before re-running (`<pg_ctl> -D <scratch>/sandbox/data -m fast
-  stop`), then verify no listener remains on the recorded port.
+- A surviving sandbox postmaster is reported by the residue scan; the
+  confirmed group close already kills every member, so a survivor escaped the
+  group. Stop it manually before re-running (`<pg_ctl> -D
+  <scratch>/sandbox/data -m fast stop`), then verify no listener remains on
+  the recorded port.
 - A non-zero exit means at least one acceptance criterion failed; the
   evidence file says which.
 
@@ -106,5 +124,6 @@ Progress goes to stderr and the final summary JSON to stdout. `--candidate
 - It does not replace the scheduled activation restore proof
   (`restore_proof.prove_candidate`), which restores to the recorded end LSN
   and carries publication authority.
-- It publishes nothing and leaves no owner evidence outside the scratch tree:
-  the operator owns the tree and its disposal.
+- It publishes nothing. Outside the scratch tree it leaves only its operation
+  record: retired on success, quarantined on failure. The operator owns the
+  scratch tree -- which holds a plaintext restored PGDATA -- and its disposal.

@@ -65,10 +65,12 @@ mandatory.
 
 ## Operation custody
 
-Base candidates, restore proofs and operator drills each run as one directly
-owned worker process group; results commit only after confirmed closure, a
-zero exit and validation, and every other outcome retains its controls for
-explicit retirement: [[services/pitr/operation-custody.ava.okf.md|Operation custody]].
+Base candidates, restore proofs and operator drills (and the logical backup
+jobs) each run as one directly owned worker process group; results commit only
+after confirmed closure, a zero exit and validation. A failed or cancelled
+operation with proven closure is quarantined without plaintext and the next
+one proceeds; unproven closure blocks its kind until `ava pitr operations
+retire`: [[services/pitr/operation-custody.ava.okf.md|Operation custody]].
 
 ## Remote retention (dry run)
 

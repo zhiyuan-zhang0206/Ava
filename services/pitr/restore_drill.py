@@ -19,9 +19,12 @@ invariants here:
 - the evidence tables come from ``DRILL_TABLES`` -- ``agent_tasks``, not
   ``tasks``.
 
-The restricted operation worker owns this flow. Trusted tools and the sandbox
-inherit its group; the outer controller confirms group closure before accepting
-the retained drill evidence. A controller crash needs native executor retirement.
+The restricted operation worker owns this flow and reports progress on stderr,
+which the controller streams to the operator. Trusted tools and the sandbox
+inherit its group; the controller refuses operator input mistakes before launch
+and confirms group closure before accepting the retained drill evidence. A
+controller crash leaves the drill kind blocked until `ava pitr operations
+retire` re-proves closure.
 """
 
 from __future__ import annotations
@@ -560,15 +563,25 @@ def _require_group_leader() -> None:
         )
 
 
+def validate_drill_inputs(candidate: CandidateManifest, scratch: Path, target_lsn: str) -> None:
+    """Refuse operator input mistakes before any drill operation starts."""
+    if not scratch.is_absolute():
+        raise DrillError(f"drill scratch {scratch} must be an absolute path")
+    _refuse_used_scratch(scratch)
+    _require_target_lsn(candidate, target_lsn)
+
+
+def _refuse_used_scratch(scratch: Path) -> None:
+    if scratch.exists() and (not scratch.is_dir() or any(scratch.iterdir())):
+        raise DrillError(
+            f"drill scratch {scratch} is not fresh; it must be absent or an empty directory "
+            "(the previous evidence tree is never overwritten)"
+        )
+
+
 def _require_fresh_scratch(scratch: Path) -> None:
-    if scratch.exists():
-        if not scratch.is_dir() or any(scratch.iterdir()):
-            raise DrillError(
-                f"drill scratch {scratch} is not fresh; it must be absent or an empty directory "
-                "(the previous evidence tree is never overwritten)"
-            )
-    else:
-        scratch.mkdir(parents=True, mode=0o700)
+    _refuse_used_scratch(scratch)
+    scratch.mkdir(parents=True, mode=0o700, exist_ok=True)
 
 
 def _require_target_lsn(candidate: CandidateManifest, target_lsn: str) -> None:

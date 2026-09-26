@@ -5,29 +5,23 @@ keeping the newest ``backup_keep`` dumps (``services.backup_keep``, default 7).
 `services.backup_scheduler.daemon` calls `is_due()` independently of watchdog
 rounds: at the first wake after ``backup_hour`` cluster time with no dump for
 the current cluster day, so a host that was down at 03:00 catches up. Its
-operation worker runs `prepare_scheduled_backup()` inside private controls; the
-controller runs `commit_scheduled_backup()` after the worker's group closed.
-In-process snapshot callers use `run_backup()`.
+operation worker runs `run_backup(staging=...)` inside private controls; the
+controller publishes that artifact after the worker's group closed
+(`services.backup_scheduler.worker`). In-process snapshot callers use
+`run_backup()` directly.
 
 Backup cadence follows the configured cluster timezone; artifact names carry
 UTC timestamps. Retention orders those timestamps independently of host DST.
 
 Local dumps guard against bad migrations / accidental deletes / DB
-corruption. Storage interface: `run_backup` is
-`dump -> encrypt -> optional off-site publish -> prune`. The off-site leg
-publishes the encrypted artifact through the shared backup store contract
-(`services.pitr.store_factory`'s `RestartableStreamingObjectStore`
-`put_base_if_absent` — the same backend switch as the physical PITR plane),
-so the GCS / Baidu Netdisk adapters are shared and the Drive-sync-folder copy
-is gone. The publish is best-effort and immutable: it happens iff absent,
-the ACK (pin_token, size, checksum) is the store-verified identity, and a
-missing/unavailable/failed store warns and keeps the local artifact — it never
-discards it. Remote objects are append-only except policy-owned retention deletions (off
-by default): the store contract deliberately has no delete verb, and the
-separate retention-delete role only acts when explicitly armed — remote
-retention is a shared planner concern (dry-run today) — see `future/infra/pg-backup.md`.
-The current dump uses PostgreSQL's compressed custom format. Existing encrypted
-legacy gzip artifacts remain restorable through `gunzip_if_needed`.
+corruption. `run_backup` is `dump -> encrypt -> optional off-site publish ->
+prune`. The best-effort off-site leg publishes the encrypted artifact iff
+absent through the shared backup store contract (`services.pitr.store_factory`,
+the physical PITR plane's backend switch); a failed store keeps the local
+artifact. Remote objects are append-only except policy-owned, armed retention
+deletions (see `future/infra/pg-backup.md`). The dump uses PostgreSQL's
+compressed custom format; legacy gzip artifacts stay restorable
+(`gunzip_if_needed`).
 
 The LangGraph checkpoint tables (`checkpoint_blobs`, `checkpoints`, and
 `checkpoint_writes`) are the only copy of conversation history: messages, tool
@@ -74,29 +68,22 @@ from services.pitr.logical_dump_names import (
     TS_FORMAT,
     stamp_utc,
 )
+from services.pitr.operation_custody import sweep_closed_partials
 from shared.config import settings
 from shared.db import connect, direct_db_url
 from shared.pg_tools import pg_tool
-from shared.platform import file_lock
+from shared.platform import LockTimeoutError, file_lock
 from shared.private_storage import ensure_private_dir, ensure_private_file
 
 _log = logging.getLogger(__name__)
 
-# Schedule and daily retention are cluster config (``services.backup_hour`` /
-# ``services.backup_keep``); each field states the reason for its default.
+# Newest activation snapshots kept in their own prune slot: the current PITR
+# activation's logical floor plus the one before it; an unresolved activation's
+# snapshot is pinned on top (task #3696 exception inventory). The managed name
+# grammar lives in `services.pitr.logical_dump_names`, shared with retention.
 ACTIVATION_KEEP = 2
-# Newest activation snapshots kept in their own prune slot: two covers the
-# current PITR activation's logical floor plus the one before it; an unresolved
-# activation's snapshot is pinned on top of this window
-# (task #3696 exception inventory).
-# The managed name grammar (markers, formats, regex) lives in
-# `services.pitr.logical_dump_names`: the retention classifier parses the
-# very same grammar, so the writer and the planner cannot drift on what a
-# managed dump name is.
-# Generous ceiling for one dump (the DB is far smaller); see the comment at the
-# run call in `_run_backup` for why an unbounded pg_dump is not acceptable here.
-# 60 min: a full dump with checkpoint history takes about 6.3 min. This is
-# headroom against a stall, not an expected runtime.
+# Headroom against a stall, not an expected runtime: a full dump with
+# checkpoint history takes about 6.3 min.
 _DUMP_TIMEOUT_S = 60 * 60
 # Heartbeat cadence while a dump or an encryption runs with a progress sink
 # attached. A pre-update snapshot runs inside a rollout whose stall watchdog
@@ -492,24 +479,15 @@ def _run_with_progress(
 ) -> subprocess.CompletedProcess[bytes]:
     """`subprocess.run(argv, capture_output=True, check=False)` that narrates its wait.
 
-    With `progress=None` this is exactly `subprocess.run`; every caller that does
-    not opt in (the nightly scheduler above all) is untouched. With a sink, the
-    wait is split so a stage that can legitimately run for many minutes is not
-    silent: one line when the child starts (naming its bound) and one every
-    `_PROGRESS_INTERVAL_S` while it runs, carrying the elapsed time and — when
-    `size_path` is the file the child writes — the bytes on disk so far. The
-    pre-update snapshot depends on this: it runs inside a rollout whose stall
-    watchdog reclaims log silence after `shared.deploy_timing.NO_PROGRESS_TIMEOUT_S`
-    (900 s), and the dump alone is allowed 20 min (2026-09-14 incident). While
-    these heartbeats flow the silence rule is deliberately superseded: an alive
-    but stuck child rides to its own `timeout_s` bound (enforced below) instead
-    of being reclaimed at 900 s of log silence. A snapshot that stops
-    heartbeating — a wedged loop or process — is still reclaimed by the watchdog
-    exactly as before.
+    With `progress=None` this is exactly `subprocess.run`. With a sink, one line
+    names the child's bound and one every `_PROGRESS_INTERVAL_S` carries the
+    elapsed time and the bytes `size_path` holds. A pre-update snapshot runs
+    inside a rollout whose stall watchdog reclaims 900 s of log silence while
+    the dump alone may take 20 min (2026-09-14 incident): heartbeats let a live
+    child ride to its own `timeout_s` instead.
 
-    Timeout semantics match `subprocess.run`: expiry kills the child, reaps it,
-    and raises `TimeoutExpired`, so callers keep scheduling their retry off the
-    same exception.
+    Like `subprocess.run`, expiry or any interruption kills and reaps the child
+    before raising, so its output never has a live writer afterwards.
     """
     if progress is None:
         return subprocess.run(  # noqa: S603
@@ -520,18 +498,33 @@ def _run_with_progress(
     with subprocess.Popen(  # noqa: S603
         argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
     ) as proc:
-        while True:
-            remaining_s = timeout_s - (time.monotonic() - started)
-            if remaining_s <= 0:
-                proc.kill()
-                proc.wait()
-                raise subprocess.TimeoutExpired(argv, timeout_s)
-            try:
-                stdout, stderr = proc.communicate(timeout=min(_PROGRESS_INTERVAL_S, remaining_s))
-            except subprocess.TimeoutExpired:
-                progress(f"{label} {time.monotonic() - started:.0f}s{_written_suffix(size_path)}")
-                continue
-            return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+        try:
+            stdout, stderr = _narrated_wait(
+                proc, argv, timeout_s, started, label, progress, size_path
+            )
+        except BaseException:
+            proc.kill()
+            raise  # `Popen.__exit__` reaps it.
+        return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
+
+def _narrated_wait(
+    proc: subprocess.Popen[bytes],
+    argv: list[str],
+    timeout_s: float,
+    started: float,
+    label: str,
+    progress: _ProgressSink,
+    size_path: Path | None,
+) -> tuple[bytes, bytes]:
+    while True:
+        remaining_s = timeout_s - (time.monotonic() - started)
+        if remaining_s <= 0:
+            raise subprocess.TimeoutExpired(argv, timeout_s)
+        try:
+            return proc.communicate(timeout=min(_PROGRESS_INTERVAL_S, remaining_s))
+        except subprocess.TimeoutExpired:
+            progress(f"{label} {time.monotonic() - started:.0f}s{_written_suffix(size_path)}")
 
 
 def run_backup(
@@ -543,12 +536,15 @@ def run_backup(
     pitr_activation: str | None = None,
     publish: bool = True,
     progress: _ProgressSink | None = None,
+    staging: Path | None = None,
 ) -> Path:
     """Dump the cluster DB into backup_dir() and prune; return the dump path.
 
     Plaintext and encrypted intermediates use `.partial` names; only the
     encrypted custom-format artifact is published after every pipeline step
-    succeeds. A failed step retains its intermediates for explicit retirement.
+    succeeds. A failed step removes its intermediates once its tool is reaped.
+    `staging` writes into a scheduled operation's private controls instead
+    and leaves publication and pruning to that operation's controller.
 
     `timeout_s` lets bounded callers such as the pre-update snapshot use a
     tighter ceiling than the daily backup default. `pre_update` names the
@@ -563,7 +559,7 @@ def run_backup(
     with backup_lock():
         target = _run_backup(
             now,
-            directory=backup_dir(),
+            directory=backup_dir() if staging is None else staging,
             db_url=db_url,
             timeout_s=timeout_s,
             pre_update=pre_update,
@@ -572,26 +568,36 @@ def run_backup(
         )
         if publish:
             _publish_offsite(target)
-        _log_written(target, _prune(target.parent))
+        if staging is None:
+            _log_written(target, _prune(target.parent))
         return target
+
+
+def prune_after_publish(target: Path) -> None:
+    """Prune around a newly linked scheduled dump without waiting on the lock.
+
+    Linking never replaces a managed name, so it needs no lock; pruning does.
+    A busy lock (a weekly base capture can hold it for hours) defers pruning
+    to the next backup instead of stalling the scheduler.
+    """
+    try:
+        with backup_lock(timeout_s=0):
+            removed = _prune(target.parent)
+    except LockTimeoutError:
+        _log.info("[backup] prune deferred while another backup owns the lock")
+        removed = []
+    _log_written(target, removed)
 
 
 def _db_size_breakdown(db_url: str | None = None) -> str:
     """One-line DB composition for the backup log: total, the LangGraph
     checkpoint tables, and everything else.
 
-    The checkpoint tables dominate DB size and dump time; logging them on
-    every backup makes each artifact carry its own baseline for growth
-    tracking. The frozen PG `events` archive is no longer part of the
-    composition — it was dropped with the task #1281/#1823 cleanup (its data
-    lives in the Loki archive stream and the cold pg_dump archive). Best-effort
-    by contract: a failure (e.g. a fresh cluster missing the tables) degrades
-    to "unavailable" and never fails the backup.
-
-    `db_url` mirrors `_run_backup`'s override: the composition is measured on
-    the SAME database the dump will read. `_run_backup` always passes the
-    resolved admin-plane direct URL; a None `db_url` (direct callers) falls
-    back to the same settings-derived connection.
+    The checkpoint tables dominate DB size and dump time, so each artifact
+    carries its own growth baseline. Best-effort: a failure (e.g. a fresh
+    cluster missing the tables) degrades to "unavailable" and never fails the
+    backup. `db_url` is the same database the dump reads; None falls back to
+    the settings-derived direct connection.
     """
     try:
         with (
@@ -618,39 +624,6 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
 
 def _mb(b: int) -> int:
     return round(b / 2**20)
-
-
-def prepare_scheduled_backup(now: datetime, directory: Path) -> Path:
-    """Write, then best-effort publish off-site, inside the operation's controls.
-
-    The local artifact is committed by the controller after group closure, so
-    an interrupted upload leaves the complete artifact in the retained controls.
-    """
-    with backup_lock():
-        artifact = _run_backup(now, directory=directory)
-        _publish_offsite(artifact)
-        return artifact
-
-
-def commit_scheduled_backup(staged: Path, digest: str) -> Path:
-    """Publish only the exact completed worker artifact; never overwrite one.
-
-    The caller invokes this only after the worker's group closed with a zero
-    exit. Any refusal leaves the staged artifact in the operation's controls.
-    """
-    if staged.is_symlink() or not staged.is_file() or not DUMP_NAME_RE.fullmatch(staged.name):
-        raise RuntimeError("scheduled backup result is not a managed regular artifact")
-    with staged.open("rb") as artifact:
-        if hashlib.file_digest(artifact, "sha256").hexdigest() != digest:
-            raise RuntimeError("scheduled backup changed after preparation")
-    with backup_lock():
-        directory = ensure_private_dir(backup_dir())
-        target = directory / staged.name
-        os.link(staged, target)  # Exclusive publication; a prior artifact is never replaced.
-        ensure_private_file(target)
-        staged.unlink()
-        _log_written(target, _prune(directory))
-    return target
 
 
 def _log_written(target: Path, removed: list[Path]) -> None:
@@ -688,7 +661,7 @@ def _run_backup(
     # meaningless and breaks. Admin plane bypasses PgBouncer.
     db_url = db_url if db_url is not None else direct_db_url()
     directory = ensure_private_dir(directory)
-    # Unknown partials are evidence of interrupted work, never a sweep target.
+    sweep_closed_partials(directory)
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
     _log.info("[backup] db composition: %s", _db_size_breakdown(db_url))
@@ -703,6 +676,28 @@ def _run_backup(
     dump_partial = directory / f"{stem}.dump.partial"
     encrypted_partial = target.with_name(target.name + ".partial")
     dump_partial.touch(mode=0o600, exist_ok=False)
+    try:
+        _dump_and_encrypt(
+            db_conninfo, password, dump_partial, encrypted_partial, timeout_s, progress
+        )
+        encrypted_partial.rename(target)
+    finally:
+        # Every tool below is a reaped direct child once control returns here,
+        # so its plaintext output has no live writer and never outlives the run.
+        for partial in (dump_partial, encrypted_partial):
+            partial.unlink(missing_ok=True)
+    ensure_private_file(target)
+    return target
+
+
+def _dump_and_encrypt(
+    db_conninfo: str,
+    password: str,
+    dump_partial: Path,
+    encrypted_partial: Path,
+    timeout_s: float,
+    progress: _ProgressSink | None,
+) -> None:
     dump_partial.chmod(0o600)
     # Pass only the credential this process owns to pg_dump. In particular, do
     # not inherit a shell's PGPASSWORD: a no-auth cluster must not accidentally
@@ -736,7 +731,7 @@ def _run_backup(
 
     encrypted_partial.touch(mode=0o600, exist_ok=False)
     encrypted_partial.chmod(0o600)
-    key_file = _key_file(directory)
+    key_file = _key_file(dump_partial.parent)
     try:
         proc = _run_with_progress(
             [
@@ -762,11 +757,6 @@ def _run_backup(
     finally:
         with suppress(OSError):
             key_file.unlink(missing_ok=True)
-    encrypted_partial.rename(target)
-    ensure_private_file(target)
-    for partial in (dump_partial, encrypted_partial):
-        partial.unlink(missing_ok=True)
-    return target
 
 
 def _main(argv: list[str] | None = None) -> int:

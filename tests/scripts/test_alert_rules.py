@@ -89,6 +89,8 @@ _EXPECTED_UIDS = {
     "ava-ops-memory-search-rows-critical",
     # recovery posture — scheduled-proof failure and remote retention growth
     "ava-ops-recovery-drill-failed",
+    "ava-ops-backup-operation-blocked",
+    "ava-ops-backup-operation-quarantined",
     "ava-ops-pitr-storage-growth",
     # alerting stack health — remote Tempo scrape target (task #3330)
     "ava-ops-tempo-backend-down",
@@ -117,7 +119,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [31, 10]
+    assert [len(group["rules"]) for group in groups] == [33, 10]
     return groups
 
 

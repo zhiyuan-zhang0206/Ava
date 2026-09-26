@@ -735,6 +735,30 @@ To re-prove a protected chain at an operator-chosen target LSN, run the
 isolated drill: `ava pitr drill` (procedure:
 `.agents/skills/operating-ava-cluster/references/physical-restore-drill.md`).
 
+Backup and PITR operations (daily dump, weekly logical restore drill, base
+candidate, restore proof, operator drill) each run as one owned worker group of
+their kind. A failed or cancelled operation whose group closure was proven --
+including an `ava stop` or release drain during the nightly dump -- is
+quarantined under `$AVA_HOME/backups/quarantine/` or
+`$AVA_HOME/physical-backup/quarantine/` (request, logs, `failure.txt`, receipts;
+plaintext database material removed), raises the
+`ava-ops-backup-operation-quarantined` warning, and the next scheduled run
+proceeds. Unproven closure (or a controller killed mid-operation) blocks only
+that kind and raises `ava-ops-backup-operation-blocked`:
+
+```bash
+ava pitr operations status            # blocked kinds, reasons, newest quarantine entries
+ava pitr operations retire            # preview: re-prove closure of each blocked operation
+ava pitr operations retire --confirm  # quarantine every proven one; the kind proceeds
+```
+
+Retire refuses while the worker is still present or its process group still
+has members; wait for them (or stop them) and retry. A controller killed while
+launching can only be proven after a reboot. An upload-interrupted dump keeps
+its complete encrypted artifact in quarantine: restore from it directly
+(`.agents/skills/operating-ava-cluster/references/db-restore.md`) or copy it
+into `backups/db/` (0600); the next scheduled run dumps again.
+
 When an activation fails, read the durable record first:
 `$AVA_HOME/physical-backup/activation/operation.json`
 (`error` / `error_code` / `error_detail`) and `ava cluster pitr status`. The

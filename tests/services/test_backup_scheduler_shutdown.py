@@ -3,7 +3,8 @@
 The scheduler's controller owns one worker process group per job. SIGTERM to
 the scheduler cancels the job: the worker gets a bounded chance to unwind its
 private cleanup, then the controller closes the whole group before the
-scheduler drops its pidfile. Partial work stays in the job's retained controls.
+scheduler drops its pidfile. With closure proven, the job's controls move into
+quarantine and no plaintext dump material survives, even from a killed worker.
 
 The sweep's bounded-exit regression (task #4224) rides the shared child-process
 harness: production ``main()`` must exit within a small bound of SIGTERM even
@@ -127,8 +128,9 @@ def _exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
     """The operation worker's real entry, with only its external effects patched."""
     from scripts import restore_drill
 
-    def restore(*, foreground: bool) -> None:
+    def restore(*, foreground: bool, scratch_root: Path) -> None:
         assert foreground
+        (scratch_root / "backup.dump").write_bytes(b"PLAINTEXT")
         _restore(root, "stubborn" if mode == "restore-stubborn" else mode, postgres_base)
 
     with _backup_patches(root, mode), patch.object(restore_drill, "run_drill", restore):
@@ -229,22 +231,21 @@ def _terminate_and_assert_reaped(tmp_path: Path, process: subprocess.Popen[str])
 
 
 def _assert_backup_artifacts(tmp_path: Path, artifacts: Path, mode: str) -> None:
-    # Cancellation retains the exact job controls and partial work as evidence;
-    # nothing is committed and no stale sweep may retire it. The cooperative
-    # stop still lets a non-stubborn worker remove its private key file.
-    (work,) = (tmp_path / "backups" / "operations").glob(".operation-*")
-    assert json.loads((work / "request.json").read_text())["kind"] == (
+    # A stop with proven closure quarantines the job and never blocks the next
+    # one. Nothing is committed; no plaintext or key survives, even when the
+    # worker was killed after the grace; an upload-interrupted artifact stays.
+    assert not list((tmp_path / "backups" / "operations").glob("*/.operation-*"))
+    (entry,) = (tmp_path / "backups" / "quarantine").iterdir()
+    assert json.loads((entry / "request.json").read_text())["kind"] == (
         "restore" if mode.startswith("restore") else "dump"
     )
-    assert not (work / "result.json").exists()
-    staged = work / "artifact"
+    assert (entry / "closure.json").is_file() and not (entry / "result.json").exists()
     assert [path.name for path in artifacts.iterdir()] == ["retained.dump.enc"]
-    if mode in {"pg_dump", "backup encryption", "stubborn"}:
-        assert list(staged.glob("*.dump.partial"))
-    if mode in {"pg_dump", "backup encryption", "publish"}:
-        assert not (staged / "test.key").exists()
-    if mode == "publish":
-        assert len(list(staged.glob("*.dump.enc"))) == 1
+    leftovers = [path for path in entry.rglob("*") if path.is_file()]
+    assert not [path for path in leftovers if b"PLAINTEXT" in path.read_bytes()]
+    assert not [path for path in leftovers if path.name.endswith((".partial", ".key", ".dump"))]
+    published = list((entry / "artifact").glob("*.dump.enc"))
+    assert len(published) == (1 if mode == "publish" else 0)
 
 
 def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> None:
@@ -317,7 +318,71 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
     )
     await worker.run_job("restore")
     assert not _alive(int((tmp_path / "postgres").read_text()))
-    assert [path.name for path in (tmp_path / "backups" / "operations").iterdir()] == [".lock"]
+    controls = tmp_path / "backups" / "operations" / "restore-drill"
+    assert [path.name for path in controls.iterdir()] == [".lock"]
+
+
+def _exercise_close_stop(root: Path) -> None:
+    """The daemon loop, with its stop request landing inside the group close."""
+    from shared.daemon_shutdown import cancel_and_drain
+
+    close = ExecProcessDomain.close_confirmed
+    launch = ExecProcessDomain.launch_posix
+    script = root / "worker.py"
+    script.write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        "Path(sys.argv[2]).write_text(json.dumps({'artifact':'x','sha256':'y'}))\n"
+    )
+
+    def close_with_stop(domain: ExecProcessDomain, deadline: float) -> None:
+        os.kill(os.getpid(), signal.SIGTERM)  # `ava stop` arrives mid-close
+        time.sleep(0.2)
+        close(domain, deadline)
+
+    def spawn(argv: list[str], **kwargs: Any):
+        return launch([sys.executable, "-I", "-B", str(script), *argv[-2:]], **kwargs)
+
+    state = daemon._BackupState()
+    outcome = "swallowed"
+    with (
+        patch.object(ExecProcessDomain, "close_confirmed", close_with_stop),
+        patch.object(ExecProcessDomain, "launch_posix", spawn),
+        patch.object(worker, "ava_home", return_value=root),
+        patch.object(daemon, "is_due", return_value=True),
+    ):
+        daemon.install_graceful_shutdown("close-stop-test")
+        runner = asyncio.Runner()
+        try:
+            runner.run(asyncio.wait_for(daemon._backup_loop(state), 10))
+        except KeyboardInterrupt:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            cancel_and_drain(runner)
+            outcome = "stopped"
+        except TimeoutError:
+            pass
+    (root / "outcome.json").write_text(json.dumps({"outcome": outcome, "error": state.last_error}))
+
+
+def test_stop_during_group_close_stops_the_scheduler(tmp_path: Path) -> None:
+    """A stop inside the confirmed close still stops the daemon, and the close
+    it interrupted finishes: the job is quarantined, never falsely unresolved."""
+    code = (
+        "from pathlib import Path; "
+        "from tests.services.test_backup_scheduler_shutdown import _exercise_close_stop; "
+        f"_exercise_close_stop(Path({str(tmp_path)!r}))"
+    )
+    completed = subprocess.run(  # noqa: S603 -- fixed disposable scheduler harness
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads((tmp_path / "outcome.json").read_text()) == {
+        "outcome": "stopped",
+        "error": None,
+    }
+    backups = tmp_path / "backups"
+    assert not list(backups.glob("operations/dump/.operation-*"))
+    (entry,) = (backups / "quarantine").iterdir()
+    assert json.loads((entry / "closure.json").read_text())["proven_by"] == "controller"
 
 
 def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:

@@ -18,6 +18,7 @@ import psycopg
 from psycopg import sql
 
 from services.pitr.base_manifest import CandidateManifest, _lsn
+from services.pitr.operation_custody import NativeProcess
 from services.pitr.restore_proof import (
     DrillResult,
     LivePostgresIdentity,
@@ -25,7 +26,6 @@ from services.pitr.restore_proof import (
     _same_live,
     update_restore_owner,
 )
-from services.pitr.worker_process import NativeProcess
 from shared.pg_tools import pg_start_env
 
 

@@ -606,21 +606,21 @@ def test_run_backup_pitr_activation_has_independent_kind(
     assert backup._is_activation(path)
 
 
-def test_run_backup_failure_retains_partials(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failed dump keeps its own `.partial` and never sweeps another run's:
-    neither has a closure proof, and due/prune logic ignores unmanaged names."""
-    stale = bdir / "other-20260801-031500.dump.partial"
-    stale.write_bytes(b"stale")
+def test_run_backup_failure_leaves_no_plaintext(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed dump removes its reaped writer's plaintext partial, and the next
+    run sweeps a dead run's partial that no process holds open."""
+    (bdir / "other-20260801-031500.dump.partial").write_bytes(b"stale")
 
-    class _Failed:
-        returncode = 1
-        stderr = "connection refused"
+    def fail(cmd: list[str], **_kw: object) -> Any:
+        Path(cmd[cmd.index("--file") + 1]).write_bytes(b"PLAINTEXT")
+        return cast(Any, type("Failed", (), {"returncode": 1, "stderr": "refused"}))
 
-    monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(backup.subprocess, "run", fail)
     with pytest.raises(RuntimeError, match="pg_dump exited 1"):
         backup.run_backup(_dt(2026, 8, 2, 3, 0), db_url="dbname=whatever")
-    assert stale.read_bytes() == b"stale"
-    assert len(list(bdir.glob("*.partial"))) == 2
+    assert not list(bdir.glob("*.partial")) and not list(bdir.glob(".backup-key-*"))
     assert not list(bdir.glob("*.dump.enc"))
 
 

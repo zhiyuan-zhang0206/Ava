@@ -20,7 +20,8 @@ from dotenv import dotenv_values
 
 from services.pitr.activation_evidence import stored_digest_matches
 from services.pitr.activation_state import ActivationRecord
-from services.pitr.restore_manifest import candidate_sha256
+from services.pitr.base_manifest import CandidateManifest
+from services.pitr.restore_manifest import ProtectedManifest, candidate_sha256
 from services.pitr.uploader import AckManifest
 from shared.config import settings
 from shared.config.physical_backup import PhysicalBackupSettings
@@ -431,21 +432,62 @@ def remote_wal_proof(
 
 
 def forced_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[str, str]:
-    from services.pitr.activation_base import build_activation_candidate
+    from services.pitr.base_worker import run_candidate
 
-    if record.candidate_chain_id is None:
+    chain_id = record.candidate_chain_id
+    if chain_id is None:
         raise RuntimeError("activation candidate intent is missing")
-    candidate = build_activation_candidate(
-        operation_id=record.operation_id, chain_id=record.candidate_chain_id, stop=stop
-    )
+    if not chain_id.endswith(f"-{record.operation_id}"):
+        raise RuntimeError("activation candidate chain differs from operation")
+    manifest_path = ava_home() / "physical-backup" / "base-manifests" / f"{chain_id}.candidate.json"
+    if manifest_path.is_file():
+        candidate = CandidateManifest.from_json(manifest_path.read_text())
+        if candidate.chain_id != chain_id:
+            raise RuntimeError("durable activation candidate differs from intent")
+    else:
+        candidate = asyncio.run(run_candidate(chain_id=chain_id, stop=stop))
     payload = candidate.to_json()
     return payload, hashlib.sha256(payload.encode()).hexdigest()
 
 
-def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[str, str]:
-    from services.pitr.activation_base import restore_activation_candidate
-    from services.pitr.base_manifest import CandidateManifest
+async def _restore_activation_candidate(
+    candidate: CandidateManifest, stop: threading.Event
+) -> ProtectedManifest:
+    """Prove the exact activation candidate; lease loss never publishes.
 
+    A cancelled proof reports its custody: an unresolved group closure names
+    the blocked controls instead of hiding behind the cancellation.
+    """
+    from services.pitr.base_operation_runtime import publish_restore, run_restore
+    from services.pitr.operation_custody import OperationCustodyError
+
+    task = asyncio.create_task(run_restore(candidate))
+    while not task.done():
+        await asyncio.wait({task}, timeout=1)
+        if stop.is_set():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError as cancelled:
+                # An unresolved closure rides as the stop's cause: name it.
+                custody = cancelled.__cause__
+                detail = f"; {custody}" if isinstance(custody, OperationCustodyError) else ""
+                raise RuntimeError(
+                    f"PITR restore cancelled after deployment lease loss{detail}"
+                ) from custody
+            raise RuntimeError("PITR restore finished after deployment lease loss; not published")
+    outcome = task.result()
+
+    def require_ownership() -> None:
+        if stop.is_set():
+            raise RuntimeError("PITR protected publication lost its deployment lease")
+
+    publish_restore(candidate, outcome, require_ownership=require_ownership)
+    path = ava_home() / "physical-backup" / "protected-manifests" / f"{candidate.chain_id}.json"
+    return ProtectedManifest.from_json(path.read_text())
+
+
+def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[str, str]:
     if record.protected_manifest is None or record.candidate_digest is None:
         raise RuntimeError("activation candidate evidence is incomplete")
     candidate = CandidateManifest.from_json(record.protected_manifest)
@@ -458,7 +500,7 @@ def restore_candidate(record: ActivationRecord, stop: threading.Event) -> tuple[
         )
     ):
         raise RuntimeError("restore candidate differs from durable activation intent")
-    protected = asyncio.run(restore_activation_candidate(candidate, stop))
+    protected = asyncio.run(_restore_activation_candidate(candidate, stop))
     if (
         protected.chain_id != candidate.chain_id
         or protected.candidate != candidate

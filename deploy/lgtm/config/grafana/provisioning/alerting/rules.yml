@@ -2273,6 +2273,150 @@ groups:
                   query:
                     params: [C]
 
+      # ── R25: backup/PITR operation blocked on unproven closure ──
+      # The controller could not prove its worker group closed, or found controls
+      # whose closure no controller proved (controller death). That operation kind
+      # refuses new work until an operator re-proves closure, so its schedule has
+      # stopped; the event repeats at every scheduled attempt while blocked.
+      - uid: ava-ops-backup-operation-blocked
+        title: "Backup operation blocked"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-backup-operation-blocked
+          metric: backup_operation_blocked
+          team: ava-ops
+        annotations:
+          summary: "Backup operation {{ $labels.attributes_operation }} is blocked ({{ $values.C }} events in 1h)"
+          description: >-
+            Operations of kind {{ $labels.attributes_operation }} are blocked:
+            group closure of an earlier operation is unproven, so no new work of
+            that kind starts. Run `ava pitr operations status`, then
+            `ava pitr operations retire` (preview) and `--confirm` once it
+            reports closure proven; the next scheduled run then proceeds.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_operation) (count_over_time({service_name="unknown_service", event_name="backup_operation_custody"}
+                | json | cluster=".ava" | category="telemetry" | level="error" | attributes_custody="blocked" [1h]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 3600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R26: backup/PITR operation quarantined after proven closure ──
+      # A failed or cancelled operation whose group closure was proven: its
+      # controls moved into the bounded quarantine and the next run proceeds.
+      # Routine stop/drain during a scheduled job lands here too, so it warns.
+      - uid: ava-ops-backup-operation-quarantined
+        title: "Backup operation quarantined"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-backup-operation-quarantined
+          metric: backup_operation_quarantined
+          team: ava-ops
+        annotations:
+          summary: "Backup operation {{ $labels.attributes_operation }} failed or was cancelled ({{ $values.C }} in 1h)"
+          description: >-
+            An operation of kind {{ $labels.attributes_operation }} failed or was
+            cancelled after its worker group was proven closed. Its controls and
+            receipts are in the quarantine root (`ava pitr operations status`),
+            plaintext database material was removed, and the next scheduled run
+            proceeds. Read the entry's failure.txt and stderr.log; repeated
+            quarantines of one kind mean its schedule is not producing backups.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_operation) (count_over_time({service_name="unknown_service", event_name="backup_operation_custody"}
+                | json | cluster=".ava" | category="telemetry" | level="error" | attributes_custody="quarantined" [1h]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 3600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
       # ── LLM stall pair: two adjacent stalls terminated a call (task #3889) ──
       # stream_stall_pair_terminated fires when one call's streaming segment
       # stalled AND its non-streaming fallback then timed out under the same

@@ -17,19 +17,22 @@ of the scheduler's asyncio loop and executor.
 
 Scheduler SIGTERM cancels the job. The controller sends SIGTERM to the group:
 the worker converts it into `KeyboardInterrupt`, so its `finally` blocks remove
-key files and decrypted scratch and stop a foreground Postgres. After a
-three-second grace it closes the group with confirmed SIGKILL, then the
-scheduler removes its pidfile and closes health. A result is accepted only
-after group closure, a zero exit and validation; the dump is then linked into
-the backup directory. Cancellation never advances scheduler success or the
-weekly restore marker.
+key files, plaintext partials and decrypted scratch and stop a foreground
+Postgres. After a three-second grace it closes the group with confirmed SIGKILL
+in a thread, so a stop that lands inside the close waits for its outcome and
+still stops the scheduler. A result is accepted only after group closure, a
+zero exit and validation; the dump is then linked into the backup directory.
+Cancellation never advances scheduler success or the weekly restore marker.
 
-Every failed or cancelled job keeps its controls (request, logs, partial
-dumps, and an upload-interrupted complete artifact) under
-`$AVA_HOME/backups/operations/`. The next job refuses until an operator
-retires them; no stale sweep deletes partial work. Closure doubt keeps the
-unreaped worker and fails loudly. A killed scheduler loses the only direct owner:
-its retained controls then need explicit retirement.
+Dumps and weekly logical restore drills have separate control roots under
+`$AVA_HOME/backups/operations/`, so a failed drill never stops the dumps. A
+failed or cancelled job whose closure was proven is quarantined under
+`$AVA_HOME/backups/quarantine/`: request, logs and failure note, plus a complete
+encrypted artifact when the off-site upload was interrupted; plaintext dump
+output and key files are removed even when the worker was killed. The next
+scheduled run proceeds. Closure doubt keeps the unreaped worker, blocks that
+kind and alerts until `ava pitr operations retire` re-proves closure; a killed
+scheduler leaves the same block.
 
 Scheduled restore drills opt into `throwaway_postgres(foreground=True)`.
 `shared/pg_foreground.py` starts Postgres directly in the worker group and

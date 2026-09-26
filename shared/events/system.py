@@ -250,6 +250,21 @@ class PitrRemoteInventory(TypedDict):
     bytes: int
 
 
+class BackupOperationCustody(TypedDict):
+    """`backup_operation_custody` payload — backup/PITR operation custody.
+
+    ``operation`` names the operation kind (``logical-dump``, ``base-candidate``,
+    ...). ``custody`` is ``quarantined`` (closure proven; the next operation
+    proceeds), ``blocked`` (closure unproven; the kind refuses new work until
+    ``ava pitr operations retire``) or ``retired`` (an operator retirement).
+    ``detail`` is the bounded diagnostic; it is never an alert grouping key.
+    """
+
+    operation: str
+    custody: str
+    detail: str
+
+
 class RecoveryDrillFailed(TypedDict):
     """`recovery_drill_failed` payload — scheduled logical/PITR proofs.
 

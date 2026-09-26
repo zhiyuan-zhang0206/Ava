@@ -164,12 +164,18 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_TERMINATE_GRACE_S",
     ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
     (
-        "services/pitr/worker_process.py",
+        "services/pitr/operation_custody.py",
         "TERMINATE_GRACE_S",
     ): "independent: the SIGTERM courtesy window for one backup/PITR operation worker to "
     "unwind its own private cleanup (key files, decrypted scratch) before the controller's "
     "confirmed group closure; the same class as shared/proc.py's TERM->KILL ladder wait, "
     "no lattice neighbour",
+    (
+        "services/pitr/base_operation_runtime.py",
+        "DRILL_GRACE_S",
+    ): "independent: the same courtesy window for an operator `ava pitr drill`, long enough "
+    "for its bounded sandbox stop, residue scan and evidence write; an operator command "
+    "outside every daemon stop budget, no lattice neighbour",
     (
         "shared/proc.py",
         "_REAP_TIMEOUT_S",

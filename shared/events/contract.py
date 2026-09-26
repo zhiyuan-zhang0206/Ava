@@ -82,6 +82,7 @@ from shared.events.system import AgentBootFailed as AgentBootFailed
 from shared.events.system import AgentRegistry as AgentRegistry
 from shared.events.system import ArchiveFetchDegraded as ArchiveFetchDegraded
 from shared.events.system import Auth401Rejected as Auth401Rejected
+from shared.events.system import BackupOperationCustody as BackupOperationCustody
 from shared.events.system import CheckpointTableSizes as CheckpointTableSizes
 from shared.events.system import ConvergeFilePreserved as ConvergeFilePreserved
 from shared.events.system import EventClassReopened as EventClassReopened

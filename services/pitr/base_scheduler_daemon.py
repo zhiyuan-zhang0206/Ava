@@ -15,9 +15,7 @@ from zoneinfo import ZoneInfo
 from services._pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.activation_state import load_record as load_activation_record
 from services.pitr.activation_state import lock_path as activation_lock_path
-from services.pitr.base_candidate import (
-    reconcile_runtime_state,
-)
+from services.pitr.base_candidate import reconcile_committed_cleanup
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.base_operation_runtime import (
     RestoreWorkerInput,
@@ -27,8 +25,9 @@ from services.pitr.base_operation_runtime import (
 )
 from services.pitr.base_scheduler_health import components as _components
 from services.pitr.base_worker import run_candidate
+from services.pitr.operation_custody import OperationDeferred
 from services.pitr.restore_manifest import ProtectedManifest
-from services.pitr.restore_proof import reconcile_restore_runtime
+from services.pitr.restore_proof import reconcile_restore_pending
 from services.pitr.retention_scheduler import (
     RetentionDryRunState,
 )
@@ -208,16 +207,17 @@ def _backup_key() -> tuple[bytes, str]:
 
 
 def _reconcile_owned_runtime() -> None:
-    """Reconcile only after the activation lock and its post-lock state check."""
+    """Reconcile only after the activation lock and its post-lock state check.
+
+    Only committed work is cleaned here. An operation's unsettled staging
+    belongs to its own kind (quarantined, or a blocked control root) and never
+    stalls retention planning or the other kind's schedule.
+    """
 
     with _claim_scheduler_ownership():
         key, key_id = _backup_key()
-        reconcile_restore_runtime(ava_home() / "physical-backup")
-        reconcile_runtime_state(
-            ava_home() / "physical-backup",
-            key=key,
-            key_id=key_id,
-        )
+        reconcile_restore_pending(ava_home() / "physical-backup")
+        reconcile_committed_cleanup(ava_home() / "physical-backup", key=key, key_id=key_id)
 
 
 def _record_protected(state: BaseCandidateState, candidate: CandidateManifest) -> None:
@@ -226,7 +226,7 @@ def _record_protected(state: BaseCandidateState, candidate: CandidateManifest) -
     state.restore_error = None
 
 
-async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
+async def _loop(state: BaseCandidateState) -> None:
     root = ava_home() / "physical-backup" / "base-manifests"
     while True:
         state.cleanup_pending = True
@@ -271,50 +271,66 @@ async def _loop(state: BaseCandidateState) -> None:  # noqa: PLR0915
             and restore_proof_due(datetime.now(UTC), last_success=state.last_protected)
             and _pending_restore_candidate(ava_home() / "physical-backup")
         ):
-            state.restore_running = True
-            try:
-                with _claim_scheduler_ownership():
-                    inputs = _restore_worker_input()
-                    outcome = await run_restore_input(
-                        inputs
-                    )  # async-blocking-ok: ownership lock spans child proof
-                    candidate = CandidateManifest.from_json(inputs.candidate_json)
-                    publish(candidate, outcome)
-                _record_protected(state, candidate)
-            except Exception as exc:
-                state.restore_error = str(exc)
-                telemetry.emit(
-                    "telemetry",
-                    "recovery_drill_failed",
-                    level="error",
-                    attributes={"drill": "pitr", "detail": str(exc)},
-                )
-                _log.exception("restore proof failed; candidate remains unprotected")
-            finally:
-                state.restore_running = False
+            await _restore_job(state)
             await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
             continue
         now = datetime.now(UTC)
         if not is_due(now, root):
             await _sleep(3600)
             continue
-        state.last_attempt = now.timestamp()
-        state.running = True
-        state.deferred_for_logical_backup = False
-        try:
-            with _claim_scheduler_ownership():
-                await run_candidate()  # async-blocking-ok: ownership lock spans candidate child
-            state.last_success = time.time()
-            state.base_error = None
-        except LockTimeoutError:
-            state.deferred_for_logical_backup = True
-            _log.info("base candidate deferred while logical backup owns backup lock")
-        except Exception as exc:
-            state.base_error = str(exc)
-            _log.exception("base candidate failed; retrying on bounded cadence")
-        finally:
-            state.running = False
+        await _base_job(state, now)
         await _sleep(BASE_BACKUP_RETRY_INTERVAL_S)
+
+
+async def _restore_job(state: BaseCandidateState) -> None:
+    """One restore proof; a space deferral is not a failed proof."""
+    state.restore_running = True
+    try:
+        with _claim_scheduler_ownership():
+            inputs = _restore_worker_input()
+            outcome = await run_restore_input(
+                inputs
+            )  # async-blocking-ok: ownership lock spans child proof
+            candidate = CandidateManifest.from_json(inputs.candidate_json)
+            publish(candidate, outcome)
+        _record_protected(state, candidate)
+    except OperationDeferred as exc:
+        state.restore_error = str(exc)
+        _log.info("restore proof deferred: %s", exc.detail)
+    except Exception as exc:
+        state.restore_error = str(exc)
+        telemetry.emit(
+            "telemetry",
+            "recovery_drill_failed",
+            level="error",
+            attributes={"drill": "pitr", "detail": str(exc)},
+        )
+        _log.exception("restore proof failed; candidate remains unprotected")
+    finally:
+        state.restore_running = False
+
+
+async def _base_job(state: BaseCandidateState, now: datetime) -> None:
+    """One weekly base candidate; lock and space deferrals are not failures."""
+    state.last_attempt = now.timestamp()
+    state.running = True
+    state.deferred_for_logical_backup = False
+    try:
+        with _claim_scheduler_ownership():
+            await run_candidate()  # async-blocking-ok: ownership lock spans candidate child
+        state.last_success = time.time()
+        state.base_error = None
+    except LockTimeoutError:
+        state.deferred_for_logical_backup = True
+        _log.info("base candidate deferred while logical backup owns backup lock")
+    except OperationDeferred as exc:
+        state.base_error = str(exc)
+        _log.info("base candidate deferred: %s", exc.detail)
+    except Exception as exc:
+        state.base_error = str(exc)
+        _log.exception("base candidate failed; retrying on bounded cadence")
+    finally:
+        state.running = False
 
 
 async def run() -> None:
@@ -326,6 +342,7 @@ async def run() -> None:
     cleanup_pending = (
         any((physical_root / "restore").glob(".*.partial"))
         or any((physical_root / "base-candidates").glob(".*.partial"))
+        or any((physical_root / "base-candidates").glob(".*.retiring"))
         or any(
             (
                 physical_root

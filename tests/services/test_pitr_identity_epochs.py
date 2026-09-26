@@ -19,8 +19,8 @@ import psutil
 import pytest
 
 from services.pitr import restore_postgres, restore_proof
+from services.pitr.operation_custody import NativeProcess
 from services.pitr.restore_postgres import SandboxPostgresIdentity
-from services.pitr.worker_process import NativeProcess
 
 _macos_correction = pytest.mark.skipif(
     sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"

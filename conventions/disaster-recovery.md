@@ -22,7 +22,11 @@ base-candidate scheduler runs the monthly isolated proof only when
 
 Either failure emits the typed `recovery_drill_failed` telemetry event with the
 affected drill name. Grafana alerts immediately on that event's one-hour
-window. The retention planner remains viewer-only and dry-run-only: it emits
+window. Every backup and PITR operation also reports custody through
+`backup_operation_custody`: a failed or cancelled operation with proven group
+closure is quarantined without plaintext and warns while the next run proceeds;
+unproven closure blocks that operation kind and alerts as an error until
+`ava pitr operations retire` re-proves closure (`conventions/runbook.md`). The retention planner remains viewer-only and dry-run-only: it emits
 the backend-scoped remote object count and byte gauges but has no delete path.
 A non-paging warning is raised if the remote byte footprint remains more than
 25% above its week-ago value for one hour; a new inventory has no seven-day

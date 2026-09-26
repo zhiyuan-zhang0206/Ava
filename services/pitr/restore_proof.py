@@ -24,6 +24,7 @@ from services.pitr.base_restore_crypto import (
 )
 from services.pitr.crypto import MAGIC, decrypt_archive
 from services.pitr.object_store import RemoteObjectAck
+from services.pitr.operation_custody import NativeProcess, OperationWorker, claims_receipt
 from services.pitr.restore_manifest import (
     PROTECTED_SCHEMA_VERSION,
     ProtectedManifest,
@@ -35,11 +36,15 @@ from services.pitr.restore_manifest import (
 )
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.wal_validate import validate_wal_file
-from services.pitr.worker_process import NativeProcess
+from shared.native_process import native_boot_id
 
 
 class RestoreProofError(RuntimeError):
     pass
+
+
+class RestoreProofDeferredError(RestoreProofError):
+    """The proof declined before creating any restore evidence."""
 
 
 @dataclass(frozen=True)
@@ -161,7 +166,7 @@ def _require_space(root: Path, required: int) -> None:
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     free = shutil.disk_usage(root).free
     if free < required:
-        raise RestoreProofError(
+        raise RestoreProofDeferredError(
             f"restore proof deferred: requires {required} bytes but only {free} are free"
         )
 
@@ -293,7 +298,10 @@ def _sandbox_is_live(evidence: dict[str, object]) -> bool:
     value = evidence.get("sandbox_native")
     if value is None:
         return False
-    return _matching_process(NativeProcess.from_value(value)) is not None
+    native = NativeProcess.from_value(value)
+    if native.boot_id != native_boot_id():
+        return False  # No process of an earlier boot is running.
+    return _matching_process(native) is not None
 
 
 def _remove_owned_restore(partial: Path, owner: Path, evidence: dict[str, object]) -> None:
@@ -316,7 +324,7 @@ def _require_owner_object(value: object) -> dict[str, object]:
 
 
 def reconcile_restore_runtime(root: Path) -> None:
-    """Refuse interrupted work without the controller or native executor owner."""
+    """Worker-side guard: refuse unsettled restore work, then reconcile pending proof."""
 
     restore_root = root / "restore"
     owners = root / "restore-owners"
@@ -324,9 +332,51 @@ def reconcile_restore_runtime(root: Path) -> None:
     owner_paths: set[Path] = set(owners.glob("*.owner.json")) if owners.exists() else set()
     if owner_paths or partials:
         raise RestoreProofError(
-            "interrupted restore requires native operation retirement; "
-            "persisted receipts do not authorize process-group adoption"
+            "interrupted restore requires native operation retirement "
+            "(`ava pitr operations retire`); persisted receipts do not authorize "
+            "process-group adoption"
         )
+    reconcile_restore_pending(root)
+
+
+def quarantine_restore_staging(root: Path, work: Path, worker: OperationWorker | None) -> None:
+    """After proven closure, drop a worker's plaintext restore and keep its evidence.
+
+    The extracted PGDATA, the decrypted WAL, the downloaded ciphertext (a
+    verbatim copy of generation-pinned remote objects) and the socket directory
+    are removed. The owner receipt and the run's top-level logs and generated
+    configuration move into the quarantined controls.
+    """
+    owners = root / "restore-owners"
+    for owner in sorted(owners.glob("*.owner.json")) if owners.is_dir() else []:
+        evidence = _require_owner_object(json.loads(owner.read_text()))
+        if not claims_receipt(evidence["native"], worker):
+            continue
+        partial = Path(str(evidence["partial"]))
+        if partial.parent != root / "restore":
+            raise RestoreProofError("restore owner escaped the restore root")
+        if _sandbox_is_live(evidence):
+            raise RestoreProofError("refusing to remove a live restore PostgreSQL data directory")
+        receipts = work / "business"
+        receipts.mkdir(mode=0o700, exist_ok=True)
+        if partial.is_dir() and not partial.is_symlink():
+            kept = receipts / f"restore-{partial.name.removeprefix('.').removesuffix('.partial')}"
+            kept.mkdir(mode=0o700, exist_ok=True)
+            for item in sorted(partial.iterdir()):
+                if item.is_dir() and not item.is_symlink():
+                    shutil.rmtree(item)
+                elif item.is_file() and not item.is_symlink():
+                    shutil.move(item, kept / item.name)
+                else:
+                    item.unlink()
+            partial.rmdir()
+            _fsync_dir(partial.parent)
+        shutil.move(owner, receipts / owner.name)
+        _fsync_dir(owners)
+
+
+def reconcile_restore_pending(root: Path) -> None:
+    """Drop pending proofs whose local protected manifest already landed."""
     pending_root = root / "protected-pending"
     local_root = root / "protected-manifests"
     if pending_root.exists():

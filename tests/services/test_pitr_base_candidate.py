@@ -453,7 +453,7 @@ def test_commit_accepts_only_the_recorded_worker_then_retires_staging(tmp_path: 
     import psutil
 
     from services.pitr.base_manifest import CandidateManifest
-    from services.pitr.worker_process import NativeProcess
+    from services.pitr.operation_custody import NativeProcess
 
     root, ready, candidate = _prepared(tmp_path)
     base_candidate._record_owner(root, candidate.chain_id)
@@ -473,7 +473,7 @@ def test_commit_refusal_after_closure_retains_every_staged_file(
 
     import psutil
 
-    from services.pitr.worker_process import NativeProcess
+    from services.pitr.operation_custody import NativeProcess
 
     root, ready, candidate = _prepared(tmp_path)
     base_candidate._record_owner(root, candidate.chain_id)

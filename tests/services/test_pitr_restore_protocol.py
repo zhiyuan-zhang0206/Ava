@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from services.pitr import worker_process
+from services.pitr.operation_custody import OperationKind
 from shared.exec_process_domain import ExecProcessDomain
 
 
@@ -24,7 +25,7 @@ async def test_native_restore_result_is_atomic_before_receiver_validation(
     script.write_text(
         "import pathlib,sys,time\n"
         f"sys.path.insert(0, {str(Path.cwd())!r})\n"
-        "from services.pitr.worker_process import publish_result\n"
+        "from services.pitr.operation_custody import publish_result\n"
         "result,marker,release=map(pathlib.Path,sys.argv[1:])\n"
         "replace,write=pathlib.Path.replace,pathlib.Path.write_text\n"
         "def pause():\n"
@@ -59,7 +60,7 @@ async def test_native_restore_result_is_atomic_before_receiver_validation(
         worker_process.run_operation(
             "services.pitr.restore_worker",
             {},
-            control_root=tmp_path / "controls",
+            kind=OperationKind("test", tmp_path / "controls", tmp_path / "quarantine"),
             env={},
         )
     )
@@ -79,7 +80,7 @@ async def test_native_restore_result_is_atomic_before_receiver_validation(
         completed = await asyncio.wait_for(task, 5)
         assert completed.result["chain_id"] == "chain"
         assert children[0][0].returncode == 0
-        completed.retire()
+        await completed.commit(lambda: None)
         assert not result.parent.exists()
     finally:
         release.touch()

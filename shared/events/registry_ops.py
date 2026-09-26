@@ -16,6 +16,7 @@ from shared.events.system import (
     AgentRegistry,
     ArchiveFetchDegraded,
     Auth401Rejected,
+    BackupOperationCustody,
     CheckpointTableSizes,
     ConvergeFilePreserved,
     EventClassReopened,
@@ -349,6 +350,12 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "PITR remote object inventory (backend-scoped absolute object and byte state)",
         payload=PitrRemoteInventory,
         tier="noise",
+    ),
+    "backup_operation_custody": _telemetry(
+        "backup_operation_custody",
+        "backup or PITR operation quarantined, blocked on unproven closure, or retired",
+        payload=BackupOperationCustody,
+        tier="anomaly",
     ),
     "recovery_drill_failed": _telemetry(
         "recovery_drill_failed",

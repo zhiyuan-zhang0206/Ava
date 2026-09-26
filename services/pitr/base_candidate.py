@@ -30,8 +30,9 @@ from services.pitr.base_manifest import (
 from services.pitr.base_object_store import RestartableStreamingObjectStore
 from services.pitr.base_stream import BASE_MAGIC, load_or_create_source, snapshot_candidate
 from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
+from services.pitr.operation_custody import NativeProcess, OperationWorker, claims_receipt
 from services.pitr.space_budget import CandidateSpaceBudget, require_candidate_space
-from services.pitr.worker_process import NativeProcess, StopSignal
+from services.pitr.worker_process import StopSignal
 from shared.db import direct_db_url
 from shared.pg_tools import pg_tool
 
@@ -194,9 +195,38 @@ def _recover_owned_partials(root: Path) -> None:
     owners = list((root / "base-facts").glob("*.owner.json"))
     if partials or owners:
         raise BaseCandidateError(
-            "base candidate has unresolved operation evidence; native operation "
-            "retirement is required before retry, not receipt-based adoption"
+            "base candidate has unresolved operation evidence; `ava pitr operations "
+            "retire` must prove its worker closed, never receipt-based adoption"
         )
+
+
+def quarantine_candidate_staging(root: Path, work: Path, worker: OperationWorker | None) -> None:
+    """After proven closure, drop a worker's plaintext copy and keep its receipts.
+
+    An incomplete `.partial` copy of PGDATA never survives its writer. A
+    completed `.ready` capture keeps its facts and plan so the next worker can
+    resume it without another multi-hour capture; its owner receipt moves into
+    the quarantined controls, which frees the chain for that resumption.
+    """
+    facts = root / "base-facts"
+    owners = sorted(facts.glob("*.owner.json")) if facts.is_dir() else []
+    for owner in owners:
+        evidence = json.loads(owner.read_text())
+        if not claims_receipt(evidence["native"], worker):
+            continue
+        chain_id = str(evidence["chain_id"])
+        if not re.fullmatch(r"[0-9A-Za-z-]+", chain_id):
+            raise BaseCandidateError("base candidate owner names an invalid chain")
+        partial = root / "base-candidates" / f".{chain_id}.partial"
+        if partial.exists() or partial.is_symlink():
+            _remove_tree(partial)
+        if not (root / "base-candidates" / f"{chain_id}.ready").exists():
+            (facts / f"{chain_id}.json").unlink(missing_ok=True)
+            (root / "base-plans" / f"{chain_id}.plan.json").unlink(missing_ok=True)
+        receipts = work / "business"
+        receipts.mkdir(mode=0o700, exist_ok=True)
+        shutil.move(owner, receipts / owner.name)
+        _fsync_dir(facts)
 
 
 def _output_suffix(stdout: bytes | None, stderr: bytes | None) -> str:
@@ -330,6 +360,7 @@ def reconcile_completed_candidates(root: Path, *, key: bytes, key_id: str) -> No
     candidates = root / "base-candidates"
     if not candidates.exists():
         return
+    _finish_retiring_trees(root)
     for ready in candidates.glob("*.ready"):
         chain_id = ready.name.removesuffix(".ready")
         manifest = root / "base-manifests" / f"{chain_id}.candidate.json"
@@ -380,15 +411,43 @@ def reconcile_completed_candidates(root: Path, *, key: bytes, key_id: str) -> No
         ):
             raise BaseCandidateError("completed candidate cleanup evidence does not match")
         _remove_tree(ready)
-        plan_path.unlink(missing_ok=True)
-        _fsync_dir(plan_path.parent)
-        (root / "base-facts" / f"{chain_id}.json").unlink(missing_ok=True)
-        _fsync_dir(root / "base-facts")
+        _remove_commit_staging(root, chain_id)
+
+
+def _finish_retiring_trees(root: Path) -> None:
+    """A torn removal after the manifest committed is garbage, never evidence."""
+    for retiring in (root / "base-candidates").glob(".*.retiring"):
+        chain_id = retiring.name.removeprefix(".").removesuffix(".retiring")
+        if not (root / "base-manifests" / f"{chain_id}.candidate.json").is_file():
+            raise BaseCandidateError("retiring candidate tree lacks its committed manifest")
+        _remove_tree(retiring)
+        _remove_commit_staging(root, chain_id)
+
+
+def _remove_commit_staging(root: Path, chain_id: str) -> None:
+    for staged in (
+        root / "base-plans" / f"{chain_id}.plan.json",
+        root / "base-facts" / f"{chain_id}.json",
+    ):
+        if staged.parent.is_dir():
+            staged.unlink(missing_ok=True)
+            _fsync_dir(staged.parent)
 
 
 def reconcile_runtime_state(root: Path, *, key: bytes, key_id: str) -> None:
+    """Worker-side guard: refuse unsettled evidence, then finish committed cleanup."""
     with backup_lock(timeout_s=0):
         _recover_owned_partials(root)
+        reconcile_completed_candidates(root, key=key, key_id=key_id)
+
+
+def reconcile_committed_cleanup(root: Path, *, key: bytes, key_id: str) -> None:
+    """Scheduler-side cleanup of committed trees only.
+
+    Another operation's unsettled staging is its own kind's custody question
+    (quarantine or a blocked control root), never a reason to stall this.
+    """
+    with backup_lock(timeout_s=0):
         reconcile_completed_candidates(root, key=key, key_id=key_id)
 
 
@@ -536,10 +595,12 @@ def commit_base_candidate(root: Path, candidate: CandidateManifest, worker: Nati
         raise BaseCandidateError("prepared candidate evidence changed before controller commit")
     manifest_path = root / "base-manifests" / f"{chain_id}.candidate.json"
     _atomic_json(manifest_path, json.loads(candidate.to_json()))
-    _remove_tree(ready)
-    plan = root / "base-plans" / f"{chain_id}.plan.json"
-    plan.unlink()
-    _fsync_dir(plan.parent)
-    (root / "base-facts" / f"{chain_id}.json").unlink()
+    # Rename before removal: a crash mid-removal leaves a `.retiring` tree that
+    # reconciliation deletes, never a torn `.ready` it cannot verify.
+    retiring = ready.with_name(f".{chain_id}.retiring")
+    ready.rename(retiring)
+    _fsync_dir(retiring.parent)
+    _remove_tree(retiring)
+    _remove_commit_staging(root, chain_id)
     owner.unlink()
     _fsync_dir(owner.parent)

@@ -18,6 +18,7 @@ from services.pitr import restore_manifest, restore_postgres, restore_proof
 from services.pitr.base_manifest import SCHEMA_VERSION, BaseObject, CandidateManifest, WalRange
 from services.pitr.checksums import CRC32C, ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
+from services.pitr.operation_custody import NativeProcess
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_postgres import (
     IsolatedPostgresRestoreExecutor,
@@ -38,7 +39,6 @@ from services.pitr.restore_proof import (
     publish_candidate_proof,
     verify_candidate_proof,
 )
-from services.pitr.worker_process import NativeProcess
 from shared import pg_tools
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess

@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import cast
 
 import psycopg
 
 from services.pitr.base_manifest import CandidateManifest
+from services.pitr.operation_custody import OperationKind
+from services.pitr.restore_drill import validate_drill_inputs
 from services.pitr.restore_manifest import ProtectedManifest
 from services.pitr.restore_proof import (
     ProtectedManifestPublisher,
     RestoreSpaceBudget,
     publish_candidate_proof,
+    quarantine_restore_staging,
     retire_restore_work,
     verify_candidate_proof,
 )
@@ -31,6 +34,26 @@ from shared.pg_tools import pg_tool
 from shared.process_env import forwarded_proxy_env, restricted_process_env
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
+# A stopped drill stops its sandbox postmaster (bounded at 20 s), scans for
+# residue and writes its evidence before the controller's confirmed close.
+DRILL_GRACE_S = 45.0
+
+
+def restore_kind(root: Path) -> OperationKind:
+    """Scheduled and activation restore proofs share one physical-backup root."""
+    return OperationKind(
+        "restore-proof",
+        root / "restore-control",
+        root / "quarantine",
+        partial(quarantine_restore_staging, root),
+    )
+
+
+def drill_kind(root: Path) -> OperationKind:
+    """Operator drills keep their evidence in the operator's scratch tree."""
+    return OperationKind(
+        "pitr-drill", root / "drill-control", root / "quarantine", grace_s=DRILL_GRACE_S
+    )
 
 
 @dataclass(frozen=True)
@@ -168,7 +191,6 @@ def _request(inputs: RestoreWorkerInput) -> dict[str, object]:
             "logical_backup_peak": inputs.budget.logical_backup_peak,
             "emergency_floor": inputs.budget.emergency_floor,
         },
-        "live_db_url": inputs.live_db_url,
         "data_directory": inputs.data_directory,
         "pg_ctl": str(inputs.pg_ctl),
         "pg_verifybackup": str(inputs.pg_verifybackup),
@@ -179,25 +201,30 @@ async def run_restore(candidate: CandidateManifest) -> dict[str, str]:
     return await run_restore_input(input_for(candidate))
 
 
+def _secrets(inputs: RestoreWorkerInput) -> dict[str, str]:
+    """The live URL may embed a password: stdin only, never the retained request."""
+    return {"live_db_url": inputs.live_db_url}
+
+
 async def run_restore_input(inputs: RestoreWorkerInput) -> dict[str, str]:
     completed = await run_operation(
         "services.pitr.restore_worker",
         _request(inputs),
-        control_root=inputs.root / "restore-control",
+        kind=restore_kind(inputs.root),
         env=restricted_process_env() | forwarded_proxy_env(),
+        secrets=_secrets(inputs),
     )
-    outcome = restore_result(completed.work / "result.json")
     candidate = CandidateManifest.from_json(inputs.candidate_json)
-    # Scratch removal is bounded local I/O; keep the scheduler's health loop live.
-    await asyncio.to_thread(
-        retire_restore_work,
-        root=inputs.root,
-        candidate=candidate,
-        worker=completed.worker,
-        outcome=outcome,
-    )
-    completed.retire()
-    return outcome
+
+    def accept() -> dict[str, str]:
+        outcome = restore_result(completed.work / "result.json")
+        retire_restore_work(
+            root=inputs.root, candidate=candidate, worker=completed.worker, outcome=outcome
+        )
+        return outcome
+
+    # Scratch removal is bounded local I/O; commit keeps the health loop live.
+    return await completed.commit(accept)
 
 
 async def run_drill_input(
@@ -207,7 +234,16 @@ async def run_drill_input(
     target_lsn: str,
     target_wall: str,
     timeout_seconds: int,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, object]:
+    """Run one operator drill; accept only passing evidence for this candidate.
+
+    Operator input mistakes (a relative or used scratch, a target before the
+    chain start) are refused before any operation exists. `progress` receives
+    the drill's own progress lines while it runs.
+    """
+    candidate = CandidateManifest.from_json(inputs.candidate_json)
+    validate_drill_inputs(candidate, scratch, target_lsn)
     request = _request(inputs)
     request["drill"] = {
         "scratch": str(scratch),
@@ -218,18 +254,22 @@ async def run_drill_input(
     completed = await run_operation(
         "services.pitr.restore_worker",
         request,
-        control_root=inputs.root / "drill-control",
+        kind=drill_kind(inputs.root),
         env=restricted_process_env() | forwarded_proxy_env(),
+        secrets=_secrets(inputs),
+        progress=progress,
     )
-    payload = (scratch / "drill-evidence.json").read_bytes()
-    if completed.result != {"evidence_sha256": hashlib.sha256(payload).hexdigest()}:
-        raise RuntimeError(f"drill result differs from its retained evidence: {completed.work}")
-    evidence = cast(dict[str, object], json.loads(payload))
-    candidate = CandidateManifest.from_json(inputs.candidate_json)
-    if evidence["outcome"] != "pass" or evidence["chain_id"] != candidate.chain_id:
-        raise RuntimeError(f"drill did not complete the requested proof: {completed.work}")
-    completed.retire()
-    return evidence
+
+    def accept() -> dict[str, object]:
+        payload = (scratch / "drill-evidence.json").read_bytes()
+        if completed.result != {"evidence_sha256": hashlib.sha256(payload).hexdigest()}:
+            raise RuntimeError("drill result differs from its retained evidence")
+        evidence = cast(dict[str, object], json.loads(payload))
+        if evidence["outcome"] != "pass" or evidence["chain_id"] != candidate.chain_id:
+            raise RuntimeError("drill did not complete the requested proof")
+        return evidence
+
+    return await completed.commit(accept)
 
 
 def restore_result(result: Path) -> dict[str, str]:

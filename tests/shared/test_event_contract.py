@@ -220,11 +220,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # trigger + guardrail quintet (task #4674: hierarchy_enqueue_failed /
     # hierarchy_regen_alert / hierarchy_regen_halt / hierarchy_regen_low_reuse /
     # hierarchy_regen_budget_tripped) raises it to 219; pause_orphan_claim_settled
-    # (task #4728's parked orphan settlement) raises it to 220.
+    # (task #4728's parked orphan settlement) raises it to 220; the backup/PITR
+    # operation custody alert (backup_operation_custody) raises it to 221.
     # The recovery wake pacing pair (task #4722: host_recovery_wake_started /
     # host_recovery_wake_released) raises it to 222.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 220
+    assert len(_TELEMETRY_KINDS) == 221
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",
@@ -427,6 +428,13 @@ def test_stall_wave_mitigation_event_contract() -> None:
         "timeout_s",
     )
     assert tier_for("stream_stall_pair_terminated", "telemetry", "warning") == "anomaly"
+
+
+def test_backup_operation_custody_payload() -> None:
+    """Custody alerts group by operation kind; the detail is never a label."""
+    from shared.events.contract import payload_keys
+
+    assert payload_keys("backup_operation_custody") == ("operation", "custody", "detail")
 
 
 def test_recovery_drill_failed_payload() -> None:
