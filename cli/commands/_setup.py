@@ -161,9 +161,6 @@ def _resolve_capability(cap: _Capability, arg_value: bool | None) -> bool:  # no
         if text.strip():
             return parse_serve_value(text, str(p))
     if arg_value is not None:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("true" if arg_value else "false")
-        print(f"  · wrote {p} ({cap.file}={'true' if arg_value else 'false'})")
         return arg_value
     return False
 
@@ -191,9 +188,6 @@ def _resolve_setup_field(field: _SetupField, arg_value: str | None) -> str | Non
     if arg_value:
         if field.validator:
             field.validator(arg_value)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(arg_value)
-        print(f"  · wrote {p} ({field.name}={arg_value})")
         return arg_value
     return None
 
@@ -298,7 +292,7 @@ def _print_missing_setup_error(missing: list[_SetupField | _Capability], role: s
         )
     if role is None or "agent-runner" in caps:
         print(
-            "  # agent-runner (machine key set via `ava enroll`):\n"
+            "  # agent-runner (machine identity selected on first `ava start`):\n"
             "  ava start --machine-name <name> --serve-agent-runner \\\n"
             "            --memory-remote <git-url> --gateway-url <https-url>",
             file=sys.stderr,

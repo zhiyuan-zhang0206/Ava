@@ -18,8 +18,7 @@ HTTP call.
   retry with bounded exponential backoff + jitter (see `_retry_delay_s`).
   Business failures (status=="failed") and deterministic rejections (4xx,
   malformed body, unknown machine) never retry. An op whose effect is NOT
-  repeatable — the legacy spawn-launch prompt insert, cluster_update (a
-  second run spawns a second updater), lifecycle terminate/restart (a second
+  repeatable — the legacy spawn-launch prompt insert or lifecycle terminate/restart (a second
   run inserts a second inbound) — is safe to retry only because this module
   attaches an idempotency key to the envelope: the ops server dedupes by key
   and replays the first run's stored outcome instead of re-executing, so a
@@ -45,7 +44,7 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from ops.rpc_schemas import OpEnvelope, OpKind, OpResponse
+from ops.rpc_schemas import OpEnvelope, OpKind, OpResponse, is_op_kind
 from shared.cluster_auth import bearer_header
 from shared.config import settings
 from shared.machines import (
@@ -87,22 +86,18 @@ _RETRY_MAX_DELAY_S = 4.0
 
 # Ops that retain transport dedupe. The legacy spawn-launch inserts a prompt;
 # v2 only publishes a repeatable wake but still replays one recorded outcome
-# within an attempt. Updates — cluster_update, cluster_bootstrap_hop or
-# cluster_normal_continue — and lifecycle ops have non-repeatable effects.
+# within an attempt. Lifecycle ops have non-repeatable effects.
 # These are retried only under an idempotency key generated once per dispatch call unless
 # the caller supplies one; retries replay the first stored outcome.
 _NON_IDEMPOTENT_KINDS = frozenset(
     {
         "spawn-launch",
         "spawn-launch-v2",
-        "cluster_update",
-        "cluster_bootstrap_hop",
-        "cluster_normal_continue",
         "lifecycle",
     }
 )
 # A stable cross-dispatch key is only safe for an agent launch: a caller
-# repeating a lifecycle reconciliation or a failed update needs the runner to
+# repeating a lifecycle reconciliation needs the runner to
 # execute again rather than replay a stale failed outcome.
 _BUSINESS_ID_KEYS = {"spawn-launch": "agent_id", "spawn-launch-v2": "agent_id"}
 
@@ -282,7 +277,7 @@ async def _dispatch_once(
 
 async def dispatch_to_machine(
     target_machine: str,
-    kind: OpKind,
+    kind: str,
     payload: dict[str, Any],
     *,
     timeout_s: float | None = None,
@@ -302,7 +297,7 @@ async def dispatch_to_machine(
     (status=failed), 4xx statuses, malformed responses and an unresolvable
     machines row never retry.
 
-    Non-idempotent kinds (`spawn`, `cluster_update`, `lifecycle`) are retried
+    Non-idempotent kinds (`spawn`, `lifecycle`) are retried
     under an idempotency key. A payload business id gets a target-scoped,
     canonical-payload key, while an op without one gets a fresh UUID unless the
     caller passes `idempotency_key`. The ops server dedupes by key, so a retry
@@ -329,6 +324,8 @@ async def dispatch_to_machine(
             `ClusterOpUnreachable`.
         ClusterOpFailed: the host ran the op but it reported `status=failed`.
     """
+    if not is_op_kind(kind):
+        raise ValueError(f"unknown op kind: {kind!r}")
     if timeout_s is None:
         timeout_s = settings.gateway.cluster_rpc_timeout_seconds
 
@@ -375,18 +372,8 @@ async def dispatch_to_machine(
             last = exc
             if attempt < retries:
                 delay = _retry_delay_s(attempt)
-                # Intermediate failures are DEBUG for every kind except
-                # `cluster_fetch`: the final outcome (success, or the exhausted
-                # WARNING below) is what an operator needs, and each intermediate
-                # line is retry machinery. The fetch is the exception because its
-                # retries are not cheap machinery — each transport timeout IS a
-                # full 30s host-side `git fetch` that ran and died (observed on
-                # win/wsl: two timeouts, success on the third), and the rollout
-                # log (Phase 0) is where the long tail is read. Every attempt
-                # must be visible there, or "69s Phase 0" is a gap with no
-                # breakdown (2026-08-27 forensics).
-                attempt_log = _log.warning if kind == "cluster_fetch" else _log.debug
-                attempt_log(
+                # Intermediate transport retries stay quiet; exhaustion is reported below.
+                _log.debug(
                     "cluster_rpc %s -> machine=%s attempt %d/%d failed, retrying in %.1fs: %r",
                     kind,
                     target_machine,

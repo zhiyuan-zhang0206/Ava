@@ -5,10 +5,11 @@ the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
 R1-R3, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
 line under `{service_name="unknown_service"}`, body = the full event JSON, so
 `| json` flattens each line to labels), while R4, the gateway-metrics silence
-rule, and the watchdog-tick staleness rule query **Prometheus** (the
+rule, and the root-health round freshness rule query **Prometheus** (the
 `ava_llm_usage_latency_milliseconds` histogram,
 `ava_gateway_latency_count_total` heartbeat,
-`ava_watchdog_tick_last_tick_timestamp_seconds` gauge, and R18 turn-duration
+`ava_root_health_tick_last_tick_timestamp_seconds` and
+`ava_root_health_expected_expected_since_timestamp_seconds` gauges, and R18 turn-duration
 histogram); R24 queries Prometheus's own too-old-samples counter. The retired
 Postgres events read path (#1197) is gone — nothing
 queries the `ops` datasource from these rules.
@@ -227,12 +228,10 @@ a new provider is covered by adding its string there, with no edit to
 
 ## Sync to the live Grafana
 
-There is no copy step: native Grafana reads this directory from the source
-checkout. Alert-rule provisioning does **not** hot-reload file changes
-(verified 2026-08-04), so restart it after editing `rules.yml` with
-`launchctl kickstart -k gui/$(id -u)/com.ava.grafana.<home-slug>` (first run
-`launchctl bootstrap gui/$(id -u) <plist>` if the job is not loaded).
-Datasource and contact-point provisioning do hot-reload.
+Converge renders the provisioning tree into this home's native configuration.
+Alert-rule changes require a new root generation. Use normal `ava stop -y` then
+`ava start`; readiness alone cannot prove that a running Grafana reloaded a file.
+There is no independent launchd or systemd Grafana restart path.
 
 ## How to add a rule
 

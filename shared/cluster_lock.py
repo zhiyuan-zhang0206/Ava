@@ -3,10 +3,9 @@
 A single row in `deployment_state` (central DB) that the gateway update
 orchestration takes before Phase A and releases at the end, so two update rollouts
 cannot run concurrently — the 2026-06-01 collision, where a manual rollout raced the
-cluster's own `ava.self.update` and both advanced the central schema. The
-session-name guard in `ops/cluster_deploy.py` is a TOCTOU-prone first line; this DB
-compare-and-set is the authoritative one. The row IS the R1 deployment-state row:
-besides the lease it carries `phase` (stable/updating/settling) and `kind`
+cluster's own `ava.self.update` and both advanced the central schema. This DB
+compare-and-set is the authoritative mutual exclusion. The row IS the R1
+deployment-state row: besides the lease it carries `phase` (stable/updating/settling) and `kind`
 (rollout/restart/update), the explicit model that replaces the implicit conjunction
 of flag files, session names and log mtimes (okf/design/r1-state-liveness).
 This module owns the cluster-level transitions; host-level state lives in
@@ -166,8 +165,8 @@ class DeployLease:
         Permitting is deliberately narrow: it says nothing about *other* hosts' heals,
         it does not release the hold, and it does not weaken the refusal a second
         `ava cluster update` gets. It also answers only the question the *lease* can answer.
-        A caller that consults a second signal — `ops.cluster.current_orchestration`,
-        which sees the watchdog-spawned updater that takes no lease — must still
+        A caller that consults a second signal — a host's `host_deploy_state`
+        posture, which covers host-local work that takes no lease — must still
         consult it: a True here is not a verdict that nothing is running on this host.
         A lease carrying no settle fact — an orchestration executing right now — is
         never permitted, the same line `release_settle_hold` and `renew_update_lock`
@@ -535,8 +534,7 @@ def release_update_lock(holder: str) -> None:
     """
     # direct=True: this release must land even when the data-plane stop this
     # rollout just ran left the pooler half-shut — the write cannot depend on
-    # the path the stop took down (issue #2307; the same standing reason
-    # `_update_git.current_schema_state` dials direct during an update).
+    # the path the stop took down (issue #2307).
     with write_transaction(direct=True) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE deployment_state SET holder = NULL, acquired_at = NULL, expires_at = NULL, "

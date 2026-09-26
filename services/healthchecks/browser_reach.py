@@ -1,30 +1,8 @@
-"""Browser reach healthcheck — does the shared browser's own network face reach the gateway?
+"""Browser network canary and host contrast, scheduled by root diagnostics.
 
-Run by the agent-runner watchdog (internally throttled,
-``settings.services.browser_reach_probe_interval_s``).
-
-The ``browser`` and ``browser_mcp`` checks certify process identity and
-supervision, and both stayed green through the 2026-09-18 macmini incident
-(task #3921) while every page-level request from the shared Chrome to the app
-host hung — stale tabs held the profile's connection pool after a gateway
-restart, so navigations and fetches never settled while a same-machine ``curl``
-answered in 0.1s. Nothing traversed the browser's network face; this check does,
-with two signals because either alone lies:
-
-- **browser path** — a canary fetch through the browser itself: CDP creates a
-  background ``about:blank`` target, runs a ``no-cors`` fetch of the gateway
-  health URL in it under a wall-clock deadline, and closes the target in
-  ``finally`` — the canary never becomes a new occupant.
-- **host path** — the same URL read with urllib from this process, the
-  "same-machine curl" contrast.
-
-A failing browser path with a healthy host path is the pool/hang shape this
-check reports; when the host path fails too, the outage is the gateway's story
-and the canary stays quiet. Reporting is episode-gated: one ERROR after
-``browser_reach_failure_threshold`` consecutive failing probes, carrying both
-raw readings and the recovery recipe pointer, then silence until a healthy
-probe logs recovery and re-arms. The check never respawns anything — a browser
-respawn would clear the user's tabs, the opposite of the remedy.
+The canary opens one temporary target and closes it in finally. It never stops,
+restarts, or repairs the shared browser. Root diagnostics verifies native
+listener ancestry before and after invoking these protocol helpers.
 """
 
 from __future__ import annotations
@@ -32,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
-import logging
 import time
 import urllib.error
 import urllib.request
@@ -41,22 +18,7 @@ from typing import Any, NamedTuple, cast
 
 import websockets
 
-from services.browser.probe import cdp_url, probe_browser
-from shared.config import settings
-from shared.log import init_gateway_process
-
-_log = logging.getLogger("services.healthchecks.browser_reach")
-
-# Where the reader of the one ERROR line finds the full incident write-up and
-# the manual recovery steps.
-_RECIPE_POINTER = "infra/machines/macmini/browser/macmini-shared-chrome-20016-pool-hang-20260918"
-
-# Per-watchdog-process state: the throttle clock and the failure episode span
-# rounds in a long-lived watchdog; a restart simply re-arms (conservative).
-# brew_pin.py carries the same one-global pattern.
-_last_probe_monotonic: float | None = None
-_consecutive_failures: int = 0
-_reported: bool = False
+from services.browser.probe import cdp_url
 
 # CDP request ids need only be unique per connection, but a global counter is
 # valid anywhere and keeps the helpers stateless.
@@ -171,94 +133,3 @@ def _host_probe(url: str, timeout_s: float) -> _HostResult:
         return _HostResult(
             ok=False, detail=f"{type(exc).__name__} after {time.monotonic() - started:.2f}s"
         )
-
-
-def main() -> None:
-    global _last_probe_monotonic, _consecutive_failures, _reported  # noqa: PLW0603 — state spans watchdog rounds
-
-    init_gateway_process(name="browser_reach-healthcheck")
-
-    interval_s = settings.services.browser_reach_probe_interval_s
-    now = time.monotonic()
-    if (
-        interval_s > 0
-        and _last_probe_monotonic is not None
-        and now - _last_probe_monotonic < interval_s
-    ):
-        return
-    _last_probe_monotonic = now
-
-    url = settings.services.gateway_health_url.strip()
-    if not url:
-        return
-
-    probe = probe_browser()
-    if not probe.alive:
-        # The browser check owns liveness/identity; with no probe-alive browser
-        # there is nothing to measure, and browser downtime must not count as
-        # canary failures (a rebuild also clears the hang this check reports).
-        _consecutive_failures = 0
-        _log.debug(
-            "[browser-reach healthcheck] browser not probe-alive (%s); canary skipped",
-            probe.detail,
-        )
-        return
-
-    canary = _canary(
-        settings.services.browser_cdp_port, url, settings.services.browser_reach_timeout_s
-    )
-    if canary.outcome == "skip":
-        _log.debug("[browser-reach healthcheck] canary skipped: %s", canary.detail)
-        return
-    if canary.outcome == "ok":
-        _consecutive_failures = 0
-        if _reported:
-            _reported = False
-            _log.info("[browser-reach healthcheck] browser reach recovered (%s)", canary.detail)
-        return
-
-    host = _host_probe(url, settings.services.browser_reach_timeout_s)
-    if not host.ok:
-        # The host path fails too: a gateway/network outage, another check's
-        # story. Do not accumulate the browser-facing count against it.
-        _consecutive_failures = 0
-        _log.debug(
-            "[browser-reach healthcheck] both paths failing (browser=%s; host=%s) — "
-            "host-side outage, not counting",
-            canary.detail,
-            host.detail,
-        )
-        return
-
-    _consecutive_failures += 1
-    threshold = settings.services.browser_reach_failure_threshold
-    if _consecutive_failures < threshold:
-        _log.debug(
-            "[browser-reach healthcheck] canary failing %d/%d (browser=%s; host=%s)",
-            _consecutive_failures,
-            threshold,
-            canary.detail,
-            host.detail,
-        )
-        return
-    if _reported:
-        _log.debug(
-            "[browser-reach healthcheck] still failing (already reported): %s", canary.detail
-        )
-        return
-    _reported = True
-    _log.error(
-        "[browser-reach healthcheck] the browser cannot reach the gateway (%d consecutive "
-        "probes): browser path=%s; host path=%s — the pool/hang shape, not a host outage. "
-        "Recovery: close the stale tabs holding %s (recipe: %s). No automatic action was "
-        "taken (a browser respawn would clear the user's tabs).",
-        _consecutive_failures,
-        canary.detail,
-        host.detail,
-        url,
-        _RECIPE_POINTER,
-    )
-
-
-if __name__ == "__main__":
-    main()

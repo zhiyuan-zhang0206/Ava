@@ -22,25 +22,25 @@ def _duration(value: str) -> str:
 
 
 def _h_plugins_update(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_plugins_update
+    from cli.commands.plugins import cmd_plugins_update
 
     return cmd_plugins_update()
 
 
 def _h_plugins_install(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_plugins_install
+    from cli.commands.plugins import cmd_plugins_install
 
     return cmd_plugins_install(args.url, args.ref, args.path, accept_risk=args.accept_risk)
 
 
 def _h_plugins_uninstall(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_plugins_uninstall
+    from cli.commands.plugins import cmd_plugins_uninstall
 
     return cmd_plugins_uninstall(args.name)
 
 
 def _h_plugins_installed(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_plugins_installed
+    from cli.commands.plugins import cmd_plugins_installed
 
     return cmd_plugins_installed()
 
@@ -55,37 +55,37 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
 
 
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_plugins_upgrade
+    from cli.commands.plugins import cmd_plugins_upgrade
 
     return cmd_plugins_upgrade(args.name, force=args.force)
 
 
 def _h_skill_update(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_skill_update
+    from cli.commands.skill import cmd_skill_update
 
     return cmd_skill_update(args.names, force=args.force)
 
 
 def _h_skill_upgrade(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_skill_upgrade
+    from cli.commands.skill import cmd_skill_upgrade
 
     return cmd_skill_upgrade(args.name, force=args.force)
 
 
 def _h_plugins_enable(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_plugins_enable
+    from cli.commands.plugins import cmd_plugins_enable
 
     return cmd_plugins_enable(args.name)
 
 
 def _h_plugins_disable(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_plugins_disable
+    from cli.commands.plugins import cmd_plugins_disable
 
     return cmd_plugins_disable(args.name)
 
 
 def _h_skill_install(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_skill_install
+    from cli.commands.skill import cmd_skill_install
 
     return cmd_skill_install(
         args.source,
@@ -98,31 +98,31 @@ def _h_skill_install(args: argparse.Namespace) -> int:
 
 
 def _h_skill_enable(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_skill_enable
+    from cli.commands.skill import cmd_skill_enable
 
     return cmd_skill_enable(args.name)
 
 
 def _h_skill_disable(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_skill_disable
+    from cli.commands.skill import cmd_skill_disable
 
     return cmd_skill_disable(args.name)
 
 
 def _h_skill_register(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_skill_register
+    from cli.commands.skill import cmd_skill_register
 
     return cmd_skill_register(args.name, accept_risk=args.accept_risk)
 
 
 def _h_skill_scan(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_skill_scan
+    from cli.commands.skill import cmd_skill_scan
 
     return cmd_skill_scan(args.target)
 
 
 def _h_skill_trust(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_skill_trust
+    from cli.commands.skill import cmd_skill_trust
 
     return cmd_skill_trust(args.name, revoke=args.revoke)
 

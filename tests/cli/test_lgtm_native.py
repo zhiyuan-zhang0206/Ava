@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import plistlib
 import subprocess
 from pathlib import Path
 
@@ -13,7 +12,15 @@ import yaml
 from cli.commands import _lgtm_native
 from cli.commands._converge_spec import ConvergeCtx
 from shared import resilience
+from shared.config import settings
+from shared.lgtm_local import BACKENDS, backend_urls, service_argv
 from shared.loki_index_labels import validate_loki_deploy_config
+
+_REAL_VERIFY_LOKI = _lgtm_native._verify_loki
+
+
+def _skip_binary_verification(_home: Path) -> None:
+    """Render fixtures do not install native executable assets."""
 
 
 @pytest.fixture(autouse=True)
@@ -21,11 +28,7 @@ def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """These existing lifecycle cases exercise the Darwin implementation."""
     monkeypatch.setattr(_lgtm_native.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "arm64")
-
-    def absent_job(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args, 1, "", "")
-
-    monkeypatch.setattr(_lgtm_native, "_launchctl", absent_job)
+    monkeypatch.setattr(_lgtm_native, "_verify_loki", _skip_binary_verification)
 
 
 def _repo() -> Path:
@@ -41,17 +44,6 @@ def _mark_current(home: Path) -> None:
     for name, spec in _lgtm_native._load_versions(_repo()).items():
         (native_dir / f"version-{name}").parent.mkdir(parents=True, exist_ok=True)
         (native_dir / f"version-{name}").write_text(spec["version"] + "\n", encoding="utf-8")
-
-
-def _redirect_plists(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
-    def fake_plist_path(name: str) -> Path:
-        return root / f"com.ava.{name}.plist"
-
-    monkeypatch.setattr(
-        _lgtm_native,
-        "_plist_path",
-        fake_plist_path,
-    )
 
 
 # The fixed document the S3 dashboard render is stubbed to: these converge
@@ -116,6 +108,7 @@ def test_platform_tag_supports_darwin_arm64_and_linux_amd64(
 ) -> None:
     monkeypatch.setattr(_lgtm_native.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(_lgtm_native, "_verify_loki", _skip_binary_verification)
     assert _lgtm_native.platform_tag() == "darwin_arm64"
 
     monkeypatch.setattr(_lgtm_native.platform, "system", lambda: "Linux")
@@ -167,7 +160,6 @@ def test_ensure_skips_download_when_markers_match(
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
-    _redirect_plists(monkeypatch, tmp_path / "plists")
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
 
     def fail_download(_name: str, _version: str, _asset: dict[str, str], _native_dir: Path) -> None:
@@ -179,7 +171,7 @@ def test_ensure_skips_download_when_markers_match(
         fail_download,
     )
 
-    _lgtm_native.ensure_lgtm_native(_repo(), home)
+    _lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(_lgtm_native.BACKENDS))
 
     assert (home / "lgtm/native/config/loki.yaml").exists()
 
@@ -190,7 +182,6 @@ def test_ensure_downloads_when_a_marker_is_stale(
     home = tmp_path / "home"
     _mark_current(home)
     (_native_dir(home) / "version-loki").write_text("old\n", encoding="utf-8")
-    _redirect_plists(monkeypatch, tmp_path / "plists")
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
     downloads: list[str] = []
 
@@ -205,7 +196,7 @@ def test_ensure_downloads_when_a_marker_is_stale(
         record_download,
     )
 
-    _lgtm_native.ensure_lgtm_native(_repo(), home)
+    _lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(_lgtm_native.BACKENDS))
 
     assert downloads == ["loki"]
 
@@ -287,7 +278,6 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
 ) -> None:
     home = tmp_path / "home"
     _mark_current(home)
-    _redirect_plists(monkeypatch, tmp_path / "plists")
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
     # Pin the listen-host and read-URL settings to their defaults so the
     # rendered bytes are deterministic regardless of the runner's environment.
@@ -309,7 +299,7 @@ def test_ensure_renders_configs_with_native_paths_and_loopback(
         "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
 
-    _lgtm_native.ensure_lgtm_native(_repo(), home)
+    _lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(_lgtm_native.BACKENDS))
 
     config_dir = _native_dir(home) / "config"
     loki = (config_dir / "loki.yaml").read_text(encoding="utf-8")
@@ -403,7 +393,6 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
     self-scrape working without template edits."""
     home = tmp_path / "home"
     _mark_current(home)
-    _redirect_plists(monkeypatch, tmp_path / "plists")
     monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "10.0.0.5")
     monkeypatch.setattr(
@@ -419,7 +408,7 @@ def test_ensure_renders_scrape_targets_from_telemetry_read_urls(
         "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
 
-    _lgtm_native.ensure_lgtm_native(_repo(), home)
+    _lgtm_native.ensure_lgtm_native(_repo(), home, services=frozenset(_lgtm_native.BACKENDS))
 
     prometheus = yaml.safe_load(
         (_native_dir(home) / "config/prometheus.yml").read_text(encoding="utf-8")
@@ -458,27 +447,15 @@ def test_render_configs_validates_loki_before_writing(
     assert validated
 
 
-def test_render_plist_uses_absolute_paths_and_memory_caps(tmp_path: Path) -> None:
-    native_dir = tmp_path / "home/lgtm/native"
-    home = tmp_path / "home"
-
-    expected_limits = {"loki": "2GiB", "prometheus": "1GiB"}
-    for name, expected_limit in expected_limits.items():
-        rendered = _lgtm_native._render_plist(name, native_dir, home)
-        plist = plistlib.loads(rendered.encode())
-        assert plist["Label"] == _lgtm_native.native_label(name, home)
-        assert plist["EnvironmentVariables"]["GOMEMLIMIT"] == expected_limit
-        assert Path(plist["ProgramArguments"][0]).is_absolute()
-        if name == "prometheus":
-            assert "--storage.tsdb.retention.time=180h" in plist["ProgramArguments"]
-        assert plist["StandardOutPath"] == str(home / f"lgtm/native/logs/{name}.log")
-        assert plist["StandardErrorPath"] == str(home / f"lgtm/native/logs/{name}.log")
-
-
 def test_native_step_does_not_touch_an_unmarked_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    ctx = ConvergeCtx(repo=_repo(), ava_home=tmp_path / "home", roles=frozenset({"gateway"}))
+    ctx = ConvergeCtx(
+        repo=_repo(),
+        ava_home=tmp_path / "home",
+        roles=frozenset({"gateway"}),
+        services=frozenset(_lgtm_native.BACKENDS),
+    )
 
     def fail_ensure(_repo_path: Path, _home: Path) -> None:
         pytest.fail("unmarked homes must be a no-op")
@@ -587,3 +564,80 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
     ]
     err = capsys.readouterr().err
     assert "keeping the previous file" in err
+
+
+def test_native_listener_ports_are_independent_of_external_query_urls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "isolated"
+    native = home / "lgtm/native"
+    monkeypatch.setattr(settings.observability, "lgtm_listen_host", "127.0.0.1")
+    monkeypatch.setattr(settings.observability, "lgtm_grafana_listen_host", "127.0.0.1")
+    for name, port in (
+        ("loki", 53100),
+        ("loki_grpc", 59095),
+        ("prometheus", 59090),
+        ("grafana", 53003),
+    ):
+        monkeypatch.setattr(settings.observability, f"lgtm_{name}_port", port)
+    monkeypatch.setattr(settings.observability, "telemetry_loki_url", "https://query.example/loki")
+    repo = Path(__file__).resolve().parents[2]
+    _lgtm_native._render_configs(repo, native, home)
+    loki = yaml.safe_load((native / "config/loki.yaml").read_text())
+    assert loki["server"]["http_listen_port"] == 53100
+    assert loki["server"]["grpc_listen_port"] == 59095
+    assert "http_port = 53003" in (native / "config/grafana.ini").read_text()
+    assert "GRAFANA_ROOT_URL:-http://localhost:53003}" in (native / "grafana/run.sh").read_text()
+    argv = service_argv(home, "prometheus")
+    assert "--web.listen-address=127.0.0.1:59090" in argv
+    assert backend_urls() == {
+        "loki": "http://127.0.0.1:53100",
+        "prometheus": "http://127.0.0.1:59090",
+        "grafana": "http://127.0.0.1:53003",
+    }
+
+
+def test_matching_versions_from_another_platform_are_downloaded_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    native = home / "lgtm/native"
+    native.mkdir(parents=True)
+    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "linux_amd64")
+    repo = Path(__file__).resolve().parents[2]
+    assets = _lgtm_native._load_versions(repo)
+    for name, asset in assets.items():
+        (native / f"version-{name}").write_text(asset["version"])
+        (native / f"platform-{name}").write_text("darwin_arm64")
+    downloads: list[str] = []
+
+    def download(name: str, _version: str, asset: dict[str, str], _native: Path) -> None:
+        assert "linux" in asset["url"]
+        if name != "grafana":
+            assert "linux-amd64" in asset["member"]
+        downloads.append(name)
+
+    monkeypatch.setattr(_lgtm_native, "_download_and_verify", download)
+    _lgtm_native.ensure_lgtm_native(repo, home, services=frozenset(_lgtm_native.BACKENDS))
+    assert downloads == list(BACKENDS)
+
+
+def test_pinned_loki_parser_rejection_blocks_preparation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+
+    def reject(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, "", "unknown config field")
+
+    monkeypatch.setattr(_lgtm_native.subprocess, "run", reject)
+    with pytest.raises(RuntimeError, match="unknown config field"):
+        _REAL_VERIFY_LOKI(tmp_path)
+    assert calls == [
+        [
+            str(tmp_path / "lgtm/native/bin/loki"),
+            f"-config.file={tmp_path}/lgtm/native/config/loki.yaml",
+            "-verify-config",
+        ]
+    ]

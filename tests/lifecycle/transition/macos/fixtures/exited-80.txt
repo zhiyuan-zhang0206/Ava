@@ -1,0 +1,78 @@
+gui/501/com.ava.review.finite-measure.cc65579c4b98.fail = {
+	active count = 0
+	path = /fixture/job/fail/com.ava.review.finite-measure.cc65579c4b98.fail.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /fixture/helper/AvaPermissionsHelper
+	arguments = {
+		/fixture/helper/AvaPermissionsHelper
+		--finite-executor
+		v1
+		--cwd
+		/fixture/job/fail
+		--env
+		HOME=/fixture/job/fail
+		--env
+		PATH=/usr/bin:/bin
+		--
+		/fixture/python3.12
+		-I
+		-S
+		-B
+		/fixture/job/fail/worker.py
+		/fixture/job/fail
+		fail
+	}
+
+	working directory = /fixture/job/fail
+
+	stdout path = /fixture/job/fail/stdout.log
+	stderr path = /fixture/job/fail/stderr.log
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.GML39p1dD5/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => com.ava.review.finite-measure.cc65579c4b98.fail
+	}
+
+	domain = gui/501 [100023]
+	umask = 22
+	asid = 100023
+	minimum runtime = 10
+	exit timeout = 20
+	runs = 1
+	last exit code = 80
+
+	resource coalition = {
+		ID = 11237
+		type = resource
+		state = active
+		active count = 1
+		name = com.ava.review.finite-measure.cc65579c4b98.fail
+	}
+
+	jetsam coalition = {
+		ID = 11238
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ava.review.finite-measure.cc65579c4b98.fail
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = runatload | inferred program
+}

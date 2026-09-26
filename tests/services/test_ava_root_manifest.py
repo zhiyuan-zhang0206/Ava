@@ -207,3 +207,32 @@ def test_load_manifests_rejects_bad_documents(tmp_path: Path, content: str, matc
 def test_load_manifests_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ManifestError, match="cannot read manifest file"):
         load_manifests(tmp_path / "absent.json")
+
+
+def test_input_seals_roundtrip_and_change_the_generation(tmp_path: Path) -> None:
+    from services.ava_root.inputs import InputSeal
+
+    config = tmp_path / "config"
+    config.write_text("first")
+    raw = _manifest(inputs=[InputSeal.capture(config).as_mapping()])
+    first = UnitManifest.from_mapping(raw, origin="test")
+    first.inputs[0].require_unchanged()
+    config.write_text("second")
+    second = UnitManifest.from_mapping(
+        _manifest(inputs=[InputSeal.capture(config).as_mapping()]), origin="test"
+    )
+    assert first.digest() != second.digest()
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        None,
+        {},
+        [{"path": "relative", "digest": "a" * 64}],
+        [{"path": "/absolute", "digest": "broken"}],
+    ],
+)
+def test_invalid_input_seals_fail_closed(invalid: object) -> None:
+    with pytest.raises(ManifestError, match="service input"):
+        UnitManifest.from_mapping(_manifest(inputs=invalid), origin="test")

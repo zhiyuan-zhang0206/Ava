@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava cluster Subcommands
-description: '`ava cluster ...` — verbs that act on a cluster rather than on this host''s services. Addressed by home path (`--path`), never by name: roster, down/destroy, rollback, health-probe, recover, and the OS-job registration verbs.'
+description: '`ava cluster ...` — verbs that act on a cluster rather than on this host''s services. Addressed by home path (`--path`), never by name: roster, down/destroy, prepared release operations, health-probe, recover, and the OS-job registration verbs.'
 tags:
 - cli
 - cluster-lifecycle
@@ -25,16 +25,12 @@ A cluster's identity **is** its home path, so every verb that names one takes
 | Command | Function |
 |---------|----------|
 | `ls` / `status` | registered clusters / multi-machine roster |
-| `restart` | bounce **the entire** cluster (local + fan-out, no git pull; POST `/api/cluster/restart`) |
+| `update --prepared REQUEST` | submit or resume one captured release operation; no implicit source checkout update or target-machine shortcut. [[cli/release_transition/release_transition.ava.okf.md]] owns its input, native custody, and recovery contracts |
 | `down --path <home>` | stop the cluster at the home, keeping registry entry + data (safe stop for worktrees) |
 | `destroy --path <home>` | stop + free the registry slot (port block); `--drop-db` deletes pg/redis data too; **refuses `~/.ava` (prod)** |
-| `rollback` | commit-pinned (`apply_down` to target sha) |
-| `health-probe` | health-probe cron payload (exit 0/1); **not** `cluster status` (roster GET). Every outage episode persists its start in `$AVA_HOME/health_probe_alert`, stays silent through the normal-recovery window, then grades WARNING → ERROR. A live deploy lease pauses grading (except disk pressure) without resetting the start, and `--auto-rollback` still resets the consecutive counter because pre-deploy failures describe the replaced commit. Low agent population remains a failed observation during an explicit local agent-host disable or native maintenance hold: its global alert grading continues, but it clears rollback counting and cannot promote pending known-good code. Alert-only checks 9-10 guard the provider account: a configured balance minimum (`AVA_PROVIDER_GUARD_BALANCE_MIN_CNY`) fires before the account runs dry, and a halted-agents count fires while several agents sit halted by permanent provider rejections |
+| `health-probe` | Observation-only OS job (exit 0/1; wrong-checkout refusal is 2). Every outage episode persists its start in `$AVA_HOME/health_probe_alert`, stays silent through normal recovery, then grades WARNING → ERROR. A live deploy lease pauses explained grading without resetting its start; disk pressure remains independent. Low agent population remains unhealthy during local maintenance and keeps global alert grading. The probe neither rolls back releases nor publishes known-good state. Provider balance and halted-agent checks remain part of health observation. |
 | `recover` | clear a stranded update lock + pause; refuses while the holder pid lives |
-| `recover-pending` | run the checked recovery for a durable pending managed-writer publication left by an interrupted rollout — new rollout lease, new challenge, fresh complete per-unit writer closure (`ops/publication_recovery.py`); proves every live owner gone and, until the trusted closure producer is connected, refuses before touching the lease. Agent births stay frozen until the recovery completes. Its `--pre-stop` mode is the exact pre-stop abort (task #4129 C-4): reads every journaled unit's bootstrap-recovery journal slot (the hop child's first durable write), and only when every unit answers "none" — and the journal records no collection/migration/readbacks — clears the never-effective pending record and releases the abandoned lease in one guarded write; any doubt refuses and leaves the checked path |
-| `health-probe-register` / `health-probe-unregister` | cluster-level cron |
-| `watchdog-probe --role <cap>` | 60s OS job respawning that capability's dead watchdog — ends the who-watches-the-watchdog recursion (`-register` / `-unregister` variants) |
-| `boot-unit install\|uninstall\|status` | [Linux] the distro-level **system** unit that owns the boot path (`ava-boot.<home-slug>.service`, `shared/os_boot_unit.py`): its convergence script runs `ava start --no-readiness-gate` once per attempt, systemd retries (no attempt cap). `install --no-enable` stages the files — the crontab `@reboot` entry stays the live boot path until an enable removes it in the same call. `status` is a read-only report |
+| `health-probe-register` / `health-probe-unregister` | Register/remove the observation-only OS job; registration accepts its interval, with no rollback threshold |
 | `pitr status\|activate\|rollback` | durable physical-backup activation lifecycle; the first delivery validates shadow readiness and creates the mandatory logical recovery floor, then stops before PostgreSQL mutation |
 
 ## Notes
@@ -43,13 +39,13 @@ A cluster's identity **is** its home path, so every verb that names one takes
   and the data on disk (the safe way to stop a dev worktree cluster), `destroy`
   frees the port block. Only `destroy` can be told to drop the data.
 - A destroyed home keeps its files, `.env` included — that `.env` is the only
-  copy of the cluster's secret, of any key hand-added beyond `seed_allowlist()`, and
+  copy of the cluster's secret, of any explicitly configured provider credentials, and
   of the URLs the data-plane identity is read from, so freeing a slot never
   discards credentials. (It would not strand the preserved pg data either way:
   `ensure_cluster_role` re-sets the role password to the current secret on every
   bring-up, so a rotation self-heals — the cost of losing `.env` is credentials
   and config, not data.) The leftover home stays *un-bootable* instead: the start gate
-  (`cli/preflight.py:require_installed_home`) refuses a home the registry does
+  (`cli/start_identity.py:_validate_existing`) refuses a home the registry does
   not corroborate — no record, or a record whose port block the home's `.env`
   contradicts, which is what a since-reallocated block looks like from inside
   the stale home.
@@ -58,12 +54,12 @@ A cluster's identity **is** its home path, so every verb that names one takes
 - `status`'s columns answer three different questions. `pin` and `code` are live
   per-host probe readings (checkout vs the cluster pin; the commit the answering
   process froze at). `hold` is not a probe at all: it is transcribed from the live
-  `cluster_update_lock` lease — a banner above the table naming the lease, and
+  `deployment_state` lease — a banner above the table naming the lease, and
   `waited-on` on each host a settle hold's recorded waiting set names as still converging. So it
   explains a refused deploy without claiming to know convergence: `waited-on` is
   what the hold *says* it waits for, a blank cell is "not named by this hold" (a
   host that never acked never is), and a blank column is not proof no deploy runs —
-  a watchdog-spawned host-local `ava-updater` takes no lease. The roster reads the
+  native admission and maintenance holds are separate facts. The roster reads the
   lease row rather than `ops.deploy_window.deploy_in_flight()`, which probes every
   machine and releases a converged hold.
 

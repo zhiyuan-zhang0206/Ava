@@ -40,6 +40,120 @@ assert 'shared.config' not in sys.modules
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize("boot_mode", ["lite", "eager"])
+@pytest.mark.parametrize("direction", ["candidate", "previous"])
+def test_release_stage_prepares_identity_before_loading_config(
+    tmp_path: Path, boot_mode: str, direction: str
+) -> None:
+    """Exercise the cold stage/boot/start chain, stopping at service effects."""
+    repo = Path(__file__).resolve().parents[2]
+    code = r"""
+import json
+import os
+import sys
+import types
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+sys.path.insert(0, sys.argv[1])
+from cli import main, start_intent, start_runtime
+from cli.parsers import build_parser
+from cli.release_transition import stage
+from cli.release_transition.journal import Operation
+from cli.release_transition.request import ReleaseRef, Request
+from shared import cluster
+from shared.maintenance_state import MaintenanceHold
+from shared.start_inputs import configuration_digest
+
+home = Path(os.environ["AVA_HOME"])
+checkout = home.parent / "checkout"
+checkout.mkdir()
+start_intent._checkout = lambda: checkout
+cluster._port_free = lambda _port: True
+start_intent.prepare_start(build_parser().parse_args(["start", "--worktree"]))
+before = (home / ".env").read_bytes()
+reference = ReleaseRef(artifact_digest="a"*64, manifest_digest="b"*64,
+    schema_digest="c"*64, source_commit="d"*40)
+request = Request(id=uuid4(), home=str(home),
+    registry=os.environ["AVA_CLUSTER_REGISTRY"], created_at=datetime.now(UTC),
+    platform_tag="cold-start-test", machine="test",
+    previous=reference.model_copy(update={"artifact_digest":"e"*64}),
+    candidate=reference, executor=reference,
+    configuration_digest=configuration_digest(home))
+operation = Operation(request=request, phase="starting", direction=sys.argv[2])
+request.path.parent.mkdir(parents=True)
+request.path.write_text(operation.model_dump_json())
+(home / "updates/active").write_text(str(request.path))
+pause = home / "run/deploy-pause-owner.json"
+pause.parent.mkdir()
+pause.write_text(json.dumps({"state":"paused", "holder":str(request.id),
+    "acquired_at":request.created_at.isoformat(),
+    "maintenance":MaintenanceHold(phase="starting").encode()}))
+
+# Only native-manager placement and installed-image bytes are fixtures.
+# Stage, boot, identity preparation, config boot, and pause authorization are real.
+from shared import os_boot_unit
+os_boot_unit.in_boot_unit = lambda value: value == home
+ReleaseRef.verify = lambda self, *args: self
+start_runtime.admit_release = lambda *args, **kwargs: start_runtime.StartRuntime.development(checkout)
+prepare = start_intent._prepare_start_locked
+def prepared(*args):
+    assert "shared.config" not in sys.modules, "configuration loaded before identity"
+    assert "shared.dotenv_boot" not in sys.modules, "home resolved before identity"
+    prepare(*args)
+start_intent._prepare_start_locked = prepared
+main._init_detached_cli_logging = lambda: None
+commands = types.ModuleType("cli.commands.start")
+sys.modules["cli.commands.start"] = commands
+calls = []
+def effects(**kwargs):
+    from cli.commands._pause_resume import resume_after_start
+    from shared import maintenance, start_serving
+    from shared.config import get_field
+    from dotenv import dotenv_values
+    expected = dotenv_values(home / ".env")
+    @resume_after_start
+    def start():
+        assert maintenance.start_authorized()
+        assert get_field("machine_serve_gateway") is True
+        assert get_field("machine_serve_agent_runner") is True
+        assert get_field("machine_serve_observability_station") is False
+        for key in ("AVA_DB_URL", "AVA_REDIS_URL", "AVA_GATEWAY_PORT"):
+            assert os.environ[key] == expected[key], key
+        calls.append("start")
+        return 0
+    start_serving.is_serving = lambda: True
+    return start()
+commands.cmd_start = effects
+sys.modules["cli.commands._root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
+assert stage.start_operation(request.path) == 0
+assert calls == ["start"]
+assert json.loads(pause.read_text())["state"] == "paused"
+assert (home / ".env").read_bytes() == before
+"""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env.update(
+        AVA_HOME=str(tmp_path.resolve() / "home"),
+        AVA_HOME_OVERRIDE="1",
+        AVA_CLUSTER_REGISTRY=str(tmp_path.resolve() / "clusters.json"),
+        AVA_DB_URL="postgresql://foreign.invalid/forbidden",
+        AVA_GATEWAY_URL="http://foreign.invalid",
+        AVA_MACHINE_SERVE_GATEWAY="false",
+    )
+    if boot_mode == "eager":
+        env["AVA_CONFIG_BOOT"] = boot_mode
+    result = subprocess.run(  # noqa: S603 — fixed interpreter and literal probe
+        [sys.executable, "-I", "-B", "-c", code, str(repo), direction],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 # Each top-level (and nested) ava sub-command maps to a _h_* handler in cli.main.
 _HANDLERS: tuple[tuple[list[str], str], ...] = (
     (["stop"], "_h_stop"),
@@ -48,17 +162,14 @@ _HANDLERS: tuple[tuple[list[str], str], ...] = (
     (["pty", "freeze", "--holder", "operator", "--reason", "cleanup"], "_h_pty_freeze"),
     (["pty", "status"], "_h_pty_status"),
     (["pty", "resume", "generation"], "_h_pty_resume"),
-    (["cluster", "update"], "_h_cluster_update"),
+    (["cluster", "update", "--prepared", "/private/request.json"], "_h_cluster_update"),
     (["converge"], "_h_converge"),
     (["firewall", "status"], "_h_firewall_status"),
     (["firewall", "sync"], "_h_firewall_sync"),
     (["cluster", "status"], "_h_cluster_status"),
-    (["cluster", "restart"], "_h_cluster_restart"),
-    (["cluster", "ensure-db-role"], "_h_cluster_ensure_db_role"),
     # The pre-#217 name stays as an alias — both spellings route to the same
     # handler (issue #217: the verb provisions the ava_runner POSTGRES role,
     # not a machine capability).
-    (["cluster", "ensure-runner-role"], "_h_cluster_ensure_db_role"),
     (["plugins", "update"], "_h_plugins_update"),
     (["agents", "ls"], "_h_agents_ls"),
     (["agents", "cancel", "1"], "_h_agents_cancel"),
@@ -114,10 +225,10 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     AttributeErrors on the first real `ava status`. Stub one level lower instead:
     `cmd_status`, which `_h_status` lazy-imports, so the real body executes against
     the real Namespace."""
-    import cli.commands as _commands
+    import cli.commands.status as _status_commands
 
     calls: list[dict[str, object]] = []
-    monkeypatch.setattr(_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_status_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _main.main(["status"]) == 0
     assert calls == [{}]
@@ -152,15 +263,15 @@ def test_migrations_subcommand_removed() -> None:
         _main._build_parser().parse_args(["migrations", "apply"])
 
 
-def test_cluster_update_parser_rejects_dry_run_with_restart_only(
+def test_cluster_update_requires_a_captured_request(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Prepare checks have no meaningful restart-only target, so reject the pair early."""
+    """No implicit mutable-checkout or moving-main update remains in the CLI."""
     with pytest.raises(SystemExit) as exited:
-        _main._build_parser().parse_args(["cluster", "update", "--dry-run", "--restart-only"])
+        _main._build_parser().parse_args(["cluster", "update"])
 
     assert exited.value.code == 2
-    assert "not allowed with argument" in capsys.readouterr().err
+    assert "--prepared" in capsys.readouterr().err
 
 
 def test_logs_retention_parser_accepts_the_public_flags() -> None:
@@ -257,9 +368,6 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
     # `start` is the one verb with a pre-dispatch side effect (the settings-free
     # installed-home gate), which this test neutralizes — it asserts flag
     # forwarding, not bring-up behaviour.
-    import cli.preflight as _preflight
-
-    monkeypatch.setattr(_preflight, "require_installed_home", lambda: None)
     rc = _main.main(
         [
             "start",
@@ -284,7 +392,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
 def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`status` / `cluster watchdog-probe` set AVA_CONFIG_FETCH=skip
+    """`status` / `cluster` / `agents` / `config` / `logs` set AVA_CONFIG_FETCH=skip
     before dispatch (settings-lite: they must work while the gateway is down);
     start and normal pause/stop need the real cluster configuration."""
     import os as _os
@@ -293,8 +401,8 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
 
     # Blanking os.environ drops AVA_HOME, which makes this checkout read as
     # unanchored — so `stop` would hit the anchored-home gate. Neutralize it the
-    # same way `start`'s installed-home gate is neutralized below: this test
-    # asserts env pinning, not gate behaviour.
+    # same way the parser handlers are stubbed below: this test asserts env
+    # pinning, not gate behaviour.
     monkeypatch.setattr(_preflight, "require_anchored_home", lambda _verb: None)  # pyright: ignore[reportUnknownArgumentType]
     for verb in ("status", "cluster", "agents", "config", "logs"):
         env = {"PATH": "/usr/bin"}
@@ -304,7 +412,6 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
         assert env.get("AVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
 
     # Starting and graceful draining both need data-plane configuration.
-    monkeypatch.setattr(_preflight, "require_installed_home", lambda: None)
     for verb in ("start", "pause", "stop"):
         env = {"PATH": "/usr/bin"}
         monkeypatch.setattr(_os, "environ", env)
@@ -370,9 +477,6 @@ def _anchored(monkeypatch: pytest.MonkeyPatch, home: str = "/Users/x/.ava-worktr
         ["stop", "-y"],
         ["restart"],
         ["converge"],
-        ["cluster", "update"],
-        ["cluster", "restart"],
-        ["cluster", "rollback"],
         ["cluster", "recover"],
         ["logs", "retention"],
     ],
@@ -392,7 +496,7 @@ def test_unanchored_checkout_is_refused_before_dispatch(
     assert dispatched == [], "the handler must never run"
     err = capsys.readouterr().err
     assert "/Users/x/.ava" in err, "the message must name the home it would have hit"
-    assert "install.sh --worktree" in err
+    assert "ava start --worktree" in err
 
 
 @pytest.mark.parametrize(
@@ -457,3 +561,110 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
     parser.add_argument("--path")
     parser.set_defaults(func=lambda _args: sink.append(verb) or 0)
     return parser
+
+
+def test_first_start_is_settings_free_until_identity_is_published(tmp_path: Path) -> None:
+    """Deny settings and network; the real public dispatch must reach its runtime boundary."""
+    repo = Path(__file__).resolve().parents[2]
+    code = r"""
+import importlib.abc
+import os
+import socket
+import sys
+import types
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+class DenySettings(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "shared.config" or fullname.startswith("shared.config."):
+            raise AssertionError("premature runtime Settings import")
+sys.meta_path.insert(0, DenySettings())
+def no_network(*args, **kwargs):
+    raise AssertionError("initialization performed a network dial")
+socket.socket.connect = no_network
+socket.create_connection = no_network
+from cli import main, start_intent
+from shared import cluster
+home = Path(os.environ["AVA_HOME"])
+checkout = home.parent / "checkout"
+checkout.mkdir()
+start_intent._checkout = lambda: checkout
+cluster._port_free = lambda _port: True
+calls = []
+def configured():
+    assert (home / "start-intent.json").is_file()
+    assert (home / ".env").is_file()
+    assert Path(os.environ["AVA_CLUSTER_REGISTRY"]).is_file()
+def log():
+    configured()
+    calls.append("logging")
+main._init_detached_cli_logging = log
+def start(**kwargs):
+    configured()
+    calls.append("runtime")
+    return 0
+sys.modules["cli.commands.start"] = types.SimpleNamespace(cmd_start=start)
+sys.modules["cli.commands._root_driver"] = types.SimpleNamespace(
+    complete_boot_start=lambda: calls.append("boot-complete")
+)
+sys.modules["shared.start_serving"] = types.SimpleNamespace(
+    clear_serving=lambda: calls.append("clear-serving")
+)
+assert main.main(["start", "--worktree"]) == 0
+assert calls == ["logging", "runtime", "boot-complete"]
+assert "shared.config" not in sys.modules
+"""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env.update(
+        AVA_HOME=str(tmp_path / "home"),
+        AVA_HOME_OVERRIDE="1",
+        AVA_CLUSTER_REGISTRY=str(tmp_path / "clusters.json"),
+        AVA_CLI_LOG_NAME="first-start",
+        AVA_DB_URL="postgresql://foreign.invalid/forbidden",
+        AVA_GATEWAY_URL="http://foreign.invalid",
+    )
+    result = subprocess.run(  # noqa: S603 — fixed interpreter and literal probe
+        [sys.executable, "-I", "-B", "-c", code, str(repo)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("entry", ["package", "parser", "config"])
+def test_command_import_boundary_is_settings_free(entry: str, tmp_path: Path) -> None:
+    code = """
+import importlib.abc
+import sys
+class Deny(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'shared.config':
+            raise AssertionError('forbidden early import: ' + fullname)
+sys.meta_path.insert(0, Deny())
+import cli.commands
+assert not any(name.startswith('cli.commands.') for name in sys.modules)
+assert not hasattr(cli.commands, '__getattr__')
+assert not hasattr(cli.commands, '__all__')
+if sys.argv[1] == 'parser':
+    from cli.parsers import build_parser
+    parser = build_parser()
+    args = parser.parse_args(['cluster', 'update', '--prepared', '/unused/request'])
+    assert args.prepared == '/unused/request'
+elif sys.argv[1] == 'config':
+    import cli.commands.config
+assert 'shared.config' not in sys.modules
+"""
+    result = subprocess.run(  # noqa: S603 — fixed interpreter, isolated import-only program.
+        [sys.executable, "-B", "-c", code, entry],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

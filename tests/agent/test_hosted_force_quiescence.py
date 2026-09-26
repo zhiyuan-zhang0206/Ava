@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from collections.abc import Iterator
 from pathlib import Path
@@ -21,7 +22,9 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import has_pending_interrupt
 from agent.graph._exec_stream import StreamingTextIO
 from agent.hosted_ownership import admit_hosted_runtime
+from ops.agent_wake import resurrect_agent
 from ops.ops_exit import _force_terminate_transaction
+from ops.resurrection_retry import ResurrectSettlementDeferredError
 from services.agent_host.daemon import _cancel_turn_route
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
@@ -29,7 +32,6 @@ from shared import exec_request_evidence
 from shared.config import settings
 from shared.exec_request_evidence import Verdict
 from shared.hosted_force import original_host_force, recover_orphaned_hosted_forces
-from shared.lifecycle_termination_observe import observe_applied_termination
 from tests.agent.test_inbound_ownership import _agent, _insert
 
 
@@ -101,9 +103,9 @@ async def _assert_pending_force(
         "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
         (command,),
     ).fetchone() == ("claimed", True, None)
-    conn.commit()  # The observer must not be a savepoint inside the earlier read transaction.
-    with conn.transaction():
-        assert not observe_applied_termination(conn, agent_id, "claim-test")
+    conn.commit()
+    with pytest.raises(ResurrectSettlementDeferredError):
+        await asyncio.to_thread(resurrect_agent, agent_id, resurrected_by="user")
     assert (
         await admit_hosted_runtime(
             pool, agent_id, "claim-test", uuid4(), expected_from="terminated"
@@ -622,13 +624,13 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
 
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
-    original_close = ExecProcessDomain.close
+    original_close = ExecProcessDomain.close_confirmed
 
-    def failed_close(domain: ExecProcessDomain) -> None:
-        original_close(domain)
+    def failed_close(domain: ExecProcessDomain, deadline: float) -> None:
+        original_close(domain, deadline)
         raise PermissionError("injected unverifiable domain closure")
 
-    monkeypatch.setattr(ExecProcessDomain, "close", failed_close)
+    monkeypatch.setattr(ExecProcessDomain, "close_confirmed", failed_close)
     scope = HostedTurnResources()
     with bind_hosted_resources(scope):
         outcome, _ = await _run_in_subprocess(
@@ -641,11 +643,13 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         assert path.exists() and isinstance(domain, ExecProcessDomain)
         assert not scope.complete(path, object())
         assert scope.unresolved[path] is domain
-        assert domain.proc.poll() is not None
+        assert domain.proc.returncode is None  # unresolved closure must not reap
         # A formatted tool failure cannot become a positive lifecycle barrier.
         assert await apply_hosted_lifecycle(aops_pool, incarnation) is None
         assert not await settle_hosted_runtime(aops_pool, incarnation)
     assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
+    original_close(domain, time.monotonic() + 5)
+    domain.proc.wait(timeout=5)
 
 
 async def test_real_missing_executable_is_not_an_unresolved_child(

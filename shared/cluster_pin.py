@@ -124,15 +124,7 @@ def clear_pending_known_good() -> None:
 
 
 def promote_pending_known_good_if_ready(*, min_age_s: float) -> bool:
-    """Promote a still-current pending target once it has aged through the window.
-
-    The same transaction finalizes a matching incomplete rollout when both
-    last-update replicas agree: passing the observation window proves the target
-    became known-good after any Phase-B tail self-healed, so its old `INCOMPLETE`
-    record must no longer read as an open incident. A stale mirror is logged and
-    preserves the record instead; it never blocks advancement of the rollback
-    anchor.
-    """
+    """Promote a still-current pending target once it has aged through the window."""
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT target_sha, pending_known_good_sha, pending_known_good_at "
@@ -159,17 +151,13 @@ def promote_pending_known_good_if_ready(*, min_age_s: float) -> bool:
         )
         if cur.rowcount != 1:
             raise RuntimeError(f"cluster_pin singleton row missing (rowcount={cur.rowcount})")
-        from shared.last_update import finalize_incomplete_update_after_lkg_advance
-
-        finalize_incomplete_update_after_lkg_advance(target_sha=pending_sha, conn=conn)
         return True
 
 
 def set_last_known_good_sha(sha: str, *, set_by: str | None = None) -> None:
-    """Set `last_known_good_sha` directly — for manual override
-    (`ava cluster rollback --set-known-good`). Most callers should use
-    `advance_pin` instead, which moves `target_sha` → `last_known_good_sha`
-    atomically with a rollout."""
+    """Set `last_known_good_sha` directly — an explicit override. `advance_pin`
+    instead moves `target_sha` → `last_known_good_sha` atomically with a new
+    target."""
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE cluster_pin SET last_known_good_sha = %s, last_known_good_at = now(), "

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Shared helpers for the scripts/provision/* pieces — one OS-dispatch + logging
-# surface so the three consumers install the same way without duplicating package
-# logic: `scripts/install.sh` (a unit), the `Dockerfile` (the eval image), and
-# `install-system.sh` (a whole bare host). Each piece sources this, resolves the
+# surface so host-tool consumers share package logic: `Dockerfile` (the eval
+# image), `install-cli-tools.sh`, and `install-system.sh` (a bare host).
+# Each piece sources this, resolves the
 # platform once, and branches.
 #
 # Source it from a sibling script:
 #   . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 #
 # Supported platforms: Linux (Debian/Ubuntu/WSL, via apt), macOS (via brew),
-# and Windows (via Docker — see docker-compose.windows.yml).
+# and Windows (Git Bash).
 set -euo pipefail
 
 # Provisioning must never upgrade formulae without explicit operator approval.

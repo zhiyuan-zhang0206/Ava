@@ -23,6 +23,13 @@ _PREDECESSOR = "SELECT i.id FROM inbound_messages i JOIN agents_meta m ON m.id=i
 _STORE = "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s"
 
 
+def _require_same_host(state: IncarnationResources, host: ResourceProcess) -> None:
+    if state.frozen_by is not None:
+        raise ResourceEvidenceError("force freezes same-owner admission")
+    if state.host_process is None or not state.host_process.same_birth(host):
+        raise ResourceEvidenceError("same owner changed its actual host process")
+
+
 def _next(
     row: tuple[Any, ...],
     target: RuntimeIncarnation,
@@ -41,10 +48,7 @@ def _next(
             raise ResourceEvidenceError("birth marker is not a never-admitted runtime")
     else:
         if (state.generation, state.owner) == (target.generation, target.owner):
-            if state.frozen_by is not None:
-                raise ResourceEvidenceError("force freezes same-owner admission")
-            if state.host_process != host:
-                raise ResourceEvidenceError("same owner changed its actual host process")
+            _require_same_host(state, host)
             return state
         dead_empty_host = (
             not state.requests

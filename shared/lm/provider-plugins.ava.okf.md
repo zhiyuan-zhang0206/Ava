@@ -54,10 +54,7 @@ retryable after the enable configuration is fixed.
 - The spawn boundary reads a plugin key from the cluster `.env`; split runners
   receive enabled bindings' present keys through bootstrap plugin-secrets, and
   a single-box agent child receives only those declared keys from its parent's
-  env. The install seed allowlist uses the same declaration only for unmodeled
-  keys or already-seedable Settings aliases; it excludes unrelated modeled
-  settings, cluster identity/data-plane aliases, and the runner database
-  password. It is deliberately not a Settings field. `build_chat_model`,
+  env. A provider-plugin key is deliberately not a Settings field. `build_chat_model`,
   `validate_model_config`, model-list and context
   endpoints, vision checks, the compact gate's `resolve_context_budget`,
   and the config-overlay validation (`validate_config_overlay`) ensure the

@@ -20,7 +20,7 @@ from services.pitr.rollback_snapshot_archive import (
     retire_rollback_snapshot,
     verify_rollback_snapshot,
 )
-from services.pitr.store_factory import construct_store_group, get_store_group
+from services.pitr.store_factory import get_store_group
 from shared.config import settings
 from shared.db import direct_db_url
 from shared.paths import ava_home
@@ -296,74 +296,53 @@ def cmd_pitr_drill(
     """Restore one protected chain to an operator target in isolation.
 
     The scratch tree is kept as evidence on every outcome; the drill never
-    publishes and never writes to the live cluster. The service imports are
-    method-local on purpose: `cli.commands` sits in the agent-runner
-    updater's pre-checkout import closure, and the drill's modules reach
-    `shared.session_record`, which must stay outside it
-    (`tests/cli/test_update_import_timing.py`).
+    publishes and never writes to the live cluster. The controller launches a
+    restricted viewer-only interpreter and accepts evidence after group closure.
     """
+    import asyncio
+
     from services.pitr.base_operation_runtime import (
+        RestoreWorkerInput,
         live_data_directory,
         restore_key_path,
         restore_store_args,
+        run_drill_input,
     )
-    from services.pitr.restore_drill import DrillRequest, parse_target_wall, run_restore_drill
+    from services.pitr.restore_drill import parse_target_wall
+    from services.pitr.restore_proof import RestoreSpaceBudget
 
+    scratch_path = Path(scratch)
+    evidence_path = scratch_path / "drill-evidence.json"
     try:
         candidate_manifest = _resolve_drill_candidate(chain, candidate)
         config = settings.physical_backup
-        group = construct_store_group(config.pitr_store_backend, dict(restore_store_args(config)))
-        request = DrillRequest(
-            candidate=candidate_manifest,
-            reader=group.generation_pinned_object_reader(),
-            key=restore_key_path(config).read_bytes(),
-            ack_dir=ava_home() / "physical-backup" / "ack",
-            scratch=Path(scratch),
-            target_lsn=target_lsn,
-            target_wall=parse_target_wall(target_wall),
-            pg_ctl=pg_tool("pg_ctl"),
-            pg_verifybackup=pg_tool("pg_verifybackup"),
-            live_db_url=direct_db_url(),
-            data_directory=live_data_directory(),
-            timeout_seconds=timeout_seconds,
+        root = ava_home() / "physical-backup"
+        inputs = RestoreWorkerInput(
+            candidate_manifest.to_json(),
+            root,
+            root / "ack",
+            restore_key_path(config),
+            config.pitr_store_backend,
+            restore_store_args(config),
+            RestoreSpaceBudget(0, 0, 0),
+            direct_db_url(),
+            live_data_directory(),
+            pg_tool("pg_ctl"),
+            pg_tool("pg_verifybackup"),
         )
-    except Exception as exc:
-        print(f"pitr drill failed before start: {exc}", file=sys.stderr)
-        return 1
-    print(
-        json.dumps(
-            {
-                "chain_id": request.candidate.chain_id,
-                "target_lsn": request.target_lsn,
-                "target_wall": request.target_wall.isoformat(),
-                "scratch": str(request.scratch),
-            },
-            sort_keys=True,
-        ),
-        file=sys.stderr,
-    )
-    evidence_path = request.scratch / "drill-evidence.json"
-    try:
-        evidence = run_restore_drill(
-            request, progress=lambda message: print(message, file=sys.stderr)
+        evidence = asyncio.run(
+            run_drill_input(
+                inputs,
+                scratch=scratch_path,
+                target_lsn=target_lsn,
+                target_wall=parse_target_wall(target_wall).isoformat(),
+                timeout_seconds=timeout_seconds,
+            )
         )
     except Exception as exc:
         print(f"pitr drill failed: {exc} (evidence: {evidence_path})", file=sys.stderr)
         return 1
-    print(
-        json.dumps(
-            {
-                "outcome": evidence.outcome,
-                "chain_id": evidence.chain_id,
-                "target_lsn": evidence.target_lsn,
-                "evidence": str(evidence_path),
-                "counts_restored": evidence.criteria.get("counts_restored"),
-                "counts_live": evidence.criteria.get("counts_live"),
-                "timings": evidence.timings,
-            },
-            sort_keys=True,
-        )
-    )
+    print(json.dumps({"evidence": str(evidence_path), **evidence}, sort_keys=True))
     return 0
 
 

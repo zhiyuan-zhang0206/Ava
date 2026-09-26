@@ -19,10 +19,11 @@ from typing import Protocol, TypedDict, cast
 import psutil
 
 from shared.log import logger
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
 from shared.paths import logs_dir, run_dir
-from shared.proc_tree import stable_create_time
 from shared.session_backend import SessionBackend
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import SessionRecord
 
 _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 _CREATE_TIME_TOLERANCE_S = 2.0

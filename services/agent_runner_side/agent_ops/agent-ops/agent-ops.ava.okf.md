@@ -13,11 +13,19 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 **Role affiliation**: agent-runner side (gateway does not run; instead it runs `gateway.ops_*` in-process) — `ServiceSpec.capabilities=_AGENT_RUNNER` in `ops/spec.py`.
 
 ## Core Responsibilities
-- **Inbound HTTP endpoint**: binds `0.0.0.0:<ops_port>`, serves `POST /ops`; `GET /healthz` (watchdog health check) on the same port, via localhost without auth. The health envelope reports update-lock / active-op age and informational worker saturation; an operation held longer than 20 minutes (the no-progress bound plus margin) returns 503 so the watchdog restarts the daemon.
+- **Inbound HTTP endpoint**: binds `0.0.0.0:<ops_port>`, serves `POST /ops`; `GET /healthz` (watchdog health check) on the same port, via localhost without auth. The health envelope reports active-op age and informational worker saturation; an operation held longer than 20 minutes (the no-progress bound plus margin) returns 503 so the watchdog restarts the daemon.
 - **Bearer-authenticated when configured**: with `AVA_CLUSTER_SECRET`, every `/ops` carries it as a bearer — including a single-machine gateway dialing its own `/ops`. An empty secret is the deliberate no-auth, loopback-only single-box posture.
 - **In-process execution**: each request calls ops functions inside the daemon, no extra spawn; bounded concurrency semaphore (`ops_concurrency`) + shared DB pool.
-- **Off the event loop**: only `spawn` / `lifecycle` are awaited on the loop; every other arm is synchronous and runs in a worker thread (`services/agent_ops/dispatch_sync.py:dispatch_sync`, reached through the daemon's thin `_dispatch_sync` binding). A blocking op must never hold the loop — one that did cost a 2 h daemon-wide freeze on the Windows runner (2026-08-12), taking the controllers and the stranded-pause self-heal down with it. Threading costs the serialization the loop gave for free, so it is restated explicitly: a second concurrent `cluster_update` is **refused** with `ClusterUpdateInProgress` rather than queued (its caller learns immediately instead of waiting out a stuck one), while `config_write` / `inventory_write` — read-modify-write of `.env` and the plugin JSON — take a blocking `threading.Lock` so an interleave cannot land one writer's snapshot over another's fields. A stuck worker therefore leaves a host that serves everything normally and refuses only updates; the tell is a growing run of `refusing a concurrent cluster_update` in this daemon's log, and the fix is to bounce the daemon.
-- **work kinds**: `spawn` / `lifecycle` / `cluster_stop` / `cluster_update` / `cluster_resume` / `status_probe` / `config_read|write` / `inventory_read|write` / `agent_skill_view`. The command-view read uses this runner's converged load dir plus the agent checkpoint's `ava_code__cwd` project roots, and scopes skill-as-command entries through that agent's persisted `config_overlay > birth_config` narrowing; provider cleanup is unconditional so one request cannot leak project skills into the next. Its result also carries this runner's sorted enabled MCP server names as phase-2 groundwork, with no gateway or frontend consumer yet.
+- **Off the event loop**: agent launch and lifecycle operations run on the loop;
+  synchronous arms run in the daemon's worker pool through
+  `services/agent_ops/dispatch_sync.py:dispatch_sync`. Blocking filesystem work
+  leaves health and generation-checked maintenance resume reachable.
+  Configuration and inventory read-modify-write operations share a thread lock.
+- **Admission**: only the current `OpKind` vocabulary reaches maintenance
+  admission or idempotency storage. Retired updater RPCs fail without effects,
+  even when a caller presents an old successful idempotency key. The daemon
+  accepts no bootstrap mode; unknown argv refuses before ordinary imports.
+- **work kinds**: `spawn-launch|spawn-launch-v2` / `lifecycle` / `cluster_stop` / `cluster_resume` / `status_probe` / `config_read|write` / `inventory_read|write` / `agent_skill_view`. The command-view read uses this runner's converged load dir plus the agent checkpoint's `ava_code__cwd` project roots, and scopes skill-as-command entries through that agent's persisted `config_overlay > birth_config` narrowing; provider cleanup is unconditional so one request cannot leak project skills into the next. Its result also carries this runner's sorted enabled MCP server names as phase-2 groundwork, with no gateway or frontend consumer yet.
 - **Singleton**: pidfile ensures only one instance per agent-runner; before start, `assert_schema_current` (refuses service if DB is ahead).
 - **Boot self-registration** (`_register_boot`): once the health server is up, the daemon calls `shared.machines.register_self(url=unit_dial_url(machine_role()))` for its own unit — clearing any `stopped_at` latch and restamping `up_since_at`. The `machine_units` row is a liveness record, so the process whose liveness it stands for is the one that writes it; `ava start` alone could not, because a host also comes back via an OS autostart, a watchdog respawn, or a rollout's restart leg. Deliberately **non-fatal** (unlike `assert_schema_current`): a stale row is not incorrect dispatch, and exiting would hand the watchdog a respawn loop that takes the host dark for the gateway. `unit_dial_url` is shared with `ava start`, so the two writers cannot advertise different addresses for one unit.
 
@@ -39,7 +47,7 @@ is specified in [[services/agent_runner_side/agent_ops/agent-ops/wire-layer.ava.
 
 ## Key Dependencies
 - [[gateway-cli.ava.okf.md]] — Gateway issues ops commands to agent-runner via this service
-- [[services/watchdog/watchdog.ava.okf.md]] — keeps alive every 60s (HTTP `/healthz`)
+- [[services/ava_root_glue/ava_root_glue.ava.okf.md]] — keeps alive every 60s (HTTP `/healthz`)
 - [[db.ava.okf.md]] — ops directly reads/writes the cluster DB in-process
 
 ## Entry Points

@@ -1,15 +1,7 @@
-"""Health-probe failure counting + auto-rollback gating (`ava cluster health-probe`).
+"""Health observations and graded owner alerts, without release mutations.
 
-The probe owns the consecutive-failure counter and the rollback trigger (there
-is no shell wrapper on either platform). These tests pin: the counter file
-arithmetic, that a healthy run clears the counter, that rollback fires only at
-the threshold, and that the counter is reset only when rollback succeeds.
-
-The edge-triggered owner alerts (W16) are pinned here too: the probe posts
-each healthy<->unhealthy edge to the gateway's alerts ingest
-(source='health-probe'; stubbed in most tests), and when the gateway is
-unreachable it falls back to running the same ingest logic locally — still
-exactly one IM notification and one alerts row per transition.
+Each outage keeps one episode through recovery and deploy suppression. Alert
+transport failures cannot hide health failures or break observation.
 """
 
 from __future__ import annotations
@@ -30,14 +22,6 @@ from cli.commands import _cluster_health, _health_alerts, _provider_guard
 # paths.
 _REAL_NOTIFY_OWNER = _cluster_health._notify_owner
 _REAL_INGEST_ALERT = _cluster_health._ingest_alert
-
-
-def _read_count(home: Path) -> str:
-    return (home / _cluster_health.FAILURE_COUNT_FILE).read_text()
-
-
-def _count_record(count: int) -> str:
-    return f"{count}\ncode\nprior failure\n{datetime.now(UTC).isoformat()}"
 
 
 def _write_aged_alert_state(
@@ -121,37 +105,7 @@ def test_agent_population_db_error_is_environment_class(monkeypatch: pytest.Monk
     assert _cluster_health._agent_population_failure_class(1) == "environment"
 
 
-def test_increment_from_missing_file(tmp_path: Path) -> None:
-    # No counter file yet -> first increment yields 1.
-    assert _cluster_health._increment_failure_count(tmp_path) == 1
-    lines = _read_count(tmp_path).splitlines()
-    assert lines[:3] == ["1", "code", ""]
-    datetime.fromisoformat(lines[3])
-    assert _cluster_health._increment_failure_count(tmp_path) == 2
-
-
-def test_increment_recovers_from_garbage(tmp_path: Path) -> None:
-    (tmp_path / _cluster_health.FAILURE_COUNT_FILE).write_text("not-a-number")
-    # A corrupt counter is treated as 0, so the next increment yields 1.
-    assert _cluster_health._increment_failure_count(tmp_path) == 1
-
-
-def test_increment_treats_legacy_plain_counter_as_zero(tmp_path: Path) -> None:
-    """A pre-classification counter cannot certify a code-failure streak."""
-    (tmp_path / _cluster_health.FAILURE_COUNT_FILE).write_text("2")
-
-    assert _cluster_health._increment_failure_count(tmp_path) == 1
-
-
-def test_reset_writes_zero(tmp_path: Path) -> None:
-    (tmp_path / _cluster_health.FAILURE_COUNT_FILE).write_text("7")
-    _cluster_health._reset_failure_count(tmp_path)
-    lines = _read_count(tmp_path).splitlines()
-    assert lines[:3] == ["0", "code", ""]
-    datetime.fromisoformat(lines[3])
-
-
-def test_liveness_retry_recovers_before_the_counter_is_armed(
+def test_liveness_retry_recovers_before_reporting_outage(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A brief data-plane restart window is healthy once liveness recovers."""
@@ -166,7 +120,6 @@ def test_liveness_retry_recovers_before_the_counter_is_armed(
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     # Check 7 resolves the real prod venv through prod_source_dir() unless
@@ -174,8 +127,7 @@ def test_liveness_retry_recovers_before_the_counter_is_armed(
     # not by hermeticity (same reasoning as the disk-usage stub above).
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
 
-    assert _cluster_health.run_health_probe(auto_rollback=True) == 0
-    assert _read_count(_home).splitlines()[0] == "0"
+    assert _cluster_health.run_health_probe() == 0
 
 
 def test_environment_liveness_failure_alerts_without_counting(
@@ -186,25 +138,21 @@ def test_environment_liveness_failure_alerts_without_counting(
     monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: True)
     monkeypatch.setattr(
-        _health_alerts.subprocess,
+        subprocess,
         "run",
         lambda command, **_kw: rollback_commands.append(command),  # type: ignore[arg-type]
     )
 
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
-    assert not (_home / _cluster_health.FAILURE_COUNT_FILE).exists()
+    assert _cluster_health.run_health_probe() == 1
     assert rollback_commands == []
 
 
-def test_code_liveness_failure_counts_toward_rollback(
-    _home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A gateway failure with a healthy data plane remains rollback evidence."""
+def test_code_liveness_failure_is_unhealthy(_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gateway failure with a healthy data plane remains unhealthy."""
     monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: False)
 
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
-    assert _read_count(_home).splitlines()[0] == "1"
+    assert _cluster_health.run_health_probe() == 1
 
 
 def test_agent_population_classifies_db_failure_as_environment(
@@ -219,82 +167,13 @@ def test_agent_population_classifies_db_failure_as_environment(
 
     monkeypatch.setattr(_cluster_health, "_agent_population_failure_class", _environment)
 
-    assert _cluster_health.run_health_probe(auto_rollback=True) == 1
-    assert not (_home / _cluster_health.FAILURE_COUNT_FILE).exists()
+    assert _cluster_health.run_health_probe() == 1
 
     def _code(_min_agents: int) -> str:
         return "code"
 
     monkeypatch.setattr(_cluster_health, "_agent_population_failure_class", _code)
-    assert _cluster_health.run_health_probe(auto_rollback=True) == 1
-    assert _read_count(_home).splitlines()[0] == "1"
-
-
-def test_environment_failure_keeps_the_previous_code_failure_count(
-    _home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Only a passing gating run resets the code-failure streak (code, env, code = 2)."""
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: False)
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
-
-    monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: True)
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
-
-    monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: False)
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
-    assert _read_count(_home).splitlines()[0] == "2"
-
-
-def test_pending_lkg_advances_after_two_gating_passes(
-    _all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The new pin becomes LKG only after two consecutive healthy observations."""
-    promoted: list[float] = []
-    monkeypatch.setattr(
-        "shared.cluster_pin.get_pending_known_good", lambda: ("PENDINGSHA", datetime.now(UTC))
-    )
-
-    def _promote(*, min_age_s: float) -> bool:
-        promoted.append(min_age_s)
-        return True
-
-    monkeypatch.setattr("shared.cluster_pin.promote_pending_known_good_if_ready", _promote)
-
-    assert _cluster_health.run_health_probe() == 0
-    marker = _home / _cluster_health.PENDING_LKG_PASSES_FILE
-    assert marker.read_text().splitlines() == ["PENDINGSHA", "1"]
-
-    assert _cluster_health.run_health_probe() == 0
-    assert promoted == [_cluster_health.PENDING_LKG_MIN_AGE_S]
-    assert not marker.exists()
-
-
-def test_gating_failure_resets_pending_lkg_streak(
-    _all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Any gating failure restarts the observation window, including environmental ones."""
-    monkeypatch.setattr(
-        "shared.cluster_pin.get_pending_known_good", lambda: ("PENDINGSHA", datetime.now(UTC))
-    )
-
-    def _not_ready(*, min_age_s: float) -> bool:
-        return False
-
-    monkeypatch.setattr("shared.cluster_pin.promote_pending_known_good_if_ready", _not_ready)
-
-    assert _cluster_health.run_health_probe() == 0
-    marker = _home / _cluster_health.PENDING_LKG_PASSES_FILE
-    assert marker.exists()
-
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: True)
     assert _cluster_health.run_health_probe() == 1
-    assert not marker.exists()
-
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    assert _cluster_health.run_health_probe() == 0
-    assert marker.read_text().splitlines() == ["PENDINGSHA", "1"]
 
 
 @pytest.fixture
@@ -304,7 +183,6 @@ def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
@@ -330,7 +208,7 @@ def _provider_guard_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    # run_health_probe resolves the counter dir via shared.paths.ava_home.
+    # run_health_probe resolves the alert state home via shared.paths.ava_home.
     import shared.paths
 
     monkeypatch.setattr(shared.paths, "ava_home", lambda: tmp_path)
@@ -365,13 +243,7 @@ def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 @pytest.fixture(autouse=True)
 def _no_deploy_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An idle cluster, so these tests keep testing the COUNTER.
-
-    The auto-rollback path now asks whether a deploy is in flight before counting
-    a failure (`ops.deploy_window`) — a real question that shells out to git and
-    dials every machine. Pinning it idle here keeps this file about the counter
-    arithmetic; the suppression behaviour itself is covered in
-    `tests/cli/test_deploy_mutex.py`."""
+    """Keep alert tests independent of live deploy state."""
     from ops.deploy_window import DeployWindow
 
     monkeypatch.setattr(
@@ -380,104 +252,22 @@ def _no_deploy_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_healthy_run_resets_counter(_all_checks_pass: None, _home: Path) -> None:
-    (_home / _cluster_health.FAILURE_COUNT_FILE).write_text(_count_record(2))
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
-    assert rc == 0
-    assert _read_count(_home).splitlines()[0] == "0"
-
-
-def test_failure_below_threshold_no_rollback(_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    called: list[list[str]] = []
-    monkeypatch.setattr(
-        _health_alerts.subprocess,
-        "run",
-        lambda cmd, **_kw: called.append(cmd),  # type: ignore[arg-type]
-    )
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
-    assert rc == 1
-    assert _read_count(_home).splitlines()[0] == "1"
-    assert called == []  # threshold not reached -> rollback not invoked
-
-
-def test_failure_at_threshold_triggers_rollback_and_resets(
-    _home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    (_home / _cluster_health.FAILURE_COUNT_FILE).write_text(_count_record(2))
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    called: list[list[str]] = []
-
-    def _fake_run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[bytes]:
-        called.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(_health_alerts.subprocess, "run", _fake_run)
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
-    assert rc == 1
-    # Rollback invoked with the same ava that runs the probe (sys.argv[0]).
-    assert called and called[0][1:] == ["cluster", "rollback", "--yes"]
-    # Successful rollback resets the counter.
-    assert _read_count(_home).splitlines()[0] == "0"
-    # The emitted flag must be one `ava cluster rollback` actually accepts —
-    # a stale flag name here would exit 2 (argparse "unrecognized arguments")
-    # on every real auto-rollback run without a unit test ever catching it.
-    from cli.main import _build_parser
-
-    _build_parser().parse_args(called[0][1:])
-
-
-def test_failed_rollback_keeps_counter(_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (_home / _cluster_health.FAILURE_COUNT_FILE).write_text(_count_record(2))
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-
-    def _fake_run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.CompletedProcess(cmd, 1)  # rollback fails
-
-    monkeypatch.setattr(_health_alerts.subprocess, "run", _fake_run)
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
-    assert rc == 1
-    # A failed rollback keeps the count (retried next run), not reset.
-    assert _read_count(_home).splitlines()[0] == "3"
-
-
-def test_no_auto_rollback_leaves_counter_untouched(
-    _home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    ran = False
-
-    def _fake_run(*a: object, **kw: object) -> None:
-        nonlocal ran
-        ran = True
-
-    monkeypatch.setattr(_health_alerts.subprocess, "run", _fake_run)
-    rc = _cluster_health.run_health_probe(auto_rollback=False, threshold=3)
-    assert rc == 1
-    assert not ran
-    assert not (_home / _cluster_health.FAILURE_COUNT_FILE).exists()
-
-
 # ─── per-service check (5) + owner alerts ────────────────────────────────────
 
 
-def test_service_probe_failure_alerts_without_rollback_counter(
+def test_service_probe_failure_alerts(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     _sent_alerts: list[str],
 ) -> None:
-    """A dead service fails the probe (exit 1) and alerts the owner, but never
-    feeds the auto-rollback counter — a dead frontend session is an outage, not
-    proof the cluster code is bad, and a rollback would not necessarily fix it."""
+    """A dead selected service fails the probe and reports its outage."""
     monkeypatch.setattr(_cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
     _write_aged_alert_state(_home, "FAIL: service probe — not healthy: ava-main-frontend")
 
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+    rc = _cluster_health.run_health_probe()
 
     assert rc == 1
-    # The counter is reset (checks 1-4 all passed), never advanced.
-    assert _read_count(_home).splitlines()[0] == "0"
     assert len(_sent_alerts) == 1
     assert "ava-main-frontend" in _sent_alerts[0]
 
@@ -512,7 +302,7 @@ def test_disk_over_watermark_fails_and_alerts(
     _sent_alerts: list[str],
 ) -> None:
     """A data volume over the 90% watermark fails the probe (exit 1) and
-    alerts the owner, but never feeds the auto-rollback counter — rolling
+    alerts the owner; rolling
     back code frees no disk space (the 2026-08-08 outage class: checkpoint
     growth filled the disk and the gateway could not start)."""
     monkeypatch.setattr(
@@ -523,10 +313,9 @@ def test_disk_over_watermark_fails_and_alerts(
         "FAIL: disk usage — data volume 92.4% used (watermark 90%)",
     )
 
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+    rc = _cluster_health.run_health_probe()
 
     assert rc == 1
-    assert _read_count(_home).splitlines()[0] == "0"  # alert-only: counter reset, never advanced
     assert len(_sent_alerts) == 1
     assert "disk usage" in _sent_alerts[0]
     assert "92.4%" in _sent_alerts[0]
@@ -557,7 +346,7 @@ def test_deploy_never_explains_full_disk(
 
 def test_disk_under_watermark_passes(_all_checks_pass: None, _home: Path) -> None:
     """Healthy disk usage keeps the probe green (no alert, exit 0)."""
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+    rc = _cluster_health.run_health_probe()
     assert rc == 0
 
 
@@ -599,24 +388,23 @@ def test_disk_usage_failure_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _cluster_health._disk_usage_failure() is not None
 
 
-def test_source_tree_failure_alerts_without_rollback_counter(
+def test_source_tree_failure_alerts(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     _sent_alerts: list[str],
 ) -> None:
     """A tampered prod source tree fails the probe (exit 1) and alerts the
-    owner, but never feeds the auto-rollback counter — rolling back code does
+    owner; rolling back code does
     not undo an on-disk edit (the 2026-08-28 outage class: edited source broke
     `import ava` for every agent on the box)."""
     message = "prod source tree tampered: untracked outside whitelist: junk.txt"
     monkeypatch.setattr(_cluster_health, "_source_tree_failure", lambda: message)
     _write_aged_alert_state(_home, f"FAIL: source tree — {message}")
 
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+    rc = _cluster_health.run_health_probe()
 
     assert rc == 1
-    assert _read_count(_home).splitlines()[0] == "0"  # alert-only: counter reset, never advanced
     assert len(_sent_alerts) == 1
     assert "source tree" in _sent_alerts[0]
     assert "junk.txt" in _sent_alerts[0]
@@ -655,32 +443,6 @@ def test_source_tree_guard_skipped_is_a_distinct_alert(
     failure = _cluster_health._source_tree_failure()
 
     assert failure == "prod source tree guard skipped: git unavailable"
-
-
-def test_service_probe_failure_resets_stale_counter_before_alerting(
-    _all_checks_pass: None,
-    _home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A check-5-only failure must not freeze a stale count: gating checks 1-4
-    all passed, so any failures before this run are not adjacent to the next
-    gating failure. Left unfixed, run1+run2 gating failures, a run3 that is
-    healthy in every gating dimension but fails check 5, and a run4 gating
-    failure would reach the threshold of 3 and roll production back on the
-    strength of non-consecutive evidence — the exact 'Consecutive has to mean
-    consecutive' reasoning the deploy suppression already applies."""
-    (_home / _cluster_health.FAILURE_COUNT_FILE).write_text("2")
-    monkeypatch.setattr(_cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
-
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
-
-    assert rc == 1
-    assert _read_count(_home).splitlines()[0] == "0"
-    # The next gating failure starts the count fresh: 1, not 3.
-    monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
-    assert _read_count(_home).splitlines()[0] == "1"
 
 
 def test_alert_edge_triggered_once_per_outage(
@@ -733,15 +495,15 @@ def test_alert_re_fires_when_failure_reason_changes(
     assert "gateway liveness" in _sent_alerts[1]
 
 
-def test_service_probes_skips_gated_and_probeless_specs(
+def test_service_probes_skips_gated_but_rejects_unknown_specs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_service_probes probes only role-wanted, non-gated specs and collects
-    the sessions whose probe is False (None = no probe available, skipped)."""
-    import cli.commands as _ns
-    from cli.commands import ServiceSpec
+    """Every intended service needs positive evidence; disabled services do not."""
+    import cli.commands._probe as _probe_commands
+    import cli.commands._repo as _repo_commands
     from ops.service_spec import (
         _GATEWAY,  # typed frozenset[MachineRole]; value irrelevant (roster stubbed)
+        ServiceSpec,
     )
 
     # requires_db is irrelevant here (no watchdog round involved), so it is uniform.
@@ -753,9 +515,9 @@ def test_service_probes_skips_gated_and_probeless_specs(
     gated = _spec("browser")
     probeless = _spec("browser-mcp")
 
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
-        _ns,
+        _repo_commands,
         "_services_for_roles_annotated",
         lambda _roles: (  # pyright: ignore[reportUnknownArgumentType]
             (dead, None),
@@ -765,33 +527,35 @@ def test_service_probes_skips_gated_and_probeless_specs(
         ),
     )
 
-    def _probe(spec: ServiceSpec) -> _ns.ServiceProbe:
+    def _probe(spec: ServiceSpec) -> _probe_commands.ServiceProbe:
         alive = {"frontend": False, "gateway": True, "browser-mcp": None}[spec.session]
-        return _ns.ServiceProbe(alive, "probe", "")
+        return _probe_commands.ServiceProbe(alive, "probe", "")
 
-    monkeypatch.setattr(_ns, "_probe_service", _probe)
+    monkeypatch.setattr(_probe_commands, "_probe_service", _probe)
 
-    assert _cluster_health._service_probes() == ["frontend"]
+    assert _cluster_health._service_probes() == ["frontend", "browser-mcp"]
 
 
 def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands as _ns
+    import cli.commands._probe as _probe_commands
+    import cli.commands._repo as _repo_commands
+    import ops.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
     recorded_sessions: list[str] = []
 
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
 
-    def _record_probe(spec: _ns.ServiceSpec) -> _ns.ServiceProbe:
+    def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
         recorded_sessions.append(spec.session)
-        return _ns.ServiceProbe(True, "probe", "")
+        return _probe_commands.ServiceProbe(True, "probe", "")
 
-    monkeypatch.setattr(_ns, "_probe_service", _record_probe)
+    monkeypatch.setattr(_probe_commands, "_probe_service", _record_probe)
 
     assert _cluster_health._service_probes() == []
     assert "otel-collector" not in recorded_sessions
@@ -800,21 +564,23 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_endpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands as _ns
+    import cli.commands._probe as _probe_commands
+    import cli.commands._repo as _repo_commands
+    import ops.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
     recorded_sessions: list[str] = []
 
     monkeypatch.setitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
 
-    def _record_probe(spec: _ns.ServiceSpec) -> _ns.ServiceProbe:
+    def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
         recorded_sessions.append(spec.session)
-        return _ns.ServiceProbe(True, "probe", "")
+        return _probe_commands.ServiceProbe(True, "probe", "")
 
-    monkeypatch.setattr(_ns, "_probe_service", _record_probe)
+    monkeypatch.setattr(_probe_commands, "_probe_service", _record_probe)
 
     assert _cluster_health._service_probes() == []
     assert "otel-collector" in recorded_sessions
@@ -823,21 +589,23 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
 def test_service_probes_checks_otel_collector_on_lgtm_gateway(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands as _ns
+    import cli.commands._probe as _probe_commands
+    import cli.commands._repo as _repo_commands
+    import ops.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
     (tmp_home / "lgtm-host").touch()
     recorded_sessions: list[str] = []
 
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("ops.spec.gateway_observability_home", lambda: tmp_home)
 
-    def _record_probe(spec: _ns.ServiceSpec) -> _ns.ServiceProbe:
+    def _record_probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
         recorded_sessions.append(spec.session)
-        return _ns.ServiceProbe(True, "probe", "")
+        return _probe_commands.ServiceProbe(True, "probe", "")
 
-    monkeypatch.setattr(_ns, "_probe_service", _record_probe)
+    monkeypatch.setattr(_probe_commands, "_probe_service", _record_probe)
 
     assert _cluster_health._service_probes() == []
     assert "otel-collector" in recorded_sessions
@@ -848,29 +616,77 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
     fact failed: "answering, but its home is /home/ava/.ava" is another unit on
     this unit's port — a different incident from "nothing is listening", and one
     no amount of waiting fixes."""
-    import cli.commands as _ns
-    from cli.commands import ServiceSpec
-    from ops.service_spec import _GATEWAY
+    import cli.commands._probe as _probe_commands
+    import cli.commands._repo as _repo_commands
+    from ops.service_spec import _GATEWAY, ServiceSpec
 
     spec = ServiceSpec(session="ops", cmd="x", capabilities=_GATEWAY, requires_db=True)
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(_ns, "_services_for_roles_annotated", lambda _roles: ((spec, None),))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
-        _ns,
+        _repo_commands,
+        "_services_for_roles_annotated",
+        lambda _roles: ((spec, None),),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _probe_commands,
         "_probe_service",
-        lambda _spec: _ns.ServiceProbe(False, "identity", "home='/home/ava/.ava' != '/u/.ava'"),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _spec: _probe_commands.ServiceProbe(
+            False, "identity", "home='/home/ava/.ava' != '/u/.ava'"
+        ),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     assert _cluster_health._service_probes() == ["ops (home='/home/ava/.ava' != '/u/.ava')"]
 
 
-def test_service_probes_no_roles_probes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Role not resolvable (setup unfinished) -> no roster to probe; the
-    core checks are the fallback signals."""
-    import cli.commands as _ns
+def test_service_probes_unknown_roster_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A responding gateway cannot replace the missing service inventory."""
+    import cli.commands._repo as _repo_commands
 
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: None)
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: None)
+    assert _cluster_health._service_probes() == ["service roster unavailable"]
+
+
+@pytest.mark.parametrize("mode,names", [("only", ["gateway"]), ("except", ["frontend"])])
+def test_service_probes_respect_durable_service_intent(
+    monkeypatch: pytest.MonkeyPatch, mode: str, names: list[str]
+) -> None:
+    import cli.commands._probe as _probe_commands
+    import cli.commands._repo as _repo_commands
+    import ops.service_spec as _service_spec
+    from shared import service_selection
+
+    wanted = _service_spec.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)
+    excluded = _service_spec.ServiceSpec("frontend", "unused", frozenset({"gateway"}), False)
+
+    def roster(_roles: object) -> tuple[tuple[_service_spec.ServiceSpec, None], ...]:
+        return ((wanted, None), (excluded, None))
+
+    def probe(spec: _service_spec.ServiceSpec) -> _probe_commands.ServiceProbe:
+        assert spec is wanted
+        return _probe_commands.ServiceProbe(True, "owned", "ready")
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_services_for_roles_annotated", roster)
+    monkeypatch.setattr(_probe_commands, "_probe_service", probe)
+    monkeypatch.setattr(
+        service_selection,
+        "read_selection",
+        lambda: service_selection.ServiceSelection(mode, frozenset(names)),
+    )
     assert _cluster_health._service_probes() == []
+
+
+def test_service_probes_unreadable_selection_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    import cli.commands._repo as _repo_commands
+
+    def unreadable() -> None:
+        raise ValueError("corrupt selection")
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.service_selection.read_selection", unreadable)
+    assert _cluster_health._service_probes() == [
+        "service selection unavailable (corrupt selection)"
+    ]
 
 
 # ─── cluster-stamped outbound alerts ─────────────────────────────────────────
@@ -964,8 +780,7 @@ def test_notify_owner_im_bridge_down_does_not_raise(
 ) -> None:
     """The alert is a side channel: when the im_bridge daemon is down the probe
     must still complete — no raise, just a stderr note naming the failure
-    class. A dead bridge must never break the probe or the auto-rollback path
-    it gates."""
+    class. A dead bridge must never break health observation."""
 
     import httpx
 
@@ -1057,72 +872,22 @@ def test_notify_owner_honours_im_bridge_health_url_override(
 # ── the gate's entry port rides in check 5 (alert-only) ───────────────────────
 
 
-def _gate(**kw: object) -> object:
-    import cli.commands._converge_gate as cg
-
-    fields: dict[str, object] = {
-        "entry_port": 3000,
-        "app_port": 3001,
-        "serving": True,
-        "supervised": True,
-        "supervisor": "launchd job com.ava.gate.x",
-    }
-    fields.update(kw)
-    return cg.GateStatus(**fields)  # type: ignore[arg-type]
-
-
-def test_gate_probe_is_silent_on_a_runner(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pure agent-runner owns no entry port, so it has nothing to report."""
-    import cli.commands as _ns
-
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    assert _cluster_health._gate_probe() is None
-
-
-def test_gate_probe_reports_a_dark_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    import cli.commands as _ns
-    import cli.commands._converge_gate as cg
-
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(cg, "probe_gate", lambda *_a: _gate(serving=False))  # pyright: ignore[reportUnknownArgumentType]
-    failure = _cluster_health._gate_probe()
-    assert failure is not None
-    assert "not answering" in failure
-
-
-def test_gate_probe_reports_a_serving_but_unsupervised_gate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Serving now, but nothing left to restart it — invisible to a user and to
-    every other probe, which is why it is worth a line of its own."""
-    import cli.commands as _ns
-    import cli.commands._converge_gate as cg
-
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(cg, "probe_gate", lambda *_a: _gate(supervised=False))  # pyright: ignore[reportUnknownArgumentType]
-    failure = _cluster_health._gate_probe()
-    assert failure is not None
-    assert "unsupervised" in failure
-
-
 def test_dark_gate_fails_the_probe_without_arming_rollback(
     monkeypatch: pytest.MonkeyPatch, _all_checks_pass: None, _home: Path, _sent_alerts: list[str]
 ) -> None:
     """The boundary this check was placed for: a dark entry port alerts the owner and
-    exits 1, but never advances the auto-rollback counter. The 2026-08-01 cause was a
+    exits 1. The 2026-08-01 cause was a
     converge step that failed to reinstall the launchd job — rolling the cluster's
     code back would re-run that step identically, so rollback is not the remedy."""
     monkeypatch.setattr(
-        _cluster_health, "_gate_probe", lambda: "gate entry :3000 not answering (dark)"
+        _cluster_health, "_service_probes", lambda: ["gate entry :3000 not answering (dark)"]
     )
     _write_aged_alert_state(
         _home,
         "FAIL: service probe — not healthy: gate entry :3000 not answering (dark)",
     )
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
+    assert _cluster_health.run_health_probe() == 1
     assert any("not answering" in a for a in _sent_alerts)
-    # Counter reset (all gating checks passed), never advanced.
-    assert _read_count(_home).splitlines()[0] == "0"
 
 
 # ── the Redis bridge rides in check 5 (alert-only) ───────────────────────────
@@ -1146,10 +911,10 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A loaded launchd job cannot hide a relay whose PING path is dead."""
-    import cli.commands as _ns
     import cli.commands._converge_redis_bridge as bridge
+    import cli.commands._repo as _repo_commands
 
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
         bridge,
         "probe_redis_bridge",
@@ -1173,9 +938,8 @@ def test_redis_bridge_failure_alerts_without_arming_rollback(
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: failure)
     _write_aged_alert_state(_home, f"FAIL: service probe — not healthy: {failure}")
 
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
+    assert _cluster_health.run_health_probe() == 1
     assert any("Redis bridge" in alert for alert in _sent_alerts)
-    assert _read_count(_home).splitlines()[0] == "0"
 
 
 # ── crash-loop detection: category=audit only (W9 fix) ──────────────────────
@@ -1921,7 +1685,7 @@ def test_run_health_probe_refused_from_worktree_checkout(
         lambda: Path("~/Ava/.worktrees/ava-2890-r4").expanduser(),
     )
 
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+    rc = _cluster_health.run_health_probe()
 
     assert rc == 2
     err = capsys.readouterr().err
@@ -1952,7 +1716,6 @@ def test_run_health_probe_allowed_from_prod_checkout(
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", _ok)
     monkeypatch.setattr(_cluster_health, "_schema_health", _ok)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: None)
@@ -1971,7 +1734,7 @@ def test_agent_min_defaults_to_settings_when_unset(
 ) -> None:
     """agent_min=None resolves to AVA_HEALTH_PROBE_AGENT_MIN — the knob a
     test/QA cluster sets to 0 so its empty agent population never trips the
-    check and --auto-rollback never cycles the checkout (2026-08-10 preview)."""
+    population check."""
     seen: list[int] = []
 
     def _fake_population(minimum: int) -> bool:
@@ -2189,14 +1952,14 @@ def test_editable_install_unreadable_record_alerts(_prod_source: Path) -> None:
     assert failure is not None and "unreadable" in failure
 
 
-def test_editable_install_failure_alerts_without_rollback_counter(
+def test_editable_install_failure_alerts(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     _sent_alerts: list[str],
 ) -> None:
     """A poisoned venv record fails the probe (exit 1) and alerts the owner, but
-    never feeds the auto-rollback counter — rolling back code does not fix a
+    performs no release mutation — rolling back code does not fix a
     venv record; the converge guard repairs it (the 2026-08-27 outage class)."""
     detail = (
         "prod venv editable install violation: "
@@ -2205,10 +1968,9 @@ def test_editable_install_failure_alerts_without_rollback_counter(
     monkeypatch.setattr(_cluster_health, "_editable_install_failure", lambda: detail)
     _write_aged_alert_state(_home, f"FAIL: editable install — {detail}")
 
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+    rc = _cluster_health.run_health_probe()
 
     assert rc == 1
-    assert _read_count(_home).splitlines()[0] == "0"  # alert-only: reset, never advanced
     assert len(_sent_alerts) == 1
     assert "editable install" in _sent_alerts[0]
 
@@ -2249,7 +2011,6 @@ def test_editable_install_healthy_records_keep_probe_green(
     monkeypatch.setattr(_cluster_health, "_crash_loop_detection", lambda _m, _w: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_cluster_health, "_schema_health", lambda: True)
     monkeypatch.setattr(_cluster_health, "_service_probes", list)
-    monkeypatch.setattr(_cluster_health, "_gate_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_redis_bridge_probe", lambda: None)
     monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: None)
     # The throwaway `_prod_source` is not a git checkout; check 8 is not this
@@ -2265,15 +2026,15 @@ def test_editable_install_healthy_records_keep_probe_green(
 _PROVIDER_GUARD_FAILURE = "FAIL: provider balance — below the configured minimum"
 
 
-def test_provider_guard_failure_alerts_without_rollback_counter(
+def test_provider_guard_failure_alerts(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
     _sent_alerts: list[str],
 ) -> None:
     """Checks 9-10 are alert-only, like checks 5-8: a drained provider account
-    fails the probe and alerts the owner, but never feeds the auto-rollback
-    counter — rolling code back does not fund the account (the 2026-09-18
+    fails the probe and alerts the owner. Rolling code back does not fund
+    the account (the 2026-09-18
     outage class)."""
     monkeypatch.setattr(_cluster_health, "run_provider_guard", _provider_guard.run_provider_guard)
 
@@ -2283,10 +2044,9 @@ def test_provider_guard_failure_alerts_without_rollback_counter(
     monkeypatch.setattr(_provider_guard, "provider_guard_failure", _failure)
     _write_aged_alert_state(_home, _PROVIDER_GUARD_FAILURE)
 
-    rc = _cluster_health.run_health_probe(auto_rollback=True, threshold=3)
+    rc = _cluster_health.run_health_probe()
 
     assert rc == 1
-    assert _read_count(_home).splitlines()[0] == "0"  # alert-only: reset, never advanced
     assert len(_sent_alerts) == 1
     assert "provider balance" in _sent_alerts[0]
 

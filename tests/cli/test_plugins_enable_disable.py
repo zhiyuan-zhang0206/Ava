@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import cmd_plugins_disable, cmd_plugins_enable
+from cli.commands.plugins import cmd_plugins_disable, cmd_plugins_enable
 
 
 @pytest.fixture(autouse=True)

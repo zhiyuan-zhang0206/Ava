@@ -31,9 +31,10 @@ from typing import Any, cast
 import psutil
 
 from shared.log import logger
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
 from shared.platform import LockTimeoutError, file_lock
-from shared.proc_tree import stable_create_time
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import SessionRecord
 from shared.sessions.pty._paths import (
     DEFAULT_COLS,
     DEFAULT_ROWS,

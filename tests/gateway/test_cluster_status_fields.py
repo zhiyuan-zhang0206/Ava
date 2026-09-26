@@ -11,11 +11,7 @@ import pytest
 import gateway.routers._roster_probe as roster_probe
 import gateway.routers.status as status_mod
 from ops import cluster_status
-from ops.cluster import (
-    _check_pidfile,
-    _count_agent_shells,
-    agent_shell_sessions,
-)
+from ops.cluster_status import _check_pidfile, _count_agent_shells, agent_shell_sessions
 from ops.rpc_schemas import SessionInfo
 
 
@@ -352,7 +348,7 @@ def test_gather_cluster_status_local_agent_runner_probed(monkeypatch: pytest.Mon
             "running_sha": "def456",
             "shell_count": 4,
             "agent_host_online": True,
-            "watchdog_online": False,
+            "supervisor_online": False,
         }
 
     monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
@@ -378,7 +374,7 @@ def test_gather_cluster_status_local_agent_runner_probed(monkeypatch: pytest.Mon
     assert m.running_sha == "def456"
     assert m.shell_count == 4
     assert m.agent_host_online is True
-    assert m.watchdog_online is False
+    assert m.supervisor_online is False
 
 
 def test_probe_flags_identity_mismatch_when_responder_name_differs(monkeypatch: pytest.MonkeyPatch):
@@ -555,7 +551,7 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(monkeypatch: pytes
     assert m.head_sha == "abc123"
     assert m.shell_count == 0
     assert m.agent_host_online is None
-    assert m.watchdog_online is None
+    assert m.supervisor_online is None
 
 
 # ─── deploy-hold stamping (the roster's `hold` column) ────────────────────────
@@ -679,3 +675,12 @@ def test_gather_cluster_status_carries_probe_paused_reason(monkeypatch: pytest.M
     assert m.online is True
     assert m.paused is True
     assert m.paused_reason == "startup"
+
+
+def test_status_schemas_omit_retired_updater_projections() -> None:
+    from gateway.schemas.status import ClusterPanel
+    from shared.api_contracts.status import MachineStatus
+
+    retired = {"current_orchestration", "last_updater_outcome", "last_update"}
+    for model in (cluster_status.ClusterStatus, ClusterPanel, MachineStatus):
+        assert retired.isdisjoint(model.model_fields)

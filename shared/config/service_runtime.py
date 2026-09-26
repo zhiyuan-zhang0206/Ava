@@ -128,29 +128,6 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
-    # Gray rollout: the root supervisor replaces the per-service session
-    # launch at `ava start` / `ava stop` once a host is switched. It is a
-    # host-scope commitment (identity, logging and recovery all move with it),
-    # so the default stays off until a host is deliberately switched — the
-    # session path is unchanged otherwise.
-    root_driver_enabled: bool = Field(
-        default=False,
-        alias="AVA_ROOT_DRIVER_ENABLED",
-        description=(
-            "Bring this host's service tree up/down through the ava-root supervisor "
-            "(manifests -> units) instead of launching service sessions directly. "
-            "Default off: the session path stays until a host is switched."
-        ),
-        json_schema_extra={
-            "capability": "common",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
     permissions_helper_port: int = Field(
         default=9223,
         alias="AVA_PERMISSIONS_HELPER_PORT",
@@ -161,6 +138,20 @@ class _ServiceRuntimeSettings(EnvSettings):
             "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
+        },
+    )
+
+    permissions_helper_artifact_dir: Path | None = Field(
+        default=None,
+        alias="AVA_PERMISSIONS_HELPER_ARTIFACT_DIR",
+        description="Explicit isolated directory for a reviewed signed helper artifact; never replaces the installed helper bundle.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
         },
     )
 

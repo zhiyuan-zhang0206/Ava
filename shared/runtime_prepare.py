@@ -13,7 +13,6 @@ import os
 import platform
 import shutil
 import stat
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,8 +54,10 @@ def _write_json(path: Path, value: object) -> None:
 
 
 def _run(argv: list[str], cwd: Path, *, timeout: int = 180) -> str:
+    from shared.posix_command import run_owned_command
+
     # No inherited AVA_HOME, credentials, PYTHONPATH, uv configuration or indexes.
-    result = subprocess.run(  # noqa: S603 — verified local artifacts, argv without a shell.
+    result = run_owned_command(
         argv,
         cwd=cwd,
         env={
@@ -70,10 +71,7 @@ def _run(argv: list[str], cwd: Path, *, timeout: int = 180) -> str:
             "AVA_DB_URL": "postgresql://unused@127.0.0.1:1/unused",
             "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
         },
-        text=True,
-        capture_output=True,
         timeout=timeout,
-        check=False,
     )
     if result.returncode:
         # Dependency URLs/credentials must not leak from subprocess diagnostics.

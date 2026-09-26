@@ -1,19 +1,19 @@
 """ava-ops — agent-runner inbound ops server.
 
 The ONLY long-running ava process on an agent-runner the gateway dials
-DIRECTLY (the runner's other services — agent-host, watchdog, browser,
+DIRECTLY (the runner's other services — agent-host, browser,
 mcp-daemon — are local or health-checked). Serves POST /ops; each request
 executes in-process against `ops/ops_*.py` and returns {status, result}.
 
 Usage: .venv/bin/python -m services.agent_ops.daemon — a per-machine
-singleton via pidfile, kept alive by `services/watchdog/daemon.py`. Registers
+singleton via pidfile, supervised by the application root. Registers
 its own unit in `machines` once serving (`_register_boot`).
 
 Idempotency keys: an envelope carrying `idempotency_key` is deduplicated
 against the shared `api_idempotency` table (method='ops' rows — migration
 20260808T200000_unify-ops-idempotency): the first dispatch runs the op and
 stores its outcome, later ones replay it, so the gateway's retry of
-non-idempotent ops (spawn / cluster_update / lifecycle) cannot duplicate the
+non-idempotent ops (spawn / lifecycle) cannot duplicate the
 effect (Task #961).
 
 A central DB pool is shared across all ops; each op manages its connection
@@ -26,17 +26,12 @@ teardown).
 
 from __future__ import annotations
 
+import argparse
 import sys
 
-if __name__ == "__main__" and any(
-    arg == "--bootstrap-observation" or arg.startswith("--bootstrap-observation=")
-    for arg in sys.argv[1:]
-):
-    # This must precede ordinary imports: Settings may fetch a stopped gateway,
-    # and normal daemon initialization writes PID/schema/registration state.
-    from services.agent_ops.bootstrap import main as bootstrap_main
-
-    raise SystemExit(bootstrap_main())
+if __name__ == "__main__":
+    # Reject unknown argv before imports can load Settings or touch local state.
+    argparse.ArgumentParser(description=__doc__).parse_args()
 
 
 import asyncio
@@ -45,7 +40,6 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -77,6 +71,7 @@ from ops.rpc_schemas import (
     LaunchAgentRequest,
     LifecyclePayload,
     OpEnvelope,
+    is_op_kind,
 )
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_ops import close_notices, health, outbox_flusher
@@ -107,7 +102,7 @@ _PIDFILE = settings.services.ops_pidfile
 # `api_idempotency` table (method='ops' rows — see `_dispatch_idempotent`): the
 # first dispatch owns the key, runs the op, and stores the outcome; later ones
 # replay it, so the gateway's retry of one logical op cannot duplicate its
-# effect (legacy launch prompt insertion, updates, lifecycle commands). The
+# effect (legacy launch prompt insertion and lifecycle commands). The
 # versioned launch wake keeps the same dedupe envelope per attempt. Rows are kept 7 days (matching the HTTP
 # channel's retention, one shared table) and pruned on each new-key insert.
 _DEDUP_TTL_S = 7 * 86_400.0
@@ -116,10 +111,6 @@ _DEDUP_TTL_S = 7 * 86_400.0
 # then fail loud instead of re-executing.
 _DEDUP_WAIT_STEP_S = 0.1
 _DEDUP_WAIT_ATTEMPTS = 30  # ~3s cap
-# Cluster updates may legitimately take 180s (validate-before-kill + pause);
-# the 2026-08-12 wedged-spawn shape stays loud beyond it instead of being
-# mistaken for legitimate progress.
-_DEDUP_EXPECTED_DURATION_S: dict[str, float] = {"cluster_update": 180.0}
 # Bounded retry for a connection that dies mid-transaction (Task #1059): the
 # idempotency key makes a re-run safe — a committed claim replays/waits, an
 # uncommitted one re-claims and executes.
@@ -153,23 +144,6 @@ def _is_running() -> bool:
     is a recycled pid, not a running instance (audit round 2, P1)."""
     return pidfile_holds_daemon(_PIDFILE, "services.agent_ops.daemon")
 
-
-# The one cluster op that spawns an orchestration session, serialized against
-# itself. The event loop used to give that serialization for free (neither POST
-# yielded); in worker threads with `ops_concurrency`=8 it has to be stated.
-#
-# **Refused, not queued** — and **only this op**. Refused, because a caller waiting
-# behind a stuck update learns nothing while it is stuck, and
-# `ClusterUpdateInProgress` is a verdict its callers already handle; this closes the
-# check-then-spawn window `spawn_update`'s own session check leaves open. Only this
-# op, because the compensating `cluster_resume` and the pause/stop path must stay
-# able to land while an update is in flight — a wider lock would rebuild, inside the
-# fix, the property this exists to remove.
-_cluster_update_lock = asyncio.Lock()
-
-# When the current holder took `_cluster_update_lock`, so a refusal can say how long
-# it has been refusing behind. Event-loop thread only, so it needs no lock.
-_cluster_update_held_since: float | None = None
 
 # Health handler and `_run_arm` share the loop; restart drops state and idempotency makes retry safe.
 _active_ops: dict[str, tuple[str, float]] = {}
@@ -232,12 +206,6 @@ async def _run_arm(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
             _active_ops.pop(kind)
 
 
-def _set_update_held_since(value: float | None) -> None:
-    """Record when the in-flight `cluster_update` took the lock (None = free)."""
-    global _cluster_update_held_since  # noqa: PLW0603 — event-loop thread only
-    _cluster_update_held_since = value
-
-
 def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
     """The blocking op arms, bound to this daemon's shared pool.
 
@@ -272,6 +240,8 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
     (ValueError), or a capture for a session that no longer exists
     (ShellNotFoundError) becomes a plain 'failed' result.
     """
+    if not is_op_kind(kind):
+        return "failed", {"error": f"unknown kind: {kind!r}"}
     pool = _db_pool
     if pool is None:
         return "failed", {"error": "_db_pool not initialized; _main must run before _dispatch"}
@@ -296,43 +266,6 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
                     trigger_inbound_kind=lc.trigger_inbound_kind,
                 )
                 return "completed", resp.model_dump(mode="json")
-            case "cluster_update":
-                # Serialized against itself, and refused rather than queued (see
-                # `_cluster_update_lock`). Everything else about the op is in
-                # `_dispatch_sync`, which this runs off the loop like the rest.
-                if _cluster_update_lock.locked():
-                    held_s = (
-                        0.0
-                        if _cluster_update_held_since is None
-                        else time.monotonic() - _cluster_update_held_since
-                    )
-                    # Logged, not merely answered: a RUN of these is the tell for the
-                    # half-dead shape (`_dispatch_sync`), and only this daemon's log
-                    # shows the run — each refused caller sees one failure and moves on.
-                    _log.warning(
-                        "refusing a concurrent cluster_update; the one holding this host "
-                        "has been running for %.0fs",
-                        held_s,
-                    )
-                    # No `reason` key, deliberately. That field is the wire-error enum
-                    # the gateway maps back to an AvaAgentError subclass; this is a
-                    # dispatch-level verdict, not one of those, and inventing a `reason`
-                    # would make the gateway reconstruct an exception type that does not
-                    # describe it.
-                    return "failed", {
-                        "error": (
-                            "ClusterUpdateInProgress: a cluster_update is already "
-                            "executing on this host; refusing a second one rather "
-                            "than queueing behind it"
-                        ),
-                        "detail": f"concurrent cluster_update refused after {held_s:.0f}s",
-                    }
-                async with _cluster_update_lock:
-                    _set_update_held_since(time.monotonic())
-                    try:
-                        return await _run_arm(kind, payload)
-                    finally:
-                        _set_update_held_since(None)
             case _:
                 return await _run_arm(kind, payload)
     except AvaAgentError as exc:
@@ -368,6 +301,8 @@ async def _dispatch_idempotent(
     committed) or observes the existing row and replays/waits for its outcome.
     Any other exception propagates unchanged.
     """
+    if not is_op_kind(kind):
+        return "failed", {"error": f"unknown kind: {kind!r}"}
     if pool is None:
         return "failed", {
             "error": "_db_pool not initialized; _main must run before _dispatch_idempotent"
@@ -391,7 +326,7 @@ async def _dispatch_idempotent_pass(
     kind: str, payload: dict[str, Any], key: str, pool: ConnectionPool
 ) -> tuple[str, dict[str, object]]:
     """Execute one op, deduplicated by `key` — the retry-safe path for
-    non-idempotent ops (spawn / cluster_update / lifecycle).
+    non-idempotent ops (spawn / lifecycle).
 
     The first dispatch with a given key runs the op and stores its
     (status, result) outcome in the shared `api_idempotency` table (method =
@@ -401,7 +336,7 @@ async def _dispatch_idempotent_pass(
     (`INSERT ... ON CONFLICT DO NOTHING`), so two racing dispatches with the
     same key cannot both execute. A same-key dispatch that arrives while the
     owner is still executing waits for the owner's outcome, bounded by the
-    operation kind's expected duration where one is known, then fails loud
+    fixed duplicate-wait budget, then fails loud
     rather than re-executing.
 
     An unexpected crash inside the op deletes the row and re-raises: no outcome
@@ -440,16 +375,11 @@ async def _dispatch_idempotent_pass(
                 (status, json.dumps(result, default=str), key),
             )
         return status, result
-    # Another dispatch owns the key (and may still be executing): wait for its
-    # stored outcome, then replay it. Most kinds retain the historical ~3s
-    # waiter cap; known slow kinds use the owner's DB creation time as the
-    # absolute deadline, so retries do not misdiagnose ordinary work as stuck.
-    expected_duration_s = _DEDUP_EXPECTED_DURATION_S.get(kind)
-    fallback_waits_left = _DEDUP_WAIT_ATTEMPTS
-    while True:
+    # A concurrent duplicate waits for the recorded outcome, never executes twice.
+    for _ in range(_DEDUP_WAIT_ATTEMPTS):
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT op_status, response_body, created_at FROM api_idempotency "
+                "SELECT op_status, response_body FROM api_idempotency "
                 "WHERE key = %s AND method = 'ops'",
                 (key,),
             )
@@ -457,59 +387,11 @@ async def _dispatch_idempotent_pass(
         if row is not None and row[0] is not None:
             result: dict[str, object] = row[1] or {}
             return row[0], result
-        if row is not None and expected_duration_s is not None:
-            owner_created_at: datetime = row[2]
-            now = datetime.now(UTC)
-            deadline = owner_created_at + timedelta(seconds=expected_duration_s)
-            if now >= deadline:
-                elapsed_s = max((now - owner_created_at).total_seconds(), 0.0)
-                return "failed", {
-                    "error": (
-                        f"idempotency key {key!r} is owned by a dispatch that has been running "
-                        f"for {elapsed_s:.1f}s without completing (kind {kind!r}); the owner is "
-                        f"likely stuck; expected bound is {expected_duration_s:.1f}s"
-                    )
-                }
-        elif expected_duration_s is None or row is None:
-            fallback_waits_left -= 1
         await _sleep(_DEDUP_WAIT_STEP_S)
-        if fallback_waits_left == 0:
-            break
     return "failed", {
         "error": f"idempotency key {key!r} is owned by another dispatch that never "
         "completed (concurrent duplicate dispatch of one logical op?)"
     }
-
-
-def dispatch_once(
-    kind: str, payload: dict[str, Any], *, idempotency_key: str | None
-) -> tuple[str, dict[str, object]]:
-    """Run one dispatch in a fresh process — the restricted observer's child entry.
-
-    `services/agent_ops/dispatch_child.py` calls this for one allowlisted op that
-    arrived at the restricted observer's `/ops`: the same routing as `_ops_route`
-    (a keyed envelope through `_dispatch_idempotent`, everything else through
-    `_dispatch`, both under `maintenance_activity.admission`), with a
-    process-local pool because there is no daemon to share one. The child exits
-    after the single call, so the module globals this sets are its own, and a
-    crash past this point cannot reach any other process.
-    """
-    global _db_pool  # noqa: PLW0603 — one-shot child: the pool lives and dies with this call.
-    _db_pool = _open_db_pool()
-    try:
-        try:
-            with maintenance_activity.admission(kind):
-                if idempotency_key is not None:
-                    return asyncio.run(
-                        _dispatch_idempotent(kind, payload, idempotency_key, _db_pool)
-                    )
-                return asyncio.run(_dispatch(kind, payload))
-        except Exception as exc:  # the same catch-all `_ops_route` applies to a dispatch.
-            _log.exception("one-shot dispatch refused or crashed for kind=%s", kind)
-            return "failed", {"error": f"{type(exc).__name__}: {exc}"}
-    finally:
-        _db_pool.close()
-        _db_pool = None
 
 
 async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
@@ -532,6 +414,15 @@ async def _ops_route(body: bytes) -> tuple[int, bytes, str]:
         return (
             400,
             json.dumps({"error": f"body must be {{kind: str, payload: dict}}: {exc}"}).encode(),
+            "application/json",
+        )
+
+    if not is_op_kind(envelope.kind):
+        return (
+            200,
+            json.dumps(
+                {"status": "failed", "result": {"error": f"unknown kind: {envelope.kind!r}"}}
+            ).encode(),
             "application/json",
         )
 
@@ -606,7 +497,7 @@ async def _main() -> None:
             "ops",
             host=bind_host,
             extra_routes={("POST", "/ops"): _ops_route},
-            components=lambda: health.ops_components(_cluster_update_held_since, _active_ops),
+            components=lambda: health.ops_components(_active_ops),
             extra=lambda: {
                 "maintenance": maintenance_activity.progress(),
                 "saturation": health.saturation(
@@ -650,7 +541,8 @@ def _shutdown_op_pool() -> None:
         _op_executor = None
 
 
-def main() -> None:
+def main(*, argv: list[str] | None = None) -> None:
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     # Task #3621: ops is on the full-validation whitelist — build the eager
     # config chain at the entry, before serving.
     from shared.config import ensure_eager
@@ -677,4 +569,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(argv=[])

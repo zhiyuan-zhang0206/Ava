@@ -1,12 +1,10 @@
-"""The gate — the always-up entry to the fleet UI.
+"""The gate: the fleet UI entry, supervised as an ordinary root service.
 
-Owns the entry port (the port the user bookmarks; `frontend` in the port
-table). Serves the static login page and two maintenance pages — "updating"
-and "service unavailable" — and proxies the Next.js app (on `app` = entry+1)
-whenever the cluster is healthy. A rollout takes the gateway down (503) and restarts the frontend —
-the gate is owned by the platform supervisor OUTSIDE service-session teardown, so the entry never
-blacks out: users see the updating page during the rollout and land back on
-the app automatically when it finishes.
+Owns the public entry port (the `frontend` slot), serves login and maintenance
+pages, and proxies the Next.js app on the separate `app` slot. Root starts,
+monitors, and stops Gate with the selected application services. Planned root
+shutdown includes the entry listener; maintenance pages describe dependency or
+rollout state only while Gate itself is running.
 
 Auth is the gateway's session cookie (host-only, shared across ports). One
 immutable `$AVA_HOME/deploy-state.json` snapshot is read at the start of each
@@ -39,6 +37,7 @@ import argparse
 import datetime as dt
 import json
 import logging
+import os
 import re
 import time
 import urllib.error
@@ -49,6 +48,7 @@ from urllib.parse import urlsplit
 
 from shared.config import settings
 from shared.log import logger
+from shared.paths import ava_home
 from shared.ui_update_state import UiUpdateSnapshot
 
 _log = logging.getLogger("services.gate")
@@ -347,6 +347,9 @@ class _Handler(BaseHTTPRequestHandler):
         self._maybe_close_connection()
 
     def _handle(self) -> None:
+        if urlsplit(self.path).path == "/__ava/healthz":
+            self._serve_health()
+            return
         cookie = self.headers.get("Cookie") or ""
         snapshot = self.gate.deploy_snapshot()
         if urlsplit(self.path).path == "/__ava/deploy-state":
@@ -368,6 +371,22 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self.gate._serve_static(self, self.gate.down_page, 503)
 
+    def _serve_health(self) -> None:
+        """Observe this server without requiring a live app or authenticated user."""
+        if self.command != "GET":
+            self.send_response(405)
+            self.send_header("Allow", "GET")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        body = json.dumps({"name": "gate", "home": str(ava_home()), "pid": os.getpid()}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _maybe_close_connection(self) -> None:
         # urllib may have consumed the request body; keep-alive is not worth the
         # edge cases — the gate's clients are browsers hitting a few assets.
@@ -380,12 +399,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def entry_port() -> int:
-    """The port the gate binds — the fleet UI entry (the `frontend` slot).
-
-    Public because the operator surfaces probe it (`cli.commands._converge_gate.
-    probe_gate`), and a monitor that derives the entry port for itself is a second
-    definition that can disagree with the one the gate binds.
-    """
+    """The public fleet UI port, shared by Gate and its roster readiness probe."""
     return urlsplit(settings.services.frontend_healthcheck_url).port or 3000
 
 
@@ -422,7 +436,7 @@ def _gateway_base() -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Always-up entry to the fleet UI")
+    parser = argparse.ArgumentParser(description="Fleet UI entry service")
     parser.add_argument("--port", type=int, default=None, help="bind port (default: entry port)")
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
     args = parser.parse_args()
@@ -431,11 +445,8 @@ def main() -> None:
     from shared.log import init_gateway_process
 
     init_gateway_process("gate")
-    # launchd stops this one (it is outside the session roster and the update
-    # lifecycle), and launchd's stop is also SIGTERM: without a handler the
-    # default disposition kills it mid-request instead of letting serve_forever
-    # return and close the listener. Nothing asyncio about the helper — raising
-    # in the handler breaks the blocking accept() the same way Ctrl-C does.
+    # Root sends SIGTERM and waits for this captured process tree to exit.
+    # The handler interrupts serve_forever so the listener closes on shutdown.
     install_graceful_shutdown("gate")
     static_dir = args.static_dir or (Path(__file__).parent / "static")
     port = args.port or entry_port()
@@ -451,8 +462,11 @@ def main() -> None:
     _log.info("gate serving on :%d (app %s, gateway %s)", port, gate.app_base, gate.gateway_base)
     import contextlib
 
-    with contextlib.suppress(KeyboardInterrupt):
-        server.serve_forever()
+    try:
+        with contextlib.suppress(KeyboardInterrupt):
+            server.serve_forever()
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

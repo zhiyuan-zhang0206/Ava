@@ -639,7 +639,9 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
     monkeypatch.setattr(outbox, "limits", lambda: snapshot)
     outbox._reset_caches_for_tests()
-    monkeypatch.setattr("shared.proc_tree.process_metadata", lambda: attested_caller(v1_lease))
+    monkeypatch.setattr(
+        "shared.native_process.ownership.process_metadata", lambda: attested_caller(v1_lease)
+    )
 
     def gateway_down(*_args: Any, **_kwargs: Any) -> Any:
         raise httpx.ConnectError("gateway unavailable")

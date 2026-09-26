@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import cmd_mcp_add, cmd_mcp_list, cmd_mcp_remove
+from cli.commands.mcp import cmd_mcp_add, cmd_mcp_list, cmd_mcp_remove
 
 
 def _config(home: Path) -> dict:

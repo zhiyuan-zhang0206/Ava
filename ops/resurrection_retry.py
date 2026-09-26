@@ -1,16 +1,33 @@
 """Placement and termination boundaries for a queued resurrection."""
 
+from uuid import UUID
+
 import psycopg
 
-from shared.agents import AgentNotFound, MachinePaused, ResurrectError
+from shared.agents import AgentNotFound, MachinePaused, ResurrectError, ResurrectRefused
+from shared.runtime_incarnation import RuntimeIncarnation
 
 
-class ResurrectExitDeferredError(ResurrectError):
-    """The old execution entity has not yet been positively observed ended."""
+class ResurrectSettlementDeferredError(ResurrectError):
+    """The original hosted lifecycle command has not yet settled."""
 
 
 class ResurrectTriggerStaleError(ResurrectError):
     """The exact pending wake no longer qualifies; the local op returns a no-op."""
+
+
+def hosted_resurrection_target(
+    agent_id: int,
+    *,
+    kind: str | None,
+    generation: UUID | None,
+    owner: UUID | None,
+    pid: int | None,
+) -> RuntimeIncarnation:
+    """Require retained hosted authority; historical rows need explicit cutover."""
+    if kind != "hosted" or generation is None or owner is None or pid is not None:
+        raise ResurrectRefused("runtime_cutover_required")
+    return RuntimeIncarnation(agent_id, generation, owner)
 
 
 def lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> str:

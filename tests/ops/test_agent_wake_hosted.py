@@ -12,8 +12,6 @@ from ops import agent_wake
 from ops.agent_spawn import create_agent_row
 from shared.machine import machine_name
 
-_DEAD_PID = 424243
-
 
 @pytest.fixture
 def wakes() -> Iterator[list[tuple[int, str]]]:
@@ -38,11 +36,17 @@ def _park(
     status: str,
     pid: int | None = None,
 ) -> int:
-    """Seed a row WITHOUT any launch — hosted spawn is row-only, and the
-    guard above turns a stray process launch into a loud failure."""
+    """Seed admission input or a terminated hosted incarnation without launching."""
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status=%s, pid=%s WHERE id=%s", (status, pid, aid))
+        if status == "terminated":
+            cur.execute(
+                "UPDATE agents_meta SET runtime_kind='hosted', "
+                "runtime_generation=gen_random_uuid(), runtime_owner=gen_random_uuid() "
+                "WHERE id=%s",
+                (aid,),
+            )
     db.commit()
     return aid
 
@@ -349,3 +353,65 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
         (aid,),
     ).fetchone()
     assert row == (2, "permanent_provider_reject")
+
+
+@pytest.mark.parametrize("runtime_kind", [None, "process"])
+@pytest.mark.parametrize("has_identity", [False, True])
+@pytest.mark.parametrize("guarded", [False, True])
+def test_historical_runtime_cannot_be_resurrected(
+    db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
+    runtime_kind: str | None,
+    has_identity: bool,
+    guarded: bool,
+) -> None:
+    """An absent command pointer cannot adopt a historical or unknown runtime."""
+    from shared.agents import ResurrectRefused
+    from shared.db import insert_inbound_message
+
+    aid = _park(db_conn, status="terminated")
+    db_conn.execute(
+        "UPDATE agents_meta SET runtime_kind=%s, "
+        "runtime_generation=CASE WHEN %s THEN runtime_generation ELSE NULL END, "
+        "runtime_owner=CASE WHEN %s THEN runtime_owner ELSE NULL END WHERE id=%s",
+        (runtime_kind, has_identity, has_identity, aid),
+    )
+    db_conn.commit()
+    trigger = insert_inbound_message(db_conn, aid, "continue", "user")
+    query = "SELECT row_to_json(a) FROM agents_meta a WHERE id=%s"
+    before = db_conn.execute(query, (aid,)).fetchone()
+    db_conn.commit()
+
+    with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
+        agent_wake.resurrect_agent(
+            aid,
+            resurrected_by="system" if guarded else "user",
+            trigger_inbound_id=trigger if guarded else None,
+            trigger_inbound_kind="chat" if guarded else None,
+        )
+
+    assert db_conn.execute(query, (aid,)).fetchone() == before
+    assert _kind_rows(db_conn, aid, "resurrect") == 0
+    assert wakes == []
+
+
+@pytest.mark.parametrize("missing", ["runtime_generation", "runtime_owner", "pid"])
+def test_incomplete_hosted_target_requires_cutover(
+    db_conn: psycopg.Connection, wakes: list[tuple[int, str]], missing: str
+) -> None:
+    """A hosted label alone cannot replace the retained incarnation authority."""
+    from psycopg import sql
+
+    from shared.agents import ResurrectRefused
+
+    aid = _park(db_conn, status="terminated")
+    db_conn.execute(
+        sql.SQL("UPDATE agents_meta SET {}=%s WHERE id=%s").format(sql.Identifier(missing)),
+        (424243 if missing == "pid" else None, aid),
+    )
+    db_conn.commit()
+    with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
+        agent_wake.resurrect_agent(aid, resurrected_by="user")
+    assert _row(db_conn, aid)[0] == "terminated"
+    assert _kind_rows(db_conn, aid, "resurrect") == 0
+    assert wakes == []

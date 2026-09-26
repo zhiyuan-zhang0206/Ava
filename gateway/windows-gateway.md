@@ -28,35 +28,12 @@ Three possible directions, none of them started: vendor a Windows redis build,
 shell out to Memurai (closed-source, licensing unexamined), or containerize the
 redis leg alone.
 
-### 2. Self-update — closed for the `ops/cluster*` family, open for schedules
+### 2. Prepared release platform qualification
 
-**Closed.** `spawn_update`, `spawn_rollout`, `spawn_restart` and
-`unpause_local_cluster` used to each build a literal raw session spawn around a
-POSIX `sh` one-liner (`{ … }`, `2>&1 | tee -a`, `$?`), while the probe and the
-kill paths already dispatched through `get_backend()`. Liveness and teardown
-were Windows-capable and every actual orchestration failed — a partial port
-that is worse than none, because the unit comes up, reports healthy, and
-silently cannot take an update. The three orchestration spawns
-(`spawn_update` / `spawn_rollout` / `spawn_restart`) share
-`ops/cluster_session.py:_spawn_detached_session`, which dispatches on
-`PlatformBackend.is_posix()` and hands a `cmd /c` chain to winproc on Windows;
-`unpause_local_cluster` respawns the restarter (the one service among them)
-through the session backend directly (`get_backend().new_session`) —
-post-2026-08 it lands on the native POSIX supervisor, on Windows it is
-winproc.
-
-Spawning the updater was only half of it: the session it spawns is the ops
-daemon's child (Windows reparents nothing), so the updater's own `ava restart`
-killed itself the moment its stop reached `ava-ops`. Closed on the kill side —
-`winproc.kill_session` prunes other sessions and the caller's ancestry out of the
-tree walk
-([decision](../decisions/2026-07-29-windows-session-kill-boundaries.md)).
-
-**Still open.** `gateway/schedule_manager.py:_launch` had the original shape
-(a raw spawn) while its `_live_ids`/`_kill` siblings were already
-backend-dispatched — the same half-port, one layer over. Schedules are a gateway
-service, so this one is genuinely blocking for a Windows gateway and irrelevant
-to a Windows agent-runner.
+The detached CLI/ops updater graph and its platform shell chains are absent.
+`ava cluster update --prepared` uses the prepared release transition path.
+Windows support for that path requires its own native custody and complete
+qualification; the retired shell implementation is not a fallback.
 
 ### 3. `milvus` cannot install, and nothing gates it
 

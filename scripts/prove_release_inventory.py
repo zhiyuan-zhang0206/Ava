@@ -29,9 +29,10 @@ from shared.managed_writer_observation import (
     UnitObserver,
 )
 from shared.native_job_observation import NativeReadUnavailableError
+from shared.native_process import pid_starttime_ticks
 from shared.runtime_prepare import tree_inventory
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import SessionRecord
 
 
 def require(value: bool, message: str) -> None:  # noqa: FBT001 — CI predicate.

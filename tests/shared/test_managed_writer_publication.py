@@ -107,7 +107,7 @@ def activation_readback(conn: psycopg.Connection, proposal: PendingPublication):
         SelectorReadback,
         UnitActivationReadback,
     )
-    from shared.managed_writer_observation import ExpectedProcess
+    from shared.process_evidence import ExpectedProcess
 
     assert proposal.normal_start_plan is not None
     expected = proposal.normal_start_plan.units[0]

@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from cli.commands import _otel_collector as oc
+from shared import collector_artifact as artifact
 from shared import resilience
 
 
@@ -41,7 +42,7 @@ def test_platform_tag_maps_machines(monkeypatch: pytest.MonkeyPatch) -> None:
     for system, machine, expected in cases:
         monkeypatch.setattr(platform, "system", lambda _s=system: _s)
         monkeypatch.setattr(platform, "machine", lambda _m=machine: _m)
-        assert oc.platform_tag() == expected
+        assert artifact.platform_tag() == expected
 
 
 def test_generate_config_bakes_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -154,7 +155,9 @@ def test_ensure_skips_download_when_version_matches(
     regenerated each converge."""
     (tmp_path / "otel-collector").mkdir(parents=True)
     (tmp_path / "otel-collector/otelcol-contrib").write_bytes(b"bin")
-    (tmp_path / "otel-collector/version").write_text(oc.OTELCOL_CONTRIB_VERSION, encoding="utf-8")
+    (tmp_path / "otel-collector/version").write_text(
+        artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
+    )
     repo = tmp_path / "repo"
     (repo / "deploy/otel-collector").mkdir(parents=True)
     (repo / "deploy/otel-collector/otel-collector.yaml").write_text(
@@ -163,8 +166,8 @@ def test_ensure_skips_download_when_version_matches(
 
     downloaded: list[str] = []
     monkeypatch.setattr(
-        oc,
-        "_download_and_verify",
+        artifact,
+        "download_and_verify",
         lambda _tag, _dir: downloaded.append(_tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -195,8 +198,8 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     downloaded: list[str] = []
     monkeypatch.setattr(
-        oc,
-        "_download_and_verify",
+        artifact,
+        "download_and_verify",
         lambda tag, _d: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -218,11 +221,11 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 def test_unsupported_platform_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No pinned tag -> warn + skip, never download."""
-    monkeypatch.setattr(oc, "platform_tag", lambda: None)
+    monkeypatch.setattr(artifact, "platform_tag", lambda: None)
     downloaded: list[str] = []
     monkeypatch.setattr(
-        oc,
-        "_download_and_verify",
+        artifact,
+        "download_and_verify",
         lambda _t, _d: downloaded.append(_t),  # pyright: ignore[reportUnknownArgumentType]
     )
     oc.ensure_otel_collector(tmp_path / "repo", tmp_path, roles=None)
@@ -640,75 +643,22 @@ def test_non_lgtm_gateway_with_explicit_endpoint_installs_collector(
     assert installed[0][1] == home
 
 
-def test_non_lgtm_gateway_reaps_orphan_collector_session(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+def test_collector_preparation_never_controls_a_running_service_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    home = tmp_path / ".ava-preview"
+    home = tmp_path / "home"
     home.mkdir()
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[2],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
+        repo=Path(__file__).resolve().parents[2], ava_home=home, roles=frozenset({"gateway"})
     )
-    killed: list[str] = []
-    expected_flags: list[bool] = []
+
+    def no_root_control() -> None:
+        pytest.fail("Preparation cannot independently reconcile a live root")
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-
-    def _collector_session_exists(session: str) -> bool:
-        return session == "ava-otel-collector"
-
-    monkeypatch.setattr("cli.commands._has_session", _collector_session_exists)
-
-    def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
-        killed.append(session)
-        expected_flags.append(expected)
-        return True, "graceful"
-
-    monkeypatch.setattr("cli.commands._session_lifecycle._graceful_kill_session", _record_kill)
-
+    monkeypatch.setattr("cli.commands._root_driver._root_client", no_root_control)
     oc.ensure_otel_collector_step(ctx)
-
-    assert killed == ["ava-otel-collector"]
-    assert expected_flags == [True]
-    assert "reaped orphan session ava-otel-collector" in capsys.readouterr().err
-
-
-def test_non_lgtm_gateway_without_session_skips_reap(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    home = tmp_path / ".ava-preview"
-    home.mkdir()
-    monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    ctx = oc.ConvergeCtx(
-        repo=Path(__file__).resolve().parents[2],
-        ava_home=home,
-        roles=frozenset({"gateway"}),
-    )
-    killed: list[str] = []
-
-    monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-
-    def _no_session(_session: str) -> bool:
-        return False
-
-    monkeypatch.setattr("cli.commands._has_session", _no_session)
-
-    def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
-        killed.append(session)
-        return True, "graceful"
-
-    monkeypatch.setattr("cli.commands._session_lifecycle._graceful_kill_session", _record_kill)
-
-    oc.ensure_otel_collector_step(ctx)
-
-    assert killed == []
-    assert "reaped orphan session" not in capsys.readouterr().err
 
 
 def test_non_lgtm_gateway_reports_and_preserves_residual_config(
@@ -1135,8 +1085,10 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         pytest.skip("POSIX file modes only")
     (tmp_path / "otel-collector").mkdir(parents=True)
     (tmp_path / "otel-collector/otelcol-contrib").write_bytes(b"bin")
-    (tmp_path / "otel-collector/version").write_text(oc.OTELCOL_CONTRIB_VERSION, encoding="utf-8")
-    monkeypatch.setattr(oc, "_download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
+    (tmp_path / "otel-collector/version").write_text(
+        artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
+    )
+    monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
     monkeypatch.setattr(
         "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
@@ -1197,10 +1149,10 @@ def test_stream_download_writes_all_chunks(
     def _fake_urlopen(_url: str, **kw: object) -> _ChunkedResp:
         return _ChunkedResp([payload] * 4, {"Content-Length": str(4 << 20)})
 
-    monkeypatch.setattr(oc.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     dest = tmp_path / "t.tar.gz"
 
-    oc._stream_download("https://example.invalid/t.tar.gz", dest)
+    artifact._stream_download("https://example.invalid/t.tar.gz", dest)
 
     assert dest.read_bytes() == payload * 4
     out = capsys.readouterr().out
@@ -1219,10 +1171,10 @@ def test_stream_download_honors_socket_timeout(
         seen["timeout"] = timeout
         raise TimeoutError("timed out")
 
-    monkeypatch.setattr(oc.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(artifact.urllib.request, "urlopen", _fake_urlopen)
     with pytest.raises(TimeoutError):
-        oc._stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
-    assert seen["timeout"] == oc._DOWNLOAD_SOCKET_TIMEOUT_S
+        artifact._stream_download("https://example.invalid/t.tar.gz", tmp_path / "t.tar.gz")
+    assert seen["timeout"] == artifact._DOWNLOAD_SOCKET_TIMEOUT_S
 
 
 @pytest.mark.parametrize("failures", [1, 3])
@@ -1243,21 +1195,21 @@ def test_download_with_retry_preserves_contract(
             raise errors[calls - 1]
         dest.write_bytes(b"ok")
 
-    monkeypatch.setattr(oc, "_stream_download", download)
-    monkeypatch.setattr(oc.time, "sleep", sleeps.append)
+    monkeypatch.setattr(artifact, "_stream_download", download)
+    monkeypatch.setattr(artifact.time, "sleep", sleeps.append)
     monkeypatch.setattr(resilience, "_sleep", sleeps.append)
-    monkeypatch.setattr(oc.time, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(artifact.time, "monotonic", lambda: 10.0)
     url = "https://example.invalid/t.tar.gz"
     if failures == 3:
         with pytest.raises(RuntimeError) as caught:
-            oc._download_with_retry(url, tmp_path / "t.tar.gz")
+            artifact._download_with_retry(url, tmp_path / "t.tar.gz")
         assert (
             str(caught.value)
             == f"failed to download otel-collector from {url} after 3 attempts (0s total): reset 3"
         )
         assert caught.value.__cause__ is errors[-1]
     else:
-        oc._download_with_retry(url, tmp_path / "t.tar.gz")
+        artifact._download_with_retry(url, tmp_path / "t.tar.gz")
         assert (tmp_path / "t.tar.gz").read_bytes() == b"ok"
     assert calls == min(failures + 1, 3)
     assert sleeps == [5.0 * i for i in range(1, calls)]

@@ -1,0 +1,320 @@
+"""PID/birth-validated process-tree ownership shared by the stop path and probes.
+
+The stop boundary (``cli.commands._maintenance_stop``) and the frontend identity
+probe (``services.healthchecks.frontend``) must answer the same question — "is
+this pid the recorded session's leader or one of its descendants, still the
+process it was?" — so the primitive lives here, importable by both without the
+ops layer reaching through services into cli (issue #2123).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from collections.abc import Iterable
+from ctypes import wintypes
+from dataclasses import dataclass
+from typing import Any, cast
+
+import psutil
+
+from shared.native_process import native_boot_id, pid_starttime_ticks, pidfd, process_birth_key
+
+# Identity reads use the stable start timestamp (stable_create_time): on macOS
+# the uncorrected kernel value, elsewhere the public create_time(). The public
+# macOS value re-derives from the wall clock with a boot-time correction
+# quantized to whole seconds (measured 2026-09-12: one live process read
+# 1.000000s apart by two import epochs), and WSL wall-clock steps move the
+# Linux value too. Linux uses its starttime tick; other native birth readings
+# compare exactly. Legacy records are not silently adopted across this boundary.
+
+
+def create_time_matches(live: float, birth: float) -> bool:
+    """Whether two stable native birth readings identify exactly the same process."""
+    return live == birth
+
+
+def stable_create_time(process: psutil.Process) -> float:
+    """Native start timestamp; Linux uses start ticks for identity instead.
+
+    psutil's public `create_time()` is not bit-stable across readers on macOS:
+    it adds a whole-second wall-clock correction on top of the kernel value
+    (and, since psutil 7.2, caches it per `Process` instance), so two readings
+    of one live process taken by different import epochs disagree by exactly
+    the correction. The uncorrected kernel value is what psutil itself keys
+    pid reuse on — `Process._proc.create_time(monotonic=True)`, documented
+    "stable over changes to system time" — and identity records must be
+    written and compared through that same value. Linux's public value includes
+    a reconstructed boot wall time and is diagnostic, never its identity key.
+    """
+    if sys.platform == "darwin":
+        # psutil's per-platform object is untyped in the public stubs; its
+        # monotonic create_time is the pid-reuse key used above.
+        return float(cast("Any", process)._proc.create_time(monotonic=True))
+    return process.create_time()
+
+
+def _start_ticks(pid: int) -> int | None:
+    ticks = pid_starttime_ticks(pid)
+    if ticks is not None and (type(ticks) is not int or ticks <= 0):
+        raise RuntimeError(f"invalid Linux start ticks for PID {pid}")
+    return ticks
+
+
+@dataclass(frozen=True)
+class OwnedProcess:
+    pid: int
+    birth: float
+    starttime: int | None
+
+    @classmethod
+    def capture(cls, process: psutil.Process) -> OwnedProcess:
+        """Sample the PID's current native birth; lineage needs separate evidence."""
+        ticks = _start_ticks(process.pid)
+        identity = cls(process.pid, stable_create_time(process), ticks)
+        if sys.platform == "linux" and identity.starttime is None:
+            if not psutil.pid_exists(process.pid):
+                raise psutil.NoSuchProcess(process.pid)
+            raise RuntimeError(f"cannot capture Linux start ticks for PID {process.pid}")
+        if ticks is not None:
+            after = _start_ticks(process.pid)
+            if after is None and psutil.pid_exists(process.pid):
+                raise RuntimeError(f"cannot finish Linux start ticks capture for PID {process.pid}")
+            if after != ticks:
+                raise psutil.NoSuchProcess(process.pid, msg="process changed during native capture")
+        return identity
+
+    def birth_key(self) -> tuple[int, str, int | float]:
+        """Index independently observed births without altering receipt equality."""
+        return process_birth_key(self.pid, self.birth, self.starttime, platform=sys.platform)
+
+    def same_birth(self, other: OwnedProcess) -> bool:
+        """Compare captured native identities without a wall-clock fallback for ticks."""
+        if sys.platform == "linux" and (self.starttime is None or other.starttime is None):
+            return False
+        return self.birth_key() == other.birth_key()
+
+    def birth_matches(self, process: psutil.Process) -> bool:
+        """Whether a fresh observation still identifies this captured birth."""
+        return self.same_birth(OwnedProcess.capture(process))
+
+    def live(self) -> bool:
+        """Whether the pid still is this recorded process.
+
+        A tracked process exiting and being reaped exactly between psutil's
+        eager validation and the raw start-time read leaves that read without a
+        /proc entry — that IS the exit, not an unverifiable identity: existence
+        is re-asked, and a vanished pid converges as gone (the 2026-09-20
+        wave-2 window raised out of a stop this way and aborted the cluster
+        update with the tracked daemon already exiting). Only a pid that still
+        exists while its start time cannot be read keeps the loud error.
+        """
+        try:
+            if sys.platform == "win32":
+                return _windows_live(self)
+            process = psutil.Process(self.pid)
+            if sys.platform == "linux" and self.starttime is None:
+                raise RuntimeError(f"missing Linux start ticks for PID {self.pid}")
+            if self.starttime is not None:
+                actual = _start_ticks(self.pid)
+                if actual is None:
+                    if not psutil.pid_exists(self.pid):
+                        # Reaped in the validation -> read window: exited.
+                        return False
+                    raise RuntimeError(f"cannot verify process identity for PID {self.pid}")
+                if actual != self.starttime:
+                    return False
+            elif not self.birth_matches(process):
+                return False
+            return process.status() not in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
+        except psutil.NoSuchProcess:
+            return False
+
+    def send_signal(self, signum: int) -> bool:
+        """Signal this birth, retaining the Linux process object through delivery.
+
+        A gone birth returns false. Unknown or changed custody refuses. Linux
+        never falls back to a numeric PID signal if pidfd custody is unavailable.
+        """
+        if not self.live():
+            return False
+        descriptor: int | None = None
+        try:
+            if sys.platform == "linux":
+                descriptor = pidfd.open_process(self.pid)
+            process = psutil.Process(self.pid)
+            if not self.same_birth(OwnedProcess.capture(process)):
+                raise RuntimeError(f"native identity changed before signal: {self.pid}")
+            if descriptor is None:
+                process.send_signal(signum)
+            else:
+                pidfd.send_signal(descriptor, signum)
+            return True
+        except (ProcessLookupError, psutil.NoSuchProcess):
+            return False
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+
+def _windows_live(identity: OwnedProcess) -> bool:
+    """Observe native exit, then exact birth under one PID-retaining handle.
+
+    Windows keeps a terminated process object until all handles close. psutil's
+    Windows status is only a suspension check; a retained, exited PID can still
+    appear RUNNING. A zero-time handle wait distinguishes it without waiting
+    for PID disappearance or mistaking exit code 259 for STILL_ACTIVE.
+    """
+    from shared.winjob import _get_last_error, _kernel32, _last_error
+
+    api = _kernel32()
+    raw = api.OpenProcess(0x00100000, 0, identity.pid)  # SYNCHRONIZE, non-inheritable
+    if not raw:
+        code = _get_last_error()
+        if code == 87:  # ERROR_INVALID_PARAMETER: no process has this PID.
+            return False
+        raise _last_error("open process for native liveness", code)
+    handle = wintypes.HANDLE(raw)
+    try:
+        outcome = api.WaitForSingleObject(handle, 0)
+        if outcome == 0:  # WAIT_OBJECT_0: exited, even with a retained PID.
+            return False
+        if outcome != 258:  # WAIT_TIMEOUT is the sole live observation.
+            raise _last_error("observe native process exit")
+        # Keeping the process object open prevents PID reuse during this read.
+        return identity.birth_matches(psutil.Process(identity.pid))
+    finally:
+        if not api.CloseHandle(handle):
+            raise _last_error("close native liveness handle")
+
+
+def _parent_edge(identity: OwnedProcess) -> tuple[OwnedProcess, int] | None:
+    """Read one fresh parent link bracketed by the child's native generation."""
+    process = psutil.Process(identity.pid)
+    if not identity.birth_matches(process):
+        return None
+    parent_pid = process.ppid()
+    if not identity.birth_matches(psutil.Process(identity.pid)):
+        return None
+    return identity, parent_pid
+
+
+def is_descendant(identity: OwnedProcess, ancestor: OwnedProcess) -> bool:
+    """Prove a current native ancestry chain, without psutil's cached PID map.
+
+    Each edge is checked again after walking to the retained ancestor. A reused
+    intermediate PID or reparented child invalidates the chain. This samples
+    membership; it does not grant custody over later births at those PIDs.
+    """
+    edges: list[tuple[OwnedProcess, int]] = []
+    seen: set[int] = set()
+    current = identity
+    try:
+        while not current.same_birth(ancestor):
+            if current.pid in seen:
+                return False
+            seen.add(current.pid)
+            edge = _parent_edge(current)
+            if edge is None or edge[1] <= 0:
+                return False
+            edges.append(edge)
+            current = OwnedProcess.capture(psutil.Process(edge[1]))
+        return ancestor.live() and all(_parent_edge(edge[0]) == edge for edge in edges)
+    except psutil.NoSuchProcess:
+        return False
+
+
+def capture_tree(identity: OwnedProcess) -> set[OwnedProcess]:
+    """Capture only generation- and ancestry-validated members of this tree."""
+    if not identity.live():
+        return set()
+    try:
+        children = psutil.Process(identity.pid).children(recursive=True)
+        captured = {identity}
+        for child in children:
+            try:
+                # children() is a PID-map hint, not membership authority. Its
+                # Process may be stale, or already describe a reused PID.
+                member = OwnedProcess.capture(psutil.Process(child.pid))
+                if is_descendant(member, identity):
+                    captured.add(member)
+            except psutil.NoSuchProcess:
+                continue
+        # A PID replacement during enumeration invalidates the capture. Never
+        # attach a replacement process's descendants to the original identity.
+        if not identity.live():
+            try:
+                current = OwnedProcess.capture(psutil.Process(identity.pid))
+            except psutil.NoSuchProcess:
+                return captured
+            if current.live():
+                raise RuntimeError(f"process changed during descendant capture: {identity.pid}")
+        return captured
+    except psutil.NoSuchProcess:
+        return {identity}
+
+
+def retain_processes(retained: set[OwnedProcess], observed: Iterable[OwnedProcess]) -> None:
+    """Add new native births, preserving the original receipt for every known one."""
+    keys = {identity.birth_key() for identity in retained}
+    for identity in observed:
+        key = identity.birth_key()
+        if key not in keys:
+            retained.add(identity)
+            keys.add(key)
+
+
+def leader_owns_pids(leader: OwnedProcess, pids: set[int]) -> bool:
+    """Whether any pid in `pids` is `leader` or a birth-validated descendant.
+
+    False when the leader is gone: a descendant whose leader died carries no
+    proof of whose it is (the stop path converges such survivors through the
+    recorded process group, a stronger claim than this probe). The identity
+    question is the same whether the leader came from a session record or, on
+    a root-driven host, from a tree unit's row (task #3370) — only the source
+    of `leader` differs, never this rule.
+    """
+    if not leader.live():
+        return False
+    owned = {identity.pid for identity in capture_tree(leader)}
+    return bool(owned & pids)
+
+
+def process_metadata() -> dict[str, Any]:
+    """Observed process facts for one caller, standardized for attestation.
+
+    Identity fields use the stable start time (`stable_create_time`) so a
+    later reader compares against the same value the kernel keeps. The parent
+    walk is bounded and records what it could observe instead of failing: a
+    permission gap on an ancestor path must not lose the facts below it.
+    """
+    result: dict[str, Any] = {"pid": os.getpid(), "ancestors": []}
+    # env-ok: inherited provider routing context, never an executor identity assertion
+    codex_home = os.environ.get("CODEX_HOME")
+    if codex_home:
+        result["codex_home"] = codex_home
+    process = psutil.Process()
+    for depth in range(8):
+        try:
+            identity = OwnedProcess.capture(process)
+            facts = {
+                "pid": process.pid,
+                "name": process.name(),
+                "executable": process.exe(),
+                "created_at": identity.birth,
+                "starttime": identity.starttime,
+                "boot_id": native_boot_id(),
+                "parent_pid": process.ppid(),
+            }
+            if depth == 0:
+                result.update(facts)
+            else:
+                result["ancestors"].append(facts)
+            parent = process.parent()
+            if parent is None:
+                break
+            process = parent
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+            result["observation_error"] = type(exc).__name__
+            break
+    return result

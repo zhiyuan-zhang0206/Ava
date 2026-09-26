@@ -16,6 +16,7 @@ from cli.commands._maintenance_probe import HostIdentity
 from ops.agent_pause_probe import host_identity_or_none as real_host_identity_or_none
 from shared import hold_driver, maintenance, pause_owner, start_serving
 from shared.maintenance_state import MaintenanceHold
+from shared.start_serving import RootBirth
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -34,7 +35,7 @@ def cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def phase(value: str) -> None:
-    before = pause_owner.begin_maintenance("local", WHEN)
+    before = pause_owner.begin_maintenance("local", WHEN).snapshot
     assert before.maintenance is not None
     hold = MaintenanceHold.decode({**before.maintenance.encode(), "phase": value})
     pause_owner.change_maintenance("local", WHEN, before.maintenance, hold)
@@ -72,7 +73,7 @@ def test_gateway_last_is_required_before_any_stop(monkeypatch: pytest.MonkeyPatc
 
 
 def test_start_keeps_hold_until_explicit_resume(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     phase("stopped")
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
@@ -82,7 +83,7 @@ def test_start_keeps_hold_until_explicit_resume(
         assert maintenance.held()
         assert kwargs == {"persist_services": False}
         generation = start_serving.begin_start()
-        assert start_serving.mark_serving(generation)
+        assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
         return 0
 
     def unpause() -> None:
@@ -243,28 +244,34 @@ def test_keep_terminals_does_not_skip_drain_or_ops_checks(monkeypatch: pytest.Mo
     assert command._hold("local", WHEN).phase == "stopping"
 
 
-def test_data_plane_keep_still_requires_all_services_stopped(
+def test_data_plane_keep_still_requires_native_root_absence(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    from services.ava_root.singleton import acquire_instance_lock, release_instance_lock
+
     phase("stopped")
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(
-        "shared.session_backend.get_backend", lambda: MagicMock(list_sessions=lambda: ["ava-ops"])
-    )
+    root = tmp_path / "root"
+    monkeypatch.setattr("shared.paths.root_run_dir", lambda: root)
     shutdown = MagicMock()
     monkeypatch.setattr(command, "stop_data_plane", shutdown)
-    with pytest.raises(RuntimeError, match="services are still running"):
-        command._stop_data("local", WHEN, 2, gateway_last=True, keep_terminals=True)
+    owner = acquire_instance_lock(root)
+    try:
+        with pytest.raises(RuntimeError):
+            command._stop_data("local", WHEN, 2, gateway_last=True, keep_terminals=True)
+    finally:
+        release_instance_lock(owner)
     shutdown.assert_not_called()
 
 
 @pytest.mark.parametrize("keep", [False, True])
 def test_data_plane_terminal_assertion_only_bypasses_terminal_guard(
-    keep: bool, monkeypatch: pytest.MonkeyPatch
+    keep: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     phase("stopped")
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: MagicMock(list_sessions=list))
+    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path / "root")
     terminals = MagicMock(side_effect=RuntimeError("live terminal"))
     shutdown = MagicMock(return_value=[])
     monkeypatch.setattr(command, "require_no_terminals", terminals)
@@ -280,7 +287,7 @@ def test_data_plane_terminal_assertion_only_bypasses_terminal_guard(
 
 
 def failed_hold(*failures: int, phase_value: str = "draining") -> None:
-    before = pause_owner.begin_maintenance("local", WHEN)
+    before = pause_owner.begin_maintenance("local", WHEN).snapshot
     assert before.maintenance is not None
     hold = MaintenanceHold.decode(
         {

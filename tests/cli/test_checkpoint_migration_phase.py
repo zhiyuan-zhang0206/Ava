@@ -29,6 +29,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     import shared.db
     import shared.migrations
     from shared import cluster
+    from shared.cluster import ownership
 
     calls: list[str] = []
     conn = object()
@@ -49,6 +50,10 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def fake_checkpoint_assertion(url: str) -> None:
         calls.append(f"checkpoint:{url}")
 
+    def record_ownership(_conn: object, _data: Path) -> None:
+        calls.append("ownership")
+
+    monkeypatch.setattr(ownership, "require_postgres_connection", record_ownership)
     monkeypatch.setattr(shared.db, "connect", fake_connect)
     monkeypatch.setattr(shared.db, "direct_db_url", lambda: "postgresql://direct/ava")
     monkeypatch.setattr(shared.migrations, "apply_pending_migrations", fake_ava_migrations)
@@ -72,10 +77,52 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
     assert migration_phase == [
         "dependency",
         "connect:{'direct': True, 'unbounded': True}",
+        "ownership",
         "ava",
         "checkpoint:postgresql://direct/ava",
     ]
     assert applied == ["20260823T000000_example"]
+
+
+def test_foreign_connected_postgres_refuses_before_migration_ddl(
+    migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli.commands.migrations import cmd_migrations_apply
+    from shared.cluster import ownership
+
+    def refuse(_conn: object, _data: Path) -> None:
+        raise RuntimeError("foreign connected backend")
+
+    monkeypatch.setattr(ownership, "require_postgres_connection", refuse)
+    with pytest.raises(RuntimeError, match="foreign connected backend"):
+        cmd_migrations_apply()
+    assert "ava" not in migration_phase
+
+
+def test_remote_managed_migration_preserves_explicit_provider_authority(
+    migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli.commands.migrations import cmd_migrations_apply
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
+    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://cache.example/0")
+    assert cmd_migrations_apply() == ["20260823T000000_example"]
+    assert "ownership" not in migration_phase
+
+
+def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared.cluster import ownership
+
+    row = conn.execute("SHOW data_directory").fetchone()
+    assert row is not None
+    directory = Path(row[0])
+    original = ownership.require_postgres_connection
+
+    def guard(actual: psycopg.Connection, _data: Path) -> None:
+        original(actual, directory)
+
+    monkeypatch.setattr(ownership, "require_postgres_connection", guard)
 
 
 def test_real_start_phase_converges_ava_then_is_idempotent(
@@ -88,6 +135,7 @@ def test_real_start_phase_converges_ava_then_is_idempotent(
     from shared.config import settings
     from shared.migrations import required_migration_set
 
+    _bind_private_database(db_conn, monkeypatch)
     db_conn.execute("DELETE FROM machine_units")
     _seed_checkpoint_versions(db_conn)
     monkeypatch.setattr(shared.db, "direct_db_url", lambda: settings.data_plane.db_url)
@@ -120,6 +168,7 @@ def test_dependency_drift_fails_before_any_database_change(
     from shared.cluster.provision import CheckpointDependencyDriftError
     from shared.config import settings
 
+    _bind_private_database(db_conn, monkeypatch)
     db_conn.execute("DELETE FROM machine_units")
     _seed_checkpoint_versions(db_conn)
     monkeypatch.setattr(shared.db, "direct_db_url", lambda: settings.data_plane.db_url)

@@ -9,6 +9,7 @@ re-export façade so the "single source" property can't silently regress.
 from __future__ import annotations
 
 import os
+from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +20,10 @@ from ops import roster, service_spec, spec
 from shared.machine import MachineRole
 
 _GATEWAY_SESSIONS = {
+    "gate",
+    "loki",
+    "prometheus",
+    "grafana",
     "gateway",
     "im-bridge",
     "labeler",
@@ -30,15 +35,16 @@ _GATEWAY_SESSIONS = {
     "memory-search",
     "memory-indexer",
     "frontend",
-    "gateway-watchdog",
     "otel-collector",
     "pg-backup",
     "pitr-uploader",
     "pitr-base-candidate",
 }
 _AGENT_RUNNER_SESSIONS = {
+    "loki",
+    "prometheus",
+    "grafana",
     "page-server",
-    "agent-runner-watchdog",
     "ops",
     "agent-host",
     "browser",
@@ -95,7 +101,7 @@ def test_profile_override_wins_over_derivation_and_no_marker() -> None:
 def test_every_service_declares_non_empty_capabilities() -> None:
     for s in roster.build_services():
         assert s.capabilities, f"{s.session} declares no capabilities"
-        assert s.capabilities <= {"gateway", "agent-runner"}
+        assert s.capabilities <= {"gateway", "agent-runner", "observability-station"}
 
 
 def test_capability_partition() -> None:
@@ -121,13 +127,18 @@ def test_annotated_roster_membership_per_capability(role: str, expected: set[str
     assert got == expected
 
 
-def test_pure_station_runs_no_session_services() -> None:
-    """A pure observability-station host runs NO session service: every service
-    spec is gated on gateway and/or agent-runner, so `ava start` on a station
-    unit only converges the native LGTM backends. This is what makes
-    register_self (via `ava start`) the sole writer of a station unit's
-    machine_units row — the ops daemon's boot registration never runs there."""
-    assert spec.services_for_capabilities(frozenset({"observability-station"})) == ()
+def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("services.healthchecks.lgtm.is_lgtm_host", lambda: False)
+    rows = spec.services_for_capabilities_annotated(frozenset({"observability-station"}))
+    assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
+    assert all(reason is not None for _service, reason in rows)
+    monkeypatch.setattr("services.healthchecks.lgtm.is_lgtm_host", lambda: True)
+    assert {
+        service.session
+        for service in spec.services_for_capabilities(frozenset({"observability-station"}))
+    } == {"loki", "prometheus", "grafana"}
 
 
 def test_gateway_roster_ordering_is_load_bearing() -> None:
@@ -150,13 +161,12 @@ def test_agent_runner_roster_ordering() -> None:
     assert order.index("agent-host") < order.index("ops")
 
 
-def test_watchdogs_declare_no_healthcheck_module() -> None:
-    # Keyed off the cmd module, not the session-name suffix: delivery-watchdog
-    # is a monitored service whose session ends in "watchdog" but runs its own
-    # module with its own healthcheck.
-    watchdogs = [s for s in roster.build_services() if "services.watchdog.daemon" in s.cmd]
-    assert watchdogs
-    assert all(s.healthcheck_module is None for s in watchdogs)
+def test_application_roster_has_one_supervision_authority() -> None:
+    services = {service.session: service for service in roster.build_services()}
+    assert "gateway-watchdog" not in services
+    assert "agent-runner-watchdog" not in services
+    assert services["delivery-watchdog"].healthcheck_module is not None
+    assert all("services.watchdog.daemon" not in service.cmd for service in services.values())
 
 
 def test_browser_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -345,43 +355,32 @@ def test_mcp_daemon_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> Non
 # reopen the gap these tests exist for: an occupant on this unit's port reading
 # green on the surface a human runs.
 
-# The services whose endpoint genuinely cannot prove who answered. Enumerated,
-# not derived, so adding a service forces a decision instead of defaulting into
-# liveness-only.
-_LIVENESS_ONLY_SESSIONS = {
-    "milvus",  # gRPC — TCP connect only, uncurlable
-    "memory-search",  # the search API carries no Ava identity payload; its healthcheck traverses a real /search
-    "browser-mcp",  # MCP over a Unix socket its own healthcheck dials
-    "computer-mcp",  # MCP over a Unix socket; its healthcheck dials + pings it
-    "mcp-daemon",  # MCP over a Unix socket; its healthcheck dials + pings it
-    "gateway-watchdog",  # not a server; its pidfile is the whole signal
-    "agent-runner-watchdog",
-}
+
+def test_every_service_declares_an_identity_probe() -> None:
+    """Every health verdict must bind the responder to this root-owned service."""
+    missing = {s.session for s in roster.build_services() if s.identity_probe is None}
+    assert missing == set(), f"{sorted(missing)} have no identity-bound health probe"
 
 
-def test_every_healthz_service_declares_an_identity_probe() -> None:
-    """Anything that serves an endpoint capable of identifying itself must say so
-    on the roster — otherwise the operator surface falls back to a bare 2xx,
-    which is exactly what an impostor satisfies."""
-    missing = {
-        s.session
-        for s in roster.build_services()
-        if s.identity_probe is None and s.session not in _LIVENESS_ONLY_SESSIONS
-    }
-    assert missing == set(), (
-        f"{sorted(missing)} have no identity_probe and are not declared liveness-only; "
-        "either give them one or add them to _LIVENESS_ONLY_SESSIONS with the reason"
+@pytest.mark.parametrize("service", ["gateway", "browser", "task-maintenance"])
+def test_healthy_protocol_cannot_certify_an_unowned_listener(
+    monkeypatch: pytest.MonkeyPatch, service: str
+) -> None:
+    from services.healthchecks import owned_service
+    from shared.daemon_health import DaemonProbe
+
+    monkeypatch.setattr(roster, "probe_home", lambda *_a, **_kw: DaemonProbe.up("healthy"))
+    monkeypatch.setattr(roster, "_browser_probe", lambda: DaemonProbe.up("healthy"))
+    monkeypatch.setattr(
+        "shared.daemon_health._probe_daemon", lambda *_a, **_kw: DaemonProbe.up("healthy")
     )
+    monkeypatch.setattr(roster, "daemon_identity", lambda *_a: lambda: DaemonProbe.up("healthy"))
+    monkeypatch.setattr(owned_service, "listener_pids", lambda _port: {12345})
+    monkeypatch.setattr(owned_service, "owned_process", lambda _service: None)
 
-
-def test_liveness_only_services_declare_no_identity_probe() -> None:
-    """The other direction: the exemption list cannot go stale silently either."""
-    wrong = {
-        s.session
-        for s in roster.build_services()
-        if s.identity_probe is not None and s.session in _LIVENESS_ONLY_SESSIONS
-    }
-    assert wrong == set(), f"{sorted(wrong)} gained an identity probe — drop them from the list"
+    item = next(item for item in roster.build_services() if item.session == service)
+    assert item.identity_probe is not None
+    assert item.identity_probe().terminal
 
 
 def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
@@ -392,7 +391,9 @@ def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
     from services.browser.probe import probe_browser
 
     browser = next(s for s in roster.build_services() if s.session == "browser")
-    assert browser.identity_probe is roster._browser_probe
+    assert isinstance(browser.identity_probe, partial)
+    assert browser.identity_probe.args[0] == "browser"
+    assert browser.identity_probe.args[2] is roster._browser_probe
     assert probe_browser is not None  # the lazy import target exists
 
 

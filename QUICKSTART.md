@@ -213,7 +213,7 @@ Never `git pull` + `ava start` on a production checkout — the update path is
 See [Windows setup guide](conventions/windows-setup.md). Common issues:
 - Agent goes offline after a restart → `ava start` registers a logon autostart task; check `schtasks /Query /TN \Ava\`
 - `ava start` refuses with "cannot host a per-cluster data plane" → this host was asked to serve the gateway capability; an enrolled agent-runner never sets `AVA_MACHINE_SERVE_GATEWAY`
-- Gateway reports the machine offline → it dials the address you passed as `ava enroll --machine-host`; confirm it is reachable *from the gateway*
+- Gateway reports the machine offline → it dials the address you passed as `ava start --machine-host`; confirm it is reachable *from the gateway*
 
 ---
 

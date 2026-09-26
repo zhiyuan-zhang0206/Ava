@@ -163,13 +163,11 @@ def check_schema_version(conn: psycopg.Connection) -> None:
     required set (baseline + migration files). Both directions are errors:
 
     - required minus applied non-empty (DB missing migrations the code carries):
-      gateway single-host / no migration run yet. Raises `SchemaVersionMismatch`;
-      run `ava cluster update` (or `ava start`, which applies pending) to catch up.
-    - applied minus required non-empty (DB has migrations this checkout lacks): an
-      agent-runner missed the gateway's `ava cluster update` phase B (e.g. while
-      offline). Raises `CodeBehindSchema`; the watchdog's schema controller
-      auto-spawns `ava cluster update` (on an agent-runner that is the self-update leg:
-      git checkout + uv sync + restart, no migrations) to self-heal.
+      the schema has not reached the code's required set. Raises
+      `SchemaVersionMismatch`.
+    - applied minus required non-empty (DB has migrations this code lacks):
+      raises `CodeBehindSchema`. No automatic updater repairs the mismatch;
+      selecting a compatible image/schema is an explicit lifecycle operation.
 
     A DB that is simultaneously ahead AND behind (both diffs non-empty) is a true
     divergence; it raises `CodeBehindSchema` (a set the code cannot have produced

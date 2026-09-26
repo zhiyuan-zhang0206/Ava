@@ -85,7 +85,7 @@ it back.
 
 ### Stops that do not go through a session
 
-Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `shared/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force) — and **must**, because two of the obvious spellings do not survive the crossing to Windows: `os.kill(pid, 0)` *terminates* the target there rather than probing it, and `signal.SIGKILL` is undefined. `cli/commands/_pgbouncer.py:_terminate_verified` is a lower-level escalating stop built on them (ask -> poll -> force -> verdict). Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/_maintenance_data_plane.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
+Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `shared/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force) — and **must**, because two of the obvious spellings do not survive the crossing to Windows: `os.kill(pid, 0)` *terminates* the target there rather than probing it, and `signal.SIGKILL` is undefined. `cli/commands/_pgbouncer.py:stop_pgbouncer` captures the exact pooler owner and delegates to its native custodian; an incomplete stop retains custody and fails. Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/_maintenance_data_plane.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
 
 ## Entry points
 
@@ -93,7 +93,7 @@ Not every process Ava stops is a named session: the pooler, an orphan holding a 
 - `shared/session_backend.py:SessionBackend.kill_session` — the session stop, per backend
 - `shared/proc.py:process_alive` / `request_stop` / `force_kill` — the non-session trio
 - `shared/proc.py:kill_process_tree` / `run_bounded` — tree teardown and a bounded run
-- `cli/commands/_pgbouncer.py:_terminate_verified` — the escalating stop built on the trio
+- `cli/commands/_pgbouncer.py:stop_pgbouncer` — exact pooler custody and bounded stop
 
 ## Notes
 

@@ -113,7 +113,7 @@ def test_runner_projects_observations_and_records_actual_lifecycle(runner_db: st
 
 def test_ensure_runner_role_reauths_password_on_rerun(runner_db: str) -> None:
     """Re-running with a different password rotates the role's stored verifier —
-    the .env edit + `ava cluster ensure-db-role` self-heal path."""
+    the normal gateway start grant refresh."""
     admin = _admin_url(runner_db)
     ensure_runner_role(_IDENTITY, base_admin_url=admin, runner_password=_RUNNER_PW)
 
@@ -265,7 +265,7 @@ def test_default_schema_check_never_setup_after_concurrent_repair(
     expected = frozenset(range(len(PostgresSaver.MIGRATIONS)))
     observed = iter((expected - {9}, expected))
 
-    def checkpoint_versions(_db_url: str) -> frozenset[int]:
+    def checkpoint_versions(_db_url: str, *, expected_data_dir: object = None) -> frozenset[int]:
         return next(observed)
 
     def setup_must_not_run(_self: PostgresSaver) -> None:

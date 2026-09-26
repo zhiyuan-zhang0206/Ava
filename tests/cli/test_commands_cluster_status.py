@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cli import commands as _cli
+import cli.commands.cluster as _cluster_commands
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _FakeResponse
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
@@ -93,7 +93,7 @@ def test_cmd_cluster_status_renders_identity_mismatch_and_code_drift(
         ),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     assert "code" in out  # new column header
@@ -125,7 +125,7 @@ def test_cmd_cluster_status_renders_pin_and_role_columns(
         ),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     assert "pin" in out
@@ -164,7 +164,7 @@ def test_cmd_cluster_status_role_column_shows_observability_station(
         ),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     station_line = next(line for line in out.splitlines() if line.startswith("station-a"))
@@ -221,7 +221,7 @@ def test_cmd_cluster_status_read_timeout_reports_friendly(
         raise httpx.ReadTimeout("timed out", request=None)
 
     monkeypatch.setattr("httpx.get", _slow_get)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "did not respond within" in err
@@ -241,7 +241,7 @@ def test_cmd_cluster_status_connect_error_reports_friendly(
         raise httpx.ConnectError("connection refused", request=None)
 
     monkeypatch.setattr("httpx.get", _refused_get)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "gateway unreachable" in err
@@ -263,7 +263,7 @@ def test_cmd_cluster_status_http_error_reports_status(
         return httpx.Response(500, request=request)
 
     monkeypatch.setattr("httpx.get", _server_error_get)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "HTTP 500" in err
@@ -280,7 +280,7 @@ def test_cmd_cluster_status_unresolvable_gateway_reports_friendly(
         "shared.machine.gateway_api_base",
         lambda: (_ for _ in ()).throw(GatewayApiBaseMissing("AVA_GATEWAY_URL unset")),
     )
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "cannot resolve gateway URL" in err
@@ -332,7 +332,7 @@ def test_cmd_cluster_status_empty_roster_prints_hint(
 ) -> None:
     """Empty roster from the gateway -> hint + exit 0."""
     calls = _patch_roster_get(monkeypatch, [])
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     assert calls == ["http://gw:8000/api/cluster/roster"]
     assert "machines table empty" in capsys.readouterr().out
@@ -355,7 +355,7 @@ def test_cmd_cluster_status_renders_online_stopped_offline(
         _machine_row(name="corp", online=False, paused=None, stopped_at=None),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     assert "test-host" in out and "online" in out
@@ -383,14 +383,14 @@ def test_cmd_cluster_status_renders_hold_column_and_banner(
         ),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == (
         "deploy hold: machine-1:pid42 (held 5m, lease expires in 10m) — settling, waiting for: wsl"
     )
     # The banner states the operator-visible consequence, which is what brought them here.
-    assert any("auto-rollback" in line for line in out[:5])
+    assert any("no other owner can take the cluster deploy lease" in line for line in out[:5])
     header = next(line for line in out if line.startswith("name"))
     assert "hold" in header
     wsl_row = next(line for line in out if line.startswith("wsl"))
@@ -399,195 +399,14 @@ def test_cmd_cluster_status_renders_hold_column_and_banner(
     assert "waited-on" not in local_row
 
 
-def _failed_update(**overrides: object) -> object:
-    """A real LastUpdate, as the roster stamps it onto every row. Handed to
-    `_machine_row` as the model so MachineStatus serializes it — a hand-built dict
-    would validate against nothing and drift silently."""
-    from datetime import UTC, datetime
-
-    from shared.last_update import LastUpdate, UpdateOutcome
-
-    base = LastUpdate(
-        outcome=UpdateOutcome.INCOMPLETE,
-        failed=True,
-        target_sha="8bdd3667aa",
-        origin="frontend",
-        started_at=datetime(2026, 7, 30, 21, 10, tzinfo=UTC),
-        failing_step="the gateway was not serving, so Phase B never fanned out",
-    )
-    return base.model_copy(update=overrides)
-
-
-def test_cmd_cluster_status_states_a_failed_update_instead_of_leaving_a_sha_riddle(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The roster's `pin` / `code` cells are symptoms — a node that missed a rollout
-    and a rollout that failed and rolled back produce the same mismatch. The banner
-    states which, above everything else, with the step and whether the pin moved."""
-    roster = [_machine_row(name="test-host", last_update=_failed_update())]
-    _patch_roster_get(monkeypatch, roster)
-
-    assert _cli.cmd_cluster_status() == 0
-
-    out = capsys.readouterr().out.splitlines()
-    assert "FAILED" in out[0] and "8bdd366" in out[0]
-    top = "\n".join(out[:5])
-    assert "Phase B never fanned out" in top
-    assert "pin was left where it was" in top
-    assert "next successful" in top.lower() or "next successful" in "\n".join(out[:6])
-
-
-def test_cmd_cluster_status_shows_the_rollback_anchor_and_the_recovery_that_ran(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """`last_known_good_sha` was recorded since the pin existed and shown nowhere, so
-    a rollback presented as the pin moving backwards for no stated reason. With the
-    anchor and the observer's own sentence, the pin change reads as the designed
-    fallback it is."""
-    roster = [
-        _machine_row(
-            name="test-host",
-            cluster_last_known_good_sha="7e571b49aa",
-            last_update=_failed_update(observed_by="rolled back 8bdd366 -> 7e571b4"),
-        )
-    ]
-    _patch_roster_get(monkeypatch, roster)
-
-    assert _cli.cmd_cluster_status() == 0
-
-    top = "\n".join(capsys.readouterr().out.splitlines()[:6])
-    assert "since then: rolled back 8bdd366 -> 7e571b4" in top
-    assert "rollback anchor (last known good): 7e571b4" in top
-
-
-def test_cmd_cluster_status_dates_the_failure_so_a_stale_one_reads_as_stale(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Minutes old is a live incident; days old is a cluster nobody has updated
-    since. The banner has to let those two be told apart at a glance."""
-    from datetime import UTC, datetime, timedelta
-
-    roster = [
-        _machine_row(
-            name="test-host",
-            last_update=_failed_update(started_at=datetime.now(UTC) - timedelta(days=3)),
-        )
-    ]
-    _patch_roster_get(monkeypatch, roster)
-
-    assert _cli.cmd_cluster_status() == 0
-
-    assert "(3d ago)" in capsys.readouterr().out
-
-
-def test_cmd_cluster_status_says_nothing_about_an_update_that_succeeded(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Silent on success by design: a permanent "last update: ok" line is one people
-    stop reading, and this is the line that has to be read the once it appears."""
-    from shared.last_update import UpdateOutcome
-
-    roster = [
-        _machine_row(
-            name="test-host",
-            last_update=_failed_update(outcome=UpdateOutcome.CLEAN, failed=False),
-        )
-    ]
-    _patch_roster_get(monkeypatch, roster)
-
-    assert _cli.cmd_cluster_status() == 0
-
-    out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith("name"), "a successful update must add no banner at all"
-
-
-def test_cmd_cluster_status_marks_a_recovered_update_as_a_warning_not_a_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A recovery still has to be stated — that silence is the 2026-07-30 bug — but
-    it is not the same call to action as an unhandled failure, so it does not get the
-    same glyph. Giving both `✗` is how the actionable one stops being read."""
-    from shared.last_update import UpdateOutcome
-
-    roster = [
-        _machine_row(
-            name="test-host",
-            last_update=_failed_update(
-                outcome=UpdateOutcome.RECOVERED,
-                observed_by="rolled back 8bdd366 -> 7e571b4",
-            ),
-        )
-    ]
-    _patch_roster_get(monkeypatch, roster)
-
-    assert _cli.cmd_cluster_status() == 0
-
-    out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith("⚠"), f"a recovered update must not read as a live failure: {out[0]}"
-    assert "RECOVERED" in out[0]
-
-
-def test_cmd_cluster_status_names_the_rollouts_own_log_when_the_record_has_it(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The record carries the log the run was actually writing, so the banner points
-    at that file instead of at the glob an operator then has to pick from by mtime."""
-    roster = [
-        _machine_row(
-            name="test-host",
-            last_update=_failed_update(log_path="/home/ava/.ava/logs/rollout-1785470000.log"),
-        )
-    ]
-    _patch_roster_get(monkeypatch, roster)
-
-    assert _cli.cmd_cluster_status() == 0
-
-    top = "\n".join(capsys.readouterr().out.splitlines()[:6])
-    assert "/home/ava/.ava/logs/rollout-1785470000.log" in top
-    assert "rollout-<epoch>.log" not in top
-
-
-def test_cmd_cluster_status_falls_back_to_the_log_pattern_when_none_was_recorded(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A foreground `ava cluster update --local` has no log of its own. Naming a specific
-    file there would be a guess, so the banner describes where rollout logs live."""
-    roster = [_machine_row(name="test-host", last_update=_failed_update(log_path=None))]
-    _patch_roster_get(monkeypatch, roster)
-
-    assert _cli.cmd_cluster_status() == 0
-
-    assert "rollout-<epoch>.log" in capsys.readouterr().out
-
-
-def test_cmd_cluster_status_reports_an_orphaned_update_as_a_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The reading no process could have filed for itself: the orchestration died,
-    so the record was never closed and the lease it held is gone."""
-    from shared.last_update import UpdateOutcome
-
-    roster = [
-        _machine_row(
-            name="test-host",
-            last_update=_failed_update(outcome=UpdateOutcome.ORPHANED, failing_step=None),
-        )
-    ]
-    _patch_roster_get(monkeypatch, roster)
-
-    assert _cli.cmd_cluster_status() == 0
-
-    assert "died without reporting an outcome" in capsys.readouterr().out
-
-
 def test_cmd_cluster_status_prints_no_banner_when_no_hold(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """No live lease -> no banner at all. A blank `hold` column is not evidence the
-    cluster is free (a host-local watchdog update takes no lease), so the roster does
-    not claim it is."""
+    cluster is free (host-local maintenance takes no cluster lease), so the roster
+    does not claim it is."""
     _patch_roster_get(monkeypatch, [_machine_row(name="test-host")])
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     assert "deploy hold" not in out
@@ -601,61 +420,16 @@ def test_cmd_cluster_status_fails_fast_on_http_error(
     silent fallback, and no unhandled traceback (#219)."""
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.get", lambda *_a, **_kw: _FakeResponse([], status_code=503))  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "HTTP 503" in err
-
-
-def test_cmd_cluster_restart_posts_endpoint(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """`ava cluster restart` POSTs /api/cluster/restart and reports the updater session."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
-    calls: list[str] = []
-
-    def _fake_post(url, **_kw):
-        calls.append(url)  # pyright: ignore[reportUnknownArgumentType]
-        return _FakeResponse({"session": "ava-updater", "log": "/var/log/u.log"})
-
-    monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_cluster_restart()
-    assert rc == 0
-    assert calls == ["http://gw:8000/api/cluster/restart"]
-    assert "ava-updater" in capsys.readouterr().out
-
-
-def test_cmd_cluster_status_renders_stranded_hold_banner(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A host carrying a stranded-hold record renders the held-host banner — its
-    reason and the one-command remedy — above the table (task #3132)."""
-    from datetime import UTC, datetime
-
-    roster = [
-        _machine_row(
-            name="macmini",
-            online=False,
-            paused=None,
-            stranded_hold_since=datetime(2026, 9, 12, 1, 2, tzinfo=UTC),
-            stranded_hold_reason="updater exited rc=1",
-        ),
-        _machine_row(name="wsl"),
-    ]
-    _patch_roster_get(monkeypatch, roster)
-    rc = _cli.cmd_cluster_status()
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "macmini: update failed (updater exited rc=1) \u2014 host left held" in out
-    assert "run `ava start` on macmini" in out
-    # banner above the table header
-    assert out.index("host left held") < out.index("up since")
 
 
 def test_cmd_cluster_status_without_held_hosts_has_no_banner(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _patch_roster_get(monkeypatch, [_machine_row(name="wsl")])
-    rc = _cli.cmd_cluster_status()
+    rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     assert "host left held" not in capsys.readouterr().out

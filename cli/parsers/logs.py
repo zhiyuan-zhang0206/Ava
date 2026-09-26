@@ -51,7 +51,7 @@ def _family_days(value: str) -> dict[str, int]:
 
 
 def _h_logs_retention(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_logs_retention
+    from cli.commands.logs import cmd_logs_retention
 
     return cmd_logs_retention(
         older_than_days=args.older_than,
@@ -61,7 +61,7 @@ def _h_logs_retention(args: argparse.Namespace) -> int:
 
 
 def _h_logs_rotate(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_logs_rotate
+    from cli.commands.logs import cmd_logs_rotate
 
     return cmd_logs_rotate(
         dry_run=args.dry_run,

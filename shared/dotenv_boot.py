@@ -54,21 +54,6 @@ from dotenv import dotenv_values, load_dotenv
 # raises an actionable error directing the operator to `ava start`.
 UNANCHORED_DB_SENTINEL = "postgresql://unanchored-dev-checkout@127.0.0.1:1/run-ava-start-first"
 
-# Never-dialed Settings placeholder for AVA_REDIS_URL on a not-yet-born install
-# home (port 1 on loopback, mirroring the DB sentinel). cli/install_cluster.py
-# plants it before the first settings import; the authority pass preserves it
-# exactly like the DB sentinel (F-s4-6), so the documented mechanism holds —
-# before the S4 fix the drop loop popped it immediately and the comment claimed
-# a mechanism that did not exist.
-BOOT_REDIS_PLACEHOLDER = "redis://install-cluster-boot@127.0.0.1:1/0"
-
-# Values the authority pass must never drop: both are boot-time placeholders a
-# process plants in ITS OWN environment before Settings constructs, and a
-# not-yet-born home has no .env to declare them in. Everything else in
-# cluster-scope aliases the unit's .env does not declare are dropped so a
-# polluted parent cannot leak a sibling cluster's value.
-_UNANCHORED_PLACEHOLDERS = frozenset({UNANCHORED_DB_SENTINEL, BOOT_REDIS_PLACEHOLDER})
-
 # The launcher's process profile, recorded by the CLI entry point before it
 # clears the live marker (cli/main.py `_normalize_process_profile`). The CLI is
 # deliberately settings-full — no profile — but a boot pass reached through it
@@ -83,9 +68,8 @@ _HOME_POINTER = ".ava_home"
 # Opt out of the AVA_HOME-vs-checkout contradiction check (`resolve_ava_home`).
 # For callers that redirect a checkout to a home it does not own ON PURPOSE and
 # accept running that checkout's code against it — the test suite's scratch home
-# (tests/conftest.py) and `install.sh --worktree` re-pointing a checkout at a new
-# cluster. Only the real process environment can open it: the check runs at this
-# module's import, before any `.env` is loaded, so no cluster can grant itself
+# (tests/conftest.py). Only the real process environment can open it: the check
+# runs at this module's import, before any `.env` is loaded, so no cluster can grant itself
 # the exemption on disk.
 _HOME_OVERRIDE = "AVA_HOME_OVERRIDE"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -228,14 +212,6 @@ def resolve_ava_home() -> tuple[Path, bool]:
     return checkout_anchored_home()
 
 
-def _env_path(ava_home: str | None) -> Path:
-    """Resolve a unit's .env path from an explicit AVA_HOME value: `$AVA_HOME/.env`,
-    or `~/.ava/.env` when None. Used by callers that hold an explicit home
-    (cli/enroll.py writes bootstrap env to AVA_ENV_PATH)."""
-    base = Path(ava_home) if ava_home else Path.home() / ".ava"
-    return base.expanduser() / ".env"
-
-
 _HOME, _ANCHORED = resolve_ava_home()
 AVA_ENV_PATH = _HOME / ".env"
 
@@ -253,10 +229,10 @@ def checkout_anchored() -> bool:
     return _ANCHORED
 
 
-# Optional sibling of .env written by `install.sh --mirror NAME`: a bundle of
-# package-manager index/registry env vars (PyPI / npm / Homebrew). Kept separate
+# Optional sibling of .env containing explicitly configured package-manager
+# index/registry env vars (PyPI / npm / Homebrew). Kept separate
 # from .env so `cp .env.example` never clobbers it and the mirror choice is
-# orthogonal to the secrets. Absent on installs that did not opt into a mirror.
+# orthogonal to the secrets. Absent when no mirror profile is configured.
 AVA_MIRROR_ENV_PATH = _HOME / "mirror.env"
 
 
@@ -521,7 +497,7 @@ def _enforce_cluster_env_authority() -> None:
     flags, machine name/description, memory remote) get the same treatment, with
     one exemption: a value the unit's own `.env` declares is forced in, an
     inherited one is DROPPED. A unit's machine identity is a per-unit fact — it
-    belongs in its own `.env` (install / `ava enroll` write it there) or its
+    belongs in its own `.env` (`ava start` writes it there) or its
     `$AVA_HOME/machine_*` files, never in whatever a parent process happened to
     inherit. The leak that motivated this was real: the gateway host's login shell
     carries prod's `~/.ava/.env` (AVA_MACHINE_SERVE_GATEWAY=true among it), so a
@@ -591,6 +567,7 @@ def _enforce_cluster_env_authority() -> None:
     # up{job="tempo"}=0 for ~14 min; task #3339). Declared -> force;
     # undeclared -> untouched.
     _force_also = {
+        "AVA_SERVICE_PATH",
         "AVA_CLUSTER_SECRET",
         "AVA_GATEWAY_URL",
         "AVA_GATEWAY_PORT",
@@ -623,7 +600,7 @@ def _enforce_cluster_env_authority() -> None:
     # unit's .env does not declare, and machine-identity keys it does not declare
     # (the env-suppliable gateway-URL pair stays exempt).
     for key in env_authority_drop_set(role) - _force_also - _identity_env_only():
-        if file_vals.get(key) is None and os.environ.get(key) not in _UNANCHORED_PLACEHOLDERS:
+        if file_vals.get(key) is None and os.environ.get(key) != UNANCHORED_DB_SENTINEL:
             if key == "AVA_DB_URL" and _is_launcher_runner_projection(os.environ.get(key)):
                 # Mirrored force-loop exemption (#4334): the launcher's runner
                 # projection is the agent child's DB source.

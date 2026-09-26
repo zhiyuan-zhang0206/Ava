@@ -31,8 +31,8 @@ A stop retains agent IDs, history, checkpoints, pending messages, workspaces,
 browser profiles and observability data. It does not terminate agent identities
 or destroy the cluster. A full stop closes persistent shells; their running
 processes and shell variables cannot be restored by `start`. Use pause when
-those live sessions must survive. Windows' user-wide permissions helper and
-externally launched tools are not owned by one local home.
+those live sessions must survive. Externally launched tools are not owned by
+one local home.
 
 Impersonation is a separate agent identity protocol. These commands do not
 request, acquire, renew or release external-agent control leases. Also, the
@@ -40,6 +40,13 @@ legacy `ava cluster pause NAME` is machine membership administration, not this
 local maintenance operation; do not substitute it for `ava pause`.
 
 ## What normal drain waits for
+
+The local maintenance journal is also the gateway's HTTP admission authority.
+Draining or locally drained units keep dependency APIs available to other hosts.
+The stop/start window (`stopping`, `stopped`, `starting`, `ready`) closes business
+requests until the same journal is atomically resumed. Completion has no posture
+cache expiry delay. Health and control-plane routes remain available even if the
+journal requires repair; an unreadable journal keeps business admission closed.
 
 The command holds new native admission, enqueues an ordinary `restart`, and
 lets native claim consume it. The graph returns normally, its checkpoint is
@@ -57,9 +64,8 @@ serial remote-dispatch batches stop starting new dispatches once shutdown
 begins, so that cleanup waits for an in-flight dispatch, never the remaining
 batch — deferred rows are re-selected by the next boot's pass.
 
-An update-family drain (a rollout's Phase A — `spawn_update`, or the
-restart-only `spawn_restart` chain; both drive `pause_local_cluster`) reaps
-its stragglers: a cohort member still un-landed
+The retained release executor calls the ordinary maintenance drain with
+straggler reaping enabled. A cohort member still un-landed
 `update_straggler_reap_seconds` (default 15) after its restart command was
 issued is truncated and released with the honest `reaped` outcome instead of
 aborting the wave (task #4016; the local stop family — `ava stop`/`pause`/
@@ -80,8 +86,10 @@ fence explicitly when a successor boot is looking at a row its predecessor left:
 that one needs `ava maintenance status` plus an explicit `resume --cancel` or
 `repair`, never a retry loop. A rollout's own pause no longer defers the held
 continuation it requires, so the ordinary update drain consumes and certifies.
-Retry the command, or run `ava start` to restore services and release
-the hold after readiness succeeds. A failed start keeps admission closed.
+For ordinary local maintenance, retry the command or run `ava start` to restore
+services and release the hold after readiness succeeds. A captured release
+operation instead continues through its exact prepared request; ordinary start
+cannot bypass its incomplete journal. A failed start keeps admission closed.
 A recorded checkpoint/continuation failure blocks ordinary start and resume
 before services are launched; repair and inspect that failure first. A healthy
 service probe cannot prove that a failed checkpoint became durable.
@@ -90,8 +98,8 @@ start can measure real readiness before opening business requests or native
 admission. Public health still verifies identity and database access; status
 and resume retain their existing authentication requirements.
 The existing exact-generation `cluster_resume` RPC is reachable but refuses
-resume before readiness or after a recorded continuation failure. Neither
-`--no-readiness-gate` nor a waived update exit code certifies readiness.
+resume before readiness or after a recorded continuation failure. Every selected
+service must pass readiness; normal start exposes no readiness waiver.
 Normal commands manage their own operation identity; there is no operation ID
 or timestamp to copy between machines.
 
@@ -108,11 +116,12 @@ the external effect but before its result becomes durable.
 
 ## Updating and moving the data plane
 
-`ava cluster update` uses the same native drain and retains persistent PTYs.
-Schedules already running in those terminals continue with their loaded code;
-new schedule-runner code needs an explicit schedule restart at an appropriate
-work boundary, or a later full stop/start. Updating a schedule template on disk
-does not rewrite its authoritative database script.
+`ava cluster update --prepared REQUEST` submits one captured operation to the
+external release executor. The current adapter supports a single Linux gateway
+with a local data plane and identical packaged SQL. It refuses retained terminal
+writers before draining. A running schedule can retain old code and DB access
+outside application root; its lifetime must be explicitly resolved before the
+operation is admitted. Root exit alone is not a writer barrier.
 
 For a move, stop all participating runners, then stop the gateway last. Check
 each command's exit status before taking the final snapshots. PostgreSQL uses
@@ -135,7 +144,8 @@ Every running daemon must already support the drain protocol. The command
 checks the actual hosted daemon's home, PID, protocol and boot owner. Updating
 source on disk does not update an imported running process. **The first
 deployment is not protected by the new protocol itself**: establish and verify
-its bootstrap procedure against the old running version before upgrading it.
+the one-time cutover procedure against the actual running version before
+switching it to the new lifecycle.
 
 Cold preparation can retain an expired owned idle row only when its native
 consumers are absent, resources are empty and the latest persisted checkpoint
@@ -171,8 +181,7 @@ partial stop or a failed startup.
 
 `resume --cancel` releases the hold; it does not retract restarts already
 issued (durable per-agent intents). Members not yet at their boundary still
-complete that restart, with its cold recovery, on next admission; budget the
-pass (~2 minutes per unit).
+complete that restart, with its cold recovery, on next admission.
 
 A drain aborted by failed receipts keeps the hold, and `resume --cancel`
 refuses while blocked failures remain. Receipts whose turn raised a
@@ -200,228 +209,70 @@ a successful repair is completed by `resume --cancel`.
 
 ## Recovering a stuck maintenance operation
 
-A maintenance hold does not expire on its own, and an incomplete pause or
-stop retains its journal — which survives a CLI crash, a host reboot and an
-offline database — instead of unwinding. Since task #3270 a **pre-stop** hold
-is no longer unconditionally hand-recovery: the operator-side entries stamp it
-with the shepherding process, and a hold whose shepherd is gone, whose
-blocking failures are empty and which nothing is executing under is declared
-`abandoned` at the 10-minute notice bound and released by the pause watchdog
-after a 30-minute observation window — `resume --cancel`'s automatic twin,
-loudly audited, disable with `AVA_ABANDONED_HOLD_AUTO_RELEASE=0`. The release
-(and `resume --cancel` on the same chain) requires the runner's live agent-host
-to answer — or be provably absent (no agent-host process; `host_running()`
-false; the skipped probe and its proof are audited loudly, task #4168).
-Everything else stays loud and manual: failed receipts, a started stop, legacy
-journals without a recorded shepherd, unreadable probes, and a still-live
-ladder. When
-such a host is found mid-maintenance — services stopped or admission held, and
-nothing left running that owns the pause — recover it by hand.
+A maintenance hold survives a CLI crash, host reboot and offline database. It
+does not expire. There is no pause-controller or OS hold-watchdog recovery job.
+A failed or unreadable ownership observation never permits an independent
+restart or release of admission.
 
-Read the phase first. Every explicit command takes the same `--operation` and
-timezone-aware `--acquired-at` the hold carries, and `maintenance status`
-prints both, the phase, and the recorded shepherd — the
-binding process's pid/argv, its session leader, and the judged liveness
-(`alive`/`dead`/`missing`/`unreadable`; null when no identity was recorded):
+First identify the operation that owns the home. For a captured release, inspect
+`$AVA_HOME/updates/active` and its operation journal, then submit the same
+`ava cluster update --prepared REQUEST`. Submission joins a live executor or
+continues only after its prior native ownership is positively closed. The
+captured images, phase and recovery direction remain fixed. Native retirement
+is verified outside the executor; a CLI return code alone is not completion.
+Do not apply the manual table below over an incomplete release operation.
 
-```
+For ordinary maintenance, read the exact generation and phase:
+
+```bash
 ava maintenance status
 ```
 
-| Phase found | Steps back to service |
+Every explicit command uses the journal's same `--operation` and timezone-aware
+`--acquired-at`. Status includes recorded process identity and judged liveness;
+a refused connection alone does not establish that the owner is absent.
+
+| Phase found | Recovery after confirming there is no competing owner |
 | --- | --- |
-| `preparing`, `draining` | `ava maintenance resume --cancel` — abandon the drain while services are still usable. |
-| `drained` | `ava maintenance resume --cancel` returns to service. To carry the planned stop through instead: `ava maintenance stop`, then `maintenance start`, then `maintenance resume`. |
-| `stopping` | The stop died or timed out mid-way: re-run `ava maintenance stop` (it re-verifies the drain and finishes the service stop), then `maintenance start`, then `maintenance resume`. |
-| `stopped` | `ava maintenance start` — the ordinary bring-up, with admission kept held — then `ava maintenance resume` to release the hold after readiness. |
-| `starting` | A bring-up died mid-way: re-run `ava maintenance start`, then `maintenance resume`. |
+| `preparing`, `draining` | `ava maintenance resume --cancel` abandons the drain while services are usable. |
+| `drained` | Cancel the drain, or complete `maintenance stop`, `maintenance start`, then `maintenance resume`. |
+| `stopping` | Repeat `maintenance stop` to verify and finish closure, then start and resume. |
+| `stopped`, `starting` | Run `maintenance start`, verify readiness, then `maintenance resume`. |
+| `ready` | `maintenance resume` verifies the generation and opens admission. |
 
-On a gateway, `maintenance stop` requires `--gateway-last` (the operator has
-independently verified every remote stop), and it refuses live terminals
-unless `--keep-terminals` asserts a separately verified work boundary. An
-ordinary `ava start` can also complete the stopped/starting recovery end to
-end: it restores service and resumes after its readiness gate, without the
-explicit hold — unless blocking failed receipts remain, in which case it
-refuses before launching services (clear those first, as for `resume --cancel`).
+On a gateway, `maintenance stop` requires `--gateway-last`, asserting that the
+operator independently verified remote stops. Live terminals refuse unless
+`--keep-terminals` asserts a separately verified work boundary. A failed stop
+retains its process inventory and hold. Force remains an explicit owned-process
+escalation, not an inference from a timeout or a way to manufacture a drain
+receipt.
 
-The updater leg itself also carries a bounded caller-side arm (task #3942): an
-agent-runner leg whose graceful stop exits non-zero spends ONE bounded attempt
-at its own internal start — the same `ava start --persist-services` shape as
-the leg's step 5 — when the hold is still its exact generation at a post-stop
-phase, its updater handoff is live, and no stranded hold is declared. The
-attempt is bounded by `AVA_STOP_INCOMPLETE_RECOVERY_TIMEOUT_SECONDS` (default
-120s) and switchable with `AVA_STOP_INCOMPLETE_RECOVERY`; failure or refusal is
-not fatal — the leg returns its stop rc and the paths below (the stranded-hold
-completion, the watchdog, a manual `ava start`) remain the recovery. The arm is
-read-only on the fleet's stranded-recovery record: it never spends the OS
-completion's one bounded attempt.
+An ordinary `ava start` can complete ordinary stopped/starting recovery and
+resume after full readiness. Blocking checkpoint/continuation failures refuse
+before services launch. Repair those through the exact-generation
+`maintenance repair` procedure above. A successful service probe cannot make
+an unflushed checkpoint durable.
 
-A post-stop hold whose shepherding process is gone no longer waits for a human
-indefinitely: since task #3887 an OS-scheduled watchdog (`ava cluster
-hold-watchdog`, one job per home; the design half of tasks #3722/#3723) spends
-ONE bounded attempt at the same stop → start → resume sequence once the hold
-outlives its age bound (30 minutes by default, `AVA_HOLD_WATCHDOG_MIN_AGE_SECONDS`),
-and only when every ownership signal is decidable and empty: a DEAD recorded
-shepherd, no live updater handoff / orchestration session / updater lock, no
-start or stop in flight, no failed receipts. A hold released while that attempt
-was in flight is recorded as rescued, never as completed. Before spending its
-attempt the watchdog asks the completion-environment question (task #4080): a
-pure agent-runner's start leg builds its OTLP relay from the gateway's
-published `AVA_GATEWAY_OTLP_ENDPOINT`, so until that is resolvable and valid
-the attempt is deferred unspent (re-asked every run; a spent attempt is still
-never refunded), and an outcome the settings-lite job cannot write to the fleet
-record is queued locally and backfilled by the first DB-capable run. The table above stays
-the manual path — and the fallback when the watchdog is disabled
-(`AVA_STRANDED_HOLD_RECOVERY`) or unregistered (`ava cluster
-hold-watchdog-unregister`), or the hold is younger than its bound or carries
-failed receipts.
+## Supervision and recovery ownership
 
-`resume --cancel` refuses while blocking failed receipts remain. Fix the root
-cause first, then release the latch with the sanctioned repair — on a
-`preparing`/`draining`/`drained` hold, and only while the agent-host has no
-active continuations or is independently proven absent:
+Ava root supervises the admitted application roster. Deliberate maintenance
+stops remove services from that roster before closing their captured processes;
+service supervision cannot reinterpret a planned stop as an unexpected crash.
+The external release executor owns release decisions and the ordinary root
+boot unit owns replacement applications. Data-plane and persistent-terminal
+custody are separate and must be reconciled explicitly.
 
-```
-ava maintenance repair --operation <operation> --acquired-at <timestamp> [--operator "Ava #1234"]
-```
+Host startup and successor admission reconcile proven-dead hosted agent owners
+through `agent.hosted_ownership.settle_stale_running_rows` and the ordinary
+incarnation protocol. Releasing a hold does not itself prove resource closure
+or replay arbitrary external effects. Missing or unreadable evidence remains
+an unresolved operation.
 
-The repair moves the failed receipts to `repaired` (both sides stay visible in
-`maintenance status`), records operator identity in the journal, and releases
-the hold in the same command; if that release is interrupted (a partial
-release), `resume --cancel` completes it.
-
-### Known limits while a hold stands
-
-The hold deliberately suspends supervision, and the paused window takes the
-unit out of every reconciliation loop: while the posture reads `paused` — the
-stop window the maintenance stop sets, through `stopped`/`starting`/`ready`,
-and any `ava start` that runs under a hold — the pause controller blocks the
-whole roster (`BlockScope.ALL`): the round short-circuits and no service
-healthcheck runs. A service that dies in that window (an agent-host SIGTERM,
-say) is not revived until the hold is released — a pre-stop hold through
-`resume --cancel` or the abandoned release, a post-stop hold through
-`ava start` or the hold watchdog's one bounded attempt. No supervision is
-added there on purpose: nothing on the roster may be revived while the window
-belongs to a stop/start handoff.
-
-- **Record-only states.** Only an ownerless PRE-stop hold with no blocking
-  failures auto-releases, and only a post-stop hold with fully decidable empty
-  ownership signals gets the watchdog's bounded attempt. Failure-carrying
-  holds, started stops without updater evidence, legacy journals without a
-  recorded shepherd, and unreadable probes/journals stay loud and manual.
-- **Orphaned runtime ownership is reclaimed outside the hold.** Agent rows
-  still owned by a dead host instance are reconciled when the host next boots
-  (`agent.hosted_ownership.settle_stale_running_rows`) or when a successor's
-  admission replaces a proven-dead predecessor — after service returns. The
-  release itself reclaims nothing; it returns the unit to service so those
-  paths can run.
-
-## Stop-class drills and operations: executor-cancellation insurance and hold handover
-
-A stop-class drill or operation — any leg that takes the message plane down with
-it — must survive its executor's cancellation. The 2026-09-17 S3 incident is the
-proof case: the executor's turn was cancelled after the stop leg, the start leg
-never ran, and the retained non-expiring hold left the whole platform dark for
-~110 minutes (#3719). At the cancellation-plus-10-minute mark the entire
-recovery was a single official `ava start`.
-
-1. **Name a rescue actor outside the blast radius.** Before the first stop leg,
-   designate one rescue actor plus a backup on a machine that stays up, and one
-   out-of-band signal (the OOB probe). The rescue actor observes directly —
-   read-only over an independent link (ssh plus state files), never through the
-   message plane, which is itself the surface under test — and never executes
-   stop legs.
-
-   Since #3887 there is also an automatic last-resort rescuer to fall back on:
-   the OS-scheduled hold watchdog completes a provably orphaned post-stop hold
-   once, bounded by its age floor — a backstop for when no designated actor
-   survives, never a substitute for naming one.
-
-2. **Keep the progress record off the stopped surface.** The authoritative
-   record is a progress file written on a non-target machine (or pulled there
-   every step); the task registry is a sync target only. On 2026-09-17 both the
-   operation log and the message plane died with the stack (log frozen 08:34:55;
-   the executor's send failed 08:50:39). Any monitoring or automation for the
-   operation lives on a surviving OS surface (launchd / cron / scheduled task),
-   never inside an agent turn.
-
-3. **Stage the exact rescue ladder for every phase, with a force tier.** Use the
-   phase table above; the staged set is (a) an incomplete stop → a bounded re-run
-   of the stop, then the documented `stop --force` escalation when a graceful
-   leg provably cannot complete (2026-09-17: two normal attempts timed out;
-   force finished in 12s), then `maintenance start` / `maintenance resume`;
-   (b) stopped → `ava start` end-to-end (or `maintenance start` plus
-   `maintenance resume` per the table); (c) starting → re-run
-   `maintenance start`, then `resume`. Verify the read-only parts in advance,
-   ssh access and `sudo -n` included. The rescue actor is pre-authorized to use
-   `--force` once the abort bound has been declared — a fresh approval round
-   would burn the window — but never against a competing rollout.
-
-4. **Heartbeat and the abort bound.** The executor records a progress line
-   every step and at least every 5 minutes. No progress for 10 minutes is the
-   abort bound for the operation — judged on observable evidence (return code
-   not delivered, state-file timestamps not advancing, surviving process
-   inventory unchanged). It shares its numeral with the abandoned-hold notice
-   bound but is a different instrument: that bound judges an idle hold for
-   release, while this one bounds executor silence during a live operation. The
-   rescue actor then executes the staged recovery, announces it, and records the
-   handover (who, when) in the operation record.
-
-5. **Bound every hold and name its rescuer.** This section extends the pre-stop
-   abandoned path described above: a started stop is never auto-released; for
-   that class the named rescuer and the stated maximum intended lifetime are the
-   insurance. A drill hold carries both, written alongside the hold, together
-   with the window end and a reference to the staged commands. A hold with a
-   dead shepherd, empty failures, nothing executing under it, and an age past
-   its bound is an orphan: escalate through the concrete available mechanisms —
-   the pause watchdog, the stranded-hold controller, the gateway alarm
-   (`update failed: host left held`) — always out-of-band, then recover via
-   the official path. A release
-   before the declared lifetime, or without the rescue actor's handover record,
-   is an anomaly to surface to the operation owner. During a stop-class window,
-   an external party may judge locks stale and clear them (user-side Codex does
-   this legitimately): announce at window start that `drill-*` locks must not be
-   cleared while the window is open, watch for releases, and treat an in-window
-   external release as stolen — abort that step's reading, carry the completion
-   chain through, and take evidence after the window. To intentionally keep a
-   host down, keep the ladder's session alive — the live shepherd is the intent
-   marker — or, until the orphan-completion design names a dedicated marker,
-   pin the existing `AVA_ABANDONED_HOLD_AUTO_RELEASE=0` (gateway/cluster
-   setting).
-
-6. **Carry the operation across turns.** Run stop-class operations as a task
-   backed by the surviving-machine record described above — never as an
-   unlogged one-shot — so a successor continues from the record plus the staged
-   commands instead of restarting.
-
-### Stop-class checklist
-
-Run this list for every stop-class drill or operation: pre-flight items before
-the first stop leg, closing items once recovery is declared.
-
-**Pre-flight**
-
-- [ ] Rescue actor and backup named and confirmed in writing: outside the
-  blast radius, an independent link, never executing stop legs.
-- [ ] Phase-by-phase rescue commands staged and dry-checked read-only — ssh
-  access, `sudo -n`, and the `--force` pre-authorization recorded.
-- [ ] Progress record location set (a non-target machine), task-log sync
-  convention declared, heartbeat cadence declared (every step, and at least
-  every 5 minutes).
-- [ ] Abort bound declared: no progress for 10 minutes → the rescue actor runs
-  the staged recovery, announces it, and records the handover.
-- [ ] Hold fields written alongside the hold: rescuer, maximum intended
-  lifetime, window end, staged-command reference. Intentional-keep strategy
-  chosen — a live shepherd session kept alive, or
-  `AVA_ABANDONED_HOLD_AUTO_RELEASE=0` pinned.
-- [ ] Window-start announcement prepared: `drill-*` locks must not be cleared
-  while the window is open, and external releases watched (an in-window
-  release is treated as stolen).
-- [ ] Out-of-band signal armed and both paths exercised (alert, recovery); the
-  expected triage line confirmed (#3722-A).
-
-**Post-recovery**
-
-- [ ] Recovery verified: services ready, maintenance resumed, scheduled probe
-  jobs present, pinned settings and schema at target, no unintended restarts.
-- [ ] All lines notified; evidence archived on the non-target machine.
+For a drill that intentionally stops the message plane, keep its progress and
+recovery access outside that plane. Record the captured operation, process
+identities, current phase, intended resource scope and the actor responsible for
+recovery before the stop. A surviving actor may inspect native evidence and
+continue the recorded operation; it must not clear a live owner's locks or
+invent a second rollout. Preserve failed-phase evidence even after successful
+recovery, and verify business admission, selected services and native custody
+before declaring the operation complete.

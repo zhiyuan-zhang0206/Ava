@@ -24,6 +24,21 @@ _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
 
 
 class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
+    provision_builtin_schedules: bool = Field(
+        default=True,
+        alias="AVA_PROVISION_BUILTIN_SCHEDULES",
+        description=(
+            "Create missing built-in schedules on gateway boot. Disable for an unseeded "
+            "cluster; existing schedules and explicit provisioning remain unchanged."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     gateway_client_max_retries: int = Field(
         default=3,
         alias="AVA_GATEWAY_MAX_RETRIES",
@@ -208,7 +223,7 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
     cluster_rpc_max_retries: int = Field(
         default=3,
         alias="AVA_CLUSTER_RPC_MAX_RETRIES",
-        description="Extra attempts (after the first) for a gateway -> agent-runner cluster op on transient infrastructure failure (transport error / 5xx), with bounded exponential backoff + jitter (task #961). Non-idempotent ops (spawn / cluster_update / lifecycle) retry under an auto-generated idempotency key, so a lost response replays the first run instead of duplicating it. 0 = fail fast, the pre-#961 single-shot behaviour. The roster's status_probe passes retries=1 inside its separate total deadline; persistent failures then use per-machine backoff.",
+        description="Extra attempts (after the first) for a gateway -> agent-runner cluster op on transient infrastructure failure (transport error / 5xx), with bounded exponential backoff + jitter (task #961). Non-idempotent ops (spawn / lifecycle) retry under an auto-generated idempotency key, so a lost response replays the first run instead of duplicating it. 0 = fail fast, the pre-#961 single-shot behaviour. The roster's status_probe passes retries=1 inside its separate total deadline; persistent failures then use per-machine backoff.",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
@@ -327,30 +342,6 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
         },
     )
 
-    stranded_hold_recovery: bool = Field(
-        default=True,
-        alias="AVA_STRANDED_HOLD_RECOVERY",
-        description=(
-            "Bounded automatic completion of a stranded update hold (task #3142). "
-            "When an update leg's maintenance hold outlives its owner past the "
-            "stranded-hold bound, the pause controller may spend ONE bounded attempt "
-            "at the same stop/start/resume sequence an operator would run by hand "
-            "(one attempt per episode, 900s cooldown, post-stop phases only; the "
-            "gateway capability's watchdog round never initiates a completion — a "
-            "unit that also serves agent-runner completes it in that round). False "
-            "disables the mechanism "
-            "outright — the task #3132 alarm and the manual recipe in "
-            "conventions/graceful-maintenance.md remain the recovery path. Read by "
-            "the watchdogs on every tick; a change takes effect at their next restart."
-        ),
-        json_schema_extra={
-            "restart_required": "ops",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     stop_incomplete_recovery: bool = Field(
         default=True,
         alias="AVA_STOP_INCOMPLETE_RECOVERY",
@@ -359,9 +350,9 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
             "agent-runner leg whose graceful stop exits non-zero, while its own "
             "maintenance generation still sits between stopping and stopped, spends "
             "ONE bounded attempt at its own internal start before returning the stop "
-            "rc. It declines unless the episode is provably its own. False = the "
-            "pre-#3942 behaviour: only the stranded-hold completion, the watchdog's "
-            "respawn, or a manual `ava start` restores the host."
+            "rc. It declines unless the episode is provably its own. False skips "
+            "that attempt and leaves the stop failure visible for operator inspection. "
+            "There is no automatic watchdog recovery."
         ),
         json_schema_extra={
             "restart_required": "",
@@ -381,100 +372,11 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
             "start` child is killed at this bound, so a hung start cannot hold the "
             "updater's verdict past a bounded window. The 120s default covers a "
             "normal start on a healthy host (launch plus readiness); a start still "
-            "running at the bound defers to the paths above. Must be finite and "
+            "running at the bound leaves the stop failure visible. Must be finite and "
             "positive."
         ),
         json_schema_extra={
             "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    hold_watchdog_min_age_seconds: float = Field(
-        default=1800.0,
-        gt=0,
-        allow_inf_nan=False,
-        alias="AVA_HOLD_WATCHDOG_MIN_AGE_SECONDS",
-        description=(
-            "The minimum age of an orphaned maintenance hold before the OS-scheduled "
-            "hold watchdog may complete it (task #3887). An ownerless hold past this "
-            "bound is completed once through the official stop/start/resume ladder; "
-            "below it the watchdog only observes. 30 minutes is the same window the "
-            "pre-stop automatic release uses (task #3270): a transition still in "
-            "flight - or an operator about to return - is never misread. Must be "
-            "finite and positive. Read by the watchdog job on every run."
-        ),
-        json_schema_extra={
-            "restart_required": "ops",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    hold_watchdog_cooldown_seconds: float = Field(
-        default=900.0,
-        ge=0,
-        allow_inf_nan=False,
-        alias="AVA_HOLD_WATCHDOG_COOLDOWN_SECONDS",
-        description=(
-            "The cooldown between two hold-watchdog attempts within one hold "
-            "generation (task #3887). The mechanism spends one attempt per episode "
-            "(task #3142's budget shape); the cooldown additionally forbids a second "
-            "attempt - a re-declared record, or a state still settling from the "
-            "first attempt - from being spent immediately. Must be finite and "
-            "non-negative. Read by the watchdog job on every run."
-        ),
-        json_schema_extra={
-            "restart_required": "ops",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    hold_watchdog_interval_seconds: int = Field(
-        default=300,
-        gt=0,
-        le=3600,
-        alias="AVA_HOLD_WATCHDOG_INTERVAL_SECONDS",
-        description=(
-            "How often the OS-scheduled hold watchdog evaluates this host's "
-            "maintenance hold (task #3887). Evaluation is a handful of local "
-            "file/lock reads; recovery latency is the completion bound plus at most "
-            "one interval. Capped at one hour: the mechanism's whole value is a "
-            "bounded blackout, and a longer period would let one missed cycle "
-            "stretch the recovery past an incident-sized window. Applied at "
-            "registration (converge): the launchd StartInterval / crontab minute "
-            "cadence / Task Scheduler period each run the command at this cadence, "
-            "so a change takes effect at the next converge."
-        ),
-        json_schema_extra={
-            "restart_required": "ops",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    abandoned_hold_auto_release: bool = Field(
-        default=True,
-        alias="AVA_ABANDONED_HOLD_AUTO_RELEASE",
-        description=(
-            "Bounded automatic release of an abandoned pre-stop maintenance hold "
-            "(task #3270). When a pre-stop hold past the notice bound has no "
-            "shepherding process left and nothing is executing under it, and no "
-            "continuation failure blocks `resume --cancel`, the pause controller "
-            "may perform that release itself once the hold has survived a 30-minute "
-            "observation window; the declaration and the release are both loud "
-            "(ops log + stranded-hold record). False disables the automatic release "
-            "-- the loud declaration stays; the release is manual. Read by the "
-            "watchdogs on every tick; a change takes effect at their next restart."
-        ),
-        json_schema_extra={
-            "restart_required": "ops",
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",

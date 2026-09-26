@@ -25,6 +25,9 @@ from services.pitr.restore_drill import (
 from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_postgres import SandboxPostgresIdentity
 from services.pitr.restore_proof import LivePostgresIdentity
+from services.pitr.worker_process import NativeProcess
+from shared.native_process import native_boot_id
+from shared.native_process.ownership import OwnedProcess
 
 _SCHEMA_SQL = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
 
@@ -110,14 +113,20 @@ def _evidence(request: DrillRequest) -> DrillEvidence:
     )
 
 
+def _native() -> NativeProcess:
+    boot = native_boot_id()
+    assert boot is not None
+    return NativeProcess(boot, OwnedProcess(4242, 1789272331.91, 1))
+
+
 def _live_identity() -> LivePostgresIdentity:
     return LivePostgresIdentity(
-        4242, 1789272331.91, "/var/lib/pg", "7683562760506812143", "2026-09-13 04:05:32+00", "p"
+        _native(), "/var/lib/pg", "7683562760506812143", "2026-09-13 04:05:32+00", "p"
     )
 
 
 def _sandbox_identity(pgdata: Path) -> SandboxPostgresIdentity:
-    return SandboxPostgresIdentity(4242, 1.0, os.getpgrp(), str(pgdata.resolve()))
+    return SandboxPostgresIdentity(_native(), os.getpgrp(), os.getsid(0), str(pgdata.resolve()))
 
 
 def _passing_criteria() -> dict[str, Any]:
@@ -265,13 +274,13 @@ def test_run_sandbox_tears_down_when_criteria_fail(
     def fake_write_config(*args: object, **kwargs: object) -> Path:
         return tmp_path / "pg.conf"
 
-    def fake_spawn(*args: object, **kwargs: object) -> subprocess.Popen[str]:
+    def fake_spawn(*args: object, **kwargs: object) -> object:
         return _fake_process()
 
     def fake_wait_identity(*args: object, **kwargs: object) -> SandboxPostgresIdentity:
         return _sandbox_identity(pgdata)
 
-    def fake_stop(pg_ctl: Path, pgdata_arg: Path, sandbox: SandboxPostgresIdentity) -> None:
+    def fake_stop(pgdata_arg: Path, sandbox: SandboxPostgresIdentity, _domain: object) -> None:
         stopped.append(sandbox)
 
     def fake_residue(scratch: Path, port: int, pgdata_arg: Path) -> dict[str, object]:
@@ -281,6 +290,7 @@ def test_run_sandbox_tears_down_when_criteria_fail(
     monkeypatch.setattr(restore_drill, "_append_recovery_config", _noop)
     monkeypatch.setattr(restore_drill, "_write_sandbox_config", fake_write_config)
     monkeypatch.setattr(restore_drill, "_spawn_sandbox_postgres", fake_spawn)
+    monkeypatch.setattr(restore_drill, "_capture_sandbox", fake_wait_identity)
     monkeypatch.setattr(restore_drill, "_wait_for_sandbox_identity", fake_wait_identity)
     monkeypatch.setattr(restore_drill, "_wait_for_promotion", _noop)
     monkeypatch.setattr(restore_drill, "_collect_criteria", blow_up)

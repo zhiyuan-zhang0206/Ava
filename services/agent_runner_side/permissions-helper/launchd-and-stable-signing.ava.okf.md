@@ -16,3 +16,15 @@ tags:
 - **Never ad-hoc**: `codesign --sign -` mints a throwaway identity per build, so every rebuild drops the grants. A locked login keychain (the norm over SSH) therefore fails the build with an unlock instruction instead of downgrading; only a real rebuild consults the keychain, so an up-to-date host converges over SSH unaffected.
 - **The signing key must work headlessly**: an unlocked keychain can still block on a SecurityAgent ACL prompt. On real rebuilds only, a short scratch-sign probe diagnoses that prompt and names the ACL remedy; the following hard smoke signs a scratch file with the production designated requirement, reads it back through `codesign`, and rejects any signing, output, parse, or identity failure before compilation.
 - The first-time authorization in System Settings is a one-time manual step (OS forces human click).
+
+
+## Artifact and activation boundary
+
+A loaded helper is never upgraded in place. A differing existing artifact or
+loaded job causes refusal. A reviewed replacement is built into a fresh explicit
+artifact directory with the same stable certificate and designated requirement.
+Activation requires an external exact-home stop/unregister; descendants cannot
+replace their permission ancestor. The optional artifact directory is host-local
+configuration, including for isolated previews; it may not overlap the ordinary
+home or production helper directories. A signing failure never falls back to
+ad-hoc identity.

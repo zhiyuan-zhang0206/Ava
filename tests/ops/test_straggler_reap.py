@@ -288,7 +288,7 @@ def test_next_wave_prepare_is_effective_after_settle(db_conn: psycopg.Connection
 
     when = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
     holder = "ops:test:4027"
-    before = pause_owner.begin_maintenance(holder, when)
+    before = pause_owner.begin_maintenance(holder, when).snapshot
     assert before.maintenance is not None
 
     with pytest.raises(RuntimeError, match="stranded update straggler-reap mark"):

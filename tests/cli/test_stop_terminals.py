@@ -92,7 +92,7 @@ def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionB
     from cli.commands import _maintenance_stop as strict
 
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
-    for name in ("stop_gate_service", "stop_permissions_helper", "stop_lgtm_services"):
+    for name in ("stop_permissions_helper",):
         monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
 

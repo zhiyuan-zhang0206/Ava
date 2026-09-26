@@ -21,7 +21,7 @@ def _target_wall_arg(value: str) -> str:
 
 
 def _h_pitr_drill(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_drill
+    from cli.commands.pitr import cmd_pitr_drill
 
     return cmd_pitr_drill(
         chain=args.chain,
@@ -34,13 +34,13 @@ def _h_pitr_drill(args: argparse.Namespace) -> int:
 
 
 def _h_pitr_multipart_list(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_multipart_list
+    from cli.commands.pitr import cmd_pitr_multipart_list
 
     return cmd_pitr_multipart_list(prefix=args.prefix, credentials_file=args.credentials_file)
 
 
 def _h_pitr_multipart_abort(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_multipart_abort
+    from cli.commands.pitr import cmd_pitr_multipart_abort
 
     return cmd_pitr_multipart_abort(
         key=args.key,
@@ -51,49 +51,49 @@ def _h_pitr_multipart_abort(args: argparse.Namespace) -> int:
 
 
 def _h_pitr_retention_inspect(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_retention_inspect
+    from cli.commands.pitr import cmd_pitr_retention_inspect
 
     return cmd_pitr_retention_inspect()
 
 
 def _h_pitr_retention_arm(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_retention_arm
+    from cli.commands.pitr import cmd_pitr_retention_arm
 
     return cmd_pitr_retention_arm(digest=args.digest, confirm=args.confirm)
 
 
 def _h_pitr_retention_disable(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_retention_disable
+    from cli.commands.pitr import cmd_pitr_retention_disable
 
     return cmd_pitr_retention_disable(confirm=args.confirm)
 
 
 def _h_pitr_retention_status(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_retention_status
+    from cli.commands.pitr import cmd_pitr_retention_status
 
     return cmd_pitr_retention_status()
 
 
 def _h_pitr_retention_run_once(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_retention_run_once
+    from cli.commands.pitr import cmd_pitr_retention_run_once
 
     return cmd_pitr_retention_run_once(confirm=args.confirm)
 
 
 def _h_pitr_snapshot_archive(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_snapshot_archive
+    from cli.commands.pitr import cmd_pitr_snapshot_archive
 
     return cmd_pitr_snapshot_archive(args.table)
 
 
 def _h_pitr_snapshot_verify(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_snapshot_verify
+    from cli.commands.pitr import cmd_pitr_snapshot_verify
 
     return cmd_pitr_snapshot_verify(args.table)
 
 
 def _h_pitr_snapshot_retire(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_snapshot_retire
+    from cli.commands.pitr import cmd_pitr_snapshot_retire
 
     return cmd_pitr_snapshot_retire(args.table)
 

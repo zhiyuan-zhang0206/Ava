@@ -198,10 +198,8 @@ class GatewayProbe(NamedTuple):
     (connection refused / timeout — nothing is listening). `detail` is the exception
     text in that case, else the truncated response body.
 
-    Shared between the agent-runner's own preflight (`_probe_gateway_or_die`) and the
-    rollout's readiness gate (`cli.commands._gateway_ready`): that is what makes the
-    gate's success criterion *the same criterion* the preflight applies seconds later,
-    rather than a second definition of "reachable" that merely tends to agree with it.
+    The agent-runner preflight (`_probe_gateway_or_die`) uses this result to
+    distinguish an unavailable gateway from a rejected request.
     """
 
     status: int | None
@@ -248,17 +246,8 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
 
     **Both transient shapes get the same bounded budget**: a 5xx (the gateway
     answered but is not ready) and no answer at all (nothing is listening on that
-    address *yet*). They used to be treated as opposites — the 5xx retried, a refused
-    connection failed on the first dial — on the reasoning that a rollout must not
-    paper over an ordering bug here, since making the gateway ready before any runner
-    is told to update is the orchestrator's job (`cli.commands._gateway_ready`). That
-    reasoning stands and the gate still owns the ordering; what it does not cover is a
-    gateway that was serving when the gate probed it and is briefly not by the time
-    this dial lands. Prod produced exactly that on 2026-08-01 (issue #1151): a ~9 s
-    restart hole, one ECONNREFUSED, an immediate decline, and two runners stranded
-    until the settle lease lapsed 15 minutes later. A single refused packet is not
-    evidence that the gateway is down, and treating it as such trades a 30 s wait for
-    a 15 minute one.
+    address *yet*). A brief gateway restart can refuse a connection before
+    serving returns; one refused packet is not evidence of a terminal failure.
 
     The budget buys nothing on the healthy path: a reachable gateway answers on the
     first dial and returns immediately. A gateway that is genuinely down still fails —
@@ -371,7 +360,7 @@ def _preflight_probes() -> int:
 
     Returns 0 when both checks pass, non-zero otherwise.
     """
-    import cli.commands as _ns
+
     from cli.commands._setup import _collect_setup_values, _print_missing_setup_error
 
     # Resolve setup from persisted env/files (all None args = read-only, no writes).
@@ -393,14 +382,14 @@ def _preflight_probes() -> int:
     roles: MachineRoles = frozenset(roles_raw.split(",")) if roles_raw else frozenset()
 
     print("\n→ preflight: register machine in central DB")
-    rc = _ns._register_machine_or_die(resolved, roles)
+    rc = _register_machine_or_die(resolved, roles)
     if rc != 0:
         print("  ✗ preflight failed: cannot register machine — host still serving", file=sys.stderr)
         return rc
 
     if "agent-runner" in roles and "gateway" not in roles:
         print("\n→ preflight: probe gateway")
-        rc = _ns._probe_gateway_or_die(resolved["gateway_url"])
+        rc = _probe_gateway_or_die(resolved["gateway_url"])
         if rc != 0:
             print("  ✗ preflight failed: gateway unreachable — host still serving", file=sys.stderr)
             return rc

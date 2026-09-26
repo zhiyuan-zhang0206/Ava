@@ -43,13 +43,16 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
     """A born cluster → the per-cluster instance on the record's exact pg/redis
     ports, with each data-plane identity read from its own URL."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "sek")
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "bearer")
+    monkeypatch.setattr(settings.data_plane, "db_admin_password", "owner")
+    monkeypatch.setattr(settings.data_plane, "redis_admin_password", "redis-admin")
+    monkeypatch.setattr(cluster, "redis_password_from_env", lambda: "redis-runtime")
     monkeypatch.setattr(
         settings.data_plane, "db_url", "postgresql://ava_main:sek@127.0.0.1:5433/ava_main"
     )
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://ava:sek@127.0.0.1:6380/0")
     own_calls: list[dict[str, object]] = []
-    monkeypatch.setattr(_ci, "ensure_cluster_instance", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "ensure_cluster_storage", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _start._ensure_gateway_data_plane() == 0
     # pgbouncer_port is derived for this pre-pooler record (no 'pgbouncer' key) →
@@ -59,12 +62,10 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
         {
             "pg_port": 5433,
             "redis_port": 6380,
-            "cluster_secret": "sek",
-            "db_admin_password": "sek",
-            "redis_admin_password": "sek",
-            "redis_password": "sek",
-            "pgbouncer_port": 6433,
-            "identity": "ava_main",
+            "cluster_secret": "bearer",
+            "db_admin_password": "owner",
+            "redis_admin_password": "redis-admin",
+            "redis_password": "redis-runtime",
             "redis_user": "ava",
         }
     ]
@@ -75,7 +76,7 @@ def test_gateway_data_plane_no_record_is_error(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(cluster, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _ci,
-        "ensure_cluster_instance",
+        "ensure_cluster_storage",
         lambda **_kw: pytest.fail("bring-up without a record"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -222,3 +223,132 @@ def test_collect_port_conflicts_env_layer_overrides_block_for_enrolled_unit(
         assert any("agent_host" in ln and "20003" in ln for ln in lines), lines
     finally:
         sock.close()
+
+
+@pytest.fixture
+def completing_plane(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    from cli.commands import _health_preflight
+
+    calls: list[str] = []
+    monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:6433/ava")
+    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://127.0.0.1:6380/0")
+    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
+    monkeypatch.setattr(
+        cluster,
+        "ensure_pgvector_extension",
+        lambda *_a, **_kw: calls.append("extension"),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    )
+    monkeypatch.setattr(cluster, "ensure_runner_role", lambda *_a, **_kw: calls.append("grant"))  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(cluster, "runner_password_from_env", lambda: "runner-password")
+    monkeypatch.setattr(_ci, "_start_pgbouncer", lambda **_kw: calls.append("pooler") or 0)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(
+        _health_preflight,
+        "probe_postgres",
+        lambda url: calls.append("runner-probe" if "ava_runner" in url else "owner-probe"),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    )
+    monkeypatch.setattr(_health_preflight, "probe_redis", lambda _url: calls.append("redis-probe"))  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr("cli.start_identity.mark_phase", lambda *_a: calls.append("provisioned"))  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    return calls
+
+
+def test_grants_precede_first_pooler_login_and_consumer_probes(completing_plane: list[str]) -> None:
+    from cli.commands._data_plane import complete_gateway_data_plane
+
+    complete_gateway_data_plane()
+    assert completing_plane == [
+        "extension",
+        "grant",
+        "pooler",
+        "owner-probe",
+        "runner-probe",
+        "redis-probe",
+        "provisioned",
+    ]
+
+
+def test_release_readiness_performs_no_schema_or_grant_writes(completing_plane: list[str]) -> None:
+    from cli.commands._data_plane import complete_gateway_data_plane
+
+    complete_gateway_data_plane(refresh_schema=False)
+    assert completing_plane == [
+        "pooler",
+        "owner-probe",
+        "runner-probe",
+        "redis-probe",
+        "provisioned",
+    ]
+
+
+def test_failed_grants_never_start_pooler_or_mark_provisioned(
+    completing_plane: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli.commands._data_plane import complete_gateway_data_plane
+
+    def fail(*_a: object, **_kw: object) -> None:
+        raise RuntimeError("grant refused")
+
+    monkeypatch.setattr(cluster, "ensure_runner_role", fail)
+    with pytest.raises(RuntimeError, match="grant refused"):
+        complete_gateway_data_plane()
+    assert completing_plane == ["extension"]
+
+
+def test_pooler_disabled_still_requires_owner_runner_and_redis_readiness(
+    completing_plane: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli.commands._data_plane import complete_gateway_data_plane
+
+    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
+    complete_gateway_data_plane()
+    assert completing_plane == [
+        "extension",
+        "grant",
+        "owner-probe",
+        "runner-probe",
+        "redis-probe",
+        "provisioned",
+    ]
+
+
+@pytest.mark.parametrize("missing", ["db_admin_password", "redis_admin_password", "redis_password"])
+def test_authenticated_storage_refuses_missing_credentials_before_effects(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    credentials = {
+        "db_admin_password": "owner-value",
+        "redis_admin_password": "admin-value",
+        "redis_password": "runtime-value",
+    }
+    credentials[missing] = ""
+    monkeypatch.setattr(
+        _ci,
+        "_start_pg",
+        lambda *_a: pytest.fail("storage started before validation"),  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    )
+    with pytest.raises(ValueError, match="explicit owner"):
+        _ci.ensure_cluster_storage(
+            pg_port=5433,
+            redis_port=6380,
+            cluster_secret="bearer-only",  # noqa: S106 — isolated test credential
+            redis_user="ava",
+            **credentials,
+        )
+
+
+def test_authenticated_pooler_does_not_substitute_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _pgbouncer
+
+    monkeypatch.setattr(
+        _pgbouncer, "pgbouncer_bin", lambda: pytest.fail("pooler prepared before validation")
+    )
+    with pytest.raises(ValueError, match="explicit database owner"):
+        _pgbouncer.ensure_pgbouncer(
+            pg_port=5433,
+            listen_port=6433,
+            db_name="ava",
+            role="ava",
+            cluster_secret="bearer-only",  # noqa: S106 — isolated test credential
+            db_admin_password="",
+            runner_password="runner-value",  # noqa: S106 — isolated test credential
+        )

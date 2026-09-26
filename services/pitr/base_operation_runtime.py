@@ -5,20 +5,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
-import shutil
-import signal
-import subprocess
-import sys
-import tempfile
-import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn, cast
+from typing import cast
 
-import psutil
 import psycopg
 
 from services.pitr.base_manifest import CandidateManifest
@@ -27,15 +18,16 @@ from services.pitr.restore_proof import (
     ProtectedManifestPublisher,
     RestoreSpaceBudget,
     publish_candidate_proof,
+    retire_restore_work,
     verify_candidate_proof,
 )
 from services.pitr.store_factory import get_store_group
+from services.pitr.worker_process import run_operation
 from shared.config import settings
 from shared.config.physical_backup import PhysicalBackupSettings
 from shared.db import direct_db_url
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
-from shared.proc_tree import create_time_matches, stable_create_time
 from shared.process_env import forwarded_proxy_env, restricted_process_env
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
@@ -54,12 +46,6 @@ class RestoreWorkerInput:
     data_directory: str
     pg_ctl: Path
     pg_verifybackup: Path
-
-
-def tree_bytes(path: Path) -> int:
-    if not path.exists():
-        return 0
-    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
 
 
 def restore_key_path(config: PhysicalBackupSettings) -> Path:
@@ -194,110 +180,69 @@ async def run_restore(candidate: CandidateManifest) -> dict[str, str]:
 
 
 async def run_restore_input(inputs: RestoreWorkerInput) -> dict[str, str]:
-    control_root = inputs.root / "restore-control"
-    control_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    work = Path(tempfile.mkdtemp(prefix=".proof-", dir=control_root))
-    request, result = work / "request.json", work / "result.json"
-    acknowledgement = result.with_suffix(".ack")
-    request.write_text(json.dumps(_request(inputs), sort_keys=True, separators=(",", ":")))
-    request.chmod(0o600)
-    process = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-m", "services.pitr.restore_worker", str(request), str(result)],
-        cwd=Path(__file__).resolve().parents[2],
+    completed = await run_operation(
+        "services.pitr.restore_worker",
+        _request(inputs),
+        control_root=inputs.root / "restore-control",
         env=restricted_process_env() | forwarded_proxy_env(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-        close_fds=True,
-        text=True,
     )
-    leader_created_at = stable_create_time(psutil.Process(process.pid))
-    try:
-        while not result.is_file():
-            if process.poll() is not None:
-                stderr = process.stderr.read() if process.stderr is not None else ""
-                return restore_result(process.returncode, stderr, result)
-            await asyncio.sleep(0.25)
-        if [member for member in group_members(process.pid) if member.pid != process.pid]:
-            reap_restore_group(process, leader_created_at)
-            _reject_restore_descendants()
-        acknowledgement.write_text("accepted")
-        acknowledgement.chmod(0o600)
-        while process.poll() is None:
-            await asyncio.sleep(0.05)
-        if group_members(process.pid):
-            _raise_surviving_restore_group()
-        stderr = process.stderr.read() if process.stderr is not None else ""
-        return restore_result(process.returncode, stderr, result)
-    except BaseException:
-        if process.poll() is None or group_members(process.pid):
-            reap_restore_group(process, leader_created_at)
-        raise
-    finally:
-        if process.stderr is not None:
-            process.stderr.close()
-        shutil.rmtree(work, ignore_errors=True)
+    outcome = restore_result(completed.work / "result.json")
+    candidate = CandidateManifest.from_json(inputs.candidate_json)
+    # Scratch removal is bounded local I/O; keep the scheduler's health loop live.
+    await asyncio.to_thread(
+        retire_restore_work,
+        root=inputs.root,
+        candidate=candidate,
+        worker=completed.worker,
+        outcome=outcome,
+    )
+    completed.retire()
+    return outcome
 
 
-def reap_restore_group(process: subprocess.Popen[str], leader_created_at: float) -> None:
-    if process.pid == os.getpgrp():
-        raise RuntimeError("refusing to signal the controller process group")
-    try:
-        leader = psutil.Process(process.pid)
-        if not create_time_matches(stable_create_time(leader), leader_created_at):
-            raise RuntimeError("restricted restore worker PID identity changed")
-    except psutil.NoSuchProcess as exc:
-        if group_members(process.pid):
-            raise RuntimeError(
-                "restricted restore descendants outlived their verifiable leader"
-            ) from exc
-        process.wait(timeout=1)
-        return
-    deadline = time.monotonic() + 20
-    with suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGTERM)
-    grace = min(deadline, time.monotonic() + 5)
-    while group_members(process.pid) and time.monotonic() < grace:
-        time.sleep(0.1)
-    while group_members(process.pid) and time.monotonic() < deadline:
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        time.sleep(0.1)
-    process.wait(timeout=max(0.1, deadline - time.monotonic()))
-    if group_members(process.pid):
-        raise RuntimeError("restricted restore worker process group could not be emptied")
+async def run_drill_input(
+    inputs: RestoreWorkerInput,
+    *,
+    scratch: Path,
+    target_lsn: str,
+    target_wall: str,
+    timeout_seconds: int,
+) -> dict[str, object]:
+    request = _request(inputs)
+    request["drill"] = {
+        "scratch": str(scratch),
+        "target_lsn": target_lsn,
+        "target_wall": target_wall,
+        "timeout_seconds": timeout_seconds,
+    }
+    completed = await run_operation(
+        "services.pitr.restore_worker",
+        request,
+        control_root=inputs.root / "drill-control",
+        env=restricted_process_env() | forwarded_proxy_env(),
+    )
+    payload = (scratch / "drill-evidence.json").read_bytes()
+    if completed.result != {"evidence_sha256": hashlib.sha256(payload).hexdigest()}:
+        raise RuntimeError(f"drill result differs from its retained evidence: {completed.work}")
+    evidence = cast(dict[str, object], json.loads(payload))
+    candidate = CandidateManifest.from_json(inputs.candidate_json)
+    if evidence["outcome"] != "pass" or evidence["chain_id"] != candidate.chain_id:
+        raise RuntimeError(f"drill did not complete the requested proof: {completed.work}")
+    completed.retire()
+    return evidence
 
 
-def group_members(pgid: int) -> list[psutil.Process]:
-    members: list[psutil.Process] = []
-    for process in psutil.process_iter(["pid"]):
-        try:
-            if os.getpgid(process.pid) == pgid:
-                members.append(process)
-        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
-            continue
-    return members
-
-
-def _reject_restore_descendants() -> NoReturn:
-    raise RuntimeError("restricted restore worker left live descendants")
-
-
-def _raise_surviving_restore_group() -> NoReturn:
-    raise RuntimeError("restricted restore worker group survived its owned leader")
-
-
-def restore_result(returncode: int, stderr: str, result: Path) -> dict[str, str]:
-    if returncode != 0:
-        raise RuntimeError(f"restricted restore worker exited {returncode}: {stderr}")
+def restore_result(result: Path) -> dict[str, str]:
+    """Validate the explicit completion result before acknowledging or reaping."""
     loaded: object = json.loads(result.read_text())
     if not isinstance(loaded, dict):
         raise TypeError("restricted restore worker result must be an object")
     raw = cast(dict[str, object], loaded)
     if set(raw) != {"chain_id", "candidate_sha256", "pending_sha256"}:
         raise RuntimeError("restricted restore worker returned an invalid result")
-    return {key: str(value) for key, value in raw.items()}
+    if any(not isinstance(value, str) or not value for value in raw.values()):
+        raise RuntimeError("restricted restore worker returned an invalid result")
+    return cast(dict[str, str], raw)
 
 
 def publish(

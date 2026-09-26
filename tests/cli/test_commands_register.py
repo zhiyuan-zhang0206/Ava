@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from cli import commands as _cli
+import cli.commands._probe as _probe_commands
+import ops.roster as _roster
+import ops.service_spec as _service_spec
 from cli.commands._setup import SetupValues
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_prechecks
 from tests.cli._commands_helpers import _real_register_machine_or_die
 
 # ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
 
 
-def _spec_by_service(service: str) -> _cli.ServiceSpec:
+def _spec_by_service(service: str) -> _service_spec.ServiceSpec:
     """Look up a ServiceSpec by bare service name."""
-    for spec in _cli.build_services():
+    for spec in _roster.build_services():
         if spec.session == service:
             return spec
     raise AssertionError(f"no ServiceSpec service={service!r}")
@@ -46,17 +48,14 @@ def test_probe_gateway_takes_the_identity_path(monkeypatch: pytest.MonkeyPatch) 
     A plain 2xx would still be satisfied by another cluster's gateway."""
     spec = _spec_by_service("gateway")
     monkeypatch.setattr(
-        _cli,
+        _probe_commands,
         "_curl_ok",
         lambda _u: pytest.fail("gateway must not fall back to a bare 2xx"),  # pyright: ignore[reportUnknownArgumentType]
     )
     from shared.daemon_health import DaemonProbe
 
-    monkeypatch.setattr(
-        "shared.daemon_health._probe_home",
-        lambda *_a, **_kw: DaemonProbe.up("home /x"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    probe = _cli._probe_service(spec)
+    spec = replace(spec, identity_probe=lambda: DaemonProbe.up("root-owned gateway"))
+    probe = _probe_commands._probe_service(spec)
     assert probe.alive is True
     assert probe.label == "identity"
 
@@ -68,11 +67,11 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
     spec = _spec_by_service("gateway")
     from shared.daemon_health import DaemonProbe
 
-    monkeypatch.setattr(
-        "shared.daemon_health._probe_home",
-        lambda *_a, **_kw: DaemonProbe.port_taken("identity mismatch: home='/home/ava/.ava'"),  # pyright: ignore[reportUnknownArgumentType]
+    spec = replace(
+        spec,
+        identity_probe=lambda: DaemonProbe.port_taken("identity mismatch: home='/home/ava/.ava'"),
     )
-    probe = _cli._probe_service(spec)
+    probe = _probe_commands._probe_service(spec)
     assert probe.alive is False
     assert "/home/ava/.ava" in probe.detail
 
@@ -91,13 +90,23 @@ def test_probe_survives_an_identity_probe_that_raises() -> None:
         raise RuntimeError("no socket for you")
 
     spec = dataclasses.replace(_spec_by_service("gateway"), identity_probe=_boom)
-    probe = _cli._probe_service(spec)
-    assert probe.alive is False
-    assert probe.label == "identity"
+    probe = _probe_commands._probe_service(spec)
+    assert probe.alive is None
+    assert probe.label == "unavailable"
     # The type AND the message: "the probe is broken" and "the daemon is down" are
     # different problems, and a fixed string would have made them look alike.
     assert "RuntimeError" in probe.detail
     assert "no socket for you" in probe.detail
+
+
+def test_service_without_identity_probe_cannot_claim_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = replace(_spec_by_service("gateway"), identity_probe=None)
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _url: True)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    result = _probe_commands._probe_service(spec)
+    assert result.alive is None
+    assert result.label == "unavailable"
 
 
 def test_register_gateway_advertises_without_gateway_url(

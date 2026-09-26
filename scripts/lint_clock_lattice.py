@@ -164,6 +164,13 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_TERMINATE_GRACE_S",
     ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
     (
+        "services/pitr/worker_process.py",
+        "TERMINATE_GRACE_S",
+    ): "independent: the SIGTERM courtesy window for one backup/PITR operation worker to "
+    "unwind its own private cleanup (key files, decrypted scratch) before the controller's "
+    "confirmed group closure; the same class as shared/proc.py's TERM->KILL ladder wait, "
+    "no lattice neighbour",
+    (
         "shared/proc.py",
         "_REAP_TIMEOUT_S",
     ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",
@@ -197,12 +204,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "ava_builtins/plugins/lm_anthropic/provider.py",
         "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
     ): "LLM thinking-token budget, not a wall-clock constant",
-    ("cli/commands/_update_phase_b.py", "POLL_STALLED"): "poll status value, not a clock",
-    ("cli/commands/_update_phase_b.py", "POLL_NO_PROGRESS"): "poll status value, not a clock",
-    (
-        "cli/commands/_update_phase_b.py",
-        "_STALL_CONFIRMATIONS",
-    ): "set of stalled confirmations, not a clock",
     ("ops/updater_reap.py", "REAP_CLEARED_QUALIFIER"): "SQL qualifier string, not a clock",
     (
         "ops/agent_launch.py",

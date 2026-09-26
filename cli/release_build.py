@@ -15,81 +15,13 @@ import tarfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Self
 
-from pydantic import Field, model_validator
-
-from shared.managed_writer_barrier import Digest, EvidenceModel
 from shared.migration_layout import required_migration_set_from_names
-from shared.proc import run_bounded
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
+from shared.posix_command import run_owned_command
+from shared.runtime_release import ApplicationIdentity, ReleaseRejectedError, file_sha256
 from shared.verified_file import regular_bytes
 
 _IDENTITY_MEMBER = "shared/release-build.json"
-_APPLICATION_MEMBER_PATTERN = re.compile(
-    r"venv/(?:lib/python[0-9]+\.[0-9]+|Lib)/site-packages/shared/release-build\.json"
-)
-
-
-class ApplicationIdentity(EvidenceModel):
-    """Source facts embedded by the builder and covered by the image inventory."""
-
-    version: Literal[1]
-    source_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
-    source_tree: str = Field(pattern=r"^[0-9a-f]{40}$")
-    source_archive_digest: Digest
-    schema_digest: Digest
-    applied_names: tuple[str, ...]
-
-    @model_validator(mode="after")
-    def ordered_names(self) -> Self:
-        if not self.applied_names or list(self.applied_names) != sorted(set(self.applied_names)):
-            raise ValueError("build migration names must be a nonempty sorted set")
-        return self
-
-
-def _identity_members(files: dict[str, str], platform: str) -> list[str]:
-    """Admit one install and its exact Linux lib64 materialization, if present."""
-    members = sorted(name for name in files if name.endswith("/" + _IDENTITY_MEMBER))
-    primary = [name for name in members if _APPLICATION_MEMBER_PATTERN.fullmatch(name)]
-    if len(primary) != 1:
-        raise ReleaseRejectedError("verified image requires one installed application identity")
-    allowed = {primary[0]}
-    if platform.startswith("Linux-") and primary[0].startswith("venv/lib/"):
-        # Runtime preparation replaces stdlib venv's lib64 -> lib symlink with
-        # a private directory copy. Both physical copies must agree below.
-        allowed.add(primary[0].replace("venv/lib/", "venv/lib64/", 1))
-    if not set(members) <= allowed:
-        raise ReleaseRejectedError("verified image has an unexpected application identity copy")
-    return members
-
-
-def read_application_identity(image: VerifiedRelease, commit: str) -> ApplicationIdentity:
-    """Bind an already verified generation to its prepared target commit.
-
-    Full image verification must precede this read. Recheck the exact member
-    against that manifest as well; a self-described JSON file is not evidence.
-    """
-    manifest_path = image.root / "manifest.json"
-    # Full runtime inventories are several MiB, unlike individual unit receipts.
-    encoded_manifest = regular_bytes(manifest_path, max_bytes=32 * 1024 * 1024)
-    if hashlib.sha256(encoded_manifest).hexdigest() != image.manifest_digest:
-        raise ReleaseRejectedError("application identity manifest changed")
-    manifest = json.loads(encoded_manifest)
-    members = _identity_members(manifest["files"], manifest["platform"])
-    copies = [regular_bytes(image.root / name) for name in members]
-    for name, encoded in zip(members, copies, strict=True):
-        if hashlib.sha256(encoded).hexdigest() != manifest["files"][name]:
-            raise ReleaseRejectedError("application identity differs from verified inventory")
-    encoded = copies[0]
-    if any(copy != encoded for copy in copies[1:]):
-        raise ReleaseRejectedError("installed application identity copies disagree")
-    identity = ApplicationIdentity.model_validate_json(encoded)
-    if identity.source_commit != commit or identity.schema_digest != manifest["schema_digest"]:
-        raise ReleaseRejectedError("application identity differs from target commit or schema")
-    if encoded != _canonical(identity.model_dump(mode="json")):
-        raise ReleaseRejectedError("application identity is not canonical")
-    return identity
 
 
 @dataclass(frozen=True)
@@ -104,7 +36,7 @@ class ApplicationBuild:
 
 
 def _git(repo: Path, *arguments: str) -> str:
-    result = run_bounded(
+    result = run_owned_command(
         [
             "git",
             "--no-replace-objects",
@@ -114,6 +46,7 @@ def _git(repo: Path, *arguments: str) -> str:
             str(repo),
             *arguments,
         ],
+        cwd=repo,
         env={
             "PATH": os.defpath,
             "HOME": str(Path.home()),
@@ -122,8 +55,6 @@ def _git(repo: Path, *arguments: str) -> str:
             "GIT_ATTR_NOSYSTEM": "1",
         },
         timeout=60,
-        capture_output=True,
-        text=True,
     )
     result.check_returncode()
     return result.stdout.strip()
@@ -153,7 +84,24 @@ def _source_epoch(repo: Path, commit: str) -> str:
     return match[1]
 
 
-def _archive(repo: Path, commit: str, destination: Path) -> dict[str, object]:
+@dataclass(frozen=True)
+class CapturedSource:
+    """Retained committed source shared by acquisition and application building."""
+
+    identity: ApplicationIdentity
+    archive: Path
+    source: Path
+
+
+def capture_source(repo: Path, commit: str, destination: Path) -> CapturedSource:
+    """Capture one exact commit into a new directory without loading its code."""
+    if not repo.is_absolute() or repo.resolve(strict=True) != repo:
+        raise ReleaseRejectedError("source repository must be canonical and absolute")
+    if (
+        not destination.is_absolute()
+        or destination.parent.resolve(strict=True) != destination.parent
+    ):
+        raise ReleaseRejectedError("source destination parent must be canonical and absolute")
     if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise ReleaseRejectedError("application build requires an exact commit SHA")
     if _git(repo, "cat-file", "-t", commit) != "commit":
@@ -187,7 +135,9 @@ def _archive(repo: Path, commit: str, destination: Path) -> dict[str, object]:
     # overwriting provenance selected by the target being built.
     with (source / _IDENTITY_MEMBER).open("xb") as stream:
         stream.write(_canonical(identity))
-    return identity
+    return CapturedSource(
+        ApplicationIdentity.model_validate_json(_canonical(identity)), archive, source
+    )
 
 
 def _canonical(value: dict[str, object]) -> bytes:
@@ -225,6 +175,21 @@ def _verify_wheel(wheel: Path, identity: dict[str, object], migrations: dict[str
         _verify_migrations(archive, migrations)
 
 
+def _build_inputs(uv: Path, python: Path, build_constraints: Path, cache_dir: Path | None) -> bytes:
+    for tool in (uv, python):
+        if not tool.is_absolute() or not tool.is_file():
+            raise ReleaseRejectedError("build tools must be explicit existing absolute files")
+    if cache_dir is not None and (not cache_dir.is_absolute() or not cache_dir.is_dir()):
+        raise ReleaseRejectedError("build cache must be an explicit existing absolute directory")
+    constraints = regular_bytes(build_constraints)
+    if (
+        not build_constraints.is_absolute()
+        or build_constraints.resolve(strict=True) != build_constraints
+    ):
+        raise ReleaseRejectedError("build constraints must be an explicit canonical file")
+    return constraints
+
+
 def build_application(
     repo: Path,
     commit: str,
@@ -232,6 +197,7 @@ def build_application(
     *,
     uv: Path,
     python: Path,
+    build_constraints: Path,
     cache_dir: Path | None = None,
 ) -> ApplicationBuild:
     """Build offline from immutable Git input; no checkout, service, or DB writes.
@@ -240,32 +206,29 @@ def build_application(
     dependencies refuse here; acquiring them belongs to online preparation.
     The receipt records build provenance, not bootability or DB compatibility.
     """
-    if not repo.is_absolute() or repo.resolve(strict=True) != repo:
-        raise ReleaseRejectedError("build repository must be canonical and absolute")
-    if (
-        not destination.is_absolute()
-        or destination.parent.resolve(strict=True) != destination.parent
-    ):
-        raise ReleaseRejectedError("build destination parent must be canonical and absolute")
-    for tool in (uv, python):
-        if not tool.is_absolute() or not tool.is_file():
-            raise ReleaseRejectedError("build tools must be explicit existing absolute files")
-    if cache_dir is not None and (not cache_dir.is_absolute() or not cache_dir.is_dir()):
-        raise ReleaseRejectedError("build cache must be an explicit existing absolute directory")
-    identity = _archive(repo, commit, destination)
-    source = destination / "source"
+    constraints = _build_inputs(uv, python, build_constraints, cache_dir)
+    captured = capture_source(repo, commit, destination)
+    identity: dict[str, object] = captured.identity.model_dump(mode="json")
+    source = captured.source
+    private_constraints = destination / "build-constraints.txt"
+    with private_constraints.open("xb") as stream:
+        stream.write(constraints)
     # Snapshot SQL before the backend runs; comparing to its mutable source
     # tree afterwards would let a build hook rewrite both expected and output.
     migrations = _migration_bytes(source)
     wheels = destination / "wheels"
-    result = run_bounded(
+    result = run_owned_command(
         [
             str(uv),
             *(["--cache-dir", str(cache_dir)] if cache_dir is not None else []),
+            "--no-config",
             "--offline",
             "build",
             "--wheel",
             "--no-sources",
+            "--build-constraints",
+            str(private_constraints),
+            "--require-hashes",
             "--python",
             str(python),
             "--out-dir",
@@ -276,10 +239,10 @@ def build_application(
             "PATH": os.defpath,
             "HOME": str(Path.home()),
             "SOURCE_DATE_EPOCH": _source_epoch(destination / "git", commit),
+            "PYTHONDONTWRITEBYTECODE": "1",
         },
         timeout=300,
-        capture_output=True,
-        text=True,
+        temporary=destination,
     )
     result.check_returncode()
     candidates = list(wheels.glob("*.whl"))
@@ -288,7 +251,16 @@ def build_application(
     wheel = candidates[0]
     _verify_wheel(wheel, identity, migrations)
     digest = file_sha256(wheel)
-    receipt = identity | {"wheel": wheel.name, "wheel_digest": digest}
+    if (
+        private_constraints.read_bytes() != constraints
+        or regular_bytes(build_constraints) != constraints
+    ):
+        raise ReleaseRejectedError("build constraints changed during application build")
+    receipt: dict[str, object] = identity | {
+        "wheel": wheel.name,
+        "wheel_digest": digest,
+        "build_constraints_digest": hashlib.sha256(constraints).hexdigest(),
+    }
     with (destination / "build-receipt.json").open("xb") as stream:
         stream.write(_canonical(receipt))
     return ApplicationBuild(
@@ -308,6 +280,7 @@ def main() -> None:
     parser.add_argument("--uv", type=Path, required=True)
     parser.add_argument("--python", type=Path, required=True)
     parser.add_argument("--cache-dir", type=Path)
+    parser.add_argument("--build-constraints", type=Path, required=True)
     args = parser.parse_args()
     result = build_application(
         args.repo,
@@ -315,6 +288,7 @@ def main() -> None:
         args.output,
         uv=args.uv,
         python=args.python,
+        build_constraints=args.build_constraints,
         cache_dir=args.cache_dir,
     )
     print(json.dumps({"wheel": str(result.wheel), "wheel_digest": result.wheel_digest}))

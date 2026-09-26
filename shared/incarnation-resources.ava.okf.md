@@ -30,7 +30,7 @@ Process and hosted admission preserve legacy NULL/protocol zero and refuse
 malformed evidence. A managed successor requires a closed exact predecessor
 resource set plus its applied lifecycle decision. A same-machine hosted process
 restart is the narrow exception: while holding the metadata lock, it may transfer
-an empty, unfrozen set only after the admission-captured host PID/birth is proven
+an empty, unfrozen set only after the admission-captured host native birth is proven
 ended. A live exact host, an expired lease, a missing host identity, a frozen set,
 or any request refuses that handoff. A legacy NULL row keeps its unknown set
 (admission never mints an empty one) and may still be adopted before lease
@@ -56,7 +56,7 @@ takes the publication row lock through the fixed security-definer
 mutation surface; publication columns remain ordinary read-only facts.
 
 Managed exec launches the fixed isolated read-only `agent.exec_domain_owner`
-entry (`-I -B -X utf8`) behind a permit gate, validates its actual PID/birth and
+entry (`-I -B -X utf8`) behind a permit gate, validates its captured launcher birth and
 direct root, and then registers and attaches the allocation atomically under the
 metadata lock. Only that committed transaction permits user code. Force winning
 before the transaction leaves no database allocation; the host closes the gated
@@ -90,6 +90,18 @@ completion additionally requires the admission-captured host PID/birth to have
 ended and the entire frozen set to be discharged. Same-user arbitrary code is
 not sandboxed; the guarantee is registered managed-domain closure, not every
 possible detached or breakaway process. Persistent sessions remain independent.
+
+Every `ResourceProcess` receipt requires explicit `starttime` and `boot_id`
+fields. Local Linux custody requires PID, exact kernel start ticks, and boot
+UUID; its wall-derived creation timestamp is diagnostic. macOS requires its
+boot UUID and exact stable kernel birth. Windows records explicit null ticks
+and boot scope, using its absolute native creation time. Missing historical
+native fields refuse; they cannot become evidence that a host ended. A different
+recorded boot or exact native PID reuse proves the prior process ended without
+authorizing work on its replacement. Failed identity observation remains unknown.
+Fresh host and ready-handshake captures compare native births; database CAS and
+terminal receipts retain exact model equality, including the original timestamp.
+Same-host admission preserves the stored receipt rather than rewriting its facts.
 
 The dedicated owner's `ExecProcessDomain.close_confirmed` operation retains the
 POSIX unreaped root while observing that no live managed group members remain.

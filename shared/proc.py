@@ -22,12 +22,13 @@ import contextlib
 import os
 import signal
 import subprocess
+import time
 from collections.abc import Sequence
 from typing import Any, Literal
 
 import psutil
 
-from shared.paths import run_dir
+from shared.native_process.ownership import OwnedProcess, capture_tree
 from shared.platform import CREATE_NO_WINDOW, SIGKILL
 from shared.platform_backend import get_backend
 
@@ -106,12 +107,13 @@ def hosting_supervised_session() -> str | None:
     """
     # Deliberately method-local: the in-process updater's post-checkout stop must
     # load these from the new tree; a module-scope import leaves their old version
-    # in sys.modules before checkout. `shared.proc_tree` belongs here too — it
+    # in sys.modules before checkout. `shared.native_process.ownership` belongs here too — it
     # imports `shared.session_record` at module scope, so importing it at module
     # scope would put the record module back in the pre-checkout closure.
     # See shared/session_backend.py.
     from shared import winproc
-    from shared.proc_tree import stable_create_time
+    from shared.native_process.ownership import stable_create_time
+    from shared.paths import run_dir
     from shared.session_record import SessionRecord
 
     try:
@@ -273,9 +275,8 @@ def force_kill(pid: int) -> None:
 
     A pid this user may not signal is a no-op too, and for the same reason as
     `process_alive` reading it as alive: "could not deliver" is not "did not need
-    to". Raising here would put an unhandled exception in the middle of a stop —
-    the shape `_terminate_verified` was rewritten to remove — where the honest
-    outcome is that the caller re-probes and reports the process a survivor.
+    to". The caller re-probes and reports the process as a survivor if delivery
+    failed, so an unhandled exception must not interrupt that verification.
     """
     backend = get_backend()
     if not backend.is_posix():  # Windows: must avoid os.kill(SIGKILL)
@@ -322,27 +323,22 @@ def request_stop(pid: int) -> None:
         return
 
 
-def _same_process(proc: psutil.Process, create_time: float) -> bool:
-    """Read fresh birth evidence: Process.create_time() itself caches its value."""
-    try:
-        current = psutil.Process(proc.pid)
-        return current.is_running() and current.create_time() == create_time
-    except _GONE:
-        return False
-
-
-def _verified_descendants(parent: psutil.Process) -> list[tuple[psutil.Process, float]]:
-    """Verify the entire captured set before our own signals can reparent it."""
-    captured: list[tuple[psutil.Process, float]] = []
-    for proc in parent.children(recursive=True):
-        with contextlib.suppress(*_GONE):
-            captured.append((proc, proc.create_time()))
-    verified: list[tuple[psutil.Process, float]] = []
-    for proc, create_time in captured:
-        with contextlib.suppress(*_GONE):
-            if _same_process(proc, create_time) and parent in psutil.Process(proc.pid).parents():
-                verified.append((proc, create_time))
-    return verified
+def _wait_owned(members: list[OwnedProcess], timeout: float) -> list[OwnedProcess]:
+    """Bounded native exit observation; a permission gap remains a survivor."""
+    deadline = time.monotonic() + timeout
+    while True:
+        alive: list[OwnedProcess] = []
+        for identity in members:
+            try:
+                if identity.live():
+                    alive.append(identity)
+            except (psutil.AccessDenied, OSError):
+                alive.append(identity)
+        remaining = deadline - time.monotonic()
+        if not alive or remaining <= 0:
+            return alive
+        members = alive
+        time.sleep(min(0.02, remaining))
 
 
 def kill_process_tree(
@@ -365,8 +361,7 @@ def kill_process_tree(
     alive**. Walking down from a dead parent is not possible: psutil resolves
     children by ppid, and on Windows there is no reparent-to-init to walk to
     instead — the link is simply lost, which is how a tree survives a kill that
-    was aimed at its root. Descendants retain psutil's enumeration order (a
-    parent can precede its child); only the root is signalled last when included.
+    was aimed at its root. Only the root is signalled last when included.
 
     Limitation worth knowing: a descendant that has already double-forked away
     (reparented to init) is not in the ppid walk and is not reached. git and ssh
@@ -377,29 +372,26 @@ def kill_process_tree(
     reparenting caused by our own TERM pass does not exempt survivors.
     """
     try:
-        parent = psutil.Process(pid)
-        members = _verified_descendants(parent)
+        parent = OwnedProcess.capture(psutil.Process(pid))
+        members = list(capture_tree(parent) - {parent})
         if include_root:
-            members.append((parent, parent.create_time()))
-    except _GONE:
+            members.append(parent)
+    except psutil.NoSuchProcess:
         return
 
-    tree = [proc for proc, _ in members]
-    create_times = {proc.pid: create_time for proc, create_time in members}
-    for proc in tree:
+    for identity in members:
         # A member that exited between enumeration and this line is the normal
         # case, not a failure — that race is the whole reason the set is
         # snapshotted rather than re-walked.
         with contextlib.suppress(*_GONE):
-            proc.terminate()
-    _gone, alive = psutil.wait_procs(tree, timeout=grace_s)
+            identity.send_signal(signal.SIGTERM)
+    alive = _wait_owned(members, grace_s)
     if not alive:
         return
-    for proc in alive:
+    for identity in alive:
         with contextlib.suppress(*_GONE):
-            if _same_process(proc, create_times[proc.pid]):
-                proc.kill()
-    psutil.wait_procs(alive, timeout=_REAP_TIMEOUT_S)
+            identity.send_signal(SIGKILL)
+    _wait_owned(alive, _REAP_TIMEOUT_S)
 
 
 def run_bounded(
@@ -441,9 +433,6 @@ def run_bounded(
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        # `kill_process_tree` may reap this child itself (psutil waitpid's its
-        # own children), leaving `proc.returncode` meaningless afterwards — fine
-        # on this path, which raises rather than returning a CompletedProcess.
         kill_process_tree(proc.pid)
         # The pipes' write ends were inherited by the descendants, so this drain
         # only terminates because they are dead — bounded anyway, because an
@@ -456,7 +445,7 @@ def run_bounded(
         raise
     except BaseException:  # KeyboardInterrupt / cancellation must not leak a tree either
         kill_process_tree(proc.pid)
-        proc.poll()  # collect the status if psutil did not, so Popen leaves no zombie
+        proc.poll()  # Native liveness observes exit; Popen still owns reaping.
         raise
     return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
 

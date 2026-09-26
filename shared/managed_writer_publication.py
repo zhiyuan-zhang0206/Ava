@@ -19,8 +19,6 @@ from psycopg.types.json import Jsonb
 from pydantic import AwareDatetime, Field, model_validator
 
 from shared.managed_writer_barrier import (
-    Digest,
-    EvidenceModel,
     ManagedUnit,
     ManagedWriterBarrierError,
     ManagedWriterCollection,
@@ -29,7 +27,7 @@ from shared.managed_writer_barrier import (
     lock_rollout,
     validate_collection_for_write,
 )
-from shared.managed_writer_observation import ExpectedProcess
+from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
 
 
 @dataclass(frozen=True)

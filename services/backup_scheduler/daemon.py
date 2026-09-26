@@ -17,10 +17,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
-from functools import partial
 
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.backup import _cluster_tz, is_due, run_backup
+from services.backup import _cluster_tz, is_due
 from services.backup_scheduler.recovery_drill import (
     load_local_dump_restore_success,
     local_dump_restore_due,
@@ -146,19 +145,12 @@ async def _sleep_until_next_backup_hour(now: datetime) -> None:
     await _sleep((target.astimezone(UTC) - now).total_seconds())
 
 
-def run_local_dump_restore() -> None:
-    """Restore the newest local dump into an isolated Postgres instance."""
-    from scripts.restore_drill import run_drill
-
-    run_drill(foreground=True)
-
-
 async def _run_due_local_dump_restore(now: datetime) -> None:
     """Run one weekly local restore proof without re-running the daily dump."""
     try:
         if not local_dump_restore_due(now, last_success=load_local_dump_restore_success()):
             return
-        await run_job(run_local_dump_restore)
+        await run_job("restore")
         record_local_dump_restore_success(now)
     except Exception as exc:
         telemetry.emit(
@@ -182,7 +174,7 @@ async def _backup_loop(state: _BackupState) -> None:
         state.record_attempt(now)
         state.running = True
         try:
-            await run_job(partial(run_backup, now))
+            await run_job("dump", now=now)
             state.record_success(now)
             await _run_due_local_dump_restore(now)
         except Exception as exc:

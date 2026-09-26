@@ -211,14 +211,18 @@ class MemorySearchStats(TypedDict):
     last_save_seconds: float
 
 
-class WatchdogTick(TypedDict):
-    """`watchdog_tick` payload — services/watchdog/daemon.py.
+class RootHealthTick(TypedDict):
+    """Completed service/diagnostic observation round, regardless of its verdicts."""
 
-    One fully completed watchdog round replaces the previous timestamp. The
-    OTLP metric is a gauge so Prometheus can calculate a role's tick age.
-    """
-
+    home_id: str
     last_tick_timestamp_seconds: float
+
+
+class RootHealthExpected(TypedDict):
+    """Observer start time before its first sample; zero explicitly retires it."""
+
+    home_id: str
+    expected_since_timestamp_seconds: float
 
 
 class ScheduleStalled(TypedDict):

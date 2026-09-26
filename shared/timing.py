@@ -136,12 +136,6 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.GATEWAY_PREFLIGHT_BUDGET_S,
         "updater preflight's per-dial gateway budget",
     ),
-    "GATEWAY_DOWN_OWNER_GRACE_S": Clock(
-        "deploy",
-        lambda: deploy.GATEWAY_DOWN_OWNER_GRACE_S,
-        "how long the gateway must be unreachable before a live deploy lease "
-        "reads as dead evidence in the stranded-pause owner determination",
-    ),
     "SERVICE_READY_TIMEOUT_S": Clock(
         "deploy",
         lambda: deploy.SERVICE_READY_TIMEOUT_S,
@@ -339,14 +333,6 @@ CONSTRAINTS: list[Constraint] = [
         "CLUSTER_DISPATCH_TIMEOUT_S",
         "the detached child must publish ownership before the dispatching client "
         "can time out and invite a duplicate submission",
-    ),
-    Constraint(
-        "<",
-        "GATEWAY_DOWN_OWNER_GRACE_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "the reachability evidence opens before the no-progress reap: a hung "
-        "orchestration is still ended by the reaper on its own clock, and this "
-        "earlier bound only recovers pauses whose owner is already dead",
     ),
     # --- schedule supervision family ---
     Constraint(

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import cmd_mcp_add, cmd_mcp_disable, cmd_mcp_enable, cmd_mcp_list
+from cli.commands.mcp import cmd_mcp_add, cmd_mcp_disable, cmd_mcp_enable, cmd_mcp_list
 
 
 def test_enable_then_disable_writes_overlay(unit_home: Path) -> None:

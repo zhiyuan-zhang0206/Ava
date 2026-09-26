@@ -220,16 +220,13 @@ class ResurrectBudgetExhausted(ResurrectError): ...  # noqa: N818
 
 
 class ResurrectRefused(ResurrectError):  # noqa: N818 — style consistent with ResurrectAlreadyAlive
-    """A resurrect guard refused — the billing batch-recovery whitelist (task #3919).
+    """Resurrection refused a runtime or billing recovery guard.
 
-    Raised under the metadata row lock when the versioned `resurrect-billing-v1`
-    action finds the row outside its contract: closed (the batch entry never
-    crosses the closure marker — only a single explicit manual resurrect
-    reopens), or not a billing-class recovery-breaker halt. Caught locally by
-    the billing op and turned into a structured per-agent outcome; like
-    `ResurrectAlreadyAlive` it is not wire-encoded (no ErrorReason entry).
-
-    `reason` is the machine-readable guard name: 'closed' / 'not_billing_halted'.
+    Historical process/unknown runtime kinds or an incomplete hosted identity
+    require explicit cutover reconciliation (`runtime_cutover_required`). Billing
+    recovery additionally refuses `closed` and `not_billing_halted` rows. The
+    billing op returns these as structured per-agent outcomes; this exception is
+    not wire-encoded (no ErrorReason entry).
     """
 
     def __init__(self, reason: str) -> None:

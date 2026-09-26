@@ -6,15 +6,19 @@ no process launch, filesystem read or network wait belongs under that lock.
 """
 
 import json
+import sys
 from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
+import psutil
 import psycopg
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from shared import native_process
+from shared.native_process import ownership as proc_tree
 from shared.runtime_incarnation import RuntimeIncarnation
 
 
@@ -37,6 +41,61 @@ class ResourceBirth(_StrictEvidence):
 class ResourceProcess(_StrictEvidence):
     pid: int = Field(gt=0)
     birth: float = Field(gt=0, allow_inf_nan=False)
+    starttime: int | None = Field(gt=0)
+    boot_id: str | None
+
+    @field_validator("boot_id")
+    @classmethod
+    def canonical_boot(cls, value: str | None) -> str | None:
+        if value is not None and str(UUID(value)) != value:
+            raise ValueError("resource boot identity must be a canonical UUID")
+        return value
+
+    @classmethod
+    def capture(cls, process: psutil.Process) -> "ResourceProcess":
+        native = proc_tree.OwnedProcess.capture(process)
+        evidence = cls(
+            pid=native.pid,
+            birth=native.birth,
+            starttime=native.starttime,
+            boot_id=native_process.native_boot_id(),
+        )
+        if not evidence.as_identity().live():
+            raise ResourceEvidenceError("resource process ended during native capture")
+        return evidence
+
+    def _require_native_evidence(self) -> None:
+        # Decode is platform-neutral: gateways also read remote runner rows.
+        # Local process use requires every native field for this platform.
+        match sys.platform:
+            case "linux":
+                valid = self.starttime is not None and self.boot_id is not None
+            case "darwin":
+                valid = self.starttime is None and self.boot_id is not None
+            case "win32":
+                valid = self.starttime is None and self.boot_id is None
+            case _:
+                valid = False
+        if not valid:
+            raise ResourceEvidenceError("resource process lacks this platform's native evidence")
+
+    def in_current_boot(self) -> bool:
+        self._require_native_evidence()
+        return self.boot_id == native_process.native_boot_id()
+
+    def as_identity(self) -> proc_tree.OwnedProcess:
+        """Admit local native use only within the captured boot scope."""
+        if not self.in_current_boot():
+            raise ResourceEvidenceError("resource process belongs to another boot")
+        return proc_tree.OwnedProcess(self.pid, self.birth, self.starttime)
+
+    def same_birth(self, other: "ResourceProcess") -> bool:
+        """Compare fresh captures without weakening immutable receipt equality."""
+        self._require_native_evidence()
+        other._require_native_evidence()
+        return self.boot_id == other.boot_id and proc_tree.OwnedProcess(
+            self.pid, self.birth, self.starttime
+        ).same_birth(proc_tree.OwnedProcess(other.pid, other.birth, other.starttime))
 
 
 class ExecAllocation(_StrictEvidence):

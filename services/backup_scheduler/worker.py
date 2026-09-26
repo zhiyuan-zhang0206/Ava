@@ -1,114 +1,78 @@
-"""Own interruptible backup jobs outside asyncio's non-cancellable executor.
-
-The adoption gate prevents a worker from creating children before its controller
-owns the process group. Cancellation unwinds the worker's synchronous finally
-blocks, then bounds cleanup of that exact group before the daemon drops health
-and its pidfile. No executor thread can keep interpreter shutdown waiting.
-"""
+"""Fixed logical-backup operations in one launch-owned trusted process group."""
 
 from __future__ import annotations
 
 import asyncio
-import multiprocessing
-import queue
-import signal
-import time
-import types
-from collections.abc import Callable
-from functools import partial
-from typing import cast
+import hashlib
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Literal
 
-from services.pitr.base_candidate import StopSignal
-from services.pitr.worker_process import (
-    WorkerQueue,
-    enable_child_subreaper,
-    group_members,
-    reap_exited_group_children,
-    reap_job_group,
-    validate_ready_message,
-    worker_bootstrap,
-)
-from shared.log import init_gateway_process
+from services.pitr.worker_process import publish_result, run_operation, worker_request
+from shared.paths import ava_home
+from shared.process_env import inherited_process_env
+
+Job = Literal["dump", "restore"]
 
 
-def _interrupt(signum: int, _frame: types.FrameType | None) -> None:
-    # A repeated stop must not interrupt the job's finally blocks halfway through.
-    signal.signal(signum, signal.SIG_IGN)
-    raise KeyboardInterrupt
+def _sha256(path: Path) -> str:
+    with path.open("rb") as artifact:
+        return hashlib.file_digest(artifact, "sha256").hexdigest()
 
 
-def _execute(job: Callable[[], object], _stop: StopSignal, output: WorkerQueue) -> None:
-    signal.signal(signal.SIGTERM, _interrupt)
-    try:
-        init_gateway_process(name="pg-backup-worker")
-        job()
-    except BaseException as exc:
-        output.put((False, f"{type(exc).__name__}: {exc}"[:4000]))
-        raise
-    else:
-        output.put((True, ""))
+async def run_job(kind: Job, *, now: datetime | None = None) -> None:
+    """Accept a worker result only after its entire inherited group closed."""
+    from services.backup import commit_scheduled_backup
 
-
-async def run_job(job: Callable[[], object]) -> None:
-    """Run one spawn-picklable job; cancellation reaps its owned process group.
-
-    Scheduled restore jobs must use foreground Postgres: a pg_ctl-detached
-    server would escape this ownership boundary. The spawn context also avoids
-    inheriting the daemon's telemetry threads and database connections.
-    """
-    enable_child_subreaper()
-    context = multiprocessing.get_context("spawn")
-    stop = context.Event()
-    adopted = context.Event()
-    output = cast(WorkerQueue, context.Queue(maxsize=2))
-    process = context.Process(
-        target=worker_bootstrap, args=(partial(_execute, job), stop, output, adopted)
+    completed = await run_operation(
+        "services.backup_scheduler.worker",
+        {"kind": kind, "now": now.isoformat() if now is not None else None},
+        control_root=ava_home() / "backups" / "operations",
+        env=inherited_process_env(),
     )
-    process.start()
-    worker_pid = process.pid
-    assert worker_pid is not None  # noqa: S101 -- a successfully started Process owns a PID
-    pgid: int | None = None
-    created_at: float | None = None
-    try:
-        deadline = time.monotonic() + 30
-        while pgid is None:
-            try:
-                message = cast(tuple[str, str, str, str], output.get_nowait())
-            except queue.Empty:
-                if not process.is_alive() or time.monotonic() >= deadline:
-                    raise RuntimeError("backup worker failed before ownership handshake") from None
-                await asyncio.sleep(0.05)
-                continue
-            pgid, created_at = validate_ready_message(message, expected_pid=worker_pid)
-            adopted.set()
-        while process.is_alive():
-            await asyncio.sleep(0.1)
-        process.join()
-        reap_exited_group_children(process, pgid)
-        if group_members(pgid):
-            raise RuntimeError("backup worker left live descendants")
-        try:
-            succeeded, detail = cast(tuple[bool, str], output.get(timeout=1))
-        except queue.Empty as exc:
-            raise RuntimeError("backup worker exited without a result") from exc
-        if process.exitcode != 0 or not succeeded:
-            raise RuntimeError(f"backup worker failed (exit={process.exitcode}): {detail}")
-    finally:
-        if pgid is not None and created_at is not None:
-            reap_job_group(
-                process,
-                worker_pid=worker_pid,
-                pgid=pgid,
-                leader_created_at=created_at,
-                grace_s=3,
-                deadline_s=7,
-            )
-        elif process.is_alive():
-            # The adoption gate guarantees this worker has created no descendants.
-            process.kill()
-            process.join(timeout=2)
-        if process.is_alive():
-            raise RuntimeError("backup worker could not be reaped")
-        process.close()
-        output.close()
-        output.join_thread()
+    result = completed.result
+    if kind == "dump":
+        if set(result) != {"artifact", "sha256"}:
+            raise RuntimeError(f"logical backup returned an invalid result: {completed.work}")
+        name, digest = result["artifact"], result["sha256"]
+        if not isinstance(name, str) or Path(name).name != name or not isinstance(digest, str):
+            raise RuntimeError(f"logical backup result escaped its controls: {completed.work}")
+        # Hashing and linking a multi-GiB artifact is bounded local I/O; the
+        # scheduler's health server shares this loop.
+        await asyncio.to_thread(commit_scheduled_backup, completed.work / "artifact" / name, digest)
+    elif result != {"restored": True}:
+        raise RuntimeError(f"logical restore returned an invalid result: {completed.work}")
+    completed.retire()
+
+
+def _execute(request: dict[str, object], work: Path) -> dict[str, object]:
+    if set(request) != {"kind", "now"}:
+        raise ValueError("invalid logical backup request")
+    if request["kind"] == "dump":
+        from services.backup import prepare_scheduled_backup
+
+        stamp = request["now"]
+        if not isinstance(stamp, str):
+            raise TypeError("logical dump requires its captured timestamp")
+        artifact = prepare_scheduled_backup(datetime.fromisoformat(stamp), work / "artifact")
+        return {"artifact": artifact.name, "sha256": _sha256(artifact)}
+    if request == {"kind": "restore", "now": None}:
+        from scripts.restore_drill import run_drill
+
+        run_drill(foreground=True)
+        return {"restored": True}
+    raise ValueError("unknown logical backup operation")
+
+
+def main() -> None:
+    request, output = worker_request(sys.argv)
+    from shared.log import init_gateway_process
+
+    # The store-verified publish ACK is an INFO record: route it to the log sinks.
+    init_gateway_process(name="pg-backup-worker")
+    publish_result(output, _execute(request, output.parent))
+
+
+if __name__ == "__main__":
+    main()

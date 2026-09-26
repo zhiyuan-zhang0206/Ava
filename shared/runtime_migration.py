@@ -17,7 +17,6 @@ from pathlib import Path
 
 import psycopg
 
-from shared.cluster_lock import read_update_lease
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
 
 
@@ -67,6 +66,8 @@ class ReleaseMigrationContext:
 
     def assert_operation(self, conn: psycopg.Connection) -> None:
         """Reject a stale receipt, another operation, and post-rollout settle holds."""
+        from shared.cluster_lock import read_update_lease
+
         lease = read_update_lease(conn=conn)
         if (
             lease is None

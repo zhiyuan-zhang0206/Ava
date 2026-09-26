@@ -37,8 +37,7 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
-from shared.managed_writer_barrier import Digest, EvidenceModel
-from shared.managed_writer_observation import ExpectedProcess
+from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
 from shared.updater_recovery import BootstrapRecoveryJournal
 
 LEDGER_MODE = "bootstrap_hop_ledger"

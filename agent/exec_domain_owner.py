@@ -29,8 +29,7 @@ from shared.exec_owner_protocol import (
 )
 from shared.exec_process_domain import KILL_GRACE_S, ExecProcessDomain
 from shared.incarnation_resources import ResourceProcess
-from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
-from shared.proc_tree import stable_create_time
+from shared.platform import IS_WINDOWS
 from shared.winjob import WindowsJob
 from shared.winjob_pipes import PipedJobChild, start_piped_job_process
 
@@ -122,25 +121,23 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         str(context_path),
     ]
     try:
-        root = (
-            start_piped_job_process(argv, job)
-            if job is not None
-            else subprocess.Popen(  # noqa: S603 -- fixed isolated entry; no caller-selected executable.
+        if job is not None:
+            root = start_piped_job_process(argv, job)
+            domain = ExecProcessDomain(root, job)
+        else:
+            root, domain = ExecProcessDomain.launch_posix(
                 argv,
+                new_session=True,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 close_fds=True,
-                creationflags=CREATE_NO_WINDOW,
-                start_new_session=not IS_WINDOWS,
                 bufsize=0,
             )
-        )
     except BaseException:
         if job is not None:
             job.close()
         raise
-    domain = ExecProcessDomain(root, job)
     reader_failures: list[BaseException] = []
     reader = threading.Thread(target=_relay, args=(root, reader_failures), daemon=True)
     reason: Literal["completed", "host_eof", "cancel", "timeout"] = "completed"
@@ -152,12 +149,8 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         owner_identity = psutil.Process()
         allocation = allocation.model_copy(
             update={
-                "owner_process": ResourceProcess(
-                    pid=owner_identity.pid, birth=stable_create_time(owner_identity)
-                ),
-                "root_process": ResourceProcess(
-                    pid=root.pid, birth=stable_create_time(root_identity)
-                ),
+                "owner_process": ResourceProcess.capture(owner_identity),
+                "root_process": ResourceProcess.capture(root_identity),
             }
         )
         reader.start()
@@ -210,9 +203,10 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
             if attached and not close_attempted:
                 close_attempted = True
                 domain.close_confirmed(close_deadline)
+                root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
             elif not attached:
                 root.kill()
-            root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
+                root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
         except BaseException as cleanup:
             original.add_note(f"owner cleanup unresolved: {type(cleanup).__name__}: {cleanup}")
         raise

@@ -3,10 +3,9 @@
 `ava start`'s read-only local checks are moved in front of the stop: a failure
 HERE refuses the stop while the host still serves, instead of failing on a
 stopped host. These tests pin each check family's disposition — fatal (refuse)
-vs observation (report, proceed) — plus the two caller-shaped knobs: the
-`.venv` entry-point checks (`check_launcher` toggles the one only an update leg
-needs). The caller-level refusal contracts live in
-`test_update_agent_runner_preflight.py` (update leg) and
+vs observation (report, proceed) — plus the caller-shaped knob for the
+`.venv` entry-point checks (`check_launcher` toggles the one only a caller that
+execs the launcher needs). The caller-level refusal contract lives in
 `test_commands_restart_stop.py::test_cmd_restart_aborts_when_start_readiness_fails`.
 """
 
@@ -42,8 +41,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("logs", "workspaces", "memory"):
         (home / name).mkdir(parents=True)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
-    monkeypatch.setattr("cli.commands._roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr("cli.commands._launch_roster", lambda *_a, **_k: ())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr("cli.commands._root_driver._root_tree_roster", lambda *_a, **_k: ())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "cli.commands._port_preflight.collect_port_conflicts",
         lambda _ctx: [],  # pyright: ignore[reportUnknownArgumentType]
@@ -96,7 +95,7 @@ def test_machine_role_missing_skips_ports_as_an_observation(
 ) -> None:
     """An unresolvable identity is the probe gate's refusal, not this one's: the
     port checks are skipped and the update still proceeds."""
-    monkeypatch.setattr("cli.commands._roles_or_none", lambda: None)
+    monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: None)
 
     assert _run(repo) == 0
 
@@ -124,7 +123,7 @@ def test_health_port_occupancy_is_fatal(
         spec=SimpleNamespace(session="ava-gateway"),
         detail="answered by $AVA_HOME=/other-unit (http://127.0.0.1:8123/healthz)",
     )
-    monkeypatch.setattr("cli.commands._occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._probe._occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
 
     assert _run(repo) == 1
     err = capsys.readouterr().err

@@ -44,7 +44,6 @@ def test_pitr_snapshot_actions_bind_their_dedicated_handlers(
 def test_pitr_snapshot_handler_forwards_its_table(
     handler: Callable[[argparse.Namespace], int], command: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli import commands
 
     tables: list[str] = []
 
@@ -52,7 +51,7 @@ def test_pitr_snapshot_handler_forwards_its_table(
         tables.append(table)
         return 17
 
-    monkeypatch.setattr(commands, command, fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pitr_commands, command, fake)  # pyright: ignore[reportUnknownArgumentType]
 
     assert handler(argparse.Namespace(table="agent_state_backfill_snapshot")) == 17
     assert tables == ["agent_state_backfill_snapshot"]

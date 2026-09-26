@@ -24,7 +24,6 @@ import psycopg
 from shared.managed_writer_observation import (
     ExcludedRegistration,
     ExpectedLauncher,
-    ExpectedProcess,
     ExpectedSession,
     ExpectedUnitWriters,
 )
@@ -34,6 +33,7 @@ from shared.native_job_observation import (
     read_launchd_labels,
 )
 from shared.private_storage import write_private_bytes
+from shared.process_evidence import ExpectedProcess
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.verified_file import regular_bytes as _regular_bytes
 

@@ -1,4 +1,4 @@
-"""Provider-plugin API-key delivery across bootstrap, agent spawn, and seed."""
+"""Provider-plugin API-key delivery across bootstrap and agent spawn."""
 
 from __future__ import annotations
 
@@ -135,38 +135,3 @@ def test_agent_child_env_excludes_a_disabled_plugin_key(
     )
 
     assert "TESTP_API_KEY" not in child_env("agent", "posix")
-
-
-def test_seed_allowlist_includes_an_enabled_plugin_key(
-    provider_plugin: Callable[..., None],
-) -> None:
-    """A fresh worktree may copy provider-plugin credentials, but no other new key."""
-    from shared.env_registry import derived_env_keys, env_identity_keys, seed_allowlist
-
-    provider_plugin()
-    seed_allowlist.cache_clear()
-
-    assert "TESTP_API_KEY" in seed_allowlist()
-    assert not (seed_allowlist() & (derived_env_keys() | env_identity_keys()))
-
-
-@pytest.mark.parametrize(
-    "key_env",
-    [
-        "AVA_CLUSTER_SECRET",
-        "AVA_DB_URL",
-        "AVA_TELEGRAM_BOT_TOKEN",
-        "AVA_RUNNER_DB_PASSWORD",
-    ],
-)
-def test_seed_allowlist_excludes_plugin_keys_that_are_not_provider_credentials(
-    provider_plugin: Callable[..., None], key_env: str
-) -> None:
-    """A plugin declaration cannot make a worktree seed protected credentials."""
-    from shared.env_registry import derived_env_keys, env_identity_keys, seed_allowlist
-
-    provider_plugin(key_env=key_env)
-    seed_allowlist.cache_clear()
-
-    assert key_env not in seed_allowlist()
-    assert not (seed_allowlist() & (derived_env_keys() | env_identity_keys()))

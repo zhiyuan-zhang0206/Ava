@@ -17,7 +17,6 @@ from pydantic import (
     ConfigDict,
 )
 
-from shared.last_update import LastUpdate
 from shared.resource_sample import ResourceSample
 
 # Why a host's status snapshot reads `paused` — the first true clause of the
@@ -29,15 +28,22 @@ from shared.resource_sample import ResourceSample
 PausedReason = Literal["no_state", "business_pause", "maintenance", "startup"]
 
 
+SchemaMismatchKind = Literal[
+    "schema-ahead-of-code",
+    "schema-behind-code",
+    "divergent",
+    "invalid-migration-layout",
+    "unavailable",
+]
+
+
 class SchemaMismatchStatus(BaseModel):
-    """One machine's code/schema/pin mismatch and watchdog hold-back."""
+    """A current schema mismatch, invalid layout, or unavailable comparison."""
 
     model_config = ConfigDict(frozen=True)
 
-    kind: Literal["pin-behind-schema", "schema-ahead-of-code", "schema-behind-code", "divergent"]
+    kind: SchemaMismatchKind
     machine: str
-    consecutive_blocked_rounds: int
-    held_back_services: list[str]
     detail: str
 
 
@@ -114,42 +120,21 @@ class MachineStatus(BaseModel):
     # stamped identically onto every row to keep the roster a bare list.
     #
     # **This is the lease signal alone (signal 1 of `ops.deploy_window`), not that
-    # module's full refusal verdict.** The roster does not run the local / remote
-    # orchestration probes, so None here is not proof that no deploy is running: a
-    # watchdog-spawned host-local `ava-updater` takes no lease at all. The lease is
+    # module's full refusal verdict.** The roster does not read the per-host posture
+    # rows, so None here is not proof that no deploy is running: host-local
+    # maintenance takes no cluster lease at all. The lease is
     # shown because it is the one signal that stays true while the transitioning host
     # is unreachable, which is when an operator most needs it.
     deploy_hold: str | None = None
-    # The cluster's last update outcome (`shared.last_update.LastUpdate`), or None
-    # when no update has been recorded. Cluster-global, so — exactly like `on_pin`
-    # and `deploy_hold` — it is read once server-side and stamped identically onto
-    # every row, keeping the roster a bare list the CLI can render without a second
-    # lookup.
-    #
-    # It is here because a failed rollout otherwise leaves only *symptoms* on this
-    # roster: a head/pin mismatch, or a head_sha that disagrees with running_sha.
-    # Those are shared by several unrelated states, so an operator reading one has
-    # to reconstruct which. This states the fact instead (#1012).
-    last_update: LastUpdate | None = None
     # The cluster's rollback anchor (`cluster_pin.last_known_good_sha`), stamped
     # cluster-globally like the fields above. Recorded since the pin existed and
     # shown nowhere until now, which is why a rollback read as the pin
     # inexplicably moving backwards instead of as a fall back to this commit.
     cluster_last_known_good_sha: str | None = None
-    # The host's durable stranded-hold record (`host_deploy_state.stranded_hold_*`,
-    # task #3132): set while this host's pause is a maintenance hold that lost its
-    # owner — the state a failed update leg leaves — and cleared when the hold is
-    # released. Read from the DB, not from the probe, deliberately: the held
-    # host's own ops server is usually down with it, so only the row the host
-    # wrote before going quiet can carry the fact. `since` renders the banner and
-    # the alarm; `reason` names the updater verdict ("updater exited rc=1",
-    # "updater died mid-flight") for context. Both None = no record.
-    stranded_hold_since: datetime | None = None
-    stranded_hold_reason: str | None = None
+
     # This row's name appears in the live settle hold's recorded waiting-for set
-    # (`shared.cluster_lock.DeployLease.settle_hosts`) — the hosts that acked
-    # their self-update and were still converging when the rollout's Phase B poll gave
-    # up.
+    # (`shared.cluster_lock.DeployLease.settle_hosts`) — the hosts the lease recorded
+    # as still converging when its owner exited.
     #
     # **A record, not a verdict.** It is read off the lease row; no probe informs it.
     # True does not mean this host is still off the pin — the hold is only re-examined
@@ -170,7 +155,7 @@ class MachineStatus(BaseModel):
     # liveness. All default to the "unknown" value used when a probe times out.
     shell_count: int = 0
     agent_host_online: bool | None = None
-    watchdog_online: bool | None = None
+    supervisor_online: bool | None = None
     # Agent-runner detail surfaced on the Status Page.
     agent_count: int = 0
     session_count: int = 0

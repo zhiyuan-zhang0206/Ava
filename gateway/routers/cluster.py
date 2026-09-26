@@ -1,6 +1,6 @@
 """Cluster control + admin endpoints — /api/cluster/*.
 
-Covers stop / update / status / roster / admin events query / machines
+Covers maintenance / status / roster / admin events query / machines
 DELETE. These paths are exempt from the paused-host 503 middleware (see
 app.py `_PAUSE_BYPASS_PREFIXES`) because they are the recovery tools the
 gateway uses during pause.
@@ -11,9 +11,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
@@ -24,30 +24,21 @@ from gateway.schemas import (
     AgentEventRow,
     AgentEventsResponse,
     AgentMachineRow,
-    ClusterOpRequest,
     MachineDeleteResponse,
     MachineStatus,
 )
 from ops import cluster_rpc as _cluster_rpc
 from ops import ops_cluster as _ops
-from ops.cluster import (
-    ClusterStatus,
-    ClusterUpdateInProgress,
-    NothingToUpdate,
-    OrchestrationSpawnFailed,
-    UpdateCheck,
-    current_orchestration,
-)
-from ops.cluster import is_paused as cluster_is_paused
-from ops.controllers.schema_mismatch import status as schema_mismatch_status
-from ops.rpc_schemas import ClusterSpawnSession, ClusterTransitionPayload
+from ops.cluster_pause import is_paused as cluster_is_paused
+from ops.cluster_status import ClusterStatus
+from ops.ops_cluster import ClusterUpdateInProgress
+from ops.rpc_schemas import ClusterTransitionPayload
+from ops.schema_mismatch import status as schema_mismatch_status
 from shared import machines
 from shared.cluster_drift import prod_source_head_sha
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.live_events import ClusterUpdateStarted
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
-from shared.redis_client import publish_best_effort_sync
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -56,13 +47,6 @@ _log = logging.getLogger(__name__)
 # Only the whole-cluster endpoints below emit this hint: the single-host update
 # relay and watchdog self-heal paths do not interrupt this gateway, and the
 # cluster-status poll remains their fallback signal.
-def _publish_cluster_update_started(kind: Literal["rollout", "restart"], origin: str) -> None:
-    event = ClusterUpdateStarted(agent_id=0, kind=kind, origin=origin)
-    publish_best_effort_sync(
-        settings.data_plane.events_channel,
-        event.model_dump_json(),
-        context="cluster_update_started",
-    )
 
 
 def _local_snapshot_blocking() -> ClusterStatus:
@@ -82,7 +66,6 @@ def _local_snapshot_blocking() -> ClusterStatus:
         # This local snapshot resolves paused from the posture row alone, so a
         # true verdict here has exactly one possible cause.
         paused_reason="business_pause" if paused else None,
-        current_orchestration=current_orchestration(),
         head_sha=prod_source_head_sha(),
         # This gateway process's own frozen commit — not a disk bookmark, so a
         # gateway that outlived a checkout advance reports the old commit and the
@@ -102,25 +85,18 @@ def _machines_rows_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
         return cur.fetchall()
 
 
-def _cluster_globals_blocking() -> tuple[Any, Any, Any, Any, Any]:
-    """Sync cluster-global markers (pin / deploy lease / last-update / known-good /
-    stranded holds) — small reads, grouped under one to_thread so a slow disk or
-    DB never stalls the roster fan-out. The stranded-hold map is the one per-host
-    entry here, keyed by machine; the rest stamp every row identically."""
-    from gateway.routers._roster_rows import read_stranded_holds
+def _cluster_globals_blocking() -> tuple[Any, Any, Any]:
+    """Read cluster-global markers off the event loop before roster fan-out."""
     from gateway.routers.status import (
         _read_cluster_pin,
         _read_deploy_lease,
         _read_known_good,
-        _read_last_update,
     )
 
     return (
         _read_cluster_pin(),
         _read_deploy_lease(),
-        _read_last_update(),
         _read_known_good(),
-        read_stranded_holds(),
     )
 
 
@@ -193,10 +169,6 @@ async def post_cluster_recover() -> dict[str, Any]:
         return await asyncio.to_thread(_ops.cluster_recover_op)
     except ClusterUpdateInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except OrchestrationSpawnFailed as exc:
-        raise HTTPException(
-            status_code=503, detail=f"could not start the orchestration session: {exc}"
-        ) from exc
 
 
 @router.post("/api/cluster/stopping", status_code=200)
@@ -215,164 +187,6 @@ async def post_cluster_stopping(machine: str, home: str) -> dict[str, str]:
     probes online=True.
     """
     return await asyncio.to_thread(_ops.cluster_stopping_op, machine, home)
-
-
-@router.post("/api/cluster/update", status_code=202)
-async def post_cluster_update(
-    target: str | None = None, target_sha: str | None = None
-) -> dict[str, str]:
-    """Trigger an update.
-
-    `target` selects which machine to update (omitted means this host). Either
-    way the op POSTs to the target's ops server, which calls cluster_update_op
-    in-process there — spawning a detached updater and returning quickly. This
-    host is no special case: its own ops server is dialed at its registered
-    localhost URL.
-
-    `target_sha` pins the force-checkout commit (the watchdog off-pin self-heal
-    passes the cluster pin so the host converges to exactly it, not the moving
-    origin/main tip); threaded into the op payload.
-
-    Returns the orchestration session name + tee'd log path.
-
-    503 when the target's ops server is unreachable; 502 when the op ran but
-    reported failure (e.g. an updater session already in flight there — the
-    caller waits for paused=false then retries).
-    """
-    if target_sha is not None:
-        from shared.deploy.git.git_sha import require_full_sha
-
-        try:
-            require_full_sha(target_sha, entry="target_sha")
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-    target_machine = target if target is not None else machine_name()
-    result = await _dispatch_op(
-        target_machine,
-        "cluster_update",
-        {"target_sha": target_sha} if target_sha is not None else {},
-    )
-    # Validate the wire result at the boundary, then return the same {session, log}
-    # shape the frontend already consumes (no new named response model — the
-    # endpoint's dict[str, str] contract is unchanged).
-    return ClusterSpawnSession.model_validate(result).model_dump()
-
-
-@router.post("/api/cluster/rollout", status_code=202)
-async def post_cluster_rollout(
-    body: ClusterOpRequest = Body(default_factory=ClusterOpRequest),  # noqa: B008 — FastAPI's Body() must appear in the signature
-) -> dict[str, str | bool]:
-    """Launch the whole-cluster `ava cluster update` rollout, detached.
-
-    Gateway only. Spawns a detached session running the full
-    orchestration — Phase A pauses every agent-runner, the gateway stops /
-    pulls / syncs / migrates, Phase B fans out the agent-runner self-updates,
-    then polls each host back to healthy. Returns 202 immediately; clients
-    poll `GET /api/cluster/status` per host to observe progress.
-
-    Body is fully optional; `origin` (default "user") names the trigger and
-    heads the rollout log + the cluster pin's `updated_by`.
-
-    Returns the orchestration session name + tee'd log path, plus
-    `backend_changed` (whether this rollout restarts agent processes) and
-    `needs_replay` (whether the installed commit is ahead of the running
-    bookmark). The frontend uses the first to describe agent restarts; the CLI
-    uses the second to identify a half-deployed state. The SDK initiator that
-    once waited on the restart signal, `ava.self.update()`, was removed 2026-08.
-
-    Errors:
-    - 400 if called on an agent-runner (rollout is a gateway operation).
-    - 409 if a rollout / update is already in flight.
-    - 422 if the cluster is already up to date (behind==0 and no replay is
-      needed) — nothing to roll out, so the fleet is not bounced. Use
-      /api/cluster/restart to bounce on the current code.
-    - 503 if the session backend could not start the orchestration session.
-    """
-    if not is_gateway():
-        raise HTTPException(
-            status_code=400,
-            detail="rollout must be triggered on the gateway",
-        )
-    try:
-        result = await asyncio.to_thread(
-            _ops.cluster_rollout_op,
-            body.origin,
-            mode=body.mode,
-            force=body.force,
-            dry_run=body.dry_run,
-        )
-        if not body.dry_run:
-            _publish_cluster_update_started("rollout", body.origin)
-        return result
-    except ClusterUpdateInProgress as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except NothingToUpdate as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except OrchestrationSpawnFailed as exc:
-        raise HTTPException(
-            status_code=503, detail=f"could not start the orchestration session: {exc}"
-        ) from exc
-
-
-@router.post("/api/cluster/restart", status_code=202)
-async def post_cluster_restart(
-    body: ClusterOpRequest = Body(default_factory=ClusterOpRequest),  # noqa: B008 — FastAPI's Body() must appear in the signature
-) -> dict[str, str]:
-    """Launch a whole-cluster restart (no pull), detached.
-
-    Gateway only. Same three-phase orchestration as rollout — pause every
-    agent-runner, gracefully quiesce agents, bounce this host, fan out the
-    agent-runner bounces — but skips git pull / uv sync / migration. Use it to
-    apply config changes (or unwedge a service) without changing the checked-out
-    code. Returns 202 immediately; clients poll `GET /api/cluster/status`.
-
-    Body is fully optional; `origin` (default "user") names the trigger and
-    heads the restart log.
-
-    Returns the orchestration session name + tee'd log path.
-
-    Errors:
-    - 400 if called on an agent-runner (restart is a gateway operation).
-    - 409 if a restart / rollout / update is already in flight.
-    - 503 if the session backend could not start the orchestration session.
-    """
-    if not is_gateway():
-        raise HTTPException(
-            status_code=400,
-            detail="restart must be triggered on the gateway",
-        )
-    try:
-        result = await asyncio.to_thread(_ops.cluster_restart_op, body.origin, mode=body.mode)
-        _publish_cluster_update_started("restart", body.origin)
-        return result
-    except ClusterUpdateInProgress as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except OrchestrationSpawnFailed as exc:
-        raise HTTPException(
-            status_code=503, detail=f"could not start the orchestration session: {exc}"
-        ) from exc
-
-
-@router.get("/api/cluster/update-check")
-async def get_cluster_update_check() -> UpdateCheck:
-    """Read-only preflight for the Update button — how far behind origin/main and
-    what a rollout would restart, or whether an interrupted rollout needs replay.
-
-    Gateway only (it inspects the gateway checkout). Does a
-    `git fetch` but never pulls or mutates the tree, so the UI can poll it.
-    A clean `behind == 0` → the UI shows "no updates" and does not launch a
-    rollout. An installed commit ahead of the running bookmark is instead
-    returned as `needs_replay`.
-    """
-    if not is_gateway():
-        raise HTTPException(
-            status_code=400,
-            detail="update-check must be queried on the gateway",
-        )
-    # update_check() shells out to `git fetch` (bounded by _GIT_TIMEOUT_S in
-    # ops/update_check.py) — off the event loop so a slow GitHub dial cannot
-    # stall the gateway (the frontend polls this endpoint every 30s).
-    return await asyncio.to_thread(_ops.cluster_update_check_op)
 
 
 @router.get("/api/cluster/status")
@@ -410,26 +224,18 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
     if not rows:
         return []
 
-    # Pin, lease and last-update outcome are all cluster-global: read once here,
-    # stamped per row by the fan-out. The lease is what makes a refused deploy
-    # explainable from the roster (`hold` column + its banner) instead of only from
-    # the cron log; the last-update record is what makes a FAILED one explainable
-    # without reading a pin/head mismatch as a riddle (#1012).
+    # Read cluster-global pin and deploy facts once, then stamp every row.
     (
         cluster_target_sha,
         deploy_lease,
-        last_update,
         last_known_good_sha,
-        stranded_holds,
     ) = await asyncio.to_thread(_cluster_globals_blocking)
     return await gather_cluster_status(
         rows,
         machine_name(),
         cluster_target_sha=cluster_target_sha,
         deploy_lease=deploy_lease,
-        last_update=last_update,
         last_known_good_sha=last_known_good_sha,
-        stranded_holds=stranded_holds,
     )
 
 

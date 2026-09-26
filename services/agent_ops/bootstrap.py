@@ -1,47 +1,37 @@
-"""Restricted same-service ops entry before normal Settings/schema/PID effects.
+"""Read-only evidence helpers retained by the retired updater coordinator.
 
-Only the updater's explicit prepared context and pre-projected child environment
-are accepted. This observer never registers a unit or migrates; it serves its
-prepared observation route plus a strict allowlist of effect deliveries
-(`cluster_bootstrap_hop` / `cluster_normal_continue`), each executed by a
-one-shot child process (`services/agent_ops/dispatch_child.py`) so this
-interpreter stays free of ordinary Settings and of the ops stack.
+The ops daemon has no bootstrap serving entry or restricted effect dispatcher.
+These data/readback helpers remain until their old coordinator consumers are
+removed; they do not provide a runnable daemon or wire mutation ingress.
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import os
 import platform
 import stat
-import subprocess
 import sys
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
 import psutil
 import psycopg
 from pydantic import Field, SecretStr, ValidationError, field_validator
 
-from shared.api_contracts.op_envelope import OpEnvelope
-from shared.daemon_http import start_daemon_http
 from shared.hop_ledger import build_ledger_payload
-from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity, lock_rollout
+from shared.managed_writer_barrier import RolloutIdentity, lock_rollout
 from shared.managed_writer_observation import (
     ChallengeRequest,
-    ExpectedProcess,
     ExpectedUnitWriters,
     ObservationChallenge,
     UnitObserver,
 )
-from shared.proc_tree import stable_create_time
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
+from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
-from shared.session_record import pid_starttime_ticks
-from shared.transport_encryption import verify_transport_encryption_declaration
 
 
 class PreparedObservation(EvidenceModel):
@@ -211,167 +201,3 @@ async def ledger_response(context: PreparedObservation, body: bytes) -> tuple[in
     if datetime.now(UTC) >= context.challenge.valid_until:
         return 409, b'{"error":"challenge expired during ledger read"}', "application/json"
     return 200, json.dumps(payload).encode(), "application/json"
-
-
-# The restricted observer's admitted /ops kinds: the coordinator's two effect
-# deliveries to a unit inside its restricted window -- channel C's bootstrap hop
-# and channel E's continuation. Everything else stays fail-closed: this observer
-# serves one prepared observation, it is not a second daemon.
-_ADMITTED_OPS = frozenset({"cluster_bootstrap_hop", "cluster_normal_continue"})
-
-# One admitted op's child work is one session spawn (seconds). This bound is
-# the observer's orphan-reclaim limit, not a dial's patience: a coordinator dial
-# carries its own default timeout (30s) and retries with the same idempotency
-# key, so a child still running past that is answered by its own claim races --
-# the sender reads a refusal and the checked recovery re-verifies. 120s just
-# caps how long a wedged child may linger before this observer reaps it.
-_DISPATCH_CHILD_TIMEOUT_S = 120.0
-
-
-def run_dispatch_child(envelope: OpEnvelope, home: Path) -> tuple[str, dict[str, object]]:
-    """Execute one admitted op through the full dispatch stack, in a child process.
-
-    This observer must not import ordinary Settings or the ops stack (its
-    startup refused an interpreter that imported `shared.config`, and the ops
-    stack pulls it transitively), so the dispatch runs in a short-lived child of
-    this same image: `services/agent_ops/dispatch_child.py`. A child that
-    cannot answer degrades to the same failed-envelope shape the daemon returns
-    for a crashed dispatch.
-    """
-    try:
-        completed = subprocess.run(
-            [sys.executable, "-I", "-B", "-m", "services.agent_ops.dispatch_child"],
-            input=envelope.model_dump_json(exclude_none=True).encode("utf-8"),
-            cwd=str(home),
-            env=dict(os.environ),
-            capture_output=True,
-            timeout=_DISPATCH_CHILD_TIMEOUT_S,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return "failed", {
-            "error": f"restricted dispatch child exceeded {_DISPATCH_CHILD_TIMEOUT_S:.0f}s"
-        }
-    if completed.returncode != 0:
-        tail = completed.stderr.decode("utf-8", "replace")[-2000:]
-        return "failed", {
-            "error": f"restricted dispatch child exited {completed.returncode}: {tail}"
-        }
-    try:
-        answer = json.loads(completed.stdout.decode("utf-8"))
-        status = str(answer["status"])
-        result = answer["result"]
-    except (ValueError, KeyError, TypeError):
-        tail = completed.stdout.decode("utf-8", "replace")[-2000:]
-        return "failed", {"error": f"restricted dispatch child returned no envelope: {tail!r}"}
-    if status not in {"completed", "failed"} or not isinstance(result, dict):
-        return "failed", {"error": "restricted dispatch child returned a malformed envelope"}
-    return status, cast("dict[str, object]", result)
-
-
-def ops_route(home: Path) -> Callable[[bytes], Awaitable[tuple[int, bytes, str]]]:
-    """The restricted observer's `/ops` handler: validate, allowlist, relay.
-
-    Wire shapes mirror the daemon's `_ops_route` exactly (400 on a bad JSON body
-    or envelope; otherwise 200 with `{"status", "result"}`). A kind outside the
-    allowlist is answered as a failed op and never reaches a child.
-
-    No concurrency semaphore here, deliberately: deliveries are one effect per
-    kind per restricted window, the `to_thread` hop is bounded by the default
-    executor's worker pool, and duplicate deliveries are settled inside the
-    child by its own `api_idempotency` claim or refused by the op's live-session
-    guard.
-    """
-
-    async def handle(body: bytes) -> tuple[int, bytes, str]:
-        try:
-            parsed = json.loads(body)
-        except json.JSONDecodeError as exc:
-            return (
-                400,
-                json.dumps({"error": f"invalid JSON body: {exc}"}).encode(),
-                "application/json",
-            )
-        try:
-            envelope = OpEnvelope.model_validate(parsed)
-        except ValidationError as exc:
-            return (
-                400,
-                json.dumps({"error": f"body must be {{kind: str, payload: dict}}: {exc}"}).encode(),
-                "application/json",
-            )
-        if envelope.kind not in _ADMITTED_OPS:
-            return (
-                200,
-                json.dumps(
-                    {
-                        "status": "failed",
-                        "result": {
-                            "error": (
-                                f"kind {envelope.kind!r} is not admitted by the restricted observer"
-                            )
-                        },
-                    }
-                ).encode(),
-                "application/json",
-            )
-        status, result = await asyncio.to_thread(run_dispatch_child, envelope, home)
-        return (
-            200,
-            json.dumps({"status": status, "result": result}, default=str).encode(),
-            "application/json",
-        )
-
-    return handle
-
-
-async def serve(context: PreparedObservation, projection: ObserverProjection) -> None:
-    await asyncio.to_thread(validate_entry, context, projection)
-    observer = UnitObserver(context.expected, context.challenge)
-
-    async def observe(body: bytes) -> tuple[int, bytes, str]:
-        return await observe_response(context, projection, observer, body)
-
-    async def ledger(body: bytes) -> tuple[int, bytes, str]:
-        return await ledger_response(context, body)
-
-    secret = projection.cluster_secret.get_secret_value()
-    bind_host = "0.0.0.0" if secret else "127.0.0.1"  # noqa: S104 — guarded below
-    verify_transport_encryption_declaration(
-        secret,
-        bind_host,
-        projection.transport_encryption,
-    )
-    server = await start_daemon_http(
-        host=bind_host,
-        port=projection.ops_port,
-        auth_token=secret or None,
-        health_response=lambda: (
-            503,
-            json.dumps({"mode": "bootstrap_observation", "full_ready": False}).encode(),
-        ),
-        extra_routes={
-            ("POST", "/ops/bootstrap-observation"): observe,
-            ("POST", "/ops/bootstrap-hop-ledger"): ledger,
-            ("POST", "/ops"): ops_route(Path(context.expected.home)),
-        },
-    )
-    async with server:
-        await server.serve_forever()
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bootstrap-observation", type=Path, required=True)
-    args = parser.parse_args()
-    try:
-        if sys.platform == "win32":
-            raise ReleaseRejectedError("bootstrap observation has no Windows preparation proof")
-        context = read_prepared_context(args.bootstrap_observation)
-        projection = ObserverProjection.from_environment()
-        asyncio.run(serve(context, projection))
-    except (OSError, ValueError, RuntimeError, KeyError, psycopg.Error) as exc:
-        # Never expose credential-bearing connection diagnostics or environment.
-        sys.stderr.write(f"bootstrap observation refused ({type(exc).__name__})\n")
-        return 2
-    return 0

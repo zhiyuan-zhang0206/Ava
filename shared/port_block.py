@@ -4,10 +4,10 @@ A unit's listening ports come from a contiguous block: the block's base plus the
 service's offset. Two consumers need that table and they sit on opposite sides of
 the config import:
 
-- `shared.cluster` allocates a block per cluster at install time and writes the
+- `shared.cluster` allocates a block per cluster at first start and writes the
   resulting ports into that cluster's `.env` (`derive_env`). It imports
   `shared.config`.
-- `cli.enroll` derives one unit's daemon health ports from an operator-supplied
+- `cli.start_intent` derives one unit's daemon health ports from an operator-supplied
   base (`--health-port-base`) and must import NEITHER `shared.config` nor
   `cli.commands` — it runs on a host that has no full config yet.
 
@@ -47,7 +47,7 @@ PORT_OFFSETS: dict[str, int] = {
     "pgbouncer": 13,
     "events_maintenance": 14,
     # The Next.js app the gate proxies to — a separate slot because the entry
-    # port (offset 1, "frontend") is owned by the always-up gate.
+    # port (offset 1, "frontend") is owned by the root-owned Gate.
     "app": 15,
     # The IM bridge + delivery watchdog — the two daemons added AFTER the
     # per-unit health-port decision (decisions/2026-07-31-a-health-port-

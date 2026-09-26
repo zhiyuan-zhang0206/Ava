@@ -9,7 +9,6 @@ from services.pitr import activation_lease
 from services.pitr.activation_state import (
     ActivationRecord,
     load_record,
-    mark_pre_mutation_rolled_back,
     record_path,
     write_record,
 )
@@ -277,27 +276,18 @@ def test_activation_record_allows_same_phase_error_update_only() -> None:
         failed.advance("snapshot_pending", started_at="2026-08-29T00:00:00+00:00")
 
 
-def test_v2_wal_config_pending_upgrades_strictly_and_can_roll_back(tmp_path: Path) -> None:
-    v2 = {
-        "schema_version": 2,
-        "operation_id": "op-1",
-        "phase": "wal_config_pending",
-        "started_at": "2026-08-29T00:00:00+00:00",
-        "updated_at": "2026-08-29T00:01:00+00:00",
-        "origin": "cli",
-        "pre_activation_snapshot": "/verified.dump.enc",
-        "pre_activation_pg_settings": {"archive_mode": "off"},
-        "pre_activation_credential_evidence": _credentials(),
-        "switched_wal": None,
-        "protected_manifest": None,
-        "error": None,
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_old_activation_schema_refuses_without_rewriting(tmp_path: Path, version: int) -> None:
+    raw = ActivationRecord.start(operation_id="op-1", origin="cli").__dict__ | {
+        "schema_version": version
     }
-    record_path(tmp_path).parent.mkdir(parents=True)
-    record_path(tmp_path).write_text(json.dumps(v2))
-    upgraded = load_record(tmp_path)
-    assert upgraded is not None and upgraded.schema_version == 4
-    rolled_back = mark_pre_mutation_rolled_back(tmp_path, upgraded)
-    assert rolled_back.phase == "rolled_back"
+    path = record_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    payload = json.dumps(raw)
+    path.write_text(payload)
+    with pytest.raises(ValueError, match=r"unsupported.*schema"):
+        load_record(tmp_path)
+    assert path.read_text() == payload
 
 
 def test_v2_post_mutation_phase_refuses_unsafe_upgrade() -> None:
@@ -322,29 +312,8 @@ def test_v2_post_mutation_phase_refuses_unsafe_upgrade() -> None:
         }
     }
     raw.update(schema_version=2, phase="wal_restart_pending")
-    with pytest.raises(ValueError, match="cannot be safely upgraded"):
+    with pytest.raises(ValueError, match="fields differ"):
         ActivationRecord.from_json(json.dumps(raw))
-
-
-def test_v3_record_upgrades_to_v4_with_null_error_message(tmp_path: Path) -> None:
-    """The 2026-08-30 base_pending operation on disk was written by schema v3;
-    the v4 bump adds only the optional error_message field, so any phase must
-    load in place (the activation stays resumable across the upgrade)."""
-    from dataclasses import asdict
-
-    record = ActivationRecord.start(operation_id="op-1", origin="cli")
-    raw = asdict(record)
-    assert "error_message" in raw
-    raw.pop("error_message")
-    raw["schema_version"] = 3
-    path = record_path(tmp_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(raw))
-    loaded = load_record(tmp_path)
-    assert loaded is not None
-    assert loaded.schema_version == 4
-    assert loaded.operation_id == "op-1"
-    assert loaded.error_message is None
 
 
 def test_restore_pending_accepts_legacy_candidate_manifest_and_digest(
@@ -422,8 +391,9 @@ def test_restore_pending_accepts_legacy_candidate_manifest_and_digest(
         pre_activation_env_digest="env-digest",
         pre_activation_auto_conf_b64="Yg==",
         pre_activation_auto_conf_digest="auto-digest",
-        restart_handoff="handoff",
-        restart_orchestration="orchestration",
+        home_operation="home-op",
+        home_action="activate",
+        home_generation=1,
         rollback_expected_env_digest="env-digest",
         rollback_expected_auto_conf_digest="auto-digest",
         wal_exact_evidence={
@@ -455,41 +425,17 @@ def test_restore_pending_accepts_legacy_candidate_manifest_and_digest(
     )
 
 
-def test_legacy_gcs_credential_evidence_normalizes_to_neutral_keys(tmp_path: Path) -> None:
-    """QA #1147 C1: records written before the backend field carried the GCS
-    vocabulary in the credential evidence; they must stay readable (the same
-    identities under backend-neutral keys)."""
-    from dataclasses import asdict
-
-    record = ActivationRecord.start(operation_id="op-1", origin="cli")
-    raw = asdict(record)
-    raw["pre_activation_credential_evidence"] = {
-        "uploader_client_email": "u@example.test",
-        "uploader_project_id": "project",
-        "uploader_private_key_id": "u-key",
-        "viewer_client_email": "v@example.test",
-        "viewer_project_id": "project",
-        "viewer_private_key_id": "v-key",
-        "bucket_name": "bucket",
-        "object_prefix": "pitr",
-        "backup_key_id": "key",
-        "backup_key_sha256": "0" * 64,
+def test_legacy_credentials_refuse_without_rewriting(tmp_path: Path) -> None:
+    raw = ActivationRecord.start(operation_id="op-1", origin="cli").__dict__ | {
+        "pre_activation_credential_evidence": {"uploader_client_email": "u@example.test"},
     }
-    record_path(tmp_path).parent.mkdir(parents=True)
-    record_path(tmp_path).write_text(json.dumps(raw))
-
-    loaded = load_record(tmp_path)
-
-    assert loaded is not None
-    assert loaded.pre_activation_credential_evidence == {
-        "backend": "gcs",
-        "uploader_identity": "u@example.test",
-        "viewer_identity": "v@example.test",
-        "store_target": "bucket",
-        "object_prefix": "pitr",
-        "backup_key_id": "key",
-        "backup_key_sha256": "0" * 64,
-    }
+    path = record_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    payload = json.dumps(raw)
+    path.write_text(payload)
+    with pytest.raises(ValueError):
+        load_record(tmp_path)
+    assert path.read_text() == payload
 
 
 def test_baidu_wal_remote_proof_loads_through_the_record_validator(
@@ -544,8 +490,9 @@ def test_baidu_wal_remote_proof_loads_through_the_record_validator(
         pre_activation_env_digest="env-digest",
         pre_activation_auto_conf_b64="Yg==",
         pre_activation_auto_conf_digest="auto-digest",
-        restart_handoff="handoff",
-        restart_orchestration="orchestration",
+        home_operation="home-op",
+        home_action="activate",
+        home_generation=1,
         rollback_expected_env_digest="env-digest",
         rollback_expected_auto_conf_digest="auto-digest",
         wal_exact_evidence={
@@ -667,7 +614,7 @@ def test_same_phase_update_may_set_error_message(tmp_path: Path) -> None:
             "PITR activation diagnostics are incomplete",
         ),
         (
-            {"phase": "protected", "restart_handoff_consumed_at": "bound"},
+            {"phase": "protected"},
             ValueError,
             "PITR activation phase is missing logical recovery evidence",
         ),
@@ -708,10 +655,9 @@ def test_activation_parser_preserves_empty_snapshot_and_rollback_ownership(
         "pre_activation_env_digest": "env-digest",
         "pre_activation_auto_conf_b64": "",
         "pre_activation_auto_conf_digest": "auto-digest",
-        "restart_handoff": "handoff",
-        "restart_orchestration": "orchestration",
-        "restart_handoff_consumed_at": "bound",
-        "restart_dispatch_session": "session",
+        "home_operation": "home-op",
+        "home_action": "rollback",
+        "home_generation": 2,
         "rollback_postmaster_started_at": "postmaster",
         "rollback_expected_env_digest": "expected-env",
         "rollback_expected_auto_conf_digest": "expected-auto",
@@ -731,10 +677,9 @@ def test_activation_parser_preserves_empty_snapshot_and_rollback_ownership(
         ActivationRecord.from_json(json.dumps(raw | {snapshot_field: None}))
     assert str(error.value) == missing_snapshot[phase]
 
-    unbound = raw | {"restart_handoff_consumed_at": None, "restart_dispatch_session": None}
-    if phase == "rolled_back":
-        with pytest.raises(ValueError) as error:
+    unbound = raw | {"home_operation": None, "home_action": None, "home_generation": None}
+    if phase in {"rollback_pending", "rollback_restart_pending", "rolled_back"}:
+        with pytest.raises(ValueError, match=r"ownership evidence|restart evidence"):
             ActivationRecord.from_json(json.dumps(unbound))
-        assert str(error.value) == "mutated PITR rollback is missing full ownership evidence"
     else:
         assert ActivationRecord.from_json(json.dumps(unbound)).__dict__ == unbound

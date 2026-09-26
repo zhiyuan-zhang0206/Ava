@@ -45,7 +45,7 @@ import psutil
 
 from shared import session_log
 from shared.log import logger
-from shared.proc_tree import stable_create_time
+from shared.native_process.ownership import stable_create_time
 from shared.session_record import SessionRecord
 from shared.sessions.pty._paths import (
     CAPTURE_MAX_LINES,

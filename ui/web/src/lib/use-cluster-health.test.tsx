@@ -23,8 +23,8 @@ vi.mock("./api", () => ({
 const getSystemStatus = vi.mocked(api.getSystemStatus);
 const getClusterStatus = vi.mocked(api.getClusterStatus);
 
-function clusterStatus(paused: boolean, orchestration: string | null = null) {
-  return { paused, current_orchestration: orchestration } as unknown as Awaited<
+function clusterStatus(paused: boolean) {
+  return { paused } as unknown as Awaited<
     ReturnType<typeof api.getClusterStatus>
   >;
 }
@@ -43,7 +43,7 @@ beforeEach(() => {
   getSystemStatus.mockReset();
   getClusterStatus.mockReset();
   getClusterStatus.mockResolvedValue(clusterStatus(false));
-  act(() => useStore.setState({ clusterStranded: false, reconnectNonce: 0 }));
+  act(() => useStore.setState({ reconnectNonce: 0 }));
 });
 
 afterEach(cleanup);
@@ -52,7 +52,7 @@ describe("useClusterHealth", () => {
   it("paused true to false reconnects SSE and refetches agents", async () => {
     const client = freshClient();
     const refetchSpy = vi.spyOn(client, "refetchQueries");
-    getClusterStatus.mockResolvedValueOnce(clusterStatus(true, "rollout"));
+    getClusterStatus.mockResolvedValueOnce(clusterStatus(true));
     getClusterStatus.mockResolvedValue(clusterStatus(false));
     renderHook(() => useClusterHealth(), { wrapper: withClient(client) });
 
@@ -68,12 +68,6 @@ describe("useClusterHealth", () => {
     expect(refetchSpy).toHaveBeenCalledWith({ queryKey: AGENTS_QUERY_KEY });
   });
 
-  it("paused with no orchestration sets the stranded recovery state", async () => {
-    getClusterStatus.mockResolvedValue(clusterStatus(true, null));
-    renderHook(() => useClusterHealth(), { wrapper: withClient(freshClient()) });
-
-    await waitFor(() => expect(useStore.getState().clusterStranded).toBe(true));
-  });
 
   it("never touches the heavier system status endpoint", async () => {
     renderHook(() => useClusterHealth(), { wrapper: withClient(freshClient()) });

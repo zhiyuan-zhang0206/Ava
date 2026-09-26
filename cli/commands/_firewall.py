@@ -1,7 +1,7 @@
 """`ava firewall` — the standalone face of the ALF allowlist manifest.
 
 The converge step (`_converge_firewall.ensure_firewall_allowlist`) converges the
-allowlist automatically on every `ava start` / `ava update`. These verbs give an
+allowlist automatically on every source `ava start`. These verbs give an
 operator the same machinery on demand, without a full converge:
 
 - `ava firewall status` — read-only: verdict, manifest coverage, stale rules,
@@ -25,9 +25,9 @@ from shared import macos_firewall as fw
 
 def cmd_firewall_status() -> int:
     """`ava firewall status` — audit the host and diff the manifest (read-only)."""
-    import cli.commands as _ns
+    import cli.commands._repo as _repo_commands
 
-    roles = _ns._roles_or_none()
+    roles = _repo_commands._roles_or_none()
     audit = audit_this_host(frozenset(roles or ()))
     print("→ firewall status")
     if audit.verdict is fw.FirewallVerdict.NOT_MACOS:
@@ -61,9 +61,9 @@ def cmd_firewall_sync() -> int:
     Mutates directly first. On older macOS it retries with `sudo -n`; if both
     paths fail, it prints the exact manual commands and exits 1.
     """
-    import cli.commands as _ns
+    import cli.commands._repo as _repo_commands
 
-    roles = _ns._roles_or_none()
+    roles = _repo_commands._roles_or_none()
     audit = audit_this_host(frozenset(roles or ()))
     if audit.verdict not in (fw.FirewallVerdict.ALLOWED, fw.FirewallVerdict.RULES_MISSING):
         print(f"→ firewall sync: nothing to do ({audit.detail})")

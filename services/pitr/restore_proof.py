@@ -6,13 +6,11 @@ import hashlib
 import json
 import os
 import shutil
-import signal
 import struct
 import tempfile
 import time
 from collections.abc import Callable
-from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -37,6 +35,7 @@ from services.pitr.restore_manifest import (
 )
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.wal_validate import validate_wal_file
+from services.pitr.worker_process import NativeProcess
 
 
 class RestoreProofError(RuntimeError):
@@ -81,12 +80,14 @@ def _restore_run_token(chain_id: str, now: datetime) -> str:
 
 @dataclass(frozen=True)
 class LivePostgresIdentity:
-    pid: int
-    created_at: float
+    native: NativeProcess
     data_directory: str
     system_identifier: str
     postmaster_started_at: str
     probe_sha256: str
+
+    def unchanged(self, other: LivePostgresIdentity) -> bool:
+        return self.native.same_birth(other.native) and replace(self, native=other.native) == other
 
 
 @dataclass(frozen=True)
@@ -166,7 +167,7 @@ def _require_space(root: Path, required: int) -> None:
 
 
 def _same_live(before: LivePostgresIdentity, after: LivePostgresIdentity) -> None:
-    if before != after:
+    if not before.unchanged(after):
         raise RestoreProofError("live PostgreSQL identity changed during restore drill")
 
 
@@ -251,7 +252,7 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
-def _atomic_owner(path: Path, value: dict[str, object]) -> None:
+def _atomic_owner(path: Path, value: dict[str, object], expected: bytes | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     staged = Path(raw)
@@ -261,6 +262,8 @@ def _atomic_owner(path: Path, value: dict[str, object]) -> None:
             json.dump(value, output, sort_keys=True, separators=(",", ":"))
             output.flush()
             os.fsync(output.fileno())
+        if expected is not None and path.read_bytes() != expected:
+            raise RestoreProofError("restore owner receipt changed during publication")
         staged.replace(path)
         _fsync_dir(path.parent)
     finally:
@@ -271,136 +274,26 @@ def update_restore_owner(path: Path, **changes: object) -> None:
     """Durably extend restore ownership without weakening prior evidence."""
 
     try:
-        evidence = _require_owner_object(json.loads(path.read_text()))
+        original = path.read_bytes()
+        evidence = _require_owner_object(json.loads(original))
     except (OSError, json.JSONDecodeError) as exc:
         raise RestoreProofError("restore owner evidence is unreadable") from exc
     evidence.update(changes)
-    _atomic_owner(path, evidence)
+    _atomic_owner(path, evidence, original)
 
 
-def _is_zombie(process: psutil.Process) -> bool:
-    """A zombie is an exited process whose status was never reaped: it runs
-    nothing, so every live-process probe must count it as dead. An unreaped
-    sandbox postmaster otherwise keeps looking "live" to the cleanup guards
-    and masks the real failure (activation #12)."""
+def _matching_process(native: NativeProcess) -> psutil.Process | None:
     try:
-        return process.status() == psutil.STATUS_ZOMBIE
-    except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
-        return False
-
-
-def _matching_process(pid: int, created_at: float) -> psutil.Process | None:
-    # Method-local: this module sits inside the updater's pre-checkout import
-    # closure, and `shared.proc_tree` imports `shared.session_record` — a
-    # module-scope import here would pull that module back into the closure.
-    # Same arrangement as shared/proc.py.
-    from shared.proc_tree import create_time_matches, stable_create_time
-
-    try:
-        process = psutil.Process(pid)
-        if not create_time_matches(stable_create_time(process), created_at):
-            return None
-        if _is_zombie(process):
-            return None
-        return process
+        return native.live()
     except psutil.AccessDenied as exc:
         raise RestoreProofError("cannot verify restore owner identity") from exc
-    except (psutil.NoSuchProcess, psutil.ZombieProcess):
-        return None
-
-
-def _group_members(pgid: int) -> list[psutil.Process]:
-    members: list[psutil.Process] = []
-    for process in psutil.process_iter(["pid"]):
-        try:
-            if os.getpgid(process.pid) == pgid and not _is_zombie(process):
-                members.append(process)
-        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
-            continue
-    return members
-
-
-def _stop_owned_group(leader: psutil.Process, pgid: int) -> None:
-    try:
-        if os.getpgid(leader.pid) != pgid or pgid == os.getpgrp():
-            raise RestoreProofError("refusing to signal an unowned restore process group")
-    except ProcessLookupError:
-        return
-    deadline = time.monotonic() + 20
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    grace = min(deadline, time.monotonic() + 5)
-    while _group_members(pgid) and time.monotonic() < grace:
-        time.sleep(0.1)
-    while _group_members(pgid) and time.monotonic() < deadline:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
-            break
-        time.sleep(0.1)
-    if _group_members(pgid):
-        raise RestoreProofError("restore process group retained live descendants")
 
 
 def _sandbox_is_live(evidence: dict[str, object]) -> bool:
-    raw_pid = evidence.get("sandbox_pid")
-    raw_created_at = evidence.get("sandbox_created_at")
-    if raw_pid is None and raw_created_at is None:
+    value = evidence.get("sandbox_native")
+    if value is None:
         return False
-    if raw_pid is None or raw_created_at is None:
-        raise RestoreProofError("restore owner has incomplete sandbox identity")
-    return _matching_process(_owner_int(raw_pid), _owner_float(raw_created_at)) is not None
-
-
-def _stop_owned_sandbox(evidence: dict[str, object], pgid: int) -> None:
-    raw_pid = evidence.get("sandbox_pid")
-    raw_created_at = evidence.get("sandbox_created_at")
-    raw_pgid = evidence.get("sandbox_pgid")
-    if raw_pid is None or raw_created_at is None or raw_pgid is None:
-        if evidence.get("state") == "postgres_starting" and pgid == _owner_int(evidence["pid"]):
-            _stop_ownerless_job_group(pgid)
-            return
-        raise RestoreProofError("orphaned restore group lacks sandbox ownership evidence")
-    if _owner_int(raw_pgid) != pgid:
-        raise RestoreProofError("sandbox PostgreSQL escaped its restore process group")
-    leader = _matching_process(_owner_int(raw_pid), _owner_float(raw_created_at))
-    if leader is None:
-        raise RestoreProofError("restore group survives without its recorded sandbox postmaster")
-    deadline = time.monotonic() + 20
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    grace = min(deadline, time.monotonic() + 5)
-    while _group_members(pgid) and time.monotonic() < grace:
-        time.sleep(0.1)
-    while _group_members(pgid) and time.monotonic() < deadline:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
-            break
-        time.sleep(0.1)
-    if _group_members(pgid):
-        raise RestoreProofError("orphaned restore process group could not be emptied")
-
-
-def _stop_ownerless_job_group(pgid: int) -> None:
-    if pgid == os.getpgrp():
-        raise RestoreProofError("refusing to signal the current restore process group")
-    deadline = time.monotonic() + 20
-    with suppress(ProcessLookupError):
-        os.killpg(pgid, signal.SIGTERM)
-    grace = min(deadline, time.monotonic() + 5)
-    while _group_members(pgid) and time.monotonic() < grace:
-        time.sleep(0.1)
-    while _group_members(pgid) and time.monotonic() < deadline:
-        with suppress(ProcessLookupError):
-            os.killpg(pgid, signal.SIGKILL)
-        time.sleep(0.1)
-    if _group_members(pgid):
-        raise RestoreProofError("restore job group could not be emptied")
+    return _matching_process(NativeProcess.from_value(value)) is not None
 
 
 def _remove_owned_restore(partial: Path, owner: Path, evidence: dict[str, object]) -> None:
@@ -422,63 +315,18 @@ def _require_owner_object(value: object) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def _owner_int(value: object) -> int:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise RestoreProofError("restore owner integer field is invalid")
-    return value
-
-
-def _owner_float(value: object) -> float:
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
-        raise RestoreProofError("restore owner numeric field is invalid")
-    return float(value)
-
-
-def reconcile_restore_runtime(root: Path) -> None:  # noqa: PLR0915
-    """Recover only restore runs whose durable owner identity is conclusive."""
+def reconcile_restore_runtime(root: Path) -> None:
+    """Refuse interrupted work without the controller or native executor owner."""
 
     restore_root = root / "restore"
     owners = root / "restore-owners"
     partials: set[Path] = set(restore_root.glob(".*.partial")) if restore_root.exists() else set()
     owner_paths: set[Path] = set(owners.glob("*.owner.json")) if owners.exists() else set()
-    for owner in sorted(owner_paths):
-        try:
-            evidence = _require_owner_object(json.loads(owner.read_text()))
-            partial = Path(str(evidence["partial"]))
-            pid = _owner_int(evidence["pid"])
-            created_at = _owner_float(evidence["created_at"])
-            pgid = _owner_int(evidence["pgid"])
-            deadline = _owner_float(evidence["deadline"])
-        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise RestoreProofError("invalid restore owner evidence") from exc
-        if partial.parent != restore_root:
-            raise RestoreProofError("restore owner escaped the restore root")
-        leader = _matching_process(pid, created_at)
-        if partial not in partials:
-            if leader is not None and time.time() < deadline:
-                raise RestoreProofError("restore spawn owner is still active")
-            if leader is not None:
-                _stop_owned_group(leader, pgid)
-            elif _group_members(pgid):
-                raise RestoreProofError("restore spawn owner left unattributed descendants")
-            owner.unlink()
-            _fsync_dir(owner.parent)
-            continue
-        if leader is not None:
-            if time.time() < deadline:
-                raise RestoreProofError("restore proof owner is still active")
-            _stop_owned_group(leader, pgid)
-        elif _group_members(pgid):
-            _stop_owned_sandbox(evidence, pgid)
-        if evidence.get("state") in {"postgres_starting", "postgres_running"}:
-            postmaster = partial / "sandbox" / "data" / "postmaster.pid"
-            if postmaster.exists() and _sandbox_is_live(evidence):
-                raise RestoreProofError("dead restore owner left unresolved postmaster evidence")
-            evidence["state"] = "postgres_stopped"
-        _remove_owned_restore(partial, owner, evidence)
-        partials.remove(partial)
-    if partials:
-        raise RestoreProofError("restore partial lacks durable owner evidence")
+    if owner_paths or partials:
+        raise RestoreProofError(
+            "interrupted restore requires native operation retirement; "
+            "persisted receipts do not authorize process-group adoption"
+        )
     pending_root = root / "protected-pending"
     local_root = root / "protected-manifests"
     if pending_root.exists():
@@ -561,7 +409,7 @@ def _resume_protected_publish(
     return protected
 
 
-def prove_candidate(  # noqa: PLR0915
+def prove_candidate(
     *,
     candidate: CandidateManifest,
     root: Path,
@@ -603,98 +451,118 @@ def prove_candidate(  # noqa: PLR0915
         raise RestoreProofError("restore proof must run as its process-group leader")
     if owner.exists() or owner.is_symlink():
         raise RestoreProofError("restore proof owner evidence already exists")
-    # Method-local for the same closure reason as `_matching_process`.
-    from shared.proc_tree import stable_create_time
-
     _atomic_owner(
         owner,
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "state": "spawning",
             "run_id": run_id,
             "partial": str(partial),
-            "pid": process.pid,
-            "created_at": stable_create_time(process),
+            "native": NativeProcess.capture(process).value(),
             "pgid": pgid,
             "deadline": time.time() + 6 * 3600,
         },
     )
-    try:
-        partial.mkdir(parents=True, mode=0o700)
-        update_restore_owner(owner, state="running")
-        started_at = now.isoformat()
-        before = executor.live_identity()
-        base_ciphertext = partial / "quarantine" / "base.enc"
-        reader.download_exact(base, base_ciphertext)
-        authenticate_base_ciphertext(base_ciphertext, key=key, expected=base)
-        pgdata = extract_authenticated_base(
-            base_ciphertext,
-            partial / "sandbox",
-            key=key,
-            expected=base,
-            candidate_sha256=candidate.base_object.source_sha256,
-            native_manifest_sha256=candidate.native_manifest_sha256,
-            max_extracted_bytes=candidate.base_object.source_size,
-        )
-        encrypted_wal = partial / "quarantine" / "wal"
-        wal_dir = partial / "archive"
-        _download_wal(
-            reader=reader,
-            objects=wal,
-            encrypted_dir=encrypted_wal,
-            wal_dir=wal_dir,
-            key=key,
-            candidate=candidate,
-        )
-        result = executor.run(
-            pgdata=pgdata,
-            wal_dir=wal_dir,
-            candidate=candidate,
-            run_root=partial,
-            owner_path=owner,
-        )
-        after = executor.live_identity()
-        _same_live(before, after)
-        completed_at = datetime.now(UTC).isoformat()
-        proof = RestoreProof(
-            run_id,
-            started_at,
-            completed_at,
-            candidate.end_lsn,
-            result.achieved_lsn,
-            before.pid,
-            before.probe_sha256,
-            candidate.native_manifest_sha256,
-            result.replay_seconds,
-            result.smoke_seconds,
-            result.restored_verify_seconds,
-            base.size + sum(item.size for item in wal),
-            result.restored_fingerprint_sha256,
-        )
-        protected = ProtectedManifest(
-            schema_version=PROTECTED_SCHEMA_VERSION,
-            protected=True,
-            chain_id=candidate.chain_id,
-            candidate_sha256=candidate_sha256(candidate),
-            candidate=candidate,
-            base=base,
-            wal=wal,
-            target_lsn=candidate.end_lsn,
-            wal_segment_size=candidate.wal_segment_size,
-            proof=proof,
-        )
-        payload = protected.to_json().encode()
-        _write_local_manifest(pending, payload)
-        update_restore_owner(owner, state="proof_durable", pending=str(pending))
-        return protected
-    finally:
-        if owner.is_file():
-            if partial.exists():
-                evidence = json.loads(owner.read_text())
-                _remove_owned_restore(partial, owner, evidence)
-            else:
-                owner.unlink()
-                _fsync_dir(owner.parent)
+    partial.mkdir(parents=True, mode=0o700)
+    update_restore_owner(owner, state="running")
+    started_at = now.isoformat()
+    before = executor.live_identity()
+    base_ciphertext = partial / "quarantine" / "base.enc"
+    reader.download_exact(base, base_ciphertext)
+    authenticate_base_ciphertext(base_ciphertext, key=key, expected=base)
+    pgdata = extract_authenticated_base(
+        base_ciphertext,
+        partial / "sandbox",
+        key=key,
+        expected=base,
+        candidate_sha256=candidate.base_object.source_sha256,
+        native_manifest_sha256=candidate.native_manifest_sha256,
+        max_extracted_bytes=candidate.base_object.source_size,
+    )
+    encrypted_wal = partial / "quarantine" / "wal"
+    wal_dir = partial / "archive"
+    _download_wal(
+        reader=reader,
+        objects=wal,
+        encrypted_dir=encrypted_wal,
+        wal_dir=wal_dir,
+        key=key,
+        candidate=candidate,
+    )
+    result = executor.run(
+        pgdata=pgdata,
+        wal_dir=wal_dir,
+        candidate=candidate,
+        run_root=partial,
+        owner_path=owner,
+    )
+    after = executor.live_identity()
+    _same_live(before, after)
+    completed_at = datetime.now(UTC).isoformat()
+    proof = RestoreProof(
+        run_id,
+        started_at,
+        completed_at,
+        candidate.end_lsn,
+        result.achieved_lsn,
+        before.native.process.pid,
+        before.probe_sha256,
+        candidate.native_manifest_sha256,
+        result.replay_seconds,
+        result.smoke_seconds,
+        result.restored_verify_seconds,
+        base.size + sum(item.size for item in wal),
+        result.restored_fingerprint_sha256,
+    )
+    protected = ProtectedManifest(
+        schema_version=PROTECTED_SCHEMA_VERSION,
+        protected=True,
+        chain_id=candidate.chain_id,
+        candidate_sha256=candidate_sha256(candidate),
+        candidate=candidate,
+        base=base,
+        wal=wal,
+        target_lsn=candidate.end_lsn,
+        wal_segment_size=candidate.wal_segment_size,
+        proof=proof,
+    )
+    payload = protected.to_json().encode()
+    _write_local_manifest(pending, payload)
+    update_restore_owner(owner, state="proof_durable", pending=str(pending))
+    return protected
+
+
+def retire_restore_work(
+    *,
+    root: Path,
+    candidate: CandidateManifest,
+    worker: NativeProcess,
+    outcome: dict[str, str],
+) -> None:
+    """Retire exact scratch only after the direct operation owner closed it."""
+    pending = root / "protected-pending" / f"{candidate.chain_id}.json"
+    payload = pending.read_bytes()
+    protected = ProtectedManifest.from_json(payload.decode())
+    if (
+        outcome["chain_id"] != candidate.chain_id
+        or outcome["candidate_sha256"] != candidate_sha256(candidate)
+        or outcome["pending_sha256"] != hashlib.sha256(payload).hexdigest()
+        or protected.candidate_sha256 != candidate_sha256(candidate)
+    ):
+        raise RestoreProofError("restore result differs from the candidate or pending proof")
+    for owner in (root / "restore-owners").glob("*.owner.json"):
+        original = owner.read_bytes()
+        evidence = _require_owner_object(json.loads(original))
+        if evidence["run_id"] != protected.proof.run_id:
+            continue
+        if not NativeProcess.from_value(evidence["native"]).same_birth(worker):
+            raise RestoreProofError("restore work belongs to another operation worker")
+        partial = Path(str(evidence["partial"]))
+        if partial.parent != root / "restore" or evidence["state"] != "proof_durable":
+            raise RestoreProofError("restore work is not the completed pending proof")
+        if evidence["pending"] != str(pending) or owner.read_bytes() != original:
+            raise RestoreProofError("restore owner receipt changed before retirement")
+        _remove_owned_restore(partial, owner, evidence)
 
 
 def verify_candidate_proof(

@@ -271,21 +271,6 @@ GATEWAY_READY_TIMEOUT_S = 180.0
 # priced that and refused it).
 GATEWAY_PREFLIGHT_BUDGET_S = 30.0
 
-# How long the gateway must have been UNREACHABLE (healthz, not merely degraded)
-# before the stranded-pause owner determination reads a live executing deploy
-# lease as dead evidence (issue #2101): every leg of a cluster update runs on
-# the gateway host and needs its gateway, so a lease whose gateway has been
-# down this long cannot be executing anything. The evidence is measured by the
-# gateway-capability watchdog's host-local down-since marker
-# (`ops.controllers.stranded_pause.record_gateway_reachability`).
-#
-# 600 s, because the longest legitimate gateway-down window is the rollout's own
-# restart leg (roughly a minute, occasionally a few with retries) — an order of
-# magnitude above it, and deliberately below `NO_PROGRESS_TIMEOUT_S` (lattice):
-# the reaper bound still ends a hung-but-alive orchestration on its own clock,
-# so this earlier bound only opens the recovery door for owners that are already
-# dead.
-GATEWAY_DOWN_OWNER_GRACE_S = 600.0
 
 # How long `ava start` waits for the services it just launched to pass their
 # liveness probes before it reports them unready and exits
@@ -304,10 +289,13 @@ GATEWAY_DOWN_OWNER_GRACE_S = 600.0
 # they are stated adjacently, because a change in what "a daemon binds its port"
 # costs would move both.
 #
-# They never nest: the rollout's local leg starts the gateway with
-# `--no-readiness-gate` precisely so the readiness question is asked once, by the
-# stronger off-box gate, rather than waited out twice.
+# Local readiness and the off-box rollout probe check different boundaries.
+# The operation deadline must include both; start never waives its verdict.
 SERVICE_READY_TIMEOUT_S = 180.0
+
+# The public serving path shares one critical readiness/startup tier across
+# CLI readiness and root monitoring. All other services use the shorter tier.
+CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-host", "im-bridge"})
 
 # How long `ava start` waits for a NON-CRITICAL service to pass its liveness
 # probe before it stops waiting on it (`cli.commands._probe`).

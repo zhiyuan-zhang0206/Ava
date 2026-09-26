@@ -1,8 +1,7 @@
 """`ava status` — one-screen view of services, infra, host relays, and cron.
 
 Composed from `_print_service_row` (session + probe per spec) +
-`print_data_plane_status` (this cluster's own pg/redis) + `print_gate_status`
-(the fleet UI entry port) + `print_redis_bridge_status` (authenticated PING
+`print_data_plane_status` (this cluster's own pg/redis) + `print_redis_bridge_status` (authenticated PING
 through the private-network relay), followed by the gateway's own cluster-status
 snapshot (GET `/api/cluster/status`).
 
@@ -17,7 +16,6 @@ from __future__ import annotations
 from contextlib import suppress
 
 from cli.commands._cluster_instance import print_data_plane_status
-from cli.commands._converge_gate import print_gate_status
 from cli.commands._converge_redis_bridge import print_redis_bridge_status
 from cli.commands._probe import (
     _cluster_pin_status,
@@ -30,7 +28,10 @@ from cli.commands._repo import (
     build_services,
     session_name,
 )
+from ops.service_spec import ServiceSpec
+from shared import service_selection
 from shared.cluster_drift import prod_source_pin_relation
+from shared.machine import MachineRoles
 
 # Cluster-pin line marks, keyed by `prod_source_pin_relation`. "ahead" means HEAD
 # moved past the pin: a stray `git pull`, or a rollout that landed while the pin
@@ -56,44 +57,17 @@ _PIN_MARK_DURING_UPDATE = "· update in progress — this host has not converged
 
 
 def _update_in_flight() -> bool:
-    """Whether a cluster update owns this cluster right now — a live update-lock
-    holder, or an orchestration session alive on this host.
-
-    Both are checked because they cover different hosts: the lock is cluster-wide
-    (so an agent-runner sees the gateway's rollout), the session is local (so a
-    host running its own `ava cluster update` sees it even though that takes no cluster
-    lock). Never raises: this only downgrades an advisory line, so a DB hiccup must
-    report "not updating" rather than break `ava status`, the first diagnostic
-    command anyone runs when things are already wrong.
-    """
+    """Read the cluster deploy lease for the advisory pin-drift hint."""
     with suppress(Exception):
         from shared.cluster_lock import update_lock_holder
 
         if update_lock_holder() is not None:
             return True
-    try:
-        from ops.cluster import current_orchestration
-
-        return current_orchestration() is not None
-    except Exception:
-        return False
+    return False
 
 
-def _root_tree_units() -> dict[str, dict[str, object]] | None:
-    """This host's ava-root tree rows by unit id, or None when sessions drive it.
-
-    A root-driven host (`settings.services.root_driver_enabled` — the same
-    switch `ava start`/`ava stop` fork on) keeps its services as ava-root tree
-    units, not session records, so the status table's session column must read
-    the tree or every serving row reports ✗. An unreachable root yields an
-    empty map: the tree claims nothing, so nothing reads as running. A session
-    host returns None and the column keeps its session reading. One snapshot
-    per `ava status` — the column is not a per-row root roundtrip.
-    """
-    import cli.commands as _ns
-
-    if not _ns._root_driven_enabled():
-        return None
+def _root_tree_units() -> dict[str, dict[str, object]]:
+    """Read one root snapshot; an unreachable root claims no running services."""
     from cli.commands import _root_driver
 
     status = _root_driver._root_status(_root_driver._root_client())
@@ -102,14 +76,8 @@ def _root_tree_units() -> dict[str, dict[str, object]] | None:
     return _root_driver._root_units(status)
 
 
-def cmd_status() -> int:
-    # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands as _ns
-
-    repo = _repo_root()
-    roles = _ns._roles_or_none()
-    print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
-
+def _status_roster(roles: MachineRoles | None) -> tuple[tuple[ServiceSpec, str | None], ...]:
+    """Explain every service excluded by capabilities or the durable desired set."""
     # Show this host's role roster WITH each gated-out service's reason, so a
     # service the start path drops (ava-browser with no display) is visible +
     # explained rather than silently missing — `ava status` is
@@ -120,12 +88,25 @@ def cmd_status() -> int:
         services_to_show = tuple((spec, None) for spec in build_services())
     else:
         services_to_show = _services_for_roles_annotated(roles)
-    name_w = max(len(session_name(spec.session)) for spec, _reason in services_to_show)
-    # Root-driven hosts keep their services as tree units: read one tree
-    # snapshot for the whole table (None on session hosts — the column keeps
-    # its session reading; an unreachable root reads as an empty tree).
+    selection = service_selection.read_selection()
+    return tuple(
+        (spec, reason if selection.enabled(spec.session) else "disabled by desired service set")
+        for spec, reason in services_to_show
+    )
+
+
+def cmd_status() -> int:
+    # Dynamic lookup for monkeypatch-aware tests.
+    import cli.commands._repo as _repo_commands
+
+    repo = _repo_root()
+    roles = _repo_commands._roles_or_none()
+    print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
+    services_to_show = _status_roster(roles)
+    name_w = max((len(session_name(spec.session)) for spec, _reason in services_to_show), default=7)
+    # The root is the only service owner. Do not infer liveness from old records.
     root_units = _root_tree_units()
-    header = f"{'service'.ljust(name_w)}  sess  probe"
+    header = f"{'service'.ljust(name_w)}  root  probe"
     print(header)
     print("-" * len(header))
     for spec, skip_reason in services_to_show:
@@ -157,15 +138,8 @@ def cmd_status() -> int:
         print("\nlgtm (observability backend):")
         print_lgtm_status()
 
-    # gate section: the fleet UI entry port. Its own section rather than a row in
-    # the table above, because the gate is not a session service — it is a launchd
-    # KeepAlive job (a pidfile-backed detached process off macOS), so the session
-    # column has no answer for it and the two facts worth showing are not the ones
-    # a ServiceSpec row carries. Same placement rule as pg/redis: gateway-capable
-    # hosts only, since a runner owns no entry port.
+    # The private-network relay is a host data-plane resource.
     if not runner_only:
-        print("\ngate (fleet UI entry):")
-        print_gate_status()
         print("\nredis bridge (private-network ingress):")
         print_redis_bridge_status()
 
@@ -250,7 +224,7 @@ def _print_gateway_cluster_status() -> None:
     import httpx
 
     from cli.commands.cluster import _fetch_gateway_cluster_status
-    from ops.cluster import ClusterStatus
+    from ops.cluster_status import ClusterStatus
     from shared.machine import (
         GatewayApiBaseMissing,
         MachineRoleInvalid,

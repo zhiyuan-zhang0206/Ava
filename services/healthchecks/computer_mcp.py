@@ -1,29 +1,15 @@
-"""ava-computer-mcp healthcheck — called every 60s by the watchdog.
-
-Probe the shared computer-use service over its Unix socket with a lock-free
-`ping` (connect + reply proves the accept/read loop is alive). `ping` does NOT
-round-trip to the permissions helper or take the daemon's action lock — a slow
-desktop action can hold that lock past the probe timeout, and probing through
-it would false-kill a busy-but-healthy daemon. On death, respawn the daemon in
-the ava-computer-mcp session via `shared.service_respawn.respawn_service`
-(same pattern as the browser / browser-mcp healthchecks).
-"""
+"""Read-only health probes for computer mcp; the root supervisor owns recovery."""
 
 import json
 import logging
 import socket
-from pathlib import Path
 
 from services.computer.protocol import Request, Response
-from shared.config import settings
-from shared.log import init_gateway_process
 from shared.paths import computer_mcp_socket
-from shared.service_respawn import respawn_service
 
 _log = logging.getLogger("services.healthchecks.computer_mcp")
 
 _TIMEOUT_S = 5.0
-_CMD = ".venv/bin/python -m services.computer.mcp_daemon"
 
 
 def _probe() -> bool:
@@ -62,24 +48,3 @@ def _is_alive() -> bool:
     except Exception:
         _log.exception("[computer-mcp healthcheck] probe raised unexpectedly; treating as dead")
         return False
-
-
-def _restart() -> bool:
-    project_root = settings.services.project_root or Path(__file__).resolve().parent.parent.parent
-    return respawn_service(
-        "computer-mcp", _CMD, project_root, extra_env={"AVA_PROCESS_PROFILE": "runner"}
-    )
-
-
-def main() -> None:
-    init_gateway_process(name="computer-mcp-healthcheck")
-    if _is_alive():
-        _log.info("[computer-mcp healthcheck] alive, no-op")
-        return
-    _log.info("[computer-mcp healthcheck] dead, restarting...")
-    if _restart():
-        _log.info("[computer-mcp healthcheck] daemon restarted")
-
-
-if __name__ == "__main__":
-    main()

@@ -484,10 +484,22 @@ async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
     assert "snapshot says hi" in result.output
 
 
+def _self_lifecycle_code(action: str) -> str:
+    return (
+        "import ava, os, psycopg\n"
+        "from shared.env_registry import ADMIN_DATA_PLANE_ALIASES\n"
+        "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
+        "with psycopg.connect(ava.DB_URL) as conn:\n"
+        "    assert conn.execute('SELECT current_user').fetchone() == ('ava_runner',)\n"
+        f"{action}\n"
+    )
+
+
+@pytest.mark.usefixtures("runner_exec_env")
 async def test_subprocess_self_terminate_lifecycle_and_inbound(tmp_path: Path) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(tmp_path, "import ava; ava.self.terminate()")
+    result = await _run(tmp_path, _self_lifecycle_code("ava.self.terminate()"))
 
     assert isinstance(result, _ExecLifecycle)
     assert isinstance(result.exc, AgentTermination)
@@ -496,10 +508,11 @@ async def test_subprocess_self_terminate_lifecycle_and_inbound(tmp_path: Path) -
     assert source == "self"
 
 
+@pytest.mark.usefixtures("runner_exec_env")
 async def test_subprocess_self_restart_lifecycle_and_inbound(tmp_path: Path) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(tmp_path, "import ava; ava.self.restart()")
+    result = await _run(tmp_path, _self_lifecycle_code("ava.self.restart()"))
 
     assert isinstance(result, _ExecLifecycle)
     assert isinstance(result.exc, AgentRestart)
@@ -508,10 +521,11 @@ async def test_subprocess_self_restart_lifecycle_and_inbound(tmp_path: Path) -> 
     assert source == "self"
 
 
+@pytest.mark.usefixtures("runner_exec_env")
 async def test_subprocess_self_compact_lifecycle_and_inbound(tmp_path: Path) -> None:
     _seed_agent_for_self_lifecycle()
 
-    result = await _run(tmp_path, "import ava; ava.self.compact('audit e2e summary')")
+    result = await _run(tmp_path, _self_lifecycle_code("ava.self.compact('audit e2e summary')"))
 
     assert isinstance(result, _ExecLifecycle)
     assert isinstance(result.exc, _SystemHalt)

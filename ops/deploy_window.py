@@ -32,9 +32,8 @@ longer a budget the rollout has to fit inside.
    controllers spawn a host-local `ava-updater` without going near the gateway's
    orchestration. The code controller added on 2026-07-28 means that path gets
    *more* traffic, not less. Read from the table rather than by probing each
-   machine: the old probe's `current_orchestration` field was a session-name
-   judgment that died with the very daemon that answered it. This signal covers
-   the orchestrator's own host too — Phase A pauses it like every agent-runner —
+   machine, whose ops daemon stops with the services it reports on. This signal
+   covers the orchestrator's own host too — Phase A pauses it like every agent-runner —
    which is why the old "this host's own orchestration session" leg was dropped
    in the old-signal sweep (PR5): a lease-less local updater writes `converging`,
    and a rollout holds the lease before its own pause lands.
@@ -277,15 +276,13 @@ def _remote_orchestration() -> DeployWindow | None:
     """Any machine mid-deploy — signal 2, read from the host_deploy_state
     table instead of probing each machine's ops server (R1, Task #1021).
 
-    The old probe's `current_orchestration` field was a session-name judgment
-    that died with the very daemon that answered it — `ops` stops mid
-    self-update, so the middle of the window read "not deploying" (the blind
-    spot in the module docstring). The posture row is written by the pause
-    fan-out and the updater's lease, both outside the restarted services, so
-    it survives the whole window; a machine with no row has never transitioned
-    and reads as idle. A stale `converging` row (updater crashed) keeps the
-    signal active until the stranded-pause recovery unpauses the host — the
-    conservative direction, since its checkout may have moved.
+    The posture row is written by the pause fan-out and the updater's lease,
+    both outside the restarted services, so it survives the whole window, while
+    an ops daemon stops with the services it would report on; a machine with no
+    row has never transitioned and reads as idle. A stale `converging` row
+    (updater crashed) keeps the signal active until `ava cluster recover`
+    unpauses the host — the conservative direction, since its checkout may have
+    moved.
 
     **Operator exclusion is the one reading this signal withholds** (issue
     #2160): a machine the operator has excluded from the cohort — pause latch,

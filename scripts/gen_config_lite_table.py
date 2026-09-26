@@ -211,30 +211,6 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         None,
         "exec child boot: _apply_per_agent_sdk_disable reads it after the overlay",
     ),
-    # The OS-scheduled hold watchdog (task #3887): its one-shot job process is a
-    # settings-lite verb (cli.main sets AVA_CONFIG_FETCH=skip for `cluster`), and
-    # it must resolve these while the database and gateway are down - that is the
-    # full-stop shape it exists for. Read order (pending > env/.env > default) is
-    # also the kill-switch contract: the unit's .env or the process environment
-    # overrides, and the compiled default is the full-stop answer.
-    LiteField(
-        "stranded_hold_recovery",
-        "literal",
-        None,
-        "shared/hold_watchdog.py enabled() - the hold watchdog's kill-switch",
-    ),
-    LiteField(
-        "hold_watchdog_min_age_seconds",
-        "literal",
-        None,
-        "shared/hold_watchdog.py min_age_seconds() - the completion bound floor",
-    ),
-    LiteField(
-        "hold_watchdog_cooldown_seconds",
-        "literal",
-        None,
-        "shared/hold_watchdog.py cooldown_seconds() - the per-generation cooldown",
-    ),
     # The caller-side stop-incomplete recovery (task #3942): the updater leg
     # reads the pair at its post-stop failure exit - the moment the host is
     # mid-stop and the data plane may be down - so both must resolve without a

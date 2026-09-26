@@ -31,11 +31,11 @@ from services.agent_ops.bootstrap import (
 )
 from shared.managed_writer_barrier import RolloutIdentity
 from shared.managed_writer_observation import (
-    ExpectedProcess,
     ExpectedUnitWriters,
     ObservationChallenge,
     UnitObserver,
 )
+from shared.process_evidence import ExpectedProcess
 
 
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 — CI assertion predicate

@@ -1,17 +1,7 @@
 """Read-only `ava start` state checks, run before a stop that a start must follow.
 
-Two callers, one rule — a check that can only fail AFTER the stop fails on a
-host whose services are already down (the 2026-09-12 incident shape, where a
-stray workspace socket aborted converge an hour after the stop took the
-fleet's coordinator offline on macmini):
-
-- the self-update leg (`_update_agent_runner` step 3.1) — `ava start` is step 5
-  there, so every local check it makes lands after the stop;
-- `ava restart` (`cli/commands/stop.py`, task #3165) — the same stop→start
-  shape on the operator verb and, on Windows, on the updater ladder's restart
-  step. Every category this gate refuses on would also fail that restart's own
-  start leg, so a refusal never blocks a viable bounce — the listed repairs are
-  the path, and a refusal leaves the host exactly as it was.
+Restart checks the coming start's prerequisites while the current services still
+serve. A local-state refusal leaves the running generation intact.
 
 This module is the local-state half of "validate before kill": the read-only
 parts of what start checks, moved in front of the stop, so a failure refuses
@@ -34,11 +24,11 @@ What it forwards (each item read-only; nothing here repairs or launches):
 - the two start prerequisites no other pre-stop gate covers: the
   prod-checkout anchoring rule, and the venv entry points — `.venv/bin/python`
   (what every service session launches through) always, `.venv/bin/ava` (what
-  the update leg's step 5 execs; its presence is step 3.5's report) only when
+  an external start process executes) only when
   the caller's start would exec it (`check_launcher`).
 
 Contract: read-only, never raises for a finding — findings are data. Returns 0
-to proceed with the update, 1 to refuse it. The caller answers a refusal with
+to proceed with restart, 1 to refuse it. The caller answers a refusal with
 RESTART_DECLINED ("nothing was stopped, host still serving"): unlike the
 migrations-layout gate there is no revert, because the target tree is not at
 fault — the host's local state is, and a retry re-checks it.
@@ -50,6 +40,7 @@ import os
 import sys
 from pathlib import Path
 
+from cli.start_runtime import StartRuntime
 from shared.machine import MachineRoles
 from shared.private_storage import (
     private_file_problem,
@@ -60,7 +51,9 @@ from shared.private_storage import (
 _TREE_ROOTS = ("logs", "workspaces", "memory")
 
 
-def preflight_start_readiness(repo: Path, *, check_launcher: bool = True) -> int:
+def preflight_start_readiness(
+    repo: Path, *, check_launcher: bool = True, runtime: StartRuntime | None = None
+) -> int:
     """Vet the local state the coming `ava start` needs, before the stop.
 
     0 = proceed (any observations are printed); 1 = refuse, with every finding
@@ -68,16 +61,20 @@ def preflight_start_readiness(repo: Path, *, check_launcher: bool = True) -> int
 
     `check_launcher=False` drops the `.venv/bin/ava` entry-point check for a
     caller whose start runs in-process and never execs it (`ava restart`);
-    `.venv/bin/python` — what every service session DOES launch through — is
-    checked for every caller.
+    development's `.venv/bin/python` is still checked. A captured retained
+    runtime instead validates its complete image and exact interpreter, without
+    editable checkout or source-converge checks.
     """
     from shared.paths import ava_home
 
     home = ava_home()
+    if runtime is not None:
+        runtime.validate(home)
+    retained = runtime is not None and runtime.release is not None
     fatal: list[str] = []
     observations: list[str] = []
 
-    checkout_problem = _prod_checkout_problem(repo)
+    checkout_problem = None if retained else _prod_checkout_problem(repo)
     if checkout_problem is not None:
         fatal.append(checkout_problem)
 
@@ -92,12 +89,19 @@ def preflight_start_readiness(repo: Path, *, check_launcher: bool = True) -> int
         fatal += port_fatal
         observations += port_observations
 
-    tree_fatal, tree_observations = _private_tree_findings(home)
-    fatal += tree_fatal
-    observations += tree_observations
-
-    fatal += _migration_findings()
-    fatal += _venv_findings(repo, check_launcher=check_launcher)
+    if retained:
+        assert runtime is not None  # noqa: S101 — retained runtime established above
+        fatal += _entrypoint_findings(
+            runtime.interpreter,
+            label="the verified release interpreter",
+            fix="prepare a valid retained image",
+        )
+    else:
+        tree_fatal, tree_observations = _private_tree_findings(home)
+        fatal += tree_fatal
+        observations += tree_observations
+        fatal += _migration_findings()
+        fatal += _venv_findings(repo, check_launcher=check_launcher)
 
     return _report(fatal, observations)
 
@@ -120,9 +124,9 @@ def _machine_roles() -> MachineRoles | None:
     gate that runs just before this one already refuses on that condition, so
     this gate does not have to fail twice for it.
     """
-    import cli.commands as _ns
+    import cli.commands._repo as _repo_commands
 
-    return _ns._roles_or_none()
+    return _repo_commands._roles_or_none()
 
 
 def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[str], list[str]]:
@@ -141,23 +145,26 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     `_port_preflight.ensure_port_preflight`'s contract: a preflight must never
     be the thing that takes the host down.
     """
-    import cli.commands as _ns
+    import cli.commands._probe as _probe_commands
+    import ops.roster as _roster
     from cli.commands._converge_spec import ConvergeCtx
     from cli.commands._port_preflight import collect_port_conflicts
+    from cli.commands._root_driver import _root_tree_roster
     from shared import cluster
-    from shared.disabled_services import resolve_launch_skip
     from shared.port_preflight import env_port_drift
+    from shared.service_selection import resolve_selection
 
     try:
-        roster = _ns._launch_roster(roles, resolve_launch_skip(set(), persist=False))
-        occupied = _ns._occupied_health_ports(roster)
+        available = {s.session for s in _roster.build_services()}
+        roster = _root_tree_roster(roles, resolve_selection(available, persist=False))
+        occupied = _probe_commands._occupied_health_ports(roster)
     except Exception as exc:  # a preflight must not fail the update
         return [], [f"health-port check skipped: {exc}"]
 
     fatal = [
         f"{port.spec.session}: health port answered by {port.detail} — `ava start` "
         "refuses the whole launch on this (#977); after the stop that refusal leaves "
-        "no host serving. Free the port, or move this unit's block: `ava enroll "
+        "no host serving. Free the port, or move this unit's block: `ava start "
         "--gateway <url> --machine-name <name> --machine-host <host> "
         "--health-port-base <N>`"
         for port in occupied

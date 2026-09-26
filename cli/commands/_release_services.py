@@ -23,7 +23,7 @@ import psutil
 import psycopg
 
 from cli.commands._release_selector import pending_transaction, verify_unit_image
-from cli.commands._session_lifecycle import _service_extra_env
+from cli.commands._root_driver import _service_extra_env
 from ops.spec import ServiceSpec, services_for_capabilities_annotated
 from services.agent_ops.bootstrap import PreparedObservation
 from shared import spawn_receipt
@@ -35,16 +35,17 @@ from shared.managed_writer_activation import (
     SelectorReadback,
     require_pending_candidate_start,
 )
-from shared.managed_writer_observation import ExpectedProcess, observe_process
 from shared.managed_writer_publication import NormalService, PublishedUnit
-from shared.proc_tree import stable_create_time
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
+from shared.process_evidence import ExpectedProcess, observe_process
 from shared.runtime_interpreter import runtime_venv
 from shared.runtime_publication_input import PreparationReceipt
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
 from shared.runtime_service_identity import NormalRuntimeIdentity
 from shared.session_backend import get_backend
 from shared.session_env import forward_env_dict
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import SessionRecord
 from shared.updater_recovery import SpawnAttempt
 from shared.verified_file import regular_bytes
 

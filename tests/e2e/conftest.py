@@ -517,20 +517,22 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
     function-scoped rather than session: each test restarts gateway to pick up new scenario env.
     Startup ~2-3s acceptable.
     """
-    from shared import start_serving
 
     global _previous_gateway  # noqa: PLW0603 — retain the exact prior fixture child, not just its PID.
     if _previous_gateway is not None and _previous_gateway.poll() is None:
         raise RuntimeError("previous exact gateway fixture has not exited")
 
-    # The pytest process imported Settings before this package redirected
-    # AVA_HOME. Keep its marker writes in the exact home inherited by the
-    # gateway, restarter, and agent-host subprocesses.
+    # This direct-process fixture gate lives in the private E2E home.
+    # It grants no production root custody or local birth evidence.
     monkeypatch.setattr(settings.general, "ava_home", _AVA_HOME)
-    generation = start_serving.begin_start()
+    fixture_gate = _AVA_HOME / "e2e-serving"
+    fixture_gate.unlink(missing_ok=True)
+    generation = str(fixture_gate)
     cmd = [
         sys.executable,
         "-m",
+        "tests.e2e._proc",
+        generation,
         "uvicorn",
         "gateway.app:app",
         "--host",
@@ -583,7 +585,7 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
             evidence_path.write_text(json.dumps(listener_evidence(GATEWAY_PORT, "http-ready")))
             yield generation
         finally:
-            start_serving.clear_serving()
+            fixture_gate.unlink(missing_ok=True)
 
 
 @pytest.fixture
@@ -622,7 +624,7 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
 @pytest.fixture
 def agent_host_proc(gateway_proc: str) -> Iterator[None]:
     """Run the local agent host with this test's model and machine identity."""
-    cmd = [sys.executable, "-m", "services.agent_host.daemon"]
+    cmd = [sys.executable, "-m", "tests.e2e._proc", gateway_proc, "services.agent_host.daemon"]
     env = os.environ.copy()
     # Prod-shaped profile construction: the healthcheck launches the daemon with
     # the `agent` profile (it runs the agent kernel in-process). Marker-less
@@ -646,10 +648,8 @@ def agent_host_proc(gateway_proc: str) -> Iterator[None]:
             raise RuntimeError(
                 f"{e}; agent-host daemon {state}; log tail:\n{proc_log_tail(str(log_path))}"
             ) from e
-        from shared import start_serving
-
-        if not start_serving.mark_serving(gateway_proc):
-            raise RuntimeError("e2e agent-host lost the gateway start generation")
+        # Direct-process fixture gate: this suite does not prove root custody.
+        Path(gateway_proc).write_text("ready\n")
         yield
 
 
@@ -684,7 +684,7 @@ def ops_proc(gateway_proc: str) -> Iterator[None]:
         conn.commit()
     log_path = _LOG_DIR / f"ops-{_E2E_SUFFIX}.log"
     with managed_proc(
-        [sys.executable, "-m", "services.agent_ops.daemon"],
+        [sys.executable, "-m", "tests.e2e._proc", gateway_proc, "services.agent_ops.daemon"],
         env=env,
         label="ops",
         log_path=str(log_path),

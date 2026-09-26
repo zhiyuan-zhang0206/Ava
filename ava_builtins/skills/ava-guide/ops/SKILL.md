@@ -61,10 +61,9 @@ instead of experimenting on the data plane.
 ## Start / Stop / Status
 
 ```bash
-ava start     # pure bring-up (idempotent). Ensures this cluster's own pg/redis
-              # instance, then brings up the union of this host's services. The
-              # cluster is born at install time (scripts/install.sh), not here;
-              # the home resolves from the checkout, never a flag.
+ava start     # initialize or resume this checkout's home, provision owned storage,
+              # and wait for the selected root services to become ready.
+ava start --worktree  # first start of an isolated dev checkout
 ava pause     # normal agent drain; keep infrastructure, browser and persistent PTYs
 ava stop      # normal drain, then full local stop; durable data and agent IDs survive
               # --keep-infra / --keep-service retain resources; --force is explicit
@@ -92,7 +91,7 @@ ava cluster destroy --path <home>     # stop + free registry slot + deregister i
                                       # add --drop-db to also remove its pg/redis data dirs
 ```
 
-### Split deployments (`ava enroll`)
+### Split deployments
 
 A pure agent-runner on another box **enrolls** into an existing cluster instead
 of birthing one of its own — it inherits the cluster's identity (db / redis /
@@ -103,12 +102,12 @@ printf 'Cluster secret: ' >&2
 IFS= read -rs AVA_CLUSTER_SECRET
 printf '\n' >&2
 export AVA_CLUSTER_SECRET
-ava enroll --gateway <URL> --machine-name <NAME> --machine-host <HOST>
+ava start --serve-agent-runner --no-serve-gateway --gateway-url <URL> \
+  --machine-name <NAME> --machine-host <HOST>
 unset AVA_CLUSTER_SECRET
-# then: ava start
 ```
 
-Enrollment presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
+First start presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
 authenticated `/api/bootstrap`, which returns the cluster's connection bundle
 (db / redis URLs, channels). The runner's database URL carries a separately
 minted least-privilege `ava_runner` password and its Redis URL carries the
@@ -119,78 +118,55 @@ back to its ops server) and is **required**. The runner starts no gateway
 process of its own; it needs both network reachability to the gateway *and* the
 cluster secret.
 
-## Update & Converge
+## Prepare, update and recover
 
-`ava cluster update` is the capability-dispatched upgrade command:
+Resolve the intended local or remote branch to one committed source revision.
+Acquire and verify dependencies and assets, then prepare an inactive immutable
+image before maintenance. Use `cli.release_prepare` and its explicit captured
+inputs; preparation has no authority to stop services or select a release.
+A branch preview may test an unmerged commit. That result does not replace CI,
+review or operator authorization for production.
 
-- On a gateway-capable host (incl. single box): orchestrates the whole cluster —
-  pause agent-runners → local pull/`uv sync`/migrate/restart → trigger
-  agent-runner self-updates.
-- On a pure agent-runner: self-updates (git pull + `uv sync` + restart).
+Submit a prepared request with
+`ava cluster update --prepared /absolute/request.json`. The request binds the
+home, configuration, predecessor, candidate and external executor. Check the
+operation journal and native ownership after submission; acknowledgement alone
+is not completion. Re-submit the same captured request to join or continue that
+operation. Do not create a new request to conceal an incomplete attempt.
 
-Related commands:
+The connected executor currently supports one initialized local Linux gateway,
+equal migration inventories and no persistent terminal writers. Fleet/schema
+transitions and the workload rollback policy remain explicit pre-cutover work.
+Consult `cli/release_transition/release_transition.ava.okf.md` and
+`future/infra/unified-cluster-lifecycle.md` before claiming broader support.
 
-- `ava restart` — restart all services on **current** code (no pull/sync/migrate).
-- `ava cluster restart` — restart the whole cluster, same code.
-- `ava converge` — re-apply idempotent host wiring (`ava` symlink, PATH,
-  home directory, plugin images, memory pool). Runs automatically on every
-  `ava start` / `ava cluster update`; run standalone if wiring looks off.
+Related local commands:
 
-## Channel (update track)
+- `ava restart` restarts this home's application through its ordinary lifecycle.
+- `ava converge` applies development host wiring. Retained-image startup verifies
+  prepared inputs instead of repairing a checkout or acquiring dependencies.
+- `ava status` and `ava cluster status` provide observations, not permission to
+  replace the selected release.
 
-A cluster tracks a GitHub branch as its update source — its **channel**,
-controlled by `AVA_TRACK_BRANCH` (default `main`).
+## Update safety discipline
 
-| Channel | Value | Who should use it |
-|---------|-------|-------------------|
-| Production | `main` (default) | All clusters |
-
-```bash
-ava config get AVA_TRACK_BRANCH      # view current channel
-ava config set AVA_TRACK_BRANCH=<b>  # switch channel (then `ava cluster update`)
-```
-
-Switching channel only declares intent — run `ava cluster update` to actually pull.
-
-Branch model:
-
-```
-feature/*  ──→ main  ──→ tag  ──→ ava cluster update   # the ONLY update entry point
-```
-
-## Update — operator CLI only
-
-Use the installed `ava cluster update --help` contract, not historical drain
-timeouts or restarter assumptions. Record the actual phase, elapsed time,
-desired service state and hosted/process ownership. Forceful interruption
-requires scoped authorization; a short configured drain is not a promise
-about total downtime or successful convergence.
-
-## Update Safety Discipline
-
-- **Merge is not runtime health.** CI and exact-head review establish repository
-  evidence, not successful deployment. Require explicit operator authorization,
-  a fixed target, compatible schema/plugins/protocols and verified recovery
-  evidence. Verify actual running services and representative agent progress
-  after rollout; skipped checks or a filtered roster are not sufficient.
-- **The prod checkout stays on `track_branch`.** It is the tree the live
-  processes run from. Sitting on a feature branch means the cluster is running
-  unreviewed code, and the next `ava cluster update` force-checkouts `track_branch`,
-  **discarding any unmerged commits on it**. Develop in a worktree; never switch
-  the prod checkout's branch by hand. `ava status` warns when the prod checkout
-  has drifted off `track_branch`.
-- **Recovery uses official lifecycle surfaces.** Preserve logs and inspect the
-  installed `ava cluster recover --help` / `ava cluster rollback --help` contract.
-  Check live holder semantics and schema compatibility. Never reset production
-  source, reinstall its venv, send raw signals, or blindly retry a rollout.
-  Escalate if no supported safe recovery path exists.
-- **Old code drives the first rollout.** A newly merged safeguard does not
-  protect the update that introduces it. Read the old orchestrator and record
-  the bootstrap plan before activation; see `conventions/defensive-patterns.md`.
-- **One operator.** Contributors and reviewers do not launch concurrent
-  rollouts. Respect explicit CI-only/no-local-cluster requirements. Preparation
-  and backup uploads should remain outside maintenance where supported, without
-  dropping backup or rollback gates to meet a downtime target.
+- **Merge is not runtime health.** Require repository review and CI, a fixed
+  target, verified recovery evidence and operator authorization for production.
+  Verify the selected service roster and representative agent progress after
+  activation. Skipped checks are not successful checks.
+- **Retain executing code.** Never change the checkout, interpreter or libraries
+  underneath a serving process. The external executor replaces the application
+  root from independently retained images.
+- **Recover the recorded operation.** Preserve receipts, logs and native births.
+  Continue only after proving the prior executor domain closed. Unknown custody
+  or changed inputs require diagnosis, not raw signals, hand-edited journals or
+  a blind new rollout. Generic maintenance recovery does not own release state.
+- **Treat first adoption as a separate cutover.** The new mechanism cannot
+  protect the legacy deployment that introduces it. Inspect the currently
+  running implementation and follow the approved explicit cutover procedure.
+- **One operation owns the home.** Prepare outside the outage window; reserve
+  activation before mutation and preserve that authority through recovery.
+  Respect any explicit CI-only or no-local-cluster constraint.
 
 ## Release Cut
 
@@ -255,19 +231,17 @@ per-session detached pty hosts for agents' interactive shells. Key facts:
 - `ava-agent-<id>` — an agent main process session
 - `ava-agent-<id>-shell-<n>[-<name>]` — an agent's shell sub-sessions (and
   `...-watcher` for background watchers)
-- `ava-updater` / `ava-rollout` / `ava-cluster-restart` — orchestration sessions
 
 ### Per-cluster session records
 
 Each session's record (pid, start time) lives at `<ava_home>/run/sessions/
 <session-name>.json` (agent shells: `<ava_home>/run/pty/`); its combined stdout+stderr goes to
-`<ava_home>/logs/<session-name>.out.log` (orchestration sessions additionally
-tee to `<ava_home>/logs/{updater,rollout,cluster-restart}-<epoch>.log` on
-POSIX). `ava cluster status` enumerates the same sessions. Raw session
+`<ava_home>/logs/<session-name>.out.log`. `ava cluster status` enumerates the
+same sessions. Raw session
 output is queried in Loki, not tailed by a CLI: the collector's
 `filelog/sessions` receiver admits only agent shell transcripts, while
 `filelog/services` admits gateway/daemon/schedule stdout and excludes all
-agent main logs; updater/rollout tees use `filelog/orchestration`. Loki's
+agent main logs. Loki's
 `service_name` label is the filename-derived session name. Query via Grafana
 Explore (LogQL), `logcli --addr http://127.0.0.1:3100`, or the Loki HTTP API;
 local managed logs are pruned only when `ava logs retention` runs. No age flag

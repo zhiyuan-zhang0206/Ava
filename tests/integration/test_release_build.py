@@ -14,7 +14,12 @@ import pytest
 # ruff: noqa: S603 -- fixed Git argv operate only on the generated fixture repository.
 from cli import release_build as build
 from shared.runtime_prepare import _materialize_venv_links
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
+from shared.runtime_release import (
+    ReleaseRejectedError,
+    VerifiedRelease,
+    file_sha256,
+    read_application_identity,
+)
 
 
 @pytest.fixture
@@ -51,6 +56,12 @@ def committed_repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, commit
 
 
+def _constraints(tmp_path: Path) -> Path:
+    path = tmp_path.resolve() / "build-tools.txt"
+    path.write_text("hatchling==1.0 --hash=sha256:" + "a" * 64 + "\n")
+    return path
+
+
 def _builder(
     tmp_path: Path, *, omit_identity: bool = False, exit_code: int = 0, rewrite_sql: bool = False
 ) -> Path:
@@ -60,7 +71,7 @@ def _builder(
         "import pathlib,sys,zipfile\n"
         f"raise_code={exit_code}\n"
         "if raise_code: raise SystemExit(raise_code)\n"
-        "assert sys.argv[1:5] == ['--offline','build','--wheel','--no-sources']\n"
+        "assert '--offline' in sys.argv and '--no-config' in sys.argv and '--require-hashes' in sys.argv\n"
         f"if {rewrite_sql!r}:\n"
         " for p in pathlib.Path('migrations').glob('*.sql'): p.write_text('SELECT 999;\\n')\n"
         "out=pathlib.Path(sys.argv[sys.argv.index('--out-dir')+1]); out.mkdir()\n"
@@ -81,7 +92,12 @@ def test_build_uses_commit_not_dirty_working_tree(
     (repo / "shared/untracked.py").write_text("SECRET = 'must not ship'\n")
     output = tmp_path.resolve() / "output"
     result = build.build_application(
-        repo, commit, output, uv=_builder(tmp_path), python=Path(sys.executable)
+        repo,
+        commit,
+        output,
+        uv=_builder(tmp_path),
+        python=Path(sys.executable),
+        build_constraints=_constraints(tmp_path),
     )
 
     with zipfile.ZipFile(result.wheel) as wheel:
@@ -104,7 +120,12 @@ def test_mutable_or_invalid_ref_refuses_before_destination(
     output = tmp_path.resolve() / "output"
     with pytest.raises(ReleaseRejectedError, match="exact commit"):
         build.build_application(
-            repo, target, output, uv=_builder(tmp_path), python=Path(sys.executable)
+            repo,
+            target,
+            output,
+            uv=_builder(tmp_path),
+            python=Path(sys.executable),
+            build_constraints=_constraints(tmp_path),
         )
     assert not output.exists()
 
@@ -121,6 +142,7 @@ def test_missing_embedded_receipt_refuses_and_retains_build(
             output,
             uv=_builder(tmp_path, omit_identity=True),
             python=Path(sys.executable),
+            build_constraints=_constraints(tmp_path),
         )
     assert (output / "source.tar").is_file()
     assert not (output / "build-receipt.json").exists()
@@ -131,10 +153,24 @@ def test_failed_build_is_not_reused(committed_repo: tuple[Path, str], tmp_path: 
     output = tmp_path.resolve() / "output"
     uv = _builder(tmp_path, exit_code=9)
     with pytest.raises(subprocess.CalledProcessError):
-        build.build_application(repo, commit, output, uv=uv, python=Path(sys.executable))
+        build.build_application(
+            repo,
+            commit,
+            output,
+            uv=uv,
+            python=Path(sys.executable),
+            build_constraints=_constraints(tmp_path),
+        )
     archive = (output / "source.tar").read_bytes()
     with pytest.raises(FileExistsError):
-        build.build_application(repo, commit, output, uv=uv, python=Path(sys.executable))
+        build.build_application(
+            repo,
+            commit,
+            output,
+            uv=uv,
+            python=Path(sys.executable),
+            build_constraints=_constraints(tmp_path),
+        )
     assert (output / "source.tar").read_bytes() == archive
     assert not (output / "build-receipt.json").exists()
 
@@ -175,13 +211,13 @@ def test_installed_identity_binds_commit_and_inventory(
     identity_image: tuple[VerifiedRelease, Path],
 ) -> None:
     image, member = identity_image
-    identity = build.read_application_identity(image, "a" * 40)
+    identity = read_application_identity(image, "a" * 40)
     assert identity.applied_names == ("00000000T000000_baseline",)
     with pytest.raises(ReleaseRejectedError, match="target commit or schema"):
-        build.read_application_identity(image, "f" * 40)
+        read_application_identity(image, "f" * 40)
     member.write_text(member.read_text().replace('"source_commit":"a', '"source_commit":"b'))
     with pytest.raises(ReleaseRejectedError, match="verified inventory"):
-        build.read_application_identity(image, "a" * 40)
+        read_application_identity(image, "a" * 40)
 
 
 def test_modified_manifest_cannot_bless_another_identity(
@@ -191,7 +227,7 @@ def test_modified_manifest_cannot_bless_another_identity(
     path = image.root / "manifest.json"
     path.write_text(path.read_text() + "\n")
     with pytest.raises(ReleaseRejectedError, match="manifest changed"):
-        build.read_application_identity(image, "a" * 40)
+        read_application_identity(image, "a" * 40)
 
 
 def _mirrored_identity(image: VerifiedRelease, member: Path) -> tuple[VerifiedRelease, Path]:
@@ -212,7 +248,7 @@ def test_materialized_linux_lib64_keeps_one_application_identity(
     image, mirror = _mirrored_identity(image, member)
     assert not (image.root / "venv/lib64").is_symlink()
     assert mirror.read_bytes() == member.read_bytes()
-    assert build.read_application_identity(image, "a" * 40).source_commit == "a" * 40
+    assert read_application_identity(image, "a" * 40).source_commit == "a" * 40
 
 
 @pytest.mark.parametrize(
@@ -244,7 +280,7 @@ def test_identity_mirror_never_hides_drift_or_another_install(
     path.write_text(json.dumps(manifest))
     image = replace(image, manifest_digest=file_sha256(path))
     with pytest.raises(ReleaseRejectedError, match=r"identity|inventory"):
-        build.read_application_identity(image, "a" * 40)
+        read_application_identity(image, "a" * 40)
 
 
 @pytest.mark.parametrize("override", ["replace", "attributes", "environment"])
@@ -282,7 +318,12 @@ def test_ambient_git_configuration_cannot_change_committed_payload(
         monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(tmp_path / "foreign-attributes"))
     output = tmp_path.resolve() / "output"
     result = build.build_application(
-        repo, commit, output, uv=_builder(tmp_path), python=Path(sys.executable)
+        repo,
+        commit,
+        output,
+        uv=_builder(tmp_path),
+        python=Path(sys.executable),
+        build_constraints=_constraints(tmp_path),
     )
     with zipfile.ZipFile(result.wheel) as wheel:
         assert wheel.read("shared/__init__.py") == b'VALUE = "committed"\n'
@@ -300,7 +341,7 @@ def test_real_sized_manifest_is_read_with_its_own_budget(
     image = VerifiedRelease(
         image.digest, file_sha256(manifest), image.root, image.interpreter, image.cwd
     )
-    assert build.read_application_identity(image, "a" * 40).source_commit == "a" * 40
+    assert read_application_identity(image, "a" * 40).source_commit == "a" * 40
 
 
 @pytest.mark.parametrize("defect", ["missing", "changed", "duplicate", "extra"])
@@ -362,6 +403,7 @@ def test_migration_expectations_precede_archive_filters_and_build_hooks(
             tmp_path.resolve() / "output",
             uv=_builder(tmp_path, rewrite_sql=defect == "backend-rewrite"),
             python=Path(sys.executable),
+            build_constraints=_constraints(tmp_path),
         )
     assert not (tmp_path / "output/build-receipt.json").exists()
 
@@ -413,6 +455,7 @@ def test_depth_one_checkout_builds_without_parent_objects(
         tmp_path.resolve() / "output",
         uv=_builder(tmp_path),
         python=Path(sys.executable),
+        build_constraints=_constraints(tmp_path),
     )
     with zipfile.ZipFile(result.wheel) as wheel:
         assert wheel.read("shared/__init__.py") == b'VALUE = "second commit"\n'

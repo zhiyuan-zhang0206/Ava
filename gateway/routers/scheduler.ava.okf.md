@@ -7,11 +7,12 @@ tags: []
 
 # Schedule Manager & Runner
 
-A **schedule** is a **resident process** supervised by the gateway (supervised resident process), **not** a cron trigger. The `schedules` table has **no time fields at all**—when to do things and how often is entirely determined internally by the script (typically a `while True: … sleep()` resumable loop). The ScheduleManager ensures every enabled schedule has a **live** session (stay-up); if it dies, it is brought back up according to crash semantics. It also alerts when an enabled, non-completed schedule stays sessionless for more than two hours, without interpreting cron expressions.
+A **schedule** is a resident process supervised by the gateway. Its script controls timing, typically with a resumable loop; the `schedules` table has no time fields. ScheduleManager maintains enabled sessions, restarts crashes and alerts on prolonged absence. Clean completion is terminal.
 
 ## Two Components
 
 ### ScheduleManager (`gateway/schedule_manager.py`)
+- **Built-in seeding**: gateway boot calls `provision_builtins`, which creates missing manifest schedules when `AVA_PROVISION_BUILTIN_SCHEDULES=1` (default). Setting it to `0` keeps a fresh cluster unseeded; existing schedules still run and explicit `ava schedules provision` still works. Existing rows are never rewritten by seeding. Branch preview persists `0` before first start so background schedules cannot escape its declared workload profile.
 - **Background reconcile loop**: every 5 seconds, compares the database `schedules` table (desired: enabled rows) against actual sessions (actual: live sessions). Each missing enabled session launch holds the local `shared.start_serving` generation lock and proceeds only while serving; cleanup (disabled/deleted session reaping and orphan run closure) remains active before that boundary.
 - **Starts missing** sessions, **kills excess** sessions (when a schedule is disabled/deleted). Every explicit stop and enabled-state value change synchronously invokes the identity-checked PTY backend; `stopped` is written only after that backend confirms the session is gone, while a failed reap remains queued for an identity-checked retry.
 - **Generation boundary**: exact old-session records support cleanup only; they never decide desired state. A missing PTY is rebuilt after gateway restart when, and only when, the current schedule row remains enabled.
@@ -64,7 +65,3 @@ Only applies to **crashes** (not clean exits) looping—clean exits go to `compl
 
 - `gateway/schedule_manager.py:ScheduleManager` — reconcile loop
 - `gateway/schedule_runner.py:run()` — loads and runs a single schedule (the in-session entrypoint of `main()` → `.venv/bin/python -m gateway.schedule_runner <id>`)
-
-## Notes
-
-Schedules are **supervised resident processes**, not cron triggers—the `schedules` table has no time fields; "when to run" is entirely inside the script. A typical script is a **resumable loop** (`while True: … sleep()`) whose built-in cron slots are reconstructed from `schedule_fire_log` on restart. One-shot scripts are also valid—exiting with rc=0 yields `completed` and is not mistaken for "disappeared" and endlessly restarted.

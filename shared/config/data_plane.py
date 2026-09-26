@@ -290,7 +290,7 @@ class DataPlaneSettings(EnvSettings):
             "and Redis default-user passwords remain gateway-local, while runner "
             "credentials are projected inside their connection URLs. Set the secret on "
             "the gateway and hand it to each runner out-of-band as AVA_CLUSTER_SECRET "
-            "for `ava enroll`."
+            "for `ava start`."
         ),
         json_schema_extra={
             "restart_required": "all",
@@ -534,9 +534,9 @@ class DataPlaneSettings(EnvSettings):
                 "at the default home"
             )
         if self.cluster_secret and local_owner_url:
-            self.db_url = url_with_password(
-                self.db_url, self.db_admin_password or self.cluster_secret
-            )
+            if not self.db_admin_password:
+                raise ValueError("authenticated local owner requires AVA_DB_ADMIN_PASSWORD")
+            self.db_url = url_with_password(self.db_url, self.db_admin_password)
         return self
 
     @model_validator(mode="after")

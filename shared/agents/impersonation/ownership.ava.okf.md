@@ -33,6 +33,15 @@ security boundary against arbitrary shell execution. Capability, machine,
 incarnation and caller-attestation checks still prevent accidental
 cross-session control.
 
+Caller metadata records each process and ancestor's PID, native birth, start
+ticks and boot identity. POSIX evidence requires an explicit native boot ID;
+Linux identity compares positive kernel start ticks within that boot, so a
+wall-clock correction does not orphan a live controller. Other platforms use
+exact native birth timestamps. Missing or invalid evidence stays unknown and
+cannot attest a caller; it is never filled from the current process or converted
+to a wall-time fallback. Caller errors distinguish unavailable evidence from
+confirmed exit, reuse, and a live controller outside the caller's ancestor chain.
+
 `ava.external.attach(session_id, agent_id=...)` loads saved state and
 binds SDK identity in the external process. Plugin changes append ordered deltas;
 only the native graph writes checkpoints. On return it applies the journal with

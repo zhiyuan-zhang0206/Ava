@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -18,6 +19,25 @@ from shared.machine import MachineRole
 _REPO = Path("/checkout/repo")
 
 
+@pytest.fixture(autouse=True)
+def _declared_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the real roster private configuration, without a native backend install."""
+    from ops import roster
+    from shared.lgtm_local import BACKENDS, service_input_paths
+
+    monkeypatch.setattr(roster, "ava_home", lambda: tmp_path)
+    collector = tmp_path / "collector.yaml"
+    collector.write_text("receivers: {}")
+    monkeypatch.setattr(roster, "otel_collector_config", lambda: collector)
+    for name in BACKENDS:
+        for path in service_input_paths(tmp_path, name):
+            if path.name == "config":
+                path.mkdir(parents=True, exist_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("test")
+
+
 def _spec(session: str, capabilities: frozenset[MachineRole], cmd: str) -> ServiceSpec:
     return ServiceSpec(
         session=session,
@@ -31,6 +51,7 @@ def test_real_roster_gateway_subset() -> None:
     units = gen.build_units(capabilities=["gateway"], repo_root=_REPO)
     ids = [u["id"] for u in units]
     assert "gateway" in ids
+    assert "gate" in ids
     assert "frontend" in ids
     assert "agent-host" not in ids
     # The two watchdogs are absorbed into the root's built-in health path.
@@ -50,7 +71,9 @@ def test_agent_runner_subset_and_otel() -> None:
     assert {"agent-host", "page-server", "ops"} <= runner
     assert "gateway" not in runner
     assert "otel-collector" in runner  # intersects on either side of the pair
-    assert gen.build_units(capabilities=["observability-station"], repo_root=_REPO) == []
+    assert {
+        u["id"] for u in gen.build_units(capabilities=["observability-station"], repo_root=_REPO)
+    } == {"loki", "prometheus", "grafana"}
 
 
 def test_key_units_exec_restart_attach() -> None:
@@ -80,19 +103,6 @@ def test_capability_tokens_validated() -> None:
         gen.build_units(capabilities=["nope"], repo_root=_REPO)
     with pytest.raises(ManifestError, match="must not be empty"):
         gen.build_units(capabilities=[], repo_root=_REPO)
-
-
-def test_watchdogs_are_absorbed_not_emitted() -> None:
-    specs = [
-        _spec(
-            "gateway-watchdog",
-            _GATEWAY,
-            ".venv/bin/python -m services.watchdog.daemon --role gateway",
-        ),
-        _spec("svc", _GATEWAY, ".venv/bin/python -m x"),
-    ]
-    units = gen.build_units(specs, capabilities=["gateway"], repo_root=_REPO)
-    assert [u["id"] for u in units] == ["svc"]
 
 
 def test_specs_order_and_subset_are_preserved() -> None:
@@ -127,7 +137,7 @@ def test_generated_manifest_is_consumed_by_load_manifests(tmp_path: Path) -> Non
     expected = gen.build_units(capabilities=["gateway", "agent-runner"], repo_root=_REPO)
     assert [manifest.id for manifest in registry.units] == [u["id"] for u in expected]
     first = registry.units[0]
-    assert first.id == "gateway"
+    assert first.id == "gate"
     assert first.exec[0] == "/bin/sh"
     assert first.attach == "root"
 
@@ -141,3 +151,23 @@ def test_session_host_attach_table_matches_the_g6b_ruling() -> None:
         "orchestration-session": "ops",
         "exec-child": "agent-host",
     }
+
+
+def test_windows_manifest_is_direct_and_preserves_path_arguments(tmp_path, monkeypatch):
+    import shlex
+
+    monkeypatch.setattr(gen, "sys", SimpleNamespace(platform="win32"))
+    repo = tmp_path / "checkout with spaces"
+    assert gen._exec_argv(".venv/bin/python -m services.agent_host.daemon", repo) == [
+        str(repo / ".venv/Scripts/python.exe"),
+        "-m",
+        "services.agent_host.daemon",
+    ]
+    executable, config = repo / "bin/collector.exe", repo / "config/collector config.yaml"
+    assert gen._exec_argv(shlex.join([str(executable), "--config", str(config)]), repo) == [
+        str(executable),
+        "--config",
+        str(config),
+    ]
+    with pytest.raises(ManifestError, match="direct command"):
+        gen._exec_argv(".venv/bin/python -m worker && other", repo)

@@ -1,12 +1,11 @@
-"""Health-probe alert machinery: failure counting, edge alerts, auto-rollback gate.
+"""Health-probe outage episodes, alert grading, and owner notifications.
 
 Split out of ``cli.commands._cluster_health`` (2026-08-07, Task #1025) to keep
 that module under the per-file 800-line ceiling once the non-prod-checkout
 guard (PR #1821) and R2-D's deploy-window changes (PR #1824) both landed.
 
-Owns the consecutive-failure counter file, the time-graded owner alert (W16,
-via the IM bridge /send RPC with the alerts ingest), the local fallback ingest
-path, and the auto-rollback trigger at the failure threshold. One state file
+Owns the time-graded owner alert, the IM bridge /send RPC with the alerts
+ingest, and the local fallback ingest path. One state file
 tracks the true start and last-fired severity of each outage episode so normal
 recovery stays quiet and WARNING can escalate in place to ERROR.
 The probe runner itself (`run_health_probe`) stays in ``_cluster_health`` and
@@ -15,7 +14,6 @@ imports the pieces it needs from here.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -25,12 +23,6 @@ from typing import Any, Literal
 import httpx
 
 from shared.transition import transition_severity
-
-# Consecutive-failure tracking file. Lives under $AVA_HOME so it is
-# cluster-scoped and survives restarts. Its four lines are count, failure
-# class, reason, and timestamp; it deliberately has no DB dependency because
-# the probe might be running when the DB is down.
-FAILURE_COUNT_FILE = "health_probe_failures"
 
 # Transition state for owner alerts: message, episode starts_at, last-fired
 # severity (empty until the episode reaches WARNING), one logical field per
@@ -67,8 +59,7 @@ def _notify_owner(text: str) -> None:
 
     No-ops (logs) when IM notifications are disabled (`alerts.im_notify_enabled`
     — the same master switch the gateway's alerts ingest honours). Never
-    raises: alerting is a side channel and must not break the probe or the
-    auto-rollback path it gates; a delivery failure (im_bridge down, network
+    raises: alerting is a side channel and must not break health observation; a delivery failure (im_bridge down, network
     error) is logged to stderr and otherwise surfaces only through the probe's
     exit code in the cron log.
 
@@ -160,8 +151,7 @@ def _ingest_alert(
     Never raises. On a transport/HTTP failure the gateway is unreachable —
     typically the very outage being reported — so the probe falls back to
     writing the row and sending the IM itself (`_ingest_alert_fallback`);
-    alerting is a side channel and must never break the probe or the
-    auto-rollback path it gates.
+    alerting is a side channel and must never break health observation.
     """
     from shared.alerts import fingerprint as compute_fingerprint
     from shared.config import settings
@@ -414,106 +404,13 @@ def _alert_recovery(home: Path) -> None:
         )
 
 
-def _reset_failure_count(home: Path) -> None:
-    """Reset the consecutive-failure counter to 0."""
-    (home / FAILURE_COUNT_FILE).write_text(f"0\ncode\n\n{datetime.now(UTC).isoformat()}")
-
-
-def _increment_failure_count(home: Path, *, failure_class: str = "code", reason: str = "") -> int:
-    """Increment the code-failure counter and retain its last classified reason."""
-    counter_path = home / FAILURE_COUNT_FILE
-    try:
-        lines = counter_path.read_text().splitlines()
-        current = int(lines[0]) if len(lines) == 4 else 0
-    except (FileNotFoundError, ValueError):
-        current = 0
-    current += 1
-    counter_path.write_text(
-        f"{current}\n{failure_class}\n{reason}\n{datetime.now(UTC).isoformat()}"
-    )
-    return current
-
-
 def _deploy_suppression() -> str | None:
-    """The live-deploy explanation for alert grading and rollback counting.
+    """Pause alert grading only while a live deploy explains the outage.
 
-    **A cluster mid-deploy is not an unhealthy cluster.** Every rollback-gating check
-    here (gateway liveness, agent population, schema) fails *by design* while a deploy
-    stops services and migrates — the expected state, not evidence the new code is
-    bad. This probe is OS-scheduled, so it keeps firing throughout; at
-    `StartInterval 300` with `--threshold 3`, fifteen minutes of a legitimate deploy
-    is enough to auto-roll-back production out from under the rollout still running,
-    with the two actors pulling the pin in opposite directions. The 2026-07-29
-    rollout's first phase took ~8 minutes. That it did not trip was timing.
-
-    This was the one automated actor that did not consult the deploy lease. The pin
-    controller, the code controller and the stranded-pause controller all already ask
-    "is a deploy running?" and defer; the probe did not, and nobody is watching when
-    it fires.
-
-    **Bounded by the lease's own TTL, with no second clock.** A deploy that dies
-    holding the lease cannot pause grading or counting past that: the lease stops
-    being live, alert severity resumes from the episode's true start, and failures
-    count again. A settle hold is bounded harder still — `deploy_in_flight` releases
-    it the moment every host reaches the pin, rather than waiting out the window. An
-    unreadable lease explains nothing: the probe must not be talked out of its job by
-    a Postgres hiccup (`deploy_in_flight` returns not-active on any failure).
-
-    **This is also why `--threshold` does not have to grow when the fleet gets
-    slower.** The lease is what protects a deploy from this probe, and the lease is
-    now shaped by the deploy (renewed while it runs, held over the hosts still
-    converging — `shared.deploy_timing`), not by a duration guessed here. A threshold
-    raised to cover the slowest imaginable rollout would only make a genuinely bad
-    release live longer; the deploy window is the right instrument, and it is already
-    exact.
+    The episode retains its true start. An expired or unreadable deploy owner
+    explains nothing, so severity resumes from that same start.
     """
     from ops.deploy_window import deploy_in_flight
 
     window = deploy_in_flight()
     return window.detail if window.active else None
-
-
-def _handle_consecutive_failure(
-    home: Path,
-    threshold: int,
-    *,
-    failure_class: str = "code",
-    reason: str = "",
-) -> None:
-    """Record a probe failure and trigger rollback once failures reach the threshold.
-
-    Bumps the consecutive-failure counter; when it reaches `threshold`, runs
-    `ava cluster rollback --yes`. The counter is reset ONLY after a
-    successful rollback, so a failed rollback is re-attempted on the next probe
-    run rather than resetting the count and starting the countdown over.
-
-    Only reached when no deploy is in flight — the caller gates on
-    `_deploy_suppression`, which is where the reasoning for that lives.
-
-    The rollback is invoked via `sys.argv[0]` — the absolute `ava` path the OS
-    scheduler launched this probe with — not a bare `ava` on PATH, which would
-    not resolve under launchd/cron's minimal PATH (and guarantees the rollback
-    targets the same cluster as the probe)."""
-    if failure_class != "code":
-        return
-    count = _increment_failure_count(home, failure_class=failure_class, reason=reason)
-    if count < threshold:
-        print(f"  consecutive failure {count}/{threshold}", file=sys.stderr)
-        return
-
-    print(
-        f"  consecutive failures reached {count} (threshold {threshold}) — rolling back",
-        file=sys.stderr,
-    )
-    result = subprocess.run(
-        [sys.argv[0], "cluster", "rollback", "--yes"],
-        check=False,
-    )
-    if result.returncode == 0:
-        _reset_failure_count(home)
-        print("  rollback succeeded — failure count reset", file=sys.stderr)
-    else:
-        print(
-            f"  rollback failed (exit {result.returncode}) — failure count kept at {count}",
-            file=sys.stderr,
-        )

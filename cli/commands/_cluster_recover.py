@@ -1,34 +1,19 @@
-"""`ava cluster recover` — clear a deploy lock that no live deploy owns.
+"""`ava cluster recover` — clear a deploy lease and pause that no live owner holds.
 
-`ava cluster update --force` skips the cluster-wide deploy-window check, which is the right
-override for a *signal* the operator knows is stale — an unreachable host, a reaped
-updater session. It does not help against the other half: a crashed orchestration
-leaves a live `cluster_update_lock` row behind, and `_run_gateway_orchestration`
-takes that lock *after* the window check, so a forced rollout still aborts with
-"another cluster update is in progress" until the lock's TTL expires. That is up to
-`LOCK_TTL_S` (30 min) of a cluster nobody can deploy to, on the strength of a
-process that is already dead.
+A deploy lease or a paused host posture can outlive the process that took it.
+This verb runs `ops.ops_cluster.cluster_recover_op` in-process, so it needs only
+the data plane, not the gateway HTTP API that is often down in the same incident.
 
-A lease whose local holder process is provably gone is also reclaimed
-automatically by the watchdog's `stranded_lease` controller (one round, same
-pid proof, same compare-and-set) — this verb remains the immediate manual path
-and the only one that also clears a stranded pause for the shapes the
-controller must not touch (a remote holder, a settle hold, a maintenance hold
-kept for an operator).
-
-`ops.ops_cluster.cluster_recover_op` has always been able to fix that — it clears
-the lock plus a stranded paused posture, and carries the safety that makes it
-sound: it refuses while the lease holder's process is still running (pid-probed
-when the holder is this host) and while this host's updater lease is live, so it
-can only ever clear a hold whose owner is definitively gone. It was reachable only through
-`POST /api/cluster/recover`, on the gateway — and a stranded deploy hold usually
-comes with a gateway that is down, so the moment the override is most needed is the
-moment HTTP cannot deliver it. This verb runs the same op in-process, needing only
-the data plane.
+The op clears nothing while any owner may still act: it refuses on an unresolved
+updater handoff, on a deploy-lease holder whose process is still running
+(pid-probed when the holder is this host), and on this host's live updater lease.
+Only then does it claim the stale lease by compare-and-set, unpause this host and
+release the lease.
 
 A holder on *another* machine cannot be pid-probed from here and is conservatively
-treated as live (refuse rather than risk clobbering a real rollout); wait out its
-TTL or run this on that host.
+treated as live (refuse rather than risk clobbering a real owner); wait out its
+TTL or run this on that host. Prepared release operations are not recovered here:
+they continue by resubmitting their captured request.
 """
 
 from __future__ import annotations
@@ -44,8 +29,7 @@ def cmd_cluster_recover() -> int:
     Returns 0 when the cluster is (or has been made) deployable, 1 when a live
     deploy still owns it — that refusal is the command working, not failing.
     """
-    from ops.cluster import ClusterUpdateInProgress
-    from ops.ops_cluster import cluster_recover_op
+    from ops.ops_cluster import ClusterUpdateInProgress, cluster_recover_op
     from shared.cluster_lock import update_lock_holder
 
     holder = update_lock_holder()

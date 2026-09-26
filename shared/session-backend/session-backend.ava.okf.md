@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`shared/session_backend.py` is the interface every long-running named session goes through. It unifies three platform supervisors behind one protocol: **posixproc** (`shared/posixproc.py`, POSIX native), the **per-session pty hosts** (`shared/sessions/pty/`), and **winproc** (`shared/winproc.py`, Windows). The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to — asked by liveness-from-freshness consumers such as `ops.cluster_deploy._reap_stalled_updater`). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
+`shared/session_backend.py` is the interface every long-running named session goes through. It unifies three platform supervisors behind one protocol: **posixproc** (`shared/posixproc.py`, POSIX native), the **per-session pty hosts** (`shared/sessions/pty/`), and **winproc** (`shared/winproc.py`, Windows). The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
 
 Three entry points, three session classes:
 
@@ -20,7 +20,9 @@ Three entry points, three session classes:
 - `get_shell_backend()` — **agent interactive shells / watchers**: `PtySessionBackend` (per-session pty hosts) on POSIX, the native supervisor on Windows. Never addresses service or orchestration sessions.
 - `native_proc()` — **agent processes** (non-interactive, no PTY needed): the posixproc or winproc module directly, used by `ops.agent_launch` (spawn / kill-stale) and the reap / force-terminate / status consumers.
 
-**Every platform-supervisor import in this module is method-local, and that is load-bearing**: the agent-runner self-update (`cli/commands/_update_agent_runner.py`) calls `_do_stop` **in-process** after `git checkout` + `uv sync`, so the session-kill code that stop runs is whatever `sys.modules` holds then. Deferred imports make that stop load the just-pulled killer off disk instead of the pre-pull one (PR #932's `winproc.kill_session` fix reaches the rollout that ships it); `tests/cli/test_update_import_timing.py` fails if one is hoisted.
+**Platform-supervisor imports are method-local** so selecting one backend does
+not import every platform implementation. Current native service custody belongs
+to the root service runtime; the backend remains for its surviving session users.
 
 ## Core responsibilities
 
@@ -42,7 +44,7 @@ Three entry points, three session classes:
 
 ### macOS firewall manifest
 The Application Firewall allow-list manifest, reconciliation, status rendering,
-and OFF_BOX_UNREACHABLE attribution (issue #949):
+and off-box reachability attribution (issue #949):
 [[shared/session-backend/firewall-audit.ava.okf.md]].
 
 ## Entry points

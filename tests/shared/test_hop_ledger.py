@@ -7,16 +7,11 @@ import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import TracebackType
-from typing import Self
-from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import SecretStr
 
-from services.agent_ops import bootstrap
-from services.agent_ops.bootstrap import ObserverProjection, PreparedObservation, ledger_response
+from services.agent_ops.bootstrap import PreparedObservation, ledger_response
 from shared.hop_ledger import (
     ENVELOPE_VERSION,
     MAX_LEDGER_BYTES,
@@ -316,59 +311,3 @@ async def test_ledger_route_serves_challenge_gated_slot(tmp_path: Path) -> None:
         ).hexdigest()
         == payload["payload_digest"]
     )
-
-
-class _StoppedServer:
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        return None
-
-    async def serve_forever(self) -> None:
-        return None
-
-
-def _projection() -> ObserverProjection:
-    return ObserverProjection(
-        db_url=SecretStr("postgresql://projected.invalid/test"),
-        cluster_secret=SecretStr(""),
-        ops_port=18106,
-    )
-
-
-def _skip_validate_entry(_context: PreparedObservation, _projection: ObserverProjection) -> None:
-    return None
-
-
-@pytest.mark.asyncio
-async def test_serve_mounts_the_ledger_route_with_the_observation_route(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    home = _home(tmp_path)
-    _write_slot_like_the_writer(home)
-    start = AsyncMock(return_value=_StoppedServer())
-    monkeypatch.setattr(bootstrap, "validate_entry", _skip_validate_entry)
-    monkeypatch.setattr(bootstrap, "start_daemon_http", start)
-    context = _prepared(home)
-
-    await bootstrap.serve(context, _projection())
-
-    awaited = start.await_args
-    assert awaited is not None
-    routes = awaited.kwargs["extra_routes"]
-    assert set(routes) == {
-        ("POST", "/ops/bootstrap-observation"),
-        ("POST", "/ops/bootstrap-hop-ledger"),
-        # The restricted /ops effect delivery (allowlisted kinds only).
-        ("POST", "/ops"),
-    }
-    body = json.dumps({"challenge": str(context.challenge.challenge)}).encode()
-    status, served, _content_type = await routes[("POST", "/ops/bootstrap-hop-ledger")](body)
-    assert status == 200
-    assert json.loads(served)["journal_readable"] is True

@@ -39,7 +39,6 @@ pytestmark = [
     # stubs respawn_service suite-wide (tests/conftest.py:_guard_service_respawn) —
     # under the stub these assertions would pass without spawning anything. The
     # session lands on this unit's own session home and each test kills its own.
-    pytest.mark.real_service_respawn,
 ]
 
 _EXPECTED_BIN = str(repo_root() / ".venv" / "bin")
@@ -91,20 +90,3 @@ def test_launch_path_activates_venv(unit_home: Path) -> None:
         assert env.get("VE") == _EXPECTED_VENV, env
     finally:
         backend.kill_session("venvcheck-launch", graceful=False)
-
-
-def test_respawn_path_activates_venv(unit_home: Path) -> None:
-    """`service_respawn.respawn_service` (the healthcheck respawn path) likewise
-    runs with the venv activated, even though `forward_env_prefix` carries no PATH."""
-    from shared.cluster import session_name
-    from shared.service_respawn import respawn_service
-    from shared.session_backend import get_backend
-
-    out = unit_home / "respawn_env.txt"
-    assert respawn_service("venvcheck-respawn", _probe_cmd(out), repo_root())
-    try:
-        env = _read(out)
-        assert _path0(env) == _EXPECTED_BIN, env
-        assert env.get("VE") == _EXPECTED_VENV, env
-    finally:
-        get_backend().kill_session(session_name("venvcheck-respawn"), graceful=False)

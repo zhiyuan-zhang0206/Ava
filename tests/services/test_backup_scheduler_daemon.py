@@ -8,7 +8,6 @@ import os
 import socket
 import subprocess
 import sys
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,16 +16,6 @@ import pytest
 from services.backup_scheduler import daemon
 from shared import daemon_health
 from shared.config import settings
-
-
-@pytest.fixture(autouse=True)
-def inline_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Cadence tests replace only the process boundary; shutdown tests spawn it."""
-
-    async def run(job: Callable[[], object]) -> None:
-        job()
-
-    monkeypatch.setattr(daemon, "run_job", run)
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:
@@ -48,11 +37,14 @@ def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
 
     Point schema startup at a deliberate connection refusal: a missing module
     guard would silently exit 0, while a real entrypoint reaches the schema
-    assertion and reports its traceback.
+    assertion and reports its traceback. The scheduler is a gateway process: its
+    home ``.env`` is the authority for cluster-pinned keys, so that file carries
+    the gateway-local owner password instead of the inherited environment.
     """
     (tmp_path / ".env").write_text(
         "AVA_DB_URL=postgresql://ava:test@127.0.0.1:1/ava\n"
         "AVA_REDIS_URL=redis://ava:test@127.0.0.1:1/0\n"
+        "AVA_DB_ADMIN_PASSWORD=test-db-owner-password\n"
     )
     env = dict(os.environ)
     env.update(
@@ -74,7 +66,7 @@ def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "Traceback" in result.stderr
-    assert "assert_schema_current" in result.stderr
+    assert "assert_schema_current" in result.stderr, result.stderr
 
 
 async def _http_get(port: int) -> tuple[int, bytes]:
@@ -206,10 +198,11 @@ def test_due_backup_runs_once_then_waits_for_tomorrow(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(daemon, "is_due", _always_due)
 
-    def record_run(now: datetime) -> None:
+    async def record_run(kind: str, *, now: datetime) -> None:
+        assert kind == "dump"
         ran.append(now)
 
-    monkeypatch.setattr(daemon, "run_backup", record_run)
+    monkeypatch.setattr(daemon, "run_job", record_run)
 
     async def stop_after_success(_now: datetime) -> None:
         raise asyncio.CancelledError
@@ -230,14 +223,14 @@ def test_failed_backup_retries_before_tomorrow(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(daemon, "is_due", _always_due)
 
-    def fail(_now: datetime) -> None:
+    async def fail(_kind: str, *, now: datetime) -> None:
         raise RuntimeError("temporary failure")
 
     async def stop_after_retry(seconds: float) -> None:
         sleeps.append(seconds)
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(daemon, "run_backup", fail)
+    monkeypatch.setattr(daemon, "run_job", fail)
     monkeypatch.setattr(daemon, "_sleep", stop_after_retry)
 
     with pytest.raises(asyncio.CancelledError):
@@ -268,7 +261,11 @@ async def test_due_local_restore_drill_runs_after_a_successful_dump(
         "local_dump_restore_due",
         due,
     )
-    monkeypatch.setattr(daemon, "run_local_dump_restore", lambda: calls.append("restore"))
+
+    async def restore(kind: str) -> None:
+        calls.append(kind)
+
+    monkeypatch.setattr(daemon, "run_job", restore)
     monkeypatch.setattr(daemon, "record_local_dump_restore_success", record_success)
 
     await daemon._run_due_local_dump_restore(now)
@@ -288,7 +285,7 @@ async def test_due_local_restore_drill_reports_failure_without_publishing_succes
     def due(_now: datetime, *, last_success: datetime | None) -> bool:
         return True
 
-    def fail_restore() -> None:
+    async def fail_restore(_kind: str) -> None:
         raise RuntimeError("scratch restore failed")
 
     def unexpected_success(_now: datetime) -> None:
@@ -298,7 +295,7 @@ async def test_due_local_restore_drill_reports_failure_without_publishing_succes
         emitted.append((category, event_name, kwargs))
 
     monkeypatch.setattr(daemon, "local_dump_restore_due", due)
-    monkeypatch.setattr(daemon, "run_local_dump_restore", fail_restore)
+    monkeypatch.setattr(daemon, "run_job", fail_restore)
     monkeypatch.setattr(daemon, "record_local_dump_restore_success", unexpected_success)
     monkeypatch.setattr(daemon.telemetry, "emit", record_emit)
 
@@ -332,7 +329,7 @@ async def test_invalid_local_restore_marker_reports_failure_without_running_rest
     monkeypatch.setattr(daemon, "load_local_dump_restore_success", invalid_marker)
     monkeypatch.setattr(
         daemon,
-        "run_local_dump_restore",
+        "run_job",
         lambda: pytest.fail("invalid marker must not run the restore"),
     )
     monkeypatch.setattr(daemon.telemetry, "emit", record_emit)

@@ -26,7 +26,7 @@ session leader** (the 2026-09-13 ruling by agent #2343/#405's thread):
   session) the direct parent is the fallback, per the same ruling.
 
 The identity is a pid + birth pair judged with the discipline
-`shared/proc_tree.py` owns (the same key pid reuse is judged by). Missing
+`shared/native_process/ownership.py` owns (the same key pid reuse is judged by). Missing
 evidence -- no identity recorded (a pre-#3270 journal) or an unreadable probe
 -- is never a release license; the callers escalate loudly instead.
 """
@@ -72,10 +72,10 @@ class ProcessRef:
         """
         # Method-local (shared/proc.py precedent): the in-process updater's
         # pre-checkout import closure must not reach shared.session_record /
-        # shared.proc_tree, so the post-checkout image loads the new files
+        # shared.native_process.ownership, so the post-checkout image loads the new files
         # (the PR #932 class); tests/cli/test_update_import_timing.py pins it.
-        from shared.proc_tree import create_time_matches, stable_create_time
-        from shared.session_record import pid_starttime_ticks
+        from shared.native_process import pid_starttime_ticks
+        from shared.native_process.ownership import create_time_matches, stable_create_time
 
         try:
             proc = psutil.Process(self.pid)
@@ -179,9 +179,9 @@ def _argv_head(proc: psutil.Process) -> str:
 def _capture(proc: psutil.Process) -> ProcessRef | None:
     """Best-effort capture of one live process; None when unreadable."""
     # Deferred like ProcessRef.probe: keep the updater's pre-checkout closure
-    # off shared.session_record / shared.proc_tree.
-    from shared.proc_tree import stable_create_time
-    from shared.session_record import pid_starttime_ticks
+    # off shared.session_record / shared.native_process.ownership.
+    from shared.native_process import pid_starttime_ticks
+    from shared.native_process.ownership import stable_create_time
 
     try:
         birth = stable_create_time(proc)

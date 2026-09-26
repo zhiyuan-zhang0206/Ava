@@ -450,20 +450,8 @@ pythonpath = ["."]
 # prepend mode requires __init__.py for every dir containing tests, inconsistent and prone to basename collisions.
 addopts = ["-ra", "--strict-markers", "--import-mode=importlib"]
 markers = [
-    # Opt out of the autouse daemon-respawn guard (tests/conftest.py) for tests that
-    # exercise the *real* shared.service_respawn.respawn_service — argv-shape
-    # assertions against a faked subprocess.run, or the venv-activation test that
-    # genuinely spawns a session.
-    "real_service_respawn: let this test call the real respawn_service",
-    # Opt out of the autouse cluster-spawn guard (tests/conftest.py) for tests whose
-    # subject IS ops.cluster.unpause_local_cluster / spawn_update / spawn_rollout /
-    # spawn_restart — they fake subprocess.run, so nothing is really spawned.
-    "real_cluster_spawn: let this test call the real ops.cluster spawn entry points",
-    # Opt out of the autouse gateway-readiness guard (tests/conftest.py) for tests whose
-    # subject IS the pre-Phase-B gate — they stub the probe seams instead, so nothing
-    # is really dialed.
-    "real_gateway_readiness_gate: let this test call the real await_gateway_serving",
-    "real_service_readiness_gate: let this test call the real _wait_for_services_ready",
+    "native_permissions_helper: explicit isolated native helper proof; owns artifact, signing and exact-home job cleanup",
+    "real_service_readiness_gate: let this test call the real _root_driver readiness waits (_wait_for_service_tree, _wait_for_root_services_ready)",
     "real_health_port_gate: let this test call the real _occupied_health_ports",
     # Tests that are timing-sensitive, race-prone, or use real DB LISTEN/NOTIFY —
     # run serial (-n 1) while stable tests run parallel (-n auto).

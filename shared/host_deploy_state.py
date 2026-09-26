@@ -7,8 +7,7 @@ answered with files, session probes and log mtimes:
   file and `updating.flag`: `paused` is the static "this host is drained, waiting
   for an update" window (the gateway's Phase A fan-out), `converging` is the
   updater actually running on this host (its lease is live). The gateway's 503
-  middleware reads this host's posture; the stranded-pause controller reads it
-  to tell a real pause from a stranded one.
+  middleware reads this host's posture.
 - **paused_at** — the moment the current pause window started: set when the
   posture enters `paused`, preserved through `converging`, cleared on `idle`.
   It is the updater-outcome reader's anchor (what the `cluster_paused` file's
@@ -20,12 +19,12 @@ answered with files, session probes and log mtimes:
 
 The old signals were retired by the old-signal sweep (PR5): the `cluster_paused`
 file and `updating.flag` are no longer written or read, and every consumer reads
-this module's row. The always-up gate's file is now owned separately by
+this module's row. Gate's file is now owned separately by
 `shared.ui_update_state`: whole-cluster UI ownership must span local
 pause/converge/start transitions and the complete Phase-B tail.
 
 Layering: `shared` must not import `cli`/`gateway`, and this module is read by
-the gateway middleware, the ops controllers, the updater and the gate — the
+the gateway middleware, maintenance, the updater and the gate — the
 machine identity comes from `shared.machine`, the DB from `shared.db`.
 """
 
@@ -35,19 +34,17 @@ import contextlib
 import dataclasses as _dataclasses
 import datetime as _dt
 import errno
-import json
 import logging
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any
 
 import shared.db
 from shared.db_transaction import write_transaction
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.machine import machine_name
-from shared.paths import ava_home, run_dir
+from shared.paths import run_dir
 
 _log = logging.getLogger("shared.host_deploy_state")
 
@@ -88,24 +85,6 @@ class HostDeployState:
     updated_at: _dt.datetime
     updater_lease_expires_at: _dt.datetime | None
     paused_at: _dt.datetime | None = None
-    # The stranded-hold record (task #3132): set while this host's pause is a
-    # maintenance hold that has lost its owner — the shape a failed updater leg
-    # leaves behind (its run exited non-zero, the hold was never released, and
-    # nothing is executing that could release it). It exists so the alarm
-    # (services.heartbeat.stranded_holds) and every roster surface can state
-    # that failure from the DB alone: the held host's own ops server is
-    # typically down with it, so no live probe can carry the fact. `since` is
-    # stamped once at declaration and preserved until the verdict clears;
-    # `reason` carries the updater verdict that justified it.
-    stranded_hold_since: _dt.datetime | None = None
-    stranded_hold_reason: str | None = None
-    # The bounded automatic recovery of that hold (task #3142): the per-episode
-    # attempt budget (`reserve_stranded_recovery` is the compare-and-set that
-    # spends it) and the latest attempt's outcome note for the operator. Both
-    # clear with the record, so a new episode starts with a fresh budget.
-    stranded_hold_attempts: int = 0
-    stranded_hold_attempted_at: _dt.datetime | None = None
-    stranded_hold_recovery_note: str | None = None
     db_now: _dt.datetime = _dataclasses.field(default_factory=lambda: _dt.datetime.now(_dt.UTC))
 
     @property
@@ -130,11 +109,9 @@ class HostDeployState:
         That next update then has a window — between `pause_local_cluster` and its
         updater's first `touch_updater_lease`, which is a detached session spawn plus
         a Python cold start, seconds on a Windows host — where the row reads exactly
-        like a host whose updater died. Both readers of this fact act on it: Phase B
-        abandons the host as `POLL_STALLED` (prod, `win`, 2026-08-06 and 08-12: both
-        rounds the host went on to converge minutes later on its own), and
-        `ops.updater_reap._updater_hung` force-kills the session that was just
-        spawned.
+        like a host whose updater died. A reader acting on that reading would
+        abandon or kill a working update (prod, `win`, 2026-08-06 and 08-12: both
+        rounds the host went on to converge minutes later on its own).
 
         A lease armed during this window expires at `armed + UPDATER_LEASE_TTL_S`, so
         `expires - TTL` dates the arming and anything armed before `paused_at` belongs
@@ -142,8 +119,7 @@ class HostDeployState:
         (`_LEASE_EXPIRY_SQL`, and `paused_at`'s `now()`), which is what makes the
         subtraction meaningful across two machines. A row that cannot be dated at all
         (no pause window) is not evidence either: undatable is "cannot tell", which
-        both callers must read as "do not act" — one would kill a live updater, the
-        other would strand a working host.
+        every caller must read as "do not act".
 
         **The TTL is read at compare time, not stored with the lease.** So a run
         armed under one `UPDATER_LEASE_TTL_S` and dated under a smaller one back-dates
@@ -167,8 +143,7 @@ def _read_with_conn(conn: Any, machine: str) -> HostDeployState | None:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, "
-            "stranded_hold_since, stranded_hold_reason, stranded_hold_attempts, "
-            "stranded_hold_attempted_at, stranded_hold_recovery_note, now() "
+            "now() "
             "FROM host_deploy_state WHERE machine = %s",
             (machine,),
         )
@@ -181,12 +156,7 @@ def _read_with_conn(conn: Any, machine: str) -> HostDeployState | None:
         updated_at=row[2],
         updater_lease_expires_at=row[3],
         paused_at=row[4],
-        stranded_hold_since=row[5],
-        stranded_hold_reason=row[6],
-        stranded_hold_attempts=row[7],
-        stranded_hold_attempted_at=row[8],
-        stranded_hold_recovery_note=row[9],
-        db_now=row[10],
+        db_now=row[5],
     )
 
 
@@ -208,19 +178,17 @@ def read(machine: str | None = None, *, conn: Any | None = None) -> HostDeploySt
 def read_all() -> dict[str, HostDeployState]:
     """Every machine's deploy-state row, keyed by machine name.
 
-    The gateway's deploy-window signal 3 reads the roster this way (R1,
-    Task #1021) instead of probing each host's ops server: the probe's
-    `current_orchestration` field is a session-name judgment that dies with
-    the very daemon that answers it (`ops` stops mid self-update), while the
-    posture row is written by the pause and the updater's lease — both outside
-    the restarted services — and survives the whole window. A machine with no
-    row has never transitioned and reads as idle.
+    The gateway's deploy-window posture signal reads the roster this way (R1,
+    Task #1021) instead of probing each host's ops server: the posture row is
+    written by the pause and the updater's lease — both outside the restarted
+    services — and survives the whole window, while an ops daemon stops with the
+    services it would report on. A machine with no row has never transitioned
+    and reads as idle.
     """
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT machine, posture, updated_at, updater_lease_expires_at, paused_at, "
-            "stranded_hold_since, stranded_hold_reason, stranded_hold_attempts, "
-            "stranded_hold_attempted_at, stranded_hold_recovery_note, now() "
+            "now() "
             "FROM host_deploy_state"
         )
         return {
@@ -230,12 +198,7 @@ def read_all() -> dict[str, HostDeployState]:
                 updated_at=row[2],
                 updater_lease_expires_at=row[3],
                 paused_at=row[4],
-                stranded_hold_since=row[5],
-                stranded_hold_reason=row[6],
-                stranded_hold_attempts=row[7],
-                stranded_hold_attempted_at=row[8],
-                stranded_hold_recovery_note=row[9],
-                db_now=row[10],
+                db_now=row[5],
             )
             for row in cur.fetchall()
         }
@@ -346,242 +309,6 @@ def clear_updater_lease() -> None:
             "UPDATE host_deploy_state SET updater_lease_expires_at = NULL WHERE machine = %s",
             (machine,),
         )
-
-
-def mark_stranded_hold(reason: str) -> bool:
-    """Declare this host's stranded hold; True when THIS call declared it.
-
-    Called by the pause controller every round the stranded-hold verdict holds
-    (task #3132). `since` is stamped by Postgres once and preserved by
-    `COALESCE`, so every reader — the gateway's alarm pass, every roster
-    surface — sees one stable episode start while `reason` follows the latest
-    reading. Conditional on the row existing: a hold can only follow the pause
-    that wrote the posture row, and inventing a row here would fabricate deploy
-    state no transition produced. Never touches `updated_at`: that column's
-    freshness judgments (issue #2101) must not be renewed by a standby record.
-    """
-    machine = machine_name()
-    with write_transaction() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT stranded_hold_since FROM host_deploy_state WHERE machine = %s FOR UPDATE",
-            (machine,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            return False
-        newly = row[0] is None
-        # A new episode starts with a fresh recovery budget: reset the attempt
-        # counters in the same statement that stamps `since` (PostgreSQL reads
-        # every right-hand side against the pre-update row, so the CASEs see
-        # the old `stranded_hold_since`).
-        cur.execute(
-            "UPDATE host_deploy_state "
-            "SET stranded_hold_since = COALESCE(stranded_hold_since, now()), "
-            "    stranded_hold_reason = %s, "
-            "    stranded_hold_attempts = "
-            "        CASE WHEN stranded_hold_since IS NULL THEN 0 ELSE stranded_hold_attempts END, "
-            "    stranded_hold_attempted_at = "
-            "        CASE WHEN stranded_hold_since IS NULL THEN NULL "
-            "             ELSE stranded_hold_attempted_at END, "
-            "    stranded_hold_recovery_note = "
-            "        CASE WHEN stranded_hold_since IS NULL THEN NULL "
-            "             ELSE stranded_hold_recovery_note END "
-            "WHERE machine = %s",
-            (reason, machine),
-        )
-        return newly
-
-
-def clear_stranded_hold() -> bool:
-    """Clear this host's stranded-hold record when one is set; True when it did.
-
-    Called on every round the host is DECIDABLY not a stranded hold (owner
-    back, hold released, or a healthy idle window) and on the recovery path,
-    so the record cannot outlive the condition that justified it. A round whose
-    signals cannot be read is not a clear — the caller must leave the record
-    standing (task #3132; `stranded_pause.StrandedHoldVerdict`). A conditional
-    UPDATE, so the every-round call is a no-op write when nothing is declared.
-    """
-    machine = machine_name()
-    with write_transaction() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE host_deploy_state SET stranded_hold_since = NULL, "
-            "stranded_hold_reason = NULL, stranded_hold_attempts = 0, "
-            "stranded_hold_attempted_at = NULL, stranded_hold_recovery_note = NULL "
-            "WHERE machine = %s AND stranded_hold_since IS NOT NULL",
-            (machine,),
-        )
-        return cur.rowcount > 0
-
-
-def reserve_stranded_recovery(*, max_attempts: int, cooldown_s: float, note: str) -> int | None:
-    """Reserve one bounded automatic recovery attempt (task #3142).
-
-    Returns this attempt's number when THIS call won the reservation, else
-    None. The compare-and-set is the whole reservation: two racing deciders
-    cannot both spawn a recovery leg, and the budgets — attempts below
-    `max_attempts`, and `cooldown_s` since the last attempt — are enforced
-    atomically in the same UPDATE against Postgres' clock (`attempted_at` is
-    written by the DB, never by the caller). The note seeds the outcome
-    column; `finish_stranded_recovery` overwrites it with the result.
-    """
-    machine = machine_name()
-    with write_transaction() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE host_deploy_state "
-            "SET stranded_hold_attempts = stranded_hold_attempts + 1, "
-            "    stranded_hold_attempted_at = now(), "
-            "    stranded_hold_recovery_note = %s "
-            "WHERE machine = %s "
-            "  AND stranded_hold_since IS NOT NULL "
-            "  AND stranded_hold_attempts < %s "
-            "  AND (stranded_hold_attempted_at IS NULL "
-            "       OR stranded_hold_attempted_at < now() - make_interval(secs => %s)) "
-            "RETURNING stranded_hold_attempts",
-            (note, machine, max_attempts, cooldown_s),
-        )
-        row = cur.fetchone()
-        return int(row[0]) if row is not None else None
-
-
-def finish_stranded_recovery(note: str) -> None:
-    """Record the latest recovery attempt's outcome (success or failure text).
-
-    A no-op when no record stands (the episode ended while the attempt ran —
-    its outcome is then moot) and deliberately attempts-preserving: the
-    budget was spent at reservation time and is never refunded.
-    """
-    machine = machine_name()
-    with write_transaction() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE host_deploy_state SET stranded_hold_recovery_note = %s "
-            "WHERE machine = %s AND stranded_hold_since IS NOT NULL",
-            (note, machine),
-        )
-
-
-# --- the stranded-recovery note queue (task #4080) ---------------------------
-#
-# A stranded-recovery outcome must reach the host_deploy_state record, but its
-# writer is the OS-scheduled hold watchdog, which runs settings-lite: on a pure
-# agent-runner (a fetch unit) that context has no dialable DB URL at all
-# (`shared/config/_lite.py` plants the never-dialed sentinel), so the record
-# write can only ever fail there — and a failed write must not lose the note.
-# A note that cannot be written is queued durably beside the unit's other
-# state; the first DB-capable process (the watchdog's next run on a
-# gateway-serving unit, any daemon round on a pure runner) flushes it onto the
-# record. A flush whose episode has already closed is a no-op, like any late
-# finish.
-
-_PENDING_NOTE_NAME = "stranded-recovery-note-pending.json"
-
-
-def pending_stranded_recovery_note_path() -> Path:
-    """The queued note's file: ``$AVA_HOME/state/stranded-recovery-note-pending.json``."""
-    return ava_home() / "state" / _PENDING_NOTE_NAME
-
-
-def queue_stranded_recovery_note(note: str) -> None:
-    """Carry a stranded-recovery note that could not reach the record.
-
-    Single-slot, latest-wins (the record's own column is the latest outcome),
-    written owner-only through an atomic replace — the same discipline as the
-    unit's other private state. Raises on an unwritable state dir; the note is
-    never left partially written.
-    """
-    path = pending_stranded_recovery_note_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps({"note": note, "queued_at": time.time()}, sort_keys=True).encode()
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    fd = -1
-    try:
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        if os.name != "nt":
-            os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as file:
-            fd = -1
-            file.write(payload)
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(temporary, path)  # noqa: PTH105 — explicit atomic replacement primitive
-    finally:
-        if fd != -1:
-            with contextlib.suppress(OSError):
-                os.close(fd)
-        with contextlib.suppress(OSError):
-            temporary.unlink()
-
-
-def pending_stranded_recovery_note() -> str | None:
-    """The queued note awaiting the record, or None when none is queued/readable.
-
-    An unreadable file reads as absent rather than raising — the note is
-    advisory carry-forward, and the file stays in place for an operator to
-    inspect (the next queue write replaces it).
-    """
-    try:
-        raw = json.loads(pending_stranded_recovery_note_path().read_text())
-    except (OSError, ValueError):
-        return None
-    if not isinstance(raw, dict):
-        return None
-    payload = cast("dict[str, object]", raw)
-    note = payload.get("note")
-    if not isinstance(note, str) or not note:
-        return None
-    return note
-
-
-def clear_pending_stranded_recovery_note() -> None:
-    """Drop a queued note (it landed, or its episode is over)."""
-    pending_stranded_recovery_note_path().unlink(missing_ok=True)
-
-
-def flush_pending_stranded_recovery_note() -> bool:
-    """Land a queued note on the record; True when one was flushed, False when none waited.
-
-    The note is cleared only after the record write returns: a failed write
-    keeps it queued for the next capable process, and a write whose episode
-    has already closed is the ordinary late-finish no-op.
-    """
-    note = pending_stranded_recovery_note()
-    if note is None:
-        return False
-    finish_stranded_recovery(note)
-    clear_pending_stranded_recovery_note()
-    return True
-
-
-def record_stranded_recovery_note(note: str) -> Literal["recorded", "queued"]:
-    """Record a stranded-recovery note, or queue it when the record is out of reach.
-
-    The write path's carry-forward (task #4080): the OS hold watchdog runs
-    settings-lite — on a pure agent-runner its DB URL is the never-dialed
-    placeholder, so `finish_stranded_recovery` can only raise there even while
-    the cluster is healthy. Any failure queues the note durably instead of
-    dropping it; the first DB-capable process flushes it
-    (`flush_pending_stranded_recovery_note`).
-
-    Returns:
-        "recorded" — the note landed on the record.
-        "queued" — the write failed; the note waits in the local queue.
-
-    Raises:
-        RuntimeError: the write failed AND the note could not be queued either —
-            nothing was recorded anywhere.
-    """
-    try:
-        finish_stranded_recovery(note)
-    except Exception as write_exc:
-        try:
-            queue_stranded_recovery_note(note)
-        except Exception as queue_exc:
-            raise RuntimeError(
-                f"stranded-recovery note could not be recorded ({write_exc!r}) "
-                f"nor queued ({queue_exc!r})"
-            ) from queue_exc
-        return "queued"
-    return "recorded"
 
 
 def updater_lease_live(machine: str | None = None) -> bool:

@@ -63,9 +63,8 @@ from pydantic import AwareDatetime, Field, model_validator
 from shared.atomic_io import fsync_parent, write_text_atomic
 from shared.config import settings
 from shared.log import logger
-from shared.managed_writer_barrier import Digest, EvidenceModel
-from shared.managed_writer_observation import ExpectedProcess, observe_process
-from shared.proc_tree import create_time_matches
+from shared.native_process.ownership import create_time_matches
+from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess, observe_process
 from shared.session_backend import SessionBackend
 from shared.session_record import SessionRecord
 
@@ -561,17 +560,14 @@ def read_session_record(home: Path, session: str) -> SessionRecord | None:
 def record_matches_receipt(record: SessionRecord, receipt: SpawnReceipt) -> bool:
     """Cross-check a session record against a birth receipt.
 
-    The stable ``/proc`` starttime is authoritative and compared exactly; only
-    a record without it (a legacy/foreign record) falls back to the
-    create-time tolerance, the same resolution rule as
-    ``SessionRecord.identifies``. Cross-source readings (psutil at spawn vs
-    the child's ``/proc`` derivation) may drift within the tolerance by
-    construction.
+    The stable ``/proc`` starttime is authoritative when either side carries it;
+    a missing tick cannot adopt that birth. Other platforms require the exact
+    stable native create time on both sides. No legacy tolerance authorizes reuse.
     """
     process = receipt.expected_process()
     if record.pid != process.pid:
         return False
-    if record.starttime is not None:
+    if record.starttime is not None or process.starttime is not None:
         return record.starttime == process.starttime
     return create_time_matches(record.create_time, process.create_time)
 

@@ -5,7 +5,7 @@ Postgres connections; see `agent/db.py`).
 PgBouncer is the third per-cluster data-plane process — a peer of this cluster's
 own Postgres and Redis (`_cluster_instance.py`) — brought up on the cluster's own
 `pgbouncer` port (a registry-record fact; the port is no longer materialized in
-`.env` — AVA_DB_URL carries it) right after Postgres whenever
+`.env` — AVA_DB_URL carries it) after schema preparation and runner grants whenever
 `AVA_PGBOUNCER_ENABLED` (ON by default: past ~50 agents pooling is the density
 path). Setting it false is a kill-switch: nothing here runs, converge rewrites
 AVA_DB_URL to the direct Postgres port, and every consumer talks to Postgres
@@ -37,12 +37,11 @@ backend raise DuplicatePreparedStatement), which is what makes transaction pooli
 safe across the different backends a transaction hands out.
 
 POSIX only (macOS brew / Linux apt `pgbouncer` on PATH). Windows fails fast upstream
-in `ensure_cluster_instance`, so this module is never reached there.
+in `complete_gateway_data_plane`, so this module is never reached there.
 """
 
 from __future__ import annotations
 
-import os
 import shutil
 import signal
 import subprocess
@@ -50,14 +49,18 @@ import sys
 import time
 from pathlib import Path
 
+import psutil
+
 import shared.port_preflight
 from cli.commands._cluster_instance import (
     _BIND_WAIT_TIMEOUT_S,
     _bind_addrs,
-    _live_pg_socket_dir,
+    _pg_socket_dir,
     _wait_for_reachable_bind,
 )
 from cli.commands._converge_spec import ConvergeCtx
+from cli.commands._pooler_stop import OwnedPooler
+from shared.cluster import ownership
 from shared.cluster.derive import RUNNER_ROLE
 from shared.machine import reachable_host
 from shared.paths import ava_home
@@ -70,14 +73,6 @@ from shared.proc import process_alive
 _MAX_CLIENT_CONN = 500
 _DEFAULT_POOL_SIZE = 25
 
-# How often `_terminate_verified` re-probes while waiting out its grace period, and
-# how long it lets a force kill land before calling the process a survivor. Both are
-# reaction times for a stop that is already happening, not judgments about whether a
-# host is making progress, so they are deliberately not in the `shared.deploy_timing`
-# lattice.
-_TERMINATE_POLL_S = 0.2
-_FORCE_KILL_SETTLE_S = 0.5
-
 # libpq/psycopg send these startup parameters; PgBouncer rejects unknown ones unless
 # told to ignore them. Real GUCs (search_path etc.) are deliberately NOT here.
 _IGNORE_STARTUP_PARAMETERS = "extra_float_digits,options"
@@ -88,7 +83,7 @@ def runner_password_from_env() -> str:
 
     Kept as a pooler-local seam for callers and tests; the secret ownership is
     in ``shared.cluster`` so non-CLI consumers never import this CLI module.
-    An absent/empty value means the cluster predates the runner-role cutover.
+    An empty value is valid only for the explicit unauthenticated identity.
     """
     from shared.cluster import runner_password_from_env as read_runner_password
 
@@ -142,11 +137,9 @@ def _render_userlist(
     `ava_runner` entry with its own password once the cluster has one. PgBouncer
     double-quotes both fields; escape any embedded quote.
 
-    The runner entry appears only when a runner password exists: a legacy
-    cluster that never ran `ava cluster ensure-db-role` keeps a byte-identical
-    userlist, and a scram entry with an empty password would reject every
-    ava_runner dial anyway (nobody dials as ava_runner before the cutover, so
-    the entry's absence is silent either way)."""
+    An explicit owner-only userlist omits the runner entry. Normal start passes
+    the independent runner credential already recorded in the home identity.
+    """
     esc = db_admin_password.replace('"', '""')
     lines = [f'"{role}" "{esc}"']
     if runner_role and runner_password:
@@ -171,7 +164,7 @@ def _render_ini(
     the same posture flag, so trust never reaches the LAN).
 
     The backend socket dir is the one the RUNNING pg actually listens on
-    (`_live_pg_socket_dir`, same probe the admin dial uses): `_start_pg` skips a
+    (`_pg_socket_dir`, the exact directory the admin dial uses): `_start_pg` skips a
     pg that is already up, so across the path-only cutover a pre-cutover pg
     still serves the old name-keyed dir — rendering the canonical dir there
     would break every pooled query while admin readiness stayed green.
@@ -199,7 +192,7 @@ def _render_ini(
     defended client-side (shared/db.py baseline restore per dial/borrow +
     read-write write posture; 2026-09-02 P0)."""
     listen_addr = ", ".join(_bind_addrs(cluster_secret))
-    socket_dir = _live_pg_socket_dir(pg_port)
+    socket_dir = _pg_socket_dir()
     from shared.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
     connect_query = f"connect_query='{PG_STATEMENT_TIMEOUT_SET_SQL}'"
@@ -273,26 +266,10 @@ def _pid_is_our_pooler(pid: int) -> bool:
     """Whether `pid` is really THIS home's pooler, and not a stranger that
     inherited the number.
 
-    A pidfile holds a bare integer and the OS recycles pids. pgbouncer unlinks its
-    pidfile on a clean exit but cannot on a force kill — and `_terminate_verified`
-    force-kills a straggler after 5s while a pooler holding live clients drains for
-    minutes, so an ordinary `ava stop` on a busy cluster is the normal way to
-    leave a stale pidfile behind, not an exotic one.
-
-    What that costs is concrete: `ensure_pgbouncer` treats a live pid as "already
-    running", SIGHUPs it and returns success. Once the number has been recycled,
-    every `ava start` signals an unrelated process (SIGHUP terminates most things
-    that are not pgbouncer) and starts no pooler — and since only a successful
-    start rewrites the pidfile, the state sustains itself. `AVA_DB_URL` carries
-    the pooler port, so the cluster is left with no database path at all.
-
-    This is also what makes the pooler the odd sibling in `stop_cluster_instance`:
-    Postgres is addressed by its data directory (`pg_ctl -D`) and redis by port +
-    this cluster's password, so neither can be aimed at the wrong process, let
-    alone the wrong home. And the house rule already exists one layer down —
-    `shared/posixproc.py` records a session's pid *and* its start-time and calls a
-    record live only when both match, precisely "to defeat pid recycling". The
-    pooler was the one signalling path left trusting the number alone.
+    A stale pidfile can name a recycled process after a crash or explicit force
+    stop. Validate its executable and exact configuration path before treating
+    it as a candidate; native custody also captures its process birth before
+    any reload or shutdown signal.
 
     The identity token is the config file the process was started with — the one
     argument that names a home. It is read back the way the process itself
@@ -317,8 +294,7 @@ def _pid_is_our_pooler(pid: int) -> bool:
     pgbouncer.ini` did to production on 2026-08-06.
 
     A process this user cannot introspect counts as NOT ours. A pooler that
-    outlives its stop is loud and idempotently restartable; a cross-cluster kill
-    is neither."""
+    outlives its stop retains custody."""
     import psutil
 
     try:
@@ -339,9 +315,8 @@ def _pid_is_our_pooler(pid: int) -> bool:
 def _running_pid() -> int | None:
     """The pid of a live pgbouncer OWNED BY THIS HOME (from its pidfile), or None.
 
-    The one seam both signalling paths read — `stop_pgbouncer`'s SIGTERM and
-    `ensure_pgbouncer`'s reload SIGHUP (which is a kill for most processes that
-    are not pgbouncer). A pidfile that no longer names our pooler — process gone,
+    Stop uses this for stale-pidfile cleanup before capturing native custody.
+    A pidfile that no longer names our pooler — process gone,
     or the number since recycled onto someone else (`_pid_is_our_pooler`) — reads
     as None and is removed, so the next bring-up starts from a clean slate instead
     of re-deciding against the same dead number. A live stranger is reported: that
@@ -370,20 +345,11 @@ def _running_pid() -> int | None:
 def _admin_reachable(
     listen_port: int, role: str, cluster_secret: str, host: str = "127.0.0.1"
 ) -> bool:
-    """Readiness probe that authenticates the client (scram) WITHOUT a server hop.
+    """Authenticate to the pooler's admin console without opening a backend.
 
-    Connects to PgBouncer's virtual `pgbouncer` admin database — a successful open
-    proves the listener is up and client scram works, but opens no backend
-    connection. This is what readiness must use: the pooler is brought up BEFORE the
-    cluster role/db is provisioned (both birth and a fresh start start the data plane
-    first, then provision), so a probe that dialed the real db would fail with `role
-    "ava_<cluster>" does not exist` and hang the bring-up. The admin console speaks
-    only the simple query protocol, so we open + close without a query (psycopg's
-    extended-protocol execute is rejected there).
-
-    `host` defaults to loopback — the listener that is always up once the pooler
-    runs. Public-bind verification is deliberately separate: it reads the local
-    socket table rather than making a network self-dial."""
+    Backend readiness is verified separately after schema and role provisioning.
+    Public bind verification reads the socket table, never a network self-dial.
+    """
     import psycopg
 
     from shared.url_secret import url_with_userinfo
@@ -464,6 +430,16 @@ def _wait_for_reachable_bind_gated(cluster_secret: str) -> bool:
     return _wait_for_reachable_bind()
 
 
+def _accepting_pooler(listen_port: int) -> OwnedPooler | None:
+    owner = ownership.pooler(_ini_path(), _pidfile_path())
+    if owner is None:
+        ownership.require_listener(None, listen_port, required=False)
+        return None
+    custodian = OwnedPooler(owner, listen_port, _ini_path())
+    custodian.require_accepting()
+    return custodian
+
+
 def ensure_pgbouncer(
     *,
     pg_port: int,
@@ -502,8 +478,9 @@ def ensure_pgbouncer(
     before the userlist rewrite.
 
     Only called when AVA_PGBOUNCER_ENABLED (gated by the caller in
-    `ensure_cluster_instance`)."""
-    db_admin_password = db_admin_password or cluster_secret
+    `complete_gateway_data_plane`)."""
+    if cluster_secret and not db_admin_password:
+        raise ValueError("authenticated pooler requires an explicit database owner credential")
     if runner_password is None:
         runner_password = runner_password_from_env()
     binary = pgbouncer_bin()
@@ -517,6 +494,7 @@ def ensure_pgbouncer(
             file=sys.stderr,
         )
         return 1
+    custodian = _accepting_pooler(listen_port)
     _write_config(
         pg_port=pg_port,
         listen_port=listen_port,
@@ -527,19 +505,17 @@ def ensure_pgbouncer(
         runner_role=RUNNER_ROLE if runner_password else None,
         runner_password=runner_password,
     )
-    pid = _running_pid()
-    if pid is not None:
+    if custodian is not None:
+        owner = custodian.identity
+        pid = owner.pid
         # A running pooler whose public listener verifies is reloaded, never waited
         # on: a transient blip on the private network must not hold `ava start`
         # hostage behind an already-serving pooler (P1).
         if pgbouncer_public_listener_reachable(listen_port, role, cluster_secret):
-            # Raw SIGHUP is safe HERE and nowhere else in this file: `signal.SIGHUP`
-            # is undefined on Windows, but a pooler only exists on a gateway unit and
-            # the gateway capability is POSIX-only (no native Windows redis to drive),
-            # so this line is unreachable there. `_terminate_verified` below had the
-            # same shape and was NOT unreachable — it is called from `_do_stop` on
-            # every platform — which is why it goes through `shared.proc` now.
-            os.kill(pid, signal.SIGHUP)  # online reload of ini + userlist
+            process = psutil.Process(pid)
+            if not owner.live():
+                raise RuntimeError("PgBouncer identity changed before reload")
+            process.send_signal(signal.SIGHUP)
             print(f"  ✓ pgbouncer already running (127.0.0.1:{listen_port}), reloaded")
             _report_backend_verification(listen_port, db_name, role, db_admin_password)
             return 0
@@ -566,13 +542,19 @@ def ensure_pgbouncer(
             "re-bind it; restarting the pooler",
             file=sys.stderr,
         )
-        if not _terminate_verified(pid, label="pgbouncer"):
+        if not custodian.stop(deadline=time.monotonic() + 5.0):
             print(
                 f"  ✗ could not stop the degraded pooler (pid {pid}) — it survived the "
-                "force kill; not starting a second pooler on the same port",
+                "graceful stop; custody retained, not starting a second pooler on the same port",
                 file=sys.stderr,
             )
             return 1
+    return _launch_pooler(listen_port, db_name, role, cluster_secret, db_admin_password)
+
+
+def _launch_pooler(
+    listen_port: int, db_name: str, role: str, cluster_secret: str, db_admin_password: str
+) -> int:
     if not _wait_for_reachable_bind_gated(cluster_secret):
         # Fail fast BEFORE starting: a pooler born now would degrade to loopback-only
         # and the public AVA_DB_URL path would be silently dead (the 2026-08-16
@@ -601,7 +583,7 @@ def ensure_pgbouncer(
         )
         return 1
     # -d daemonizes and returns immediately; wait for the listener to authenticate a
-    # client (admin console — no backend, since the cluster role is provisioned later).
+    # client; schema and grants have already been provisioned by the caller.
     for _ in range(60):
         if _admin_reachable(listen_port, role, db_admin_password):
             break
@@ -626,6 +608,7 @@ def ensure_pgbouncer(
             file=sys.stderr,
         )
         return 1
+    ownership.require_listener(ownership.pooler(_ini_path(), _pidfile_path()), listen_port)
     print(f"  ✓ pgbouncer started (127.0.0.1:{listen_port}, transaction pooling)")
     _report_backend_verification(listen_port, db_name, role, db_admin_password)
     return 0
@@ -634,12 +617,7 @@ def ensure_pgbouncer(
 def _report_backend_verification(
     listen_port: int, db_name: str, role: str, cluster_secret: str
 ) -> None:
-    """After readiness, attempt ONE real pooled backend connection and say what
-    happened. Admin readiness alone cannot see a broken backend route (e.g. a
-    stale socket dir), so on an already-provisioned cluster this is the line
-    that makes such a break loud at bring-up. On a fresh birth the role/db are
-    provisioned AFTER the pooler comes up, so a failure here is expected then —
-    reported as ⚠, never as success."""
+    """Report the pooled backend result; final start readiness requires it."""
     if _reachable(listen_port, db_name, role, cluster_secret):
         print("  ✓ pgbouncer backend verified (pooled SELECT 1)")
         return
@@ -668,69 +646,16 @@ def pgbouncer_listener_reachable(listen_port: int, role: str, cluster_secret: st
 
 
 def stop_pgbouncer() -> None:
-    """Stop this cluster's PgBouncer (best-effort; a not-running pooler is a no-op).
-    Counterpart of ensure_pgbouncer for `ava stop` / `ava cluster down`."""
+    """Stop this home's captured pooler; a previous drain is only waited on."""
     pid = _running_pid()
     if pid is None:
         return
-    # SIGTERM, then VERIFY the process actually exits: pgbouncer runs daemonized
-    # and can outlive the signal when it is mid-pool-drain (observed on a preview
-    # teardown 2026-08-06 — `ava stop` printed "pgbouncer stopped" while the
-    # process still held its socket and kept running). SIGKILL a straggler after
-    # the grace period and report honestly either way — a stop must never CLAIM
-    # success it did not verify.
-    _terminate_verified(pid, label="pgbouncer")
-
-
-def _terminate_verified(pid: int, *, label: str, timeout_s: float = 5.0) -> bool:
-    """Ask `pid` to stop, wait up to `timeout_s`, force-kill a straggler, and report
-    the verified outcome. A PID that is already gone counts as stopped (the race
-    between the pidfile read and the signal is covered either way).
-
-    Returns True iff the process is confirmed gone (or was already); False when it
-    survived the force kill — the caller can then report the stop as incomplete
-    instead of claiming success it did not verify (Task #965).
-
-    **Every step goes through `shared.proc`, and that is the whole fix.** This was
-    written in raw POSIX signals — `os.kill(pid, signal.SIGTERM)`, `os.kill(pid, 0)`
-    as the liveness probe, `signal.SIGKILL` — each of which is exactly one of the
-    spellings `shared.proc` exists to keep off a call site: on Windows `os.kill(pid,
-    0)` does not probe, it calls TerminateProcess (and raised `[WinError 87]` here),
-    and `signal.SIGKILL` is not defined at all (`process_alive` probes via psutil on
-    Windows and `os.kill(pid, 0)` on POSIX). `_reap_orphan_listeners` calls this
-    on **every** platform from inside `_do_stop`, so a Windows host raised out of the
-    middle of its own stop the moment any orphan held a unit port — which is what
-    killed win's 2026-08-12 11:40 self-update and, through the lease its aborted
-    chain never cleared, the two rollouts after it.
-
-    `PermissionError` — a pid this user may not touch, the POSIX twin of the same
-    failure — is handled on all three legs rather than one: `process_alive` reads it
-    as alive, and `request_stop` / `force_kill` return quietly instead of raising. It
-    used to escape as an unhandled exception from whichever leg met it first. The
-    outcome is now the honest one: nothing could be delivered, the process is still
-    there, and the stop reports a survivor rather than claiming a success it cannot
-    see."""
-    import time
-
-    from shared.proc import force_kill, request_stop
-
-    if not process_alive(pid):
-        print(f"  ✓ {label} stopped")
-        return True
-    request_stop(pid)
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if not process_alive(pid):
-            print(f"  ✓ {label} stopped")
-            return True
-        time.sleep(_TERMINATE_POLL_S)
-    force_kill(pid)
-    time.sleep(_FORCE_KILL_SETTLE_S)
-    if not process_alive(pid):
-        print(f"  ⚠ {label} stopped (forced kill)")
-        return True
-    print(f"  ⚠ {label} survived the force kill — kill manually (pid {pid})", file=sys.stderr)
-    return False
+    owner = ownership.pooler(_ini_path(), _pidfile_path())
+    if owner is None:
+        return
+    custodian = OwnedPooler.from_config(owner, _ini_path())
+    if not custodian.stop(deadline=time.monotonic() + 5.0):
+        raise RuntimeError("PgBouncer stop incomplete; custody retained")
 
 
 def _ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:

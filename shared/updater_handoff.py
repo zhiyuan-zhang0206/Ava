@@ -32,8 +32,8 @@ import psutil
 import shared.paths
 from shared import atomic_io, spawn_receipt
 from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
+from shared.native_process.ownership import create_time_matches, stable_create_time
 from shared.platform import file_lock
-from shared.proc_tree import create_time_matches, stable_create_time
 from shared.updater_recovery import (
     BootstrapRecoveryJournal,
     NormalReleaseRecoveryJournal,

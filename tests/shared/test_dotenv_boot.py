@@ -1,5 +1,5 @@
-"""_env_path derives this unit's .env from AVA_HOME, so co-located gateway /
-runner units each load their own .env. resolve_ava_home is the checkout-anchored
+"""Co-located gateway and runner units each load their own .env.
+resolve_ava_home is the checkout-anchored
 resolver that decides which home a bare invocation uses (and whether it is
 anchored, i.e. safe to load the host .env's prod database URL)."""
 
@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from shared import dotenv_boot
-from shared.dotenv_boot import _env_path, resolve_ava_home
+from shared.dotenv_boot import resolve_ava_home
 
 # resolve_ava_home reads os.environ["AVA_HOME"] LIVE (it runs before Settings is
 # built and decides the home), so these tests drive the real input via
@@ -59,14 +59,6 @@ def _restore_authority_env() -> Iterator[None]:
             os.environ.pop(key, None)
         else:
             os.environ[key] = val
-
-
-def test_env_path_follows_ava_home() -> None:
-    assert _env_path("/srv/.ava_gateway") == Path("/srv/.ava_gateway/.env")
-
-
-def test_env_path_defaults_to_home_ava() -> None:
-    assert _env_path(None) == Path.home() / ".ava" / ".env"
 
 
 # ── resolve_ava_home: checkout-anchored home + anchored flag ──
@@ -276,6 +268,7 @@ _IDENTITY_LINES = [
     f"AVA_DB_URL={os.environ['AVA_DB_URL']}",
     f"AVA_REDIS_URL={os.environ['AVA_REDIS_URL']}",
     f"AVA_CLUSTER_SECRET={os.environ['AVA_CLUSTER_SECRET']}",
+    f"AVA_DB_ADMIN_PASSWORD={os.environ['AVA_DB_ADMIN_PASSWORD']}",
     f"AVA_GATEWAY_URL={os.environ['AVA_GATEWAY_URL']}",
 ]
 
@@ -401,6 +394,18 @@ def test_enforce_keeps_tempo_urls_supplied_by_env_alone(
     _point_env_at(monkeypatch, env_file, tmp_path)
     dotenv_boot._enforce_cluster_env_authority()
     assert os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] == "http://tempo.test:3200"
+
+
+def test_declared_service_path_wins_over_forwarded_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setitem(os.environ, "AVA_SERVICE_PATH", str(tmp_path / "stale"))
+    declared = str(tmp_path / "declared")
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"AVA_SERVICE_PATH='{declared}'\n")
+    _point_env_at(monkeypatch, env_file, tmp_path)
+    dotenv_boot._enforce_cluster_env_authority()
+    assert os.environ["AVA_SERVICE_PATH"] == declared
 
 
 def test_spawned_child_reads_forwarded_timezone_without_env_key(
@@ -546,16 +551,16 @@ def test_enforce_keeps_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch, tmp_
     assert os.environ["AVA_DB_URL"] == dotenv_boot.UNANCHORED_DB_SENTINEL
 
 
-def test_enforce_keeps_boot_redis_placeholder(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    "url", ["redis://undeclared@127.0.0.1:1/0", "redis://install-cluster-boot@127.0.0.1:1/0"]
+)
+def test_enforce_drops_undeclared_redis_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str
 ) -> None:
-    """F-s4-6: the install-time AVA_REDIS_URL placeholder is exempt from the
-    drop, exactly like the DB sentinel — install plants it before the first
-    settings import on a home that has no .env yet, and the authority pass
-    popping it would make the documented boot mechanism a lie (before this fix
-    the two placeholders were treated asymmetrically and the redis one was dead
-    code)."""
-    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", dotenv_boot.BOOT_REDIS_PLACEHOLDER)
+    """Initialization declares real local URLs before constructing Settings."""
+    monkeypatch.delenv("AVA_PROCESS_PROFILE", raising=False)
+    monkeypatch.delenv(dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, raising=False)
+    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", url)
     env_file = tmp_path / "no-redis.env"
     env_file.write_text(
         "AVA_AGENT_HOST_HEALTH_PORT=18035\n"
@@ -569,7 +574,7 @@ def test_enforce_keeps_boot_redis_placeholder(
     monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
     monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
     dotenv_boot._enforce_cluster_env_authority()
-    assert os.environ["AVA_REDIS_URL"] == dotenv_boot.BOOT_REDIS_PLACEHOLDER
+    assert "AVA_REDIS_URL" not in os.environ
 
 
 def test_enforce_keeps_unanchored_sentinel_over_a_declaring_env_file(
@@ -964,163 +969,5 @@ def test_agent_profile_drops_malformed_undeclared_db_url(
     assert "AVA_DB_URL" not in os.environ
 
 
-# ── CLI launcher context (#4334): the entry pop records, the gates read it ──
-#
-# cli.main's entry pops AVA_PROCESS_PROFILE (settings-full by design) and
-# records the popped value as AVA_LAUNCHER_PROFILE; the authority pass reads
-# the live-or-recorded context (`_launcher_context`). With only the live
-# marker consulted, both launcher-projection exemptions were unreachable on
-# every CLI path: `ava cluster health-probe` run from an agent child on a pure
-# agent-runner dropped the launcher's runner URLs and fell back to the
-# sentinel (env-class red).
-
-_NO_DATA_PLANE_IDENTITY_LINES = tuple(
-    ln for ln in _IDENTITY_LINES if ln.startswith(("AVA_CLUSTER_SECRET=", "AVA_GATEWAY_URL="))
-)
-
-
-def _point_env_at_without_data_plane_urls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """An env file that declares neither data-plane URL — the pure agent-runner
-    shape for AVA_DB_URL and AVA_REDIS_URL together (#4334)."""
-    env_file = tmp_path / "no-data-plane.env"
-    env_file.write_text(
-        "AVA_AGENT_HOST_HEALTH_PORT=18035\n" + "\n".join(_NO_DATA_PLANE_IDENTITY_LINES) + "\n"
-    )
-    monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", env_file)
-    monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", tmp_path / "absent-mirror.env")
-
-
-def test_cli_entry_records_launcher_profile_and_keeps_undeclared_projections(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The full CLI shape (#4334): the entry helper pops the live marker and
-    records it, and the later authority pass — reading the recorded context —
-    keeps both undeclared launcher projections. This is the health-probe flow
-    that was red: agent child -> CLI pop -> drop -> sentinel (env-class)."""
-    from cli.main import _normalize_process_profile
-
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.delitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, raising=False)
-    monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
-    _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
-    monkeypatch.setitem(
-        os.environ,
-        "AVA_DB_URL",
-        "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
-    )
-    monkeypatch.setitem(
-        os.environ, "AVA_REDIS_URL", "redis://ava:runtime-password@127.0.0.1:6380/0"
-    )
-    # Companion: inherited keys the `.env` does not declare still drop in the
-    # same pass — the exemption must not spill.
-    monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
-
-    _normalize_process_profile()
-
-    assert "AVA_PROCESS_PROFILE" not in os.environ
-    assert os.environ[dotenv_boot.LAUNCHER_PROFILE_ENV_KEY] == "agent"
-
-    dotenv_boot._enforce_cluster_env_authority()
-
-    assert os.environ["AVA_DB_URL"] == "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
-    assert os.environ["AVA_REDIS_URL"] == "redis://ava:runtime-password@127.0.0.1:6380/0"
-    assert "AVA_APP_PORT" not in os.environ
-
-
-def test_recorded_launcher_profile_drops_undeclared_owner_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The recorded context keeps the live one's runner-shape gate: an
-    inherited OWNER url on an undeclared unit still drops — recording the
-    profile must not widen the exemption."""
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
-    monkeypatch.setitem(
-        os.environ, "AVA_DB_URL", "postgresql://ava_main:owner-password@127.0.0.1:5433/ava"
-    )
-
-    dotenv_boot._enforce_cluster_env_authority()
-
-    assert "AVA_DB_URL" not in os.environ
-
-
-def test_recorded_launcher_profile_drops_malformed_db_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The parse gate holds for the recorded context too: `urlsplit` itself
-    rejects the value (invalid IPv6), so it drops instead of raising."""
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    _point_env_at_without_db_url(monkeypatch, tmp_path)
-    monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://[::1")
-
-    dotenv_boot._enforce_cluster_env_authority()
-
-    assert "AVA_DB_URL" not in os.environ
-
-
-@pytest.mark.parametrize("value", ["redis://[::1", "redis://"])
-def test_recorded_launcher_profile_drops_unparseable_redis_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str
-) -> None:
-    """The redis exemption's parse gate: a `urlsplit` failure (invalid IPv6)
-    and a parse with no host both drop — never raise, never keep a value that
-    cannot dial."""
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
-    monkeypatch.setitem(os.environ, "AVA_REDIS_URL", value)
-
-    dotenv_boot._enforce_cluster_env_authority()
-
-    assert "AVA_REDIS_URL" not in os.environ
-
-
-def test_unanchored_checkout_drops_recorded_launcher_projections(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The anchored gate holds for the recorded context too: a bare worktree's
-    CLI keeps the sentinel discipline — the record must not let an agent
-    shell's inherited URLs smuggle the host home's data plane into a worktree
-    that never claimed it."""
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    monkeypatch.setattr(dotenv_boot, "_ANCHORED", False)
-    _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
-    monkeypatch.setitem(
-        os.environ, "AVA_DB_URL", "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
-    )
-    monkeypatch.setitem(
-        os.environ, "AVA_REDIS_URL", "redis://ava:runtime-password@127.0.0.1:6380/0"
-    )
-
-    dotenv_boot._enforce_cluster_env_authority()
-
-    assert "AVA_DB_URL" not in os.environ
-    assert "AVA_REDIS_URL" not in os.environ
-
-
-@pytest.mark.parametrize("context", ["live", "recorded"])
-def test_launcher_context_keeps_undeclared_redis_url(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, context: str
-) -> None:
-    """Both context forms keep a parseable undeclared redis URL — the mirror
-    of the DB exemption (#4334): the live marker for agent/daemon processes,
-    the recorded one for CLI paths. No username shape gates it (the URL
-    carries the cluster's runtime ACL identity, the same one the gateway's own
-    URL does)."""
-    monkeypatch.delitem(os.environ, "AVA_PROCESS_PROFILE", raising=False)
-    monkeypatch.delitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, raising=False)
-    if context == "live":
-        monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
-    else:
-        monkeypatch.setitem(os.environ, dotenv_boot.LAUNCHER_PROFILE_ENV_KEY, "agent")
-    _point_env_at_without_data_plane_urls(monkeypatch, tmp_path)
-    monkeypatch.setitem(
-        os.environ, "AVA_REDIS_URL", "redis://ava:runtime-password@127.0.0.1:6380/0"
-    )
-
-    dotenv_boot._enforce_cluster_env_authority()
-
-    assert os.environ["AVA_REDIS_URL"] == "redis://ava:runtime-password@127.0.0.1:6380/0"
+# The "CLI launcher context (#4334)" section moved to
+# test_dotenv_boot_launcher_context.py (structure-lint split).

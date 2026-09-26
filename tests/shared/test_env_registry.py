@@ -252,34 +252,6 @@ class TestConsumptionMatrixDeclarations:
         } | set(health_port_env_aliases().values())
         assert derived_env_keys() == expected
 
-    def test_seed_allowlist_is_the_provider_keys(self) -> None:
-        """Pinned as an exact set, so widening it is a decision someone makes on
-        purpose. AVA_DASHSCOPE_BASE_URL is the one member that is not a
-        credential: a dedicated Model Studio workspace mints its key for its own
-        host, so seeding DASHSCOPE_API_KEY without it hands a fresh worktree a
-        key it cannot spend."""
-        from shared.env_registry import seed_allowlist
-
-        expected = {
-            "DEEPSEEK_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "GEMINI_API_KEY",
-            "OPENAI_API_KEY",
-            "MIMO_API_KEY",
-            "MOONSHOT_API_KEY",
-            "GLM_API_KEY",
-            "DASHSCOPE_API_KEY",
-            "AVA_DASHSCOPE_BASE_URL",
-            "BRAVE_API_KEY",
-            "JINA_API_KEY",
-        }
-        assert seed_allowlist() == expected
-        # A seeded worktree must never inherit prod's identity or its secret.
-        from shared.env_registry import derived_env_keys, env_identity_keys
-
-        assert not (seed_allowlist() & (derived_env_keys() | env_identity_keys()))
-        assert "AVA_TELEGRAM_BOT_TOKEN" not in seed_allowlist()
-
     def test_health_port_aliases_are_host_scope_settings_fields(self) -> None:
         from shared.env_registry import health_port_env_aliases
 
@@ -345,7 +317,6 @@ class TestRegistryInvariants:
             er.agent_runner_cluster_aliases(),
             er.env_identity_keys(),
             er.derived_env_keys(),
-            er.seed_allowlist(),
             er.session_forward_keys(),
             er.agent_forward_keys(),
         ):
@@ -412,125 +383,8 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def _backfill(existing: dict[str, str]) -> dict[str, str]:
-    from shared.env_registry import backfill_missing_health_ports
-
-    return backfill_missing_health_ports(existing)
-
-
 def _block_env(base: int) -> dict[str, str]:
     """The full health-port env a block-style unit at `base` carries."""
     from shared.env_registry import health_port_env
 
     return {alias: str(int(port)) for alias, port in health_port_env(base).items()}
-
-
-def test_backfill_derives_missing_keys_from_a_block_unit() -> None:
-    """win-shaped .env: the present keys prove one base (18114) but the slots
-    added after enroll (agent_host, the capability watchdogs) are absent — the
-    healer derives them at base + offset, and never rewrites a present key."""
-    from shared.port_block import PORT_OFFSETS
-
-    base = 18114
-    full = _block_env(base)
-    present = {
-        "AVA_LABELER_HEALTH_PORT",
-        "AVA_HEARTBEAT_HEALTH_PORT",
-        "AVA_TASK_MAINTENANCE_HEALTH_PORT",
-        "AVA_MEMORY_INDEXER_HEALTH_PORT",
-        "AVA_OPS_HEALTH_PORT",
-        "AVA_EVENTS_MAINTENANCE_HEALTH_PORT",
-    }
-    keys = {alias: full[alias] for alias in present}
-    missing = _backfill(keys)
-    assert missing["AVA_AGENT_HOST_HEALTH_PORT"] == str(base + PORT_OFFSETS["agent_host"])
-    assert missing["AVA_GATEWAY_WATCHDOG_HEALTH_PORT"] == str(
-        base + PORT_OFFSETS["gateway_watchdog"]
-    )
-    assert "AVA_OPS_HEALTH_PORT" not in missing  # present keys are never rewritten
-    assert missing == {alias: port for alias, port in full.items() if alias not in present}
-
-
-def test_backfill_refuses_a_legacy_pin_sequence() -> None:
-    """prod ~/.ava's fixed 8102-8111 pins must not be read as a block: some line
-    up with PORT_OFFSETS by accident (restarter/labeler/memory_indexer/ops all
-    "solve" to 8099), the legacy slot order of the rest does not."""
-    legacy = {
-        "AVA_RESTARTER_HEALTH_PORT": "8102",
-        "AVA_LABELER_HEALTH_PORT": "8103",
-        "AVA_MEMORY_INDEXER_HEALTH_PORT": "8105",
-        "AVA_OPS_HEALTH_PORT": "8106",
-        "AVA_HEARTBEAT_HEALTH_PORT": "8107",  # legacy slot order, not offset order
-        "AVA_TASK_MAINTENANCE_HEALTH_PORT": "8108",
-    }
-    assert _backfill(legacy) == {}
-
-
-def test_backfill_needs_two_agreeing_keys_on_a_block_floor_base() -> None:
-    assert _backfill({"AVA_OPS_HEALTH_PORT": "8113"}) == {}  # one key proves nothing
-    # two keys that disagree
-    assert _backfill({"AVA_OPS_HEALTH_PORT": "18121", "AVA_LABELER_HEALTH_PORT": "9999"}) == {}
-    # two keys agreeing below the block floor (8106): a legacy band, not a block
-    assert _backfill({"AVA_RESTARTER_HEALTH_PORT": "8109", "AVA_LABELER_HEALTH_PORT": "8110"}) == {}
-
-
-def test_backfill_ignores_a_present_but_misplaced_key() -> None:
-    """win's 2026-09-02 emergency pin put agent_host ON the block base (18114)
-    instead of base+19 — the healer heals ABSENCE, never drift; a wrong-slot
-    hand-set port is the operator's to move through the config surface."""
-    from shared.port_block import PORT_OFFSETS
-
-    base = 18114
-    keys = {
-        "AVA_OPS_HEALTH_PORT": str(base + PORT_OFFSETS["ops"]),
-        "AVA_AGENT_HOST_HEALTH_PORT": str(base),  # wrong slot: base, not base+19
-    }
-    assert _backfill(keys) == {}
-
-
-def test_backfill_majority_base_ignores_a_single_outlier() -> None:
-    """wsl-shaped .env (2026-09-02): all keys prove one block base except one
-    drifted hand-set key — the agreeing majority must still prove the block,
-    and the outlier must not abort the whole backfill."""
-    from shared.port_block import PORT_OFFSETS
-
-    base = 20027
-    full = _block_env(base)
-    present = set(full) - {"AVA_AGENT_HOST_HEALTH_PORT", "AVA_GATEWAY_WATCHDOG_HEALTH_PORT"}
-    keys = {alias: full[alias] for alias in present}
-    keys["AVA_AGENT_RUNNER_WATCHDOG_HEALTH_PORT"] = "20024"  # the drifted outlier
-    missing = _backfill(keys)
-    assert missing["AVA_AGENT_HOST_HEALTH_PORT"] == str(base + PORT_OFFSETS["agent_host"])
-    assert missing["AVA_GATEWAY_WATCHDOG_HEALTH_PORT"] == str(
-        base + PORT_OFFSETS["gateway_watchdog"]
-    )
-
-
-def test_backfill_refuses_an_ambiguous_tie_between_two_bases() -> None:
-    """Two keys on base A and two on base B prove neither — guessing would bind
-    ports nobody asked for."""
-    from shared.port_block import PORT_OFFSETS
-
-    base, other = 18114, 20027
-    keys = {
-        "AVA_OPS_HEALTH_PORT": str(base + PORT_OFFSETS["ops"]),
-        "AVA_LABELER_HEALTH_PORT": str(base + PORT_OFFSETS["labeler"]),
-        "AVA_HEARTBEAT_HEALTH_PORT": str(other + PORT_OFFSETS["heartbeat"]),
-        "AVA_AGENT_HOST_HEALTH_PORT": str(other + PORT_OFFSETS["agent_host"]),
-    }
-    assert _backfill(keys) == {}
-
-
-def test_backfill_unparseable_values_are_outliers_not_fatal() -> None:
-    """A corrupt value must not abort the backfill when the rest of the block
-    still agrees (previously any TypeError returned {})."""
-    from shared.port_block import PORT_OFFSETS
-
-    base = 18114
-    full = _block_env(base)
-    present = set(full) - {"AVA_MEMORY_INDEXER_HEALTH_PORT"}
-    keys = {alias: full[alias] for alias in present}
-    keys["AVA_OPS_HEALTH_PORT"] = "not-a-port"
-    missing = _backfill(keys)
-    assert missing["AVA_MEMORY_INDEXER_HEALTH_PORT"] == str(base + PORT_OFFSETS["memory_indexer"])
-    assert "AVA_OPS_HEALTH_PORT" not in missing

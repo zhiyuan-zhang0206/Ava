@@ -73,11 +73,6 @@ class _DaemonCase:
 
 
 _CASES: dict[str, _DaemonCase] = {
-    "watchdog": _DaemonCase(
-        module="services.watchdog.daemon",
-        interrupt_line="[watchdog] interrupted, shutting down",
-        argv=("--role", "gateway"),
-    ),
     "memory_indexer": _DaemonCase(
         module="services.memory_indexer.daemon",
         interrupt_line="[indexer] received interrupt, shutting down",

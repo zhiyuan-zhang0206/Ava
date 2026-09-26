@@ -1,44 +1,19 @@
-"""The distro-level systemd boot unit for a Linux cluster ("boot unit").
+"""Linux systemd owns the lifetime of this home's application root.
 
-`ava start`'s boot path on Linux has been a `@reboot` crontab entry
-(`shared.os_autostart`): the scheduler fires it exactly once, so the retry loop
-lives inside a stray child process (`cli.boot_retry`, `ava boot`) that nothing
-supervises. On a host with systemd, this module registers the same boot job as
-a **system** unit instead -- `ava-boot.<home-slug>.service` -- which runs a
-small convergence script at boot while systemd itself does the retrying:
-`Restart=on-failure`, `RestartSec=BOOT_RETRY_INTERVAL_S`, and
-`StartLimitIntervalSec=0` (no attempt cap), the same policy
-`shared.boot_policy.py` states for every platform, with `RuntimeMaxSec` killing
-a wedged attempt so a hang cannot block retries.
+The unit invokes ordinary ``ava start`` directly. Its successful readiness tail
+publishes the birth-validated root PID. Type=forking adopts it only after the
+ordinary start command exits successfully and the root becomes a manager child.
+There is no resident boot wrapper and no separate service readiness policy.
 
-Why a system unit and not a user unit (`systemctl --user`): the boot path must
-not depend on a login session or on linger bookkeeping, and its enable/state
-must be visible in `systemctl` and journald without a session. The job still
-runs AS the cluster's user (`User=`), so every file it touches keeps its
-ownership.
-
-Once the unit is installed AND enabled, `shared.os_autostart._register_linux`
-leaves the crontab entry out -- exactly one owner for the boot path. An
-installed-but-not-yet-enabled unit is a staged install: the crontab entry
-stays live until the unit is enabled, and is removed as soon as it is.
-
-Privileges: `/etc/systemd/system` and the mutating `systemctl` verbs need root,
-so they go through `_privileged()` (`sudo -n` -- never a password prompt -- or
-direct when already root) and fail actionably when neither is available; the
-same no-prompt stance as `shared.macos_firewall`. The convergence script under
-`$AVA_HOME/bin` is written as the invoking user.
-
-Operator surfaces: `ava cluster boot-unit install|uninstall|status` (wrappers
-in `cli/commands/_cluster_boot_unit.py`), and `ava cluster destroy` removes the
-unit with the other OS jobs.
+KillMode=process deliberately leaves the independent native data plane alone.
+The root closes its own captured application tree on TERM; failed closure keeps
+custody and blocks replacement. Systemd cannot establish orphan closure after
+an abrupt root death. It must never erase that retained custody.
 """
 
 from __future__ import annotations
 
-import grp
 import os
-import pwd
-import re
 import shutil
 import subprocess
 import tempfile
@@ -47,35 +22,43 @@ from pathlib import Path
 
 from loguru import logger
 
+from shared.atomic_io import write_text_atomic
 from shared.boot_policy import BOOT_RETRY_INTERVAL_S
-from shared.cluster import home_slug
-from shared.paths import ava_home, repo_root
+from shared.cluster import home_slug, registry_path
+from shared.native_process.ownership import OwnedProcess
 from shared.platform import IS_LINUX
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
 
-# Kill a wedged convergence attempt and let the unit's restart policy run the
-# next one (see the module docstring). Well beyond a cold start yet bounded.
-CONVERGE_RUNTIME_MAX_S = 900
-
-# The proxy readiness probe is a REAL round trip (a liveness check that does
-# not touch the resource it claims to check is theater).
-GENERATE_204_URL = "http://www.gstatic.com/generate_204"
-
-# Characters that would break the convergence script's double-quoted literals
-# (paths are embedded; refuse rather than silently render a broken script).
-_UNSAFE_IN_SCRIPT = ('"', "$", "`", chr(92))
+# Bound startup only; a healthy resident root has no runtime deadline.
+START_TIMEOUT_S = 900
 
 
 @dataclass(frozen=True)
 class BootUnitContext:
-    """Everything the unit and the script render from (explicit for tests)."""
+    """Everything the unit renders from (explicit for tests)."""
 
     home: Path  # $AVA_HOME
     repo: Path  # the checkout that owns this home (holds .venv/)
     user: str
     group: str
     home_dir: Path  # the user's $HOME
+    registry: Path  # exact registry authority, including isolated previews
+
+
+@dataclass(frozen=True)
+class BootStartAction:
+    """One explicit start command under the existing home boot owner.
+
+    Release transitions use their pinned stage entry here so the new root is
+    born in its own boot cgroup, never in the finite updater's cgroup. The
+    transition restores a steady release start action after the stage succeeds.
+    """
+
+    argv: tuple[str, ...]
+    cwd: Path
+    environment: tuple[tuple[str, str], ...]
+    restart_on_failure: bool = True
 
 
 # --- paths and names --------------------------------------------------------
@@ -91,17 +74,17 @@ def unit_path(home: Path) -> Path:
     return SYSTEM_UNIT_DIR / unit_name(home)
 
 
-def script_path(home: Path) -> Path:
-    return home / "bin" / "ava-boot-converge.sh"
-
-
-def state_path(home: Path) -> Path:
-    """Where the convergence script records its last outcome (journal holds the
-    full log; this is the terse operator surface `status` reads)."""
-    return home / "logs" / "boot-converge.state"
+def root_pid_path(home: Path) -> Path:
+    """Manager adoption hint; native root custody remains the ownership authority."""
+    return home / "run" / "ava-root" / "systemd.pid"
 
 
 def _default_context() -> BootUnitContext:
+    import grp
+    import pwd
+
+    from shared.paths import ava_home, repo_root
+
     entry = pwd.getpwuid(os.getuid())
     group = grp.getgrgid(entry.pw_gid).gr_name
     return BootUnitContext(
@@ -110,6 +93,7 @@ def _default_context() -> BootUnitContext:
         user=entry.pw_name,
         group=group,
         home_dir=Path(entry.pw_dir),
+        registry=registry_path().resolve(),
     )
 
 
@@ -137,17 +121,6 @@ def unit_enabled(home: Path) -> bool:
     return _systemctl("is-enabled", unit_name(home)).stdout.strip() == "enabled"
 
 
-def boot_unit_owns_boot_path(home: Path | None = None) -> bool:
-    """Whether the systemd unit -- not the crontab entry -- owns this home's
-    boot path.
-
-    Installed AND enabled. A staged install (files written, unit not yet
-    enabled) returns False on purpose: the crontab entry is still the live
-    path until the switch, so the two never race at boot.
-    """
-    return unit_enabled(home if home is not None else ava_home())
-
-
 # --- rendering --------------------------------------------------------------
 
 
@@ -173,153 +146,129 @@ def _path_value(value: str, what: str) -> str:
     return _clean(value, what).replace("%", "%%")
 
 
-def _validate_proxy_url(url: str) -> str:
-    _clean(url, "proxy wait URL")
-    if not re.match(r"^https?://[^\s\"'\x60$]+$", url):
-        raise ValueError(
-            f"proxy wait URL must be an http(s) URL without shell metacharacters: {url!r}"
-        )
-    return url
-
-
-def render_unit(ctx: BootUnitContext, *, proxy_wait_url: str = "") -> str:
-    """The system unit: systemd is the retry supervisor (module docstring)."""
-    environment = [
-        ("HOME", str(ctx.home_dir)),
-        ("AVA_HOME", str(ctx.home)),
-        ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
-    ]
-    if proxy_wait_url:
-        environment.append(("AVA_BOOT_PROXY_WAIT", _validate_proxy_url(proxy_wait_url)))
-    env_lines = "\n".join(
-        f"Environment={_quote(f'{key}={value}', 'environment value')}" for key, value in environment
+def source_start_action(ctx: BootUnitContext) -> BootStartAction:
+    """The ordinary source checkout invocation of the same root boot owner."""
+    return BootStartAction(
+        (str(ctx.repo / ".venv/bin/python"), "-m", "cli.main", "start"),
+        ctx.repo,
+        (
+            ("HOME", str(ctx.home_dir)),
+            ("AVA_HOME", str(ctx.home)),
+            ("AVA_CLUSTER_REGISTRY", str(ctx.registry)),
+            ("PATH", f"{ctx.repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"),
+        ),
     )
+
+
+def render_unit(ctx: BootUnitContext, *, action: BootStartAction | None = None) -> str:
+    """Start normally, then let systemd own the verified application root."""
+    action = source_start_action(ctx) if action is None else action
+    environment = dict(action.environment)
+    if len(environment) != len(action.environment) or any(
+        not key.isidentifier() for key in environment
+    ):
+        raise ValueError("boot action environment keys must be unique identifiers")
+    for key, expected in (
+        ("HOME", ctx.home_dir),
+        ("AVA_HOME", ctx.home),
+        ("AVA_CLUSTER_REGISTRY", ctx.registry),
+    ):
+        if environment.get(key) != str(expected):
+            raise ValueError(f"boot action must preserve {key}")
+    if not action.argv or not Path(action.argv[0]).is_absolute() or not action.cwd.is_absolute():
+        raise ValueError("boot action executable and working directory must be absolute")
+    env_lines = "\n".join(
+        f"Environment={_quote(f'{key}={value}', 'environment value')}"
+        for key, value in action.environment
+    )
+    # Quote every supplied argument. ':' also disables systemd's $ expansion.
+    command = " ".join(_quote(value, "start argument") for value in action.argv)
     return (
         "[Unit]\n"
-        f"Description=Ava cluster boot convergence ({home_slug(ctx.home)})\n"
-        "# Ordering is a no-op for units a host does not have; the proxy's\n"
-        "# CONTENT readiness is the convergence script's to wait on.\n"
+        f"Description=Ava application root ({home_slug(ctx.home)})\n"
         "After=network-online.target tailscaled.service mihomo.service\n"
         "Wants=network-online.target\n"
-        "# No attempt cap, per shared/boot_policy.py.\n"
-        "StartLimitIntervalSec=0\n"
-        "\n"
+        "StartLimitIntervalSec=0\n\n"
         "[Service]\n"
-        "Type=simple\n"
+        "Type=forking\n"
+        "GuessMainPID=no\n"
+        f"PIDFile={_path_value(str(root_pid_path(ctx.home)), 'root PID path')}\n"
         f"User={_path_value(ctx.user, 'user')}\n"
         f"Group={_path_value(ctx.group, 'group')}\n"
         f"{env_lines}\n"
-        # Not quoted on purpose: WorkingDirectory= takes the rest of the line
-        # literally (spaces included), and quotes would become part of the
-        # path -- verified on systemd 255 (quoted = fatal, unquoted = clean).
-        f"WorkingDirectory={_path_value(str(ctx.repo), 'checkout path')}\n"
-        # `:` = no $-expansion in the command line (needs systemd >= 245;
-        # Ubuntu >= 22.04, and the drill host runs 255).
-        f"ExecStart=:{_quote(str(script_path(ctx.home)), 'script path')}\n"
-        "# The retry policy, stated in systemd terms (shared/boot_policy.py).\n"
-        "Restart=on-failure\n"
+        f"WorkingDirectory={_path_value(str(action.cwd), 'runtime path')}\n"
+        f"ExecStart=:{command}\n"
+        f"Restart={'on-failure' if action.restart_on_failure else 'no'}\n"
         f"RestartSec={BOOT_RETRY_INTERVAL_S}\n"
-        "# A wedged attempt is killed and retried rather than blocking forever.\n"
-        f"RuntimeMaxSec={CONVERGE_RUNTIME_MAX_S}\n"
-        "TimeoutStopSec=30\n"
+        f"TimeoutStartSec={START_TIMEOUT_S}\n"
+        "# Only root receives TERM; it owns captured application-tree closure.\n"
+        "# Native data-plane siblings survive application-root shutdown.\n"
+        "KillMode=process\n"
+        "SendSIGKILL=no\n"
+        "TimeoutStopSec=90\n"
         "StandardOutput=journal\n"
-        "StandardError=journal\n"
-        "\n"
+        "StandardError=journal\n\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"
     )
 
 
-def render_script(ctx: BootUnitContext) -> str:
-    """One convergence attempt; the exit code is the retry contract."""
-    home = _clean(str(ctx.home), "ava home")
-    repo = _clean(str(ctx.repo), "checkout path")
-    home_dir = _clean(str(ctx.home_dir), "user home")
-    if any(ch in f"{home}{repo}{home_dir}" for ch in _UNSAFE_IN_SCRIPT):
-        raise ValueError("path values must not contain shell metacharacters")
-    unit = unit_name(ctx.home)
-    return f"""#!/bin/bash
-# Ava cluster boot convergence -- ONE attempt per invocation.
-#
-# Installed as the ExecStart of {unit} (inspect with
-# `ava cluster boot-unit status`). The retry is the UNIT's, not this script's:
-# Restart=on-failure + RestartSec={BOOT_RETRY_INTERVAL_S} + StartLimitIntervalSec=0,
-# no attempt cap (shared/boot_policy.py). Exit-code contract:
-#
-#   0  converged (`ava start` exited 0). A launched-but-unready service is the
-#      watchdog's to revive -- never grounds for a retry (see boot_policy).
-#   !=0 a step failed; the unit restarts this script after RestartSec.
-set -u
+def _process_cgroup(pid: int) -> str:
+    """Read the native systemd/unified cgroup, without process-name inference."""
+    rows = (Path("/proc") / str(pid) / "cgroup").read_text().splitlines()
+    for row in rows:
+        hierarchy, controllers, path = row.split(":", 2)
+        if hierarchy == "0" or "name=systemd" in controllers.split(","):
+            return path
+    raise RuntimeError(f"PID {pid} has no observable systemd cgroup")
 
-export HOME="{home_dir}"
-export AVA_HOME="{home}"
-export PATH="{repo}/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 
-log="$AVA_HOME/logs/boot.log"
-state="$AVA_HOME/logs/boot-converge.state"
-t0=$SECONDS
+def in_boot_unit(home: Path) -> bool:
+    """Interactive start has no systemd readiness tail, even on Linux."""
+    if not IS_LINUX:
+        return False
+    return _process_cgroup(os.getpid()) == f"/system.slice/{unit_name(home)}"
 
-# The redirects below and the state write assume logs/ exists; create it so a
-# fresh home cannot turn a missing directory into an attempt that never ran
-# ava start yet still asks the unit to retry forever.
-mkdir -p "$AVA_HOME/logs"
 
-# 1) Proxy readiness -- a real round trip through the configured entrypoint
-#    (the unit's AVA_BOOT_PROXY_WAIT; empty disables the wait). Bounded; on
-#    timeout the convergence below still runs and its failure, if any, is
-#    retried by the unit.
-proxy="disabled"
-if [ -n "${{AVA_BOOT_PROXY_WAIT:-}}" ]; then
-  proxy="no"
-  for _ in $(seq 1 30); do
-    if curl -sS -m 4 -x "$AVA_BOOT_PROXY_WAIT" -o /dev/null {GENERATE_204_URL}; then
-      proxy="yes"
-      break
-    fi
-    sleep 4
-  done
-fi
-echo "[boot-converge] proxy_ready=$proxy t=+$((SECONDS - t0))s"
+def _manager_properties(home: Path) -> dict[str, str]:
+    result = _systemctl(
+        "show", "--property=MainPID,ControlPID,ControlGroup,ActiveState", unit_name(home)
+    )
+    if result.returncode:
+        raise RuntimeError(f"cannot observe systemd root ownership: {result.stderr.strip()}")
+    values = dict(row.split("=", 1) for row in result.stdout.splitlines() if "=" in row)
+    if not {"MainPID", "ControlPID", "ControlGroup", "ActiveState"} <= values.keys():
+        raise RuntimeError("systemd omitted root ownership properties")
+    return values
 
-# 2) Converge (idempotent; the manual 2026-09-16 recovery ran the same verb).
-#    --no-readiness-gate per boot_policy: the retried set stays "a step
-#    failed"; boot.log keeps this attempt's output, truncated per attempt.
-cd "{repo}"
-"{repo}/.venv/bin/python" -m cli.main start --no-readiness-gate >"$log" 2>&1
-rc=$?
-if [ "$rc" != 0 ]; then
-  echo "[boot-converge] ava start rc=$rc t=+$((SECONDS - t0))s -- the unit will retry"
-  exit "$rc"
-fi
 
-# 3) Record readiness -- measurement only; the exit verdict above is final.
-#    The URL is resolved the way every client resolves it -- env
-#    AVA_GATEWAY_URL (the unit's .env) > $AVA_HOME/gateway_url file -- so the
-#    probe dials what the cluster dials; a bare file read missed the .env URL.
-gw_base=$("{repo}/.venv/bin/python" -c 'from shared.machines import gateway_url; print(gateway_url())' 2>/dev/null || true)
-[ -n "$gw_base" ] || gw_base=$(cat "$AVA_HOME/gateway_url" 2>/dev/null || true)
-gw="unknown"
-if [ -n "$gw_base" ]; then
-  gw="no"
-  for _ in $(seq 1 15); do
-    if curl -sS -m 3 -o /dev/null "$gw_base/api/health"; then
-      gw="yes"
-      break
-    fi
-    sleep 4
-  done
-fi
-up=$(awk '{{print int($1)}}' /proc/uptime)
-{{
-  echo "state=$([ "$gw" = yes ] && echo ready || echo started)"
-  echo "boot_to_ready_s=$up"
-  echo "at=$(date -Is)"
-  echo "proxy=$proxy"
-  echo "gw_health=$gw"
-}} >"$state"
-echo "[boot-converge] done gw_health=$gw uptime=${{up}}s"
-exit 0
-"""
+def publish_root_ready(home: Path, root: OwnedProcess) -> None:
+    """Publish the ready root; systemd adopts only after successful caller exit.
+
+    Type=forking waits for this ordinary start process to exit before reading
+    PIDFile. At that point root is systemd's child, so native stop waits for its
+    closure. Interactive start writes nothing. This hint never replaces the
+    birth-bound root custody checked by the caller.
+    """
+    if not in_boot_unit(home):
+        return
+    expected = f"/system.slice/{unit_name(home)}"
+    before = _manager_properties(home)
+    if (
+        not root.live()
+        or _process_cgroup(root.pid) != expected
+        or before["ControlGroup"] != expected
+        or before["ControlPID"] != str(os.getpid())
+        or before["MainPID"] != "0"
+        or before["ActiveState"] != "activating"
+    ):
+        raise RuntimeError("root is outside this systemd startup's native custody")
+    path = root_pid_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    write_text_atomic(path, f"{root.pid}\n", mode=0o600, sync_parent=True)
+    if not root.live() or _process_cgroup(root.pid) != expected:
+        path.unlink()
+        raise RuntimeError("root changed birth or native custody during PID publication")
 
 
 # --- privileged steps -------------------------------------------------------
@@ -365,26 +314,13 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
-# --- install / uninstall / status -------------------------------------------
+# --- native registration / retirement -------------------------------------------
 
 
 def install(
-    *,
-    enable: bool = True,
-    start: bool = False,
-    proxy_wait_url: str = "",
-    context: BootUnitContext | None = None,
+    *, context: BootUnitContext | None = None, action: BootStartAction | None = None
 ) -> list[str]:
-    """Render and install the boot unit + convergence script for this home.
-
-    `enable=False` is a staged install (drills and reviewed rollouts write the
-    files first). Enabling swaps the live boot path and removes the crontab
-    entry in the same call, so the two never race at boot. `start=True` runs
-    the unit once, now.
-    `proxy_wait_url` is baked as the unit's AVA_BOOT_PROXY_WAIT (empty: no
-    wait). Returns the steps performed, for the CLI to print. Raises
-    RuntimeError when a privileged step fails.
-    """
+    """Register and enable the sole Linux boot route without recursive startup."""
     if not systemd_running():
         raise RuntimeError(
             "the boot unit needs a Linux host running systemd as its service manager"
@@ -392,23 +328,8 @@ def install(
     ctx = context if context is not None else _default_context()
     steps: list[str] = []
 
-    script = script_path(ctx.home)
-    script.parent.mkdir(parents=True, exist_ok=True)
-    script_content = render_script(ctx)
-    content_changed = _read_text(script) != script_content
-    if content_changed:
-        script.write_text(script_content)
-        steps.append(f"wrote convergence script {script}")
-    if script.stat().st_mode & 0o777 != 0o755:
-        # A content-identical script whose mode drifted (e.g. 0644) would not
-        # run under systemd -- repair it instead of reporting success over a
-        # dead ExecStart.
-        script.chmod(0o755)
-        if not content_changed:
-            steps.append(f"fixed {script} mode to 0755")
-
     destination = unit_path(ctx.home)
-    unit_content = render_unit(ctx, proxy_wait_url=proxy_wait_url)
+    unit_content = render_unit(ctx, action=action)
     if _read_text(destination) != unit_content:
         fd, name = tempfile.mkstemp(prefix="ava-boot-unit-", suffix=".service")
         os.close(fd)
@@ -424,126 +345,34 @@ def install(
         _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload")
         steps.append(f"installed system unit {destination}")
 
-    if enable:
-        if not unit_enabled(ctx.home):
-            _privileged_or_raise(
-                ["systemctl", "enable", unit_name(ctx.home)],
-                f"enable {unit_name(ctx.home)}",
-            )
-            steps.append(f"enabled {unit_name(ctx.home)}")
-        # Enabling swaps the live boot path -- drop the cron entry in the same
-        # step so the two never race at boot (idempotent; converge also
-        # reconciles this on every `ava start`).
-        from shared.os_autostart import _unregister_linux
-
-        if _crontab_has_autostart(ctx.home):
-            _unregister_linux(home_slug(ctx.home))
-            steps.append("removed the crontab autostart entry")
-    if start:
+    if not unit_enabled(ctx.home):
         _privileged_or_raise(
-            ["systemctl", "start", unit_name(ctx.home)],
-            f"start {unit_name(ctx.home)}",
+            ["systemctl", "enable", unit_name(ctx.home)], f"enable {unit_name(ctx.home)}"
         )
-        steps.append(f"started {unit_name(ctx.home)}")
+        steps.append(f"enabled {unit_name(ctx.home)}")
     logger.info("boot unit ready for {}", ctx.home)
     return steps
 
 
 def uninstall(home: Path | None = None) -> list[str]:
-    """Remove this home's boot unit and convergence script.
+    """Remove this home's boot unit after a successful native stop.
 
     Safe when nothing is installed, and safe to call on non-systemd hosts (a
     no-op): `ava cluster destroy` runs it unconditionally with the other OS
-    jobs. Removes only this home's exact unit/script paths.
+    jobs. Removes only this home's exact unit path.
     """
     if not IS_LINUX:
         return []
+    from shared.paths import ava_home
+
     home = home if home is not None else ava_home()
     steps: list[str] = []
     destination = unit_path(home)
     if destination.exists():
-        result = _privileged(["systemctl", "disable", "--now", unit_name(home)])
-        if result.returncode != 0:
-            logger.warning("boot unit disable returned rc={}", result.returncode)
+        _privileged_or_raise(
+            ["systemctl", "disable", "--now", unit_name(home)], f"stop {unit_name(home)}"
+        )
         _privileged_or_raise(["rm", "-f", str(destination)], f"remove {destination}")
         _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload")
         steps.append(f"removed {destination}")
-    script = script_path(home)
-    if script.exists():
-        script.unlink()
-        steps.append(f"removed {script}")
     return steps
-
-
-def status(home: Path | None = None) -> list[tuple[str, str]]:
-    """Read-only operator report: unit, script, proxy wait, cron entry, last state.
-
-    `unit content` / `script content` compare only for this process's own home:
-    a foreign home renders from its own checkout/user by construction, so
-    comparing it against this process's context would always read as
-    "differs".
-    """
-    home = home if home is not None else ava_home()
-    ctx = _default_context()
-    rows: list[tuple[str, str]] = []
-
-    destination = unit_path(home)
-    unit_text = _read_text(destination)
-    rows.append(("unit", unit_name(home)))
-    rows.append(("unit file", f"{destination} ({'present' if unit_text else 'missing'})"))
-    proxy_wait = ""
-    if unit_text is not None:
-        match = re.search(r'AVA_BOOT_PROXY_WAIT=([^"\n]*)', unit_text)
-        proxy_wait = match.group(1) if match else ""
-        if home == ctx.home:
-            rendered = render_unit(ctx, proxy_wait_url=proxy_wait)
-            rows.append(
-                ("unit content", "matches rendered" if unit_text == rendered else "differs")
-            )
-        else:
-            rows.append(("unit content", "not compared (not this process's home)"))
-    if systemd_running():
-        state = _systemctl("show", "-p", "ActiveState", "--value", unit_name(home)).stdout.strip()
-        rows.append(("systemd state", state or "unknown"))
-        rows.append(("enabled", "yes" if unit_enabled(home) else "no"))
-    else:
-        rows.append(("systemd state", "not running (the boot unit needs systemd)"))
-
-    script = script_path(home)
-    script_text = _read_text(script)
-    rows.append(("script", f"{script} ({'present' if script_text else 'missing'})"))
-    if script_text is not None:
-        if home == ctx.home:
-            rows.append(
-                (
-                    "script content",
-                    "matches rendered" if script_text == render_script(ctx) else "differs",
-                )
-            )
-        else:
-            rows.append(("script content", "not compared (not this process's home)"))
-
-    rows.append(("proxy wait", proxy_wait or "disabled"))
-
-    rows.append(("cron entry", "present" if _crontab_has_autostart(home) else "absent"))
-    rows.append(("last convergence", _read_text(state_path(home)) or "none"))
-    return rows
-
-
-def _crontab_lines() -> list[str]:
-    if shutil.which("crontab") is None:
-        # Minimal hosts (CI containers, benches) ship no crontab binary: there
-        # is no entry to find, and install/status must degrade to "absent"
-        # instead of raising (the same warn-and-skip stance as os_autostart).
-        return []
-    result = subprocess.run(
-        ["crontab", "-l"], capture_output=True, text=True, check=False, timeout=30
-    )
-    return result.stdout.splitlines() if result.returncode == 0 else []
-
-
-def _crontab_has_autostart(home: Path) -> bool:
-    from shared.os_autostart import _CRON_MARKER
-
-    marker = f"{_CRON_MARKER}.{home_slug(home)}"
-    return any(marker in line for line in _crontab_lines())

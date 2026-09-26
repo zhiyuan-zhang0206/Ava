@@ -302,6 +302,8 @@ class RestartableBaseSource:
                     continue
                 if item is None:
                     producer.join()
+                    if producer.exitcode != 0:
+                        raise RuntimeError("base stream producer exited unsuccessfully")
                     return
                 if isinstance(item, BaseException):
                     producer.join()

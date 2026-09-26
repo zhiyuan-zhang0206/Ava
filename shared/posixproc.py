@@ -45,10 +45,11 @@ from pathlib import Path
 import psutil
 
 from shared.log import logger
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
 from shared.paths import logs_dir, run_dir
 from shared.platform import CREATE_NO_WINDOW
-from shared.proc_tree import stable_create_time
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import SessionRecord
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # benign during a teardown race.

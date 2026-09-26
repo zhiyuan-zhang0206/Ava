@@ -116,24 +116,6 @@ def test_migrations_apply_uses_direct_unbounded_connection() -> None:
     assert "connect(direct=True, unbounded=True)" in src
 
 
-def test_update_git_migration_paths_use_direct_unbounded_connection() -> None:
-    """The update/rollback migration wrappers (`ava cluster update` /
-    `ava cluster rollback` / failed-update recovery) are migration paths too:
-    apply_pending_migrations and rollback_schema_to hold the SESSION advisory
-    lock and run DDL, so they must dial direct + unbounded; the schema snapshot
-    is part of the admin update path and must read the real Postgres (direct),
-    but stays bounded (a plain read)."""
-    from cli.commands import _update_git
-
-    apply_src = inspect.getsource(_update_git.apply_pending_migrations)
-    assert "connect(direct=True, unbounded=True)" in apply_src
-    rollback_src = inspect.getsource(_update_git.rollback_schema_to)
-    assert "connect(direct=True, unbounded=True)" in rollback_src
-    snapshot_src = inspect.getsource(_update_git.current_schema_state)
-    assert "connect(direct=True)" in snapshot_src
-    assert "unbounded" not in snapshot_src
-
-
 def test_backup_defaults_to_direct_db_url() -> None:
     """pg_dump needs a real Postgres session (consistent snapshot); it must use the
     admin-plane direct URL (shared.db.direct_db_url), never the one URL as-is

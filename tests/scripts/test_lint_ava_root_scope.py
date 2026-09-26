@@ -32,6 +32,26 @@ def test_clean_file_passes(tmp_path: Path) -> None:
     assert gate.scan_file(path) == []
 
 
+def test_architecture_docs_can_describe_platform_boundaries(tmp_path: Path) -> None:
+    doc = _write(
+        tmp_path,
+        "root.ava.okf.md",
+        "macOS: launchd -> permissions helper -> root\nLinux: systemd -> root\n",
+    )
+    code = _write(
+        tmp_path,
+        "root.py",
+        '"""Linux systemd owns root; macOS uses the permissions helper."""\n\ndef serve():\n    """This root does not call launchctl."""\n    return "launchctl"\n',
+    )
+    assert gate.scan_file(doc) == []
+    assert [(line, symbol) for line, symbol, _text in gate.scan_file(code)] == [(5, "launchctl")]
+
+
+def test_docstring_cannot_hide_executable_statement_on_same_line(tmp_path: Path) -> None:
+    path = _write(tmp_path, "root.py", '"""Architecture."""; command = "launchctl"\n')
+    assert [(line, symbol) for line, symbol, _text in gate.scan_file(path)] == [(1, "launchctl")]
+
+
 @pytest.mark.parametrize(
     "symbol",
     [

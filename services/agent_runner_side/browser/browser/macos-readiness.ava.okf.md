@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Browser macOS Startup Readiness
-description: Read-only GUI-session, launch-domain and login-Keychain startup gate for the shared headed browser, with a healthcheck-visible degraded wait and a GUI-domain relaunch heal for a chain that lost the login session.
+description: Read-only GUI-session, launch-domain and login-Keychain startup gate for the shared headed browser, with a visible degraded wait under the required macOS root ancestry.
 tags:
 - browser
 - macos
@@ -41,41 +41,11 @@ after five seconds and periodically logs the explicit **DEGRADED** reason. It
 never unlocks a Keychain, changes a login session, or launches Chrome without
 its encryption material.
 
-## Healthcheck Contract
+## Root ancestry and observation
 
-While waiting, the daemon atomically records a private marker below
-`$AVA_HOME/run` with its pid, process start time, reason, `context_missing`, and
-observation time. The marker is trusted only while the owning process still
-matches its recorded start time and the observation is fresh; a missing or
-malformed `context_missing` reads as false. If the marker cannot be read or
-written, `probe.py` and `healthchecks/browser.py` fall back to the same
-bounded, read-only readiness check in structured form
-(`degraded_wait_state`); a macOS probe failure fails safe to degraded rather
-than creating restart churn. The marker is removed just before Chrome can
-launch, so an ordinary CDP-down session remains restartable.
-
-A marker with `context_missing` is the one wait the healthcheck does not
-preserve: it stops the stuck session (otherwise the GUI `ava start` would skip
-the live session) and kickstarts the cluster's GUI-domain autostart job
-(`shared/os_autostart.relaunch_via_gui_domain`), whose `ava start` rebuilds the
-session in the GUI domain — at most twice per episode, 600 seconds apart, then
-one episode-gated ERROR naming the manual recipe. A session-gone round inside
-the relaunch window defers its own in-context rebuild so the relaunch is not
-undone; the episode clears on the first healthy round or context-healthy wait.
-
-Every automatic browser rebuild routes through that same stop + kick whenever
-this chain runs outside the GUI login session — the session-gone sweep and the
-live-session respawn stop the stuck session and kick instead of re-creating a
-context-less session in place (`respawn_service` is not reached there) — so the
-residual path that kept re-seeding the wrong-domain loop is closed. The success
-line is a WARNING naming the trigger (`context-missing` / `session-gone` /
-`cdp-down`) and the cumulative attempt total, and service respawns record their
-chain's launchd domain for attribution (task #3346).
-
-## Profile Safety
-
-Automatic provisioning copies a daily profile only into an absent destination;
-every existing profile directory, including an empty or partial first copy,
-remains untouched. At launch `Local State` receives only existence,
-read-permission, and future-mtime checks. Warnings are non-fatal, and Ava never
-parses, rewrites, copies, or deletes that Chrome-owned file.
+The macOS permissions helper is the permission-carrying parent of root. Browser
+launch occurs under that established ancestry. The readiness marker remains
+read-only diagnostic evidence; no probe can kickstart a GUI-domain job, stop a
+session, or replace the helper. Unavailable GUI or Keychain prerequisites remain
+visible as degraded readiness until an authorized external transition or changed
+host state resolves them.

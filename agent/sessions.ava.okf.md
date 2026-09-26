@@ -19,7 +19,6 @@ Interactive shells and watchers use independent PTY hosts through
 
 - `ava-agent-host` is the runner daemon.
 - `ava-agent-<id>-shell-<n>[-<name>]` is a persistent agent shell.
-- `ava-updater`, `ava-rollout` and `ava-cluster-restart` are orchestration sessions.
 
 Shell handles are monotonic and never reused after closure. A rebuilt shell
 receives a new handle; an old capture request cannot address its replacement.

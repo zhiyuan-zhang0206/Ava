@@ -8,11 +8,22 @@ fails fast on timeout. A loopback-only single box never waits.
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from cli.commands import _cluster_instance as _ci
 from shared.config import settings
+
+
+def _no_native_effect(*_args: object, **_kwargs: object) -> None:
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _native_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_ci.ownership, "require_listener", _no_native_effect)
+    monkeypatch.setattr(_ci.ownership, "require_postgres", _no_native_effect)
 
 
 def _pg_socket_path(root: Path, home: Path) -> Path:
@@ -404,11 +415,12 @@ def test_start_probes_receive_the_url_hosts(
         calls.append(cmd)
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
+    monkeypatch.setattr(_ci.owned_postgres, "start", _no_native_effect)
     monkeypatch.setattr(_ci.subprocess, "run", _run)
 
     assert _ci._start_pg(15433, "") == 0
     assert _ci._start_redis(16380, "admin", "runtime", "", "ava") == 0
-    assert seen == {"pg": (15433, "10.0.0.7"), "redis": (16380, "10.0.0.7")}
+    assert seen == {"redis": (16380, "10.0.0.7")}
 
 
 def test_pg_socket_dir_rejects_symlink(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -458,6 +470,11 @@ def _wire_pg_start(
     """Common mocks for _start_pg: a not-running pg on a scratch data dir, with
     subprocess.run captured."""
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+
+    def captured(*_args: object, **_kwargs: object) -> SimpleNamespace | None:
+        return SimpleNamespace(pid=123, live=lambda: True) if running else None
+
+    monkeypatch.setattr(_ci.ownership, "require_postgres", captured)
     monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: running)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []
@@ -466,7 +483,12 @@ def _wire_pg_start(
         calls.append(cmd)
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
-    monkeypatch.setattr(_ci.subprocess, "run", _run)
+    def start(
+        _data: Path, _port: int, argv: list[str], _env: dict[str, str], **_kw: object
+    ) -> None:
+        calls.append(argv)
+
+    monkeypatch.setattr(_ci.owned_postgres, "start", start)
     return calls
 
 
@@ -494,8 +516,9 @@ def test_start_pg_sets_owner_only_socket_permissions(
     calls = _wire_pg_start(monkeypatch, tmp_path)
 
     assert _ci._start_pg(5433, "") == 0
-    options = calls[0][calls[0].index("-o") + 1]
-    assert "unix_socket_permissions=0700" in options
+    assert "unix_socket_permissions=0700" in calls[0]
+    assert Path(calls[0][0]).name == "postgres"
+    assert "pg_ctl" not in calls[0]
 
 
 def test_start_pg_waits_and_fails_fast_on_timeout(
@@ -536,10 +559,10 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     assert calls != []
 
 
-def test_start_pg_hands_the_built_start_env_to_pg_ctl(
+def test_start_pg_hands_the_built_start_env_to_owned_launch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: object
 ) -> None:
-    """Task #3754: pg_ctl start gets pg_start_env() — the postmaster env is
+    """Task #3754: direct postgres gets pg_start_env() — the postmaster env is
     built explicitly (the macOS locale fallback for launchd / non-interactive
     ssh starts) instead of inheriting whatever process brought the cluster up."""
     monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
@@ -550,11 +573,12 @@ def test_start_pg_hands_the_built_start_env_to_pg_ctl(
     monkeypatch.setattr(_ci, "pg_start_env", lambda: sentinel)
     envs: list[object] = []
 
-    def _run(cmd: list[str], **kwargs: object) -> object:
-        envs.append(kwargs.get("env"))
-        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+    def start(
+        _data: Path, _port: int, _argv: list[str], env: dict[str, str], **_kw: object
+    ) -> None:
+        envs.append(env)
 
-    monkeypatch.setattr(_ci.subprocess, "run", _run)
+    monkeypatch.setattr(_ci.owned_postgres, "start", start)
 
     assert _ci._start_pg(5433, "") == 0
     assert envs == [sentinel]

@@ -30,7 +30,7 @@ persistence.
 
 ## Key Dependencies
 - [[memory-indexer.ava.okf.md]] — writer (indexer daemon) and reader (gateway search)
-- [[services/watchdog/watchdog.ava.okf.md]] — kept alive via `healthchecks/memory_search.py`
+- [[services/ava_root_glue/ava_root_glue.ava.okf.md]] — kept alive via `healthchecks/memory_search.py`
 
 ## Entry Points
 - `services/memory_search/daemon.py` — `.venv/bin/python -m services.memory_search.daemon`

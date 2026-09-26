@@ -20,38 +20,30 @@ routes return 404; configured bearer authentication precedes explicit route
 execution; unauthenticated health responses contain no secrets. Parsing and
 body limits remain shared rather than independently reimplemented.
 
-The settings-free boundary permits a prepared ops observation mode to report
-bootstrap-only health without importing the ordinary RPC mutation handlers.
-The transport itself does not validate a prepared release, prove process/job
-closure or grant startup permission. Its caller must establish these before
-binding, and an observation-only mode must not report normal ops readiness.
+The settings-free boundary supports explicit read-only observation tools without
+loading ordinary daemon configuration. The transport does not validate a release,
+prove process closure or grant startup permission; callers establish their own
+admission before binding.
 
-`shared.managed_writer_observation` supplies typed expected process, session and
-launcher facts for the prepared inventory producer. Its `UnitObserver` route
+`shared.process_evidence` owns strict digest/model values, exact native process
+identity and read-only process observations. Runtime image construction, service
+health and native launcher reads import these values without loading rollout
+leases or managed-writer controllers. Native read errors remain unknown; PID
+reuse stays distinct from the expected process exiting. This evidence grants no
+startup or mutation authority.
+
+`shared.managed_writer_observation` adds session and launcher facts for the
+prepared inventory producer. Its `UnitObserver` route
 checks an outstanding challenge before and after off-loop OS reads. Exact live
 processes, exited processes and reused PID identities remain distinct. Session
 records that are malformed, unreadable, substituted or still present never
 become absent by convenience. No signal or session mutation is performed.
 
-The actual ops daemon recognizes `--bootstrap-observation <private-context>`
-before normal imports. The restricted entry validates the complete prepared
-image, its loaded module origin, canonical home and registered machine/home,
-and the live old-schema rollout lease before binding. It consumes only the
-existing DB/secret/ops-port/transport-encryption aliases pre-projected by its
-parent; it neither fetches gateway configuration nor reads an ordinary Settings
-singleton. A secret-bearing off-box observer fails before socket creation unless
-that explicit projection is `tls`, `mtls`, or `overlay`, matching the normal ops
-daemon contract. Each challenge revalidates the operation. The normal daemon PID
-and unit registration paths are never invoked.
-
-The current observer returns `closure: unknown` unconditionally: native job
-declaration reads do not establish complete launcher closure, and actual updater
-replacement and complete inventory production are not yet connected. An empty
-test inventory is not evidence of complete unit or fleet closure. Normal ops
-routes are not registered on the test observation socket; a restricted `/ops`
-admits only two effect deliveries (`cluster_bootstrap_hop`,
-`cluster_normal_continue`), each executed by a one-shot child process, and
-refuses every other kind without dispatch.
+The normal ops daemon has no bootstrap observation mode, restricted `/ops`
+allowlist or one-shot dispatch child. Unknown daemon arguments, including the
+retired bootstrap option, refuse before ordinary imports. Read-only prepared
+observation and ledger helpers remain for the old coordinator's pending deletion;
+the generic transport mounts only routes explicitly supplied by a caller.
 
 ## Native launcher observation
 

@@ -18,6 +18,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import gateway.schedule_manager as sm
+from shared import start_serving
 from shared.cluster import session_name
 from shared.config import settings
 
@@ -65,8 +66,9 @@ def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
 
 
 @pytest.fixture
-def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[_FakeBackend, list[int]]:
-    from shared import start_serving
+def fake_session(
+    serving_root: start_serving.RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[_FakeBackend, list[int]]:
     from shared.sessions.pty import allocation_freeze
 
     backend = _FakeBackend()
@@ -88,7 +90,7 @@ def fake_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[_Fake
     monkeypatch.setattr(allocation_freeze, "current_generation", lambda: None)
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation) is True
+    assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
     return backend, launched
 
 
@@ -225,6 +227,7 @@ def test_launches_enabled_missing_session(
 
 
 def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
+    serving_root: start_serving.RootBirth,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     fake_session: tuple[_FakeBackend, list[int]],
@@ -235,7 +238,6 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     Removing the serving check would launch on the first reconcile; applying it
     to the whole reconcile would break disabled-schedule cleanup tests.
     """
-    from shared import start_serving
 
     _backend, launched = fake_session
     start_serving.clear_serving()
@@ -248,7 +250,7 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     assert _status(db_conn, sid) == "stopped"
 
     generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation) is True
+    assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True
     manager._reconcile()
 
     assert launched == [sid]

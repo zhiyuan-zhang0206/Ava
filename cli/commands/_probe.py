@@ -1,103 +1,31 @@
-"""Service probes, the start path's readiness gate, and status row formatting.
+"""Identity-bound service diagnostics and startup failure reporting.
 
-`_probe_service` is the one probe behind every operator-facing surface — the
-`ava status` per-service rows, `ava cluster health-probe`'s check 5, and the
-start path's readiness gate.
-
-**It asks for identity first, and only falls back to liveness when the endpoint
-cannot carry any.** A plain HTTP 2xx was the whole test, and a 2xx from
-*something* is not evidence that the something is ours: on 2026-07-24 a
-pytest-leaked restarter on prod's default port answered 200 for 98 minutes while
-the real restarter was dead, and on 2026-07-26 a WSL2 unit's daemons answered the
-Windows unit's health ports through the localhost relay. The watchdog has refused
-to believe a bare 2xx since (`shared.daemon_health.probe_daemon`); this surface —
-the one a human runs and the one alerts fire from — did not, so the condition the
-watchdog was shouting about read **green** here. `ServiceSpec.identity_probe`
-carries the check, so both now ask the same question of the same endpoint.
-
-Four signal types remain, in precedence order, and the row says which one it got:
-
-| label | what a ✓ means |
-|---|---|
-| `identity` | 2xx AND the answering process is this unit's (`ServiceSpec.identity_probe`) |
-| `http` | 2xx/3xx only — the endpoint carries no identity (frontend: Next.js) |
-| `tcp` | the port accepts a connection (milvus: gRPC, uncurlable) |
-| `pid` | this unit's pidfile names a live process (the watchdogs, which serve nothing) |
-
-The bottom three are liveness-only **by property of the endpoint, not by
-oversight** — see `ServiceSpec.identity_probe`. Showing the label is what keeps
-that visible instead of letting every ✓ look equally strong.
-
-`_wait_for_services_ready` polls those same probes for the roster `ava start` just
-launched and *reports* which never passed, so the start's exit code can carry
-service readiness instead of only "the start process exited cleanly". Why that
-mattered enough to change: a human reads the status snapshot and sees the crosses,
-but a program reads `rc`, and every programmatic caller of `ava start` was reading
-`rc == 0` as "the services are serving". Prod lost that bet — see
-`cli/commands/_gateway_ready.py` for the rollout that stalled on it.
-
-The gate is tiered (`CRITICAL_SERVICE_SESSIONS` vs the 45 s
-`NON_CRITICAL_SERVICE_READY_TIMEOUT_S` window): the 2026-08-30 rollout spent
-182 s of its 197.5 s start waiting on a pitr-uploader no conclusion depended on.
+The canonical roster supplies a protocol probe bound to root's captured process
+birth. Missing or unobservable evidence is unavailable; a responding foreign
+process cannot certify this cluster. Root owns startup readiness and recovery.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
-import time
-from pathlib import Path
 from typing import Any, NamedTuple
 
 from cli.commands._repo import ServiceSpec, session_name
 from shared.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
 from shared.cluster_drift import prod_source_head_sha as _prod_source_head_sha
+from shared.deploy_timing import CRITICAL_SERVICE_SESSIONS as CRITICAL_SERVICE_SESSIONS
 from shared.deploy_timing import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
-from shared.proc import process_alive
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
 __all__ = ["_detect_prod_source_drift", "_prod_source_head_sha"]
 
-# The poll's throttle, as a module-local name rather than a `time.sleep` call.
-#
-# Tests shorten or forbid this sleep to assert the wait's timing, and the only
-# handle a bare `time.sleep(...)` call offers is `time.sleep` itself — patching
-# `cli.commands._probe.time.sleep` resolves `time` to the *stdlib module object*
-# and disables sleeping for the whole process. That is not a wider version of the
-# same effect, it is a different one: every wall-clock-bounded retry loop in the
-# product (`shared.session_backend._graceful_kill_session` is `while
-# time.monotonic() < deadline: ...; time.sleep(0.5)`) keeps its real deadline and
-# loses its only throttle, so it spins at full speed for its full bound. On
-# 2026-07-30 that turned one `tests/cli` test into a 26 GB process and took the
-# swap out from under the prod box (issue #1001).
-#
-# Bound at import, so patching this name replaces THIS poll's sleep and nothing
-# else. Same intent as the `import cli.commands as _ns` indirection below: a
-# named seam per patchable behaviour.
-_poll_sleep = time.sleep
-
 logger = logging.getLogger(__name__)
 
 
-def _pidfile_path(spec: ServiceSpec) -> Path | None:
-    return spec.pidfile
-
-
-def _pid_alive(pidfile: Path) -> tuple[bool, int | None]:
-    try:
-        pid = int(pidfile.read_text().strip())
-    except (FileNotFoundError, ValueError):
-        return False, None
-    # process_alive, not a raw os.kill(pid, 0): on Windows os.kill maps any signal
-    # (incl. 0) to TerminateProcess, so the probe would *kill* the daemon it checks
-    # (e.g. `ava status` killing the watchdogs). process_alive routes through
-    # psutil.pid_exists on Windows and keeps the signal-0 semantics on POSIX.
-    return process_alive(pid), pid
-
-
 # Probe confirm-retry (R2-D, audit-06 Q2): a transient TCP reset / slow
-# response at the probe instant must not read as down and feed alerts /
-# auto-rollback decisions — one 1s confirm retry. 4xx stays immediate
+# response at the probe instant must not read as down and feed alerts —
+# one 1s confirm retry. 4xx stays immediate
 # (a misconfigured probe), 429/5xx get the confirm. No Retry-After respect:
 # a probe must never sleep for the upstream's backoff.
 _PROBE_POLICY = Policy(
@@ -127,39 +55,12 @@ def _curl_ok(url: str) -> bool:
     return True
 
 
-def _tcp_alive(port: int) -> bool:
-    """TCP connect probe — used by gRPC servers (milvus); curl cannot probe gRPC."""
-    import socket
-
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=2):
-            return True
-    except OSError:
-        return False
-
-
 class ServiceProbe(NamedTuple):
-    """One service's probe outcome, as the operator surfaces need it.
+    """Operator-facing readiness evidence.
 
-    Attributes:
-        alive: True / False, or None when there is no probe to run at all
-            (`browser-mcp`, whose transport is a Unix socket only its own
-            healthcheck dials). None is not "assumed healthy" — it is "never
-            observed", and the readiness gate treats it as un-gateable.
-        label: which signal answered — `identity` / `http` / `tcp` / `pid` /
-            `n/a`. Printed, because a ✓ backed by an identity check and a ✓
-            backed by a bare 2xx are not the same claim.
-        detail: why, in the endpoint's own words. Populated on failure (an
-            identity probe's `DaemonProbe.detail` names the fact that failed —
-            "home='/home/ava/.ava' != …" is actionable where "down" is not) and
-            left empty when there is nothing to add.
-        terminal: whether the endpoint is held by something this unit cannot
-            evict (`DaemonProbe.terminal` — another `$AVA_HOME`'s daemon, another
-            daemon kind, a non-Ava process). Always False for a liveness-only
-            signal, which cannot tell an occupant from an outage. The status rows
-            do not branch on it — "not serving for us" is one answer there — but
-            `_occupied_health_ports` does, because a start that is about to BIND
-            the port has to know whether waiting could help.
+    ``alive=None`` means missing or unobservable evidence. Only ``True`` is a
+    positive readiness claim. ``terminal`` identifies an occupied endpoint or
+    unknown ownership that startup must resolve before launching.
     """
 
     alive: bool | None
@@ -169,131 +70,19 @@ class ServiceProbe(NamedTuple):
 
 
 def _probe_service(spec: ServiceSpec) -> ServiceProbe:
-    """Probe one service, preferring identity over liveness.
-
-    Precedence: the spec's `identity_probe` (which already dialled the endpoint
-    and verified the answer is ours), then the liveness-only signals for the
-    endpoints that cannot carry identity — curl, TCP connect, pidfile. A spec with
-    neither reports `alive=None`.
-    """
-    # Lookup _curl_ok through the package namespace so tests can monkeypatch
-    # `cli.commands._curl_ok` to stub HTTP calls. Same pattern in
-    # _print_service_row below.
-    import cli.commands as _ns
-
-    if spec.identity_probe is not None:
-        # The three built-in probes are total wrappers — every failure mode
-        # (timeout, refused connection, malformed body) already comes back as a
-        # `DaemonProbe`. A plugin-registered `identity_probe` carries no such
-        # guarantee, and this is the function behind `ava status`: the command an
-        # operator runs precisely when the unit is already misbehaving. One
-        # plugin's unhandled exception must not take the whole status screen with
-        # it, and a service whose probe cannot answer is not serving for us.
-        #
-        # The exception's type and message become the row's detail, so a merely
-        # buggy probe still says which probe and why, on the surface being read.
-        # Swallowing it into a fixed string would trade the crash for a mystery.
-        try:
-            probe = spec.identity_probe()
-        except Exception as exc:
-            detail = f"identity probe raised {type(exc).__name__}: {exc}"
-            return ServiceProbe(alive=False, label="identity", detail=detail)
-        # `terminal` rides along but never changes what a ROW says: a port held
-        # by an occupant is exactly as "not serving for us" as an empty one, and
-        # whether a respawn could win is the watchdog's question. It is carried
-        # because one caller is neither reporting nor respawning —
-        # `_occupied_health_ports` is about to bind that port.
+    """Report only identity-bound protocol evidence from the canonical roster."""
+    if spec.identity_probe is None:
+        return ServiceProbe(None, "unavailable", "service has no identity-bound readiness probe")
+    try:
+        probe = spec.identity_probe()
+    except Exception as exc:
         return ServiceProbe(
-            probe.alive, "identity", "" if probe.alive else probe.detail, probe.terminal
+            None, "unavailable", f"identity probe raised {type(exc).__name__}: {exc}"
         )
-    if spec.curl_url is not None:
-        ok = _ns._curl_ok(spec.curl_url)
-        return ServiceProbe(ok, "http", "" if ok else f"no 2xx/3xx from {spec.curl_url}")
-    if spec.tcp_port is not None:
-        ok = _tcp_alive(spec.tcp_port)
-        return ServiceProbe(ok, "tcp", "" if ok else f"nothing accepting on port {spec.tcp_port}")
-    pidfile = _pidfile_path(spec)
-    if pidfile is None:
-        return ServiceProbe(None, "n/a", "")
-    alive, pid = _pid_alive(pidfile)
-    if pid is None:
-        detail = f"no readable pid in {pidfile}"
-    else:
-        detail = "" if alive else f"pid {pid} is not running"
-    return ServiceProbe(alive=alive, label="pid", detail=detail)
+    from shared.daemon_health import ProbeVerdict
 
-
-# The services the readiness gate holds the whole bound for — the only ones that
-# can fail a start. Everything else gets the short non-critical window
-# (`NON_CRITICAL_SERVICE_READY_TIMEOUT_S`). Single source of truth: tests pin
-# this exact set, so adding or removing a critical service turns the suite red.
-#
-# The CTO ruling (Task #2183, C2): critical = a failure cuts user-visible core
-# function or the ops safety net. gateway / frontend are the serving surface;
-# agent-host runs agent turns; im-bridge is the IM alert channel; the two
-# watchdogs are the revive safety net. `frontend` is named here even though
-# `_SLOW_TO_SERVE_SESSIONS` keeps it out of the wait entirely.
-CRITICAL_SERVICE_SESSIONS = frozenset(
-    {
-        "gateway",
-        "frontend",
-        "agent-host",
-        "gateway-watchdog",
-        "agent-runner-watchdog",
-        "im-bridge",
-    }
-)
-
-
-# The services whose probe says nothing about a launch that just happened. The
-# frontend is the whole list: `npm run build` runs for ~30-60 s before Next.js
-# answers, so its probe reads False for most of a perfectly good start.
-#
-# Both launch-time consumers of the probes have to know this, and for the same
-# reason — the readiness wait (gating on the frontend would put a minute on every
-# gateway start) and `_launch_sessions`' husk check (a mid-build frontend is
-# not a husk, and "relaunching" one restarts the build it is in the middle of).
-# Stated once, because two copies of this list would drift and the second copy is
-# the one nobody reads.
-_SLOW_TO_SERVE_SESSIONS = frozenset({"frontend"})
-
-
-def _probe_judges_a_fresh_launch(spec: ServiceSpec) -> bool:
-    """Whether a False probe means "this service is not up" for a just-launched spec.
-
-    False for a service that legitimately takes longer to serve than a start is
-    willing to wait for it (`_SLOW_TO_SERVE_SESSIONS`); its state is reported by the
-    status snapshot instead, which is read after the delay has had time to pass.
-    """
-    return spec.session not in _SLOW_TO_SERVE_SESSIONS
-
-
-def _husk_session_reason(spec: ServiceSpec) -> str | None:
-    """Why a live session for `spec` is not evidence its service runs — or None.
-
-    `ava start` skips a service whose session already exists, which is the right
-    idempotence guard asked of the wrong thing: the session *process* can stay
-    alive, and a process whose daemon logic died is a session that exists with
-    nothing behind it. On
-    2026-07-30 an unconfirmed force-kill left exactly that behind, the start printed
-    `✓ ava-gateway already running`, and prod had no gateway for a minute until the
-    watchdog noticed (issue #1015).
-
-    So the guard asks the probe instead — the same probe `ava status` and the
-    readiness wait use. A non-None return is the reason to relaunch, in the
-    endpoint's own words, so the operator sees why a session they saw listed
-    as alive was torn down. None means "skip is correct": the probe passed, the
-    endpoint carries no probe at all (`alive is None`), or the probe cannot judge a
-    fresh launch (`_probe_judges_a_fresh_launch`).
-    """
-    import cli.commands as _ns
-
-    if not _probe_judges_a_fresh_launch(spec):
-        return None
-    probe = _ns._probe_service(spec)
-    if probe.alive is not False:
-        return None
-    return probe.detail or f"{probe.label} probe reports it down"
+    alive = None if probe.verdict is ProbeVerdict.UNAVAILABLE else probe.alive
+    return ServiceProbe(alive, "identity", "" if alive else probe.detail, probe.terminal)
 
 
 class OccupiedPort(NamedTuple):
@@ -351,26 +140,18 @@ def _occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort
     to prevent. The gate narrows the failure it was built for (issue #977's relay,
     which answers) and leaves the generic taken-port case where it already was.
     """
-    import cli.commands as _ns
 
     occupied: list[OccupiedPort] = []
     for spec in specs:
         if not _binds_a_daemon_health_port(spec):
             continue
-        probe = _ns._probe_service(spec)
+        probe = _probe_service(spec)
         if probe.terminal:
             occupied.append(OccupiedPort(spec, probe.detail))
     return tuple(occupied)
 
 
-_READY_POLL_INTERVAL_S = 0.5
-
-# How many consecutive polls must agree that an unready service's session is gone
-# before the wait stops waiting on it. One reading is not evidence: the backend may
-# not have registered a session the start path spawned moments earlier, so a single
-# "session missing" right after launch is a race. Two, one interval apart, costs
-# `_READY_POLL_INTERVAL_S` instead of the whole bound. Same rule, for the same
-# reason, as `_EARLY_EXIT_CONFIRMATIONS` in `cli.commands._gateway_ready`.
+# Require repeated positive stopped observations before ending readiness early.
 _SESSION_GONE_CONFIRMATIONS = 2
 
 
@@ -402,104 +183,6 @@ class ReadinessWait(NamedTuple):
     non_critical_unready: tuple[ServiceSpec, ...] = ()
 
 
-def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -> ReadinessWait:
-    """Poll each spec's liveness probe until all pass, and report the ones that never do.
-
-    Returns the specs still probing False when the wait stops — an empty `unready`
-    means every critical spec passed, which is the signal `ava start` turns into its
-    exit code — together with how long that took and which of the two exits ended
-    it. A spec counts as ready the moment its probe is no longer False: True, or
-    `None` for a probe-less spec, which can never be observed unready and therefore
-    can never gate (`browser-mcp` is the one such service on the roster — its
-    transport is a Unix socket that only its healthcheck dials).
-
-    The start path calls this just before its status snapshot, and the wait exists
-    in the first place because the session spawn returns the instant the process
-    starts while a uvicorn daemon needs a beat to bind its port. A healthy roster therefore pays
-    nothing beyond the polls it takes to come up; the bound is only ever spent by a
-    service that is alive and has bound nothing.
-
-    The roster is tiered by `CRITICAL_SERVICE_SESSIONS`: the critical services get
-    the whole `timeout_s` bound and are the only ones that can end the wait
-    unready. A non-critical service is waited on only for
-    `NON_CRITICAL_SERVICE_READY_TIMEOUT_S`, then leaves the wait whether it is up
-    or not — still-unready ones land in `non_critical_unready` for the caller to
-    report and alert, never as a failed start (the 2026-08-30 lesson: 182 s of a
-    197.5 s local start went to a pitr-uploader whose verdict nothing depended on).
-
-    Two things end the wait early, so the bound is affordable:
-
-    - every remaining critical spec's probe passes (the normal exit, and the only
-      one that returns empty — non-critical stragglers ride along in
-      `non_critical_unready`);
-    - every remaining critical spec's *session* is confirmed gone. A launched
-      service whose session died will never bind its port, so waiting cannot help.
-      This is the local form of `_gateway_ready`'s `GATEWAY_GONE`, and it is what
-      keeps a crashed daemon from costing an operator the full bound before the
-      snapshot prints. It requires ALL unready critical specs to be gone: one dead
-      `browser` must not cut short the wait of a gateway that is 20 s from serving
-      and would then be reported unready when it was merely slow.
-
-    The caller excludes the frontend (a ~30-60 s `npm run build`, which would set the
-    floor for every start) and services gated out or `--disable-service`-skipped
-    never reach here at all — the roster this receives is `ops.spec`'s capability
-    view minus those, so "skipped" and "unready" stay different answers.
-    """
-    # Go through the package namespace so a test can monkeypatch
-    # `cli.commands._probe_service` (same pattern as _probe_service -> _curl_ok).
-    import cli.commands as _ns
-
-    started_at = time.monotonic()
-    deadline = started_at + timeout_s
-    non_critical_deadline = started_at + NON_CRITICAL_SERVICE_READY_TIMEOUT_S
-    critical = tuple(s for s in specs if s.session in CRITICAL_SERVICE_SESSIONS)
-    non_critical = {s.session: s for s in specs if s.session not in CRITICAL_SERVICE_SESSIONS}
-    gone_streak: dict[str, int] = {}
-    non_critical_gone_streak: dict[str, int] = {}
-    non_critical_unready: list[ServiceSpec] = []
-    while True:
-        # Non-critical services are waited on only inside their short window:
-        # drop the ready ones every poll, drop a session confirmed gone without
-        # spending the window, and at the window's end drop whatever is left.
-        for name, spec in list(non_critical.items()):
-            if _ns._probe_service(spec).alive is not False:
-                del non_critical[name]
-                continue
-            alive = _ns._has_session(session_name(name))
-            non_critical_gone_streak[name] = (
-                0 if alive else non_critical_gone_streak.get(name, 0) + 1
-            )
-            if non_critical_gone_streak[name] >= _SESSION_GONE_CONFIRMATIONS:
-                del non_critical[name]
-                non_critical_unready.append(spec)
-        if non_critical and time.monotonic() >= non_critical_deadline:
-            non_critical_unready.extend(non_critical.values())
-            non_critical.clear()
-        # The gate itself is critical-only: the exit code's verdict must not
-        # depend on a service the tier demoted. The wait still runs on while a
-        # non-critical service has not reached a verdict (ready, confirmed gone,
-        # or its window expired) — otherwise a session that dies on the very
-        # poll the critical roster clears would be dropped without a report.
-        unready = tuple(s for s in critical if _ns._probe_service(s).alive is False)
-        if not unready and not non_critical:
-            return ReadinessWait(
-                (),
-                time.monotonic() - started_at,
-                sessions_gone=False,
-                non_critical_unready=tuple(non_critical_unready),
-            )
-        if unready:
-            for spec in unready:
-                alive = _ns._has_session(session_name(spec.session))
-                gone_streak[spec.session] = 0 if alive else gone_streak.get(spec.session, 0) + 1
-            gone = all(gone_streak[s.session] >= _SESSION_GONE_CONFIRMATIONS for s in unready)
-            if gone or time.monotonic() >= deadline:
-                return ReadinessWait(
-                    unready, time.monotonic() - started_at, gone, tuple(non_critical_unready)
-                )
-        _poll_sleep(_READY_POLL_INTERVAL_S)
-
-
 def _print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
     """Name the services that never became ready, for the operator reading the same
     output as the status snapshot above it.
@@ -523,7 +206,7 @@ def _print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
             f"— their sessions are gone: {names}\n"
             f"  They died or were never launched, so the {timeout_s:.0f}s readiness bound was "
             f"not spent and raising it would change nothing;\n"
-            f"  read why in $AVA_HOME/logs. The watchdog keeps trying to revive them and "
+            f"  read why in $AVA_HOME/logs. ava-root keeps trying to revive them and "
             f"`ava start` is idempotent to retry.",
             file=sys.stderr,
         )
@@ -533,7 +216,7 @@ def _print_unready_services(wait: ReadinessWait, timeout_s: float) -> None:
         f"({wait.elapsed_s:.1f}s elapsed): {names}\n"
         f"  Their sessions are running and still not serving — their rows above show the "
         f"failing probe. Every start step itself succeeded,\n"
-        f"  so this host is up but incomplete; the watchdog keeps trying to revive them, "
+        f"  so this host is up but incomplete; ava-root keeps trying to revive them, "
         f"`ava status` re-checks, and `ava start` is idempotent to retry.",
         file=sys.stderr,
     )
@@ -552,7 +235,7 @@ def _print_non_critical_unready_services(specs: tuple[ServiceSpec, ...]) -> None
         f"{NON_CRITICAL_SERVICE_READY_TIMEOUT_S:.0f}s: {names}\n"
         f"  They do not fail this start (the readiness gate waits for the critical roster "
         f"only),\n"
-        f"  but an alert has been posted; the watchdog keeps trying to revive them and "
+        f"  but an alert has been posted; ava-root keeps trying to revive them and "
         f"`ava start` is idempotent to retry.",
         file=sys.stderr,
     )
@@ -565,9 +248,9 @@ def _alert_db_connect() -> Any:
     """The DB dial the non-critical alert uses — a named seam.
 
     `shared.db.connect` is a process-wide entry a full `ava start` dials in
-    other steps too (the rollout-boundary lease read), so stubbing the alert's
-    data plane must not replace every caller's. Indirection costs one line and
-    keeps a test able to fake only this alert's DB.
+    other steps too, so stubbing the alert's data plane must not replace every
+    caller's. Indirection costs one line and keeps a test able to fake only this
+    alert's DB.
     """
     import shared.db
 
@@ -724,37 +407,16 @@ def _resolve_recovered_non_critical_alerts(
             )
 
 
-_ABSORBED_REASON = (
-    "absorbed by ava-root (health supervision runs in the root tree; no session by design)"
-)
-
-
 def _print_service_row(
     spec: ServiceSpec,
     name_w: int,
     skip_reason: str | None = None,
     *,
-    root_units: dict[str, dict[str, Any]] | None = None,
+    root_units: dict[str, dict[str, Any]],
 ) -> None:
-    # Lazy import keeps tests' `monkeypatch.setattr(cli.commands, "_has_session", X)`
-    # effective — the call goes through the package namespace which the test
-    # rebinds, instead of the sub-module's frozen local binding.
-    import cli.commands as _ns
-
     sess = session_name(spec.session)
-    if root_units is None:
-        session_mark = "✓" if _ns._has_session(sess) else "✗"
-    else:
-        # Root mode (task #3370): the column's question — "does this host run
-        # this service" — is answered by the tree that actually drives it. The
-        # absorbed watchdogs emit no unit by design; their rows say so instead
-        # of reading as a missing service.
-        from services.ava_root_glue.manifests import ABSORBED_WATCHDOGS
-
-        unit = root_units.get(spec.session)
-        session_mark = "✓" if unit is not None and unit.get("state") == "running" else "✗"
-        if unit is None and spec.session in ABSORBED_WATCHDOGS:
-            skip_reason = skip_reason or _ABSORBED_REASON
+    unit = root_units.get(spec.session)
+    session_mark = "✓" if unit is not None and unit.get("state") == "running" else "✗"
 
     probe = _probe_service(spec)
     if probe.alive is True:

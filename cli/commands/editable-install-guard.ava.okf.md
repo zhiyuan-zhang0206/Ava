@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Editable Install Guard
-description: Prod lifecycle assertions, execution gate, and update-time protection for Ava's editable install.
+description: Explicit editable-install inspection and permission restoration for development tooling.
 tags:
 - cli
 - lifecycle
@@ -20,65 +20,30 @@ disposable worktree is never a legal target. uv writes one line per wheel
 package, so its native multi-line form (including repeated roots and no trailing
 newline) is healthy.
 `shared/editable_install.py` owns the platform-independent discovery, exact-root
-validation, atomic repair, and temporary permission window used by lifecycle
-callers.
+validation, atomic repair, and temporary permission window for explicit
+installation tooling.
 
-## Lifecycle flow
+## Execution boundary
 
-- `_converge` registers the prod assertion as a host-global step. It resolves
-  the installed prod checkout, accepts that source plus explicitly allowlisted
-  stable dev-clone roots, and repairs only an illegal or missing pointer. Legal
-  records are byte-identical after the pass; repaired content is the prod source
-  root without a trailing newline.
-  The same pass asserts the `direct_url.json` records: a URL naming anything
-  outside the allowlist (or a record that is unparsable or not marked
-  editable) is repaired too, so the pointer and the URL can never disagree.
-  Repairs print a warning and emit the registered anomaly events
-  `editable_pth_repaired` / `editable_direct_url_repaired` with the path,
-  poisoned target, and source root.
-- The following host-global `prod editable exec gate` checks the remaining
-  records and the virtualenv console script (`.venv/bin/ava` or
-  `.venv/Scripts/ava.exe`). If a residual half-uninstall remains, it runs one
-  recovery `uv sync --reinstall-package ava` and rechecks. Finally it runs the checkout virtualenv
-  interpreter in isolated mode from the platform temp directory to import
-  `agent.exec_child`; success requires the printed module path to resolve under
-  the prod source root or the same stable-root allowlist used for the records.
-  Any residual record, missing launcher, or failed import
-  raises after a clear stderr diagnostic, so `ava start`, `ava converge`, and
-  `ava cluster update` fail fast instead of accepting uv's false-success exit.
-  Manual reinstall must use the same write window (see the runbook's
-  "Manual editable-install recovery" recipe); `ava cluster update` performs
-  the managed recovery.
-- `converge_host` rejects host-global steps before execution in `.worktrees/`
-  and `.claude/worktrees/` checkouts, so a worktree's own legal pointer is never
-  inspected or rewritten. `ava start` inherits the same converge step.
-- Update, recovery, rollback, and start's source-integrity auto-heal route each
-  `uv sync` through `editable_pth_write_window`. The window temporarily opens
-  editable records plus `protected_editable_paths`: site-packages,
-  `ava-*.dist-info`, and POSIX `.venv/bin`. Converge protection, updater sync,
-  exec-gate reinstall, and direct record repair use this single directory set.
-  Discovery is structural, so missing records or a missing launcher cannot hide
-  an existing protected directory. The window restores exact prior modes after
-  success, non-zero sync, timeout, an exception, or partial entry failure.
-  Rollback callbacks unwind in reverse order and attempt every restoration even
-  if a chmod fails; that error propagates. Outside
-  an active cluster update, converge protects those POSIX directories as `0555`,
-  which rejects an unsanctioned replacement at the directory boundary. During an
-  update it defers that protection until the next quiescent start, allowing an
-  already-running orchestrator and recovery path to complete their syncs.
-- The local, agent-runner, and dry-run update-chain sync sites use
-  `run_uv_sync_verified`, which runs the same isolated import proof after uv
-  exits successfully. Rollback and recovery remain on the plain sync seam
-  because their trailing `ava start` runs the converge execution gate. Every
-  sync command pins `--python` to the target checkout's virtualenv and removes
-  inherited `VIRTUAL_ENV` from uv's child environment, so a foreign session
-  cannot select another venv.
-- The native Windows deployment chain calls
-  `python -m cli.commands._update_uv_sync`, giving it the same write window as
-  the in-process POSIX/WSL paths. Discovery scans Windows `Lib`, POSIX `lib`,
-  and `lib64` virtualenv layouts explicitly.
-  Windows retains the legacy record/dist-info write adjustments while skipping
-  site-packages/bin chmod and converge directory protection.
+Ordinary start admits a `StartRuntime` before preparing host state. A retained
+image is verified in place and never invokes editable repair, dependency sync,
+or source convergence. Development starts keep host wiring and plugin scaffold
+preparation, but do not discover or rewrite a separate production virtualenv.
+Converge has no editable pointer repair, protection, or reinstall step.
+
+`shared/editable_install.py` provides explicit inspection and repair tools for
+editable installations. Its write window opens the exact records and structural
+site-packages, dist-info and launcher directories, then restores their original
+modes. A caller must identify the intended checkout and its virtualenv; automatic
+startup does not grant permission to repair another installation. The
+`cli/python_install.py` source dependency pipeline owns normal locked dependency
+acquisition and editable builds.
+
+The import proof runs the selected virtualenv interpreter in isolated mode from
+a temporary directory and checks the actual `agent.exec_child` path. A successful
+package-manager exit alone does not prove that the install is usable. Discovery
+covers POSIX `lib`/`lib64` and Windows `Lib` layouts. See the runbook's manual
+editable-install recovery procedure for an explicitly selected installation.
 
 ## Invariants
 
@@ -93,7 +58,7 @@ callers.
   if the directory is gone, it reports the violation and the recovery sync owns
   recreation because this layer cannot invent a distribution version.
 - Repair changes editable-record content only. The write window restores every
-  record and directory mode that existed before lifecycle code entered it.
+  record and directory mode that existed before the explicit write window opened.
   This is exception-safe permission restoration, not a filesystem transaction:
   process termination or an OS refusal to restore permissions still requires
   operator recovery. Directory protection prevents launcher unlink/replacement;

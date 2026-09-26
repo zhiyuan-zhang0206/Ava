@@ -85,7 +85,7 @@ def test_begin_maintenance_records_and_refresh_re_stamps_the_shepherd() -> None:
     from shared.hold_driver import HoldDriver, mint_driver
 
     shepherd = mint_driver()
-    before = pause_owner.begin_maintenance("op1", _when(), driver=shepherd)
+    before = pause_owner.begin_maintenance("op1", _when(), driver=shepherd).snapshot
     assert before.driver == shepherd
     hold = before.maintenance
     assert hold is not None

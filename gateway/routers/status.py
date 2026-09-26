@@ -28,7 +28,7 @@ from gateway import loki_events, loki_query_budget
 from gateway.routers import _loki_shards, _roster_probe, _roster_rows, _stats_dashboard
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._health import get_health
-from gateway.routers._roster_rows import read_stranded_holds, stamp_cluster_globals
+from gateway.routers._roster_rows import stamp_cluster_globals
 from gateway.schemas import (
     ClusterPanel,
     MachineStatus,
@@ -41,13 +41,12 @@ from gateway.schemas import (
     applied_window,
 )
 from ops import cluster_rpc as _cluster_rpc
-from ops.cluster import ClusterStatus, _check_pidfile, current_orchestration
-from ops.cluster import is_paused as cluster_is_paused
-from ops.controllers.schema_mismatch import status as schema_mismatch_status
+from ops.cluster_pause import is_paused as cluster_is_paused
+from ops.cluster_status import ClusterStatus, _check_pidfile
+from ops.schema_mismatch import status as schema_mismatch_status
 from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease
 from shared.config import settings
-from shared.last_update import LastUpdate
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.observability import cluster_label
 from shared.resource_sample import ResourceSample
@@ -426,7 +425,7 @@ async def _probe_agent_runner(
         schema_mismatch=status.schema_mismatch,
         shell_count=status.shell_count,
         agent_host_online=status.agent_host_online,
-        watchdog_online=status.watchdog_online,
+        supervisor_online=status.supervisor_online,
         agent_count=status.agent_count,
         session_count=status.session_count,
         agent_groups=status.agent_groups,
@@ -508,33 +507,6 @@ def _read_deploy_lease() -> DeployLease | None:
         return None
 
 
-def _read_last_update() -> LastUpdate | None:
-    """The cluster's last update outcome, or None when unrecorded / unreadable.
-
-    Read once per roster assembly and stamped onto every row, the same shape as
-    `_read_cluster_pin` and `_read_deploy_lease` and degrading the same way: a
-    transient `OperationalError` (a rollout mid-restart is exactly when the status
-    surfaces are asked) leaves the banner off rather than taking the roster down,
-    while any other failure is a real bug and is logged loudly first.
-
-    Degrading to None means "we cannot say", and the surfaces show nothing rather
-    than a green all-clear — the failure mode this record exists to close is a
-    surface that stays quiet about a failed update, so it must not be reintroduced
-    by the reader.
-    """
-    import psycopg
-
-    from shared.last_update import read_last_update
-
-    try:
-        return read_last_update()
-    except psycopg.OperationalError:
-        return None
-    except Exception:
-        _log.exception("reading the last update record failed (the update banner will be blank)")
-        return None
-
-
 def _local_resource_sample() -> ResourceSample | None:
     """One live resource reading for the gateway's own machine (no status_snapshot call)."""
     try:
@@ -590,9 +562,7 @@ async def gather_cluster_status(
     *,
     cluster_target_sha: str | None = None,
     deploy_lease: DeployLease | None = None,
-    last_update: LastUpdate | None = None,
     last_known_good_sha: str | None = None,
-    stranded_holds: dict[str, tuple[datetime, str | None]] | None = None,
 ) -> list[MachineStatus]:
     """Async fan-out: every machine probed in parallel via a status_probe op
     to its ops server (the local machine included — its ops server is dialed
@@ -621,11 +591,7 @@ async def gather_cluster_status(
     Both are transcribed from the lease row — the fan-out's own probes do not inform
     them, and nothing here re-derives whether a deploy is in flight.
 
-    `last_update` is the third such fact, and the one that turns the roster from a
-    set of symptoms into a statement: a head/pin mismatch is shared by a node that
-    missed a rollout, a checkout moved without a restart, and a rollout that failed
-    and rolled back, so the roster carries the recorded outcome rather than leaving
-    every reader to guess which (#1012)."""
+    """
     machines: list[MachineStatus] = []
     probe_coros: list[Any] = []
 
@@ -661,15 +627,12 @@ async def gather_cluster_status(
 
     # The hold's OWN population, the pin verdict and the rest are applied in one
     # place (`_roster_rows.stamp_cluster_globals`): a row absent from the hold's
-    # note is "not named by this hold", not "converged", and `stranded_holds` is
-    # the one per-host fact among them (task #3132).
+    # note is "not named by this hold", not "converged".
     return stamp_cluster_globals(
         machines,
         cluster_target_sha=cluster_target_sha,
         deploy_lease=deploy_lease,
-        last_update=last_update,
         last_known_good_sha=last_known_good_sha,
-        stranded_holds=stranded_holds,
     )
 
 
@@ -702,9 +665,7 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
 
     pin = _read_cluster_pin()
     lease = _read_deploy_lease()
-    last_update = _read_last_update()
     known_good = _read_known_good()
-    stranded_holds = read_stranded_holds()
     local_name = machine_name()
     machines = (
         asyncio.run(
@@ -713,9 +674,7 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
                 local_name,
                 cluster_target_sha=pin,
                 deploy_lease=lease,
-                last_update=last_update,
                 last_known_good_sha=known_good,
-                stranded_holds=stranded_holds,
             )
         )
         if rows
@@ -728,11 +687,9 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
         current_serve_agent_runner=is_agent_runner(),
         current_serve_observability_station=is_observability_station(),
         current_paused=cluster_is_paused(),
-        current_orchestration=current_orchestration(),
         machines=machines,
         cluster_target_sha=pin,
         cluster_last_known_good_sha=known_good,
-        last_update=last_update,
     )
 
 

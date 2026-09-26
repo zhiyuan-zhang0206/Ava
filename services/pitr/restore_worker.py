@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sys
-import time
 from pathlib import Path
 from typing import Any, cast
 
 from services.pitr.base_manifest import CandidateManifest
+from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.restore_postgres import IsolatedPostgresRestoreExecutor
 from services.pitr.restore_proof import RestoreSpaceBudget, prove_candidate
 from services.pitr.store_factory import construct_store_group
+from services.pitr.worker_process import publish_result, worker_request
 
 
 def _object(value: object) -> dict[str, Any]:
@@ -27,8 +27,7 @@ def _string_map(value: object) -> dict[str, str]:
     return {str(key): str(item) for key, item in cast(dict[str, object], value).items()}
 
 
-def run(input_path: Path, output_path: Path) -> None:
-    raw = _object(json.loads(input_path.read_text()))
+def run(raw: dict[str, Any], output_path: Path) -> None:
     expected = {
         "candidate_json",
         "root",
@@ -42,11 +41,14 @@ def run(input_path: Path, output_path: Path) -> None:
         "pg_ctl",
         "pg_verifybackup",
     }
-    if set(raw) != expected:
+    if set(raw) not in (expected, expected | {"drill"}):
         raise ValueError("restore worker input fields differ from the restricted protocol")
     candidate = CandidateManifest.from_json(str(raw["candidate_json"]))
     budget = _object(raw["budget"])
     group = construct_store_group(str(raw["backend"]), _string_map(raw["store_args"]))
+    if "drill" in raw:
+        _run_drill(raw, candidate, group.generation_pinned_object_reader(), output_path)
+        return
     protected = prove_candidate(
         candidate=candidate,
         root=Path(str(raw["root"])),
@@ -72,19 +74,44 @@ def run(input_path: Path, output_path: Path) -> None:
         "candidate_sha256": protected.candidate_sha256,
         "pending_sha256": hashlib.sha256(payload).hexdigest(),
     }
-    output_path.write_text(json.dumps(result, sort_keys=True, separators=(",", ":")))
-    acknowledgement = output_path.with_suffix(".ack")
-    deadline = time.monotonic() + 60
-    while not acknowledgement.is_file():
-        if time.monotonic() >= deadline:
-            raise TimeoutError("restore controller did not acknowledge the worker result")
-        time.sleep(0.05)
+    publish_result(output_path, result)
+
+
+def _run_drill(
+    raw: dict[str, Any],
+    candidate: CandidateManifest,
+    reader: GenerationPinnedObjectReader,
+    output: Path,
+) -> None:
+    from services.pitr.restore_drill import DrillRequest, parse_target_wall, run_restore_drill
+
+    drill = _object(raw["drill"])
+    if set(drill) != {"scratch", "target_lsn", "target_wall", "timeout_seconds"}:
+        raise ValueError("invalid drill worker input")
+    scratch = Path(str(drill["scratch"]))
+    run_restore_drill(
+        DrillRequest(
+            candidate=candidate,
+            reader=reader,
+            key=Path(str(raw["key_path"])).read_bytes(),
+            ack_dir=Path(str(raw["ack_dir"])),
+            scratch=scratch,
+            target_lsn=str(drill["target_lsn"]),
+            target_wall=parse_target_wall(str(drill["target_wall"])),
+            pg_ctl=Path(str(raw["pg_ctl"])),
+            pg_verifybackup=Path(str(raw["pg_verifybackup"])),
+            live_db_url=str(raw["live_db_url"]),
+            data_directory=str(raw["data_directory"]),
+            timeout_seconds=int(drill["timeout_seconds"]),
+        )
+    )
+    payload = (scratch / "drill-evidence.json").read_bytes()
+    publish_result(output, {"evidence_sha256": hashlib.sha256(payload).hexdigest()})
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: python -m services.pitr.restore_worker INPUT OUTPUT")
-    run(Path(sys.argv[1]), Path(sys.argv[2]))
+    request, output = worker_request(sys.argv)
+    run(request, output)
 
 
 if __name__ == "__main__":

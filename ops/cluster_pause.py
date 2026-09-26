@@ -1,8 +1,8 @@
 """Drain local native work before stopping its dependencies.
 
 The existing pause-owner journal closes admission and records checkpoint/exit
-receipts. Gateway middleware reads the separate DB posture, which changes only
-when the caller proceeds to service shutdown after the cluster-wide barrier.
+receipts. It fences HTTP only after the cluster-wide drain barrier advances this
+home into its stop window. Database posture remains a status projection.
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ def is_paused(
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).
 
-    Gateway middleware checks this on every request. The row is read from the
-    central DB, which the gateway owns; a read failure (DB unreachable) reads as
+    Status readers consume this database projection. HTTP admission instead reads
+    the local journal. A projection read failure (DB unreachable) reads as
     NOT paused — the same conservative direction the old file stat had (an
     unreadable flag was an absent flag). The offline maintenance page is owned
     separately by the cluster orchestrator's Gate marker.
@@ -57,10 +57,10 @@ def pause_local_cluster() -> None:
     paused. Posture becomes 503 only when the caller actually stops services,
     after all participating runners have completed their ordinary restarts.
 
-    This entry is update-family only (Phase A, `spawn_update`, the update CLI's
-    local leg), so the drain enables the straggler reap (task #4016): a member
-    still un-landed past `update_straggler_reap_seconds` is truncated and
-    released as `reaped` instead of aborting the wave.
+    This entry is update-family only (`ops.ops_cluster.cluster_stop_op` under an
+    executing deploy lease), so the drain enables the straggler reap (task
+    #4016): a member still un-landed past `update_straggler_reap_seconds` is
+    truncated and released as `reaped` instead of aborting the wave.
     """
     from ops.agent_pause import pause_agents
     from shared.config import settings

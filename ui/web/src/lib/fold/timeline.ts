@@ -482,7 +482,6 @@ export function applySystemEvent(
     case "task_updated":
       // task board — useTasks invalidate-refetches on these; they never enter
       // the per-agent timeline.
-    case "cluster_update_started":
       // root resilience provider owns the full-screen update takeover; this
       // cluster-level event never enters an agent timeline.
     case "timeline_snapshot":

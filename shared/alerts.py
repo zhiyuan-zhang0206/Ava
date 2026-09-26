@@ -354,7 +354,7 @@ def format_local(ts: datetime | None) -> str:
 def frontend_base_url() -> str:
     """The user-facing fleet UI base URL for IM jump links.
 
-    The user reaches the fleet UI at the always-up gate's entry port on the
+    The user reaches the fleet UI at Gate's entry port on the
     gateway host (the Next.js app itself binds another port and is proxied).
     Derived from the two existing settings: the HOST of ``AVA_GATEWAY_URL``
     (reachable over the private network, never localhost in prod) and the PORT of

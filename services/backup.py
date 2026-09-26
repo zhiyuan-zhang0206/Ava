@@ -1,27 +1,16 @@
 """Daily local Postgres backup, driven by the gateway scheduler daemon.
 
 One `pg_dump --format=custom` per day into `$AVA_HOME/backups/db/`,
-keeping the newest ``backup_keep`` dumps (``services.backup_keep``, default 7). `services.backup_scheduler.daemon`
-calls `is_due()` and `run_backup()` independently of watchdog rounds. The
-scheduler runs at the first wake after ``backup_hour`` cluster time with no dump
-for the current cluster day, so a host that was down at 03:00 catches up.
-The scheduler is the only production caller of `is_due()` and `run_backup()`.
+keeping the newest ``backup_keep`` dumps (``services.backup_keep``, default 7).
+`services.backup_scheduler.daemon` calls `is_due()` independently of watchdog
+rounds: at the first wake after ``backup_hour`` cluster time with no dump for
+the current cluster day, so a host that was down at 03:00 catches up. Its
+operation worker runs `prepare_scheduled_backup()` inside private controls; the
+controller runs `commit_scheduled_backup()` after the worker's group closed.
+In-process snapshot callers use `run_backup()`.
 
-Two clocks, deliberately different ones:
-
-- **When to run** is the cluster wall clock (`AVA_TIMEZONE`, cluster-pinned):
-  "03:00" means the same instant for every gateway in the fleet, and it does
-  not move when a machine does. Reading the host's OS timezone instead used to
-  skip backups outright — carry a laptop from Asia/Shanghai to US/Pacific and
-  the newest dump's local date sits ahead of the new local date, so `is_due`
-  returned False (silently, with no error to notice) until the calendar caught
-  up.
-- **What a dump is called** is UTC, stamped `Z`: `<db>-YYYYMMDDTHHMMSSZ.dump.enc`.
-  Prune deletes the oldest dumps by this stamp, so the ordering must be a
-  total order over real instants. A local-time name is not: in the DST fall-back
-  hour the same wall clock names two instants an hour apart, and re-parsing it
-  as naive-then-local made "which backup do we delete" depend on which offset
-  the parse happened to pick.
+Backup cadence follows the configured cluster timezone; artifact names carry
+UTC timestamps. Retention orders those timestamps independently of host DST.
 
 Local dumps guard against bad migrations / accidental deletes / DB
 corruption. Storage interface: `run_backup` is
@@ -37,12 +26,8 @@ discards it. Remote objects are append-only except policy-owned retention deleti
 by default): the store contract deliberately has no delete verb, and the
 separate retention-delete role only acts when explicitly armed — remote
 retention is a shared planner concern (dry-run today) — see `future/infra/pg-backup.md`.
-The dump is `pg_dump --format=custom` with zstd compression — custom format
-already compresses the archive, so the pre-2026-08-27 pipeline's extra `gzip`
-stage (a second compression pass over already-compressed bytes) is gone. The
-benchmark on the production DB (2026-08-27) measured the removed gzip pass at
-13-47 s for a <1% size gain. Legacy artifacts named `<db>-<ts>.dump.gz.enc`
-stay managed and restorable (see `gunzip_if_needed`).
+The current dump uses PostgreSQL's compressed custom format. Existing encrypted
+legacy gzip artifacts remain restorable through `gunzip_if_needed`.
 
 The LangGraph checkpoint tables (`checkpoint_blobs`, `checkpoints`, and
 `checkpoint_writes`) are the only copy of conversation history: messages, tool
@@ -563,7 +548,7 @@ def run_backup(
 
     Plaintext and encrypted intermediates use `.partial` names; only the
     encrypted custom-format artifact is published after every pipeline step
-    succeeds.
+    succeeds. A failed step retains its intermediates for explicit retirement.
 
     `timeout_s` lets bounded callers such as the pre-update snapshot use a
     tighter ceiling than the daily backup default. `pre_update` names the
@@ -576,15 +561,19 @@ def run_backup(
     anything (`pg_dump` and the encryption pass) — see `_run_with_progress`.
     """
     with backup_lock():
-        return _run_backup(
+        target = _run_backup(
             now,
+            directory=backup_dir(),
             db_url=db_url,
             timeout_s=timeout_s,
             pre_update=pre_update,
             pitr_activation=pitr_activation,
-            publish=publish,
             progress=progress,
         )
+        if publish:
+            _publish_offsite(target)
+        _log_written(target, _prune(target.parent))
+        return target
 
 
 def _db_size_breakdown(db_url: str | None = None) -> str:
@@ -631,6 +620,48 @@ def _mb(b: int) -> int:
     return round(b / 2**20)
 
 
+def prepare_scheduled_backup(now: datetime, directory: Path) -> Path:
+    """Write, then best-effort publish off-site, inside the operation's controls.
+
+    The local artifact is committed by the controller after group closure, so
+    an interrupted upload leaves the complete artifact in the retained controls.
+    """
+    with backup_lock():
+        artifact = _run_backup(now, directory=directory)
+        _publish_offsite(artifact)
+        return artifact
+
+
+def commit_scheduled_backup(staged: Path, digest: str) -> Path:
+    """Publish only the exact completed worker artifact; never overwrite one.
+
+    The caller invokes this only after the worker's group closed with a zero
+    exit. Any refusal leaves the staged artifact in the operation's controls.
+    """
+    if staged.is_symlink() or not staged.is_file() or not DUMP_NAME_RE.fullmatch(staged.name):
+        raise RuntimeError("scheduled backup result is not a managed regular artifact")
+    with staged.open("rb") as artifact:
+        if hashlib.file_digest(artifact, "sha256").hexdigest() != digest:
+            raise RuntimeError("scheduled backup changed after preparation")
+    with backup_lock():
+        directory = ensure_private_dir(backup_dir())
+        target = directory / staged.name
+        os.link(staged, target)  # Exclusive publication; a prior artifact is never replaced.
+        ensure_private_file(target)
+        staged.unlink()
+        _log_written(target, _prune(directory))
+    return target
+
+
+def _log_written(target: Path, removed: list[Path]) -> None:
+    _log.info(
+        "[backup] wrote %s (%.1f MiB), pruned %d",
+        target,
+        target.stat().st_size / 2**20,
+        len(removed),
+    )
+
+
 def _run_backup(
     now: datetime | None = None,
     *,
@@ -638,7 +669,7 @@ def _run_backup(
     timeout_s: float = _DUMP_TIMEOUT_S,
     pre_update: bool = False,
     pitr_activation: str | None = None,
-    publish: bool = True,
+    directory: Path,
     progress: _ProgressSink | None = None,
 ) -> Path:
     """Write one managed dump while `backup_lock` is held.
@@ -656,14 +687,8 @@ def _run_backup(
     # snapshot across many statements); running it through a transaction pooler is
     # meaningless and breaks. Admin plane bypasses PgBouncer.
     db_url = db_url if db_url is not None else direct_db_url()
-    directory = ensure_private_dir(backup_dir())
-    # A run interrupted mid-dump (e.g. the process tree killed during a rollout)
-    # leaves `.partial` files behind. The name never matches `DUMP_NAME_RE`, so the
-    # due/prune logic ignores them and they pile up. Sweep them before writing a
-    # new dump; a fresh partial from THIS run is created after the sweep.
-    for stale in directory.glob("*.partial"):
-        with suppress(OSError):
-            stale.unlink()
+    directory = ensure_private_dir(directory)
+    # Unknown partials are evidence of interrupted work, never a sweep target.
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
     _log.info("[backup] db composition: %s", _db_size_breakdown(db_url))
@@ -695,65 +720,52 @@ def _run_backup(
         "--dbname",
         db_conninfo,
     ]
+    # The scheduler owns this subprocess in its own process, so its bound
+    # cannot delay watchdog supervision. Expiry kills the child and
+    # TimeoutExpired lets the scheduler schedule its retry.
+    proc = _run_with_progress(
+        dump_cmd,
+        timeout_s=timeout_s,
+        label="pg_dump",
+        progress=progress,
+        env=dump_env,
+        size_path=dump_partial,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"pg_dump exited {proc.returncode}")
+
+    encrypted_partial.touch(mode=0o600, exist_ok=False)
+    encrypted_partial.chmod(0o600)
+    key_file = _key_file(directory)
     try:
-        # The scheduler owns this subprocess in its own process, so its bound
-        # cannot delay watchdog supervision. Expiry kills the child and
-        # TimeoutExpired lets the scheduler schedule its retry.
         proc = _run_with_progress(
-            dump_cmd,
+            [
+                "openssl",
+                "enc",
+                "-aes-256-cbc",
+                "-pbkdf2",
+                "-salt",
+                "-kfile",
+                str(key_file),
+                "-in",
+                str(dump_partial),
+                "-out",
+                str(encrypted_partial),
+            ],
             timeout_s=timeout_s,
-            label="pg_dump",
+            label="backup encryption",
             progress=progress,
-            env=dump_env,
-            size_path=dump_partial,
+            size_path=encrypted_partial,
         )
         if proc.returncode != 0:
-            raise RuntimeError(f"pg_dump exited {proc.returncode}")
-
-        encrypted_partial.touch(mode=0o600, exist_ok=False)
-        encrypted_partial.chmod(0o600)
-        key_file = _key_file(directory)
-        try:
-            proc = _run_with_progress(
-                [
-                    "openssl",
-                    "enc",
-                    "-aes-256-cbc",
-                    "-pbkdf2",
-                    "-salt",
-                    "-kfile",
-                    str(key_file),
-                    "-in",
-                    str(dump_partial),
-                    "-out",
-                    str(encrypted_partial),
-                ],
-                timeout_s=timeout_s,
-                label="backup encryption",
-                progress=progress,
-                size_path=encrypted_partial,
-            )
-            if proc.returncode != 0:
-                raise RuntimeError(f"backup encryption exited {proc.returncode}")
-        finally:
-            with suppress(OSError):
-                key_file.unlink(missing_ok=True)
-        encrypted_partial.rename(target)
-        ensure_private_file(target)
+            raise RuntimeError(f"backup encryption exited {proc.returncode}")
     finally:
-        # Cleanup failure must not mask a pipeline error.
-        for partial in (dump_partial, encrypted_partial):
-            with suppress(OSError):
-                partial.unlink(missing_ok=True)
-    if publish:
-        _publish_offsite(target)
-    removed = _prune(directory)
-    _log.info(
-        "[backup] wrote %s (%.1f MiB), pruned %d",
-        target,
-        target.stat().st_size / 2**20,
-        len(removed),
-    )
+        with suppress(OSError):
+            key_file.unlink(missing_ok=True)
+    encrypted_partial.rename(target)
+    ensure_private_file(target)
+    for partial in (dump_partial, encrypted_partial):
+        partial.unlink(missing_ok=True)
     return target
 
 

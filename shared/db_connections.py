@@ -72,8 +72,7 @@ PG_KEEPALIVE_KWARGS: dict[str, Any] = {
 # gateway/daemon request for minutes.
 #
 # Deliberately NOT folded into PG_KEEPALIVE_KWARGS: the migration applier
-# (cli/commands/migrations.py + the update/rollback wrappers in
-# cli/commands/_update_git.py) dials `connect(direct=True, unbounded=True)` and
+# (cli/commands/migrations.py) dials `connect(direct=True, unbounded=True)` and
 # its DDL runs may legitimately exceed 60s — the migration applier must stay
 # unbounded. Every other connection point in the codebase goes through
 # connect()/pool() (or, in the agent process, reuses this constant explicitly —

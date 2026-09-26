@@ -5,7 +5,7 @@ on:
       - 'shared/runtime_release.py'
       - 'shared/runtime_prepare.py'
       - 'shared/platform.py'
-      - 'tests/runtime_release/**'
+      - 'tests/lifecycle/images/**'
       - '.github/workflows/release-store.yml'
   workflow_dispatch:
 permissions:
@@ -24,8 +24,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Real filesystem transitions without a cluster or project environment
-        run: uv run --no-project --python 3.12 python -m unittest discover -s tests/runtime_release -v
+        run: uv run --no-project --python 3.12 python -m unittest discover -s tests/lifecycle/images -v
       - name: Copied dynamic Mac Python retains its loader dependency
         if: runner.os == 'macOS'
         # This is the deployed standalone build that exposed the missing dylib.
-        run: uv run --no-project --managed-python --python 3.12.12 python -m unittest tests.runtime_release.test_mac_python -v
+        run: uv run --no-project --managed-python --python 3.12.12 python -m unittest tests.lifecycle.images.test_mac_python -v

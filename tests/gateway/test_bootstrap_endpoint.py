@@ -139,4 +139,4 @@ def test_bootstrap_role_runner_without_credential_refused(
     with TestClient(app) as client:
         resp = client.get("/api/bootstrap", params={"role": "runner"}, headers=_auth())
     assert resp.status_code == 400
-    assert "ensure-db-role" in resp.json()["detail"]
+    assert "AVA_RUNNER_DB_PASSWORD" in resp.json()["detail"]

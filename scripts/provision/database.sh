@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Postgres 17 + Redis SERVER — the native data plane a gateway owns (and the CI /
 # bench hosts need so the test suite can spin throwaway clusters). One source for
-# install.sh / install-system.sh. Linux: PGDG pg17 + redis-server; macOS: brew;
-# Windows: Docker (see docker-compose.windows.yml).
+# install-system.sh and evaluation images. Linux: PGDG pg17 + redis-server;
+# macOS: brew. Gateway data-plane processes run on POSIX hosts.
 #
 # WSL without sudo: a Linux host that already carries the whole data plane
 # (pg17 binaries under /usr/lib/postgresql/17/bin, redis-server, pgbouncer)

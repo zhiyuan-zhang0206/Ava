@@ -16,33 +16,10 @@ from typing import Literal
 import pytest
 
 import ops.ops_cluster as _ops
-from ops import deploy_spawn
-from ops.cluster import ClusterUpdateInProgress
+from ops.ops_cluster import ClusterUpdateInProgress
 from shared.cluster_lock import DeployLease, RecoveryClaim
-from shared.updater_handoff import UpdaterHandoffSnapshot
 
 _Kind = Literal["rollout", "restart", "update"]
-
-
-@pytest.mark.parametrize("status", ["pending", "running", "invalid"])
-def test_new_rollout_refuses_an_updater_handoff_before_session_visibility(
-    status: Literal["pending", "running", "invalid"], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The persisted handoff closes the owner-lock release to session-spawn gap."""
-    monkeypatch.setattr(deploy_spawn, "assert_prod_home_has_its_own_checkout", lambda: None)
-    monkeypatch.setattr(deploy_spawn.cluster_session, "live_orchestration_session", lambda: None)
-    monkeypatch.setattr(
-        deploy_spawn.shared.updater_handoff,
-        "read",
-        lambda: UpdaterHandoffSnapshot(status=status),
-    )
-
-    def no_fleet_probe() -> None:
-        pytest.fail("the local handoff must refuse before the fleet probe")
-
-    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", no_fleet_probe)
-    with pytest.raises(ClusterUpdateInProgress, match=f"handoff is {status}"):
-        deploy_spawn.assert_no_orchestration_in_flight()
 
 
 def _lease(
@@ -74,7 +51,6 @@ def recover_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool]:
     # seams to pin: machine identity for the holder parse + process liveness.
     monkeypatch.setattr("shared.machine.machine_name", lambda: "m1")
     monkeypatch.setattr(_ops, "updater_lease_live", lambda: False)
-    monkeypatch.setattr(_ops.cluster_session, "live_orchestration_session", lambda: None)
 
     def _claim(_holder: str, observed: DeployLease | None) -> RecoveryClaim:
         return RecoveryClaim(
@@ -113,26 +89,6 @@ def test_recover_clears_the_stranded_ui_marker_after_liveness_refusal_passes(
     _ops.cluster_recover_op()
 
     assert cleared == ["stranded"]
-
-
-@pytest.mark.parametrize("session", ["ava-rollout", "ava-cluster-restart"])
-def test_recover_refuses_a_spawned_session_before_its_db_lease_exists(
-    session: str,
-    monkeypatch: pytest.MonkeyPatch,
-    recover_calls: dict[str, bool],
-) -> None:
-    """begin -> detached spawn -> child lock acquisition is a real live-owner
-    window even though neither DB lease exists yet."""
-    _set_lease(monkeypatch, None)
-    monkeypatch.setattr(_ops.cluster_session, "live_orchestration_session", lambda: session)
-    marker_clears: list[bool] = []
-    monkeypatch.setattr(_ops.ui_update_state, "force_clear", lambda: marker_clears.append(True))
-
-    with pytest.raises(ClusterUpdateInProgress, match=session):
-        _ops.cluster_recover_op()
-
-    assert recover_calls == {"released": False, "unpaused": False}
-    assert marker_clears == []
 
 
 def _set_lease(monkeypatch: pytest.MonkeyPatch, lease: DeployLease | None) -> None:

@@ -9,10 +9,11 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
-from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity
+from shared.managed_writer_barrier import RolloutIdentity
 from shared.managed_writer_closure import LauncherTerminal
 from shared.managed_writer_observation import ExpectedUnitWriters, ObservationChallenge
 from shared.managed_writer_publication import PublishedUnit, UnitActivationReadback
+from shared.process_evidence import Digest, EvidenceModel
 
 BootstrapRecoveryStage = Literal[
     "prepared",

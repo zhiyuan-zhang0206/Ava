@@ -7,8 +7,7 @@ capability selection and runtime gates to it.
 Every service declares its ``ServiceSpec.capabilities`` in one of three groups:
 gateway-only, agent-runner-only, or both. ``services_for_capabilities(roles)``
 selects services whose capabilities intersect the host's roles. A service also
-declares ``requires_db`` so the watchdog can hold back exactly the database's
-users during a DB-scoped round block (``ops.controllers.base.BlockScope``).
+declares ``requires_db`` so database-dependent readiness remains explicit.
 
 Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
 module. ``_plugin_services()`` discovers code-present plugins and appends them
@@ -19,16 +18,13 @@ The fleet task daemon follows this path; see
 
 Layer: the ``ops`` module family imports ``shared``, plus lazy function-local
 reaches into the shared-tier browser identity probe and gate app-port source.
-Nothing reaches up into cli/gateway, so start, watchdog, and ``ava status``
+Nothing reaches up into cli/gateway, so start, root monitoring, and ``ava status``
 share one roster.
 
-**Deliberately outside the roster** (each documented at its own site): the
-``gate`` entry-port service (launchd KeepAlive / pidfile job, no session row —
-``ops/controllers/_converge_gate.py``, probed via ``probe_gate``, not the
-watchdog), the OS-level watchdog-probe jobs (``shared/os_watchdog_probe.py``),
-and the watchdog's hand-prepended ``redis-acl`` healthcheck
-(``services/watchdog/daemon.py``). These are not sessions, so
-``build_services()`` does not see them by design.
+Native Postgres, Redis, and PgBouncer have separate data-plane custody so they
+can remain available during an application-root transition. The macOS helper
+is root's platform parent, not an application service. Read-only extra checks
+live in the root diagnostic roster; they never acquire service ownership.
 ``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
 ``services_for_capabilities`` under their historical names as a cli-facing façade
 (so existing `from cli.commands._repo import ...` call sites keep working), but the
@@ -39,6 +35,7 @@ from __future__ import annotations
 
 import importlib.util
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -83,7 +80,7 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
     semantics. A plugin gates its own service (whether it starts) via an explicit
     settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
     ``AVA_TASK_MAINTENANCE_ENABLED`` — which is deterministic at daemon-start and
-    unaffected by any per-agent config overlay. start / watchdog / status all
+    unaffected by any per-agent config overlay. start / root / status all
     follow, since they derive from `build_services()`.
 
     The ``services.py`` module is loaded by FILE PATH (like
@@ -208,6 +205,97 @@ def _otel_collector_gate_reason() -> str | None:
     return None
 
 
+# Uniform "session X is gated out when its single settings flag is off" rows —
+# each entry's predicate is checked in one small loop by `_flag_gate_reason`
+# instead of a repeated `if session == NAME and not settings...: return ...`
+# chain, which is what previously drove `_gate_reason`'s complexity above the
+# hard ceiling. Every row here has exactly this shape; a session whose gate
+# needs more than one flag or a non-boolean comparison (browser, mcp-daemon,
+# computer-mcp, the lgtm trio, otel-collector, milvus) stays a dedicated branch
+# in `_core_gate_reason` below.
+_FLAG_GATES: tuple[tuple[str, Callable[[], bool], str], ...] = (
+    (
+        "heartbeat",
+        lambda: settings.daemon.heartbeat_enabled,
+        "disabled (AVA_HEARTBEAT_ENABLED off)",
+    ),
+    (
+        "delivery-watchdog",
+        lambda: settings.daemon.delivery_watchdog_enabled,
+        "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)",
+    ),
+    (
+        "pitr-uploader",
+        lambda: settings.physical_backup.pitr_enabled,
+        "disabled (AVA_PITR_ENABLED off)",
+    ),
+    (
+        "pitr-base-candidate",
+        lambda: settings.physical_backup.pitr_base_backup_enabled,
+        "disabled (AVA_PITR_BASE_BACKUP_ENABLED off)",
+    ),
+    (
+        "im-bridge",
+        lambda: settings.services.im_bridge_enabled,
+        "disabled (AVA_IM_BRIDGE_ENABLED off)",
+    ),
+)
+
+
+def _flag_gate_reason(session: str) -> str | None:
+    """The reason for a session in `_FLAG_GATES`, or None (enabled / not one of these)."""
+    for name, enabled, reason in _FLAG_GATES:
+        if session == name and not enabled():
+            return reason
+    return None
+
+
+def _browser_family_gate_reason(session: str) -> str | None:
+    if not settings.services.browser_enabled:
+        return "disabled (AVA_BROWSER_ENABLED off)"
+    # Two services, two capability probes: browser-mcp needs a strict SUPERSET
+    # of what the headed browser needs (the same display / Chrome / npx prongs
+    # plus an AF_UNIX transport), so a host can legitimately run `browser` and
+    # not `browser-mcp` — which is exactly a Windows agent-runner. Sharing one
+    # probe put browser-mcp in that host's start roster with no skip
+    # annotation, and it failed every launch.
+    if session == "browser-mcp":
+        return browser_mcp_incapability()
+    return browser_incapability()  # display / Chrome / npx, or None when capable
+
+
+def _core_gate_reason(session: str) -> str | None:
+    """The session-name-keyed half of `_gate_reason` — every core service
+    without its own plugin-registered ``gate``."""
+    if session in ("browser", "browser-mcp"):
+        return _browser_family_gate_reason(session)
+    if session == "mcp-daemon" and not unix_sockets_available():
+        # Same transport story as browser-mcp: the daemon binds a Unix socket
+        # (ava/_mcps_daemon.py) and its healthcheck dials it, so without AF_UNIX
+        # the service can never start and the watchdog would judge it dead every
+        # 60s and log a restart failure — a Windows agent-runner, exactly.
+        return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
+    if session == "computer-mcp":
+        return _computer_mcp_gate_reason()
+    if session in {"loki", "prometheus", "grafana"}:
+        from services.healthchecks.lgtm import is_lgtm_host
+
+        return None if is_lgtm_host() else "this home is not an observability station"
+    if session == "otel-collector":
+        return _otel_collector_gate_reason()
+    if session == "milvus" and settings.services.memory_search_backend != "milvus":
+        # The milvus-lite server only serves the memory indexer's milvus
+        # backend; numpy (default) and pgvector never dial it. Without the
+        # gate every `ava start` launched an idle ~1GB milvus-lite process the
+        # memory search never uses (2026-09-02 numpy-default ruling; daemon
+        # was disabled by hand 2026-09-03, this gate makes it durable).
+        return (
+            "memory-search backend is "
+            f"{settings.services.memory_search_backend!r} (AVA_MEMORY_SEARCH_BACKEND) — milvus not needed"
+        )
+    return _flag_gate_reason(session)
+
+
 def _gate_reason(spec: ServiceSpec) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
@@ -216,7 +304,7 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
 
     A service that carries its own ``gate`` (plugin-registered services) is asked
     directly — its fleet/plugin-domain toggle lives with the plugin, not here.
-    Core services are gated by session name below.
+    Core services are gated by session name in `_core_gate_reason`.
     """
     if spec.gate is not None:
         try:
@@ -231,50 +319,7 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
             # already scoped the service to this host's role.
             logger.warning("gate for %s raised (failing open): %s", spec.session, exc)
             return None
-    session = spec.session
-    if session in ("browser", "browser-mcp"):
-        if not settings.services.browser_enabled:
-            return "disabled (AVA_BROWSER_ENABLED off)"
-        # Two services, two capability probes: browser-mcp needs a strict
-        # SUPERSET of what the headed browser needs (the same display / Chrome /
-        # npx prongs plus an AF_UNIX transport), so a host can legitimately run
-        # `browser` and not `browser-mcp` — which is exactly a Windows
-        # agent-runner. Sharing one probe put browser-mcp in that host's start
-        # roster with no skip annotation, and it failed every launch.
-        if session == "browser-mcp":
-            return browser_mcp_incapability()
-        return browser_incapability()  # display / Chrome / npx, or None when capable
-    if session == "mcp-daemon" and not unix_sockets_available():
-        # Same transport story as browser-mcp: the daemon binds a Unix socket
-        # (ava/_mcps_daemon.py) and its healthcheck dials it, so without AF_UNIX
-        # the service can never start and the watchdog would judge it dead every
-        # 60s and log a restart failure — a Windows agent-runner, exactly.
-        return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
-    if session == "computer-mcp":
-        return _computer_mcp_gate_reason()
-    if session == "otel-collector":
-        return _otel_collector_gate_reason()
-    if session == "heartbeat" and not settings.daemon.heartbeat_enabled:
-        return "disabled (AVA_HEARTBEAT_ENABLED off)"
-    if session == "delivery-watchdog" and not settings.daemon.delivery_watchdog_enabled:
-        return "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)"
-    if session == "pitr-uploader" and not settings.physical_backup.pitr_enabled:
-        return "disabled (AVA_PITR_ENABLED off)"
-    if session == "pitr-base-candidate" and not settings.physical_backup.pitr_base_backup_enabled:
-        return "disabled (AVA_PITR_BASE_BACKUP_ENABLED off)"
-    if session == "im-bridge" and not settings.services.im_bridge_enabled:
-        return "disabled (AVA_IM_BRIDGE_ENABLED off)"
-    if session == "milvus" and settings.services.memory_search_backend != "milvus":
-        # The milvus-lite server only serves the memory indexer's milvus
-        # backend; numpy (default) and pgvector never dial it. Without the
-        # gate every `ava start` launched an idle ~1GB milvus-lite process the
-        # memory search never uses (2026-09-02 numpy-default ruling; daemon
-        # was disabled by hand 2026-09-03, this gate makes it durable).
-        return (
-            "memory-search backend is "
-            f"{settings.services.memory_search_backend!r} (AVA_MEMORY_SEARCH_BACKEND) — milvus not needed"
-        )
-    return None
+    return _core_gate_reason(spec.session)
 
 
 def services_for_capabilities_annotated(

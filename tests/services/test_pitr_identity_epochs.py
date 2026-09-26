@@ -18,9 +18,9 @@ import sys
 import psutil
 import pytest
 
-from services.pitr import base_candidate, restore_postgres, restore_proof
+from services.pitr import restore_postgres, restore_proof
 from services.pitr.restore_postgres import SandboxPostgresIdentity
-from shared.proc_tree import stable_create_time
+from services.pitr.worker_process import NativeProcess
 
 _macos_correction = pytest.mark.skipif(
     sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
@@ -46,16 +46,17 @@ def test_owner_evidence_identity_survives_an_epoch_shift(
     psosx = _psosx()
     base = psosx.INIT_BOOT_TIME
     process = psutil.Process()
-    token = process.cmdline()[0]
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + seconds)
-    recorded = stable_create_time(process)  # what the capture sites write
-    assert abs(psutil.Process().create_time() - recorded) > 2.0
+    recorded = NativeProcess.capture(process)  # what the worker's owner receipt writes
+    assert abs(psutil.Process().create_time() - recorded.process.birth) > 2.0
     # Still inside the shifted epoch: catches a reader that went back to the
-    # public value (the registry record and the re-read would then disagree by
-    # the whole correction). Then the crossing itself, after the epoch returns.
-    assert base_candidate._matching_process(process.pid, recorded, token) is not None
+    # public value (the receipt and the controller's capture would then disagree
+    # by the whole correction). Then the crossing itself, after the epoch returns.
+    assert recorded.same_birth(NativeProcess.capture(psutil.Process()))
+    assert recorded.live() is not None
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
-    assert base_candidate._matching_process(process.pid, recorded, token) is not None
+    assert recorded.same_birth(NativeProcess.capture(psutil.Process()))
+    assert recorded.live() is not None
 
 
 @_macos_correction
@@ -69,7 +70,7 @@ def test_sandbox_identity_survives_an_epoch_shift(
     process = psutil.Process()
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + seconds)
     identity = SandboxPostgresIdentity(
-        process.pid, stable_create_time(process), os.getpgid(process.pid), "/data"
+        NativeProcess.capture(process), os.getpgid(process.pid), os.getsid(process.pid), "/data"
     )
     assert restore_postgres._matching_sandbox(identity) is not None
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
@@ -86,7 +87,7 @@ def test_restore_owner_identity_survives_an_epoch_shift(
     base = psosx.INIT_BOOT_TIME
     process = psutil.Process()
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + seconds)
-    recorded = stable_create_time(process)  # what the owner-evidence writes store
-    assert restore_proof._matching_process(process.pid, recorded) is not None
+    recorded = NativeProcess.capture(process)  # what the owner-evidence writes store
+    assert restore_proof._matching_process(recorded) is not None
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
-    assert restore_proof._matching_process(process.pid, recorded) is not None
+    assert restore_proof._matching_process(recorded) is not None

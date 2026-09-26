@@ -43,12 +43,13 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
 
     monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(3))
     monkeypatch.setattr(daemon, "_dispatch", dispatch)
-    before = pause_owner.begin_maintenance("ops", WHEN)
+    before = pause_owner.begin_maintenance("ops", WHEN).snapshot
     assert before.maintenance is not None
     draining = MaintenanceHold("draining")
     pause_owner.change_maintenance("ops", WHEN, before.maintenance, draining)
     tasks = [
-        asyncio.create_task(daemon._ops_route(b'{"kind":"probe","payload":{}}')) for _ in range(2)
+        asyncio.create_task(daemon._ops_route(b'{"kind":"config_read","payload":{}}'))
+        for _ in range(2)
     ]
     try:
         await asyncio.wait_for(entered.wait(), 2)
@@ -57,7 +58,7 @@ async def test_same_kind_requests_remain_counted_and_stop_refuses_new_requests(
         await tasks[0]
         assert activity.progress()["requests"] == 1
         pause_owner.change_maintenance("ops", WHEN, draining, MaintenanceHold("stopping"))
-        status, body, _ = await daemon._ops_route(b'{"kind":"probe","payload":{}}')
+        status, body, _ = await daemon._ops_route(b'{"kind":"config_read","payload":{}}')
         assert status == 200
         assert b'"status": "failed"' in body
         assert b"stopping" in body

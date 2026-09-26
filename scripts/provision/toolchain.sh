@@ -6,8 +6,8 @@
 # hosts run. Idempotent: skips the fetch when `uv` is already on PATH.
 #
 # This installs ONLY the uv binary. Interpreter provisioning + dependency sync
-# differ per consumer and stay with them: a unit runs `uv python install 3.12` +
-# `uv sync` in install.sh; the eval image bakes its venv in a dedicated Dockerfile
+# differ per consumer and stay with them: source development uses its locked
+# dependency installer; the eval image bakes its venv in a dedicated Dockerfile
 # layer (it needs the pyproject/uv.lock COPY + the corp-CA build secret).
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 

@@ -102,6 +102,8 @@ _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
 # A call site not listed here fails the lint; a listed module whose calls
 # disappear fails too (stale entry). See the module docstring.
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
+    "cli/release_transition/stage.py": "Read the local ordinary root roster for captured-image preflight and readiness; does not route a cluster request.",
+    "cli/release_transition/identity.py": "Refuse a nonlocal/fleet topology before effects in the first one-host release adapter; never dispatch by role.",
     "cli/commands/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
     "ops/agent_pause.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
     "ops/cluster_pause.py": "Does this unit serve an agent host whose live daemon identity must answer before a pre-stop hold release restores local posture (what do I serve)",
@@ -111,7 +113,6 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "services/healthchecks/otel_collector.py": "does this unit own the LGTM collector healthcheck, preserving pure-runner relay behavior (what do I serve)",
     "cli/commands/start.py": "which daemons do I bring up (what do I serve)",
     "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
-    "cli/commands/_gateway_ready.py": "audit this host's role for the readiness report (what do I serve)",
     "cli/commands/trace.py": "which recovery ingress does this host serve: gateway-local Tempo or a pure-runner relay target (what do I serve)",
     "services/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
     "ops/ops_inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",

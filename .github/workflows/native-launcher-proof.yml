@@ -1,8 +1,32 @@
 name: Native launcher observation proof
 on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Native platform proof to run from the selected revision
+        type: choice
+        options: [windows, linux, macos, all]
+        default: windows
+        required: true
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - 'shared/os_boot_unit.py'
+      - 'cli/commands/_root_driver.py'
+      - 'cli/commands/start.py'
+      - 'services/ava_root/**'
+      - 'services/ava_root_glue/**'
+      - 'shared/winjob*.py'
+      - 'shared/winproc.py'
+      - 'shared/proc_tree.py'
+      - 'shared/session_backend.py'
+      - 'shared/windows_terminal/**'
+      - 'shared/root_control/**'
+      - 'cli/commands/_temporary_stop.py'
+      - 'cli/commands/_maintenance_stop.py'
+      - 'cli/commands/stop.py'
+      - 'tests/lifecycle/native_root/**'
+      - 'tests/services/test_ava_root_daemon.py'
       - 'shared/native_job_observation.py'
       - 'shared/managed_writer_observation.py'
       - 'shared/managed_writer_barrier.py'
@@ -23,10 +47,10 @@ permissions:
   contents: read
 jobs:
   native-read:
-    if: github.head_ref == 'ava-5344-native-launcher-observer'
+    if: github.head_ref == 'ava-5344-native-launcher-observer' || (github.event_name == 'workflow_dispatch' && inputs.platform != 'windows')
     strategy:
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: ${{ fromJSON(inputs.platform == 'linux' && '["ubuntu-24.04"]' || inputs.platform == 'macos' && '["macos-14"]' || '["ubuntu-24.04","macos-14"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
@@ -35,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
         with:
           version: 0.10.2
@@ -50,3 +74,58 @@ jobs:
         run: uv run pyright shared/native_job_observation.py shared/managed_writer_observation.py scripts/prove_native_launcher_reads.py tests/shared/test_native_job_observation.py
       - name: Actual read-only OS query (no job registration)
         run: uv run python scripts/prove_native_launcher_reads.py
+
+  root-lifetime:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'linux' || inputs.platform == 'all'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          version: 0.10.2
+      - uses: ./.github/actions/uv-sync
+      - name: Require native manager (absence is not a passing skip)
+        run: |
+          test -d /run/systemd/system
+          sudo -n true
+          systemctl --version
+      - name: Root lifetime and independent data sibling
+        run: uv run pytest --noconftest tests/services/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-root-lifetime
+          path: root-lifetime.xml
+
+  native-windows-root:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'windows' || inputs.platform == 'all'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          version: 0.10.2
+          python-version: '3.12'
+      - name: Record the exact proof revision
+        shell: bash
+        run: |
+          mkdir -p proof
+          git rev-parse HEAD > proof/head-sha.txt
+      - run: uv sync --frozen
+      - name: Native pipe, singleton, Job closure and durable terminal survival
+        shell: bash
+        run: |
+          uv run pyright --pythonplatform Windows services/ava_root/windows shared/root_control services/ava_root_glue/windows_terminal.py services/ava_root_glue/windows_terminal_owner.py shared/windows_terminal shared/winjob.py shared/winjob_spawn.py
+          uv run pytest --confcutdir=tests/lifecycle/native_root tests/lifecycle/native_root -q --basetemp=proof/native --junitxml=proof/windows-root.xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: windows-root-${{ github.event.pull_request.head.sha || github.sha }}
+          path: proof/
+          if-no-files-found: error

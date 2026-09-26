@@ -24,12 +24,14 @@ The full linter inventory — what each one enforces and where it runs: [[script
 - `serve_okf_viz.py` — renders interactive graph locally
 - `fix_okf.py`, `migrate_okf.py`, `fix_frontmatter.py` — batch fix / migrate
 
-### Installation and Provisioning
-- `install.sh` — unit scaffolding, two mutually exclusive paths: `--role gateway,agent-runner|gateway|agent-runner|observability-station` (prod/host install, final step runs `cli.install_cluster` to birth the cluster: registry record + own pg/redis + provisioned db + `$AVA_HOME/.env`; `ava start` remains the sole bring-up); `--worktree [--path P] [--no-seed]` (dev worktree self-cluster, first runs `guard_editable_venv.py`, skips brew/apt, install-dir guard, `~/.local/bin` symlinks; identity = checkout path, home defaults to `~/.ava-<checkout dir name>`, `--path` is the sole identity override — no name flag)
+### Host Dependencies and Development Setup
+Cluster initialization belongs to `ava start`; `ava start --worktree` creates an
+isolated development home. These scripts prepare host tools or development
+checkouts; they do not provide another cluster initialization path.
 - `guard_editable_venv.py` — dependency-free worktree preflight that refuses symlinked/external virtualenvs and cross-checkout editable-install records before a sync can mutate them
 - `install-cli-tools.sh`, `setup-worktree.sh`, `worktree.sh`
-- `provision/` — `database.sh` / `node.sh` / `toolchain.sh` / `install-playwright.sh` (the Dockerfile's eval-image layer) / `install-system.sh` (Linux Debian/Ubuntu system-level install for a bare host: Python 3.12 + build tools, then composes the other scripts) / `_lib.sh`. Consumers: `install.sh`, the `Dockerfile`, `install-cli-tools.sh`.
-- `install.sh --mirror cn` — select Python/npm/brew mirrors and persist the unit profile. Python install/update share `cli/python_install.py`: canonical lock validation, host-index transport with locked hashes, and the real editable checkout; existing machine uv/pip settings are reused without rewriting the lock. See [[cli/python-install.ava.okf.md]].
+- `provision/` — `database.sh` / `node.sh` / `toolchain.sh` / `install-playwright.sh` (the Dockerfile's eval-image layer) / `install-system.sh` (Linux Debian/Ubuntu host tools: Python 3.12 + build tools, then composes the other scripts) / `_lib.sh`. Consumers include the `Dockerfile` and `install-cli-tools.sh`.
+- `cli/python_install.py` handles source dependency synchronization: canonical lock validation, host-index transport with locked hashes, and the real editable checkout. Existing machine uv/pip settings are reused without rewriting the lock. Immutable release preparation uses its separately captured inputs. See [[cli/python-install.ava.okf.md]].
 
 ### CI / Release / Migration
 - `qa_gate.py` + `qa_receipt.py` — evaluates exact-head QA evidence from GitHub; synthetic queue exemptions require verified Trunk identity, same-repository draft targeting main, and a complete normal or `-bisection` test ref (see [receipt contract](../conventions/qa-approval-receipt.md))
@@ -45,7 +47,7 @@ The full linter inventory — what each one enforces and where it runs: [[script
   static direct test imports, preserves conservative full-suite escapes, and
   emits selection decisions consumed by `ci.yml` (enforce by default, optional shadow)
 - `prepush-guard.sh` — host-wide flock/load guard for pyright, tsc, eslint and vitest; loud skips, real failures propagate. `provision/check_git_hooks.py` warns on missing hooks or interpreter drift.
-- `release_cut.py`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`, `test_uv_sync_write_window.sh`
+- `release_cut.py`, `check_cross_branch_migrations.py`, `migration_smoke.py`, `test_migrations_apply.sh`
 - `post_deploy_visual_check.py` — read-only five-surface production visual gate: a gateway `started_at` change distinguishes deployment waves from daily sentinels, the repo-pinned Playwright Chromium (headless, host-local) captures desktop/narrow light/dark combinations after an explicit settle predicate, shared structural probes fail P0, and stable two-frame pixel drift on static crops is attributed to the golden-to-wave frontend diff. It writes artifacts and exit codes only; the invoking agent owns notifications. Golden updates require an audited `--accept-wave`. Its engine-agnostic capture
 matrix lives in `post_deploy_visual_matrix.py`, shared with the blocking CI
 preview gate (`tests/e2e/test_preview_visual_gate.py`); combinations that
@@ -67,7 +69,7 @@ immediately.
 
 ## Key Dependencies
 
-- [[../cli/cli.ava.okf.md]] — `_converge.py` **re-implements** host wiring in Python, **does not call** `install.sh` (replace/absorb relationship, not reuse); the one calling provision scripts is `install.sh` itself
+- [[../cli/cli.ava.okf.md]] — `ava start` owns cluster identity and service readiness; `_converge.py` applies host wiring and plugin scaffolds.
 - [[../tests/tests.ava.okf.md]] — many lint scripts have corresponding `tests/test_lint_*.py`
 
 ## Notes

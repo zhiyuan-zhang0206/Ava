@@ -134,7 +134,7 @@ def config_source_is_local() -> bool:
     Role-derived (AVA_CONFIG_SOURCE deleted 2026-08-01): a unit that serves the
     gateway owns the cluster's config in its own `.env` and never fetches; a
     configured pure agent-runner holds only the bootstrap env (gateway URL +
-    secret, from `ava enroll`) and fetches the rest from the gateway at every
+    secret, from `ava start`) and fetches the rest from the gateway at every
     process start (see `should_fetch_from_gateway`). A bare checkout with no
     role flags — CI, lint scripts, dev tools — is not a unit yet and resolves
     locally with no fetch.
@@ -153,8 +153,8 @@ def should_fetch_from_gateway() -> bool:
 
     True only for a CONFIGURED pure agent-runner: the serve_agent_runner flag is
     on (env `AVA_MACHINE_SERVE_AGENT_RUNNER` > `$AVA_HOME/machine_serve_agent_runner`
-    file > False) AND a gateway URL is present (the host enrolled — `ava enroll`
-    writes both together, fetch-first). Everything else resolves locally:
+    file > False) AND a gateway URL is present (`ava start` validates the remote
+    projection before persisting runner identity). Everything else resolves locally:
 
     - a gateway-capable unit (config_source_is_local) never fetches;
     - a bare checkout with no role flags (CI, lint scripts, dev tools) and a
@@ -369,7 +369,7 @@ def _apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
 def _gateway_base_url() -> str:
     """The enrolled gateway to dial, or an actionable failure.
 
-    The gateway URL is AVA_GATEWAY_URL (`ava enroll` wrote it to `.env`; this
+    The gateway URL is AVA_GATEWAY_URL (`ava start` wrote it to `.env`; this
     runs before Settings, so it is read from the environment directly).
     """
     base_url = os.environ.get("AVA_GATEWAY_URL") or ""
@@ -378,7 +378,7 @@ def _gateway_base_url() -> str:
             "this host is a pure agent-runner but has no AVA_GATEWAY_URL — its cluster "
             "config comes from the gateway at startup. Enroll it first:\n"
             "    set AVA_CLUSTER_SECRET from a non-echoing prompt, then run:\n"
-            "    ava enroll --gateway <url> --machine-name <name> --machine-host "
+            "    ava start --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> --machine-host "
             "<this-host-addr>"
         )
     return base_url

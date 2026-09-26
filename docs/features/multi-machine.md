@@ -17,9 +17,10 @@ no flag and no opt-in.
 ## How it works
 
 Any machines that are **network-reachable to each other** form a cluster: run
-`install.sh --role gateway,agent-runner` on the gateway box, and
-`ava enroll --gateway <url>` on each runner. The gateway orchestrates rollouts
-across the whole roster; a pure runner self-updates on the pinned commit.
+`install.sh --role gateway,agent-runner` on the gateway box, and, with
+`AVA_CLUSTER_SECRET` exported, `ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --machine-name <name> --machine-host <host>` on
+each runner. The gateway orchestrates rollouts across the whole roster; a pure
+runner self-updates on the pinned commit.
 
 <!-- TODO(image): cluster topology — gateway + N runner machines -->
 

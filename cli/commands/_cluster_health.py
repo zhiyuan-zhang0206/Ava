@@ -1,77 +1,17 @@
-"""Cluster health probe — `ava cluster health-probe`.
+"""Observe cluster health from the CLI or an OS-scheduled probe.
 
-A CLI command designed to run from an OS cron job (launchd on macOS, crontab on
-Linux). Assesses cluster health across several signals and exits 0 (healthy) or
-1 (unhealthy). With `--auto-rollback`, the probe itself gates rollback on
-consecutive failures (tracked in a counter file under $AVA_HOME) to avoid false
-positives from transient issues — so both platforms just run the probe with the
-same flags, with no shell-side counting.
+Checks cover gateway liveness, agent population, crash loops, schema, selected
+services, Redis relay, disk usage, editable-install records, source integrity,
+and provider account health. Any failed check returns unhealthy.
 
-Checks (all must pass for exit 0):
-1. Gateway HTTP liveness — a health endpoint reachable and returning 200.
-2. Agent population — at least a configurable minimum of agents in running/idling
-   status.
-3. Crash-loop detection — no agent has restarted more than N times in the last T
-   minutes.
-4. Schema health — the applied schema version matches the required version
-   (existing `check_schema_version` invariant).
-5. Per-service health — every service this host's roles should be running
-   answers its probe, and for every endpoint that can prove it, answers *as this
-   unit* (`cli.commands._probe`: identity where the endpoint carries one, plain
-   liveness where it cannot). A daemon of another cluster holding this unit's
-   port is the condition this check exists to make visible; it used to satisfy
-   the check with a bare 2xx. The fleet UI entry port (`_gate_probe`) and the
-   authenticated private-network Redis relay (`_redis_bridge_probe`) ride here
-   too — neither is a service session, and process liveness cannot certify either
-   serving path. Alert-only: a failure exits 1 but never
-   feeds the auto-rollback counter — a dead frontend session is an outage worth
-   waking the owner for, but not proof the cluster code is bad, and a rollback
-   would not necessarily fix it (checks 1-4 are the rollback-gating signals).
-6. Data-volume usage — the data volume over the watermark (default 90%)
-   fails the probe and alerts. Alert-only, same reasoning as check 5: a full
-   disk is the 2026-08-08 outage class, but rollback frees no disk space.
-7. Editable-install records — the prod venv's `_editable_impl_ava.pth` pointer
-   and its `direct_url.json` record name only allowlisted source (read-only
-   detection; repair belongs to the converge guard). Alert-only, same reasoning
-   as checks 5 and 6: a poisoned pointer is the 2026-08-27 outage class, but
-   rollback does not fix a venv record.
-8. Source-tree integrity — the prod source checkout reports tamper findings
-   (tracked files changed, untracked files outside the runtime-artifact
-   whitelist, HEAD moved off the installed commit). Alert-only, same class as
-   checks 5-7: an edited tree is the 2026-08-28 outage class (it broke
-   `import ava` for every agent), but rollback does not undo an on-disk edit —
-   the converge guard resets the tree on the next start/update.
-9-10. Provider account guard — balance minimum / halted agents; alert-only like checks 5-8.
+Outage episodes retain their first observation and grade by elapsed time:
+normal recovery stays quiet, then WARNING escalates to ERROR. A live deploy
+pauses explained alert grading; disk pressure remains independent. Recovery
+resolves only alerts that fired. Owner notification uses the alerts ingest and
+its local fallback when the gateway is unavailable.
 
-**A failure a running deploy explains does not advance the auto-rollback counter, and
-resets it** (`_deploy_suppression`). The same live lease is an expected transition
-window for alerts: the episode start is still persisted, but grading pauses while the
-lease is live and resumes from the true start if the outage survives the rollout.
-Unreadable deploy context explains nothing. Disk pressure is never explained by a
-deploy.
-
-Every check failure is tracked in a state file under $AVA_HOME and graded by elapsed
-episode time: silent during normal recovery, WARNING after three minutes, ERROR after
-ten. The later recovery resolves only episodes that actually fired. The alert is
-ingested into the alerts store (source='health-probe')
-through the gateway's /api/alerts endpoint — the same pipeline
-Grafana alert rules use — which both records the row for the UI and
-fans the notification out to the owner's IM channels (im_bridge daemon, the
-only sanctioned Telegram surface, see
-docs/decisions/2026-08-03-telegram-skill-removed.md). One health alert =
-one alerts row + one IM notification.
-
-Every alert is stamped with the cluster name (`[<cluster>] ...`) so the owner
-can tell which cluster is talking — a preview cluster's alert must not read
-like a prod incident. If the gateway is unreachable (the alert's most
-important case — a dead gateway is itself a check failure), the probe falls
-back to writing the row and sending the IM itself, using the same ingest
-logic; only when the database is down too does it degrade to the legacy
-direct-IM path. Without any of this the probe's exit code only lands in the
-cron log, which nobody watches — the 2026-07-13 frontend outage ran unalerted
-until the owner hit the dead page.
-
-See future/infra/self-evolution-rollback.md for the full design.
+The probe never selects a release, rolls back code, or publishes known-good
+state. The release operation owns those decisions.
 """
 
 from __future__ import annotations
@@ -82,23 +22,19 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-# Alert machinery (failure counter, edge alerts, auto-rollback gate) lives in
+# Outage episodes and edge alerts live in
 # `_health_alerts` (split out 2026-08-07 to stay under the 800-line ceiling).
 # The probe runner uses the pieces below; the rest are re-exported so tests
 # and callers that address them as `_cluster_health.<name>` keep working.
 from cli.commands._health_alerts import (
     ALERT_STATE_FILE,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
-    FAILURE_COUNT_FILE,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
     _alert_failure,
     _alert_recovery,
     _alert_summary,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
     _deploy_suppression,
-    _handle_consecutive_failure,
-    _increment_failure_count,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
     _ingest_alert,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
     _ingest_alert_fallback,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
     _notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
-    _reset_failure_count,
 )
 from cli.commands._provider_guard import run_provider_guard
 from shared.loki_index_labels import LokiReadEra, event_stream_selector, split_index_label_window
@@ -112,12 +48,8 @@ DEFAULT_CRASH_LOOP_MAX_RESTARTS = 5
 # flapping daemon to trip, narrow enough that old restarts age out
 # (task #3696 exception inventory).
 DEFAULT_CRASH_LOOP_WINDOW_MINUTES = 10
-DEFAULT_CONSECUTIVE_THRESHOLD = 3
 _LIVENESS_ATTEMPTS = 3
 _LIVENESS_RETRY_INTERVAL_S = 30.0
-PENDING_LKG_PASSES = 2
-PENDING_LKG_MIN_AGE_S = 600.0
-PENDING_LKG_PASSES_FILE = "health_probe_pending_lkg_passes"
 
 # Data-volume used fraction at which the probe fails (alert-only, see
 # `_disk_usage_failure`). One line shared across the statvfs family: the
@@ -206,7 +138,7 @@ def _agent_population(min_agents: int) -> bool:
 def _agent_population_failure_class(min_agents: int) -> str | None:
     """Classify observed low population against DB availability and local intent."""
     import shared.db
-    from shared import disabled_services, pause_owner
+    from shared import pause_owner, service_selection
 
     try:
         with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
@@ -222,83 +154,24 @@ def _agent_population_failure_class(min_agents: int) -> str | None:
     if row[0] >= min_agents:
         return None
     current = pause_owner.read()
-    if disabled_services.is_skipped("agent-host", disabled_services.read_skipped()) or (
+    if not service_selection.read_selection().enabled("agent-host") or (
         current.status == "paused" and current.maintenance is not None
     ):
         return "maintenance"
     return "code"
 
 
-def _reset_pending_lkg_streak(home: Path) -> None:
-    """Forget a partial observation window after any rollback-gating failure."""
-    (home / PENDING_LKG_PASSES_FILE).unlink(missing_ok=True)
-
-
-def _advance_pending_lkg(home: Path) -> None:
-    """Record a healthy gating pass and promote a mature pending LKG candidate."""
-    from shared.cluster_pin import get_pending_known_good, promote_pending_known_good_if_ready
-
-    marker = home / PENDING_LKG_PASSES_FILE
-    try:
-        pending = get_pending_known_good()
-        if pending is None:
-            marker.unlink(missing_ok=True)
-            return
-        pending_sha, _pending_at = pending
-        try:
-            stored_sha, stored_count = marker.read_text().splitlines()
-            count = int(stored_count) + 1 if stored_sha == pending_sha else 1
-        except (FileNotFoundError, ValueError):
-            count = 1
-        marker.write_text(f"{pending_sha}\n{count}")
-        if count >= PENDING_LKG_PASSES and promote_pending_known_good_if_ready(
-            min_age_s=PENDING_LKG_MIN_AGE_S
-        ):
-            print(f"  ✓ last-known-good advanced -> {pending_sha[:7]} (observation window passed)")
-            marker.unlink(missing_ok=True)
-    except Exception as exc:
-        print(
-            f"  . pending last-known-good observation unavailable: {type(exc).__name__}",
-            file=sys.stderr,
-        )
-
-
-def _unhealthy(
-    home: Path,
-    message: str,
-    *,
-    auto_rollback: bool,
-    threshold: int,
-    failure_class: str = "code",
-) -> int:
-    """Alert a gating failure, counting only code/config evidence toward rollback."""
+def _unhealthy(home: Path, message: str, *, failure_class: str = "code") -> int:
+    """Report an unhealthy observation without making a release decision."""
     print(message, file=sys.stderr)
-    _reset_pending_lkg_streak(home)
     deploying = _deploy_suppression()
     _alert_failure(home, message, deploy_explains=deploying is not None)
     if failure_class == "maintenance":
-        _reset_failure_count(home)
-        print(
-            "  local agent maintenance — NOT counting low population toward rollback",
-            file=sys.stderr,
-        )
-        return 1
-    if deploying is None:
-        if failure_class == "environment":
-            print("  environment-class failure — NOT counted toward auto-rollback", file=sys.stderr)
-        elif auto_rollback:
-            _handle_consecutive_failure(
-                home, threshold, failure_class=failure_class, reason=message
-            )
-        return 1
-
-    print(f"  deploy in flight — alert grading paused ({deploying})", file=sys.stderr)
-    _reset_failure_count(home)
-    print(
-        f"  deploy in flight — NOT counting this failure toward auto-rollback "
-        f"(counter reset; the pre-deploy failures were about the old commit): {deploying}",
-        file=sys.stderr,
-    )
+        print("  local agent maintenance explains the low population", file=sys.stderr)
+    elif failure_class == "environment":
+        print("  environment-class failure", file=sys.stderr)
+    if deploying is not None:
+        print(f"  deploy in flight — alert grading paused ({deploying})", file=sys.stderr)
     return 1
 
 
@@ -394,79 +267,48 @@ def _service_probes() -> list[str]:
     services, each annotated with why (empty = all responding).
 
     Reuses the `ava status` roster + probe primitives: the role-annotated spec
-    list (gated-out services — no display, no bot token — are absent by design
-    and skipped) and the per-spec probe (identity / HTTP / TCP / pidfile; a
-    probe-less spec reports None and is skipped). Role not resolvable (setup
-    unfinished) probes nothing — checks 1-4 are the fallback signals there.
+    list (gated-out services are intentionally absent and skipped) and the
+    ownership-bound per-spec probe. Unknown evidence or an unresolved roster
+    cannot certify health, even when the gateway responds.
 
     The probe's `detail` rides along into the entry because this list becomes the
     owner's alert text, and that alert is the only thing a human sees. "ava-ops
     not responding" and "ava-ops is answering, but it is /home/ava/.ava" are the
     same bare session name and completely different incidents — the second one
     means another unit holds this unit's port and no amount of waiting fixes it."""
-    import cli.commands as _ns
+    import cli.commands._probe as _probe_commands
+    import cli.commands._repo as _repo_commands
+    from shared.service_selection import read_selection
 
-    roles = _ns._roles_or_none()
+    roles = _repo_commands._roles_or_none()
     if roles is None:
-        return []
+        return ["service roster unavailable"]
+    try:
+        selection = read_selection()
+    except (OSError, ValueError, RuntimeError, TypeError) as exc:
+        return [f"service selection unavailable ({exc})"]
     failing: list[str] = []
-    for spec, gate_reason in _ns._services_for_roles_annotated(roles):
-        if gate_reason is not None:
+    for spec, gate_reason in _repo_commands._services_for_roles_annotated(roles):
+        if gate_reason is not None or not selection.enabled(spec.session):
             continue
-        probe = _ns._probe_service(spec)
-        if probe.alive is False:
+        probe = _probe_commands._probe_service(spec)
+        if probe.alive is not True:
             failing.append(f"{spec.session} ({probe.detail})" if probe.detail else spec.session)
     return failing
-
-
-def _gate_probe() -> str | None:
-    """The fleet UI entry port as an alert signal — the failure text, or None.
-
-    Gateway-capable hosts only (a runner owns no entry port). Reported through
-    check 5, which is **alert-only and never feeds the auto-rollback counter** —
-    and that placement is the point, not an accident of where it was easiest to
-    add. A dark entry port is an outage worth waking the owner for and is exactly
-    NOT evidence that the cluster's code is bad: on 2026-08-01 the cause was a
-    converge step that booted the gate's launchd job out and failed to load it
-    back, which rolling the cluster to the previous commit would re-run
-    identically. No rollback puts a supervisor's job back.
-
-    Both halves are alerted on. An unsupervised gate is still serving *now*, so it
-    reads healthy to a user, but nothing will restart it — and with the converge
-    step no longer touching an unchanged job, the bootout window that could make
-    this a false positive is both rare (only a real plist change opens one) and an
-    order of magnitude shorter than the probe's interval.
-    """
-    import cli.commands as _ns
-
-    roles = _ns._roles_or_none()
-    if roles is None or "gateway" not in roles:
-        return None
-    from cli.commands._converge_gate import probe_gate
-
-    status = probe_gate()
-    if not status.serving:
-        return f"gate entry :{status.entry_port} not answering (the fleet UI is dark)"
-    if not status.supervised:
-        return (
-            f"gate entry :{status.entry_port} answering but unsupervised "
-            f"({status.supervisor} is absent — nothing will restart it)"
-        )
-    return None
 
 
 def _redis_bridge_probe() -> str | None:
     """End-to-end Redis relay failure text, or None when healthy/not required.
 
-    Gateway-only and alert-only, like the gate: a failed host listener is an
+    Gateway-only and alert-only: a failed host listener is an
     infrastructure outage, not evidence that rolling application code back is
     safe or useful.  The probe authenticates and PINGs through the off-box
     endpoint; a loaded launchd label or open TCP port alone cannot certify the
     forwarding path.
     """
-    import cli.commands as _ns
+    import cli.commands._repo as _repo_commands
 
-    roles = _ns._roles_or_none()
+    roles = _repo_commands._roles_or_none()
     if roles is None or "gateway" not in roles:
         return None
     from cli.commands._converge_redis_bridge import probe_redis_bridge
@@ -510,8 +352,7 @@ def _disk_usage_fraction() -> float | None:
 def _disk_usage_failure(watermark: float = DEFAULT_DISK_USAGE_WATERMARK) -> str | None:
     """Alert text when the data volume is over the watermark, else None.
 
-    Reported through check 6, which is **alert-only and never feeds the
-    auto-rollback counter** — the same placement logic as check 5: a full disk
+    Reported through check 6. A full disk
     is the 2026-08-08 outage class (checkpoint growth filled the disk and the
     gateway could not start), but rolling the cluster back to a previous
     commit frees no disk space, so it is not rollback evidence. The edge
@@ -529,21 +370,14 @@ def _editable_install_failure() -> str | None:
     """Alert text when the prod venv's editable-install records name source
     outside the allowlist, else None.
 
-    Reported through check 7, which is **alert-only and never feeds the
-    auto-rollback counter** — the same placement logic as checks 5 and 6: a
-    poisoned pointer is the 2026-08-27 outage class (a worktree ``uv sync``
-    under a polluted ``VIRTUAL_ENV`` silently repointed the prod venv at
-    disposable source), but rolling the cluster back to a previous commit
-    does not fix a venv record — the converge guard repairs it on the next
-    ``ava start`` / ``ava cluster update`` (``_ensure_prod_editable_pth``).
-    The probe only detects and never writes, so it also covers the read-only
-    emergency mode where the guard's repair is skipped.
+    A polluted virtualenv can point at disposable source even when the checkout
+    itself is unchanged. This probe reads only; ordinary start and converge do
+    not repair editable installs. Recovery requires explicit inspection and
+    repair of the identified installation. Retained images use their verified
+    inventory instead of an editable pointer.
 
-    Delegates to ``shared.editable_install.editable_install_violations`` —
-    the public read-only twin of the converge guard's repair primitives —
-    with the same exact-root allowlist (prod source plus the ``~/Ava`` dev
-    clone), so the detector and the fixer can never disagree about what is
-    poisoned.
+    The shared inspection helper applies exact-root allowlisting (production
+    source plus the stable ~/Ava clone), never an arbitrary descendant.
     """
     import shared.cluster_drift
     import shared.editable_install as ei
@@ -564,26 +398,10 @@ def _editable_install_failure() -> str | None:
 
 
 def _source_tree_failure() -> str | None:
-    """Alert text when the prod source checkout is tampered with, else None.
+    """Report source drift or unavailable inspection without repairing files.
 
-    Reported through check 8, which is **alert-only and never feeds the
-    auto-rollback counter** — the same placement logic as checks 5-7: a
-    tampered tree is the 2026-08-28 outage class (edited source broke
-    ``import ava`` for every agent on the box), but rolling the cluster back
-    does not undo an on-disk edit — the converge guard resets the tree on the
-    next ``ava start`` / ``ava cluster update`` ("source tree reset + clean").
-    The probe only detects and never writes, so it also covers the read-only
-    emergency mode where the guard's repair is skipped.
-
-    Delegates to ``shared.source_tree_guard.source_tree_violations`` — the
-    public read-only twin of the converge guard's repair primitive — with the
-    same whitelist, so the detector and the fixer can never disagree about
-    what is legal.
-
-    A checkout the guard could NOT evaluate (not a git checkout, or a git
-    command failed) yields a distinct "guard skipped" alert instead of a
-    clean pass: a broken git is the state in which tampering becomes
-    invisible, so the probe must name the guard itself as failing.
+    This alert-only check cannot authorize rollback: selecting a release does
+    not repair arbitrary edits. An unreadable checkout is unknown, never healthy.
     """
     import shared.cluster_drift
     import shared.source_tree_guard as stg
@@ -620,40 +438,50 @@ def run_health_probe(
     crash_loop_window_minutes: int = DEFAULT_CRASH_LOOP_WINDOW_MINUTES,
     check_crash_loops: bool = True,
     check_schema: bool = True,
-    auto_rollback: bool = False,
-    threshold: int = DEFAULT_CONSECUTIVE_THRESHOLD,
 ) -> int:
-    """Run all health checks. Returns 0 if healthy, 1 if any check fails.
+    """Return 0 for healthy, 1 for unhealthy, and 2 for a checkout refusal.
 
-    Each check is run independently; the first failure short-circuits with a
-    diagnostic message to stderr. With `auto_rollback`, the probe tracks
-    consecutive failures in a counter file under $AVA_HOME and triggers
-    `ava cluster rollback` once they reach `threshold` (a passing run resets
-    the counter). The per-service check (5) fails the probe but never feeds
-    that counter. Every failure and the eventual recovery also pushes an
-    edge-triggered owner alert (see `_alert_failure` / `_alert_recovery`).
-    This is the entry point for both the CLI command and the OS cron job."""
+    Observations feed graded owner alerts. Release selection, rollback, and
+    known-good publication belong to the release operation.
+    """
     from shared.paths import ava_home, prod_service_checkout_error, repo_root
 
     home = ava_home()
     refusal = prod_service_checkout_error(repo_root())
     if refusal is not None:
         # A worktree/dev checkout driving the probe is the 2026-08-07 accident
-        # (Task #1025): worktree code misjudges schema health against prod data
-        # and auto-rolls-back the cluster. Refuse with a distinct exit code (2)
-        # so the cron log shows the refusal; never count it toward the
-        # auto-rollback counter.
+        # (Task #1025): worktree code misjudges schema health against prod data.
+        # Refuse the wrong runtime with a distinct exit code (2)
+        # so the cron log shows the refusal.
         print(f"health-probe refused: {refusal}", file=sys.stderr)
         return 2
 
+    return _observe_cluster_health(
+        home,
+        agent_min=agent_min,
+        crash_loop_max_restarts=crash_loop_max_restarts,
+        crash_loop_window_minutes=crash_loop_window_minutes,
+        check_crash_loops=check_crash_loops,
+        check_schema=check_schema,
+    )
+
+
+def _observe_cluster_health(
+    home: Path,
+    *,
+    agent_min: int | None,
+    crash_loop_max_restarts: int,
+    crash_loop_window_minutes: int,
+    check_crash_loops: bool,
+    check_schema: bool,
+) -> int:
+    """Observe one health round and report the first failed check."""
     # 1. Gateway liveness (primary signal)
     if not _gateway_liveness_with_retry():
         failure_class = "environment" if _data_plane_abnormal() else "code"
         return _unhealthy(
             home,
             "FAIL: gateway liveness — health endpoint unreachable or non-200",
-            auto_rollback=auto_rollback,
-            threshold=threshold,
             failure_class=failure_class,
         )
     print("  ✓ gateway liveness")
@@ -661,8 +489,7 @@ def run_health_probe(
     # 2. Agent population
     # `agent_min` defaults to the cluster's AVA_HEALTH_PROBE_AGENT_MIN (itself
     # 1): a test/QA cluster with no resident agents sets it to 0 or the check
-    # fails forever and --auto-rollback cycles the checkout back to the
-    # last-known-good commit (2026-08-10 preview incident).
+    # otherwise reports a permanent population outage.
     if agent_min is None:
         from shared.config import settings
 
@@ -671,8 +498,6 @@ def run_health_probe(
         return _unhealthy(
             home,
             f"FAIL: agent population — fewer than {agent_min} agent(s) running/idling",
-            auto_rollback=auto_rollback,
-            threshold=threshold,
             failure_class=_agent_population_failure_class(agent_min) or "code",
         )
     print(f"  ✓ agent population (>= {agent_min})")
@@ -684,8 +509,6 @@ def run_health_probe(
                 home,
                 f"FAIL: crash-loop detected — agent(s) restarted > {crash_loop_max_restarts} "
                 f"times in {crash_loop_window_minutes} min",
-                auto_rollback=auto_rollback,
-                threshold=threshold,
             )
         print(
             f"  ✓ crash-loop check (<= {crash_loop_max_restarts} restarts / "
@@ -698,27 +521,18 @@ def run_health_probe(
             return _unhealthy(
                 home,
                 "FAIL: schema health — applied version behind required (CodeBehindSchema)",
-                auto_rollback=auto_rollback,
-                threshold=threshold,
             )
         print("  ✓ schema health")
 
-    # Checks 1-4 — the rollback-gating set — all passed. Reset the consecutive-
-    # failure counter BEFORE the alert-only check 5 runs: a service/host probe
-    # failure is not rollback evidence, and a stale count left in place would let
-    # non-adjacent gating failures accumulate into an unattended rollback (the
-    # same adjacency rule the deploy suppression applies — a run that is healthy
-    # in every rollback-gating dimension breaks the run, and resetting costs
-    # nothing a cold start would not also cost).
-    if auto_rollback:
-        _reset_failure_count(home)
-    _advance_pending_lkg(home)
+    return _check_alert_only_health(home)
 
-    # 5. Per-service health + host-level gate / Redis bridge — alert-only: fails
-    # the probe but does NOT feed the auto-rollback counter (see module
-    # docstring), so it bypasses _unhealthy and alerts directly.
+
+def _check_alert_only_health(home: Path) -> int:
+    """Observe the remaining service, host, and provider health signals."""
+
+    # 5. Per-service health and the host-level Redis bridge.
     failing = _service_probes() + [
-        failure for failure in (_gate_probe(), _redis_bridge_probe()) if failure is not None
+        failure for failure in (_redis_bridge_probe(),) if failure is not None
     ]
     if failing:
         message = f"FAIL: service probe — not healthy: {', '.join(sorted(failing))}"
@@ -743,8 +557,8 @@ def run_health_probe(
     # 7. Editable-install records — alert-only, same class as checks 5 and 6:
     # the 2026-08-27 outage class (a worktree uv sync under a polluted
     # VIRTUAL_ENV repointed the prod venv at disposable source), but rolling
-    # back code does not fix a venv record — the converge guard repairs it on
-    # the next start/update. The probe detects and alerts; it never writes.
+    # back code does not fix a venv record. Explicit installation repair owns
+    # recovery; this probe and ordinary startup never rewrite these records.
     editable_failure = _editable_install_failure()
     if editable_failure is not None:
         message = f"FAIL: editable install — {editable_failure}"
@@ -767,8 +581,7 @@ def run_health_probe(
     if (guard_rc := run_provider_guard(home, alert_failure=_alert_failure)) is not None:
         return guard_rc
 
-    # All checks passed (the counter was already reset once checks 1-4 passed,
-    # above the alert-only check 5) — clear the alert edge state.
+    # All checks passed — resolve any alert episode that actually fired.
     _alert_recovery(home)
     return 0
 
@@ -780,21 +593,12 @@ def cmd_health_probe(
     crash_loop_window_minutes: int = DEFAULT_CRASH_LOOP_WINDOW_MINUTES,
     check_crash_loops: bool = True,
     check_schema: bool = True,
-    auto_rollback: bool = False,
-    threshold: int = DEFAULT_CONSECUTIVE_THRESHOLD,
 ) -> int:
-    """CLI entry point for `ava cluster health-probe`.
-
-    Exits 0 if the cluster is healthy; exits 1 if any check fails. Diagnostic
-    messages go to stderr so the cron job can capture them separately from
-    stdout. With `--auto-rollback`, consecutive failures are counted and a
-    cluster rollback is triggered once they reach `--threshold`."""
+    """Report cluster health through exit status, diagnostics, and graded alerts."""
     return run_health_probe(
         agent_min=agent_min,
         crash_loop_max_restarts=crash_loop_max_restarts,
         crash_loop_window_minutes=crash_loop_window_minutes,
         check_crash_loops=check_crash_loops,
         check_schema=check_schema,
-        auto_rollback=auto_rollback,
-        threshold=threshold,
     )

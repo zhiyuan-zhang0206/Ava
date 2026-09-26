@@ -17,6 +17,7 @@ from services.agent_ops import daemon
 from shared import host_deploy_state, maintenance, pause_owner, start_serving
 from shared.config import settings
 from shared.maintenance_state import MaintenanceHold
+from shared.start_serving import RootBirth
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -60,6 +61,48 @@ def test_held_gateway_health_still_reports_database_failure(
     assert not start_serving.is_serving()
 
 
+def test_control_plane_bypasses_an_unreadable_admission_journal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unexpected_read(_request: object) -> bool:
+        raise AssertionError("control-plane request read the business admission journal")
+
+    monkeypatch.setattr("gateway.app._cluster_is_paused", unexpected_read)
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+
+
+def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ops import agent_pause, ops_cluster
+
+    class ProbeBoundaryError(Exception):
+        pass
+
+    monkeypatch.setattr(ops_cluster, "_require_executing_deploy", MagicMock())
+    monkeypatch.setattr(agent_pause, "machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(agent_pause, "host_running", lambda: True)
+    monkeypatch.setattr(
+        ops_cluster, "pause_local_cluster", lambda: agent_pause._prepare("fleet", WHEN)
+    )
+    monkeypatch.setattr(ops_cluster, "unpause_local_cluster", agent_pause.resume_agents)
+    with TestClient(app) as client:
+
+        def inspect_before_drain() -> None:
+            response = client.get("/api/agents")
+            assert response.status_code == 200, response.text
+            current = maintenance.snapshot()
+            assert current is not None and current.maintenance is not None
+            assert current.maintenance.phase == "preparing"
+            raise ProbeBoundaryError
+
+        monkeypatch.setattr(agent_pause, "host_identity", inspect_before_drain)
+        with pytest.raises(ProbeBoundaryError):
+            ops_cluster.cluster_stop_op("fleet", WHEN)
+    assert not maintenance.held()
+
+
 @pytest.mark.usefixtures("held")
 def test_held_health_exemption_preserves_authentication(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", uuid4().hex)
@@ -72,9 +115,9 @@ def test_held_health_exemption_preserves_authentication(monkeypatch: pytest.Monk
     assert maintenance.held()
 
 
-@pytest.mark.real_cluster_spawn
 @pytest.mark.usefixtures("held")
 async def test_real_ops_status_and_exact_resume_keep_readiness_fence(
+    serving_root: RootBirth,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Real dispatch, executor, PostgreSQL posture and journal; no service is launched.
@@ -102,7 +145,7 @@ async def test_real_ops_status_and_exact_resume_keep_readiness_fence(
         assert "readiness" in early["result"]["error"]
         assert maintenance.held()
         generation = start_serving.begin_start()
-        assert start_serving.mark_serving(generation)
+        assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
         wrong = await request("cluster_resume", {**transition, "deploy_holder": "other"})
         assert wrong["status"] == "failed"
         assert maintenance.held()

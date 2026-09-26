@@ -37,11 +37,15 @@ from tests.shared.test_updater_handoff import (
     _write_normal_through,
 )
 
+_START_GENERATION = "00000000-0000-4000-8000-000000000001"
+
 
 def _marker_write(case: str, path: Path) -> None:
     payload: dict[str, object] = {"z": 1, "a": "value"}
     if case == "start":
-        start_serving._write_state("starting", "generation")
+        start_serving._write_state(
+            start_serving.ServingState(state="starting", generation=_START_GENERATION)
+        )
     elif case == "receipt":
         spawn_receipt._write_atomic_text(path, '{"z":1,"a":"value"}')
     elif case == "owner":
@@ -88,7 +92,11 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     _marker_write(case, path)
     raw = path.read_bytes()
     if case == "start":
-        assert raw == b'{"generation":"generation","schema_version":1,"state":"starting"}'
+        assert raw == (
+            b'{"schema_version":2,"state":"starting","generation":"'
+            + _START_GENERATION.encode()
+            + b'","birth":null}'
+        )
     elif case == "receipt":
         assert raw == b'{"z":1,"a":"value"}'
     elif case == "owner":

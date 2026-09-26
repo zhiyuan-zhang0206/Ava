@@ -6,7 +6,7 @@ from typing import Literal
 import psycopg
 from psycopg import sql
 
-from ops.resurrection_retry import ResurrectExitDeferredError
+from ops.resurrection_retry import ResurrectSettlementDeferredError, hosted_resurrection_target
 from ops.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
 from ops.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
 from shared import telemetry
@@ -22,15 +22,15 @@ from shared.audit_events import prepare_event_log
 from shared.config import field_alias, get_field, settings
 from shared.db import fetch_one, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.lifecycle_termination_observe import observe_applied_termination
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.machine import machine_name
+from shared.runtime_incarnation import RuntimeIncarnation
 
 
 def _transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
-    agent_id: int,
+    incarnation: RuntimeIncarnation,
     *,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
@@ -43,7 +43,14 @@ def _transition_terminated_to_unclaimed_idling(
     a closed agent is exactly the manual resurrect's contract, and the caller
     reports it on the resurrect event.
     """
-    base_params = (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED)
+    agent_id = incarnation.agent_id
+    base_params = (
+        AgentStatus.IDLING,
+        agent_id,
+        AgentStatus.TERMINATED,
+        incarnation.generation,
+        incarnation.owner,
+    )
     if trigger_inbound_id is not None:
         from shared.lifecycle_acceptance import (
             CLOSED_AGENT,
@@ -61,6 +68,8 @@ def _transition_terminated_to_unclaimed_idling(
                 "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
                 "runtime_protocol_version = 0 "
                 "WHERE id = %s AND status = %s "
+                "AND runtime_kind = 'hosted' AND runtime_generation = %s AND runtime_owner = %s "
+                "AND pid IS NULL AND lifecycle_command_id IS NULL "
                 "AND NOT {} "
                 "AND (agents_meta.wake_suppressed_until IS NULL "
                 "     OR agents_meta.wake_suppressed_until < now()) "
@@ -88,7 +97,9 @@ def _transition_terminated_to_unclaimed_idling(
             "last_turn_fatal_at = NULL, "
             "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
             "runtime_protocol_version = 0 "
-            "WHERE id = %s AND status = %s RETURNING status_changed_at",
+            "WHERE id = %s AND status = %s "
+            "AND runtime_kind = 'hosted' AND runtime_generation = %s AND runtime_owner = %s "
+            "AND pid IS NULL AND lifecycle_command_id IS NULL RETURNING status_changed_at",
             base_params,
         )
     transition_row = cur.fetchone()
@@ -175,7 +186,8 @@ def _prepare_resurrect_attempt(
     with write_transaction() as conn, conn.cursor() as cur:
         latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(
-            "SELECT status,machine,closed_at,permanent_reject_streak,last_permanent_reject_reason "
+            "SELECT status,machine,closed_at,permanent_reject_streak,last_permanent_reject_reason,"
+            "runtime_kind,runtime_generation,runtime_owner,pid "
             "FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
@@ -190,6 +202,9 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
+        incarnation = hosted_resurrection_target(
+            agent_id, kind=row[5], generation=row[6], owner=row[7], pid=row[8]
+        )
         if billing_recovery:
             from shared.recovery_breaker import (
                 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
@@ -214,7 +229,7 @@ def _prepare_resurrect_attempt(
                 raise ResurrectBudgetExhausted(
                     f"agent {agent_id} has exhausted its auto-resurrect budget"
                 )
-        # The resurrection inbound is inserted before the observation check so
+        # The resurrection inbound is inserted before the settlement check so
         # its id can fence the new incarnation's epoch: every earlier unapplied
         # lifecycle command is settled as superseded right here (issue #2158),
         # and a command that never applied cannot defer this resurrection. A
@@ -228,13 +243,14 @@ def _prepare_resurrect_attempt(
         if resurrect_row is None:
             raise RuntimeError("resurrect lifecycle inbound INSERT returned no id")
         supersede_lifecycle_for_resurrect(conn, agent_id, resurrect_row[0])
-        if not observe_applied_termination(conn, agent_id, machine_name()):
-            raise ResurrectExitDeferredError(
-                "outstanding lifecycle target has not been observed ended"
+        cur.execute("SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,))
+        if fetch_one(cur, "resurrect: locked lifecycle pointer")[0] is not None:
+            raise ResurrectSettlementDeferredError(
+                "outstanding hosted lifecycle command has not settled"
             )
         _transition_terminated_to_unclaimed_idling(
             cur,
-            agent_id,
+            incarnation,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
@@ -296,7 +312,11 @@ def resurrect_agent(
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
     billing_recovery: bool = False,
 ) -> int:
-    """Atomically restore native intent and enqueue lifecycle plus optional chat.
+    """Resume a terminated hosted incarnation and enqueue lifecycle plus optional chat.
+
+    Historical process/unknown runtimes and incomplete hosted identities require
+    explicit cutover reconciliation. Only the hosted lifecycle owner settles an
+    applied command; resurrection never infers its completion from process exit.
 
     Pending-work callers name the exact post-termination inbound. Its ID and
     the latest force-termination fence are checked under the metadata row lock,
@@ -305,7 +325,7 @@ def resurrect_agent(
     qualifies: a reaper death is not an operator's decision. The automatic
     trigger additionally requires clear automatic wakes (no suppression window,
     `RECOVERY_BREAKER_CLEAR`) and an open agent (no closure marker); explicit
-    manual resurrection passes no trigger and keeps its unconditional
+    manual resurrection passes no trigger and keeps its explicit reopen
     contract — it reopens a closed agent (clearing `closed_at`), the audit
     event carries `"reopened": true`, and a WARNING-level `agent_reopened` log
     line marks the reopen for operator-side visibility. The versioned billing

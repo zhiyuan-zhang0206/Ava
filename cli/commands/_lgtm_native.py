@@ -1,8 +1,6 @@
-"""Native LGTM installation and host service configuration.
+"""Prepare native LGTM assets and configuration for the root service roster.
 
-Converge downloads only a missing or stale release asset, while always
-rendering live configs and launchd plists / user systemd units so changes apply on the
-next lifecycle run.
+Preparation never registers OS jobs, launches services or retires another home.
 """
 
 from __future__ import annotations
@@ -11,8 +9,6 @@ import hashlib
 import ipaddress
 import os
 import platform
-import plistlib
-import re
 import shlex
 import shutil
 import subprocess
@@ -23,21 +19,22 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from urllib.parse import urlparse
 
 import yaml
 from dotenv import dotenv_values
 
 from cli.commands._converge_spec import ConvergeCtx
-from cli.commands._lgtm import is_station_ctx, roles_declare_station
+from cli.commands._lgtm import is_station_ctx
 from cli.commands._lgtm_assets import _NATIVE_CONSTANTS, load_versions
 from cli.commands._lgtm_provisioning import _render_provisioning
 from cli.commands._observatory_urls import (
     _alerts_webhook_url,
     _observability_datasource_urls,
 )
-from shared.log import logger
+from shared.lgtm_local import BACKENDS
+from shared.lgtm_local import storage_dir as _storage_dir
 from shared.loki_index_labels import validate_loki_deploy_config
 from shared.resilience import Policy, retry
 
@@ -48,7 +45,6 @@ _DOWNLOAD_ATTEMPT_TIMEOUT_S = 600.0
 _DOWNLOAD_ATTEMPTS = 3
 _DOWNLOAD_RETRY_BACKOFF_S = 5.0
 _DOWNLOAD_PROGRESS_INTERVAL_S = 15.0
-_LAUNCHCTL_TIMEOUT_S = 5.0
 
 
 def _download_backoff(attempt: int) -> float:
@@ -85,89 +81,9 @@ def _load_versions(repo: Path) -> dict[str, dict[str, str]]:
     return load_versions(repo, tag)
 
 
-def _plist_path(label: str) -> Path:
-    """The launchd plist path for a native backend label."""
-    return _agents_dir() / f"{label}.plist"
-
-
-def _agents_dir() -> Path:
-    """The user LaunchAgents directory used by native LGTM services."""
-    return Path.home() / "Library" / "LaunchAgents"
-
-
-def native_label(name: str, ava_home: Path) -> str:
-    """Return the per-cluster launchd label for one native LGTM backend."""
-    from shared.cluster import home_slug
-
-    return f"com.ava.{name}.{home_slug(ava_home)}"
-
-
 def _binary_path(name: str, native_dir: Path) -> Path:
     """Return the installed executable path for one native backend."""
     return native_dir / _NATIVE_CONSTANTS[name].binary_path
-
-
-def _storage_dir(ava_home: Path) -> Path:
-    """The observation-data root for the native backends, per machine.
-
-    `AVA_LGTM_STORAGE_DIR` (empty = default) selects where Loki's filesystem
-    store and Prometheus' TSDB live; the default resolves to
-    `$AVA_HOME/lgtm/native/data`, byte-identical to the historical layout. The
-    knob is host-scope — it names a machine's data volume, not a cluster's.
-    """
-    from shared.config import settings
-
-    configured = settings.observability.lgtm_storage_dir.strip()
-    if not configured:
-        return (ava_home / "lgtm" / "native" / "data").resolve()
-    return Path(configured).expanduser().resolve()
-
-
-def _service_invocation(
-    name: str, native_dir: Path, ava_home: Path
-) -> tuple[tuple[str, ...], dict[str, str]]:
-    """The same native command and environment for launchd and user systemd."""
-    from shared.config import settings
-
-    service = _NATIVE_CONSTANTS[name]
-    resolved_native = native_dir.resolve()
-    resolved_home = ava_home.resolve()
-    substitutions = {
-        "config": str(resolved_native / "config"),
-        "data": str(_storage_dir(ava_home)),
-        "homepath": str(resolved_native / "grafana-home"),
-        "lgtm_listen_host": settings.observability.lgtm_listen_host,
-        "lgtm_prometheus_port": str(settings.observability.lgtm_prometheus_port),
-    }
-    program_arguments = (
-        [str(resolved_native / "grafana" / "run.sh")]
-        if service.uses_run_script
-        else [
-            str(_binary_path(name, resolved_native)),
-            *[argument.format(**substitutions) for argument in service.arguments],
-        ]
-    )
-    environment = {"AVA_HOME": str(resolved_home)}
-    if service.gomemlimit is not None:
-        environment["GOMEMLIMIT"] = service.gomemlimit
-    return tuple(program_arguments), environment
-
-
-def _render_plist(name: str, native_dir: Path, ava_home: Path) -> str:
-    """Render one owner-scoped launchd plist with absolute program paths."""
-    program_arguments, environment = _service_invocation(name, native_dir, ava_home)
-    resolved_home = ava_home.resolve()
-    plist: dict[str, Any] = {
-        "Label": native_label(name, ava_home),
-        "ProgramArguments": program_arguments,
-        "EnvironmentVariables": environment,
-        "RunAtLoad": True,
-        "KeepAlive": {"SuccessfulExit": False},
-        "ThrottleInterval": 10,
-        "StandardOutPath": str(resolved_home / "lgtm/native/logs" / f"{name}.log"),
-        "StandardErrorPath": str(resolved_home / "lgtm/native/logs" / f"{name}.log"),
-    }
-    return plistlib.dumps(plist, fmt=plistlib.FMT_XML, sort_keys=False).decode("utf-8")
 
 
 def _stream_download(url: str, destination: Path) -> None:
@@ -520,113 +436,22 @@ def _render_grafana_admin_password(native_dir: Path) -> None:
     _write_if_changed(credential_file, credential.get_secret_value() + "\n", mode=0o600)
 
 
-def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
-    """Run one local launchctl command without surfacing absent-job failures."""
-    return subprocess.run(
-        ["launchctl", *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=_LAUNCHCTL_TIMEOUT_S,
-    )
-
-
-def _job_loaded(label: str) -> bool:
-    """Whether launchd currently has a user job for this label."""
-    return _launchctl("print", f"gui/{os.getuid()}/{label}").returncode == 0
-
-
-def _loaded_user_job_labels() -> set[str]:
-    """Return labels reported by launchd's bounded user-job listing."""
-    result = _launchctl("list")
-    if result.returncode != 0:
-        return set()
-    labels: set[str] = set()
-    for line in result.stdout.splitlines():
-        fields = line.split(maxsplit=2)
-        if len(fields) == 3:
-            labels.add(fields[2])
-    return labels
-
-
-def _retire_other_native_jobs(ava_home: Path) -> None:
-    """Remove legacy and foreign native jobs that race this host's fixed ports."""
-    loaded_labels = _loaded_user_job_labels()
-    for name in _NATIVE_CONSTANTS:
-        current = native_label(name, ava_home)
-        competing_loaded = {
-            label
-            for label in loaded_labels
-            if re.fullmatch(rf"com\.ava\.{re.escape(name)}(?:\..+)?", label) and label != current
-        }
-        plists: dict[str, Path] = {}
-        for plist in _agents_dir().glob(f"com.ava.{name}*.plist"):
-            try:
-                label = plistlib.loads(plist.read_bytes())["Label"]
-            except (KeyError, OSError, plistlib.InvalidFileException):
-                continue
-            if not isinstance(label, str):
-                continue
-            if label == current:
-                continue
-            plists[label] = plist
-        competitors = set(plists) | competing_loaded
-        if not competitors or not _job_loaded(current):
-            continue
-        for label in competitors:
-            plist = plists.get(label, _plist_path(label))
-            was_loaded = label in competing_loaded or _job_loaded(label)
-            booted_out = (
-                _launchctl("bootout", f"gui/{os.getuid()}/{label}").returncode == 0
-                if was_loaded
-                else False
-            )
-            try:
-                plist.unlink()
-            except FileNotFoundError:
-                removed_plist = False
-            else:
-                removed_plist = True
-            if booted_out or removed_plist:
-                logger.info("retired competing native LGTM job {} ({})", label, plist)
-
-
-def bootout_native_jobs(ava_home: Path) -> None:
-    """Boot out and delete this home's jobs; `ava lgtm off` should call it after marker removal."""
-    if platform.system() == "Linux":
-        from shared.lgtm_systemd import stop
-
-        stop(ava_home)
-        return
-    for name in _NATIVE_CONSTANTS:
-        label = native_label(name, ava_home)
-        if _job_loaded(label) and _launchctl("bootout", f"gui/{os.getuid()}/{label}").returncode:
-            raise RuntimeError(f"Failed to stop native LGTM job {label}")
-        _plist_path(label).unlink(missing_ok=True)
-
-
-def ensure_lgtm_native(repo: Path, ava_home: Path, *, station: bool = False) -> None:
-    """Install current binaries and converge configs and native service definitions.
-
-    `station` is the declarative provider identity (the `observability-station`
-    capability); the legacy `$AVA_HOME/lgtm-host` marker is still honored on its
-    own, so the existing marked host behaves exactly as before.
-    """
+def ensure_lgtm_native(repo: Path, ava_home: Path, *, services: frozenset[str]) -> None:
+    """Prepare selected pinned binaries and config; lifecycle belongs to ava-root."""
+    if not services or services - set(BACKENDS):
+        raise ValueError("native LGTM preparation requires selected backend names")
     tag = platform_tag()
     if tag not in SUPPORTED_TAGS:
-        print(
-            f"  ! lgtm native: no pinned binaries for {platform.system()} {platform.machine()} — skipped",
-            file=sys.stderr,
-        )
-        return
+        raise RuntimeError("Native LGTM has no pinned binaries for this platform")
     native_dir = ava_home / "lgtm/native"
     for directory in ("bin", "config", "logs"):
         (native_dir / directory).mkdir(parents=True, exist_ok=True)
     storage = _storage_dir(ava_home)
     for sub in ("", "loki", "prom"):
         (storage / sub).mkdir(parents=True, exist_ok=True)
-    config_before = _linux_config_fingerprint(native_dir)
     for name, asset in _load_versions(repo).items():
+        if name not in services:
+            continue
         marker = native_dir / f"version-{name}"
         platform_marker = native_dir / f"platform-{name}"
         matching_platform = (
@@ -639,84 +464,30 @@ def ensure_lgtm_native(repo: Path, ava_home: Path, *, station: bool = False) -> 
             continue
         _download_and_verify(name, asset["version"], asset, native_dir)
         print(f"  · lgtm native: installed {name} {asset['version']} ({tag})")
-    grafana_config_before = _grafana_config_fingerprint(native_dir)
     _render_configs(repo, native_dir, ava_home)
-    _render_grafana_admin_password(native_dir)
-    if tag == "linux_amd64":
-        from shared import lgtm_systemd
-
-        commands = {
-            name: lgtm_systemd.Command(*_service_invocation(name, native_dir, ava_home))
-            for name in _NATIVE_CONSTANTS
-        }
-        units_changed = lgtm_systemd.register(ava_home, commands)
-        if units_changed or config_before != _linux_config_fingerprint(native_dir):
-            lgtm_systemd.restart_running(ava_home)
-        return
-    for name in _NATIVE_CONSTANTS:
-        label = native_label(name, ava_home)
-        _write_if_changed(_plist_path(label), _render_plist(name, native_dir, ava_home))
-    if station or (ava_home / "lgtm-host").exists():
-        _retire_other_native_jobs(ava_home)
-    _restart_grafana_if_config_changed(native_dir, ava_home, grafana_config_before)
+    if "grafana" in services:
+        _render_grafana_admin_password(native_dir)
+    if "loki" in services:
+        _verify_loki(ava_home)
 
 
-def _linux_config_fingerprint(native_dir: Path) -> tuple[str, ...]:
-    """Inputs whose changes require restarting an already running Linux backend."""
-    paths = [native_dir / "config" / name for name in ("loki.yaml", "prometheus.yml")]
-    paths += [native_dir / f"version-{name}" for name in _NATIVE_CONSTANTS]
-    paths.append(native_dir / "grafana/run.sh")
-    return (
-        *_grafana_config_fingerprint(native_dir),
-        *(p.read_text() if p.exists() else "" for p in paths),
+def _verify_loki(home: Path) -> None:
+    """Use the pinned binary's own parser before starting the root generation."""
+    from shared.lgtm_local import binary_path
+
+    result = subprocess.run(
+        [
+            str(binary_path(home, "loki")),
+            f"-config.file={home.resolve()}/lgtm/native/config/loki.yaml",
+            "-verify-config",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
     )
-
-
-def _grafana_config_fingerprint(native_dir: Path) -> tuple[str, str, str]:
-    """The converge-rendered inputs the RUNNING Grafana serves: the INI (its
-    provisioning path lives there), the runtime env (the datasource/webhook
-    $__env{} values), and the rendered provisioning tree's hash sidecar (the
-    tree content). Comparing the pre/post tuple detects every config change
-    that needs a Grafana restart to take effect."""
-    config_dir = native_dir / "config"
-    ini = config_dir / "grafana.ini"
-    runtime_env = config_dir / "runtime.env"
-    hashes = config_dir / "provisioning-hashes.json"
-    return (
-        ini.read_text(encoding="utf-8") if ini.exists() else "",
-        runtime_env.read_text(encoding="utf-8") if runtime_env.exists() else "",
-        hashes.read_text(encoding="utf-8") if hashes.exists() else "",
-    )
-
-
-def _restart_grafana_if_config_changed(
-    native_dir: Path, ava_home: Path, before: tuple[str, str, str]
-) -> None:
-    """Kickstart Grafana when its converge-rendered config changed.
-
-    A running Grafana never re-reads its INI: after a render that changed the
-    provisioning path or the env-baked datasource/webhook URLs, the instance
-    keeps serving the OLD config until restarted (the watchdog only acts on
-    readiness failure, which broken datasources do not cause). A controlled
-    `launchctl kickstart -k` closes that window — same convention the README
-    documents for manual config restarts. Only on Darwin with the job loaded;
-    the watchdog's 60s readiness window is well above Grafana's ~10s cold
-    start. Converge does not wait for the restart.
-    """
-    if platform.system() != "Darwin":
-        return
-    after = _grafana_config_fingerprint(native_dir)
-    if before == after:
-        return
-    label = native_label("grafana", ava_home)
-    if not _job_loaded(label):
-        return
-    _launchctl("kickstart", "-k", f"gui/{os.getuid()}/{label}")
-    print(
-        f"  · lgtm native: grafana config changed; kickstarted {label} "
-        "(watchdog readiness window covers the cold start)",
-        file=sys.stderr,
-    )
+    if result.returncode:
+        raise RuntimeError(f"Loki config verification failed: {result.stderr.strip()}")
 
 
 def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
@@ -726,31 +497,7 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
     `observability-station` capability; both render the full native set
     (configs + native service definitions + storage dirs) and install pinned binaries.
     """
-    if not is_station_ctx(ctx):
+    selected = ctx.services.intersection(BACKENDS)
+    if not is_station_ctx(ctx) or not selected:
         return
-    ensure_lgtm_native(ctx.repo, ctx.ava_home, station=roles_declare_station(ctx.roles))
-
-
-def backend_pids(native_dir: Path) -> dict[str, str | None]:
-    """Return the running PID for each exact native binary path, if any."""
-    if platform.system() == "Linux":
-        from shared.lgtm_systemd import running_pid
-
-        home = native_dir.parent.parent
-        return {
-            name: str(pid) if (pid := running_pid(home, name)) else None
-            for name in _NATIVE_CONSTANTS
-        }
-    pids: dict[str, str | None] = {}
-    for name in _NATIVE_CONSTANTS:
-        binary = _binary_path(name, native_dir).resolve()
-        result = subprocess.run(
-            ["pgrep", "-f", rf"^{re.escape(str(binary))}( |$)"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        pids[name] = (
-            result.stdout.splitlines()[0] if result.returncode == 0 and result.stdout else None
-        )
-    return pids
+    ensure_lgtm_native(ctx.repo, ctx.ava_home, services=selected)

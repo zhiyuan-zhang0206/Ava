@@ -4,18 +4,14 @@ from __future__ import annotations
 
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
 import hashlib
-import re
 import shutil
 import stat
 import subprocess
-import sys
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import LiteralString
 
-import psutil
 import psycopg
 from psycopg.conninfo import make_conninfo
 
@@ -23,7 +19,6 @@ from cli.commands._pitr_activation_config import (
     apply_wal_config,
     require_inactive_gate_posture,
     restore_archive_settings,
-    rollback_gate_hint,
 )
 from services.pitr.activation_credentials import (
     credential_app_key,
@@ -35,8 +30,6 @@ from services.pitr.activation_credentials import (
     require_store_config,
 )
 from services.pitr.activation_lease import run_while_renewing
-from services.pitr.activation_observability import refusal_message
-from services.pitr.activation_observability import save_error as _save_error
 from services.pitr.activation_runtime import (
     _PITR_ENV_FIELDS as _PITR_ENV_FIELDS,
 )
@@ -68,11 +61,8 @@ from services.pitr.activation_runtime import (
 from services.pitr.activation_state import (
     ActivationPhase,
     ActivationRecord,
-    consume_restart_handoff,
     load_record,
-    lock_path,
     mark_pre_mutation_rolled_back,
-    rearm_restart_handoff,
     write_record,
     write_record_cas,
 )
@@ -80,8 +70,6 @@ from services.pitr.cos_client import credential_evidence as _cos_credential_evid
 from shared.config import settings
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
-from shared.platform import LockTimeoutError, file_lock
-from shared.private_storage import ensure_private_dir
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 
@@ -197,11 +185,14 @@ def _validate_secrets() -> dict[str, str]:
 
 def _read_pg_state() -> dict[str, str]:
     from cli.commands._cluster_instance import pg_admin_url
-    from shared.cluster import db_identity, get_record, record_postgres_port
+    from shared.cluster import db_identity, get_record, ownership, record_postgres_port
 
     if (record := get_record(ava_home())) is None:
         raise RuntimeError("cluster registry record is missing")
     expected_db = db_identity()
+    owner = ownership.require_postgres(ava_home() / "pg", record_postgres_port(record))
+    if owner is None:
+        raise RuntimeError("PITR requires this home's native PostgreSQL owner")
 
     def scalar(conn: psycopg.Connection[tuple[object, ...]], query: LiteralString) -> object:
         row = conn.execute(query).fetchone()
@@ -210,6 +201,7 @@ def _read_pg_state() -> dict[str, str]:
         return row[0]
 
     with psycopg.connect(pg_admin_url(record_postgres_port(record)), autocommit=True) as conn:
+        ownership.require_postgres_connection(conn, ava_home() / "pg")
         system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
         server_version = int(str(scalar(conn, "SHOW server_version_num")))
         current = {
@@ -225,6 +217,7 @@ def _read_pg_state() -> dict[str, str]:
         )
     direct_url = make_conninfo(pg_admin_url(record_postgres_port(record)), dbname=expected_db)
     with psycopg.connect(direct_url, autocommit=True) as conn:
+        ownership.require_postgres_connection(conn, ava_home() / "pg")
         current["dbname"] = str(scalar(conn, "SELECT current_database()"))
         direct_system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
     if current["dbname"] != expected_db or direct_system_id != system_id:
@@ -238,14 +231,17 @@ def _read_pg_state() -> dict[str, str]:
         raise RuntimeError("live PostgreSQL data_directory differs from this AVA_HOME")
     if int(current["port"]) != record_postgres_port(record):
         raise RuntimeError("live PostgreSQL port differs from the cluster registry")
-    pid_path = expected_data / "postmaster.pid"
-    pid = int(pid_path.read_text().splitlines()[0])
-    process = psutil.Process(pid)
-    current["postmaster_pid"] = str(pid)
-    current["postmaster_create_time"] = str(process.create_time())
-    postmaster_started = datetime.fromisoformat(current["postmaster_started_at"])
-    if abs(postmaster_started.timestamp() - process.create_time()) > 5:
-        raise RuntimeError("postmaster PID create-time differs from PostgreSQL start time")
+    current_owner = ownership.postgres(expected_data)
+    if current_owner is None or not owner.same_birth(current_owner) or not owner.live():
+        raise RuntimeError("PostgreSQL native birth changed during PITR observation")
+    current["postmaster_pid"] = str(owner.pid)
+    current["postmaster_create_time"] = str(owner.birth)
+    current["postmaster_starttime"] = "" if owner.starttime is None else str(owner.starttime)
+    _require_control_identity(expected_data, system_id)
+    return current
+
+
+def _require_control_identity(expected_data: Path, system_id: str) -> None:
     control = subprocess.run(
         [str(pg_tool("pg_controldata")), str(expected_data)],
         capture_output=True,
@@ -265,7 +261,6 @@ def _read_pg_state() -> dict[str, str]:
     )
     if control_id != system_id:
         raise RuntimeError("pg_controldata system identifier differs from the live server")
-    return current
 
 
 def _shadow_readiness() -> ShadowReadiness:
@@ -328,9 +323,9 @@ def _validate_snapshot(record: ActivationRecord) -> None:
     path = Path(record.pre_activation_snapshot)
     if path.is_symlink() or not path.is_file() or _mode(path) != 0o600:
         raise RuntimeError("pre-activation snapshot is missing or unsafe")
-    from cli.commands import _update_snapshot
+    from services.gateway_side.backup import snapshot as backup_snapshot
 
-    _update_snapshot._verify_snapshot_artifact(path)
+    backup_snapshot.verify_snapshot(path)
 
 
 def cmd_pitr_status() -> int:
@@ -341,7 +336,21 @@ def cmd_pitr_status() -> int:
 
 
 def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> None:
-    if expected is None or _read_pg_state() != expected:
+    current = _read_pg_state()
+    if expected is not None and expected.get("postmaster_starttime"):
+        from shared.native_process.ownership import OwnedProcess
+
+        def native(state: dict[str, str]) -> OwnedProcess:
+            return OwnedProcess(
+                int(state["postmaster_pid"]),
+                float(state["postmaster_create_time"]),
+                int(state["postmaster_starttime"]) if state["postmaster_starttime"] else None,
+            )
+
+        if native(expected).same_birth(native(current)):
+            # Linux's stable tick is identity; its derived wall time can move.
+            current = current | {"postmaster_create_time": expected["postmaster_create_time"]}
+    if expected is None or current != expected:
         raise RuntimeError(f"PostgreSQL identity/settings changed {boundary}")
 
 
@@ -369,8 +378,8 @@ def _require_same_pre_mutation_state(record: ActivationRecord) -> None:
 
 
 def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
-    from cli.commands import _update_git, _update_snapshot
     from services.backup import activation_snapshot
+    from services.gateway_side.backup import snapshot as backup_snapshot
 
     pg_settings = record.pre_activation_pg_settings
     if pg_settings is None:
@@ -380,11 +389,12 @@ def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
     existing = activation_snapshot(record.operation_id)
     if existing is not None:
         snapshot = existing
-        _update_snapshot._verify_snapshot_artifact(snapshot)
+        backup_snapshot.verify_snapshot(snapshot)
     else:
-        snapshot = _update_git.snapshot_pre_activation_data(
+        snapshot = backup_snapshot.create_pre_activation_snapshot(
             operation_id=record.operation_id,
             db_url=pg_settings["direct_db_url"],
+            progress=lambda line: print(f"→ pre-activation data snapshot: {line}", flush=True),
         )
     _require_same_pg_state(pg_settings, "during snapshot")
     _require_same_credentials(record.pre_activation_credential_evidence, "during snapshot")
@@ -405,15 +415,10 @@ def _persist_transition(
     return replacement
 
 
-def _pg_auto_conf_baseline(home: Path, values: dict[str, str] | None = None) -> dict[str, str]:
-    path = home / "pg" / "postgresql.auto.conf"
-    text = path.read_text() if path.exists() else ""
-    result: dict[str, str] = {}
-    effective = _read_pg_state() if values is None else values
-    for name in ("archive_mode", "archive_command", "archive_timeout", "wal_compression"):
-        matches = [line for line in text.splitlines() if re.match(rf"^\s*{name}\s*=", line)]
-        result[name] = effective[name] if matches else "__ABSENT__"
-    return result
+def _pg_auto_conf_baseline(home: Path) -> dict[str, str]:
+    from cli.commands._pitr_activation_config import _persistent_archive_settings
+
+    return _persistent_archive_settings(home)
 
 
 def _restart_ready(record: ActivationRecord, desired: dict[str, str]) -> bool:
@@ -432,7 +437,9 @@ def _restart_ready(record: ActivationRecord, desired: dict[str, str]) -> bool:
     )
 
 
-def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> ActivationRecord:
+def _advance_activation(
+    home: Path, record: ActivationRecord, holder: str, *, stop_at_restart: bool = False
+) -> ActivationRecord:
     if record.phase != "shadow":
         _require_same_credentials(
             record.pre_activation_credential_evidence, f"before {record.phase}"
@@ -467,7 +474,7 @@ def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> Ac
             wal_config_before_digest=_settings_digest(before),
             wal_config_desired_digest=_settings_digest(desired),
             pre_activation_pitr_env=env_baseline,
-            pre_activation_pg_auto_conf=_pg_auto_conf_baseline(home, before),
+            pre_activation_pg_auto_conf=_pg_auto_conf_baseline(home),
             pre_activation_env_b64=env_b64,
             pre_activation_env_digest=env_digest,
             pre_activation_auto_conf_b64=auto_b64,
@@ -478,6 +485,8 @@ def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> Ac
         )
     if record.phase == "wal_config_applying":
         record = apply_wal_config(home, record, desired)
+    if stop_at_restart and record.phase == "wal_restart_pending":
+        return record
     if record.phase == "wal_restart_pending":
         if not _restart_ready(record, desired):
             return record
@@ -490,6 +499,10 @@ def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> Ac
             wal_verification_deadline=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
             error=None,
         )
+    return _prove_activation(home, record, holder)
+
+
+def _prove_activation(home: Path, record: ActivationRecord, holder: str) -> ActivationRecord:
     if record.phase == "wal_ack_pending":
         # The verification deadline is a per-attempt window: an earlier attempt
         # that crashed before the proof loop (2026-08-30: the switch step died
@@ -551,249 +564,105 @@ def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> Ac
 
 
 def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
-    from shared.cluster_lock import acquire_update_lock, release_update_lock
+    from shared.release_operation import require_pitr_authorized
 
-    holder = f"pitr-rollback:{record.operation_id}"
-    if not acquire_update_lock(holder, kind="update"):
-        raise RuntimeError("cluster update/maintenance owner is already active")
-    try:
-        if record.phase == "rollback_restart_pending":
-            current = _read_pg_state()
-            expected = record.pre_activation_pg_settings or {}
-            if current[
-                "postmaster_started_at"
-            ] == record.rollback_postmaster_started_at or _archive_settings(
-                current
-            ) != _archive_settings(expected):
-                return record
-            if _pg_auto_conf_baseline(home, current) != record.pre_activation_pg_auto_conf:
-                raise RuntimeError("PostgreSQL ALTER SYSTEM ownership differs after rollback")
-            return _persist_transition(home, record, "rolled_back", error=None)
-        if record.phase == "rolled_back":
-            return record
-        if record.phase in {
-            "shadow",
-            "snapshot_pending",
-            "snapshot_verified",
-            "wal_config_pending",
-        }:
-            return mark_pre_mutation_rolled_back(home, record)
+    require_pitr_authorized(home)
+    if record.phase == "rollback_restart_pending":
         current = _read_pg_state()
-        before = record.pre_activation_pg_settings
-        if before is None:
-            raise RuntimeError("rollback has no frozen PostgreSQL settings")
-        handoff = str(uuid.uuid4())
-        orchestration = str(uuid.uuid4())
-        if record.phase != "rollback_pending":
-            record = _persist_transition(
-                home,
-                record,
-                "rollback_pending",
-                wal_config_before_digest=_settings_digest(_archive_settings(before)),
-                restart_handoff=handoff,
-                restart_orchestration=orchestration,
-                rollback_postmaster_started_at=current["postmaster_started_at"],
-                error=None,
-            )
-        # The PITR gate keys are config-owned (settable through the settings
-        # path since the 2026-08-31 rollback rework), so rollback never
-        # reverts them: undoing the activation leaves the operator's
-        # enablement exactly as configured. The captured env evidence stays
-        # in the record for audit, but only the PostgreSQL auto-conf bytes
-        # are restored here.
-        if None in {
-            record.pre_activation_auto_conf_b64,
-            record.pre_activation_auto_conf_digest,
-            record.rollback_expected_auto_conf_digest,
-        }:
-            raise RuntimeError("rollback has no exact config byte ownership evidence")
-        current_auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
-        try:
-            rollback_effect_state(
-                current=current_auto_digest,
-                before=str(record.pre_activation_auto_conf_digest),
-                owned=str(record.rollback_expected_auto_conf_digest),
-            )
-        except RuntimeError:
-            intent = record.config_apply_intent
-            if (
-                intent is None
-                or intent.get("kind") != "postgresql_auto_conf"
-                or intent.get("expected_digest") != record.rollback_expected_auto_conf_digest
-                or current.get(str(intent.get("name"))) != intent.get("desired_value")
-            ):
-                raise
-            # Exact preimage + intended field/value owns the post-ALTER crash window.
-        baseline = record.pre_activation_pg_auto_conf
-        if baseline is None:
-            raise RuntimeError("rollback lacks PostgreSQL owned-field baseline")
-        record = restore_archive_settings(home, record, baseline)
-        restored_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
-        return _persist_transition(
+        expected = record.pre_activation_pg_settings or {}
+        if current[
+            "postmaster_started_at"
+        ] == record.rollback_postmaster_started_at or _archive_settings(
+            current
+        ) != _archive_settings(expected):
+            return record
+        if _pg_auto_conf_baseline(home) != record.pre_activation_pg_auto_conf:
+            raise RuntimeError("PostgreSQL ALTER SYSTEM ownership differs after rollback")
+        return _persist_transition(home, record, "rolled_back", error=None)
+    if record.phase == "rolled_back":
+        return record
+    if record.phase in {
+        "shadow",
+        "snapshot_pending",
+        "snapshot_verified",
+        "wal_config_pending",
+    }:
+        return mark_pre_mutation_rolled_back(home, record)
+    current = _read_pg_state()
+    before = record.pre_activation_pg_settings
+    if before is None:
+        raise RuntimeError("rollback has no frozen PostgreSQL settings")
+    if record.phase != "rollback_pending":
+        record = _persist_transition(
             home,
             record,
-            "rollback_restart_pending",
-            rollback_expected_auto_conf_digest=restored_digest,
+            "rollback_pending",
+            wal_config_before_digest=_settings_digest(_archive_settings(before)),
+            rollback_postmaster_started_at=current["postmaster_started_at"],
             error=None,
         )
-    finally:
-        release_update_lock(holder)
-
-
-def _dispatch_restart_handoff(home: Path, record: ActivationRecord) -> ActivationRecord:
-    from ops.cluster_deploy import PitrRestartContinuation, spawn_restart
-
-    action = "rollback" if record.phase == "rollback_restart_pending" else "activate"
-    continuation = PitrRestartContinuation(
-        record.operation_id,
-        str(record.restart_orchestration),
-        str(record.restart_handoff),
-        action=action,
-        expected_phase=record.phase,
-        expected_digest=record.wal_config_desired_digest
-        if action == "activate"
-        else record.wal_config_before_digest,
+    # The PITR gate keys are config-owned (settable through the settings
+    # path since the 2026-08-31 rollback rework), so rollback never
+    # reverts them: undoing the activation leaves the operator's
+    # enablement exactly as configured. The captured env evidence stays
+    # in the record for audit, but only the PostgreSQL auto-conf bytes
+    # are restored here.
+    if None in {
+        record.pre_activation_auto_conf_b64,
+        record.pre_activation_auto_conf_digest,
+        record.rollback_expected_auto_conf_digest,
+    }:
+        raise RuntimeError("rollback has no exact config byte ownership evidence")
+    owned = _require_owned_rollback_config(home, record)
+    if owned != record.rollback_expected_auto_conf_digest:
+        replacement = record.journal_rollback(rollback_expected_auto_conf_digest=owned)
+        write_record_cas(home, expected=record, replacement=replacement)
+        record = replacement
+    baseline = record.pre_activation_pg_auto_conf
+    if baseline is None:
+        raise RuntimeError("rollback lacks PostgreSQL owned-field baseline")
+    record = restore_archive_settings(home, record, baseline)
+    restored_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
+    return _persist_transition(
+        home,
+        record,
+        "rollback_restart_pending",
+        rollback_expected_auto_conf_digest=restored_digest,
+        error=None,
     )
-    consumed: list[ActivationRecord] = []
-    session = _restart_session()
-
-    def bind() -> None:
-        with file_lock(lock_path(home), timeout_s=5):
-            latest = load_record(home)
-            if latest is None or (
-                latest.operation_id != record.operation_id
-                or latest.phase != record.phase
-                or latest.restart_orchestration != record.restart_orchestration
-                or latest.restart_handoff != record.restart_handoff
-            ):
-                raise RuntimeError("PITR restart handoff changed before dispatch")
-            if latest.restart_handoff_consumed_at is not None:
-                latest = rearm_restart_handoff(home, latest, session=session)
-            consumed.append(consume_restart_handoff(home, latest, session=session))
-
-    spawned = spawn_restart(
-        continuation.origin(),
-        mode="smooth",
-        continuation=continuation,
-        bind_continuation=bind,
-    )
-    if not consumed:
-        raise RuntimeError("restart orchestration did not consume PITR handoff")
-    if spawned["session"] != session:
-        raise RuntimeError("restart orchestration returned a different bound session")
-    return consumed[0]
 
 
-def _restart_session() -> str:
-    import shared.cluster
-    from ops.cluster_session import _CLUSTER_RESTART_SERVICE
+def _require_owned_rollback_config(home: Path, record: ActivationRecord) -> str:
+    from cli.commands._pitr_activation_config import complete_auto_intent
 
-    return shared.cluster.session_name(_CLUSTER_RESTART_SERVICE)
+    current_auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
+    try:
+        rollback_effect_state(
+            current=current_auto_digest,
+            before=str(record.pre_activation_auto_conf_digest),
+            owned=str(record.rollback_expected_auto_conf_digest),
+        )
+    except RuntimeError:
+        intent = record.rollback_setting_intent or record.config_apply_intent
+        if (
+            intent is None
+            or intent.get("kind", "postgresql_auto_conf") != "postgresql_auto_conf"
+            or intent.get("expected_digest") != record.rollback_expected_auto_conf_digest
+        ):
+            raise
+        complete_auto_intent(home, intent)
+    return current_auto_digest
 
 
 def cmd_pitr_activate(*, origin: str) -> int:
-    """Resume the durable activation through restart, WAL, base, and restore proof."""
-    home = ava_home()
-    ensure_private_dir(home / "physical-backup" / "activation")
-    try:
-        with file_lock(lock_path(home), timeout_s=5):
-            record = load_record(home)
-            if origin.startswith("restart-continuation:"):
-                parts = origin.split(":", 6)
-                if len(parts) != 6 or record is None:
-                    raise RuntimeError("invalid PITR restart continuation")  # noqa: TRY301
-                _, operation_id, orchestration, handoff, phase, digest = parts
-                if (
-                    record.operation_id != operation_id
-                    or record.restart_orchestration != orchestration
-                    or record.restart_handoff != handoff
-                    or record.restart_handoff_consumed_at is None
-                    or record.restart_dispatch_session != _restart_session()
-                    or record.phase != phase
-                    or record.wal_config_desired_digest != digest
-                ):
-                    raise RuntimeError("stale PITR restart continuation")  # noqa: TRY301
-            if record is None or record.phase == "rolled_back":
-                record = ActivationRecord.start(operation_id=str(uuid.uuid4()), origin=origin)
-                write_record(home, record)
-            from shared.cluster_lock import acquire_update_lock, release_update_lock
+    """Submit or join the home's finite, retained-image PITR operation."""
+    from cli.release_transition.pitr_submit import run_pitr
 
-            holder = f"pitr-activation:{record.operation_id}"
-            if not acquire_update_lock(holder, kind="update"):
-                exc = RuntimeError("cluster update/maintenance owner is already active")
-                _save_error(home, record, exc)
-                raise exc
-            try:
-                record = _advance_activation(home, record, holder)
-            except BaseException as exc:
-                _save_error(home, record, exc)
-                raise
-            finally:
-                try:
-                    release_update_lock(holder)
-                except BaseException as exc:
-                    _save_error(home, record, exc)
-                    raise
-    except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
-        print(f"PITR activation refused: {refusal_message(exc)}", file=sys.stderr)
-        return 1
-    if record.phase == "wal_restart_pending" and not _restart_ready(
-        record, _desired_archive_settings(home)
-    ):
-        try:
-            record = _dispatch_restart_handoff(home, record)
-        except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
-            print(f"PITR restart dispatch refused: {refusal_message(exc)}", file=sys.stderr)
-            return 1
-    _print_record(record)
-    return 0
+    return run_pitr("activate", origin=origin)
 
 
-def cmd_pitr_rollback(*, continuation: str | None = None) -> int:
-    """Record a safe rollback request without deleting backups or remote objects."""
-    home = ava_home()
-    ensure_private_dir(home / "physical-backup" / "activation")
-    record: ActivationRecord | None = None
-    try:
-        with file_lock(lock_path(home), timeout_s=5):
-            record = load_record(home)
-            if record is None:
-                print("PITR activation: not started (rollback is a no-op)")
-                return 0
-            if record.phase == "rolled_back":
-                return _print_record(record)
-            if continuation is not None:
-                parts = continuation.split(":", 6)
-                expected_digest = record.wal_config_before_digest or "none"
-                if (
-                    len(parts) != 6
-                    or parts[0] != "restart-continuation"
-                    or parts[1] != record.operation_id
-                    or parts[2] != record.restart_orchestration
-                    or parts[3] != record.restart_handoff
-                    or record.restart_handoff_consumed_at is None
-                    or record.restart_dispatch_session != _restart_session()
-                    or parts[4] != record.phase
-                    or parts[5] != expected_digest
-                ):
-                    raise RuntimeError("stale PITR rollback continuation")  # noqa: TRY301
-            try:
-                record = _rollback_record(home, record)
-            except BaseException as exc:
-                _save_error(home, record, exc)
-                raise
-    except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
-        print(f"PITR rollback refused: {refusal_message(exc)}", file=sys.stderr)
-        return 1
-    if record.phase == "rollback_restart_pending":
-        try:
-            record = _dispatch_restart_handoff(home, record)
-        except (LockTimeoutError, RuntimeError, OSError, ValueError) as exc:
-            print(f"PITR rollback restart refused: {refusal_message(exc)}", file=sys.stderr)
-            return 1
-    _print_record(record)
-    print("PITR rollback preserves all logical and remote backup data")
-    hint = rollback_gate_hint(home)
-    if hint is not None:
-        print(hint)
-    return 0
+def cmd_pitr_rollback() -> int:
+    """Serialize explicit rollback under the same home operation authority."""
+    from cli.release_transition.pitr_submit import run_pitr
+
+    return run_pitr("rollback", origin="operator")

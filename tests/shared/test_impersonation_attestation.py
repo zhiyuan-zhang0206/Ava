@@ -1,7 +1,9 @@
 """Caller attestation on the controller surface: tiers, pid reuse, generation crossing."""
 
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 from uuid import uuid4
 
 import psutil
@@ -12,15 +14,205 @@ from shared.agents.impersonation import _impersonation_store as store
 from shared.caller_identity import CallerIdentity
 from shared.db import create_agent
 from shared.machine import machine_name
+from shared.native_process import ownership
 from shared.runtime_incarnation import RuntimeIncarnation
-from tests.impersonation_support import attested_caller, recorded_tree, unrelated_caller
+from tests.impersonation_support import (
+    attested_caller,
+    native_identity,
+    recorded_tree,
+    unrelated_caller,
+)
+
+
+def _running_process(pid: int) -> SimpleNamespace:
+    return SimpleNamespace(pid=pid, create_time=lambda: 101.0, status=lambda: psutil.STATUS_RUNNING)
+
+
+def test_linux_tick_identity_survives_wall_clock_shift(monkeypatch: pytest.MonkeyPatch) -> None:
+    boot = "33f1e236-5b3d-48d8-a002-e117e3b95fc4"
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(store, "sys", SimpleNamespace(platform="linux"), raising=False)
+    monkeypatch.setattr(store, "native_boot_id", lambda: boot, raising=False)
+    monkeypatch.setattr(ownership, "pid_starttime_ticks", Mock(return_value=500))
+    monkeypatch.setattr(
+        store.psutil,
+        "Process",
+        _running_process,
+    )
+    anchor = {"pid": 42, "name": "codex", "created_at": 100.0, "starttime": 500, "boot_id": boot}
+    caller = {**anchor, "created_at": 101.0}
+    assert store.classify_anchor(anchor) == "alive"
+    store.verify_caller(_lease(anchor), caller)
+
+
+def test_linux_missing_ticks_are_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(store, "sys", SimpleNamespace(platform="linux"), raising=False)
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(
+        store.psutil,
+        "Process",
+        _running_process,
+    )
+    assert store.classify_anchor({"pid": 42, "created_at": 100.0}) == "unknown"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("pid", True),
+        ("pid", -1),
+        ("created_at", float("nan")),
+        ("created_at", 10**1000),
+        ("created_at", 0),
+        ("starttime", None),
+        ("starttime", False),
+        ("starttime", -1),
+        ("starttime", "500"),
+        ("boot_id", None),
+        ("boot_id", "garbage"),
+    ],
+)
+def test_invalid_linux_anchor_cannot_attest_or_prove_death(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    monkeypatch.setattr(store, "sys", SimpleNamespace(platform="linux"))
+    anchor = {
+        "pid": 42,
+        "name": "codex",
+        "created_at": 100.0,
+        "starttime": 500,
+        "boot_id": str(uuid4()),
+        field: value,
+    }
+    assert store.classify_anchor(anchor) == "unknown"
+    assert not store._same_process(anchor, dict(anchor))
+    with pytest.raises(store.ImpersonationError, match="anchor-unavailable"):
+        store.verify_caller(_lease(anchor), dict(anchor))
+
+
+def test_native_metadata_producer_survives_linux_wall_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boot = str(uuid4())
+    shift = 0.0
+
+    class Process:
+        def __init__(self, pid: int = 42) -> None:
+            self.pid = pid
+
+        def create_time(self) -> float:
+            return 100.0 + self.pid + shift
+
+        def name(self) -> str:
+            return "codex" if self.pid == 41 else "python"
+
+        def exe(self) -> str:
+            return "/opt/" + self.name()
+
+        def ppid(self) -> int:
+            return 41 if self.pid == 42 else 1
+
+        def parent(self) -> "Process | None":
+            return Process(41) if self.pid == 42 else None
+
+        def status(self) -> str:
+            return psutil.STATUS_RUNNING
+
+    monkeypatch.setattr(store, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(store, "native_boot_id", lambda: boot)
+    monkeypatch.setattr(ownership, "native_boot_id", lambda: boot)
+
+    def ticks(pid: int) -> int:
+        return 500 + pid
+
+    monkeypatch.setattr(ownership, "pid_starttime_ticks", ticks)
+    monkeypatch.setattr(ownership.psutil, "Process", Process)
+    recorded = ownership.process_metadata()
+    original = deepcopy(recorded)
+    shift = 1.0
+    caller = ownership.process_metadata()
+    for node in [recorded, *recorded["ancestors"]]:
+        assert node["starttime"] == 500 + node["pid"]
+        assert node["boot_id"] == boot
+    store.verify_caller(_lease(recorded), caller)
+    assert store.provider_anchor_states(recorded) == ["alive"]
+    assert recorded == original
+    monkeypatch.setattr(ownership, "pid_starttime_ticks", Mock(return_value=None))
+    monkeypatch.setattr(ownership.psutil, "pid_exists", Mock(return_value=True))
+    assert store.provider_anchor_states(recorded) == ["unknown"]
+    monkeypatch.setattr(ownership, "pid_starttime_ticks", Mock(return_value=0))
+    assert store.provider_anchor_states(recorded) == ["unknown"]
+
+
+def test_reboot_never_reattests_old_pid_and_ticks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(store, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
+    boot, current_boot = str(uuid4()), str(uuid4())
+    anchor = {"pid": 42, "name": "codex", "created_at": 100.0, "starttime": 500, "boot_id": boot}
+    monkeypatch.setattr(store, "native_boot_id", lambda: current_boot)
+    assert not store._same_process(anchor, dict(anchor))
+    assert not store._same_process(anchor, {**anchor, "boot_id": current_boot})
+    assert store.classify_anchor(anchor) == "dead"
+
+
+@pytest.mark.parametrize("boot", [None, "", "unreadable"])
+def test_unavailable_current_boot_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    boot: str | None,
+) -> None:
+    anchor = recorded_tree()["ancestors"][-1]
+    monkeypatch.setattr(store, "sys", SimpleNamespace(platform="linux"))
+    anchor["starttime"] = 500
+    monkeypatch.setattr(store, "native_boot_id", lambda: boot)
+    assert store.classify_anchor(anchor) == "unknown"
+    assert not store._same_process(anchor, dict(anchor))
+
+
+@pytest.mark.parametrize("missing", ["boot_id", "starttime"])
+def test_windows_head_requires_explicit_native_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    missing: str,
+) -> None:
+    monkeypatch.setattr(store, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(store, "native_boot_id", lambda: None)
+    head = {"pid": 42, "name": "codex", "created_at": 100.0, "starttime": None, "boot_id": None}
+    store.verify_caller(_lease(head), dict(head))
+    del head[missing]
+    with pytest.raises(store.ImpersonationError, match="anchor-unavailable"):
+        store.verify_caller(_lease(head), dict(head))
+
+
+@pytest.mark.parametrize(
+    "error,state", [(psutil.AccessDenied(4240), "denied"), (OSError("unreadable"), "unknown")]
+)
+def test_anchor_read_errors_are_not_death(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    state: str,
+) -> None:
+    monkeypatch.setattr(store.psutil, "Process", Mock(side_effect=error))
+    tree = recorded_tree()
+    assert store.provider_anchor_states(tree) == [state]
+    with pytest.raises(store.ImpersonationError, match="anchor-unavailable"):
+        store.verify_caller(_lease(tree), unrelated_caller())
+
+
+def test_attested_native_identity_still_requires_same_machine() -> None:
+    lease = _lease(recorded_tree())
+    lease["machine"] += "-other"
+    with pytest.raises(store.ImpersonationError, match="own machine"):
+        store.authenticate(lease, attested_caller(lease))
 
 
 def _stub_birth(monkeypatch: pytest.MonkeyPatch, birth: float) -> None:
-    def stable(_process: object) -> float:
-        return birth
-
-    monkeypatch.setattr(store, "stable_create_time", stable)
+    monkeypatch.setattr(ownership, "stable_create_time", Mock(return_value=birth))
+    monkeypatch.setattr(
+        ownership, "pid_starttime_ticks", Mock(return_value=native_identity(birth)["starttime"])
+    )
 
 
 def _lease(tree: dict[str, Any]) -> dict[str, Any]:
@@ -35,18 +227,12 @@ def _stub_liveness(
     def process(pid: int) -> SimpleNamespace:
         if missing:
             raise psutil.NoSuchProcess(pid)
-        return SimpleNamespace(status=lambda: status or psutil.STATUS_RUNNING)
+        return SimpleNamespace(pid=pid, status=lambda: status or psutil.STATUS_RUNNING)
 
     monkeypatch.setattr(
-        store,
-        "psutil",
-        SimpleNamespace(
-            Process=process,
-            NoSuchProcess=psutil.NoSuchProcess,
-            AccessDenied=psutil.AccessDenied,
-            STATUS_ZOMBIE=psutil.STATUS_ZOMBIE,
-            STATUS_DEAD=psutil.STATUS_DEAD,
-        ),
+        store.psutil,
+        "Process",
+        process,
     )
     _stub_birth(monkeypatch, 998.0)
 
@@ -86,7 +272,7 @@ def test_no_anchor_records_fail_closed() -> None:
         "pid": 4242,
         "name": "python3.12",
         "executable": "/usr/bin/python3.12",
-        "created_at": 1000.0,
+        **native_identity(1000.0),
         "parent_pid": 1,
         "ancestors": [],
     }
@@ -100,21 +286,21 @@ def _native_claude_tree() -> dict[str, Any]:
         "pid": 4242,
         "name": "python3.12",
         "executable": "/usr/bin/python3.12",
-        "created_at": 1000.0,
+        **native_identity(1000.0),
         "parent_pid": 4241,
         "ancestors": [
             {
                 "pid": 4241,
                 "name": "zsh",
                 "executable": "/bin/zsh",
-                "created_at": 999.0,
+                **native_identity(999.0),
                 "parent_pid": 4240,
             },
             {
                 "pid": 4240,
                 "name": "2.1.274",
                 "executable": "/Users/dev/.local/share/claude/versions/2.1.274",
-                "created_at": 998.0,
+                **native_identity(998.0),
                 "parent_pid": 1,
             },
         ],
@@ -133,7 +319,7 @@ def _anchor_recognized(node: dict[str, Any]) -> bool:
         "pid": 4242,
         "name": "python3.12",
         "executable": "/usr/bin/python3.12",
-        "created_at": 1000.0,
+        **native_identity(1000.0),
         "parent_pid": int(node["pid"]),
         "ancestors": [node],
     }
@@ -167,13 +353,13 @@ def test_provider_anchor_recognition(name: str, executable: str, recognized: boo
         "pid": 4240,
         "name": name,
         "executable": executable,
-        "created_at": 998.0,
+        **native_identity(998.0),
         "parent_pid": 1,
     }
     assert _anchor_recognized(node) is recognized
 
 
-def test_same_pid_with_a_drifted_start_time_does_not_attest(
+def test_same_pid_with_a_different_native_birth_does_not_attest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_liveness(monkeypatch)
@@ -181,7 +367,7 @@ def test_same_pid_with_a_drifted_start_time_does_not_attest(
     caller = attested_caller(lease)
     for node in caller["ancestors"]:
         if node["pid"] == 4240:
-            node["created_at"] = 998.0 + 60.0
+            node.update(native_identity(998.0 + 60.0))
     with pytest.raises(store.ImpersonationError, match="chain-mismatch"):
         store.verify_caller(lease, caller)
 
@@ -223,14 +409,14 @@ def test_generation_crossing_is_refused(db_conn: Any, monkeypatch: pytest.Monkey
             "pid": 4341,
             "name": "zsh",
             "executable": "/bin/zsh",
-            "created_at": 1999.0,
+            **native_identity(1999.0),
             "parent_pid": 4340,
         },
         {
             "pid": 4340,
             "name": "codex",
             "executable": "/opt/codex",
-            "created_at": 1998.0,
+            **native_identity(1998.0),
             "parent_pid": 1,
         },
     ]

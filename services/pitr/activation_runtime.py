@@ -150,33 +150,6 @@ def _desired_archive_settings(home: Path) -> dict[str, str]:
     }
 
 
-def _enable_pitr_services(expected_digest: str) -> bytes:
-    from shared.config.candidate import validate_env_patch_for_write
-    from shared.runtime_config import write_fields
-
-    updates: dict[str, object] = {
-        "pitr_enabled": True,
-        "pitr_base_backup_enabled": True,
-        "pitr_restore_proof_enabled": True,
-        "pitr_retention_planner_enabled": False,
-    }
-    candidate = validate_env_patch_for_write(updates, set())
-    if candidate.errors:
-        raise RuntimeError("PITR activation refused: " + "; ".join(candidate.errors))
-    if candidate.expected_digest != expected_digest:
-        raise RuntimeError("PITR activation refused: .env changed before candidate validation")
-    captured = write_fields(
-        updates,
-        set(),
-        capture_bytes=True,
-        expected_digest=candidate.expected_digest,
-        audit_site="pitr_activation",
-    )
-    if captured is None:
-        raise RuntimeError("PITR environment write did not return owned bytes")
-    return captured
-
-
 _PITR_ENV_FIELDS = {
     "pitr_enabled": "AVA_PITR_ENABLED",
     "pitr_base_backup_enabled": "AVA_PITR_BASE_BACKUP_ENABLED",

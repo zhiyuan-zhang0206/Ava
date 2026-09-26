@@ -26,7 +26,7 @@ Gateway's 43 route modules, split by business domain under `gateway/routers/<dom
 - **event_resolutions** (`/api/event-resolutions`) — authenticated immutable-Loki warning/error class dismissal history: create, status-filtered review list, and manual reopen; writes `event_dismissals` and emits transition markers, while the events-maintenance daemon publishes the resulting gauges
 
 ### Cluster & configuration
-- **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, rollout/update/stop control (admin contracts: [[gateway/routers/ops-surfaces.ava.okf.md]])
+- **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, and maintenance control; release submission belongs to [[cli/release_transition/release_transition.ava.okf.md]] (admin contracts: [[gateway/routers/ops-surfaces.ava.okf.md]])
 - **bootstrap** (`/api/bootstrap`) — agent-runner registration handshake (returns cluster config)
 - **config** (`/api/config`) — runtime configuration read/write (PUT is merge-patch reducer, not full-replace); validates the full affected Settings candidate before persisting (400 invalid / 409 concurrent-write retry)
 - **settings** (`/api/settings`) — frontend user preference KV store (`user_settings` table)

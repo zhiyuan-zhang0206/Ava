@@ -3,122 +3,19 @@
 Orchestration tests record the local pause/resume seam while updating the
 actual host posture. Without that posture effect, a fake recovery would leave
 later gateway requests behind a stale 503 gate. Production service and OS job
-boundaries remain guarded by the root fixtures and the local gate stubs.
+boundaries remain guarded by the root fixtures.
 """
 
 from __future__ import annotations
 
 import pathlib
-import subprocess
 from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 
 import pytest
 
-from shared import disabled_services as ds
+from shared import service_selection as ds
 from shared.config import settings
-
-
-@pytest.fixture
-def stub_deploy_lease_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pair tests' fake successful acquire with the exact lease it implies."""
-    from datetime import UTC, datetime
-
-    from cli.commands import update as _up
-    from shared.cluster_lock import DeployLease
-
-    monkeypatch.setattr(
-        _up,
-        "read_update_lease",
-        lambda: DeployLease(
-            holder=_up.self_holder(),
-            held_for_s=0,
-            expires_in_s=60,
-            kind="rollout",
-            acquired_at=datetime(2026, 8, 25, tzinfo=UTC),
-        ),
-    )
-
-
-@pytest.fixture(autouse=True)
-def _gate_probe_offline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the gate observation off this box's real entry port and real launchd.
-
-    `ava status` and the health probe now observe the gate (`probe_gate`), which
-    dials `127.0.0.1:<entry port>` and shells out to `launchctl`. On a dev box that
-    entry port belongs to the operator's LIVE prod gate and that label is their real
-    launchd job, so both seams are stubbed for the whole directory rather than left
-    to each test to remember — the same reason `AVA_OS_JOBS_ENABLED=false` exists.
-
-    The default answers are "nothing on the port, no such job", which is what a
-    hermetic host looks like. Tests that assert a particular gate state (including
-    `_ensure_launchd`'s own) install their own `_launchctl` on top."""
-    import cli.commands._converge_gate as cg
-    import cli.commands._gate_systemd as gs
-
-    monkeypatch.setattr(
-        gs,
-        "_systemctl",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            [], 1, "LoadState=not-found\nActiveState=inactive\n", ""
-        ),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(gs, "unit_path", lambda home: home / "test-systemd" / gs.unit_name(home))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(cg, "_entry_answers", lambda _port: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        cg,
-        "_launchctl",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 1, "", "no such process"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-
-@pytest.fixture(autouse=True)
-def local_unpauses(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
-    """Record orchestration resume while restoring its actual HTTP posture.
-
-    A stub that records without clearing posture leaks 503 responses into
-    unrelated TestClient requests later in the pytest process.
-    """
-    calls: list[bool] = []
-
-    def _unpause() -> None:
-        # The real unpause writes the R1 host_deploy_state posture row
-        # (ops/cluster_pause.py); the stub stands in for that function, so its
-        # observable effects must match — a test that asserts the pause
-        # lifecycle through the orchestration relies on it, and a leftover
-        # `paused` row would 503 every gateway test in this session
-        # (host_deploy_state IS in the per-test TRUNCATE list — tests/conftest.py;
-        # the R1 singleton deployment_state is not, and self-cleans via
-        # acquire/release pairs + test_cluster_lock's _free_lock).
-        from shared.host_deploy_state import set_posture
-
-        set_posture("idle")
-        calls.append(True)
-
-    monkeypatch.setattr("ops.cluster.unpause_local_cluster", _unpause)
-    return calls
-
-
-@pytest.fixture(autouse=True)
-def _prepare_checks_are_explicit_in_orchestration_tests(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep legacy phase tests focused on their named commit-stage boundary.
-
-    Prepare has its own gate suite. Tests that exercise Phase A, the local leg,
-    readiness, or Phase B use synthetic commit IDs and therefore supply a local
-    prepared recovery tuple rather than constructing a real detached worktree.
-    A test of prepare itself overrides these seams explicitly.
-    """
-    from cli.commands import update as _up
-
-    monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 85.0)
-    monkeypatch.setattr(
-        _up,
-        "_snapshot_known_good",
-        lambda *, pull, target_sha: ("prepared-sha", set(), None) if pull else None,  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
-    )
-    monkeypatch.setattr(_up, "_finalize_commit_telemetry", lambda _telemetry: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_up, "_spawn_async_offsite_upload", lambda _repo, _dump: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture
@@ -198,7 +95,7 @@ def _isolate_disabled_services_marker(
     shard-5 flake, task #2177). Same redirection `tests/shared/test_disabled_services.py`
     uses: the marker is per-unit durable state, so each test gets a fresh one.
     """
-    monkeypatch.setattr(ds, "disabled_services_file", lambda: tmp_path / "disabled_services")
+    monkeypatch.setattr(ds, "selection_path", lambda: tmp_path / "service-selection.json")
 
 
 @pytest.fixture(autouse=True)
@@ -218,5 +115,5 @@ def local_pauses(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
     directly; a phase-ordering test must not dial this host's real agent-host.
     """
     calls: list[bool] = []
-    monkeypatch.setattr("ops.cluster.pause_local_cluster", lambda: calls.append(True))
+    monkeypatch.setattr("ops.cluster_pause.pause_local_cluster", lambda: calls.append(True))
     return calls

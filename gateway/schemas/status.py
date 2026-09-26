@@ -9,7 +9,6 @@ gateway-only status surface.
 """
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -19,7 +18,6 @@ from pydantic import (
 # Re-exported so `gateway.schemas` keeps serving MachineStatus under its OpenAPI
 # name; the definition lives in shared so `cli` can decode the roster too.
 from shared.api_contracts.status import MachineStatus
-from shared.last_update import LastUpdate
 
 
 class ServiceItem(BaseModel):
@@ -66,17 +64,11 @@ class ClusterPanel(BaseModel):
     # disables the Update / Restart actions on (current_paused only flips once the
     # orchestration reaches the gateway's own stop, leaving an early window
     # where a second trigger could fire).
-    current_orchestration: Literal["rollout", "restart", "update"] | None = None
     machines: list[MachineStatus]
     # The cluster's pinned commit (`cluster_target_sha`), or None if no rollout
     # has pinned one yet. Lets the panel show "cluster pinned to <sha>" alongside
     # each machine's on_pin verdict.
     cluster_target_sha: str | None = None
-    # The cluster's last update outcome, or None when none has been recorded. The
-    # panel's failure banner is switched on `last_update.failed` — a stated fact —
-    # rather than on a pin/head colour, which is a symptom several unrelated states
-    # share (#1012).
-    last_update: LastUpdate | None = None
     # The cluster's rollback anchor (`cluster_pin.last_known_good_sha`), so a pin
     # that moved backwards reads as "rolled back to this" rather than as drift.
     cluster_last_known_good_sha: str | None = None

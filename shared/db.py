@@ -264,8 +264,6 @@ def insert_inbound_message(
         raise ValueError("lifecycle_result is reserved for verified command settlement")
     if payload is not None and "launch_attempts" in payload:
         raise ValueError("launch_attempts is reserved for controller authorization")
-    if payload is not None and "target_process_identity" in payload:
-        raise ValueError("target_process_identity is reserved for admitted lifecycle application")
     if payload is not None and "resurrection_retry" in payload:
         raise ValueError("resurrection_retry is reserved for the pending resurrection owner")
     if payload is not None and (

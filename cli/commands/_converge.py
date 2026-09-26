@@ -2,14 +2,12 @@
 
 Bring a machine to the host-level state the current code expects: the `ava`
 symlink on PATH, ~/.local/bin on PATH, the $AVA_HOME dir skeleton, fresh plugin
-config images. Run by `cmd_start` (so `ava cluster update` inherits it via its
-trailing start), and standalone via `ava converge`.
+config images. Run by development `cmd_start`, and standalone via `ava converge`.
+Verified release startup consumes prepared assets without mutating its image.
 """
 
-# Host setup that used to live only in install.sh never reached already-deployed
-# hosts on upgrade. Folding it into the lifecycle makes one `ava cluster update` converge
-# the fleet. Each step is idempotent + fail-fast; `roles` / `requires_unit_config`
-# are declarative filters mirroring ServiceSpec's role-scoping.
+# Host preparation is idempotent and fail-fast. Role and selected-service
+# filters share the start lifecycle's desired roster.
 from __future__ import annotations
 
 import sys
@@ -19,20 +17,15 @@ from cli.commands._converge_brew_pin import ensure_brew_pin
 from cli.commands._converge_external_agent_skills import converge_external_agent_skill
 from cli.commands._converge_firewall import ensure_firewall_allowlist
 from cli.commands._converge_frontend_env import ensure_no_frontend_env_overrides
-from cli.commands._converge_gate import ensure_gate
-from cli.commands._converge_legacy_permission_watcher import remove_legacy_permission_watcher
 from cli.commands._converge_os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
-    ensure_hold_watchdog,
     ensure_logs_maintenance,
     ensure_packages_refresh_job,
     ensure_pr_flow_job,
-    ensure_watchdog_probe,
 )
 from cli.commands._converge_pitr import converge_pitr_foundation
 from cli.commands._converge_redis_bridge import ensure_redis_bridge
-from cli.commands._converge_source_tree import ensure_source_tree_integrity
 
 # The step contract lives in _converge_spec so step implementations can span
 # modules without an import cycle; re-exported here because every caller and
@@ -45,22 +38,16 @@ from cli.commands._converge_steps import (
     _PATH_END as _PATH_END,
 )
 from cli.commands._converge_steps import (
-    _backfill_health_port_keys_step,
     _ensure_ava_home_dirs,
     _ensure_ava_symlink,
     _ensure_local_bin_on_path,
     _ensure_pg_binaries_step,
-    _ensure_prod_editable_dir_protection,
-    _ensure_prod_editable_exec_gate,
-    _ensure_prod_editable_pth,
-    _ensure_redis_url_identity_step,
     ensure_local_git_hooks,
 )
 from cli.commands._converge_steps import (
     _shell_rc_path as _shell_rc_path,
 )
 from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
-from cli.commands._lgtm import ensure_lgtm_stack_step
 from cli.commands._lgtm_native import ensure_lgtm_native_step
 from cli.commands._otel_collector import ensure_otel_collector_step
 from cli.commands._ownership_preflight import (
@@ -78,8 +65,8 @@ from shared.host.converge.accessibility import (
 )
 from shared.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
 from shared.host.converge.screen_capture import clear_status, write_status
+from shared.lgtm_local import BACKENDS
 from shared.machine import MachineRoles
-from shared.platform_backend import get_backend
 from shared.platform_probes import browser_incapability
 
 __all__ = [
@@ -150,37 +137,19 @@ def _ensure_browser(ctx: ConvergeCtx) -> None:
 
 
 def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    """Build, sign, and launchd-load the macOS permissions helper.
-
-    Idempotent bring-up (stable cert, compile + sign, load the LaunchAgent);
-    an incapable host warns and skips, and so does a process that cannot reach
-    the signing key, while a failure that is neither propagates (fail-fast).
-    Desktop permissions stay a one-time manual operator step.
-    """
-    if not settings.services.permissions_helper_enabled:
+    """Require the stable signed ancestor before starting a macOS root."""
+    if sys.platform != "darwin":
         return
+    if not settings.services.permissions_helper_enabled:
+        raise RuntimeError("macOS root supervision requires the permissions helper")
     from shared.platform_probes import permissions_helper_incapability
 
     reason = permissions_helper_incapability()
     if reason is not None:
-        print(f"  ! permissions-helper: {reason}", file=sys.stderr)
-        print("    (ava-permissions-helper will not start on this host)", file=sys.stderr)
-        return
-    # Capability is a property of the host; reaching the signing key is a
-    # property of THIS process, so the probe above cannot answer it and the
-    # attempt is what reports it. Both are environment limits and skip; anything
-    # else is a real defect and propagates.
+        raise RuntimeError(f"macOS root supervision cannot start: {reason}")
     from services.permissions_helper import converge
-    from services.permissions_helper.lifecycle import PermissionsHelperSigningUnavailableError
 
-    try:
-        converge()
-    except PermissionsHelperSigningUnavailableError as exc:
-        print(f"  ! permissions-helper: {exc}", file=sys.stderr)
-        print(
-            "    (keeping the existing build; converge continues so the cluster starts)",
-            file=sys.stderr,
-        )
+    converge()
 
 
 def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
@@ -248,56 +217,6 @@ def _ensure_github_pr(ctx: ConvergeCtx) -> None:
             "branch and open/merge PRs: install the GitHub CLI (`gh`), run `gh auth login`, "
             "and grant the account write access to the memory repo, then retry."
         )
-
-
-# Services that were renamed; the old `ava-<old>` session lingers after an
-# upgrade because `_do_stop` only knows the current name. Reaped by converge so the
-# rename never strands the old daemon.
-# - `runner` -> `ops` (2026-06-05 direct-dial).
-# - `watchdog` -> `gateway-watchdog` + `agent-runner-watchdog` (2026-06-20
-#   per-capability split). The two replacements are in `build_services()` so they
-#   land in `current` and are NOT reaped; only the retired single name is.
-# - `pty-supervisor` -> nothing (2026-08-13 per-session pty hosts): agent
-#   shells run in their own detached host processes now (shared/sessions/pty);
-#   the supervisor daemon is gone. Reaping the old service session kills the
-#   shells of that final pre-host era — the one transition where they were
-#   still its children.
-_RENAMED_AWAY_SERVICES: frozenset[str] = frozenset({"runner", "watchdog", "pty-supervisor"})
-
-
-def _reap_legacy_sessions() -> None:
-    """Migration cleanup: kill daemon sessions left under an OLDER naming scheme so a
-    scheme change never strands a daemon (its pidfile would then block the new-named
-    one from starting). New code only ever creates `ava-<service>` on this home's
-    own session backend.
-
-    Reaped here: `ava-<renamed-away-service>` — the service was renamed (e.g.
-    `runner` -> `ops`), so the old session is no longer in `build_services()` and
-    nothing else stops it. Enumerated and killed through the session backend
-    (native supervisor on POSIX, winproc on Windows).
-
-    Runs in converge (every `ava start`), so a stranded daemon is reaped on the next
-    start, then `_launch_sessions` brings up the current-named one (the reaped
-    process's pidfile is now free).
-    """
-    # Windows has no legacy naming schemes to reap (winproc named sessions
-    # identically from the start).
-    if not get_backend().is_posix():
-        return
-    # Method-local import: the self-update's in-process stop must load the
-    # session backend post-checkout (tests/cli/test_update_import_timing.py).
-    from cli.commands._repo import build_services, session_name
-    from shared.session_backend import get_backend as _sess_backend
-
-    current = {session_name(spec.session) for spec in build_services()}
-    renamed_away = {session_name(svc) for svc in _RENAMED_AWAY_SERVICES} - current
-    for name in _sess_backend().list_sessions():
-        if name in renamed_away:
-            _sess_backend().kill_session(name, graceful=False)
-
-
-def _reap_legacy_sessions_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    _reap_legacy_sessions()
 
 
 def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
@@ -382,17 +301,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # Warning-only ownership preflight must run before every write-capable step:
     # root-owned paths otherwise fail before converge can print the exact repair.
     ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
-    # Reset the prod checkout before any other step reads the tree: a tampered
-    # tree would make every later step misbehave, and resetting first means the
-    # rest of converge runs against the installed commit.
-    ConvergeStep("source tree reset + clean", ensure_source_tree_integrity, host_global=True),
-    ConvergeStep("prod editable .pth target", _ensure_prod_editable_pth, host_global=True),
-    ConvergeStep(
-        "prod editable site-packages protection",
-        _ensure_prod_editable_dir_protection,
-        host_global=True,
-    ),
-    ConvergeStep("prod editable exec gate", _ensure_prod_editable_exec_gate, host_global=True),
     ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
@@ -422,11 +330,10 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         _ensure_health_preflight,
         requires_unit_config=True,
     ),
-    # Fetch the vendored relocatable Postgres + inject pgvector ahead of the
-    # data-plane bring-up, so a clean gateway host needs no
-    # `brew install postgresql@17` (nor a pgvector package). Gateway-only.
+    # Validate the selected installed runtime, or provision the pinned vendor
+    # distribution when no installation exists. Gateway-only.
     ConvergeStep(
-        "vendored Postgres + pgvector binaries",
+        "PostgreSQL 17 + pgvector runtime",
         _ensure_pg_binaries_step,
         roles=frozenset({"gateway"}),
     ),
@@ -440,13 +347,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "one DB URL + pgbouncer binary (when enabled)",
         _ensure_pgbouncer_step,
-        roles=frozenset({"gateway"}),
-    ),
-    # Legacy clusters carry a username-less AVA_REDIS_URL; backfill the identity
-    # so the redis-acl healthcheck has an ACL user to re-affirm. Gateway-only.
-    ConvergeStep(
-        "redis URL identity backfill",
-        _ensure_redis_url_identity_step,
         roles=frozenset({"gateway"}),
     ),
     # Redis itself stays loopback-only. The host-global launchd relay is the
@@ -466,15 +366,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         "no frontend build-time env overrides",
         ensure_no_frontend_env_overrides,
         roles=frozenset({"gateway"}),
-    ),
-    # A block-style unit whose .env predates a health daemon's slot gets the
-    # missing keys derived from its own block, so no daemon falls back to the
-    # shared legacy segment on a co-located namespace. File-only, idempotent;
-    # legacy units (no consistent block) are untouched.
-    ConvergeStep(
-        "backfill missing daemon health-port keys",
-        _backfill_health_port_keys_step,
-        requires_unit_config=True,
+        services=frozenset({"frontend"}),
     ),
     # Warning-only: untracked `.sql` files in migrations/ are never applied
     # (Task #998) — say so on the console instead of letting the log warning be
@@ -501,23 +393,23 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
-    ConvergeStep("otel collector sidecar", ensure_otel_collector_step, requires_unit_config=True),
-    ConvergeStep("lgtm native backends", ensure_lgtm_native_step),
-    # The native LGTM observability backend — a host singleton, so the step is
-    # gated on the $AVA_HOME/lgtm-host marker file
-    # inside, not on roles: only the one home the operator marked brings it up;
-    # every other cluster on the box (dev worktrees included) no-ops.
-    ConvergeStep("lgtm observability stack", ensure_lgtm_stack_step),
+    ConvergeStep(
+        "otel collector sidecar",
+        ensure_otel_collector_step,
+        requires_unit_config=True,
+        services=frozenset({"otel-collector"}),
+    ),
+    ConvergeStep("lgtm native backends", ensure_lgtm_native_step, services=frozenset(BACKENDS)),
     ConvergeStep(
         "browser capability + plugin",
         _ensure_browser,
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
+        services=frozenset({"browser", "browser-mcp"}),
     ),
     ConvergeStep(
         "permissions helper build + sign + load",
         _ensure_permissions_helper,
-        roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
     ),
     ConvergeStep(
@@ -537,15 +429,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # fallback; both capabilities (a gateway serves HTTP, a runner serves its
     # ops port), and silent on every host that cannot have the defect.
     ConvergeStep("macOS firewall allow list", ensure_firewall_allowlist),
-    # The macOS permission-prompt watcher was removed 2026-08-26 (user ruling:
-    # drop all TCC interception); boot out its KeepAlive LaunchAgent so a
-    # rollout of the removal cannot leave the job crash-looping against the
-    # deleted watcher.py. No-op once the job and plist are gone.
-    ConvergeStep(
-        "legacy macOS permission-watcher removal",
-        remove_legacy_permission_watcher,
-        host_global=True,
-    ),
     # Warning-only assertion of the operator-approved Homebrew pins. Both roles
     # may share the same macOS host; drift is detected, never repaired here.
     ConvergeStep("Homebrew formula pins", ensure_brew_pin),
@@ -553,7 +436,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # INSTALL_PYTHON or a missing stage silently disables local checks).
     # Drift is detected, never repaired here.
     ConvergeStep("local Git hook pointers", ensure_local_git_hooks),
-    ConvergeStep("reap legacy-named sessions", _reap_legacy_sessions_step),
     ConvergeStep(
         "screen capture availability",
         _ensure_screen_capture,
@@ -592,33 +474,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         roles=frozenset({"gateway"}),
         requires_unit_config=True,
     ),
-    # The always-up fleet UI entry: owns the frontend port, proxies the app,
-    # survives updates by construction (not a service session). Gateway-only.
-    ConvergeStep(
-        "fleet UI gate (always-up entry)",
-        ensure_gate,
-        roles=frozenset({"gateway"}),
-        requires_unit_config=True,
-    ),
-    # The watchdog keeps the services alive; this keeps the WATCHDOG alive.
-    # Runs on any serving role — an agent-runner-only box needs it just as much
-    # (that is where the gap was observed), and the step itself fans out over
-    # whichever capabilities the unit carries.
-    ConvergeStep(
-        "watchdog probe job",
-        ensure_watchdog_probe,
-        requires_unit_config=True,
-    ),
-    # The probe keeps the watchdog alive; this one bounds an ORPHANED
-    # maintenance hold (task #3887) — the 2026-09-17 S3 blackout shape: a
-    # stopped unit nobody owns, with the OS scheduler the only live layer.
-    # One job per home (the hold is host-level) and retired under the root
-    # supervisor, mirroring the probe's session/root split.
-    ConvergeStep(
-        "hold watchdog job",
-        ensure_hold_watchdog,
-        requires_unit_config=True,
-    ),
     # Boot-time autostart of the whole cluster. host_global so only the prod
     # install registers it (a dev worktree cluster must not auto-start on reboot);
     # runs on any serving role since an agent-runner-only box must self-restart too.
@@ -637,6 +492,7 @@ def converge_host(
     *,
     ava_home: Path | None = None,
     steps: tuple[ConvergeStep, ...] = CONVERGE_STEPS,
+    services: frozenset[str] | None = None,
 ) -> None:
     """Run the applicable converge steps in order; idempotent, fail-fast.
 
@@ -649,7 +505,8 @@ def converge_host(
     resolved_home = (
         ava_home if ava_home is not None else Path(settings.general.ava_home).expanduser()
     )
-    ctx = ConvergeCtx(repo=repo, ava_home=resolved_home, roles=roles)
+    selected = _desired_service_names(roles) if services is None else services
+    ctx = ConvergeCtx(repo=repo, ava_home=resolved_home, roles=roles, services=selected)
 
     # Host-global steps belong to the host's prod install (the default home
     # `~/.ava`), not to a dev cluster spun up from a worktree — a dev cluster must
@@ -666,22 +523,9 @@ def converge_host(
 
     print("\n→ converge host")
     for step in steps:
-        if step.host_global and not is_prod_install:
-            print(
-                f"  · {step.name}: skipped (dev cluster/worktree — host-global wiring is prod-install only)"
-            )
-            continue
-        # When roles is None (unconfigured host) the capability filter is
-        # skipped; every role-scoped step in CONVERGE_STEPS is also
-        # requires_unit_config=True, so it is caught by the next guard. A
-        # role-scoped step that is NOT requires_unit_config would run on an
-        # unconfigured host — give such a step requires_unit_config=True or
-        # extend this guard.
-        if roles is not None and not (roles & step.roles):
-            print(f"  · {step.name}: skipped (roles {','.join(sorted(roles))})")
-            continue
-        if roles is None and step.requires_unit_config:
-            print(f"  · {step.name}: deferred to first `ava start` (unit not configured yet)")
+        reason = _skip_reason(ctx, step, is_prod_install=is_prod_install)
+        if reason is not None:
+            print(f"  · {step.name}: skipped ({reason})")
             continue
         try:
             step.apply(ctx)
@@ -691,50 +535,45 @@ def converge_host(
         print(f"  ✓ {step.name}")
 
 
+def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool) -> str | None:
+    if step.services and not step.services.intersection(ctx.services):
+        return "consumer service not selected"
+    if step.host_global and not is_prod_install:
+        return "dev cluster/worktree — host-global wiring is prod-install only"
+    if ctx.roles is not None and not (ctx.roles & step.roles):
+        return f"roles {','.join(sorted(ctx.roles))}"
+    if ctx.roles is None and step.requires_unit_config:
+        return "unit not configured yet; initialize with ava start"
+    return None
+
+
+def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
+    from cli.commands._repo import _services_for_roles_annotated
+    from shared.service_selection import read_selection
+
+    if roles is None:
+        return frozenset()
+    selection = read_selection()
+    return frozenset(
+        spec.session
+        for spec, gate in _services_for_roles_annotated(roles)
+        if gate is None and selection.enabled(spec.session)
+    )
+
+
 def cmd_converge() -> int:
     """`ava converge` — bring this host to the state the current code expects (idempotent)."""
-    import cli.commands as _ns
+    import cli.commands._repo as _repo_commands
     from shared import maintenance
     from shared.platform import raise_fd_limit
 
     maintenance.require_start_allowed()
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
-    repo = _ns._repo_root()
-    roles = _ns._roles_or_none()
+    repo = _repo_commands._repo_root()
+    roles = _repo_commands._roles_or_none()
     print(f"[ava converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}")
 
-    # Source-integrity guard: detect manual git operations in the source tree.
-    # Converge does not launch services, so the guard only warns — it does not
-    # auto-heal (uv sync) or block. The full guard (with auto-heal) runs at
-    # `ava start` time; this is an early-warning check for standalone converge.
-    import contextlib
-    import subprocess as _sp
-
-    with contextlib.suppress(Exception):
-        _head = _sp.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-        if _head.returncode == 0:
-            _head_sha = _head.stdout.strip()
-            with contextlib.suppress(Exception):
-                from shared.source_integrity import get as _get_installed
-
-                _installed = _get_installed()
-                if _installed is not None and _head_sha != _installed:
-                    print(
-                        f"\n⚠  SOURCE INTEGRITY: HEAD ({_head_sha[:7]}) != "
-                        f"installed ({_installed[:7]})\n"
-                        f"   The source tree changed outside of `ava cluster update`. "
-                        f"Run `ava cluster update` or `ava start` to auto-heal.\n",
-                        file=sys.stderr,
-                    )
-
-    _ns.converge_host(repo, roles)
+    converge_host(repo, roles)
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
     # a CONVERGE_STEPS entry would not have on the `ava start` path.

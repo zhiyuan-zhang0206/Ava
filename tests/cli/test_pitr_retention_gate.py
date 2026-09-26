@@ -19,13 +19,13 @@ from typing import Any, cast
 
 import pytest
 
-from cli.commands import (
+from cli.commands import pitr as pitr_commands
+from cli.commands.pitr import (
     cmd_pitr_retention_arm,
     cmd_pitr_retention_disable,
     cmd_pitr_retention_run_once,
     cmd_pitr_retention_status,
 )
-from cli.commands import pitr as pitr_commands
 from services.pitr import retention_gate, retention_scheduler
 from services.pitr.retention_executor import RetentionExecutionSummary
 from services.pitr.retention_manifest import (
@@ -220,7 +220,7 @@ def test_status_shows_the_logical_surface(
 def test_inspect_reports_the_logical_counts(
     gate_env: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands import cmd_pitr_retention_inspect
+    from cli.commands.pitr import cmd_pitr_retention_inspect
 
     _write_plan(gate_env, _plan(with_logical=True))
     assert cmd_pitr_retention_inspect() == 0
@@ -381,7 +381,7 @@ def test_inspect_reports_the_live_gate_state(
     gate_env: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`retention inspect` no longer hardcodes the gate off (P1c stub)."""
-    from cli.commands import cmd_pitr_retention_inspect
+    from cli.commands.pitr import cmd_pitr_retention_inspect
 
     digest = _write_plan(gate_env, _plan())
     assert cmd_pitr_retention_inspect() == 0
@@ -396,7 +396,7 @@ def test_inspect_degrades_without_a_plan(
     gate_env: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """No dry-run plan on disk: a stderr note and exit 1, not a traceback."""
-    from cli.commands import cmd_pitr_retention_inspect
+    from cli.commands.pitr import cmd_pitr_retention_inspect
 
     assert cmd_pitr_retention_inspect() == 1
     captured = capsys.readouterr()

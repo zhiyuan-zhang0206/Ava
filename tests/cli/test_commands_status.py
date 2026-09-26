@@ -4,20 +4,63 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess as subprocess
 import sys
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from cli import commands as _cli
+import cli.commands._probe as _probe_commands
+import cli.commands._repo as _repo_commands
+import cli.commands.status as _status_commands
+import ops.roster as _roster
+import shared.cluster_drift as _cluster_drift
 from shared.config import settings
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_prechecks
+
+
+@pytest.fixture(autouse=True)
+def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Status tests do not initialize a cluster or contact any live gateway."""
+    import httpx
+
+    from shared.root_control.client import RootClientError
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+
+    def _unreachable(*_args: object, **_kwargs: object) -> None:
+        raise httpx.ConnectError("isolated status test")
+
+    class _AbsentRoot:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def status(self) -> object:
+            raise RootClientError("isolated status test")
+
+    monkeypatch.setattr(httpx, "get", _unreachable)
+    monkeypatch.setattr("shared.root_control.client.RootClient", _AbsentRoot)
+
 
 # ─── gateway cluster-status probe carries the bearer ───────────────────────────
+
+
+def test_status_explains_persistently_unselected_services(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from shared import service_selection
+
+    monkeypatch.setattr(
+        service_selection,
+        "read_selection",
+        lambda: service_selection.ServiceSelection("only", frozenset({"gateway"})),
+    )
+    assert _status_commands.cmd_status() == 0
+    frontend = next(line for line in capsys.readouterr().out.splitlines() if "frontend" in line)
+    assert "disabled by desired service set" in frontend
 
 
 def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,14 +122,13 @@ def test_fetch_gateway_cluster_status_no_bearer_when_secret_unset(
 def test_status_runs_without_error(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """status can output normally even when all command mocks return non-0 (empty cluster) (no raise)."""
     _ = capsys
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
 
-    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_status()
+    monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert _sess("gateway") in out
@@ -94,15 +136,14 @@ def test_status_runs_without_error(monkeypatch: pytest.MonkeyPatch, capsys) -> N
 
 
 def test_status_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
 
-    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_status()
+    monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert _sess("gateway") in out
@@ -110,11 +151,10 @@ def test_status_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch, capsys) ->
 
 
 def test_status_agent_runner_shows_ops(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli.cmd_status()
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert _sess("ops") in out
@@ -127,43 +167,43 @@ def test_status_shows_browser_skip_reason(monkeypatch: pytest.MonkeyPatch, capsy
     is not blind to the broken service."""
     from cli.commands import _repo
 
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(_repo.settings.services, "browser_enabled", True)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
 
-    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_status()
+    monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert _sess("browser") in out
     assert "skipped: no display" in out
 
 
-def test_status_shows_the_gate_entry_row(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    """The fleet UI entry port is on the status screen. On 2026-08-01 a converge
-    killed the gate and failed to reinstall it: every service row stayed green
-    (they probe the app slot BEHIND the gate) while :3000 answered nothing."""
-    import cli.commands._converge_gate as cg
+def test_status_shows_the_gate_entry_row(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The entry service shares the root/identity readiness table with the app."""
+    import cli.commands._probe as probe_module
+    import cli.commands.status as status_module
+    from cli.commands._probe import ServiceProbe
 
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(status_module, "_root_tree_units", lambda: {"gate": {"state": "running"}})
     monkeypatch.setattr(
-        cg,
-        "probe_gate",
-        lambda *_a: cg.GateStatus(3000, 3001, False, True, "launchd job com.ava.gate.x"),  # pyright: ignore[reportUnknownArgumentType]
+        probe_module,
+        "_probe_service",
+        lambda _spec: ServiceProbe(False, "down", "owned listener not ready"),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
-
-    rc = _cli.cmd_status()
-    assert rc == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert "gate (fleet UI entry):" in out
-    assert "entry :3000 not answering" in out
+    assert _status_commands.cmd_status() == 0
+    out = capsys.readouterr().out
+    row = next(line for line in out.splitlines() if line.startswith(_sess("gate") + " "))
+    assert "✓" in row and "✗" in row
+    assert "owned listener not ready" in row
+    assert "gate (fleet UI entry):" not in out
 
 
 def test_status_shows_the_end_to_end_redis_bridge_row(
@@ -172,16 +212,15 @@ def test_status_shows_the_end_to_end_redis_bridge_row(
     """The host-level relay must not disappear behind healthy service rows."""
     import cli.commands.status as status_mod
 
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         status_mod,
         "print_redis_bridge_status",
         lambda: sys.stdout.write("  ✗ 10.64.0.7:6380 Redis PING: connection refused\n"),
     )
 
-    assert _cli.cmd_status() == 0
+    assert _status_commands.cmd_status() == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "redis bridge (private-network ingress):" in out
     assert "Redis PING: connection refused" in out
@@ -189,27 +228,22 @@ def test_status_shows_the_end_to_end_redis_bridge_row(
 
 def test_status_runner_only_has_no_gate_section(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """A pure agent-runner owns no entry port — same rule as the pg/redis section."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli.cmd_status()
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "gate (fleet UI entry):" not in out
     assert "redis bridge (private-network ingress):" not in out
 
 
-def test_status_root_mode_reads_the_tree_for_the_session_column(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
-    """On a root-driven host the sess column reads the tree's units; the absorbed
-    watchdogs say why they carry none instead of reading as a missing service
-    (task #3370)."""
-    monkeypatch.setattr(_cli, "_root_driven_enabled", lambda: True)
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+def test_status_reads_root_units(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """Service rows read root units; retired watchdogs have no runtime row."""
+    monkeypatch.setattr(
+        _repo_commands, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"})
+    )
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
 
     class _Client:
         def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
@@ -226,103 +260,63 @@ def test_status_root_mode_reads_the_tree_for_the_session_column(
                 },
             }
 
-    monkeypatch.setattr("services.ava_root.client.RootClient", _Client)
+    monkeypatch.setattr("shared.root_control.client.RootClient", _Client)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
 
-    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_status()
+    monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("ava-")}
     assert rows[_sess("gateway")][1] == "✓"
     assert rows[_sess("frontend")][1] == "✓"
-    assert rows[_sess("gateway-watchdog")][1] == "✗"
-    assert "absorbed by ava-root" in out
-
-
-def test_status_session_mode_does_not_dial_the_root(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
-    """The session path is untouched: a session-driven host never constructs a
-    root client from `ava status`."""
-    monkeypatch.setattr(settings.services, "root_driver_enabled", False)
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
-
-    def _explode(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("RootClient consulted on a session-driven host")
-
-    monkeypatch.setattr("services.ava_root.client.RootClient", _explode)
-
-    def fake_run(_args, **_kwargs):
-        return _FakeResult(returncode=0, stdout="")
-
-    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    assert _cli.cmd_status() == 0
-    _ = capsys.readouterr()  # pyright: ignore[reportUnknownMemberType]
+    assert _sess("gateway-watchdog") not in rows
+    assert _sess("agent-runner-watchdog") not in rows
 
 
 def test_status_root_mode_survives_an_unreachable_root(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     """Diagnostic-first: a down root reads as an empty tree, not a crash."""
-    monkeypatch.setattr(_cli, "_root_driven_enabled", lambda: True)
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
 
     class _Down:
         def __init__(self, _socket_path: Path, *, timeout: float = 5.0) -> None:
             del timeout
 
         def status(self) -> dict[str, object]:
-            from services.ava_root.client import RootClientError
+            from shared.root_control.client import RootClientError
 
             raise RootClientError("unreachable in test")
 
-    monkeypatch.setattr("services.ava_root.client.RootClient", _Down)
+    monkeypatch.setattr("shared.root_control.client.RootClient", _Down)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
 
-    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_status()
+    monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = cast(str, capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     rows = {line.split()[0]: line.split() for line in out.splitlines() if line.startswith("ava-")}
     assert rows[_sess("gateway")][1] == "✗"
 
 
-def test_start_prints_browser_skip_reason(monkeypatch, capsys, tmp_path) -> None:
-    """`ava start` (_launch_sessions) prints the gated-out browser + reason on
-    the console — the start-time analogue of the `ava status` row, so the roster
-    never silently shrinks. _has_session->True keeps it from launching anything."""
-    from cli.commands import _repo
-
-    monkeypatch.setattr(_repo.settings.services, "browser_enabled", True)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownMemberType]
-
-    _cli._launch_sessions(frozenset({"agent-runner"}), set(), tmp_path)  # pyright: ignore[reportUnknownArgumentType]
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert _sess("browser") in out
-    assert "skipped: no display" in out
-
-
-def test_service_row_shows_live_session_with_skip_reason(
+def test_service_row_shows_live_unit_with_skip_reason(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """A still-running session that is now gated reads as `✓ ... -- skipped: <reason>`
     — marks reflect real liveness, the suffix the gate — surfacing the mismatch the
     _print_service_row comment advertises."""
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    spec = next(s for s in _cli.build_services() if s.session == "browser")
-    _cli._print_service_row(spec, 16, "no display (headless)")
+    spec = next(s for s in _roster.build_services() if s.session == "browser")
+    _probe_commands._print_service_row(
+        spec, 16, "no display (headless)", root_units={"browser": {"state": "running"}}
+    )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "✓" in out  # liveness mark still shown
     assert "skipped: no display" in out
@@ -354,14 +348,14 @@ def _init_prod_source(source: Path, *, branch: str = "main") -> None:
 def test_detect_prod_source_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No source repo → None (nothing to check)."""
     monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
-    assert _cli._detect_prod_source_drift() is None
+    assert _cluster_drift.prod_source_branch_drift() is None
 
 
 def test_detect_prod_source_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Prod source on `main` → None (no drift)."""
     _init_prod_source(tmp_path / "source")
     monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
-    assert _cli._detect_prod_source_drift() is None
+    assert _cluster_drift.prod_source_branch_drift() is None
 
 
 def test_detect_prod_source_drift_feature_branch(
@@ -371,17 +365,16 @@ def test_detect_prod_source_drift_feature_branch(
     incident: an agent developing in the prod tree instead of a worktree)."""
     _init_prod_source(tmp_path / "source", branch="ava-7/fix")
     monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
-    assert _cli._detect_prod_source_drift() == "ava-7/fix"
+    assert _cluster_drift.prod_source_branch_drift() == "ava-7/fix"
 
 
 def test_cmd_status_warns_on_prod_source_drift(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """cmd_status surfaces the drift warning when the prod source is off main
     (runs on any installed host, here agent-runner)."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: "ava-7/fix")
-    rc = _cli.cmd_status()
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "prod source" in out
@@ -394,14 +387,14 @@ def test_cmd_status_warns_on_prod_source_drift(monkeypatch: pytest.MonkeyPatch, 
 def test_cluster_pin_status_no_pin(monkeypatch: pytest.MonkeyPatch) -> None:
     """No pin set yet → None (no line to show)."""
     monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda: None)
-    assert _cli._cluster_pin_status() is None
+    assert _probe_commands._cluster_pin_status() is None
 
 
 def test_cluster_pin_status_returns_pin_and_head(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin set → (target_sha, this_host_head)."""
     monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda: "abc1234")
     monkeypatch.setattr("cli.commands._probe._prod_source_head_sha", lambda: "abc1234")
-    assert _cli._cluster_pin_status() == ("abc1234", "abc1234")
+    assert _probe_commands._cluster_pin_status() == ("abc1234", "abc1234")
 
 
 def test_cluster_pin_status_db_unreachable_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -412,17 +405,16 @@ def test_cluster_pin_status_db_unreachable_is_none(monkeypatch: pytest.MonkeyPat
         raise psycopg.OperationalError("connection refused")
 
     monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", _boom)
-    assert _cli._cluster_pin_status() is None
+    assert _probe_commands._cluster_pin_status() is None
 
 
 def test_cmd_status_shows_cluster_pin_aligned(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """cmd_status prints the cluster-pin line; HEAD == pin → aligned."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: None)
     monkeypatch.setattr("cli.commands.status._cluster_pin_status", lambda: ("abc1234", "abc1234"))
-    rc = _cli.cmd_status()
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "cluster pin: abc1234" in out
@@ -443,25 +435,23 @@ def test_cmd_status_cluster_pin_drift_wording(
 ) -> None:
     """HEAD != pin: the mark reflects the git relation to the pin, not a flat 'behind'.
     'ahead' is the stray-`git pull` case the old flat wording mislabelled as behind."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: None)
     monkeypatch.setattr("cli.commands.status._cluster_pin_status", lambda: ("aaaaaaa", "bbbbbbb"))
     monkeypatch.setattr("cli.commands.status.prod_source_pin_relation", lambda _p, _h: relation)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_status()
+    rc = _status_commands.cmd_status()
     assert rc == 0
     assert expected in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_cmd_status_cluster_pin_head_unreadable(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """HEAD can't be read (head is None) → 'HEAD unreadable', no relation computed."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: None)
     monkeypatch.setattr("cli.commands.status._cluster_pin_status", lambda: ("aaaaaaa", None))
-    rc = _cli.cmd_status()
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "HEAD unreadable" in out
@@ -473,9 +463,8 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
 ) -> None:
     """`ava status` (no flag) runs local probes AND prints the gateway snapshot."""
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli.subprocess, "run", lambda *_a, **_kw: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "httpx.get",
         lambda *_a, **_kw: _FakeResponse(  # pyright: ignore[reportUnknownArgumentType]
@@ -487,7 +476,7 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
             }
         ),
     )
-    rc = _cli.cmd_status()
+    rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out
     assert _sess("gateway") in out  # local probe section still present
@@ -502,15 +491,14 @@ def test_cmd_status_gateway_unreachable_is_inline_not_fatal(
     import httpx
 
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli.subprocess, "run", lambda *_a, **_kw: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]
 
     def _boom(*_a, **_kw):
         raise httpx.ConnectError("connection refused")
 
     monkeypatch.setattr("httpx.get", _boom)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_status()
+    rc = _status_commands.cmd_status()
     assert rc == 0
     assert "gateway unreachable" in capsys.readouterr().out
 

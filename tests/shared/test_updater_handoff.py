@@ -20,11 +20,7 @@ import pytest
 from shared import updater_handoff as handoff
 from shared import updater_recovery as recovery
 from shared.managed_writer_barrier import RolloutIdentity
-from shared.managed_writer_observation import (
-    ExpectedProcess,
-    ExpectedUnitWriters,
-    ObservationChallenge,
-)
+from shared.managed_writer_observation import ExpectedUnitWriters, ObservationChallenge
 from shared.managed_writer_publication import (
     NormalService,
     NormalServiceReadback,
@@ -32,6 +28,7 @@ from shared.managed_writer_publication import (
     SelectorReadback,
     UnitActivationReadback,
 )
+from shared.process_evidence import ExpectedProcess
 
 
 def _bootstrap_journal(stage: str, *, normal_release_planned: bool = False) -> dict[str, object]:

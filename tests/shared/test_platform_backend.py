@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from shared.platform_backend import (
@@ -68,7 +70,9 @@ def test_windows_capability_queries() -> None:
     assert backend.npm_shell_flag() is True
 
 
-def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_windows_scheduling_delegates_to_schtasks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """All four job kinds route through the Task Scheduler backend.
 
     These used to be deliberate no-ops ("not yet wired on Windows"), which left a
@@ -80,7 +84,6 @@ def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatc
         ("shared.os_autostart", "autostart"),
         ("shared.os_cron", "cron"),
         ("shared.os_logs_job", "logs"),
-        ("shared.os_watchdog_probe", "watchdog"),
     ]:
         monkeypatch.setattr(f"{mod}._register_windows", lambda *_a, _n=name: calls.append(_n) or 0)  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
@@ -92,22 +95,22 @@ def test_windows_scheduling_delegates_to_schtasks(monkeypatch: pytest.MonkeyPatc
     backend.register_autostart()
     backend.register_cron()
     backend.register_logs_job()
-    backend.register_watchdog_probe("gateway")
-    assert calls == ["autostart", "cron", "logs", "watchdog"]
+    assert calls == ["autostart", "cron", "logs"]
 
     # Unregister stays silent-on-absent, like the launchd / crontab paths — and
     # carries the caller's slug instead of resolving one from this process, so
     # `ava cluster destroy` removes the target cluster's tasks and not its own.
-    backend.unregister_autostart("ava-target")
+    from shared.cluster import home_slug
+
+    target_home = tmp_path / "ava-target"
+    backend.unregister_autostart(target_home)
     backend.unregister_cron("ava-target")
     backend.unregister_logs_job("ava-target")
-    backend.unregister_watchdog_probe("gateway", "ava-target")
 
     assert unregistered == [
-        ("autostart", ("ava-target",)),
+        ("autostart", (home_slug(target_home),)),
         ("cron", ("ava-target",)),
         ("logs", ("ava-target",)),
-        ("watchdog", ("gateway", "ava-target")),
     ]
 
 
@@ -123,7 +126,6 @@ def test_windows_scheduling_failure_degrades_to_a_warning(
         ("shared.os_autostart", "autostart"),
         ("shared.os_cron", "health probe"),
         ("shared.os_logs_job", "logs maintenance"),
-        ("shared.os_watchdog_probe", "watchdog probe"),
     ]:
         monkeypatch.setattr(f"{mod}._register_windows", lambda *_a: "ERROR: Access is denied.")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -131,18 +133,16 @@ def test_windows_scheduling_failure_degrades_to_a_warning(
     backend.register_autostart()
     backend.register_cron()
     backend.register_logs_job()
-    backend.register_watchdog_probe("gateway")  # no exception
 
     err = capsys.readouterr().err
     assert "autostart" in err
     assert "health probe" in err
     assert "logs maintenance" in err
-    assert "watchdog probe" in err
     # And each says WHY, on stderr. The loguru record alone never reached disk on
     # the fleet's Windows box — a converge under the updater chain has its stderr
     # captured into the updater log but no sink configured — so "registration
     # failed" with nothing after it is all nine months of logs ever showed.
-    assert err.count("ERROR: Access is denied.") == 4
+    assert err.count("ERROR: Access is denied.") == 3
 
 
 def test_windows_pg_binary_path() -> None:
@@ -165,3 +165,34 @@ def test_venv_python_path() -> None:
     path = backend.venv_python()
     assert ".venv" in path
     assert path.endswith("python3")
+
+
+def test_linux_autostart_has_one_native_manager_and_explicit_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shared import os_boot_unit
+
+    calls: list[Path | str] = []
+
+    def install() -> list[str]:
+        calls.append("install")
+        return []
+
+    def uninstall(home: Path) -> list[str]:
+        calls.append(home)
+        return []
+
+    monkeypatch.setattr(os_boot_unit, "install", install)
+    monkeypatch.setattr(os_boot_unit, "uninstall", uninstall)
+    backend = LinuxPlatformBackend()
+    backend.register_autostart()
+    backend.unregister_autostart(tmp_path)
+    assert calls == ["install", tmp_path]
+
+
+def test_linux_autostart_propagates_unavailable_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared import os_boot_unit
+
+    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
+    with pytest.raises(RuntimeError, match="systemd"):
+        LinuxPlatformBackend().register_autostart()

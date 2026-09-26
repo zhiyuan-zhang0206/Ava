@@ -47,6 +47,12 @@ class PauseOwnerSnapshot:
         return self.holder == holder and self.acquired_at == acquired_at
 
 
+@dataclass(frozen=True)
+class MaintenanceAdmission:
+    snapshot: PauseOwnerSnapshot
+    created_here: bool
+
+
 def state_path() -> Path:
     import shared.paths
 
@@ -263,25 +269,33 @@ def _refuse_maintenance(current: PauseOwnerSnapshot) -> None:
 
 def begin_maintenance(
     holder: str, acquired_at: dt.datetime, *, driver: HoldDriver | None = None
-) -> PauseOwnerSnapshot:
+) -> MaintenanceAdmission:
     """Close admission durably; a new deploy cannot overwrite this capability.
 
     `driver` is the shepherding identity minted by an operator-side entry (task
     #3270). Daemon-driven pauses leave it None on purpose: their ownership
     evidence is the updater handoff / outcome, never a caller daemon that
     outlives the ladder and would mask a dead shepherd.
+
+    Creation ownership is returned under the journal lock: compensation must
+    never infer it from a separately read snapshot.
     """
     if not holder or acquired_at.tzinfo is None:
         raise ValueError("holder and timezone-aware acquired_at are required")
     with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
         current = _read_unlocked(state_path())
+        if current.matches(holder, acquired_at) and current.status == "resumed":
+            raise RuntimeError("maintenance operation already resumed; use a new generation")
         if current.matches(holder, acquired_at) and current.maintenance is not None:
-            return current
+            return MaintenanceAdmission(current, created_here=False)
         if current.status == "invalid" or (
             current.status == "paused" and not current.matches(holder, acquired_at)
         ):
             raise RuntimeError("another or unreadable pause owner must be resolved first")
-        return _write_maintenance(holder, acquired_at, MaintenanceHold(), driver=driver)
+        return MaintenanceAdmission(
+            _write_maintenance(holder, acquired_at, MaintenanceHold(), driver=driver),
+            created_here=True,
+        )
 
 
 def _write_maintenance(

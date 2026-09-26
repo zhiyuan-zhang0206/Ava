@@ -61,9 +61,11 @@ def _halt(
     status: str = "terminated",
     closed: bool = False,
 ) -> None:
-    """Seed a row's death shape (the incident signature by default)."""
+    """Seed a hosted incarnation's death shape (the incident signature by default)."""
     conn.execute(
         "UPDATE agents_meta SET status=%s, termination_source=%s, "
+        "runtime_kind='hosted', runtime_generation=gen_random_uuid(), "
+        "runtime_owner=gen_random_uuid(), "
         "permanent_reject_streak=%s, last_permanent_reject_reason=%s, "
         "closed_at=CASE WHEN %s THEN now() ELSE NULL END WHERE id=%s",
         (status, source, streak, reason, closed, agent_id),

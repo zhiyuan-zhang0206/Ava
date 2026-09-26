@@ -40,9 +40,16 @@ suite and the post-deploy visual gate consume it so their definitions cannot dri
 - `tests/cli/` — command-line tools
 - `tests/shared/` — shared library
 - `tests/services/` — backend services
-- `tests/ops/` — ops layer (18 files: controllers pin/schema/stranded-pause/code, updater outcomes + stall reap, manager, heal records, deploy window, spec roster, plugin services, spawn birth config, cluster ops)
+- `tests/ops/` — agent drain, pause/recovery, deployment holds, health inventory,
+  service roster and resource admission
+- `tests/lifecycle/` — lifecycle qualification, grouped by native root custody,
+  immutable images, preparation, retained transitions and branch previews
+  (`preview/` also holds the CI preview visual gate's golden-minting contracts).
+  Native platform cases and opt-in acquisition cases keep their explicit gates;
+  moving the tests does not turn a simulated result into native evidence.
 - `tests/skills/` — skills
-- `tests/scripts/` — release/docs/secret-rotation scripts plus the shell updater-manifest builder; lint script tests at `tests/` root `test_lint_*.py`
+- `tests/scripts/` — release/docs/secret-rotation and repository tooling;
+  lint script tests also live at `tests/` root `test_lint_*.py`
 - `tests/ui/` — deterministic tests for applying the shell's Kotlin/XML/signing overlay to Tauri's generated Android project
 - `tests/plugins/` — plugin tests (`test_ava_memory_lint.py` / `test_ava_memory_notes.py` for the ava_memory plugin, `ava_fleet/` subtree)
 - `tests/fixtures/` + `tests/factories/` — test fixture data and data factories
@@ -59,7 +66,11 @@ suite and the post-deploy visual gate consume it so their definitions cannot dri
 - A killed run (Ctrl-C, SIGKILL, an agent dying mid-run) leaks its throwaway **Postgres**, because the detached postmaster outlives an owner that ran no finalizer. It is bounded not by teardown but by a **sweep at the start of the next spin-up**: `shared.pg_tools.sweep_orphaned_throwaway_clusters` reaps the instances whose owner is provably gone, proof being an exclusive `flock` the owner held for the instance's whole life on an `owner.lock` inside that instance's own dir (so the proof shares the cluster's exact lifetime, and two UNIX users on one `/dev/shm` never contend for a shared registry). The throwaway **redis** leaks the same way and is not swept (a redis orphan costs RAM, not the System V segment that wedges the box)
 - Standalone `conftest.py` only in 6 subdirectories: `agent` / `ava` / `cli` / `gateway` / `integration` / `e2e` (**not** "each module")
 - **The env block at the top of `conftest.py` must stay above every project import.** `shared.dotenv_boot` resolves the home once at import and binds `AVA_ENV_PATH` from it, so AVA_HOME set after that import has no effect on it — the suite then loads the operator's real `~/.ava/.env`, and `_enforce_cluster_env_authority()` force-assigns the production cluster secret / db / redis / gateway URL over the sentinels conftest just set. `_assert_env_precedes_project_imports()` fails the run if a project module was imported early; `tests/test_home_isolation.py` asserts the outcome independently of mechanism
-- A family of autouse **host-resource guards** makes "don't touch the host" the default rather than something each test author remembers: agent launch, daemon respawn, cluster spawn, OS cron, warm-up, and `os.exec*`. Each is overridable inside a test body (or via a `real_*` marker) when the guarded call IS the subject under test. The `os.exec*` one is the odd member — it guards the *test runner itself*, since an exec replaces the pytest process and the run ends with no summary and no failure report
+- A family of autouse **host-resource guards** makes "don't touch the host" the
+  default: agent launch, permissions-helper native effects, OS cron, warm-up and
+  `os.exec*`. Tests of those boundaries explicitly supply their own doubles or
+  opt into an isolated native proof with owned cleanup. The `os.exec*` guard
+  protects the test runner itself from process replacement.
 
 ### CI integration
 - `.github/workflows/` — GitHub Actions runs the full suite automatically
@@ -75,9 +86,10 @@ suite and the post-deploy visual gate consume it so their definitions cannot dri
 
 ## Entry points
 
-- `.venv/bin/pytest tests/ --ignore=tests/e2e -q` — run all non-e2e tests
-- `.venv/bin/pytest tests/agent/ -q` — run a single module
-- `.venv/bin/pytest tests/ --cov=agent --cov=ava ...` — with coverage report
+- `.venv/bin/pytest tests/agent/test_<subject>.py -q` — run the relevant subject
+- `.venv/bin/pytest tests/lifecycle/transition/test_<subject>.py -q` — run a
+  retained-transition contract; native proof commands belong to their CI workflow
+- Full-suite and coverage execution belong to CI, not local development
 
 ## Notes
 

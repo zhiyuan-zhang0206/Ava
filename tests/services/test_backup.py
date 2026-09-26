@@ -606,23 +606,11 @@ def test_run_backup_pitr_activation_has_independent_kind(
     assert backup._is_activation(path)
 
 
-def test_run_backup_failure_leaves_no_files(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    class _Failed:
-        returncode = 1
-        stderr = "connection refused"
-
-    monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
-    with pytest.raises(RuntimeError, match="pg_dump exited 1"):
-        backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=whatever")
-    assert list(bdir.iterdir()) == []  # no .dump, no .partial
-
-
-def test_run_backup_sweeps_stale_partials(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A `.partial` left by an interrupted run (e.g. the process tree killed
-    mid-rollout) is swept before the new dump is written, so it cannot pile up
-    unnoticed: the name never matches the managed grammar, so due/prune logic ignores it."""
-    (bdir / "whatever-20260801-030000.dump.partial").write_bytes(b"stale")
-    (bdir / "other-20260801-031500.dump.partial").write_bytes(b"stale")
+def test_run_backup_failure_retains_partials(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed dump keeps its own `.partial` and never sweeps another run's:
+    neither has a closure proof, and due/prune logic ignores unmanaged names."""
+    stale = bdir / "other-20260801-031500.dump.partial"
+    stale.write_bytes(b"stale")
 
     class _Failed:
         returncode = 1
@@ -631,8 +619,9 @@ def test_run_backup_sweeps_stale_partials(bdir: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(RuntimeError, match="pg_dump exited 1"):
         backup.run_backup(_dt(2026, 8, 2, 3, 0), db_url="dbname=whatever")
-    assert not list(bdir.glob("*.partial"))  # both stale partials swept
-    assert list(bdir.iterdir()) == []
+    assert stale.read_bytes() == b"stale"
+    assert len(list(bdir.glob("*.partial"))) == 2
+    assert not list(bdir.glob("*.dump.enc"))
 
 
 @pytest.mark.skipif(not backup.pg_tool("pg_dump").exists(), reason="needs a native pg_dump binary")
@@ -1189,13 +1178,24 @@ def test_run_backup_serializes_dump_creation(bdir: Path, monkeypatch: pytest.Mon
 
     def _run_backup(_now: datetime | None = None, **_kwargs: object) -> Path:
         events.append("backup-body")
+        artifact.write_bytes(b"encrypted")
         return artifact
 
     monkeypatch.setattr(backup, "backup_lock", _backup_lock)
     monkeypatch.setattr(backup, "_run_backup", _run_backup)
 
+    def _record(name: str, result: object = None) -> Callable[[Path], object]:
+        def record(_path: Path) -> object:
+            events.append(name)
+            return result
+
+        return record
+
+    monkeypatch.setattr(backup, "_publish_offsite", _record("publish"))
+    monkeypatch.setattr(backup, "_prune", _record("prune", []))
+
     assert backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever") == artifact
-    assert events == ["lock-enter", "backup-body", "lock-exit"]
+    assert events == ["lock-enter", "backup-body", "publish", "prune", "lock-exit"]
 
 
 def test_run_backup_avoids_overwriting_a_same_second_dump(

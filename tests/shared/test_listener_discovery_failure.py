@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
-from pathlib import Path
 
 import psutil
 import pytest
 
-from shared import port_preflight, proc, service_respawn, supervised_listener
-from shared.daemon_health import DaemonProbe, ProbeVerdict
-from tests.shared.test_supervised_listener import _wire_listener
+from shared import port_preflight, proc
 
 
 @pytest.mark.parametrize("failure", ["timeout", "missing", "denied"])
 def test_failed_listener_discovery_is_unavailable(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    _wire_listener(monkeypatch, holder_matches_binary=True, supervised_pid=1109)
-    monkeypatch.setattr(supervised_listener, "listeners_on", port_preflight.strict_listeners_on)
 
     def denied(*, kind: str) -> None:
         raise psutil.AccessDenied
@@ -34,27 +28,9 @@ def test_failed_listener_discovery_is_unavailable(
 
     monkeypatch.setattr(psutil, "net_connections", denied)
     monkeypatch.setattr(proc, "run_bounded", lsof)
-    result = supervised_listener.probe_supervised_listener(
-        "otel-collector", ports=(4319, 8889), binary=Path("/collector")
-    )
-    assert result.probe.verdict is ProbeVerdict.UNAVAILABLE
-    assert result.probe.terminal and not result.probe.alive
-    assert "listener discovery failed on port 4319" in result.probe.detail
-    assert result.stale_pids == ()
+    with pytest.raises(port_preflight.ListenerDiscoveryError):
+        port_preflight.strict_listeners_on(4319)
     assert port_preflight.listeners_on(4319) == []
-
-
-def test_unavailable_probe_never_respawns(monkeypatch: pytest.MonkeyPatch) -> None:
-    def respawn() -> DaemonProbe:
-        pytest.fail("inspection failure must not restart a service")
-
-    with pytest.raises(SystemExit):
-        service_respawn.run_keepalive(
-            "otel-collector",
-            logging.getLogger(__name__),
-            probe=lambda: DaemonProbe.unavailable("inspection denied"),
-            respawn=respawn,
-        )
 
 
 @pytest.mark.parametrize(
@@ -88,8 +64,6 @@ def test_probe_resolves_lsof_through_candidates_in_restricted_context(
     """The company-air regression: a context whose PATH hides lsof (macOS
     keeps it in /usr/sbin) must still resolve the supervised listener and
     report it alive instead of "nothing listening"."""
-    _wire_listener(monkeypatch, holder_matches_binary=True, supervised_pid=1109)
-    monkeypatch.setattr(supervised_listener, "listeners_on", port_preflight.strict_listeners_on)
 
     def denied(*, kind: str) -> None:
         raise psutil.AccessDenied
@@ -115,10 +89,5 @@ def test_probe_resolves_lsof_through_candidates_in_restricted_context(
     monkeypatch.setattr(port_preflight.shutil, "which", _which)
     monkeypatch.setattr(port_preflight.os, "access", _access)
 
-    result = supervised_listener.probe_supervised_listener(
-        "otel-collector", ports=(4319, 8889), binary=Path("/collector")
-    )
-    assert result.probe.alive and result.probe.verdict is ProbeVerdict.ALIVE
-    assert result.probe.detail == "otel-collector listener pid 1109 is supervised"
-    assert result.stale_pids == ()
+    assert port_preflight.strict_listeners_on(4319) == [1109]
     assert seen and seen[0][0] == "/usr/sbin/lsof"

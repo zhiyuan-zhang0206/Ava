@@ -1,27 +1,10 @@
-"""ava-root: the platform-neutral root supervisor skeleton.
+"""The root owner for one home's application services and native custody.
 
-One tree of long-lived processes per (machine x home). This package owns the
-tree's lifecycle (spawn, stop, restart policies), the K1 control plane over a
-unix socket, and the K2 unit-manifest registry. What launches the root process
-by itself (the OS edge) is out of scope here by design: the tree's own code
-carries no platform-specific concepts.
-
-W1.2e-2 wires it into the cluster's dev path: `cli.commands._root_driver`
-drives this package over K1 when a host's `AVA_ROOT_DRIVER_ENABLED` switch is
-on (default off — the production flip is S3/S4). Besides its own tests
-(`tests/services/test_ava_root_*.py`), it is exercised by the launch dry run
-(`scripts/ava_root_dry_run.py`) and the start/stop drill
-(`scripts/ava_root_e2_drill.py`).
+macOS starts this tree under the stable signed permissions helper. Transport,
+health observation, and service manifests share this owner; there is no service
+session mode or in-place interpreter upgrade.
 """
 
-from services.ava_root.client import RootClient, RootClientError
-from services.ava_root.handoff import (
-    HandoffError,
-    HandoffFile,
-    HandoffUnit,
-    load_handoff,
-    write_handoff,
-)
 from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.manifest import (
     ROOT_ID,
@@ -41,7 +24,6 @@ from services.ava_root.singleton import (
     release_instance_lock,
 )
 from services.ava_root.supervisor import Supervisor, SupervisorConfig, UnitState
-from services.ava_root.survival import UPDATE_SURVIVAL_UNIT_IDS, is_update_survival_unit
 from services.ava_root.wiring import (
     WiringContext,
     WiringError,
@@ -51,20 +33,14 @@ from services.ava_root.wiring import (
 
 __all__ = [
     "ROOT_ID",
-    "UPDATE_SURVIVAL_UNIT_IDS",
     "AlreadyRunningError",
     "ControlServer",
-    "HandoffError",
-    "HandoffFile",
-    "HandoffUnit",
     "HealthConfig",
     "HealthMonitor",
     "ManifestError",
     "ProbeError",
     "ProbeRegistry",
     "RestartPolicy",
-    "RootClient",
-    "RootClientError",
     "SelfCheckConfig",
     "Supervisor",
     "SupervisorConfig",
@@ -77,10 +53,7 @@ __all__ = [
     "WiringError",
     "WiringParticipant",
     "acquire_instance_lock",
-    "is_update_survival_unit",
-    "load_handoff",
     "load_manifests",
     "load_wiring",
     "release_instance_lock",
-    "write_handoff",
 ]

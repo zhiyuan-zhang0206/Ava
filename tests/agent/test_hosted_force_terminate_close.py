@@ -120,7 +120,7 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
 ) -> None:
     """The predicate reads the command, not the row (state-independence pin).
 
-    The resurrect fence (`observe_applied_termination` in the wake path)
+    The resurrection path's outstanding-command guard
     normally prevents this ordering; the classification stays correct across
     the race rather than claiming the ordering is routine.
     """

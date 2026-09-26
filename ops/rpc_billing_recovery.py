@@ -57,13 +57,13 @@ class BillingResurrectAgentResponse(BaseModel):
     """Home-runner adjudication of `resurrect-billing-v1` for one agent.
 
     `spawned`: every billing-victim guard passed under the row lock;
-        terminated -> idling + launch.
+        terminated -> idling + host wake.
     `already_alive`: not terminated — an idempotent repeat, or a concurrent
         run won (the per-agent CAS is the dedupe).
     `refused`: a guard refused (fail closed) — `reason` names it ('closed',
-        'not_billing_halted', 'machine_paused').
-    `deferred`: the outstanding lifecycle target has not been observed ended
-        (`ResurrectExitDeferredError`); retry once it settles.
+        'not_billing_halted', 'machine_paused', 'runtime_cutover_required').
+    `deferred`: the outstanding hosted lifecycle command has not settled
+        (`ResurrectSettlementDeferredError`); retry once it settles.
     """
 
     status: Literal["spawned", "already_alive", "refused", "deferred"]

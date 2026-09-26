@@ -1800,149 +1800,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/cluster/update": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Update
-         * @description Trigger an update.
-         *
-         *     `target` selects which machine to update (omitted means this host). Either
-         *     way the op POSTs to the target's ops server, which calls cluster_update_op
-         *     in-process there — spawning a detached updater and returning quickly. This
-         *     host is no special case: its own ops server is dialed at its registered
-         *     localhost URL.
-         *
-         *     `target_sha` pins the force-checkout commit (the watchdog off-pin self-heal
-         *     passes the cluster pin so the host converges to exactly it, not the moving
-         *     origin/main tip); threaded into the op payload.
-         *
-         *     Returns the orchestration session name + tee'd log path.
-         *
-         *     503 when the target's ops server is unreachable; 502 when the op ran but
-         *     reported failure (e.g. an updater session already in flight there — the
-         *     caller waits for paused=false then retries).
-         */
-        post: operations["post_cluster_update_api_cluster_update_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/rollout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Rollout
-         * @description Launch the whole-cluster `ava cluster update` rollout, detached.
-         *
-         *     Gateway only. Spawns a detached session running the full
-         *     orchestration — Phase A pauses every agent-runner, the gateway stops /
-         *     pulls / syncs / migrates, Phase B fans out the agent-runner self-updates,
-         *     then polls each host back to healthy. Returns 202 immediately; clients
-         *     poll `GET /api/cluster/status` per host to observe progress.
-         *
-         *     Body is fully optional; `origin` (default "user") names the trigger and
-         *     heads the rollout log + the cluster pin's `updated_by`.
-         *
-         *     Returns the orchestration session name + tee'd log path, plus
-         *     `backend_changed` (whether this rollout restarts agent processes) and
-         *     `needs_replay` (whether the installed commit is ahead of the running
-         *     bookmark). The frontend uses the first to describe agent restarts; the CLI
-         *     uses the second to identify a half-deployed state. The SDK initiator that
-         *     once waited on the restart signal, `ava.self.update()`, was removed 2026-08.
-         *
-         *     Errors:
-         *     - 400 if called on an agent-runner (rollout is a gateway operation).
-         *     - 409 if a rollout / update is already in flight.
-         *     - 422 if the cluster is already up to date (behind==0 and no replay is
-         *       needed) — nothing to roll out, so the fleet is not bounced. Use
-         *       /api/cluster/restart to bounce on the current code.
-         *     - 503 if the session backend could not start the orchestration session.
-         */
-        post: operations["post_cluster_rollout_api_cluster_rollout_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/restart": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Restart
-         * @description Launch a whole-cluster restart (no pull), detached.
-         *
-         *     Gateway only. Same three-phase orchestration as rollout — pause every
-         *     agent-runner, gracefully quiesce agents, bounce this host, fan out the
-         *     agent-runner bounces — but skips git pull / uv sync / migration. Use it to
-         *     apply config changes (or unwedge a service) without changing the checked-out
-         *     code. Returns 202 immediately; clients poll `GET /api/cluster/status`.
-         *
-         *     Body is fully optional; `origin` (default "user") names the trigger and
-         *     heads the restart log.
-         *
-         *     Returns the orchestration session name + tee'd log path.
-         *
-         *     Errors:
-         *     - 400 if called on an agent-runner (restart is a gateway operation).
-         *     - 409 if a restart / rollout / update is already in flight.
-         *     - 503 if the session backend could not start the orchestration session.
-         */
-        post: operations["post_cluster_restart_api_cluster_restart_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/update-check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Cluster Update Check
-         * @description Read-only preflight for the Update button — how far behind origin/main and
-         *     what a rollout would restart, or whether an interrupted rollout needs replay.
-         *
-         *     Gateway only (it inspects the gateway checkout). Does a
-         *     `git fetch` but never pulls or mutates the tree, so the UI can poll it.
-         *     A clean `behind == 0` → the UI shows "no updates" and does not launch a
-         *     rollout. An installed commit ahead of the running bookmark is instead
-         *     returned as `needs_replay`.
-         */
-        get: operations["get_cluster_update_check_api_cluster_update_check_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/cluster/status": {
         parameters: {
             query?: never;
@@ -4734,39 +4591,6 @@ export interface components {
             status: "enqueued" | "already_terminated";
         };
         /**
-         * ClusterOpRequest
-         * @description POST /api/cluster/rollout | /api/cluster/restart request body — fully
-         *     optional; a body-less POST uses defaults.
-         *
-         *     `origin` names the trigger, same convention as `resurrected_by`:
-         *     default "user" (the frontend buttons), SDK passes f"agent:{my_id}".
-         *     It heads the rollout/restart log and (rollout only) lands in the
-         *     cluster pin's `updated_by`, so "who moved the cluster" is answerable
-         *     from the log file or the pin row alone.
-         */
-        ClusterOpRequest: {
-            /**
-             * Origin
-             * @default user
-             */
-            origin: string;
-            /**
-             * Mode
-             * @default smooth
-             */
-            mode: string;
-            /**
-             * Force
-             * @default false
-             */
-            force: boolean;
-            /**
-             * Dry Run
-             * @default false
-             */
-            dry_run: boolean;
-        };
-        /**
          * ClusterPanel
          * @description GET /api/status cluster sub-section — multi-machine view.
          *
@@ -4788,13 +4612,10 @@ export interface components {
             current_serve_observability_station: boolean;
             /** Current Paused */
             current_paused: boolean;
-            /** Current Orchestration */
-            current_orchestration?: ("rollout" | "restart" | "update") | null;
             /** Machines */
             machines: components["schemas"]["MachineStatus"][];
             /** Cluster Target Sha */
             cluster_target_sha?: string | null;
-            last_update?: components["schemas"]["LastUpdate"] | null;
             /** Cluster Last Known Good Sha */
             cluster_last_known_good_sha?: string | null;
         };
@@ -4822,9 +4643,6 @@ export interface components {
             paused: boolean;
             /** Paused Reason */
             paused_reason?: ("no_state" | "business_pause" | "maintenance" | "startup") | null;
-            /** Current Orchestration */
-            current_orchestration?: ("rollout" | "restart" | "update") | null;
-            last_updater_outcome?: components["schemas"]["UpdaterOutcome"] | null;
             /** Head Sha */
             head_sha?: string | null;
             /** Running Sha */
@@ -4837,8 +4655,8 @@ export interface components {
             shell_count: number;
             /** Agent Host Online */
             agent_host_online?: boolean | null;
-            /** Watchdog Online */
-            watchdog_online?: boolean | null;
+            /** Supervisor Online */
+            supervisor_online?: boolean | null;
             /**
              * Agent Count
              * @default 0
@@ -5898,40 +5716,6 @@ export interface components {
             text: string | null;
         };
         /**
-         * LastUpdate
-         * @description The last cluster update, as served to `ava cluster status` and the frontend.
-         *
-         *     `failed` is computed here rather than in each surface: two consumers deciding
-         *     independently what counts as a failure is how they end up disagreeing, and this
-         *     is the value a banner is switched on.
-         */
-        LastUpdate: {
-            outcome: components["schemas"]["UpdateOutcome"];
-            /** Failed */
-            failed: boolean;
-            /** Target Sha */
-            target_sha?: string | null;
-            /** Origin */
-            origin?: string | null;
-            /** Holder */
-            holder?: string | null;
-            /** Started At */
-            started_at?: string | null;
-            /** Ended At */
-            ended_at?: string | null;
-            /** Failing Step */
-            failing_step?: string | null;
-            /** Observed By */
-            observed_by?: string | null;
-            /**
-             * Pin Advanced
-             * @default false
-             */
-            pin_advanced: boolean;
-            /** Log Path */
-            log_path?: string | null;
-        };
-        /**
          * LlmBucket
          * @description One bucket's LLM call profile. Latency percentiles are over rows that
          *     carry `latency_ms` (pre-instrumentation rows are NULL and ignored);
@@ -6129,13 +5913,8 @@ export interface components {
             schema_mismatch?: components["schemas"]["SchemaMismatchStatus"] | null;
             /** Deploy Hold */
             deploy_hold?: string | null;
-            last_update?: components["schemas"]["LastUpdate"] | null;
             /** Cluster Last Known Good Sha */
             cluster_last_known_good_sha?: string | null;
-            /** Stranded Hold Since */
-            stranded_hold_since?: string | null;
-            /** Stranded Hold Reason */
-            stranded_hold_reason?: string | null;
             /**
              * Settle Waited On
              * @default false
@@ -6153,8 +5932,8 @@ export interface components {
             shell_count: number;
             /** Agent Host Online */
             agent_host_online?: boolean | null;
-            /** Watchdog Online */
-            watchdog_online?: boolean | null;
+            /** Supervisor Online */
+            supervisor_online?: boolean | null;
             /**
              * Agent Count
              * @default 0
@@ -7726,20 +7505,16 @@ export interface components {
         };
         /**
          * SchemaMismatchStatus
-         * @description One machine's code/schema/pin mismatch and watchdog hold-back.
+         * @description A current schema mismatch, invalid layout, or unavailable comparison.
          */
         SchemaMismatchStatus: {
             /**
              * Kind
              * @enum {string}
              */
-            kind: "pin-behind-schema" | "schema-ahead-of-code" | "schema-behind-code" | "divergent";
+            kind: "schema-ahead-of-code" | "schema-behind-code" | "divergent" | "invalid-migration-layout" | "unavailable";
             /** Machine */
             machine: string;
-            /** Consecutive Blocked Rounds */
-            consecutive_blocked_rounds: number;
-            /** Held Back Services */
-            held_back_services: string[];
             /** Detail */
             detail: string;
         };
@@ -8654,107 +8429,6 @@ export interface components {
             dark_tokens?: {
                 [key: string]: string;
             } | null;
-        };
-        /**
-         * UpdateCheck
-         * @description `GET /api/cluster/update-check` response — how far the gateway's
-         *     checkout is behind its track target, and which side a pull would restart.
-         *
-         *     `behind` is the commit count from the last fully installed commit to the
-         *     track target. `needs_replay` covers an interrupted installed-versus-running
-         *     transition and a cluster pin that lacks migrations already applied in the
-         *     DB. Either case needs a full rollout even with zero new commits. A running
-         *     commit ahead of installation alone is the normal fast-path state.
-         *
-         *     `frontend_changed` / `backend_changed` mirror `ava cluster update`'s own
-         *     classification so the UI can tell the user what a rollout would actually
-         *     restart (docs-only diffs count as neither — a pull with nothing to restart).
-         */
-        UpdateCheck: {
-            /** Behind */
-            behind: number;
-            /** Frontend Changed */
-            frontend_changed: boolean;
-            /** Backend Changed */
-            backend_changed: boolean;
-            /** Needs Replay */
-            needs_replay: boolean;
-        };
-        /**
-         * UpdateOutcome
-         * @description How the last update ended, as the surfaces need to say it.
-         *
-         *     `CLEAN` / `INCOMPLETE` / `ABORTED` mirror
-         *     `cli.commands._update_recover.RolloutOutcome` — the orchestration's own
-         *     three-way verdict, persisted rather than re-derived, so the banner cannot
-         *     disagree with the rollout log.
-         *
-         *     `RECOVERED` is the fourth terminal state, and it is a distinct one rather than a
-         *     shade of `ABORTED` because it answers a different operator question: the attempt
-         *     failed AND the cluster is already back on a commit that works, so there is
-         *     nothing to repair — only something to know. It is reached three ways, and all
-         *     are real recoveries: the orchestration's own gateway leg rolling back to
-         *     last-known-good (written by `finish_update`), a *later* `ava cluster rollback`
-         *     cleaning up after an orchestration that died (derived by `read_last_update` from
-         *     the observation that rollback left behind), and an incomplete rollout whose
-         *     target becomes last-known-good after the cluster self-heals. Collapsing it into
-         *     `ABORTED` was what made the 2026-07-30 recovery read as an open incident.
-         *
-         *     `RUNNING` and `ORPHANED` are the two readings of a row with no recorded end, and
-         *     they are told apart by the deploy lease rather than by a timeout: a rollout runs
-         *     for as long as it runs (the lease is renewed while it does), so elapsed time
-         *     proves nothing, while the holder having stopped renewing does.
-         * @enum {string}
-         */
-        UpdateOutcome: "clean" | "recovered" | "incomplete" | "aborted" | "running" | "orphaned";
-        /**
-         * UpdaterOutcome
-         * @description How this host's last updater session ended, as far as its log can say.
-         *
-         *     `kind` is the operator-facing distinction:
-         *
-         *     - `declined` — the restart's validate-before-kill preflight refused. **Nothing
-         *       was stopped**: the host is serving its old code, intact, and the next action
-         *       is to fix what the preflight named (usually gateway reachability) and re-run.
-         *     - `exited` — the session ran to its end and reported `rc`. Non-zero means the
-         *       self-update failed after the stop; the host may be half-transitioned.
-         *     - `unknown` — the log is this update's, and carries neither marker. The
-         *       session died mid-flight: every terminal branch on both platforms writes one
-         *       (`native_exit_line`), so reaching an end and saying nothing is no longer a
-         *       thing a healthy run does.
-         *
-         *     `rc` is None whenever no exit line was found. It is a fact about the run, not
-         *     about the platform: a Windows run that got as far as any branch of its ladder
-         *     reports one.
-         */
-        UpdaterOutcome: {
-            /**
-             * Kind
-             * @default unknown
-             */
-            kind: string;
-            /** Rc */
-            rc?: number | null;
-            /**
-             * Detail
-             * @default
-             */
-            detail: string;
-            /**
-             * Log
-             * @default
-             */
-            log: string;
-            /** Stages */
-            stages?: {
-                [key: string]: number;
-            };
-            /** Total S */
-            total_s?: number | null;
-            /** Current Stage */
-            current_stage?: string | null;
-            /** Current Stage S */
-            current_stage_s?: number | null;
         };
         /**
          * UploadedBatch
@@ -10873,130 +10547,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_update_api_cluster_update_post: {
-        parameters: {
-            query?: {
-                target?: string | null;
-                target_sha?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_rollout_api_cluster_rollout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["ClusterOpRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string | boolean;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_restart_api_cluster_restart_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["ClusterOpRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_cluster_update_check_api_cluster_update_check_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UpdateCheck"];
                 };
             };
         };

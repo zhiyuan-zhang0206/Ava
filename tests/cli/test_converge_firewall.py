@@ -158,10 +158,8 @@ def test_failed_direct_and_sudo_repairs_print_exact_commands_and_do_not_raise(
     assert "older macOS" in err
     # The rule alone is not enough: an already-bound socket keeps its old policy.
     assert "re-bind" in err
-    # Both halves of the diagnosis name each other. An operator who skims this warning
-    # and meets the verdict later needs the two connected; the gate's own detail names
-    # `ava converge` in the other direction (test_phase_b_gateway_ready.py).
-    assert "OFF_BOX_UNREACHABLE" in err
+    # The warning states the operator-visible consequence of leaving it unfixed.
+    assert "off-box peers cannot reach these services" in err
 
 
 def test_grant_installed_repairs_silently(
@@ -289,9 +287,9 @@ def test_unconfigured_unit_audits_the_interpreter(
 def test_firewall_status_renders_manifest_details(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import cli.commands as command_namespace
+    import cli.commands._repo as _repo_commands
 
-    monkeypatch.setattr(command_namespace, "_roles_or_none", lambda: {"gateway"})
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: {"gateway"})
     monkeypatch.setattr(
         firewall_cmd,
         "audit_this_host",

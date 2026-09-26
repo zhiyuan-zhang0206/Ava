@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Node for the frontend (Next.js) build + agent tooling — one source for
-# install.sh / Dockerfile / CI. Linux: nodesource 22 (Ubuntu 24.04 ships 18).
+# host preparation / Dockerfile / CI. Linux: nodesource 22 (Ubuntu 24.04 ships 18).
 # macOS: the linked `node` formula (npx must land on PATH for ava-browser);
 # the keg-only `node@22` is the force-linked fallback. Idempotent.
 #

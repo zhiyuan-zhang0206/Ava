@@ -101,8 +101,7 @@ class TestSpawnStamping:
 
 
 class TestReplayOnWake:
-    """ "Replayed on every restart / respawn / resurrect" — the wake paths read the
-    stamp off the row and hand it to the same launch channel spawn used."""
+    """Resurrection preserves the birth configuration for hosted successor admission."""
 
     def test_resurrect_replays_the_stamp(self, db_conn: psycopg.Connection) -> None:
         from ops.agent_wake import resurrect_agent
@@ -111,7 +110,9 @@ class TestReplayOnWake:
         stamp = _birth_config(db_conn, agent_id)
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agents_meta SET status = 'terminated', termination_source = 'exit' "
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'exit', "
+                "runtime_kind='hosted', runtime_generation=gen_random_uuid(), "
+                "runtime_owner=gen_random_uuid() "
                 "WHERE id = %s",
                 (agent_id,),
             )

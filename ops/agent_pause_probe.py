@@ -92,8 +92,8 @@ def _root_unit(unit_id: str) -> dict[str, object] | None:
     unreachable root reads as "no unit", the conservative rule `host_running`
     applies too: a claim the root cannot make is not made.
     """
-    from services.ava_root.client import RootClient, RootClientError
     from shared.paths import root_run_dir
+    from shared.root_control.client import RootClient, RootClientError
 
     try:
         response = RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=2.0).status()
