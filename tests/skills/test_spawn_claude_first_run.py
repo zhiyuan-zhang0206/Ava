@@ -422,3 +422,41 @@ def test_existing_file_keeps_its_permissions(tmp_path: Path) -> None:
     _settings(home).chmod(0o640)
     spawn_claude._preset_claude_first_run(home)
     assert stat.S_IMODE(_settings(home).stat().st_mode) == 0o640
+
+
+_PANEL_2_1_283 = (
+    " ▐▛███▜▌   Claude Code v2.1.283\n"
+    "▝▜█████▛▘  Opus 5.5 (1M context)\n"
+    "  ~/.ava-previews/run/home/workspaces/4\n"
+    "────────────\n"
+    "\u276f\n"
+    "────────────\n"
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n"
+)
+
+
+def test_ready_accepts_bare_composer_of_recorded_claude_2_1_283_panel() -> None:
+    # Captures strip trailing blanks, so the empty composer is a lone glyph.
+    assert spawn_claude._claude_ui_ready(_PANEL_2_1_283)
+
+
+def test_signed_out_claude_fails_fast_instead_of_timing_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    panel = _PANEL_2_1_283.replace(
+        "\u276f\n",
+        "\u23fa Monitor ended\n  ⎿  Not logged in · Please run /login\n\u276f\n",
+    )
+
+    def _capture(_sid: int, *, scrollback: bool) -> str:
+        assert scrollback is False
+        return panel
+
+    def _no_sleep(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(spawn_claude.ava.shell.sessions, "capture", _capture)
+    monkeypatch.setattr(spawn_claude.time, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="not logged in on this host"):
+        spawn_claude._wait_for_ready(7, timeout=30)

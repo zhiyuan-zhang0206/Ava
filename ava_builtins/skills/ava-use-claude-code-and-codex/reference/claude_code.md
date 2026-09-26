@@ -6,8 +6,11 @@ first-run dialogs (bypass-permissions confirmation + fullscreen upsell;
 persisted into `~/.claude/settings.json` / `~/.claude.json`, backed up and
 idempotent) so an unattended spawn cannot park on one, and sends the
 contract message. The session resolves `claude` from its PATH, then tries
-`$HOME/.local/bin/claude`. If Claude's UI does not appear, the launcher stops
-before sending the contract or takeover bootstrap:
+`$HOME/.local/bin/claude`. If Claude's UI does not appear, or it renders
+signed out ("Not logged in"), the launcher stops before sending the contract
+or takeover bootstrap. The standalone CLI keeps its own login, separate from a
+desktop app's; run `claude auth login` once as the host user
+(`claude auth status` shows it):
 
 ```bash
 .venv/bin/python reference/spawn_claude.py <workspace-dir>
