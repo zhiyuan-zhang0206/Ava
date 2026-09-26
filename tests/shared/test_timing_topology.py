@@ -54,11 +54,30 @@ def test_checker_catches_derived_violation(monkeypatch: pytest.MonkeyPatch) -> N
     assert any("WEDGED_AGE_SEC >= EXEC_NODE_TIMEOUT_S" in f for f in failures)
 
 
-def test_checker_catches_scaled_eq_violation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A lease TTL that drifts off its 10x renewal ratio must be reported."""
-    monkeypatch.setattr(deploy, "AGENT_LEASE_TTL_S", 700.0)  # not 10 x 60
+def test_checker_catches_scaled_violation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A lease TTL shorter than ten renewal beats must be reported."""
+    monkeypatch.setattr(deploy, "AGENT_LEASE_TTL_S", 9 * deploy.AGENT_LEASE_RENEW_INTERVAL_S)
     failures = validate_clock_lattice()
-    assert any("AGENT_LEASE_TTL_S == 10 * AGENT_LEASE_RENEW_INTERVAL_S" in f for f in failures)
+    assert any("AGENT_LEASE_TTL_S >= 10 * AGENT_LEASE_RENEW_INTERVAL_S" in f for f in failures)
+
+
+def test_legacy_adoption_silence_is_floored_by_the_renewal_beat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slower beat that would let a live predecessor read as silent is reported."""
+    monkeypatch.setattr(deploy, "AGENT_LEASE_RENEW_INTERVAL_S", 20.0)
+    failures = validate_clock_lattice()
+    assert any(
+        "LEGACY_HOST_ADOPTION_SILENCE_S >= 4 * AGENT_LEASE_RENEW_INTERVAL_S" in f for f in failures
+    )
+
+
+def test_renewal_clock_is_the_agent_hosts_actual_beat() -> None:
+    """The lattice must check the renewal beat that runs, not a second number
+    (it once registered 60 s while the agent host renewed every 15 s)."""
+    from services.agent_host import daemon as agent_host_daemon
+
+    assert CLOCKS["AGENT_LEASE_RENEW_INTERVAL_S"].get() == agent_host_daemon._LIVENESS_BEAT_STEP_S
 
 
 def test_assert_clock_lattice_raises_on_violation(monkeypatch: pytest.MonkeyPatch) -> None:

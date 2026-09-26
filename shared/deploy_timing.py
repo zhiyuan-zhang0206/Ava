@@ -52,9 +52,16 @@ NO_PROGRESS_TIMEOUT_S = 900.0
 # single-row UPDATEs rather than a poll-rate write stream.
 LEASE_RENEW_INTERVAL_S = 60.0
 
+# How often the agent host renews its hosted agents' leases: the one ownership
+# beat of `services/agent_host/daemon.py` (`_beat_forever`), which sleeps exactly
+# this long between renewals and uses this constant as its step, so the lattice
+# checks the beat that actually runs.
+AGENT_LEASE_RENEW_INTERVAL_S = 15.0
+
 # The hosted agent ownership lease: `agents_meta.lease_expires_at`.
-# TTL = 10x the renewal interval, so transient DB renewal failures do not
-# immediately relinquish a live turn. Expiry bounds crash recovery.
+# Forty renewal beats (the lattice floor is ten), so transient DB renewal
+# failures do not immediately relinquish a live turn. Expiry bounds crash
+# recovery.
 AGENT_LEASE_TTL_S = 600.0
 
 # How long a crash-marked idling row may sit dead before the agent_host beat's
@@ -64,13 +71,12 @@ AGENT_LEASE_TTL_S = 600.0
 # claim-park window after a fatal abort (~4 min observed on the 5858 corpse),
 # so a still-running parked row is never raced.
 CORPSE_REAP_GRACE_S = 900.0
-AGENT_LEASE_RENEW_INTERVAL_S = 60.0
 
 # How much renewal silence a legacy (NULL-resource) hosted row must show before
 # a same-machine successor may replace its owner without waiting the full
 # `AGENT_LEASE_TTL_S` (issue #2156). The hosted ownership beat renews leases
-# every 15 s (`services/agent_host/daemon.py` `_LIVENESS_BEAT_STEP_S`), so this
-# is four missed beats — the same "the host stopped beating" idiom as the
+# every `AGENT_LEASE_RENEW_INTERVAL_S`, so this is four missed beats (a lattice
+# floor) — the same "the host stopped beating" idiom as the
 # turn-progress heartbeat TTL — while staying far inside the lease TTL the
 # fence still protects. Silence is only one probe of the evidence set; the
 # others (no live same-home host daemon, no live exec child of the agent) are

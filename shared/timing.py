@@ -117,7 +117,7 @@ CLOCKS: dict[str, Clock] = {
     "AGENT_LEASE_RENEW_INTERVAL_S": Clock(
         "agent-lease",
         lambda: deploy.AGENT_LEASE_RENEW_INTERVAL_S,
-        "how often a healthy agent renews its lease",
+        "the agent host's ownership beat: how often it renews hosted agent leases",
     ),
     "LEGACY_HOST_ADOPTION_SILENCE_S": Clock(
         "agent-lease",
@@ -217,11 +217,19 @@ CONSTRAINTS: list[Constraint] = [
     ),
     # --- agent-lease family ---
     Constraint(
-        "==",
+        ">=",
         "AGENT_LEASE_TTL_S",
         "10 * AGENT_LEASE_RENEW_INTERVAL_S",
-        "TTL = 10x the renewal interval, so a transient renewal blip never reads "
-        "as death against the reaper cadence",
+        "the lease must outlive at least ten missed renewal beats, so a transient "
+        "renewal blip never reads as death against the reaper cadence",
+    ),
+    Constraint(
+        ">=",
+        "LEGACY_HOST_ADOPTION_SILENCE_S",
+        "4 * AGENT_LEASE_RENEW_INTERVAL_S",
+        "legacy adoption needs four missed renewal beats of silence, so a live "
+        "predecessor between two beats (or behind one slow renewal) never reads "
+        "as silent",
     ),
     Constraint(
         "<",

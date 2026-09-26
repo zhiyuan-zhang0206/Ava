@@ -76,6 +76,7 @@ from shared.daemon_health import (
 )
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
 from shared.daemon_shutdown import hard_exit as _hard_exit
+from shared.deploy_timing import AGENT_LEASE_RENEW_INTERVAL_S
 from shared.exec_request_evidence import disposition_hint
 from shared.helper_chain_guard import parent_chain_intact
 from shared.hosted_force import recover_orphaned_hosted_forces
@@ -89,9 +90,10 @@ _log = logging.getLogger("services.agent_host.daemon")
 _MODULE = "services.agent_host.daemon"
 _PIDFILE = settings.services.agent_host_pidfile
 
-# A fixed timer proves liveness even when no agent has work.
+# A fixed timer proves liveness even when no agent has work. The same beat
+# renews hosted agent leases, so its step IS the lattice's renewal interval.
 _LIVENESS_TIMEOUT_S = 60.0
-_LIVENESS_BEAT_STEP_S = 15.0
+_LIVENESS_BEAT_STEP_S = AGENT_LEASE_RENEW_INTERVAL_S
 _OWNERSHIP_RENEW_TIMEOUT_S = 10.0
 # Gateway key presence proves the 15s host loop runs; four missed beats expire it.
 _TURN_PROGRESS_HEARTBEAT_TTL_S = 60
