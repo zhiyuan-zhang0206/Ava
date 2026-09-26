@@ -1,15 +1,14 @@
-"""Locality rules coverage: package doors (Rule 4) and single decision owners (Rule 5)."""
+"""Unit coverage for scripts/structure/locality.py: package doors (Rule 4) and
+single decision owners (Rule 5), exercised directly against the module's
+functions (no lcs.main, no git — see test_locality_gate.py for that)."""
 
 from __future__ import annotations
 
 import ast
-import json
 import pathlib
-import subprocess
 
 import pytest
 
-from scripts import lint_code_structure as lcs
 from scripts.structure import locality
 
 
@@ -24,67 +23,7 @@ def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
     return path
 
 
-def _baseline(
-    root: pathlib.Path,
-    *,
-    files: dict[str, int] | None = None,
-    directories: dict[str, int] | None = None,
-    complexity: dict[str, int] | None = None,
-    nesting: dict[str, int] | None = None,
-    private_imports: dict[str, int] | None = None,
-    owner_bypasses: dict[str, int] | None = None,
-) -> pathlib.Path:
-    path = root / "scripts/structure/baseline.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "directories": directories or {},
-                "files": files or {},
-                "complexity": complexity or {},
-                "nesting": nesting or {},
-                "private_imports": private_imports or {},
-                "owner_bypasses": owner_bypasses or {},
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return path
-
-
-def _git(root: pathlib.Path, *args: str) -> None:
-    subprocess.run(  # noqa: S603 — arguments are fixed test commands, never external input.
-        [
-            "git",
-            "-C",
-            str(root),
-            "-c",
-            "user.name=Structure gate test",
-            "-c",
-            "user.email=structure-test@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-            *args,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
-@pytest.fixture
-def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
-    """A repo root wired to lcs._REPO_ROOT, with an all-empty baseline already in place."""
-    monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
-    monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
-    _baseline(tmp_path)
-    return tmp_path
-
-
-# --- private_imports: package doors -----------------------------------------
+# --- private_imports: basic owner resolution ---------------------------------
 
 
 def test_reach_in_from_outside_owner_is_flagged(tmp_path: pathlib.Path) -> None:
@@ -121,6 +60,33 @@ def test_module_level_private_name_owner_is_the_modules_package(tmp_path: pathli
     assert locality.private_imports(tree, "c/importer.py", ("a", "c"), tmp_path) == {
         "c/importer.py::a.b._fn": [1]
     }
+
+
+def test_module_file_owner_wins_over_a_same_named_docs_directory(tmp_path: pathlib.Path) -> None:
+    """A leftover OKF docs folder or __pycache__ beside a module must not flip
+    the owner from "module" to "package": Python-style resolution (`<prefix>.py`
+    is a file) wins over the coincidental directory of the same name."""
+    _write(tmp_path, "a/b.py", "def _fn(): ...\n")
+    _write(tmp_path, "a/b/b.ava.okf.md", "# docs\n")
+    tree = _parse("from a.b import _fn\n")
+
+    assert locality.private_imports(tree, "a/c.py", ("a",), tmp_path) == {}
+    assert locality.private_imports(tree, "z/y.py", ("a", "z"), tmp_path) == {
+        "z/y.py::a.b._fn": [1]
+    }
+
+
+def test_dot_boundary_a_sibling_package_prefix_match_is_still_flagged(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Owner `a.b` must not match importer `a.bc` on a raw string prefix —
+    `a.bc` is a sibling of `a.b`, not one of its subpackages."""
+    _write(tmp_path, "a/b/_x.py", "y = 1\n")
+    tree = _parse("from a.b import _x\n")
+
+    sites = locality.private_imports(tree, "a/bc/m.py", ("a",), tmp_path)
+
+    assert sites == {"a/bc/m.py::a.b._x": [1]}
 
 
 def test_relative_import_resolved_against_importer_stays_inside_owner(
@@ -166,76 +132,218 @@ def test_multiple_private_names_from_one_module_count_as_one_site(
     assert sites == {"e/importer.py::a._b": [1]}
 
 
+# --- private_imports: attribute reach-ins on an imported module alias -------
+
+
+def _shared_lm_and_db(tmp_path: pathlib.Path) -> None:
+    _write(tmp_path, "shared/lm/_effort.py", "x = 1\n")
+    _write(tmp_path, "shared/db.py", "class Foo:\n    _x = 1\n\n\ndef _restore(): ...\n")
+
+
+def test_attribute_reach_in_via_import_module(tmp_path: pathlib.Path) -> None:
+    _shared_lm_and_db(tmp_path)
+    tree = _parse("import shared.lm\nshared.lm._effort.x\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
+
+    assert sites == {"gateway/x.py::shared.lm._effort": [2]}
+
+
+def test_attribute_reach_in_via_from_import_package(tmp_path: pathlib.Path) -> None:
+    _shared_lm_and_db(tmp_path)
+    tree = _parse("from shared import lm\nlm._effort\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
+
+    assert sites == {"gateway/x.py::shared.lm._effort": [2]}
+
+
+def test_attribute_reach_in_via_from_import_module(tmp_path: pathlib.Path) -> None:
+    _shared_lm_and_db(tmp_path)
+    tree = _parse("from shared import db\ndb._restore()\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
+
+    assert sites == {"gateway/x.py::shared.db._restore": [2]}
+
+
+def test_attribute_on_an_imported_class_is_not_a_module_reach_in(tmp_path: pathlib.Path) -> None:
+    """`Foo` is bound to a class, not a module or package on disk, so its
+    private attribute is out of Rule 4's reach."""
+    _shared_lm_and_db(tmp_path)
+    tree = _parse("from shared.db import Foo\nFoo._x\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path) == {}
+
+
+def test_attribute_chain_past_a_class_stops_at_the_module_boundary(
+    tmp_path: pathlib.Path,
+) -> None:
+    _shared_lm_and_db(tmp_path)
+    tree = _parse("from shared import db\ndb.Foo._x\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path) == {}
+
+
+def test_an_unbound_local_attribute_is_never_a_reach_in(tmp_path: pathlib.Path) -> None:
+    tree = _parse("obj._x\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path) == {}
+
+
+def test_attribute_reach_in_from_inside_the_owner_is_not_flagged(tmp_path: pathlib.Path) -> None:
+    _shared_lm_and_db(tmp_path)
+    tree = _parse("import shared.lm\nshared.lm._effort.x\n")
+
+    assert locality.private_imports(tree, "shared/lm/other.py", ("shared",), tmp_path) == {}
+
+
+def test_a_long_attribute_chain_counts_the_site_once(tmp_path: pathlib.Path) -> None:
+    _shared_lm_and_db(tmp_path)
+    tree = _parse("import shared.lm\nshared.lm._effort.a.b\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
+
+    assert sites == {"gateway/x.py::shared.lm._effort": [2]}
+
+
+# --- private_imports: FRAMEWORK_TIERS ----------------------------------------
+
+
+def test_framework_tier_import_from_is_not_flagged(tmp_path: pathlib.Path) -> None:
+    _write(tmp_path, "ava/_boot.py", "x = 1\n")
+    tree = _parse("from ava import _boot\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path) == {}
+
+
+def test_framework_tier_attribute_reach_in_is_not_flagged(tmp_path: pathlib.Path) -> None:
+    _write(tmp_path, "ava/_boot.py", "def f(): ...\n")
+    tree = _parse("import ava\nava._boot.f()\n")
+
+    assert locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path) == {}
+
+
+def test_a_nested_package_under_the_tier_is_not_itself_a_tier(tmp_path: pathlib.Path) -> None:
+    """`ava.shell` is not a FRAMEWORK_TIERS entry (only the bare `ava` root is);
+    a private submodule owned by `ava.shell` is a normal package door."""
+    _write(tmp_path, "ava/shell/_x.py", "y = 1\n")
+    tree = _parse("from ava.shell import _x\n")
+
+    sites = locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path)
+
+    assert sites == {"gateway/x.py::ava.shell._x": [1]}
+
+
 # --- owner_bypasses: the postgres-dial single decision owner ----------------
 
 _POSITIVE_DIALS = {
     "module_connect": "import psycopg\npsycopg.connect('dsn')\n",
     "aliased_module_connect": "import psycopg as pg\npg.connect('dsn')\n",
-    "from_connection_connect": "from psycopg import Connection\nConnection.connect('dsn')\n",
+    "from_connect_function": "from psycopg import connect\nconnect()\n",
+    "aliased_connect_function": "from psycopg import connect as c\nc()\n",
     "from_async_connection_connect": (
-        "from psycopg import AsyncConnection\nAsyncConnection.connect('dsn')\n"
+        "from psycopg import AsyncConnection\nAsyncConnection.connect()\n"
     ),
-    "qualified_async_connection_connect": (
-        "import psycopg\npsycopg.AsyncConnection.connect('dsn')\n"
+    "qualified_async_connection_connect": "import psycopg\npsycopg.AsyncConnection.connect()\n",
+    "connection_pool": "from psycopg_pool import ConnectionPool\nConnectionPool()\n",
+    "subscripted_aliased_async_connection_pool": (
+        "from psycopg_pool import AsyncConnectionPool as P\nP[int]()\n"
     ),
-    "connection_pool": "from psycopg_pool import ConnectionPool\nConnectionPool('dsn')\n",
-    "subscripted_async_connection_pool": (
-        "from psycopg_pool import AsyncConnectionPool\nAsyncConnectionPool[int]('dsn')\n"
+    "qualified_pool_module_connection_pool": (
+        "import psycopg_pool\npsycopg_pool.ConnectionPool()\n"
     ),
 }
 
 
 @pytest.mark.parametrize("source", _POSITIVE_DIALS.values(), ids=_POSITIVE_DIALS.keys())
 def test_postgres_dial_forms_are_flagged(source: str) -> None:
-    sites = locality.owner_bypasses(_parse(source), "gateway/db.py")
+    sites = locality.owner_bypasses(_parse(source), "gateway/db.py", ())
 
     assert sites == {"gateway/db.py::postgres-dial": [2]}
+
+
+def test_governed_subclass_construction_is_a_dial() -> None:
+    """This repo's own pool subclasses (e.g. agent/db.py's LoggingConnectionPool)
+    are governed reach-ins too, not just the psycopg_pool names themselves."""
+    source = "from agent.db import LoggingConnectionPool\nLoggingConnectionPool[int]('dsn')\n"
+
+    sites = locality.owner_bypasses(_parse(source), "gateway/db.py", ("agent", "gateway"))
+
+    assert sites == {"gateway/db.py::postgres-dial": [2]}
+
+
+def test_ungoverned_subclass_construction_is_not_a_dial() -> None:
+    source = "from somepkg.db import LoggingConnectionPool\nLoggingConnectionPool()\n"
+
+    sites = locality.owner_bypasses(_parse(source), "gateway/db.py", ("agent", "gateway"))
+
+    assert sites == {}
+
+
+def test_a_locally_defined_pool_subclass_is_a_dial() -> None:
+    source = (
+        "from psycopg_pool import AsyncConnectionPool\n"
+        "class P(AsyncConnectionPool[int]):\n"
+        "    pass\n\n\n"
+        "P()\n"
+    )
+
+    sites = locality.owner_bypasses(_parse(source), "gateway/db.py", ())
+
+    assert sites == {"gateway/db.py::postgres-dial": [6]}
 
 
 _NEGATIVE_DIALS = {
     "sqlite3_connect": "import sqlite3\nsqlite3.connect('file.db')\n",
     "connection_from_a_non_psycopg_module": (
-        "from somewhere import Connection\nConnection.connect()\n"
+        "from mylib import Connection\nConnection.connect()\n"
     ),
     "pool_method_call": (
         "from psycopg_pool import ConnectionPool\nConnectionPool.check_connection('x')\n"
     ),
+    "unbound_redis_attribute_pool": "import redis\nredis.ConnectionPool()\n",
+    "ungoverned_third_party_pool": "from redis import ConnectionPool\nConnectionPool()\n",
+    "unbound_urllib3_https_pool": "import urllib3\nurllib3.HTTPSConnectionPool('h')\n",
+    "pool_timeout_from_import": "from psycopg_pool import PoolTimeout\nPoolTimeout()\n",
+    "pool_timeout_qualified": "import psycopg_pool\npsycopg_pool.PoolTimeout()\n",
     "bare_annotation": "from psycopg import Connection\ndef f(conn: Connection) -> None: ...\n",
 }
 
 
 @pytest.mark.parametrize("source", _NEGATIVE_DIALS.values(), ids=_NEGATIVE_DIALS.keys())
 def test_non_dial_calls_are_not_flagged(source: str) -> None:
-    assert locality.owner_bypasses(_parse(source), "gateway/db.py") == {}
+    assert locality.owner_bypasses(_parse(source), "gateway/db.py", ()) == {}
 
 
 def test_the_owner_module_itself_is_exempt() -> None:
     tree = _parse("import psycopg\npsycopg.connect('dsn')\n")
 
-    assert locality.owner_bypasses(tree, "shared/db_connections.py") == {}
+    assert locality.owner_bypasses(tree, "shared/db_connections.py", ()) == {}
 
 
-# --- measure: test files are exempt from both rules --------------------------
-
-_REACHES_AND_DIALS = "import a._priv.mod\nimport psycopg\npsycopg.connect('dsn')\n"
+# --- measure: test *directories* are exempt, test-prefixed files are not ----
 
 
-@pytest.mark.parametrize(
-    "rel_path",
-    ["tests/gateway/db.py", "gateway/test_db.py", "gateway/db_test.py", "tests/db.py"],
-)
-def test_measure_exempts_test_files(tmp_path: pathlib.Path, rel_path: str) -> None:
+def test_test_directory_is_exempt_but_a_test_prefixed_governed_file_is_scanned(
+    tmp_path: pathlib.Path,
+) -> None:
     _write(tmp_path, "a/_priv/mod.py", "x = 1\n")
+    tree = _parse("import a._priv.mod\n")
 
-    measured = locality.measure(_parse(_REACHES_AND_DIALS), rel_path, ("a",), tmp_path)
+    assert locality.measure(tree, "gateway/tests/x.py", ("a",), tmp_path) == {
+        "private_imports": {},
+        "owner_bypasses": {},
+    }
+    measured = locality.measure(tree, "gateway/test_db.py", ("a",), tmp_path)
+    assert measured["private_imports"] == {"gateway/test_db.py::a._priv": [1]}
 
-    assert measured == {"private_imports": {}, "owner_bypasses": {}}
 
-
-def test_measure_scans_non_test_files(tmp_path: pathlib.Path) -> None:
+def test_measure_scans_a_non_test_file_for_both_rules(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, "a/_priv/mod.py", "x = 1\n")
+    source = "import a._priv.mod\nimport psycopg\npsycopg.connect('dsn')\n"
 
-    measured = locality.measure(_parse(_REACHES_AND_DIALS), "gateway/db.py", ("a",), tmp_path)
+    measured = locality.measure(_parse(source), "gateway/db.py", ("a",), tmp_path)
 
     assert measured["private_imports"] == {"gateway/db.py::a._priv": [1]}
     assert measured["owner_bypasses"] == {"gateway/db.py::postgres-dial": [3]}
@@ -270,7 +378,7 @@ def test_site_errors_flags_a_brand_new_site(tmp_path: pathlib.Path) -> None:
     )
 
     assert len(errors) == 1
-    assert errors[0].startswith("gateway/db.py:5: imports private `a._priv`")
+    assert errors[0].startswith("gateway/db.py:5: reaches private `a._priv`")
     assert "grew above" not in errors[0]
     assert "renamed file" not in errors[0]
 
@@ -354,7 +462,7 @@ def test_site_errors_new_site_on_a_renamed_file_gets_a_migration_hint(
     assert "grew above" not in errors[0]
 
 
-# --- allowlist_errors: a listed exemption must still bypass the owner -------
+# --- allowlist_errors / missing_allowlist_errors -----------------------------
 
 
 def test_allowlist_entry_is_stale_once_the_module_stops_bypassing(
@@ -362,13 +470,13 @@ def test_allowlist_entry_is_stale_once_the_module_stops_bypassing(
 ) -> None:
     decision = locality.Decision(
         owners=frozenset({"shared/owner.py"}),
-        find=lambda _tree: [],
+        find=lambda _tree, _roots: [],
         fix="use the owner",
         allowed={"gateway/legacy.py": "historical exemption"},
     )
     monkeypatch.setattr(locality, "DECISIONS", {"fake-decision": decision})
 
-    errors = locality.allowlist_errors(_parse("x = 1\n"), "gateway/legacy.py")
+    errors = locality.allowlist_errors(_parse("x = 1\n"), "gateway/legacy.py", ())
 
     assert len(errors) == 1
     lineno, message = errors[0]
@@ -382,24 +490,57 @@ def test_allowlist_entry_is_not_stale_while_it_still_bypasses(
 ) -> None:
     decision = locality.Decision(
         owners=frozenset({"shared/owner.py"}),
-        find=lambda _tree: [3],
+        find=lambda _tree, _roots: [3],
         fix="use the owner",
         allowed={"gateway/legacy.py": "historical exemption"},
     )
     monkeypatch.setattr(locality, "DECISIONS", {"fake-decision": decision})
 
-    assert locality.allowlist_errors(_parse("x = 1\n"), "gateway/legacy.py") == []
+    assert locality.allowlist_errors(_parse("x = 1\n"), "gateway/legacy.py", ()) == []
 
 
 def test_allowlist_errors_ignore_modules_outside_the_allowed_map(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     decision = locality.Decision(
-        owners=frozenset(), find=lambda _tree: [], fix="use the owner", allowed={}
+        owners=frozenset(), find=lambda _tree, _roots: [], fix="use the owner", allowed={}
     )
     monkeypatch.setattr(locality, "DECISIONS", {"fake-decision": decision})
 
-    assert locality.allowlist_errors(_parse("x = 1\n"), "gateway/other.py") == []
+    assert locality.allowlist_errors(_parse("x = 1\n"), "gateway/other.py", ()) == []
+
+
+def test_missing_allowlist_errors_flags_a_deleted_allowed_path(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decision = locality.Decision(
+        owners=frozenset(),
+        find=lambda _tree, _roots: [],
+        fix="use the owner",
+        allowed={"gateway/gone.py": "historical exemption"},
+    )
+    monkeypatch.setattr(locality, "DECISIONS", {"fake-decision": decision})
+
+    errors = locality.missing_allowlist_errors(tmp_path)
+
+    assert len(errors) == 1
+    assert "gateway/gone.py:1: stale fake-decision allowlist entry" in errors[0]
+    assert "the module no longer exists" in errors[0]
+
+
+def test_missing_allowlist_errors_is_clean_for_an_existing_path(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "gateway/present.py", "x = 1\n")
+    decision = locality.Decision(
+        owners=frozenset(),
+        find=lambda _tree, _roots: [],
+        fix="use the owner",
+        allowed={"gateway/present.py": "historical exemption"},
+    )
+    monkeypatch.setattr(locality, "DECISIONS", {"fake-decision": decision})
+
+    assert locality.missing_allowlist_errors(tmp_path) == []
 
 
 # --- validate_entries: baseline schema rejections ----------------------------
@@ -456,73 +597,32 @@ def test_validate_owner_bypasses_accepts_a_known_decision_name() -> None:
     locality.validate_entries("owner_bypasses", {"a/mod.py::postgres-dial": 1}, ("a",))
 
 
-# --- end-to-end through lcs.main ---------------------------------------------
+# --- unpaired_additions: leaf-name pairing for the base-revision guard ------
 
 
-def test_a_new_reach_in_fails_the_gate(
-    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._priv import mod\n")
+def test_unpaired_additions_same_file_same_leaf_pairs() -> None:
+    previous = {"gateway/db.py::shared._old": 2}
+    current = {"gateway/db.py::shared.sub._old": 2}
 
-    assert lcs.main([]) == 1
-    output = capsys.readouterr().out
-    assert "gateway/importer.py:1:" in output
-    assert "imports private `shared._priv`" in output
+    assert locality.unpaired_additions(current, previous) == []
 
 
-def test_the_same_reach_in_frozen_in_the_baseline_passes(
-    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._priv import mod\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
+def test_unpaired_additions_same_file_different_leaf_does_not_pair() -> None:
+    previous = {"gateway/db.py::shared._old": 2}
+    current = {"gateway/db.py::shared._new": 2}
 
-    assert lcs.main([]) == 0
-    assert capsys.readouterr().out == ""
+    assert locality.unpaired_additions(current, previous) == ["gateway/db.py::shared._new"]
 
 
-def test_removing_the_reach_in_but_keeping_the_entry_fails_as_stale(
-    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "value = 1\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
+def test_unpaired_additions_different_file_does_not_pair() -> None:
+    previous = {"gateway/db.py::shared._old": 2}
+    current = {"other/db.py::shared._old": 2}
 
-    assert lcs.main([]) == 1
-    output = capsys.readouterr().out
-    assert "stale private_imports entry gateway/importer.py::shared._priv" in output
-    assert "remove it" in output
+    assert locality.unpaired_additions(current, previous) == ["other/db.py::shared._old"]
 
 
-def test_baseline_guard_rejects_an_unpaired_new_private_imports_key(
-    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _git(_repo, "init", "--quiet")
-    _git(_repo, "add", "scripts/structure/baseline.json")
-    _git(_repo, "commit", "--quiet", "-m", "Freeze empty baseline")
+def test_unpaired_additions_value_above_the_removed_one_does_not_pair() -> None:
+    previous = {"gateway/db.py::shared._old": 1}
+    current = {"gateway/db.py::shared.sub._old": 2}
 
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._priv import mod\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
-
-    assert lcs.main([]) == 1
-    output = capsys.readouterr().out
-    assert "added private_imports entry gateway/importer.py::shared._priv" in output
-    assert "added key without a paired same-file removal" in output
-
-
-def test_baseline_guard_accepts_a_same_file_pairing(
-    _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._old": 1})
-    _git(_repo, "init", "--quiet")
-    _git(_repo, "add", "scripts/structure/baseline.json")
-    _git(_repo, "commit", "--quiet", "-m", "Freeze the old reach-in")
-
-    _write(_repo, "shared/_new/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._new import mod\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._new": 1})
-
-    assert lcs.main([]) == 0
-    assert capsys.readouterr().out == ""
+    assert locality.unpaired_additions(current, previous) == ["gateway/db.py::shared.sub._old"]
