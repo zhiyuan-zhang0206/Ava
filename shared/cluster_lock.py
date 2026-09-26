@@ -312,8 +312,8 @@ def acquire_update_lock(
 ) -> bool:
     """Take the single cluster update lock for `holder`. Returns True if acquired
     (the row was free, or a previous holder's TTL had expired), False if a *live*
-    holder still holds it or a durable pending publication requires its own exact
-    recovery. The conditional UPDATE is the atomic compare-and-set.
+    holder still holds it or a durable pending publication is recorded (only the
+    cutover repair resolves it). The conditional UPDATE is the atomic compare-and-set.
 
     `kind` names what kind of orchestration is starting (rollout / restart /
     update) — the explicit-model replacement for session-name probing. The
@@ -414,12 +414,24 @@ def renew_update_lock(holder: str, *, ttl_s: float = LOCK_TTL_S) -> bool:
     return renewed
 
 
+# The managed-writer publication producer and its checked recovery were retired
+# with the in-place updater, so nothing in the tree clears a recorded pending
+# publication: the fence keeps refusing until an operator resolves the record as
+# part of the one-time cutover. Every refusal names that durable fact and its
+# owner instead of a recovery verb.
+_PENDING_PUBLICATION_REPAIR = (
+    "a durable pending managed-writer publication is recorded in "
+    "deployment_state.managed_writer_evidence->'pending'; no command clears it — "
+    "resolving it is a manual cutover repair (future/infra/unified-cluster-lifecycle.md)"
+)
+
+
 def _transition_refusal_reason(cur: Any, holder: str) -> str:
     """Name the scenario that blocked a holder-scoped lease transition.
 
     `rowcount == 0` from the guarded transitions has two distinct causes (task
-    #2683): a durable pending publication holds the row back until its checked
-    protocol clears it, or the row is no longer this holder's lease — reclaimed
+    #2683): a durable pending publication holds the row back until the cutover
+    repair resolves it, or the row is no longer this holder's lease — reclaimed
     past TTL because the caller outran `LOCK_TTL_S`, or two orchestrations ran
     concurrently. The caller's WARNING says which one it actually was; read the
     guard state on the failure path only, the transition itself stays one
@@ -434,8 +446,8 @@ def _transition_refusal_reason(cur: Any, holder: str) -> str:
     if row is not None:
         if not bool(row[1]):
             return (
-                "a durable pending publication refuses the transition "
-                "(its checked protocol must clear pending first)"
+                "a durable pending publication refuses the transition: "
+                f"{_PENDING_PUBLICATION_REPAIR}"
             )
         if row[0] != holder:
             return (
@@ -450,11 +462,10 @@ def _acquire_refusal_reason(cur: Any) -> str:
 
     Two causes share the guard (the sibling of the release/settle diagnostics,
     task #2683): a live holder, or a durable pending managed-writer publication
-    whose checked recovery must run before any new update can start. When both
-    are present the live holder leads — a rollout that opened its journal is
-    normally still running, and `recover-pending` would refuse on that live
-    process anyway — with the pending recovery named as the follow-up for the
-    case where that rollout never completes.
+    that refuses every new acquire until the cutover repair resolves it. When
+    both are present the live holder leads — a holder that opened its journal is
+    normally still running — with the pending record named as the follow-up
+    fact for the case where that holder never completes.
     """
     cur.execute(
         "SELECT holder, "
@@ -468,17 +479,10 @@ def _acquire_refusal_reason(cur: Any) -> str:
     pending_present = not bool(row[1])
     if row[2]:
         if pending_present:
-            return (
-                f"a live holder exists ({row[0]}); a durable pending publication is also "
-                "journaled and will need its checked recovery (`ava cluster recover-pending`) "
-                "if that rollout does not complete"
-            )
+            return f"a live holder exists ({row[0]}); {_PENDING_PUBLICATION_REPAIR}"
         return f"a live holder exists ({row[0]})"
     if pending_present:
-        return (
-            "a durable pending publication requires its checked recovery first "
-            "(`ava cluster recover-pending`)"
-        )
+        return _PENDING_PUBLICATION_REPAIR
     return "the guarded row no longer matched at write time"
 
 
@@ -486,11 +490,11 @@ def update_lock_refusal_detail() -> str:
     """The operator sentence for a refused `acquire_update_lock`.
 
     A live holder leads even when a durable pending managed-writer publication
-    is also journaled (wait it out, or `ava cluster recover` once its process is
-    provably gone; `recover-pending` refuses on a live process), with the
-    pending recovery named as the follow-up for the case where that rollout
-    never completes. A pending-only row keeps the recovery sentence, and a row
-    that is already free is a racing acquire. Read-only companion of
+    is also recorded (wait it out, or `ava cluster recover` once its process is
+    provably gone), with the pending record named as the follow-up fact. A
+    pending-only row names the record and its owner (no command clears it; the
+    cutover repair does), and a row that is already free is a racing acquire.
+    Read-only companion of
     `update_lock_holder`, for callers that print the refusal instead of logging
     it.
     """
@@ -507,20 +511,15 @@ def update_lock_refusal_detail() -> str:
     if lease_live:
         if not pending_absent:
             return (
-                f"another cluster update is in progress (held by {holder}); a durable pending "
-                "publication is also journaled — if that rollout does not complete it, its "
-                "checked recovery (`ava cluster recover-pending`) must clear it first; aborting"
+                f"another cluster update is in progress (held by {holder}); "
+                f"{_PENDING_PUBLICATION_REPAIR}; aborting"
             )
         return (
             f"another cluster update is in progress (held by {holder}); aborting "
             "(the lock auto-expires after its TTL if that holder crashed)"
         )
     if not pending_absent:
-        return (
-            "another cluster update is in progress — a durable pending publication from an "
-            "interrupted rollout requires its checked recovery first "
-            "(`ava cluster recover-pending`); aborting"
-        )
+        return f"{_PENDING_PUBLICATION_REPAIR}; aborting"
     return "another orchestration just took the cluster update lock; aborting"
 
 
@@ -528,7 +527,7 @@ def release_update_lock(holder: str) -> None:
     """Release the lock iff `holder` still holds it — a no-op when another holder
     has since reclaimed it past a TTL expiry, so a slow release never clobbers a
     newer owner's lock. Durable pending publication also refuses this generic
-    release; its checked protocol must clear pending before the lease can end.
+    release; the lease cannot end until the cutover repair resolves pending.
     """
     # direct=True: this release must land even when the data-plane stop this
     # rollout just ran left the pooler half-shut — the write cannot depend on
@@ -546,7 +545,7 @@ def release_update_lock(holder: str) -> None:
             logger.info("[cluster-lock] released by {holder}", holder=holder)
         else:
             # The guarded UPDATE refused. Either a durable pending publication held
-            # the row back (its checked protocol must clear pending first), or the
+            # the row back (only the cutover repair resolves pending), or the
             # lease is no longer this holder's — reclaimed past TTL because the
             # rollout outran LOCK_TTL_S (or two ran concurrently). Surface which one
             # it actually was rather than swallow either: the first is the designed
@@ -576,9 +575,9 @@ def claim_recovery_lock(
     """CAS-claim the deploy row for one short recovery critical section.
 
     ``observed=None`` may claim only a still-free/expired row with no durable
-    pending publication. A pending publication has an independent exact
-    predecessor/closure recovery protocol and outlives lease expiry; generic
-    recovery must not strand it by replacing its holder. A dead live lease may
+    pending publication. A pending publication outlives lease expiry and has no
+    in-tree recovery (the cutover repair resolves it); generic recovery must not
+    strand it by replacing its holder. A dead live lease may
     be replaced only while both its holder and ``acquired_at`` still match the
     snapshot whose process liveness the caller proved. Therefore a new rollout
     that lands after the proof wins the race and recovery refuses; it is never
@@ -707,7 +706,7 @@ def release_settle_hold(holder: str) -> bool:
     converged in the first thirty seconds would otherwise block the next deploy —
     and suppress auto-rollback — for the rest of `SETTLE_TTL_S`. The caller
     (`ops.deploy_window`) establishes convergence; this is only the write.
-    A durable pending publication must be cleared by its checked protocol first;
+    A durable pending publication must be resolved by the cutover repair first;
     generic settle release cannot remove only its lease authority.
     """
     with write_transaction() as conn, conn.cursor() as cur:

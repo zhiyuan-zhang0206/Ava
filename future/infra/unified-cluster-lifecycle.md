@@ -59,6 +59,13 @@ are not implementation requirements for this revision.
    directories as `AVA_SERVICE_PATH` in its home configuration before first start
    with the new code; omit virtualenv directories. Do not derive this declaration
    from a later recovery caller's PATH. Deployment is separate from PR merge.
+   Cutover preconditions:
+   - Every cluster reads `deployment_state.managed_writer_evidence->'pending'
+     IS NULL` before this release is admitted. The retired updater's checked
+     publication recovery is gone, and no command clears a recorded pending
+     publication. It keeps fencing every deploy-lease acquire, including PITR
+     provisioning, until an operator resolves it in the cutover record from its
+     retained evidence. The fence itself stays.
 
 ## Planned: remove retired controller storage
 

@@ -275,13 +275,17 @@ def test_update_lock_refusal_detail_names_the_pending_recovery(
     db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
 ) -> None:
     """The refusal detail and the acquire warning must tell the pending story —
-    not send the operator hunting for a live holder that does not exist."""
+    not send the operator hunting for a live holder that does not exist, nor to a
+    recovery verb that no longer exists. They name the durable fact and its owner:
+    no command clears it; resolving it is a manual cutover repair."""
     _seed_pending_rollout(db_conn, _pending_operation())
 
     assert acquire_update_lock("next-rollout") is False
     detail = update_lock_refusal_detail()
-    assert "durable pending publication" in detail
-    assert "recover-pending" in detail
+    assert "managed_writer_evidence->'pending'" in detail
+    assert "no command clears it" in detail
+    assert "cutover repair" in detail
+    assert "recover-pending" not in detail
 
     refusals = [
         r["message"]
@@ -289,7 +293,8 @@ def test_update_lock_refusal_detail_names_the_pending_recovery(
         if "[cluster-lock] acquire by next-rollout REFUSED" in r["message"]
     ]
     assert len(refusals) == 1
-    assert "checked recovery" in refusals[0]
+    assert "managed_writer_evidence->'pending'" in refusals[0]
+    assert "recover-pending" not in refusals[0]
     assert "a live holder exists" not in refusals[0]
 
 
@@ -308,17 +313,16 @@ def test_update_lock_refusal_detail_leads_with_the_live_holder_when_pending_coex
 ) -> None:
     """A rollout that already opened its journal is normally still running.
 
-    The live holder leads — a wait; `recover-pending` would refuse on that live
-    process anyway — and the durable pending publication is the follow-up hint
-    for the case that rollout never completes, never the headline.
+    The live holder leads — a wait — and the durable pending publication is the
+    follow-up fact for the case that rollout never completes, never the headline.
     """
     _seed_pending_rollout(db_conn, _pending_operation(), expired=False)
 
     assert acquire_update_lock("next-rollout") is False
     detail = update_lock_refusal_detail()
     assert "gateway:pid123" in detail
-    assert "recover-pending" in detail
-    assert detail.index("gateway:pid123") < detail.index("recover-pending")
+    assert "recover-pending" not in detail
+    assert detail.index("gateway:pid123") < detail.index("managed_writer_evidence")
 
     refusals = [
         r["message"]
@@ -327,8 +331,8 @@ def test_update_lock_refusal_detail_leads_with_the_live_holder_when_pending_coex
     ]
     assert len(refusals) == 1
     assert "a live holder exists" in refusals[0]
-    assert "recover-pending" in refusals[0]
-    assert refusals[0].index("a live holder exists") < refusals[0].index("recover-pending")
+    assert "recover-pending" not in refusals[0]
+    assert refusals[0].index("a live holder exists") < refusals[0].index("managed_writer_evidence")
 
 
 def test_update_lock_refusal_detail_reports_a_free_row_as_a_lost_race(
