@@ -14,7 +14,10 @@ tags:
 Each agent allocates increasing integers starting at zero, through a database
 counter and allocation trigger, including when an older client inserts a row.
 The session `name` and free `executor_name` are separate from the CLI's observed
-process metadata (PID, name, executable, birth time and ancestors). `relay_provider`
+process metadata (PID, name, executable, birth time and ancestors). New CLI
+requests also record `invoked_python`, preserving the virtualenv path used to
+invoke the CLI. Renewal reminders use that path rather than assuming source is
+under the unit home; older sessions retain the machine-home fallback. `relay_provider`
 selects transport; no name or process observation proves a provider's identity.
 The former UUID remains a private compatibility reference for existing leases,
 checkpoint receipts and plugin journals. Public commands and file paths
