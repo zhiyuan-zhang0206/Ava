@@ -177,7 +177,7 @@ class TestSpawn:
             captured["machine"] = machine
             return 999
 
-        monkeypatch.setattr(ava._gateway_client, "spawn", _fake_spawn)
+        monkeypatch.setattr(ava.gateway_client, "spawn", _fake_spawn)
 
         assert ava.agents.spawn() == 999
         assert captured["machine"] == machine_name()
@@ -185,7 +185,7 @@ class TestSpawn:
     def test_spawn_explicit_machine_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explicit machine passthrough unchanged, not overridden by local default."""
         captured: dict[str, Any] = {}
-        monkeypatch.setattr(ava._gateway_client, "spawn", lambda **kw: captured.update(kw) or 7)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ava.gateway_client, "spawn", lambda **kw: captured.update(kw) or 7)  # pyright: ignore[reportUnknownArgumentType]
 
         assert ava.agents.spawn(machine="other-host") == 7
         assert captured["machine"] == "other-host"
@@ -275,7 +275,7 @@ class TestSpawnFork:
 
         wire path: gateway side resolve_latest_checkpoint_id gets None → raise
         ForkSourceEmpty → handler converts to 409 + reason="fork_source_empty" → SDK
-        `_raise_from_response` reverse lookup rebuild.
+        `raise_from_response` reverse lookup rebuild.
         """
         ava.agent_identity._agent_id = _spawn_agent()  # self identity
         empty_source = ava.agents.spawn()  # spawn without checkpoint
@@ -833,7 +833,7 @@ class TestGetAncestors:
 
 class TestListAgents:
     def test_gateway_client_reads_exactly_one_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import ava._gateway_client as gateway_client
+        from ava import gateway_client
 
         calls: list[tuple[str, dict[str, object]]] = []
         page: dict[str, object] = {"agents": [], "next_cursor": 17}
@@ -850,7 +850,7 @@ class TestListAgents:
             return None
 
         monkeypatch.setattr(gateway_client, "_get", fake_get)
-        monkeypatch.setattr(gateway_client, "_raise_from_response", fake_raise)
+        monkeypatch.setattr(gateway_client, "raise_from_response", fake_raise)
 
         assert (
             gateway_client.list_agents(scope="terminated", query="research", before_id=42, limit=5)
@@ -949,7 +949,7 @@ class TestListAgents:
             return None
 
         monkeypatch.setattr(ava.agents._client, "_get", fake_get)
-        monkeypatch.setattr(ava.agents._client, "_raise_from_response", fake_raise)
+        monkeypatch.setattr(ava.agents._client, "raise_from_response", fake_raise)
         assert ava.agents.get_status(1) == AgentStatus.TERMINATED
         assert calls == ["/api/agents/1"]
 

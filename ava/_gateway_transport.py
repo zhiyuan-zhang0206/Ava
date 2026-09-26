@@ -140,7 +140,7 @@ def _retry_delay_seconds(attempt: int) -> float:
     return base + _agent_jitter_seconds()
 
 
-def _raise_from_response(resp: httpx.Response) -> None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def raise_from_response(resp: httpx.Response) -> None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Non-2xx → rebuild exception per wire contract. Flow:
 
     1. body JSON parse failure (FastAPI default 500 plain text, corrupted
@@ -220,7 +220,7 @@ def _wire_reason(resp: httpx.Response) -> tuple[ErrorReason, dict] | None:  # no
     return reason, body
 
 
-def _post(
+def post(
     path: str,
     json: dict | None = None,
     params: dict | None = None,
@@ -240,7 +240,7 @@ def _post(
     backends hiccuped) — with bounded exponential backoff + per-agent jitter
     (`_retry_delay_seconds`), then either raises `GatewayUnavailable`
     (transport) or returns the last response (HTTP: the caller's
-    `_raise_from_response` produces the wire error / `HTTPStatusError` — the
+    `raise_from_response` produces the wire error / `HTTPStatusError` — the
     loud failure carries the full status + body).
 
     `idempotent=None` (default) inherits the route's semantics from its
@@ -315,7 +315,7 @@ def _post(
                 # or AtLeastOnceWithKey — the server dedups by our key).
                 # Record the response and retry — the final failure (if
                 # retries run out) is still loud: the last response is
-                # returned so `_raise_from_response` surfaces the wire error /
+                # returned so `raise_from_response` surfaces the wire error /
                 # HTTPStatusError with the full status + body.
                 last_err = httpx.HTTPStatusError(
                     f"transient HTTP {resp.status_code} for POST {path}",
@@ -340,12 +340,12 @@ def _get(
 ) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified GET wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
-    Same policy as `_post`; a GET is always idempotent, so transient HTTP
+    Same policy as `post`; a GET is always idempotent, so transient HTTP
     429/5xx responses are retried too.
 
     `timeout` overrides the per-client default for this single request;
     `max_retries` overrides the module-wide attempt count. Both exist for the
-    same reason `_post` has them: a caller on a hot, must-not-stall path (the
+    same reason `post` has them: a caller on a hot, must-not-stall path (the
     born-chain read at context establishment) shrinks its budget for a request
     whose failure it already knows how to degrade — re-sending it only parks
     the agent's birth behind backoff it cannot use.
@@ -376,7 +376,7 @@ def _get(
     ) from last_err
 
 
-def _patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified PATCH wrapper + transient-failure retry + failure → GatewayUnavailable conversion.
 
     Same policy as `_get` — a PATCH (partial update, e.g. edit the current
@@ -408,7 +408,7 @@ def _patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821
 
 
 def _delete(path: str) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    """Unified DELETE wrapper + transient-failure retry + failure → GatewayUnavailable. Same policy as `_post`; DELETE is idempotent by semantics."""
+    """Unified DELETE wrapper + transient-failure retry + failure → GatewayUnavailable. Same policy as `post`; DELETE is idempotent by semantics."""
     import httpx
 
     last_err: Exception | None = None

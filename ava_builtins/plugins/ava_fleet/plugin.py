@@ -130,10 +130,10 @@ def _raise_as_value_error(resp: Any) -> None:
     """Raise gateway 422 validation errors as ValueError — the SDK's
     validation contract (fail fast with a clear message). Any other error
     propagates through the normal wire contract."""
-    from ava import _gateway_client
+    from ava import gateway_client
 
     try:
-        _gateway_client._raise_from_response(resp)
+        gateway_client.raise_from_response(resp)
     except Exception as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
         if status != 422:
@@ -208,9 +208,9 @@ def notify(
     # One unified write path (R3 door ④): the gateway performs the whole
     # lifecycle atomically — supersede the previous open notice + insert the
     # new one in one transaction, then publish the events.
-    from ava import _gateway_client
+    from ava import gateway_client
 
-    resp = _gateway_client._post(
+    resp = gateway_client.post(
         f"/api/agents/{aid}/notices",
         {
             "title": title,
@@ -284,9 +284,9 @@ def edit_notice(
 
     # One unified write path (R3 door ④): the gateway edits the agent's
     # current open notice and re-publishes the posted event.
-    from ava import _gateway_client
+    from ava import gateway_client
 
-    resp = _gateway_client._patch(
+    resp = gateway_client.patch(
         f"/api/agents/{aid}/notices/current",
         body,
     )
@@ -299,9 +299,9 @@ def dismiss_notice() -> None:
     aid = ava.agent_identity.require_agent_id()
     # One unified write path (R3 door ④): the gateway withdraws the agent's
     # current open notice and publishes the resolve + agent-updated events.
-    from ava import _gateway_client
+    from ava import gateway_client
 
-    resp = _gateway_client._post(f"/api/agents/{aid}/notices/current/dismiss")
+    resp = gateway_client.post(f"/api/agents/{aid}/notices/current/dismiss")
     _raise_as_value_error(resp)
 
 

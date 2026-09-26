@@ -1,4 +1,4 @@
-"""SDK ↔ Gateway HTTP client (private).
+"""SDK ↔ Gateway HTTP client.
 
 The agent process's `ava.agents.*` no longer directly connects to the DB —
 three gateway ops (spawn / send_message / get_last_message)
@@ -18,7 +18,7 @@ Design trade-offs:
     `GatewayUnavailable` (transport) or surface the wire error /
     `HTTPStatusError` (HTTP)
   - HTTP non-2xx with wire-contract JSON body → go through
-    `_raise_from_response`, reverse-lookup `EXCEPTION_BY_REASON` by
+    `raise_from_response`, reverse-lookup `EXCEPTION_BY_REASON` by
     `reason` field to rebuild AvaAgentError subclass
   - HTTP non-2xx with non-JSON body / missing reason field (FastAPI default
     500, `ErrorReason(...)` ValueError, etc.) → fall through to
@@ -66,14 +66,14 @@ from ava._gateway_transport import (
     _delete,
     _get,
     _memory_search_timeout,
-    _post,
-    _raise_from_response,
+    post,
+    raise_from_response,
 )
 from ava._gateway_transport import (
     _MEMORY_SEARCH_TIMEOUT_MARGIN_S as _MEMORY_SEARCH_TIMEOUT_MARGIN_S,
 )
 from ava._gateway_transport import (
-    _patch as _patch,
+    patch as patch,
 )
 from shared.agents import GatewayUnavailable as GatewayUnavailable
 from shared.log import logger
@@ -123,13 +123,13 @@ def memory_search(query: str, k: int, *, timeout: float | None = None) -> list[M
     """
     import httpx
 
-    resp = _post(
+    resp = post(
         "/api/memory/search",
         {"query": query, "k": k},
         timeout=httpx.Timeout(timeout) if timeout is not None else _memory_search_timeout(),
         max_retries=_MEMORY_SEARCH_MAX_RETRIES,
     )
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return [
         MemorySearchResult(
             path=r["path"], description=r["description"], tags=tuple(r.get("tags", []))
@@ -167,8 +167,8 @@ def spawn(
     # the agent (response lost, not request lost) — retrying could produce a
     # phantom-twin agent, so the retry is limited to connect-family failures
     # (task #698 G7 + task #960). Inherited from the contract — no override.
-    resp = _post("/api/agents", body)
-    _raise_from_response(resp)
+    resp = post("/api/agents", body)
+    raise_from_response(resp)
     data = resp.json()
     normalized = data.get("config_normalized")
     if normalized:
@@ -188,8 +188,8 @@ def spawn(
 
 def retry_launch(agent_id: int) -> int:
     """Retry launch of one committed identity without creating a new agent."""
-    resp = _post(f"/api/agents/{agent_id}/retry-launch")
-    _raise_from_response(resp)
+    resp = post(f"/api/agents/{agent_id}/retry-launch")
+    raise_from_response(resp)
     return int(resp.json()["id"])
 
 
@@ -254,7 +254,7 @@ def send_message(
             "delivery outbox unavailable; sending agent {} an unkeyed message", agent_id
         )
     try:
-        resp = _post(
+        resp = post(
             f"/api/agents/{agent_id}/messages",
             body,
             timeout=httpx.Timeout(120.0),
@@ -287,7 +287,7 @@ def send_message(
                 key=key,
                 completion_notice=completion_notice,
             )
-    _raise_from_response(resp)
+    raise_from_response(resp)
 
 
 def send_system_note(
@@ -315,15 +315,15 @@ def send_system_note(
     }
     if task_id is not None:
         body["task_id"] = task_id
-    resp = _post(f"/api/agents/{agent_id}/system-note", body, timeout=httpx.Timeout(120.0))
-    _raise_from_response(resp)
+    resp = post(f"/api/agents/{agent_id}/system-note", body, timeout=httpx.Timeout(120.0))
+    raise_from_response(resp)
     return int(resp.json()["inbound_id"])
 
 
 def get_last_message(agent_id: int, caller: str) -> str | None:
     """GET /api/agents/{id}/last-message → the agent's most recent AI turn text."""
     resp = _get(f"/api/agents/{agent_id}/last-message", params={"caller": caller})
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return resp.json()["text"]
 
 
@@ -334,7 +334,7 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict]:
     (order preserved from the gateway).
     """
     resp = _get(f"/api/agents/{agent_id}/neighbors", params={"depth": depth, "limit": limit})
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return resp.json()["neighbors"]
 
 
@@ -344,7 +344,7 @@ def get_ancestors(agent_id: int) -> list[dict]:
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
     shape as get_neighbors."""
     resp = _get(f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return resp.json()["ancestors"]
 
 
@@ -373,7 +373,7 @@ def get_born_chain(agent_id: int) -> list[dict]:
         timeout=httpx.Timeout(_BORN_CHAIN_TIMEOUT_S),
         max_retries=1,
     )
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return resp.json()["ancestors"]
 
 
@@ -389,14 +389,14 @@ def list_agents(
     if before_id is not None:
         params["before_id"] = before_id
     resp = _get("/api/agents", params=params)
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return resp.json()
 
 
 def get_agent(agent_id: int) -> dict[str, Any]:
     """Read an agent directly, independently of directory scope or pagination."""
     resp = _get(f"/api/agents/{agent_id}")
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return resp.json()
 
 
@@ -440,8 +440,8 @@ def terminate(
         body["force"] = True
     if final:
         body["final"] = True
-    resp = _post(f"/api/agents/{agent_id}/terminate", body)
-    _raise_from_response(resp)
+    resp = post(f"/api/agents/{agent_id}/terminate", body)
+    raise_from_response(resp)
     return resp.json()
 
 
@@ -457,8 +457,8 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
         body["source"] = source
     else:
         body["source"] = ava.agent_identity.default_actor()
-    resp = _post(f"/api/agents/{agent_id}/restart", body)
-    _raise_from_response(resp)
+    resp = post(f"/api/agents/{agent_id}/restart", body)
+    raise_from_response(resp)
     return resp.json()["status"]
 
 
@@ -477,8 +477,8 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
         body["resurrected_by"] = resurrected_by
     else:
         body["resurrected_by"] = ava.agent_identity.default_actor()
-    resp = _post(f"/api/agents/{agent_id}/resurrect", body)
-    _raise_from_response(resp)
+    resp = post(f"/api/agents/{agent_id}/resurrect", body)
+    raise_from_response(resp)
     return resp.json()["status"]
 
 
@@ -505,35 +505,35 @@ def register_page(
         body["serve_dir"] = serve_dir
     if ttl_seconds is not None:
         body["ttl_seconds"] = ttl_seconds
-    resp = _post(f"/api/agents/{agent_id}/pages", body)
-    _raise_from_response(resp)
+    resp = post(f"/api/agents/{agent_id}/pages", body)
+    raise_from_response(resp)
     return resp.json()
 
 
 def close_page(agent_id: int, name: str) -> None:
     """DELETE /api/agents/{id}/pages/{name}. 404 → httpx.HTTPStatusError."""
     resp = _delete(f"/api/agents/{agent_id}/pages/{name}")
-    _raise_from_response(resp)
+    raise_from_response(resp)
 
 
 def list_open_pages(agent_id: int) -> list[dict]:
     """GET /api/agents/{id}/pages → the agent's open PageRow dicts."""
     resp = _get(f"/api/agents/{agent_id}/pages")
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return list(resp.json())
 
 
 def list_machines() -> list[dict]:
     """GET /api/cluster/machines → list of {name, description, live} dicts."""
     resp = _get("/api/cluster/machines")
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return list(resp.json())
 
 
 def list_presets() -> list[dict]:
     """GET /api/presets → list of preset dicts, ordered by name."""
     resp = _get("/api/presets")
-    _raise_from_response(resp)
+    raise_from_response(resp)
     return list(resp.json())
 
 

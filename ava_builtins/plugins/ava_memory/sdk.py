@@ -19,7 +19,7 @@ import yaml
 import ava as _ava
 import shared.machine
 import shared.paths
-from ava import _gateway_client as _client
+from ava import gateway_client as _client
 from ava.sdk_validation import coerce_str, coerce_typed
 from shared.agents import IndexerUnavailable as IndexerUnavailable
 from shared.paths import ava_home as _ava_home

@@ -6,7 +6,7 @@ from typing import Literal
 
 import ava
 import ava.agent_identity
-from ava import _gateway_client as _client
+from ava import gateway_client as _client
 from ava.sdk_validation import coerce_str, coerce_typed
 from shared.agents import AgentLaunchFailed as AgentLaunchFailed
 

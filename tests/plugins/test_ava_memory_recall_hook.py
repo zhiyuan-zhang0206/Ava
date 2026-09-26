@@ -21,7 +21,7 @@ from langgraph.runtime import Runtime
 from agent.graph._memory_recall import PassiveRecall
 from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import build_agent_state, clear_plugin_registrations
-from ava import _gateway_client
+from ava import gateway_client
 from shared.context import AvaContext
 
 
@@ -165,7 +165,7 @@ async def test_gateway_error_leaves_the_turn_running(
             "Server error '500'", request=request, response=httpx.Response(500, request=request)
         )
 
-    monkeypatch.setattr(_gateway_client, "memory_search", _boom)
+    monkeypatch.setattr(gateway_client, "memory_search", _boom)
 
     hook = _loaded.passive_memory_recall_before_llm
     state = _state([AIMessage(content="prev", id="a0"), _inbound("user")])

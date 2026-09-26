@@ -140,11 +140,11 @@ def _ancestor_chain(agent_id: int) -> list[dict[str, Any]] | None:
         return cached
     import httpx  # deferred: stays off the boot path
 
-    from ava import _gateway_client
+    from ava import gateway_client
     from shared.agents import GatewayUnavailable
 
     try:
-        chain = _gateway_client.get_born_chain(agent_id)
+        chain = gateway_client.get_born_chain(agent_id)
     except (GatewayUnavailable, httpx.HTTPStatusError) as exc:
         logger.warning("[inherited-memory] born-chain read failed (agent {}): {}", agent_id, exc)
         return None
