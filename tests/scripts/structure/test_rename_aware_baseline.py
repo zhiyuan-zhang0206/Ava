@@ -55,7 +55,14 @@ def _freeze(tmp_path: pathlib.Path, path: str, *, cc: int = 16) -> None:
     source.write_text(_branches(cc), encoding="utf-8")
     _write_baseline(
         tmp_path,
-        {"directories": {}, "files": {}, "complexity": {f"{path}::f": cc}, "nesting": {}},
+        {
+            "directories": {},
+            "files": {},
+            "complexity": {f"{path}::f": cc},
+            "nesting": {},
+            "private_imports": {},
+            "owner_bypasses": {},
+        },
     )
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", "-A")
@@ -161,7 +168,14 @@ def test_files_budget_move_inherits(tmp_path: pathlib.Path) -> None:
     big.write_text("x = 1\n" * 805, encoding="utf-8")
     _write_baseline(
         tmp_path,
-        {"directories": {}, "files": {"tests/big.py": 805}, "complexity": {}, "nesting": {}},
+        {
+            "directories": {},
+            "files": {"tests/big.py": 805},
+            "complexity": {},
+            "nesting": {},
+            "private_imports": {},
+            "owner_bypasses": {},
+        },
     )
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", "-A")

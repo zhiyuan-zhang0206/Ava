@@ -41,6 +41,36 @@ else fails the run; an allowlisted module that stops calling it also fails
 (stale-entry alert, the `unmatched_ignore_imports_alerting` shape from #176)
 so the list cannot rot into a permission wall.
 
+### Rule 4: package doors (locality)
+
+A `_`-prefixed module or name is private to the package that owns it: the
+package directory itself for a private submodule, the module's package for a
+module-level private name. Importing it from outside that package bypasses the
+package door, so the importer depends on an implementation detail the owner never
+promised to keep. Fix: import a public name through the owner's `__init__.py`, or
+promote the name into the owner's contract on purpose (export it / drop the
+underscore) so the widened contract is visible in the diff. No allowlist: a name
+another package needs is contract by definition. Test files are exempt (white-box
+tests reach into privates by design).
+
+### Rule 5: single decision owners (locality)
+
+`scripts/structure/locality.py:DECISIONS` names design decisions that have exactly
+one owning module; any other module making that decision is a bypass. Today:
+`postgres-dial` — every psycopg connect and `*ConnectionPool` construction belongs
+to `shared/db_connections.py`, which owns the transport posture. A site that
+genuinely cannot go through the owner goes in that decision's `allowed` map with
+a one-line reason; an allowed module that stops bypassing fails as stale.
+
+Rules 4 and 5 freeze today's sites in the `private_imports` / `owner_bypasses`
+baseline sections as `path::target -> site count`. Unlike the budgets, the
+frozen counts must match reality exactly: a new or grown site is a violation,
+and a removed one fails until its entry is lowered or deleted, so a fixed
+reach-in cannot silently return. Against the base revision they are shrink-only
+like complexity/nesting: a new key needs a paired same-file removal of equal or
+greater value (the private owner module moved), and git -M renames carry keys.
+Why locality: conventions/python-conventions.md.
+
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
 Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.
@@ -78,6 +108,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.structure import locality  # noqa: E402 — standalone script
 from scripts.structure import quality_budget as quality  # noqa: E402 — standalone script
 
 _HARD_CEILING = 800
@@ -253,6 +284,7 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
                 )
             )
 
+    out.extend(locality.allowlist_errors(tree, rel_path))
     return out
 
 
@@ -323,13 +355,17 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
 
 def _parse_baseline(text: str, *, allow_legacy: bool = False) -> dict[str, dict[str, int]]:
     baseline = json.loads(text)
-    sections = {"directories", "files", *quality.QUALITY_SECTIONS}
-    allowed = [sections, {"directories", "files"}] if allow_legacy else [sections]
-    if not isinstance(baseline, dict) or set(baseline) not in allowed:
-        raise ValueError("expected directories, files, complexity and nesting objects")
+    budgets = {"directories", "files", *quality.QUALITY_SECTIONS}
+    sections = budgets | set(locality.SECTIONS)
+    legacy = [budgets, {"directories", "files"}] if allow_legacy else []
+    if not isinstance(baseline, dict) or set(baseline) not in [sections, *legacy]:
+        raise ValueError(f"expected exactly the sections {sorted(sections)}")
     for kind in quality.QUALITY_SECTIONS:
         if kind in baseline:
             quality.validate_quality_entries(kind, baseline[kind], _STRUCTURE_DIRS)
+    for kind in locality.SECTIONS:
+        if kind in baseline:
+            locality.validate_entries(kind, baseline[kind], _SCAN_DIRS)
     _validate_structure_entries(baseline)
     return baseline
 
@@ -450,7 +486,8 @@ def _section_guard(
 ) -> list[str]:
     errors: list[str] = []
     additions = current.keys() - previous.keys()
-    if kind in quality.QUALITY_SECTIONS:
+    paired = kind in quality.QUALITY_SECTIONS or kind in locality.SECTIONS
+    if paired:
         additions = set(quality.unpaired_additions(current, previous))
     for name in sorted(additions):
         moved_to = _renamed_to(kind, name, renames or {})
@@ -462,7 +499,7 @@ def _section_guard(
             continue
         rule = (
             "added key without a paired same-file removal of equal or greater value"
-            if kind in quality.QUALITY_SECTIONS
+            if paired
             else "baseline is shrink-only"
         )
         errors.append(f"{_BASELINE_PATH}: added {kind} entry {name} — {rule}")
@@ -556,6 +593,14 @@ def _ast_rule_files(argv: list[str]) -> set[Path]:
     return set(_iter_py_files(targets))
 
 
+def _collect_locality(
+    tree: ast.Module, rel: str, sites: dict[str, locality.Sites], scanned: set[str]
+) -> None:
+    scanned.add(rel)
+    for kind, found in locality.measure(tree, rel, _SCAN_DIRS, _REPO_ROOT).items():
+        sites[kind].update(found)
+
+
 def _check_ast_and_quality(
     argv: list[str],
     targets: list[Path],
@@ -567,6 +612,8 @@ def _check_ast_and_quality(
     files, _ = _budget_targets(targets)
     ast_files = _ast_rule_files(argv)
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality.QUALITY_SECTIONS}
+    sites: dict[str, locality.Sites] = {kind: {} for kind in locality.SECTIONS}
+    scanned: set[str] = set()
     errors: list[str] = []
     for path in sorted(files | ast_files):
         try:
@@ -585,10 +632,16 @@ def _check_ast_and_quality(
             errors.extend(
                 f"{rel}:{line}: {message}" for line, message in _scan_file(path, rel, tree)
             )
+            _collect_locality(tree, rel, sites, scanned)
         if path in files:
             for kind, values in quality.measure_quality(tree, rel).items():
                 measurements[kind].update(values)
     errors.extend(quality.quality_errors(measurements, baseline, renames=renames))
+    errors.extend(
+        locality.site_errors(
+            sites, baseline, scanned=scanned, repo_root=_REPO_ROOT, renames=renames
+        )
+    )
     quality.render_warnings(measurements["complexity"], full=full)
     return errors
 
