@@ -376,7 +376,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls  # No native model acceptance turn.
@@ -472,7 +472,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
@@ -537,7 +537,7 @@ async def test_end_note_resumes_an_empty_queue(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     wakes: list[tuple[int, str]] = []
 
     def record_wake(agent_id: int, payload: str) -> bool:
@@ -590,7 +590,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     wakes: list[tuple[int, str]] = []
 
     def record_wake(agent_id: int, payload: str) -> bool:
