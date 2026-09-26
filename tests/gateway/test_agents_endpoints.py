@@ -63,6 +63,16 @@ def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str,
         return cur.fetchall()
 
 
+def _terminate_hosted(db: psycopg.Connection, agent_id: int) -> None:
+    """Terminate a hosted incarnation; resurrection resumes only retained hosted authority."""
+    db.execute(
+        "UPDATE agents_meta SET status = 'terminated', runtime_kind = 'hosted', "
+        "runtime_generation = gen_random_uuid(), runtime_owner = gen_random_uuid() WHERE id = %s",
+        (agent_id,),
+    )
+    db.commit()
+
+
 def test_get_models_returns_grouped_supported_models() -> None:
     with TestClient(app) as client:
         resp = client.get("/api/models")
@@ -519,14 +529,7 @@ class TestAutoResurrect:
         INSERT 'resurrect' lifecycle inbound."""
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
-            with db_conn.cursor() as cur:  # a terminated hosted incarnation (resumable)
-                cur.execute(
-                    "UPDATE agents_meta SET status = 'terminated', runtime_kind = 'hosted', "
-                    "runtime_generation = gen_random_uuid(), runtime_owner = gen_random_uuid() "
-                    "WHERE id = %s",
-                    (agent_id,),
-                )
-            db_conn.commit()
+            _terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
                 json={"content": "resume your work", "source": "user"},
@@ -599,11 +602,7 @@ class TestSystemNote:
         """resurrect=True (task assignment) revives a terminated target, like chat."""
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
-            with db_conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
-                )
-            db_conn.commit()
+            _terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" is now assigned to you.'},
@@ -621,11 +620,7 @@ class TestSystemNote:
         terminated owner — the note stays queued (user ruling 2026-08-27)."""
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
-            with db_conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
-                )
-            db_conn.commit()
+            _terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/system-note",
                 json={"content": 'Task #1 "t" was updated.', "resurrect": False},
