@@ -33,8 +33,8 @@ from tests.shared.test_updater_handoff import (
     _isolated_attempts as _isolated_attempts,
 )
 from tests.shared.test_updater_handoff import (
+    _normal_journal,
     _retained_bootstrap,
-    _write_normal_through,
 )
 
 _START_GENERATION = "00000000-0000-4000-8000-000000000001"
@@ -377,8 +377,9 @@ def test_atomic_pointer_replacement_restores_read_only_mode(tmp_path: Path) -> N
 
 def test_clear_completes_across_a_half_completed_unlink() -> None:
     """INJ-14: a crash between the two unlinks must not strand the state file."""
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    _write_normal_through("committed")
+    _retained_bootstrap(
+        "candidate_ready", normal_release_planned=True, normal=_normal_journal("committed")
+    )
     handoff.bootstrap_state_path().unlink()
     assert handoff.clear("bootstrap")
     assert not handoff.state_path().exists()

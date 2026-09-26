@@ -1,4 +1,10 @@
 # pyright: reportUnknownArgumentType=warning, reportUnknownLambdaType=warning
+"""Retained updater handoff evidence: the readers and exact-generation clear.
+
+No current code writes the handoff or its recovery envelope, so every state
+here is a raw on-disk fixture shaped like what the retired updater left behind.
+"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -8,10 +14,7 @@ import logging
 import os
 import subprocess
 import sys
-from dataclasses import replace
 from pathlib import Path
-from typing import cast
-from unittest.mock import Mock
 from uuid import UUID
 
 import psutil
@@ -28,6 +31,7 @@ from shared.managed_writer_publication import (
     SelectorReadback,
     UnitActivationReadback,
 )
+from shared.native_process.ownership import stable_create_time
 from shared.process_evidence import ExpectedProcess
 
 
@@ -157,284 +161,213 @@ def _normal_journal(stage: str) -> dict[str, object]:
     return recovery.NormalReleaseRecoveryJournal.model_validate(payload).model_dump(mode="json")
 
 
-def _retained_bootstrap(stage: str, *, normal_release_planned: bool = False) -> None:
-    handoff.begin(expected_session="ava-updater", generation="bootstrap")
-    assert handoff.claim_running("bootstrap", expected_session="ava-updater")
-    handoff.write_bootstrap_recovery(
-        "bootstrap", _bootstrap_journal(stage, normal_release_planned=normal_release_planned)
-    )
-
-
-def _normal_at(base: dict[str, object], stage: str) -> dict[str, object]:
-    payload = json.loads(json.dumps(base))
-    payload["stage"] = stage
-    payload["starting_session"] = "ava-ops" if stage == "starting" else None
-    payload["starting_attempt"] = _spawn_attempt() if stage == "starting" else None
-    payload["replaces"] = None
-    payload["readback"] = (
-        _normal_journal("observed")["readback"] if stage in {"observed", "committed"} else None
-    )
-    return recovery.NormalReleaseRecoveryJournal.model_validate_json(
-        json.dumps(payload)
-    ).model_dump(mode="json")
-
-
-def _write_normal_through(stage: str) -> None:
-    sequence = ["waiting", "selected", "bootstrap_stopped", "starting", "observed", "committed"]
-    base = _normal_journal("waiting")
-    observed_readback: object | None = None
-    for item in sequence:
-        payload = _normal_at(base, item)
-        if observed_readback is not None:
-            payload["readback"] = observed_readback
-        handoff.write_normal_release_recovery("bootstrap", payload)
-        observed_readback = payload["readback"]
-        if item == stage:
-            return
-    raise AssertionError(f"unknown normal stage: {stage}")
-
-
-def test_unfinished_bootstrap_cannot_be_cleared_or_replaced(
-    monkeypatch: pytest.MonkeyPatch,
+def _write_handoff(
+    generation: str = "g",
+    *,
+    phase: str = "running",
+    expires_in_s: float = 900.0,
+    owner_pid: int | None = None,
+    owner_create_time: float | None = None,
 ) -> None:
+    """Write the marker the retired updater published, exactly as it laid it out.
+
+    A running marker defaults to this test process as its owner, so its
+    identity is genuinely live unless a test swaps it.
+    """
+    now = dt.datetime.now(dt.UTC)
+    payload: dict[str, object] = {
+        "phase": phase,
+        "generation": generation,
+        "expected_session": "ava-updater",
+        "created_at": now.isoformat(),
+        "expires_at": (now + dt.timedelta(seconds=expires_in_s)).isoformat(),
+    }
+    if phase == "running":
+        payload["owner_pid"] = os.getpid() if owner_pid is None else owner_pid
+        payload["owner_create_time"] = (
+            stable_create_time(psutil.Process()) if owner_create_time is None else owner_create_time
+        )
+    handoff.state_path().write_text(json.dumps(payload))
+
+
+def _write_bootstrap(generation: str, journal: dict[str, object], *, version: int = 1) -> None:
+    handoff.bootstrap_state_path().write_text(
+        json.dumps({"version": version, "generation": generation, "journal": journal})
+    )
+
+
+def _retained_bootstrap(
+    stage: str,
+    *,
+    normal_release_planned: bool = False,
+    normal: dict[str, object] | None = None,
+) -> None:
+    """A running bootstrap handoff plus its retained recovery envelope."""
+    _write_handoff("bootstrap")
+    journal = _bootstrap_journal(stage, normal_release_planned=normal_release_planned)
+    journal["normal_release"] = normal
+    _write_bootstrap("bootstrap", journal)
+
+
+@pytest.fixture(autouse=True)
+def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(handoff, "state_path", lambda: tmp_path / "handoff.json")
+    monkeypatch.setattr(
+        handoff, "bootstrap_state_path", lambda: tmp_path / "bootstrap-recovery.json"
+    )
+    monkeypatch.setattr(handoff, "lock_path", lambda: tmp_path / "handoff.lock")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_attempts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the clear-time spawn-attempt GC (I6) inside the test home."""
+    monkeypatch.setattr(
+        handoff, "spawn_attempts_dir", lambda generation: tmp_path / "updater-spawn" / generation
+    )
+
+
+def _process_stub(create_time: float, *, pid: int = 123):
+    """psutil.Process stand-in: both identity readings return `create_time`."""
+
+    class _PlatformProcess:
+        def create_time(self, monotonic: bool = False) -> float:
+            return create_time
+
+    def process(_pid: int | None = None) -> object:
+        return type(
+            "P",
+            (),
+            {"pid": pid, "create_time": lambda _self: create_time, "_proc": _PlatformProcess()},
+        )()
+
+    return process
+
+
+# --- the retained recovery envelope gates clear and generic recovery ---------
+
+
+def test_unfinished_bootstrap_cannot_be_cleared() -> None:
     _retained_bootstrap("old_stopped")
     before = handoff.bootstrap_state_path().read_bytes()
     assert not handoff.clear("bootstrap")
-    assert not handoff.force_clear()
-    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
-    with pytest.raises(handoff.UpdaterHandoffActive):
-        handoff.begin(expected_session="another-updater")
+    assert not handoff.allows_generic_recovery(handoff.read())
     assert handoff.bootstrap_state_path().read_bytes() == before
-
-
-def test_bootstrap_resume_requires_dead_owner_and_preserves_compensation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _retained_bootstrap("candidate_starting")
-    assert not handoff.resume_bootstrap("bootstrap", expected_session="recovery")
-    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
-    assert not handoff.resume_bootstrap("other-generation", expected_session="recovery")
-    assert handoff.resume_bootstrap("bootstrap", expected_session="recovery")
-    raw = handoff.read_bootstrap_recovery()
-    assert raw is not None
-    assert raw["journal"] == _bootstrap_journal("candidate_starting")
-    snapshot = handoff.read()
-    assert snapshot.owner_pid == os.getpid()
-    assert snapshot.owner_create_time == psutil.Process().create_time()
-    assert snapshot.expected_session == "recovery"
 
 
 @pytest.mark.parametrize("stage", ["candidate_ready", "recovered"])
 def test_only_terminal_bootstrap_can_complete(stage: str) -> None:
     _retained_bootstrap(stage)
+    assert handoff.allows_generic_recovery(handoff.read())
     assert handoff.clear("bootstrap")
     assert handoff.read().status == "inactive"
-
-
-def test_unreadable_ordinary_handoff_is_recoverable_without_bootstrap_evidence() -> None:
-    path = handoff.state_path()
-    path.write_text("{unfinished recovery record")
-    assert handoff.force_clear()
-    assert not path.exists()
-
-
-def test_malformed_versioned_bootstrap_evidence_is_retained() -> None:
-    _retained_bootstrap("old_stopped")
-    path = handoff.bootstrap_state_path()
-    path.write_text('{"version":2,"generation":"bootstrap"}')
-    assert not handoff.force_clear()
-    assert path.read_text() == '{"version":2,"generation":"bootstrap"}'
-    with pytest.raises(handoff.UpdaterHandoffActive):
-        handoff.begin(expected_session="another-updater")
-
-
-def test_bootstrap_evidence_has_a_hard_encoded_budget() -> None:
-    handoff.begin(expected_session="ava-updater", generation="bootstrap")
-    assert handoff.claim_running("bootstrap", expected_session="ava-updater")
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="evidence budget"):
-        oversized = _bootstrap_journal("old_stopped")
-        oversized["cron"] = "x" * (300 * 1024)
-        handoff.write_bootstrap_recovery("bootstrap", oversized)
     assert not handoff.bootstrap_state_path().exists()
 
 
-def test_bootstrap_takeover_is_exact_dead_predecessor_cas(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    handoff.begin(expected_session="old", generation="old")
-    assert handoff.claim_running("old", expected_session="old")
-    predecessor = handoff.read()
-    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
+def test_malformed_versioned_bootstrap_evidence_is_retained() -> None:
+    _write_handoff("bootstrap")
+    path = handoff.bootstrap_state_path()
+    path.write_text('{"version":2,"generation":"bootstrap"}')
+    assert not handoff.clear("bootstrap")
+    assert not handoff.allows_generic_recovery(handoff.read())
+    assert path.read_text() == '{"version":2,"generation":"bootstrap"}'
 
-    mismatched = replace(predecessor, generation="replacement")
-    assert handoff.begin_bootstrap_after_dead_owner(mismatched, expected_session="new") is None
-    claimed = handoff.begin_bootstrap_after_dead_owner(predecessor, expected_session="new")
-    assert claimed is not None
-    assert claimed.status == "running"
-    assert claimed.owner_pid == os.getpid()
+
+def test_oversized_bootstrap_evidence_is_retained() -> None:
+    """The reader's byte budget: an over-budget envelope is unreadable, never absent."""
+    _write_handoff("bootstrap")
+    oversized = _bootstrap_journal("candidate_ready")
+    oversized["cron"] = "x" * (300 * 1024)
+    _write_bootstrap("bootstrap", oversized)
+    before = handoff.bootstrap_state_path().read_bytes()
+    assert not handoff.clear("bootstrap")
+    assert not handoff.allows_generic_recovery(handoff.read())
+    assert handoff.bootstrap_state_path().read_bytes() == before
+
+
+def test_orphaned_bootstrap_evidence_blocks_recovery_of_an_unreadable_marker() -> None:
+    """With no readable generation, only an absent envelope permits recovery."""
+    handoff.state_path().write_text("{unfinished recovery record")
+    snapshot = handoff.read()
+    assert snapshot.status == "invalid"
+    assert handoff.allows_generic_recovery(snapshot)
+    _write_bootstrap("bootstrap", _bootstrap_journal("candidate_ready"))
+    assert not handoff.allows_generic_recovery(snapshot)
 
 
 @pytest.mark.parametrize(
     "stage", ["waiting", "selected", "bootstrap_stopped", "starting", "observed"]
 )
-def test_normal_release_retains_exact_recovery_record(
-    stage: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    _write_normal_through(stage)
+def test_normal_release_retains_exact_recovery_record(stage: str) -> None:
+    _retained_bootstrap(
+        "candidate_ready", normal_release_planned=True, normal=_normal_journal(stage)
+    )
     path = handoff.bootstrap_state_path()
     before = path.read_bytes()
     assert not handoff.clear("bootstrap")
-    assert not handoff.force_clear()
     assert not handoff.allows_generic_recovery(handoff.read())
-    monkeypatch.setattr(handoff, "owner_is_live", lambda _: False)
-    with pytest.raises(handoff.UpdaterHandoffActive):
-        handoff.begin(expected_session="replacement")
     assert path.read_bytes() == before
 
 
 def test_only_committed_normal_release_can_clear() -> None:
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    _write_normal_through("committed")
+    _retained_bootstrap(
+        "candidate_ready", normal_release_planned=True, normal=_normal_journal("committed")
+    )
     assert handoff.clear("bootstrap")
     assert not handoff.state_path().exists()
     assert not handoff.bootstrap_state_path().exists()
 
 
 def test_partial_committed_normal_release_is_retained_as_malformed() -> None:
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
+    _retained_bootstrap(
+        "candidate_ready", normal_release_planned=True, normal={"stage": "committed"}
+    )
     path = handoff.bootstrap_state_path()
-    envelope = json.loads(path.read_text())
-    envelope["journal"]["normal_release"] = {"stage": "committed"}
-    path.write_text(json.dumps(envelope))
     before = path.read_bytes()
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="malformed"):
-        handoff.read_bootstrap_recovery()
     assert not handoff.clear("bootstrap")
     assert not handoff.allows_generic_recovery(handoff.read())
     assert path.read_bytes() == before
 
 
 def test_complete_but_incoherent_terminal_recovery_is_retained() -> None:
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    _write_normal_through("committed")
+    journal = _bootstrap_journal("recovered")
+    journal["normal_release"] = _normal_journal("committed")
+    _write_handoff("bootstrap")
+    _write_bootstrap("bootstrap", journal)
     path = handoff.bootstrap_state_path()
-    envelope = json.loads(path.read_text())
-    envelope["journal"]["stage"] = "recovered"
-    envelope["journal"]["normal_release_planned"] = False
-    envelope["journal"]["phases"][-1]["stage"] = "recovered"
-    path.write_text(json.dumps(envelope))
     before = path.read_bytes()
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="malformed"):
-        handoff.read_bootstrap_recovery()
     assert not handoff.clear("bootstrap")
     assert not handoff.allows_generic_recovery(handoff.read())
     assert path.read_bytes() == before
 
 
-def test_normal_release_recovery_requires_candidate_ready_bootstrap() -> None:
-    _retained_bootstrap("candidate_started")
-    before = handoff.bootstrap_state_path().read_bytes()
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="candidate-ready"):
-        handoff.write_normal_release_recovery("bootstrap", {"stage": "waiting"})
-    assert handoff.bootstrap_state_path().read_bytes() == before
-
-
-def test_bootstrap_writer_cannot_discard_retained_normal_recovery() -> None:
+def test_planned_normal_release_blocks_clear_before_its_first_journal_write() -> None:
     _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    handoff.write_normal_release_recovery("bootstrap", _normal_journal("waiting"))
     before = handoff.bootstrap_state_path().read_bytes()
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="retained normal"):
-        handoff.write_bootstrap_recovery(
-            "bootstrap", _bootstrap_journal("candidate_ready", normal_release_planned=True)
-        )
+    snapshot = handoff.read()
+    assert not handoff.clear("bootstrap")
+    assert not handoff.allows_generic_recovery(snapshot)
     assert handoff.bootstrap_state_path().read_bytes() == before
 
 
 def test_legacy_bootstrap_journal_without_terminals_still_reads() -> None:
-    _retained_bootstrap("prepared")
-    path = handoff.bootstrap_state_path()
-    envelope = json.loads(path.read_text())
-    del envelope["journal"]["launcher_terminals"]
-    path.write_text(json.dumps(envelope))
-
-    raw = handoff.read_bootstrap_recovery()
-    assert raw is not None
-    assert cast("dict[str, object]", raw["journal"])["launcher_terminals"] == []
+    """Journals written before `launcher_terminals` existed parse as terminal evidence."""
+    journal = _bootstrap_journal("candidate_ready")
+    del journal["launcher_terminals"]
+    _write_handoff("bootstrap")
+    _write_bootstrap("bootstrap", journal)
+    assert handoff.clear("bootstrap")
+    assert not handoff.bootstrap_state_path().exists()
 
 
-def test_bootstrap_writer_carries_launcher_terminals() -> None:
-    _retained_bootstrap("prepared")
-    quiesced = _bootstrap_journal("cron_quiesced")
-    prepared_phases = _bootstrap_journal("prepared")["phases"]
-    assert isinstance(prepared_phases, list)
-    quiesced["phases"] = [
-        *prepared_phases,
-        {
-            "stage": "cron_quiesced",
-            "observed_at": dt.datetime.now(dt.UTC).isoformat(),
-            "monotonic_s": 1.0,
-            "pid": os.getpid(),
-            "elapsed_s": None,
-        },
-    ]
-    quiesced["launcher_terminals"] = [{"label": "e" * 64, "kind": "removed"}]
-
-    handoff.write_bootstrap_recovery("bootstrap", quiesced)
-
-    retained = handoff.read_bootstrap_recovery()
-    assert retained is not None
-    assert cast("dict[str, object]", retained["journal"])["launcher_terminals"] == [
-        {"label": "e" * 64, "kind": "removed", "new_digest": None}
-    ]
+def test_generic_recovery_requires_the_exact_inspected_snapshot() -> None:
+    _write_handoff("old")
+    inspected = handoff.read()
+    _write_handoff("new")
+    assert not handoff.allows_generic_recovery(inspected)
+    assert handoff.allows_generic_recovery(handoff.read())
 
 
-def test_bootstrap_writer_preserves_plan_identity_and_appends_phase() -> None:
-    _retained_bootstrap("prepared", normal_release_planned=True)
-    changed = _bootstrap_journal("cron_quiesced")
-    prepared_phases = _bootstrap_journal("prepared", normal_release_planned=True)["phases"]
-    assert isinstance(prepared_phases, list)
-    changed["phases"] = [
-        *prepared_phases,
-        {
-            "stage": "cron_quiesced",
-            "observed_at": dt.datetime.now(dt.UTC).isoformat(),
-            "monotonic_s": 1.0,
-            "pid": os.getpid(),
-            "elapsed_s": None,
-        },
-    ]
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="identity changed"):
-        handoff.write_bootstrap_recovery("bootstrap", changed)
-    changed["normal_release_planned"] = True
-    handoff.write_bootstrap_recovery("bootstrap", changed)
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="append exactly one"):
-        handoff.write_bootstrap_recovery("bootstrap", changed)
-
-
-def test_normal_recovery_rejects_identity_changes_and_phase_rollback() -> None:
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    base = _normal_journal("waiting")
-    handoff.write_normal_release_recovery("bootstrap", base)
-    selected = _normal_at(base, "selected")
-    changed = json.loads(json.dumps(selected))
-    changed["request_path"] = "/unit/run/replacement.json"
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="identity changed"):
-        handoff.write_normal_release_recovery("bootstrap", changed)
-    handoff.write_normal_release_recovery("bootstrap", selected)
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="cannot transition"):
-        handoff.write_normal_release_recovery("bootstrap", base)
-
-
-def _write_starting_slot(
-    stage_sequence: tuple[str, ...] = ("waiting", "selected", "bootstrap_stopped"),
-) -> dict[str, object]:
-    """Advance the retained journal through the given stages; return the base."""
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    base = _normal_journal("waiting")
-    for stage in stage_sequence:
-        handoff.write_normal_release_recovery("bootstrap", _normal_at(base, stage))
-    return base
+# --- the recovery evidence schemas the reader validates against --------------
 
 
 def test_starting_stage_requires_its_exact_attempt() -> None:
@@ -472,133 +405,56 @@ def test_replaces_witness_only_exists_while_starting() -> None:
             recovery.NormalReleaseRecoveryJournal.model_validate_json(json.dumps(payload))
 
 
-def test_first_start_displaces_no_attempt() -> None:
-    base = _write_starting_slot()
-    starting = _normal_at(base, "starting")
-    starting["replaces"] = "spawned_dead"
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="displaces no"):
-        handoff.write_normal_release_recovery("bootstrap", starting)
-    starting["replaces"] = None
-    handoff.write_normal_release_recovery("bootstrap", starting)
+# --- the handoff marker: parse, expiry and exact owner identity --------------
 
 
-def test_starting_replacement_requires_witness_and_fresh_nonce() -> None:
-    base = _write_starting_slot(("waiting", "selected", "bootstrap_stopped", "starting"))
-    first_nonce = str(UUID(int=7))
-
-    unwitnessed = _normal_at(base, "starting")
-    unwitnessed["starting_attempt"] = _spawn_attempt(nonce=UUID(int=8))
-    unwitnessed["replaces"] = None
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="adjudication witness"):
-        handoff.write_normal_release_recovery("bootstrap", unwitnessed)
-
-    same_nonce = _normal_at(base, "starting")
-    same_nonce_attempt = cast("dict[str, object]", same_nonce["starting_attempt"])
-    assert same_nonce_attempt["nonce"] == first_nonce
-    same_nonce["replaces"] = "spawned_alive"
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="fresh attempt nonce"):
-        handoff.write_normal_release_recovery("bootstrap", same_nonce)
-
-    fresh = _normal_at(base, "starting")
-    fresh["starting_attempt"] = _spawn_attempt(nonce=UUID(int=8))
-    fresh["replaces"] = "spawned_dead"
-    handoff.write_normal_release_recovery("bootstrap", fresh)
-    retained = handoff.read_bootstrap_recovery()
-    assert retained is not None
-    journal = cast("dict[str, object]", retained["journal"])
-    retained_normal = cast("dict[str, object]", journal["normal_release"])
-    retained_attempt = cast("dict[str, object]", retained_normal["starting_attempt"])
-    assert retained_attempt["nonce"] == str(UUID(int=8))
-    assert retained_normal["replaces"] == "spawned_dead"
-
-
-def test_normal_release_recovery_requires_planned_continuation() -> None:
-    _retained_bootstrap("candidate_ready")
-    before = handoff.bootstrap_state_path().read_bytes()
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="did not plan"):
-        handoff.write_normal_release_recovery("bootstrap", _normal_journal("waiting"))
-    assert handoff.bootstrap_state_path().read_bytes() == before
-
-
-def test_planned_normal_release_blocks_clear_before_its_first_journal_write() -> None:
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    before = handoff.bootstrap_state_path().read_bytes()
+def test_pending_marker_expiry_is_read_against_the_given_clock() -> None:
+    _write_handoff("g", phase="pending", expires_in_s=60)
     snapshot = handoff.read()
-    assert not handoff.clear("bootstrap")
-    assert not handoff.allows_generic_recovery(snapshot)
-    assert handoff.bootstrap_state_path().read_bytes() == before
+    assert (snapshot.status, snapshot.generation, snapshot.expired) == ("pending", "g", False)
+    assert snapshot.owner_pid is None and snapshot.owner_create_time is None
+    later = dt.datetime.now(dt.UTC) + dt.timedelta(minutes=5)
+    assert handoff.read(now=later).expired
 
 
-@pytest.fixture(autouse=True)
-def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(handoff, "state_path", lambda: tmp_path / "handoff.json")
-    monkeypatch.setattr(
-        handoff, "bootstrap_state_path", lambda: tmp_path / "bootstrap-recovery.json"
-    )
-    monkeypatch.setattr(handoff, "lock_path", lambda: tmp_path / "handoff.lock")
-
-
-def test_pending_claim_records_the_childs_exact_process_identity(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"phase": "pending", "owner_pid": 7, "owner_create_time": 1.0},
+        {"phase": "running", "owner_pid": None, "owner_create_time": 1.0},
+        {"phase": "running", "owner_pid": 7, "owner_create_time": "soon"},
+        {"phase": "finished"},
+        {"generation": ""},
+        {"expires_at": "2026-01-01T00:00:00"},
+    ],
+)
+def test_malformed_marker_is_conservatively_invalid(
+    mutation: dict[str, object], caplog: pytest.LogCaptureFixture
 ) -> None:
-    handoff.begin(expected_session="ava-updater", generation="g")
-    monkeypatch.setattr(psutil, "Process", _process_stub(42.5))
-
-    assert handoff.claim_running("g", expected_session="ava-updater", owner_pid=123)
-    snapshot = handoff.read()
-    assert snapshot.status == "running"
-    assert (snapshot.owner_pid, snapshot.owner_create_time) == (123, 42.5)
-
-
-def test_claim_is_exact_fresh_pending_cas(monkeypatch: pytest.MonkeyPatch) -> None:
-    handoff.begin(expected_session="ava-updater", generation="new", ttl_s=60)
-    monkeypatch.setattr(psutil, "Process", _process_stub(1.0))
-    assert not handoff.claim_running("old", expected_session="ava-updater", owner_pid=1)
-    assert handoff.read().generation == "new"
-
-
-def test_expired_pending_can_be_replaced_and_late_child_cannot_claim(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    handoff.begin(expected_session="ava-updater", generation="old", ttl_s=-1)
-    replacement = handoff.begin(expected_session="ava-updater", generation="new")
-    monkeypatch.setattr(psutil, "Process", _process_stub(1.0))
-    assert replacement.generation == "new"
-    assert not handoff.claim_running("old", expected_session="ava-updater", owner_pid=1)
+    _write_handoff("g", owner_pid=7, owner_create_time=1.0)
+    payload = json.loads(handoff.state_path().read_text())
+    handoff.state_path().write_text(json.dumps(payload | mutation))
+    with caplog.at_level(logging.WARNING, logger="shared.updater_handoff"):
+        assert handoff.read().status == "invalid"
+    assert "invalid" in caplog.text
 
 
 def test_running_owner_never_expires_while_exact_pid_is_alive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    handoff.begin(expected_session="ava-updater", generation="g", ttl_s=1)
+    _write_handoff("g", expires_in_s=1, owner_pid=7, owner_create_time=10.0)
     monkeypatch.setattr(psutil, "Process", _process_stub(10.0))
-    assert handoff.claim_running("g", expected_session="ava-updater", owner_pid=7)
     future = dt.datetime.now(dt.UTC) + dt.timedelta(days=1)
     snapshot = handoff.read(now=future)
     assert snapshot.status == "running" and snapshot.expired
     assert handoff.owner_is_live(snapshot)
-    with pytest.raises(handoff.UpdaterHandoffActive):
-        handoff.begin(expected_session="ava-updater", generation="new")
 
 
 @pytest.mark.parametrize("error", [psutil.AccessDenied(1), OSError("opaque")])
 def test_unreadable_running_identity_fails_closed(
     monkeypatch: pytest.MonkeyPatch, error: BaseException
 ) -> None:
-    path = handoff.state_path()
-    path.write_text(
-        json.dumps(
-            {
-                "phase": "running",
-                "generation": "g",
-                "expected_session": "ava-updater",
-                "created_at": "2026-01-01T00:00:00+00:00",
-                "expires_at": "2026-01-01T00:01:00+00:00",
-                "owner_pid": 7,
-                "owner_create_time": 10.0,
-            }
-        )
-    )
+    _write_handoff("g", owner_pid=7, owner_create_time=10.0)
 
     def _opaque(_pid: int) -> object:
         raise error
@@ -608,26 +464,39 @@ def test_unreadable_running_identity_fails_closed(
 
 
 def test_pid_reuse_is_positive_death_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
-    handoff.begin(expected_session="ava-updater", generation="g")
-    monkeypatch.setattr(psutil, "Process", _process_stub(10.0))
-    assert handoff.claim_running("g", expected_session="ava-updater", owner_pid=7)
+    _write_handoff("g", owner_pid=7, owner_create_time=10.0)
     monkeypatch.setattr(psutil, "Process", _process_stub(99.0))
     assert not handoff.owner_is_live(handoff.read())
-    assert handoff.begin(expected_session="ava-updater", generation="new").generation == "new"
+
+
+def test_absent_pid_is_positive_death_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_handoff("g", owner_pid=7, owner_create_time=10.0)
+
+    def _gone(pid: int) -> object:
+        raise psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(psutil, "Process", _gone)
+    assert not handoff.owner_is_live(handoff.read())
+
+
+def test_owner_liveness_is_undefined_for_a_pending_marker() -> None:
+    _write_handoff("g", phase="pending")
+    with pytest.raises(ValueError, match="running handoff"):
+        handoff.owner_is_live(handoff.read())
 
 
 @pytest.mark.skipif(
     sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
 )
-def test_claimed_owner_spans_import_epochs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A handoff claimed under one clock epoch stays proven-live under another."""
+def test_recorded_owner_spans_import_epochs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An owner recorded under one clock epoch stays proven-live under another."""
     psosx = importlib.import_module("psutil._psosx")
     base = psosx.INIT_BOOT_TIME
     child = subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(60)"])
     try:
         monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + 3600.0)
-        handoff.begin(expected_session="ava-updater", generation="g")
-        assert handoff.claim_running("g", expected_session="ava-updater", owner_pid=child.pid)
+        recorded = stable_create_time(psutil.Process(child.pid))
+        _write_handoff("g", owner_pid=child.pid, owner_create_time=recorded)
         monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
         assert handoff.owner_is_live(handoff.read())
     finally:
@@ -636,117 +505,28 @@ def test_claimed_owner_spans_import_epochs(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_exact_generation_clear_cannot_remove_a_replacement() -> None:
-    handoff.begin(expected_session="ava-updater", generation="old", ttl_s=-1)
-    handoff.begin(expected_session="ava-updater", generation="new")
+    _write_handoff("new")
     assert not handoff.clear("old")
     assert handoff.read().generation == "new"
 
 
-def test_atomic_write_json_and_parent_warning(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    path = tmp_path / "handoff.json"
-    monkeypatch.setattr(handoff, "_fsync_parent", Mock(side_effect=OSError("sync failed")))
-    with caplog.at_level(logging.WARNING, logger="shared.updater_handoff"):
-        handoff._write_atomic(path, {"z": "café", "a": 1})
-    assert path.read_bytes() == b'{"a":1,"z":"caf\\u00e9"}'
-    assert "directory fsync failed after commit" in caplog.text
-    if os.name != "nt":
-        assert path.stat().st_mode & 0o777 == 0o600
+# --- clear-time spawn-attempt GC (I6) -----------------------------------------
 
 
-@pytest.mark.parametrize("target,method", [(os, "fsync"), (os, "replace"), (Path, "replace")])
-def test_atomic_write_precommit_failure_preserves_old_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: object, method: str
-) -> None:
-    path = tmp_path / "handoff.json"
-    path.write_bytes(b"old")
-    fail = Mock(side_effect=OSError("write failed"))
-    monkeypatch.setattr(target, method, fail)
-    with pytest.raises(OSError, match="write failed"):
-        handoff._write_atomic(path, {"new": True})
-    assert path.read_bytes() == b"old"
-    assert sorted(tmp_path.iterdir()) == [path]
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
-def test_marker_is_private_to_the_cluster_user() -> None:
-    handoff.begin(expected_session="ava-updater", generation="g")
-    assert handoff.state_path().stat().st_mode & 0o777 == 0o600
-
-
-def _process_stub(create_time: float, *, pid: int = 123):
-    """psutil.Process stand-in: both identity readings return `create_time`."""
-
-    class _PlatformProcess:
-        def create_time(self, monotonic: bool = False) -> float:
-            return create_time
-
-    def process(_pid: int | None = None) -> object:
-        return type(
-            "P",
-            (),
-            {"pid": pid, "create_time": lambda _self: create_time, "_proc": _PlatformProcess()},
-        )()
-
-    return process
-
-
-@pytest.mark.parametrize("drift_s", [1.0, 1e-6])
-def test_bootstrap_writer_requires_the_exact_owner_birth(
-    monkeypatch: pytest.MonkeyPatch, drift_s: float
-) -> None:
-    """Owner identity is the exact stable native birth: any drift is another process."""
-    monkeypatch.setattr(psutil, "Process", _process_stub(42.5))
-    handoff.begin(expected_session="ava-updater", generation="bootstrap")
-    assert handoff.claim_running("bootstrap", expected_session="ava-updater", owner_pid=123)
-    handoff.write_bootstrap_recovery("bootstrap", _bootstrap_journal("prepared"))
-    retained = handoff.read_bootstrap_recovery()
-    monkeypatch.setattr(psutil, "Process", _process_stub(42.5 + drift_s))
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="bootstrap writer lost exact"):
-        handoff.write_bootstrap_recovery("bootstrap", _bootstrap_journal("prepared"))
-    assert retained is not None and handoff.read_bootstrap_recovery() == retained
-
-
-@pytest.mark.parametrize("drift_s", [1.0, 1e-6])
-def test_normal_writer_requires_the_exact_owner_birth(
-    monkeypatch: pytest.MonkeyPatch, drift_s: float
-) -> None:
-    """The nested normal writer applies the same exact-birth ownership proof."""
-    monkeypatch.setattr(psutil, "Process", _process_stub(42.5))
-    handoff.begin(expected_session="ava-updater", generation="bootstrap")
-    assert handoff.claim_running("bootstrap", expected_session="ava-updater", owner_pid=123)
-    handoff.write_bootstrap_recovery(
-        "bootstrap", _bootstrap_journal("candidate_ready", normal_release_planned=True)
-    )
-    handoff.write_normal_release_recovery("bootstrap", _normal_journal("waiting"))
-    retained = handoff.read_bootstrap_recovery()
-    monkeypatch.setattr(psutil, "Process", _process_stub(42.5 + drift_s))
-    with pytest.raises(handoff.BootstrapRecoveryInvalidError, match="normal writer lost exact"):
-        handoff.write_normal_release_recovery("bootstrap", _normal_journal("waiting"))
-    assert retained is not None and handoff.read_bootstrap_recovery() == retained
-
-
-@pytest.fixture(autouse=True)
-def _isolated_attempts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the clear-time spawn-attempt GC (I6) inside the test home.
-
-    A second isolated-path fixture (not folded into ``_isolated``) keeps this
-    addition additive at the file tail.
-    """
-    monkeypatch.setattr(
-        handoff, "spawn_attempts_dir", lambda generation: tmp_path / "updater-spawn" / generation
-    )
-
-
-def test_clear_gcs_the_generation_spawn_attempts() -> None:
-    """I6: a successful clear removes this generation's spawn-attempt evidence."""
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    _write_normal_through("committed")
+def _seed_attempts() -> Path:
     attempts = handoff.spawn_attempts_dir("bootstrap")
     attempts.mkdir(parents=True, exist_ok=True)
     (attempts / "ava-ops.gate").write_text("held", encoding="utf-8")
     (attempts / "ava-ops.7.receipt.json").write_text("{}", encoding="utf-8")
+    return attempts
+
+
+def test_clear_gcs_the_generation_spawn_attempts() -> None:
+    """I6: a successful clear removes this generation's spawn-attempt evidence."""
+    _retained_bootstrap(
+        "candidate_ready", normal_release_planned=True, normal=_normal_journal("committed")
+    )
+    attempts = _seed_attempts()
     assert handoff.clear("bootstrap")
     assert not attempts.exists()
 
@@ -754,10 +534,7 @@ def test_clear_gcs_the_generation_spawn_attempts() -> None:
 def test_refused_clear_keeps_the_generation_spawn_attempts() -> None:
     """I6: a refused clear never touches the attempt evidence (non-terminal)."""
     _retained_bootstrap("candidate_started")
-    attempts = handoff.spawn_attempts_dir("bootstrap")
-    attempts.mkdir(parents=True, exist_ok=True)
-    (attempts / "ava-ops.gate").write_text("held", encoding="utf-8")
-    (attempts / "ava-ops.7.receipt.json").write_text("{}", encoding="utf-8")
+    attempts = _seed_attempts()
     assert not handoff.clear("bootstrap")
     assert (attempts / "ava-ops.gate").read_text(encoding="utf-8") == "held"
     assert (attempts / "ava-ops.7.receipt.json").read_text(encoding="utf-8") == "{}"
@@ -778,12 +555,10 @@ def test_failed_gc_keeps_the_generation_spawn_attempts(
     directory): the warning is the record, the retained files are the
     conservative side.
     """
-    _retained_bootstrap("candidate_ready", normal_release_planned=True)
-    _write_normal_through("committed")
-    attempts = handoff.spawn_attempts_dir("bootstrap")
-    attempts.mkdir(parents=True, exist_ok=True)
-    (attempts / "ava-ops.gate").write_text("held", encoding="utf-8")
-    (attempts / "ava-ops.7.receipt.json").write_text("{}", encoding="utf-8")
+    _retained_bootstrap(
+        "candidate_ready", normal_release_planned=True, normal=_normal_journal("committed")
+    )
+    attempts = _seed_attempts()
 
     def _refuse_removal(*args: object, **kwargs: object) -> None:
         raise exc

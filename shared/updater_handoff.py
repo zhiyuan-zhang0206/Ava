@@ -1,16 +1,16 @@
-"""Crash-safe local ownership for a detached host updater.
+"""Retained host-local updater handoff evidence: readers and exact-generation clear.
 
-The parent pauses a host before its detached updater can write the Postgres
-updater lease. A session-record write can fail after fork/Popen, so an exception
-cannot prove that no child exists. This small host-local marker bridges that
-gap and then stays for the updater's complete lifetime: the parent publishes a
-``pending`` generation before pause, and the child atomically turns that exact
-generation into ``running`` with its own PID + process birth time before any
-checkout or service mutation.
+The retired in-place updater published ``$AVA_HOME/run/updater-handoff.json``
+(a ``pending`` generation, then ``running`` with the owner's PID + process
+birth time) and a versioned bootstrap/normal recovery envelope beside it. No
+current code writes either file. A host upgraded from that updater may still
+carry them, so cluster resume and recovery read them and refuse while they
+could name a live owner or unfinished compensation.
 
 It is not the deployment UI marker and Gate never reads it. Pending expiry only
 opens a recovery attempt; it never proves a running child dead. Recovery may
-clear a running generation only when PID + birth time prove that owner gone.
+clear a running generation only when PID + birth time prove that owner gone,
+and only when the retained recovery envelope is terminal.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ import logging
 import os
 import shutil
 import stat
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, cast
@@ -31,23 +30,14 @@ import psutil
 
 import shared.paths
 from shared import atomic_io, spawn_receipt
-from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
 from shared.native_process.ownership import create_time_matches, stable_create_time
 from shared.platform import file_lock
-from shared.updater_recovery import (
-    BootstrapRecoveryJournal,
-    NormalReleaseRecoveryJournal,
-    validate_normal_recovery_transition,
-)
+from shared.updater_recovery import BootstrapRecoveryJournal
 
 _LOCK_TIMEOUT_S = 5.0
 _BOOTSTRAP_RECOVERY_VERSION = 1
 _MAX_BOOTSTRAP_RECOVERY_BYTES = 256 * 1024
 _log = logging.getLogger("shared.updater_handoff")
-
-
-class UpdaterHandoffActive(RuntimeError):  # noqa: N818 — active state verdict
-    """A fresh or unreadable handoff already owns the spawn gap."""
 
 
 class BootstrapRecoveryInvalidError(RuntimeError):
@@ -61,15 +51,6 @@ def _parse_bootstrap_journal(value: object) -> BootstrapRecoveryJournal:
         )
     except (TypeError, ValueError) as exc:
         raise BootstrapRecoveryInvalidError("bootstrap recovery journal is malformed") from exc
-
-
-def _parse_normal_journal(value: object) -> NormalReleaseRecoveryJournal:
-    try:
-        return NormalReleaseRecoveryJournal.model_validate_json(
-            json.dumps(value, separators=(",", ":"))
-        )
-    except (TypeError, ValueError) as exc:
-        raise BootstrapRecoveryInvalidError("normal recovery journal is malformed") from exc
 
 
 @dataclass(frozen=True)
@@ -86,11 +67,6 @@ class UpdaterHandoffSnapshot:
 
 def _invalid(message: str) -> Never:
     raise ValueError(message)
-
-
-def new_generation() -> str:
-    """Mint an opaque token for one updater handoff generation."""
-    return str(uuid.uuid4())
 
 
 def state_path() -> Path:
@@ -185,24 +161,6 @@ def _fsync_parent(path: Path) -> None:
     atomic_io.fsync_parent(path)
 
 
-def _write_atomic(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    atomic_io.write_text_atomic(
-        path,
-        text,
-        mode=0o600,
-        sync_file=True,
-        sync_parent=False,
-        prefix=".updater-handoff-",
-        suffix=".tmp",
-    )
-    try:
-        _fsync_parent(path)
-    except OSError:
-        _log.warning("[updater-handoff] directory fsync failed after commit", exc_info=True)
-
-
 def _bounded_bytes(path: Path, *, limit: int) -> bytes:
     """Read one identity-stable regular file without following a substituted link."""
     before = path.lstat()
@@ -253,241 +211,6 @@ def _read_bootstrap_unlocked() -> dict[str, object] | None:
         return None
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise BootstrapRecoveryInvalidError("bootstrap recovery envelope is malformed") from exc
-
-
-def read_bootstrap_recovery() -> dict[str, object] | None:
-    """Read the bounded, versioned compensation envelope without discarding errors."""
-    return _read_bootstrap_unlocked()
-
-
-def _require_bootstrap_budget(generation: str, journal: dict[str, object]) -> None:
-    raw_payload: dict[str, object] = {
-        "version": _BOOTSTRAP_RECOVERY_VERSION,
-        "generation": generation,
-        "journal": journal,
-    }
-    if len(json.dumps(raw_payload, separators=(",", ":"), sort_keys=True).encode()) > (
-        _MAX_BOOTSTRAP_RECOVERY_BYTES
-    ):
-        raise BootstrapRecoveryInvalidError("bootstrap recovery exceeds its evidence budget")
-
-
-def _write_bootstrap_unlocked(generation: str, journal: dict[str, object]) -> None:
-    _require_bootstrap_budget(generation, journal)
-    validated = _parse_bootstrap_journal(journal)
-    payload: dict[str, object] = {
-        "version": _BOOTSTRAP_RECOVERY_VERSION,
-        "generation": generation,
-        "journal": validated.model_dump(mode="json"),
-    }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    if len(encoded) > _MAX_BOOTSTRAP_RECOVERY_BYTES:
-        raise BootstrapRecoveryInvalidError("bootstrap recovery exceeds its evidence budget")
-    _write_atomic(bootstrap_state_path(), payload)
-
-
-def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> None:
-    """Replace compensation evidence only for this process's exact running claim."""
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(state_path())
-        process = psutil.Process()
-        if (
-            current.status != "running"
-            or current.generation != generation
-            or current.owner_pid != process.pid
-            or current.owner_create_time is None
-            # The owner re-reads its own stable native birth; identity is exact.
-            or not create_time_matches(stable_create_time(process), current.owner_create_time)
-        ):
-            raise BootstrapRecoveryInvalidError("bootstrap writer lost exact handoff ownership")
-        existing = _read_bootstrap_unlocked()
-        if existing is not None and existing["generation"] != generation:
-            raise BootstrapRecoveryInvalidError("bootstrap recovery generation changed")
-        _require_bootstrap_budget(generation, journal)
-        candidate = _parse_bootstrap_journal(journal)
-        if existing is not None:
-            retained = _parse_bootstrap_journal(existing["journal"])
-            if retained.normal_release is not None:
-                raise BootstrapRecoveryInvalidError(
-                    "bootstrap writer cannot replace retained normal recovery"
-                )
-            if (
-                candidate.request,
-                candidate.request_digest,
-                candidate.inventory_digest,
-                candidate.candidate_context_digest,
-                candidate.recovery_context_digest,
-                candidate.normal_release_planned,
-                candidate.cron,
-                candidate.launchd,
-            ) != (
-                retained.request,
-                retained.request_digest,
-                retained.inventory_digest,
-                retained.candidate_context_digest,
-                retained.recovery_context_digest,
-                retained.normal_release_planned,
-                retained.cron,
-                retained.launchd,
-            ):
-                raise BootstrapRecoveryInvalidError("bootstrap recovery identity changed")
-            if (
-                len(candidate.phases) != len(retained.phases) + 1
-                or candidate.phases[:-1] != retained.phases
-            ):
-                raise BootstrapRecoveryInvalidError(
-                    "bootstrap recovery phases must append exactly one observation"
-                )
-        _write_bootstrap_unlocked(generation, candidate.model_dump(mode="json"))
-
-
-def write_normal_release_recovery(generation: str, journal: dict[str, object]) -> None:
-    """Nest normal continuation evidence under the exact completed bootstrap hop."""
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(state_path())
-        process = psutil.Process()
-        if (
-            current.status != "running"
-            or current.generation != generation
-            or current.owner_pid != process.pid
-            or current.owner_create_time is None
-            # The owner re-reads its own stable native birth; identity is exact.
-            or not create_time_matches(stable_create_time(process), current.owner_create_time)
-        ):
-            raise BootstrapRecoveryInvalidError("normal writer lost exact handoff ownership")
-        recovery = _read_bootstrap_unlocked()
-        if recovery is None or recovery["generation"] != generation:
-            raise BootstrapRecoveryInvalidError("normal writer has no exact bootstrap recovery")
-        bootstrap = _parse_bootstrap_journal(recovery["journal"])
-        if bootstrap.stage != "candidate_ready":
-            raise BootstrapRecoveryInvalidError("normal writer has no candidate-ready bootstrap")
-        if not bootstrap.normal_release_planned:
-            raise BootstrapRecoveryInvalidError("bootstrap did not plan a normal continuation")
-        normal = _parse_normal_journal(journal)
-        try:
-            validate_normal_recovery_transition(bootstrap.normal_release, normal)
-        except ValueError as exc:
-            raise BootstrapRecoveryInvalidError(str(exc)) from exc
-        _write_bootstrap_unlocked(
-            generation,
-            bootstrap.model_copy(update={"normal_release": normal}).model_dump(mode="json"),
-        )
-
-
-def begin(
-    *,
-    expected_session: str,
-    generation: str | None = None,
-    ttl_s: float = NO_PROGRESS_TIMEOUT_S,
-) -> UpdaterHandoffSnapshot:
-    """Publish a pending child before the parent pauses the host."""
-    generation = generation or new_generation()
-    if not generation or not expected_session:
-        raise ValueError("generation and expected_session must be non-empty")
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        if bootstrap_state_path().exists():
-            raise UpdaterHandoffActive("restricted bootstrap recovery requires checked resume")
-        current = _read_unlocked(path)
-        reclaimable = (current.status == "pending" and current.expired) or (
-            current.status == "running" and not owner_is_live(current)
-        )
-        if current.status == "invalid" or (
-            current.status in ("pending", "running") and not reclaimable
-        ):
-            raise UpdaterHandoffActive(
-                f"updater handoff {current.generation!r} is already active or unreadable"
-            )
-        now = dt.datetime.now(dt.UTC)
-        payload: dict[str, object] = {
-            "phase": "pending",
-            "generation": generation,
-            "expected_session": expected_session,
-            "created_at": now.isoformat(),
-            "expires_at": (now + dt.timedelta(seconds=ttl_s)).isoformat(),
-        }
-        _write_atomic(path, payload)
-        return _read_unlocked(path, now=now)
-
-
-def begin_bootstrap_after_dead_owner(
-    predecessor: UpdaterHandoffSnapshot,
-    *,
-    expected_session: str,
-) -> UpdaterHandoffSnapshot | None:
-    """Atomically replace the exact dead predecessor with this bootstrap updater."""
-    if not expected_session:
-        raise ValueError("expected_session must be non-empty")
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(path)
-        if (
-            current != predecessor
-            or current.status != "running"
-            or owner_is_live(current)
-            or bootstrap_state_path().exists()
-        ):
-            return None
-        now = dt.datetime.now(dt.UTC)
-        process = psutil.Process()
-        _write_atomic(
-            path,
-            {
-                "phase": "running",
-                "generation": new_generation(),
-                "expected_session": expected_session,
-                "created_at": now.isoformat(),
-                "expires_at": (now + dt.timedelta(seconds=NO_PROGRESS_TIMEOUT_S)).isoformat(),
-                "owner_pid": process.pid,
-                "owner_create_time": stable_create_time(process),
-            },
-        )
-        return _read_unlocked(path, now=now)
-
-
-def claim_running(
-    generation: str,
-    *,
-    expected_session: str,
-    owner_pid: int | None = None,
-) -> bool:
-    """CAS-claim one fresh pending generation for the calling updater.
-
-    ``owner_pid`` defaults to this process. The Windows shell helper supplies
-    its root ``cmd.exe`` parent instead, because that process synchronously
-    owns the complete native update chain. Process birth time is read locally;
-    callers cannot inject an unverifiable identity.
-    """
-    owner_pid = os.getpid() if owner_pid is None else owner_pid
-    try:
-        owner_create_time = stable_create_time(psutil.Process(owner_pid))
-    except (psutil.Error, OSError):
-        return False
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(path)
-        if (
-            current.status != "pending"
-            or current.expired
-            or current.generation != generation
-            or current.expected_session != expected_session
-        ):
-            return False
-        if current.created_at is None or current.expires_at is None:
-            return False
-        _write_atomic(
-            path,
-            {
-                "phase": "running",
-                "generation": generation,
-                "expected_session": expected_session,
-                "created_at": current.created_at.isoformat(),
-                "expires_at": current.expires_at.isoformat(),
-                "owner_pid": owner_pid,
-                "owner_create_time": owner_create_time,
-            },
-        )
-        return True
 
 
 def owner_is_live(snapshot: UpdaterHandoffSnapshot) -> bool:
@@ -575,49 +298,4 @@ def clear(generation: str) -> bool:
         path.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
             _fsync_parent(path)
-        return True
-
-
-def force_clear() -> bool:
-    """Clear stale/invalid state after recovery's no-live-owner proof."""
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        if bootstrap_state_path().exists():
-            return False
-        existed = path.exists()
-        path.unlink(missing_ok=True)
-        if existed:
-            with contextlib.suppress(OSError):
-                _fsync_parent(path)
-        return existed
-
-
-def resume_bootstrap(generation: str, *, expected_session: str) -> bool:
-    """Reclaim this same retained handoff only after exact owner death evidence.
-
-    The updater first validates the persisted request, operation and image
-    references. This changes local process ownership, not release authority.
-    """
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        path = state_path()
-        current = _read_unlocked(path)
-        if (
-            current.generation != generation
-            or current.status != "running"
-            or owner_is_live(current)
-        ):
-            return False
-        try:
-            recovery = _read_bootstrap_unlocked()
-        except BootstrapRecoveryInvalidError:
-            return False
-        if recovery is None or recovery["generation"] != generation:
-            return False
-        payload = json.loads(path.read_text())
-        payload.update(
-            expected_session=expected_session,
-            owner_pid=os.getpid(),
-            owner_create_time=stable_create_time(psutil.Process()),
-        )
-        _write_atomic(path, payload)
         return True
