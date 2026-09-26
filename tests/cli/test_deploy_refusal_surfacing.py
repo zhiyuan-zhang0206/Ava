@@ -65,7 +65,9 @@ def test_recover_clears_a_dead_holders_lock(
 
         assert _cluster_recover.cmd_cluster_recover() == 0
         assert update_lock_holder() is None  # deployable again
-        assert "gateway-host:pid81319" in capsys.readouterr().out  # names what it cleared
+        out = capsys.readouterr().out
+        assert "gateway-host:pid81319" in out  # names what it cleared
+        assert "ava cluster update" not in out  # never a bare verb that exits 2
     finally:
         _clear_update_lock(db_conn)
 

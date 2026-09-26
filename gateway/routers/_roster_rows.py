@@ -2,8 +2,8 @@
 
 The three abnormal-state rows — reachable-unknown, offline, identity mismatch —
 are pure functions of a machines-table row: no probe state, no backoff, no
-cluster-global markers. `pin_verdict` / `stamp_cluster_globals` apply the
-cluster-global facts (pin, deploy lease, last update) onto every assembled row.
+cluster-global markers. `stamp_cluster_globals` applies the cluster-global
+deploy lease onto every assembled row.
 Split out of status.py so the roster module stays under the 800-line budget
 while the row contract lives in one place."""
 
@@ -114,41 +114,15 @@ def identity_mismatch_status(
     )
 
 
-def pin_verdict(head_sha: str | None, cluster_target_sha: str | None) -> bool | None:
-    """Whether a node is on the cluster pin. None when there is no pin yet or the
-    node's head_sha is unknown (the comparison is meaningless); else head == pin."""
-    if cluster_target_sha is None or head_sha is None:
-        return None
-    return head_sha == cluster_target_sha
-
-
 def stamp_cluster_globals(
     machines: list[MachineStatus],
     *,
-    cluster_target_sha: str | None,
     deploy_lease: DeployLease | None,
-    last_known_good_sha: str | None,
 ) -> list[MachineStatus]:
-    """Apply the cluster-global facts to every assembled row; return them sorted.
-
-    The hold's OWN population is read back from its recorded waiting set — never the machine
-    table; a row absent from it is "not named by this hold", not "converged".
-    """
+    """Apply the cluster-global deploy lease to every assembled row; return them sorted."""
     hold_detail = deploy_lease.describe() if deploy_lease is not None else None
-    waited_on: frozenset[str] = (
-        frozenset(deploy_lease.settle_hosts or []) if deploy_lease is not None else frozenset()
-    )
     stamped: list[MachineStatus] = []
     for m in machines:
-        stamped.append(
-            m.model_copy(
-                update={
-                    "on_pin": pin_verdict(m.head_sha, cluster_target_sha),
-                    "deploy_hold": hold_detail,
-                    "settle_waited_on": m.name in waited_on,
-                    "cluster_last_known_good_sha": last_known_good_sha,
-                }
-            )
-        )
+        stamped.append(m.model_copy(update={"deploy_hold": hold_detail}))
     stamped.sort(key=lambda m: m.name)
     return stamped

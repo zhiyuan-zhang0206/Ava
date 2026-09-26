@@ -19,8 +19,6 @@ _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
 # Roster `role` column width: the widest label format_capabilities emits is
 # "gateway + agent-runner + observability-station" (44 chars).
 _ROLE_COL_W = 44
-# Roster `hold` column width: the widest cell is "waited-on" (9 chars).
-_HOLD_COL_W = 9
 
 
 def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
@@ -149,8 +147,8 @@ def cmd_cluster_status() -> int:
     assembles the roster server-side (its own row locally + each agent-runner
     probed in parallel via the status_probe op) and returns
     every machine's name / role / paused / live status, plus the cluster-global
-    deploy lease stamped per row (the `hold` column + its banner). Fails fast on any
-    HTTP error rather than masking an unreachable gateway.
+    deploy lease stamped per row (the deploy-hold banner). Fails fast on any HTTP
+    error rather than masking an unreachable gateway.
 
     The transport failures get one-line stderr verdicts and a nonzero exit
     instead of an unhandled traceback — the unreachable-machine case is the
@@ -225,8 +223,8 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
     lines = _schema_mismatch_banner(roster) + _hold_banner(roster)
     lines += [
         f"{'name'.ljust(name_w)}  {'role':<{_ROLE_COL_W}} {'paused':<7} {'status':<10} "
-        f"{'pin':<10} {'code':<10} {'hold':<{_HOLD_COL_W}} up since",
-        "-" * (name_w + 92),
+        f"{'code':<10} up since",
+        "-" * (name_w + 71),
     ]
     for m in roster:
         status = _status_cell(m.online, m.identity_mismatch, m.stopped_at)
@@ -238,12 +236,10 @@ def _render_roster(roster: list[MachineStatus]) -> list[str]:
         role = format_capabilities(
             m.serve_gateway, m.serve_agent_runner, m.serve_observability_station
         )
-        pin_str = _pin_cell(m.on_pin, m.head_sha)
         code_str = _code_cell(m.running_sha, m.head_sha)
-        hold_str = _hold_cell(m.settle_waited_on)
         lines.append(
             f"{display_name.ljust(name_w)}  {role:<{_ROLE_COL_W}} {paused_str:<7} {status:<10} "
-            f"{pin_str:<10} {code_str:<10} {hold_str:<{_HOLD_COL_W}} {up_since}"
+            f"{code_str:<10} {up_since}"
         )
     return lines
 
@@ -263,46 +259,25 @@ def _hold_banner(roster: list[MachineStatus]) -> list[str]:
     """The lines above the table naming the live deploy lease, or none when the
     cluster is free.
 
-    `deploy_hold` is cluster-global and stamped identically on every row (like the
-    pin verdict), so the first row is as good as any — no row is more authoritative
-    than another.
+    `deploy_hold` is cluster-global and stamped identically on every row, so the
+    first row is as good as any — no row is more authoritative than another.
 
     The banner exists because the refusal it causes happens somewhere else: another
     owner fails to take the deploy lease, and the roster is where an operator looks
-    to learn what holds it. It states that consequence, and it says what the `hold`
-    column is NOT so the column is never mistaken for a live convergence check.
+    to learn what holds it.
 
-    It carries no "no hold" line: a blank `hold` column is not evidence the cluster
-    is free (host-local maintenance takes no cluster lease), so printing "no deploy
-    in flight" here would assert more than the roster knows.
+    It carries no "no hold" line: an absent lease is not evidence the cluster is
+    free (host-local maintenance takes no cluster lease), so printing "no deploy in
+    flight" here would assert more than the roster knows.
     """
     hold = next((m.deploy_hold for m in roster if m.deploy_hold is not None), None)
     if hold is None:
         return []
     return [
         f"deploy hold: {hold}",
-        "  while it holds, no other owner can take the cluster deploy lease. `hold` names the",
-        "  hosts the lease RECORDED as still converging when its owner exited — not a live",
-        "  verdict; `pin` / `code` are the live per-host ones.",
+        "  while it holds, no other owner can take the cluster deploy lease.",
         "",
     ]
-
-
-def _hold_cell(settle_waited_on: bool) -> str:  # noqa: FBT001 — one flag per cell, passed positionally by the renderer like the other cells
-    """One cell for the roster `hold` column: whether the live settle hold names this
-    host as one it is waiting for.
-
-    Deliberately narrow. This is transcribed from the lease's note — the hosts the
-    lease recorded as still converging when its owner exited — and no probe informs
-    it, so the cell means "the hold says it is waiting for this host" and nothing
-    more. It is not the deploy-window refusal verdict (that also weighs per-host
-    posture rows this roster never reads), and it is not a convergence
-    verdict in either direction: `waited-on` does not prove this host is still
-    behind, and a blank does not prove it converged — a host that never acked is
-    never named by a hold at all. The live reading sits one column left, in `pin` and
-    `code`.
-    """
-    return "waited-on" if settle_waited_on else "—"
 
 
 def _status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | None) -> str:  # noqa: FBT001 — online / identity_mismatch are probe verdicts, passed positionally by the renderer
@@ -327,33 +302,14 @@ def _status_cell(online: bool, identity_mismatch: bool, stopped_at: datetime | N
     return "stopped" if stopped_at else "offline"
 
 
-def _pin_cell(on_pin: bool | None, head_sha: str | None) -> str:  # noqa: FBT001 — on_pin is the tri-state pin verdict, passed positionally by the renderer
-    """One cell for the roster `pin` column: ✓/✗ vs the cluster pin plus the
-    node's short HEAD. `?` when there is no pin yet or the node's HEAD is unknown
-    (on_pin is None) — the same tri-state the gateway computed. This reflects the
-    CHECKOUT only; the `code` column reflects the running process."""
-    short = head_sha[:7] if head_sha else "—"
-    if on_pin is True:
-        return f"✓ {short}"
-    if on_pin is False:
-        return f"✗ {short}"
-    return f"? {short}"
-
-
 def _code_cell(running_sha: str | None, head_sha: str | None) -> str:
     """One cell for the roster `code` column: the commit the live process is
     actually running (`running_sha`), short. `⚠` when it differs from the node's
     checkout HEAD (`head_sha`) — the checkout advanced but the process was not
-    restarted, so a node can read `pin ✓` yet still be running stale code (the
-    2026-07-18 lesson: pin only proved the checkout; up-since exposed the old
-    process). `—` when the answering process froze no commit — it came up
-    outside the supervised start path, or its tree is not a git checkout.
-
-    The cell has read this way since it was written; what changed on 2026-07-28
-    is that `running_sha` finally means it. It used to be a bookmark file that
-    `ava start` rewrote one line before a launcher that skips already-running
-    sessions, so the drift this cell exists to show was the one case it could
-    not produce."""
+    restarted, so it is still running stale code (the 2026-07-18 lesson: the
+    checkout alone proved nothing; up-since exposed the old process). `—` when
+    the answering process froze no commit — it came up outside the supervised
+    start path, or its tree is not a git checkout."""
     if running_sha is None:
         return "—"
     short = running_sha[:7]

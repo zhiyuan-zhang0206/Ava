@@ -75,17 +75,14 @@ class ClusterStatus(BaseModel):
     # opaque bool that a consumer can only guess at.
     paused_reason: PausedReason | None = None
     # This host's prod-source HEAD commit (`$AVA_HOME/source`), or None when it
-    # cannot be read (no prod source / git unavailable). Compared against the
-    # cluster pin (`cluster_target_sha`) to surface a node drifted off the
-    # cluster's pinned commit; threaded to the roster so the multi-machine view
-    # shows per-node drift.
+    # cannot be read (no prod source / git unavailable); threaded to the roster so
+    # the multi-machine view shows each node's checkout.
     head_sha: str | None = None
     # The commit the process answering this probe actually loaded, frozen at its
     # own boot (`shared.process_sha`), or None when it never froze one. Distinct
-    # from head_sha: head_sha is the checkout the pin is compared against,
-    # running_sha is code the live process holds. They differ when the checkout
-    # advanced (git pull / rollout) but the process was not restarted — the roster
-    # shows a node "on pin ✓" that is nonetheless running stale code.
+    # from head_sha: head_sha is the checkout, running_sha is code the live
+    # process holds. They differ when the checkout advanced (`git pull`) but the
+    # process was not restarted — the roster marks that node's code as stale.
     #
     # This speaks only for the answering process (the ops daemon on an
     # agent-runner, the gateway on a pure gateway). A sibling daemon respawned at

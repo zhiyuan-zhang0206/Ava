@@ -98,14 +98,13 @@ question, which is what makes the same weak evidence usable for both.
 
 ## Displaying a hold is not asking this question
 
-`ava cluster status` shows the hold (a banner + the `hold` column beside `pin` /
-`code`) so a refused operator can see it from the roster instead of the cron log.
-That display reads the lease row directly (`read_update_lease`'s settle fields) and
-must keep doing so — calling `deploy_in_flight()` from a status GET would probe every
-machine and, on a converged cluster, *release* the hold as a side effect of someone
-looking at it. It also means the roster shows signal 1 only, which is why the column
-is labelled as the hold's recorded waiting set and never as a convergence verdict:
-the permissive and conservative readings above both belong to callers deciding
+`ava cluster status` shows the hold (a banner above the table) so a refused
+operator can see it from the roster instead of the cron log. That display reads the
+lease row directly (`read_update_lease`) and must keep doing so — calling
+`deploy_in_flight()` from a status GET would probe every machine and, on a
+converged cluster, *release* the hold as a side effect of someone looking at it. It
+also means the roster shows signal 1 only and never a convergence verdict: the
+permissive and conservative readings above both belong to callers deciding
 something, not to a table.
 """
 
@@ -350,9 +349,9 @@ def settle_hosts_converged(hosts: list[str]) -> bool:
     Inheriting the permissive reading here would rebuild it inside the fix, where it
     would be much harder to find because the mechanism is believed correct.
 
-    `running_sha` is what makes this more than the roster's pin column: a host whose
-    checkout landed but whose processes were never replaced reads on-pin and is still
-    mid-transition. Bounded caveat: `running_sha` speaks for the process that *answers*
+    `running_sha` is what makes this more than a checkout comparison: a host whose
+    checkout landed but whose processes were never replaced matches the pin and is
+    still mid-transition. Bounded caveat: `running_sha` speaks for the process that *answers*
     the probe — the ops daemon — so "converged" here means that daemon is on the pin,
     not that every process on the host is. A sibling daemon respawned at a different
     commit is the `code` controller's dimension, not this one.

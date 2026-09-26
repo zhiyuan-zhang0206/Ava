@@ -49,5 +49,4 @@ def cmd_cluster_recover() -> int:
         print("✓ no update lock to clear; this host is unpaused")
     else:
         print(f"✓ cleared the stranded update lock (was {cleared}) and unpaused this host")
-    print("  a new `ava cluster update` can start now.")
     return 0

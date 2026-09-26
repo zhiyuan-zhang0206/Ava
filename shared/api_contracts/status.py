@@ -98,26 +98,20 @@ class MachineStatus(BaseModel):
     # `ava cluster mark-staging` / `unmark-staging`.
     is_staging: bool = False
     # This node's prod-source HEAD commit (None when the probe failed / could not
-    # read it). `on_pin` is the gateway's server-side verdict comparing head_sha
-    # to the cluster pin (`cluster_target_sha`): True = on the pinned commit,
-    # False = drifted off it, None = no pin set yet or head_sha unknown. The pin
-    # is cluster-global, so the verdict is computed once and stamped per row to
-    # keep the roster a bare list (the CLI has no separate pin lookup).
+    # read it). There is no cluster pin to compare it against.
     head_sha: str | None = None
-    on_pin: bool | None = None
     # The commit the process that answered this node's ClusterStatus probe froze
     # at its own boot (`shared.process_sha`; None when the probe failed or the
-    # process froze nothing). head_sha is the checkout the pin verdict compares;
-    # running_sha is the code that process holds. They diverge when the checkout
-    # advanced but the process was not restarted — a node shown "on pin ✓" can
-    # still be running stale code, which only running_sha reveals.
+    # process froze nothing). head_sha is the checkout; running_sha is the code
+    # that process holds. They diverge when the checkout advanced but the process
+    # was not restarted — only running_sha reveals the stale code.
     running_sha: str | None = None
     schema_mismatch: SchemaMismatchStatus | None = None
     # The live deploy lease (`shared.cluster_lock.read_update_lease().describe()`):
     # holder, how long it has been held, when it lapses, plus the settle note when
     # it is a hold rather than an executing rollout. None = no live lease. The lease
-    # is cluster-global, so — exactly like `on_pin` — it is read once server-side and
-    # stamped identically onto every row to keep the roster a bare list.
+    # is cluster-global, so it is read once server-side and stamped identically
+    # onto every row to keep the roster a bare list.
     #
     # **This is the lease signal alone (signal 1 of `ops.deploy_window`), not that
     # module's full refusal verdict.** The roster does not read the per-host posture
@@ -126,24 +120,6 @@ class MachineStatus(BaseModel):
     # shown because it is the one signal that stays true while the transitioning host
     # is unreachable, which is when an operator most needs it.
     deploy_hold: str | None = None
-    # The cluster's rollback anchor (`cluster_pin.last_known_good_sha`), stamped
-    # cluster-globally like the fields above. Recorded since the pin existed and
-    # shown nowhere until now, which is why a rollback read as the pin
-    # inexplicably moving backwards instead of as a fall back to this commit.
-    cluster_last_known_good_sha: str | None = None
-
-    # This row's name appears in the live settle hold's recorded waiting-for set
-    # (`shared.cluster_lock.DeployLease.settle_hosts`) — the hosts the lease recorded
-    # as still converging when its owner exited.
-    #
-    # **A record, not a verdict.** It is read off the lease row; no probe informs it.
-    # True does not mean this host is still off the pin — the hold is only re-examined
-    # (and released on convergence) when `ops.deploy_window.deploy_in_flight` is asked,
-    # which reading a roster does not do. False does not mean converged — a host that
-    # never acked is not covered by a settle hold at all. The live per-host question is
-    # `head_sha` / `running_sha` / `on_pin`; this field is only "what the hold says it
-    # is waiting for".
-    settle_waited_on: bool = False
     # The probe responder self-reported a machine_name that did NOT match the row
     # this probe targeted — a structural red flag that a loopback/misregistered
     # gateway_url made the gateway dial the wrong host (or itself) and answer under

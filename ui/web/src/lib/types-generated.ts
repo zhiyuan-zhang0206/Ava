@@ -4586,10 +4586,6 @@ export interface components {
             current_paused: boolean;
             /** Machines */
             machines: components["schemas"]["MachineStatus"][];
-            /** Cluster Target Sha */
-            cluster_target_sha?: string | null;
-            /** Cluster Last Known Good Sha */
-            cluster_last_known_good_sha?: string | null;
         };
         /**
          * ClusterStatus
@@ -5878,20 +5874,11 @@ export interface components {
             is_staging: boolean;
             /** Head Sha */
             head_sha?: string | null;
-            /** On Pin */
-            on_pin?: boolean | null;
             /** Running Sha */
             running_sha?: string | null;
             schema_mismatch?: components["schemas"]["SchemaMismatchStatus"] | null;
             /** Deploy Hold */
             deploy_hold?: string | null;
-            /** Cluster Last Known Good Sha */
-            cluster_last_known_good_sha?: string | null;
-            /**
-             * Settle Waited On
-             * @default false
-             */
-            settle_waited_on: boolean;
             /**
              * Identity Mismatch
              * @default false

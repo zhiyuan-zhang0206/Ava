@@ -123,8 +123,8 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: "runn
   const t = useTranslations("insights.status");
   const v = machineVerdict(m);
   // running_sha is the code the live process loaded; head_sha is its checkout.
-  // A drift means the checkout advanced (pull / rollout) but the process was
-  // not restarted — a node can read pin ✓ yet still run stale code.
+  // A drift means the checkout advanced (pull) but the process was not
+  // restarted, so it still runs stale code.
   const codeDrift =
     m.running_sha != null && m.head_sha != null && m.running_sha !== m.head_sha;
   return (
@@ -137,26 +137,6 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: "runn
           title={t("codeDrift", { running: m.running_sha?.slice(0, 7) ?? "?", head: m.head_sha?.slice(0, 7) ?? "?" })}
         >
           ⚠{m.running_sha?.slice(0, 7)}
-        </span>
-      )}
-      {!codeDrift && m.on_pin === false && (
-        <span
-          className="text-amber-600 dark:text-amber-400"
-          title={t("offPin", { head: m.head_sha?.slice(0, 7) ?? "?" })}
-        >
-          {t("offPinBadge")}
-        </span>
-      )}
-      {/* The live settle hold names this host. Recorded by the lease when the
-          rollout exited (this host acked its self-update and had not finished
-          converging), NOT a live check — the off-pin / code-drift badges beside it
-          are the live verdicts, and its absence does not prove convergence. */}
-      {m.settle_waited_on && (
-        <span
-          className="text-amber-600 dark:text-amber-400"
-          title={t("settleHold")}
-        >
-          {t("settleHoldBadge")}
         </span>
       )}
     </span>
@@ -203,24 +183,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
         {data.current_paused && (
           <span className="ml-1 text-amber-600 dark:text-amber-400">{t("pausedDetail")}</span>
         )}
-        {data.cluster_target_sha && (
-          <span className="ml-1">{t("pinnedTo", { sha: data.cluster_target_sha.slice(0, 7) })}</span>
-        )}
-        {/* Recorded since the pin existed and shown nowhere until now — without it a
-            rollback presents as the pin simply moving to an older commit, with
-            nothing saying that commit is the anchor the cluster fell back to. */}
-        {data.cluster_last_known_good_sha && (
-          <span
-            className="ml-1"
-            title={t("rollbackAnchor")}
-          >
-            {t("lastKnownGood", { sha: data.cluster_last_known_good_sha.slice(0, 7) })}
-          </span>
-        )}
-
       </div>
-
-
 
       {data.machines.length === 0 ? (
         <p className="text-xs text-muted-foreground">

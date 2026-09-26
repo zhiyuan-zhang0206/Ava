@@ -172,8 +172,9 @@ def _assert_schema_current_or_die() -> int:
     except CodeBehindSchema as e:
         print(
             f"  ✗ {e}\n"
-            f"    The central DB is ahead of this checkout — typically the gateway ran `ava cluster update` while "
-            f"this host stayed on an older revision. Run `git pull && uv sync` on this host, then retry "
+            f"    The central DB is ahead of this code — typically the gateway moved to a newer "
+            f"revision while this host stayed on an older one. Bring this host to the gateway's "
+            f"revision (a source checkout: check out that commit and `uv sync`), then retry "
             f"`ava start`.",
             file=sys.stderr,
         )
@@ -336,8 +337,9 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     except psycopg.errors.UndefinedTable as e:
         print(
             f"  ✗ register_self failed: `machines` table does not exist ({e}).\n"
-            f"    Gateway's DB schema is behind — run `ava cluster update` (or `ava start`, which "
-            f"applies pending migrations) on the gateway, then retry `ava start` here.",
+            f"    Gateway's DB schema is behind — run `ava stop` then `ava start` on the gateway "
+            f"(a source-run gateway applies pending migrations on a cold start), then retry "
+            f"`ava start` here.",
             file=sys.stderr,
         )
         return 1

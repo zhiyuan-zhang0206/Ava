@@ -554,7 +554,7 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(monkeypatch: pytes
     assert m.supervisor_online is None
 
 
-# ─── deploy-hold stamping (the roster's `hold` column) ────────────────────────
+# ─── deploy-hold stamping (the roster's deploy-hold banner) ───────────────────
 
 
 def _hold_rows() -> list[
@@ -569,12 +569,10 @@ def _hold_rows() -> list[
     ]
 
 
-def test_gather_stamps_settle_hold_only_on_the_hosts_the_note_names(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A settle hold's recorded set is the population: the hosts it names get
-    settle_waited_on=True, every other row False — and the lease sentence is stamped
-    on ALL rows, being cluster-global (same treatment as the pin verdict)."""
+def test_gather_stamps_the_lease_sentence_on_every_row(monkeypatch: pytest.MonkeyPatch):
+    """The live lease is cluster-global: its sentence (settle note included) is
+    stamped on ALL rows. No per-host settle verdict rides the wire — nothing
+    records a settle hold's waiting set any more."""
     from shared.cluster_lock import DeployLease, settle_note
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
@@ -589,20 +587,15 @@ def test_gather_stamps_settle_hold_only_on_the_hosts_the_note_names(
 
     machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1", deploy_lease=lease))
 
-    by_name = {m.name: m for m in machines}
-    assert by_name["m2"].settle_waited_on is True
-    assert by_name["m1"].settle_waited_on is False
     assert all(
         m.deploy_hold is not None and "gateway-host:pid42" in m.deploy_hold for m in machines
     )
+    assert all("settle_waited_on" not in m.model_dump() for m in machines)
 
 
-def test_gather_stamps_hold_with_no_waited_on_hosts_for_an_executing_rollout(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A lease with no settle fact is a rollout *executing*, not a settle hold: the sentence
-    is stamped so the roster can explain the refusal, but no row is marked waited-on —
-    there is no recorded waiting set to speak for."""
+def test_gather_stamps_hold_for_an_executing_lease(monkeypatch: pytest.MonkeyPatch):
+    """A lease with no settle fact (for example PITR provisioning) is stamped so the
+    roster can explain a refused acquire."""
     from shared.cluster_lock import DeployLease
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
@@ -612,22 +605,21 @@ def test_gather_stamps_hold_with_no_waited_on_hosts_for_an_executing_rollout(
     machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1", deploy_lease=lease))
 
     assert all(m.deploy_hold is not None for m in machines)
-    assert not any(m.settle_waited_on for m in machines)
 
 
 def test_gather_leaves_hold_blank_when_no_lease(monkeypatch: pytest.MonkeyPatch):
-    """No live lease -> both hold fields at their defaults, on every row."""
+    """No live lease -> the hold field at its default, on every row."""
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
 
     machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1"))
 
-    assert all(m.deploy_hold is None and m.settle_waited_on is False for m in machines)
+    assert all(m.deploy_hold is None for m in machines)
 
 
 def test_read_deploy_lease_degrades_on_operational_error(monkeypatch: pytest.MonkeyPatch):
-    """A connectivity blip while reading the lease blanks the hold column instead of
-    failing the roster — mid-rollout is exactly when the roster is asked for."""
+    """A connectivity blip while reading the lease blanks the hold banner instead of
+    failing the roster — mid-restart is exactly when the roster is asked for."""
     import psycopg
 
     def _boom() -> None:

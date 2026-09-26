@@ -1,15 +1,14 @@
-"""Prod-source git introspection — the checkout the live cluster runs from.
+"""Prod-source git introspection — the checkout a source-run home executes.
 
-The prod source (`$AVA_HOME/source`) is the tree every cluster service runs out
-of. Two facts about it surface "this host is running something other than the
-reviewed, pinned code":
+The prod source (`$AVA_HOME/source`) is the tree a source-run home's services
+run out of. Facts about it that status surfaces show:
 
-- `prod_source_head_sha()` — its HEAD commit, compared against the cluster pin
-  (`shared.cluster_pin.get_cluster_target_sha`) to detect a node that has drifted
-  off the commit the whole cluster should be on.
+- `prod_source_head_sha()` — its HEAD commit, reported per host in the roster
+  beside the commit the answering process loaded (`shared.process_sha`).
+- `checkout_head_sha(repo)` — the same read for an explicit checkout.
 - `prod_source_branch_drift()` — its current branch when it is not `main`, i.e.
   an agent developed *in* the prod tree instead of a worktree (un-reviewed code
-  on the running host; the next rollout force-discards it).
+  on the running host).
 
 All are subprocess calls against a fixed path — local reads plus one
 best-effort fetch (`prod_source_fetch`, the only one that touches the network),
@@ -23,7 +22,6 @@ from __future__ import annotations
 import contextlib
 import subprocess
 from pathlib import Path
-from typing import Literal
 
 from shared.deploy.git.gitenv import git_env
 from shared.proc import run_bounded
@@ -38,9 +36,8 @@ _GIT_TIMEOUT_S = 5.0
 
 # `prod_source_fetch`'s ceiling. A fetch is network I/O with no natural bound (a
 # wedged network hangs git until TCP gives up), so it cannot share the local-read
-# ceiling; 30s is generous enough for a real fetch while small enough that the
-# watchdog tick that runs it (the pin-drift unknown branch) is delayed, not
-# parked, when the remote is unreachable.
+# ceiling; 30s is generous enough for a real fetch while small enough that a
+# caller is delayed, not parked, when the remote is unreachable.
 _FETCH_TIMEOUT_S = 30.0
 
 
@@ -52,8 +49,7 @@ def prod_source_dir() -> Path | None:
     order is load-bearing for co-located clusters (e.g. a preview gateway
     `~/.ava-preview` on the same host as the prod runner `~/.ava`): the symlink
     points at PROD's source on every unit layout, so reading it from the
-    secondary unit would report PROD's HEAD as its own and raise a false
-    off-pin warning. The symlink fallback still covers the gateway-only layout
+    secondary unit would report PROD's HEAD as its own. The symlink fallback still covers the gateway-only layout
     (`$AVA_HOME=~/.ava_gateway` with the checkout at `/opt/ava/source`), where
     `$AVA_HOME/source` does not exist. The symlink is never repointed by a dev
     cluster, so from a dev worktree this still reports PROD's source (the
@@ -104,33 +100,6 @@ def _git_ro(*args: str, repo: Path | None = None) -> str | None:
     return result.stdout.strip() or None
 
 
-def _git_rc(*args: str, repo: Path | None = None) -> int | None:
-    """Run a read-only git command in the prod source checkout, returning its exit
-    code rather than stdout.
-
-    `repo` overrides the checkout the command runs in, like `_git_ro`. Lets a
-    caller act on a meaningful non-zero exit -- `git merge-base
-    --is-ancestor A B` exits 0 (A is an ancestor of B), 1 (it is not), or >1
-    (neither commit could be resolved) -- which `_git_ro` collapses into None.
-    Returns None only when the command could not be run at all (checkout absent /
-    not a git repo / git unavailable).
-    """
-    source = repo if repo is not None else _prod_source_dir()
-    if source is None or not (source / ".git").exists():
-        return None
-    try:
-        result = run_bounded(  # git + fixed path + literal args, no user input
-            ["git", "-C", str(source), *args],
-            capture_output=True,
-            text=True,
-            env=git_env(),
-            timeout=_GIT_TIMEOUT_S,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return result.returncode
-
-
 def running_from_prod_source() -> bool:
     """Whether the calling process loaded its code from the prod source checkout.
 
@@ -152,50 +121,13 @@ def running_from_prod_source() -> bool:
 
 
 def prod_source_head_sha() -> str | None:
-    """The prod source's current HEAD commit sha, or None if it cannot be read.
-
-    Compared against the cluster pin (`cluster_target_sha`) to surface a node
-    drifted off the cluster's pinned commit.
-    """
+    """The prod source's current HEAD commit sha, or None if it cannot be read."""
     return _git_ro("rev-parse", "HEAD")
 
 
-PinRelation = Literal["aligned", "ahead", "behind", "diverged", "unknown"]
-
-
-def prod_source_pin_relation(pin: str, head: str, *, repo: Path | None = None) -> PinRelation:
-    """How a checkout's HEAD relates to the cluster pin, via git ancestry:
-
-    - "aligned"  — HEAD is the pin.
-    - "behind"   — HEAD is an ancestor of the pin: this host missed a rollout, and
-                   `ava cluster update` fast-forwards it onto the pin.
-    - "ahead"    — the pin is an ancestor of HEAD: the checkout moved past the pin
-                   — a stray `git pull`, or a rollout that landed while the pin was
-                   not advanced (the convergent end-state of a mid-rollout failure).
-                   The pin is a floor, not a ceiling: nothing resets the tree back
-                   to it. `ava cluster update` force-checks-out the reviewed target
-                   (origin/main, resolved once) and advances the pin to it — a
-                   stray HEAD is discarded, not promoted.
-    - "diverged" — neither is an ancestor of the other (a rebase / force-push).
-    - "unknown"  — the relationship can't be computed: the pin commit is not present
-                   in this checkout (never fetched), or git can't be read.
-
-    Defaults to the prod source checkout (the tree the live cluster runs out of);
-    `repo` overrides it for a caller checking a different checkout (the health
-    preflight checks the checkout a start is running FROM). Equality is checked
-    first, so "ahead"/"behind" never collapse onto an equal pair.
-    """
-    if head == pin:
-        return "aligned"
-    pin_is_ancestor = _git_rc("merge-base", "--is-ancestor", pin, head, repo=repo)
-    head_is_ancestor = _git_rc("merge-base", "--is-ancestor", head, pin, repo=repo)
-    if pin_is_ancestor == 0:
-        return "ahead"
-    if head_is_ancestor == 0:
-        return "behind"
-    if pin_is_ancestor == 1 and head_is_ancestor == 1:
-        return "diverged"
-    return "unknown"
+def checkout_head_sha(repo: Path) -> str | None:
+    """`repo`'s current HEAD commit sha, or None if it cannot be read."""
+    return _git_ro("rev-parse", "HEAD", repo=repo)
 
 
 def prod_source_branch_drift() -> str | None:
@@ -215,13 +147,9 @@ def prod_source_fetch(*refs: str, repo: Path | None = None) -> bool:
 
     The one non-read in this module: it writes to the object store and
     FETCH_HEAD (never the working tree — concurrent with a checkout it is the
-    fetch half of a `git pull`, which git already serializes). Its purpose is
-    to make a pin commit locally resolvable before judging ancestry:
-    `prod_source_pin_relation` answers "unknown" when the pin was never
-    fetched, and a checkout cannot be healed toward a commit it cannot see
-    (the pin-drift self-heal's unknown branch). Returns False when the checkout
-    is absent / not a git repo / git is unavailable / the fetch fails or times
-    out — the caller keeps its prior judgment then.
+    fetch half of a `git pull`, which git already serializes). Returns False
+    when the checkout is absent / not a git repo / git is unavailable / the
+    fetch fails or times out.
     """
     source = repo if repo is not None else _prod_source_dir()
     if source is None or not (source / ".git").exists():

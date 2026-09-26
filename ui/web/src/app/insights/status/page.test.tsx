@@ -1,6 +1,6 @@
 // Status section tests — the tri-state (loading / quiet-error / data), the
 // Services block (agent-runner table and current observations),
-// pin/off-pin display, and the merged Gateway card + daemon section.
+// code-drift display, and the merged Gateway card + daemon section.
 //
 // Renders <StatusPage /> directly (no Control page shell): useSectionVisible
 // defaults true outside a provider, so the status poll enables and goes through
@@ -39,7 +39,6 @@ const STATUS_OK: SystemStatus = {
     current_serve_agent_runner: false,
     current_serve_observability_station: false,
     current_paused: false,
-    cluster_target_sha: "abc1234def",
     machines: [
       {
         name: "test-host",
@@ -47,14 +46,12 @@ const STATUS_OK: SystemStatus = {
         serve_agent_runner: false,
         serve_observability_station: false,
         identity_mismatch: false,
-        settle_waited_on: false,
         is_staging: false,
         gateway_url: "http://10.0.0.1:8000",
         up_since_at: new Date(Date.now() - 30_000).toISOString(),
         online: true,
         paused: false,
         head_sha: "abc1234def",
-        on_pin: true,
         shell_count: 0,
         agent_count: 0,
         session_count: 0,
@@ -73,20 +70,18 @@ const STATUS_OK: SystemStatus = {
         supervisor_online: true,
       },
       {
-        // offline: a failed probe clears HEAD, so head_sha is null + on_pin null
+        // offline: a failed probe clears HEAD, so head_sha is null
         name: "wsl",
         serve_gateway: false,
         serve_agent_runner: true,
         serve_observability_station: false,
         identity_mismatch: false,
-        settle_waited_on: false,
         is_staging: false,
         gateway_url: "http://10.0.0.2:8000",
         up_since_at: new Date(Date.now() - 5 * 60_000).toISOString(),
         online: false,
         paused: null,
         head_sha: null,
-        on_pin: null,
         shell_count: 0,
         agent_count: 0,
         session_count: 0,
@@ -105,20 +100,18 @@ const STATUS_OK: SystemStatus = {
         supervisor_online: null,
       },
       {
-        // online but drifted off the pin → the off-pin case
+        // online, with daemon health degraded
         name: "test-host-2",
         serve_gateway: false,
         serve_agent_runner: true,
         serve_observability_station: false,
         identity_mismatch: false,
-        settle_waited_on: false,
         is_staging: false,
         gateway_url: "http://10.0.0.3:8000",
         up_since_at: new Date(Date.now() - 30_000).toISOString(),
         online: true,
         paused: false,
         head_sha: "999888777",
-        on_pin: false,
         shell_count: 2,
         agent_count: 4,
         session_count: 0,
@@ -273,17 +266,37 @@ describe("StatusPage Services and Gateway sections", () => {
     expect(screen.getAllByText("Up since").length).toBeGreaterThan(0);
   });
 
-  it("agent count + off-pin marker render per runner row", async () => {
+  it("agent count renders per runner row", async () => {
     wrap(<StatusPage />);
     await waitFor(() => screen.getByTestId("agent-runners-card"));
     const table = screen.getByTestId("agent-runners-card");
-    // test-host-2 runs 4 agents and sits off the cluster pin.
+    // test-host-2 runs 4 agents.
     expect(table.textContent).toMatch(/4/);
-    expect(screen.getByText("off-pin")).toBeTruthy();
-    expect(screen.getByText(/pinned to abc1234/)).toBeTruthy();
   });
 
-  it("code drift outranks the pin verdict (⚠ + running sha)", async () => {
+  it("never renders a historical cluster pin or known-good anchor", async () => {
+    // Nothing writes the pin any more; a payload still carrying frozen values
+    // (an older gateway) must not present them as the cluster's current target.
+    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+      ...STATUS_OK,
+      cluster: {
+        ...STATUS_OK.cluster,
+        cluster_target_sha: "0123456789",
+        cluster_last_known_good_sha: "fedcba9876",
+        machines: [
+          { ...STATUS_OK.cluster.machines[0], on_pin: false },
+          STATUS_OK.cluster.machines[1],
+        ],
+      } as unknown as SystemStatus["cluster"],
+    });
+    wrap(<StatusPage />);
+    await waitFor(() => screen.getByTestId("gateway-card-test-host"));
+    expect(screen.queryByText(/0123456/)).toBeNull();
+    expect(screen.queryByText(/fedcba9/)).toBeNull();
+    expect(screen.queryByText("off-pin")).toBeNull();
+  });
+
+  it("code drift renders ⚠ + the running sha", async () => {
     vi.spyOn(api, "getSystemStatus").mockResolvedValue({
       ...STATUS_OK,
       cluster: {
@@ -300,27 +313,6 @@ describe("StatusPage Services and Gateway sections", () => {
     wrap(<StatusPage />);
     await waitFor(() => screen.getByTestId("gateway-card-test-host"));
     expect(screen.getByText(/⚠1112223/)).toBeTruthy();
-    expect(screen.queryByText("off-pin")).toBeNull();
-  });
-
-  it("settle_waited_on renders a settle-hold badge on that host only", async () => {
-    // A deploy's settle hold names wsl. The badge is the lease's record of who it
-    // waits for — orthogonal to the live pin/code verdicts, so it shows alongside
-    // them rather than replacing them, and only on the named host.
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
-      ...STATUS_OK,
-      cluster: {
-        ...STATUS_OK.cluster,
-        machines: [
-          STATUS_OK.cluster.machines[0],
-          { ...STATUS_OK.cluster.machines[1], settle_waited_on: true },
-        ],
-      },
-    });
-    wrap(<StatusPage />);
-    await waitFor(() => screen.getByTestId("agent-runners-card"));
-    expect(screen.getAllByText("settle-hold")).toHaveLength(1);
-    expect(screen.getByTestId("gateway-card-test-host").textContent).not.toContain("settle-hold");
   });
 
   it("gateway daemon probe failure → health 'degraded'", async () => {

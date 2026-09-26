@@ -59,13 +59,6 @@ class ClusterPanel(BaseModel):
     current_serve_observability_station: bool = False
     current_paused: bool  # whether the current gateway is paused (local is_paused())
     machines: list[MachineStatus]
-    # The cluster's pinned commit (`cluster_target_sha`), or None if no rollout
-    # has pinned one yet. Lets the panel show "cluster pinned to <sha>" alongside
-    # each machine's on_pin verdict.
-    cluster_target_sha: str | None = None
-    # The cluster's rollback anchor (`cluster_pin.last_known_good_sha`), so a pin
-    # that moved backwards reads as "rolled back to this" rather than as drift.
-    cluster_last_known_good_sha: str | None = None
 
 
 class SystemStatus(BaseModel):

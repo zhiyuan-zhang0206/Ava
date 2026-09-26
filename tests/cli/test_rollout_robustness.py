@@ -1,4 +1,4 @@
-"""Rollout robustness — the four defects a live 2026-07-28 rollout exposed.
+"""Rollout robustness — defects a live 2026-07-28 rollout exposed.
 
 Each of these is a regression test for something the rollout did silently:
 - the fan-out dropped a probe-live host because of a stale `machines.stopped_at`,
@@ -6,8 +6,7 @@ Each of these is a regression test for something the rollout did silently:
 - the roster showed that same host `online` throughout, so the two sources of
   truth disagreed with nothing to see;
 - the updater's recovery branch could only fire on a checkout/sync failure, so a
-  failed `ava restart` reached no fallback at all;
-- `ava status`'s pin hint accused an in-flight rollout of being a stray `git pull`.
+  failed `ava restart` reached no fallback at all.
 
 No cluster is required: the `machines` reads and the ops probe are stubbed.
 """
@@ -126,51 +125,3 @@ def test_declined_restart_leaves_a_rollouts_pause_alone(
 
     _stop_commands._release_self_heal_pause()
     assert unpaused == []
-
-
-# ─── Defect 4: the pin hint during an in-flight rollout ──────────────────────
-
-
-def test_pin_hint_does_not_cry_stray_git_pull_during_a_rollout(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
-    """Mid-rollout the checkout legitimately runs ahead of a pin that is only
-    written once the gateway lands the target. Read live in a rollout log, the
-    standing hint reads as an incident."""
-    from cli.commands import status as status_mod
-
-    monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(status_mod, "_cluster_pin_status", lambda: ("aaaaaaa", "bbbbbbb"))
-    monkeypatch.setattr(status_mod, "prod_source_pin_relation", lambda _p, _h: "ahead")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(status_mod, "_update_in_flight", lambda: True)
-    monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
-    monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert status_mod.cmd_status() == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert "update in progress" in out
-    assert "stray" not in out
-
-
-def test_pin_hint_still_warns_when_no_update_is_running(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
-    """Outside a rollout the same state IS a stray `git pull`, and the hint that
-    says so must survive."""
-    from cli.commands import status as status_mod
-
-    monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(status_mod, "_cluster_pin_status", lambda: ("aaaaaaa", "bbbbbbb"))
-    monkeypatch.setattr(status_mod, "prod_source_pin_relation", lambda _p, _h: "ahead")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(status_mod, "_update_in_flight", lambda: False)
-    monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
-    monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
-    monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-
-    assert status_mod.cmd_status() == 0
-    assert "stray" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]

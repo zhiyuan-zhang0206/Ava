@@ -51,17 +51,16 @@ A cluster's identity **is** its home path, so every verb that names one takes
   the stale home.
 - `health-probe` is a cron payload that exits 0/1, not a human-readable view —
   the roster is `status`.
-- `status`'s columns answer three different questions. `pin` and `code` are live
-  per-host probe readings (checkout vs the cluster pin; the commit the answering
-  process froze at). `hold` is not a probe at all: it is transcribed from the live
-  `deployment_state` lease — a banner above the table naming the lease, and
-  `waited-on` on each host a settle hold's recorded waiting set names as still converging. So it
-  explains a refused deploy without claiming to know convergence: `waited-on` is
-  what the hold *says* it waits for, a blank cell is "not named by this hold" (a
-  host that never acked never is), and a blank column is not proof no deploy runs —
-  native admission and maintenance holds are separate facts. The roster reads the
-  lease row rather than `ops.deploy_window.deploy_in_flight()`, which probes every
-  machine and releases a converged hold.
+- `status`'s `code` column is a live per-host probe reading: the commit the
+  answering process froze at, marked when it differs from the host's checkout
+  HEAD. There is no cluster pin or known-good column: nothing writes those legacy
+  values, so a verdict against them would present a frozen value as current. The
+  deploy-hold banner above the table is not a probe: it is transcribed from the
+  live `deployment_state` lease and explains a refused lease acquire. Its absence
+  is not proof no deploy runs — native admission and maintenance holds are
+  separate facts. The roster reads the lease row rather than
+  `ops.deploy_window.deploy_in_flight()`, which probes every machine and releases
+  a converged hold.
 
 ## Key dependencies
 

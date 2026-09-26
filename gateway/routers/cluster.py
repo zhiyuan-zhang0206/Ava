@@ -35,6 +35,7 @@ from ops.rpc_schemas import ClusterTransitionPayload
 from ops.schema_mismatch import status as schema_mismatch_status
 from shared import machines
 from shared.cluster_drift import prod_source_head_sha
+from shared.cluster_lock import DeployLease
 from shared.config import settings
 from shared.db_transaction import write_transaction
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
@@ -79,19 +80,11 @@ def _machines_rows_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
         return cur.fetchall()
 
 
-def _cluster_globals_blocking() -> tuple[Any, Any, Any]:
-    """Read cluster-global markers off the event loop before roster fan-out."""
-    from gateway.routers.status import (
-        _read_cluster_pin,
-        _read_deploy_lease,
-        _read_known_good,
-    )
+def _cluster_globals_blocking() -> DeployLease | None:
+    """Read the cluster-global deploy lease off the event loop before roster fan-out."""
+    from gateway.routers.status import _read_deploy_lease
 
-    return (
-        _read_cluster_pin(),
-        _read_deploy_lease(),
-        _read_known_good(),
-    )
+    return _read_deploy_lease()
 
 
 async def _dispatch_op(
@@ -200,19 +193,9 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
     if not rows:
         return []
 
-    # Read cluster-global pin and deploy facts once, then stamp every row.
-    (
-        cluster_target_sha,
-        deploy_lease,
-        last_known_good_sha,
-    ) = await asyncio.to_thread(_cluster_globals_blocking)
-    return await gather_cluster_status(
-        rows,
-        machine_name(),
-        cluster_target_sha=cluster_target_sha,
-        deploy_lease=deploy_lease,
-        last_known_good_sha=last_known_good_sha,
-    )
+    # Read the cluster-global deploy lease once, then stamp every row.
+    deploy_lease = await asyncio.to_thread(_cluster_globals_blocking)
+    return await gather_cluster_status(rows, machine_name(), deploy_lease=deploy_lease)
 
 
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------

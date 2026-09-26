@@ -1,23 +1,19 @@
-"""The cluster's pinned commit plus the pending-known-good observation window.
+"""Legacy cluster pin row: historical values that no current lifecycle writes.
 
-The standing record of which git commit the whole cluster should be on. The
-gateway writes it (`set_cluster_target_sha`) after a rollout's local update
-reaches its target; any node reads it (`get_cluster_target_sha`) to compare its
-own HEAD and surface drift (`ava status`). A single row in `cluster_pin` (central
-DB).
+`cluster_pin` (one row, central DB) holds the commit the retired in-place
+updater last pinned (`target_sha`) and its known-good bookkeeping
+(`last_known_good_sha`, `pending_known_good_sha`). Nothing advances these
+columns any more: the retained release journal (`cli/release_transition/`) is
+the release record, and known-good publication belongs to the release
+operation, which has not implemented it yet. The values are therefore frozen at
+whatever the legacy updater last wrote, and no operator surface presents them
+as the cluster's current target or rollback anchor.
 
-`last_known_good_sha` is the automatic rollback anchor. A successful backend
-rollout pins its target immediately, but records it as `pending_known_good_sha`
-until the health probe has observed a healthy window. Only then does
-`promote_pending_known_good_if_ready` advance the anchor. `advance_pin` remains
-the immediate-advance primitive for an explicit manual operation.
-
-This is the *persisted* form of the per-rollout `target_sha` (the SHA-pinned
-rollout in `gateway/cluster.py` / `cli/commands/update.py`, which threads the SHA
-only for the duration of one rollout). It is the first step toward commit-level
-pinning (`future/infra/commit-pinned-cluster.md`): persist + visualize now;
-fail-fast on drift (a node refusing to run when `HEAD != target_sha`) is a later
-step that builds on this standing value.
+The writers below have no production caller. The remaining readers are
+`ops.deploy_window.settle_hosts_converged` (settle holds, which likewise have no
+current producer) and `ops.spec.Spec.cluster_pin`. Removing the row belongs to
+the cutover's retired-storage cleanup
+(`future/infra/unified-cluster-lifecycle.md`).
 """
 
 from __future__ import annotations
@@ -87,9 +83,9 @@ def get_cluster_target_sha(*, conn: psycopg.Connection | None = None) -> str | N
 
 
 def get_last_known_good_sha() -> str | None:
-    """The last-known-good commit — the automatic rollback target for the
-    health-probe / rollback flow. NULL means no known-good has been established
-    yet (fresh cluster, or no successful rollout has completed)."""
+    """The legacy last-known-good commit the retired updater recorded, or None
+    when it never recorded one. No current writer advances it; it is not the
+    rollback target of any current lifecycle."""
     with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT last_known_good_sha FROM cluster_pin WHERE id = 1")
         row = cur.fetchone()

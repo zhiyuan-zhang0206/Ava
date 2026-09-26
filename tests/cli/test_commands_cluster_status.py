@@ -1,4 +1,4 @@
-"""Cluster roster, status transport, restart, and hold banners; split from tests/cli/test_commands.py (task #4554)."""
+"""Cluster roster, status transport, resume checklist, and hold banners; split from tests/cli/test_commands.py (task #4554)."""
 
 from __future__ import annotations
 
@@ -10,25 +10,7 @@ from tests.cli._commands_helpers import _FakeResponse
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_prechecks
 
-# ─── ava cluster status roster pin column ────────────────────────────────────
-
-
-def test_pin_cell_on_pin() -> None:
-    from cli.commands.cluster import _pin_cell
-
-    assert _pin_cell(on_pin=True, head_sha="abc1234def") == "✓ abc1234"
-
-
-def test_pin_cell_off_pin() -> None:
-    from cli.commands.cluster import _pin_cell
-
-    assert _pin_cell(on_pin=False, head_sha="abc1234def") == "✗ abc1234"
-
-
-def test_pin_cell_unknown() -> None:
-    from cli.commands.cluster import _pin_cell
-
-    assert _pin_cell(None, None) == "? —"
+# ─── ava cluster status roster code column ───────────────────────────────────
 
 
 def test_code_cell_matches_checkout() -> None:
@@ -40,7 +22,7 @@ def test_code_cell_matches_checkout() -> None:
 
 def test_code_cell_drift_marks_stale_process() -> None:
     """running_sha != head_sha → ⚠ + running short SHA (process running stale code
-    vs its checkout, even when pin reads ✓)."""
+    vs its checkout)."""
     from cli.commands.cluster import _code_cell
 
     assert _code_cell(running_sha="999888777", head_sha="abc1234def") == "⚠ 9998887"
@@ -87,7 +69,6 @@ def test_cmd_cluster_status_renders_identity_mismatch_and_code_drift(
             name="stale",
             serve_gateway=False,
             serve_agent_runner=True,
-            on_pin=True,
             head_sha="abc1234def",
             running_sha="999888777",
         ),
@@ -101,36 +82,37 @@ def test_cmd_cluster_status_renders_identity_mismatch_and_code_drift(
     assert "⚠ 9998887" in out
 
 
-def test_cmd_cluster_status_renders_pin_and_role_columns(
+def test_cmd_cluster_status_renders_role_column_without_a_pin_verdict(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The roster has a `pin` column (✓/✗ from each row's on_pin) and a `role`
-    column derived from the serve_gateway / serve_agent_runner /
-    serve_observability_station capability flags
-    (regression for the KeyError('role') crash)."""
+    """The roster has a `role` column derived from the serve_gateway /
+    serve_agent_runner / serve_observability_station capability flags
+    (regression for the KeyError('role') crash) and no `pin` column: nothing
+    writes the cluster pin, so a verdict against it would be a stale value
+    presented as current."""
     roster = [
         _machine_row(
             name="cloud",
             serve_gateway=True,
             serve_agent_runner=True,
-            on_pin=True,
             head_sha="abc1234def",
+            running_sha="abc1234def",
         ),
         _machine_row(
             name="wsl",
             serve_gateway=False,
             serve_agent_runner=True,
-            on_pin=False,
             head_sha="999888777",
+            running_sha="999888777",
         ),
     ]
     _patch_roster_get(monkeypatch, roster)
     rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
-    assert "pin" in out
-    assert "✓ abc1234" in out
-    assert "✗ 9998887" in out
+    header = out.splitlines()[0].split()
+    assert "pin" not in header and "code" in header
+    assert "✓" not in out and "✗" not in out
     cloud_line = next(line for line in out.splitlines() if line.startswith("cloud"))
     wsl_line = next(line for line in out.splitlines() if line.startswith("wsl"))
     assert "gateway + agent-runner" in cloud_line
@@ -363,46 +345,34 @@ def test_cmd_cluster_status_renders_online_stopped_offline(
     assert "corp" in out and "offline" in out
 
 
-def test_cmd_cluster_status_renders_hold_column_and_banner(
+def test_cmd_cluster_status_renders_the_deploy_hold_banner_without_a_hold_column(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A live settle hold shows up twice: the banner naming the lease (the answer to
-    "why was my deploy refused"), and `waited-on` on exactly the hosts the hold's
-    recorded set names — every other host reads `—`, which is "not named", not
-    "converged"."""
+    """A live deploy lease shows as the banner naming it (the answer to "why was
+    my deploy refused"). There is no per-host `hold` column: nothing records a
+    settle hold's waiting set any more, so a per-host verdict would be a dead
+    state."""
+    hold = "machine-1:pid42 (held 5m, lease expires in 10m)"
     roster = [
-        _machine_row(
-            name="test-host",
-            deploy_hold="machine-1:pid42 (held 5m, lease expires in 10m) — settling, waiting for: wsl",
-            settle_waited_on=False,
-        ),
-        _machine_row(
-            name="wsl",
-            deploy_hold="machine-1:pid42 (held 5m, lease expires in 10m) — settling, waiting for: wsl",
-            settle_waited_on=True,
-        ),
+        _machine_row(name="test-host", deploy_hold=hold),
+        _machine_row(name="wsl", deploy_hold=hold),
     ]
     _patch_roster_get(monkeypatch, roster)
     rc = _cluster_commands.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[0] == (
-        "deploy hold: machine-1:pid42 (held 5m, lease expires in 10m) — settling, waiting for: wsl"
-    )
+    assert out[0] == f"deploy hold: {hold}"
     # The banner states the operator-visible consequence, which is what brought them here.
     assert any("no other owner can take the cluster deploy lease" in line for line in out[:5])
     header = next(line for line in out if line.startswith("name"))
-    assert "hold" in header
-    wsl_row = next(line for line in out if line.startswith("wsl"))
-    assert "waited-on" in wsl_row
-    local_row = next(line for line in out if line.startswith("test-host"))
-    assert "waited-on" not in local_row
+    assert "hold" not in header.split()
+    assert not any("waited-on" in line for line in out)
 
 
 def test_cmd_cluster_status_prints_no_banner_when_no_hold(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """No live lease -> no banner at all. A blank `hold` column is not evidence the
+    """No live lease -> no banner at all. An absent lease is not evidence the
     cluster is free (host-local maintenance takes no cluster lease), so the roster
     does not claim it is."""
     _patch_roster_get(monkeypatch, [_machine_row(name="test-host")])

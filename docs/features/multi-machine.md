@@ -20,8 +20,9 @@ Any machines that are **network-reachable to each other** form a cluster: run
 `ava start --serve-gateway --serve-agent-runner --machine-name <name>` on the
 gateway box, and, with `AVA_CLUSTER_SECRET` exported,
 `ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --machine-name <name> --machine-host <host>` on
-each runner. The gateway orchestrates rollouts across the whole roster; a pure
-runner self-updates on the pinned commit.
+each runner. `ava cluster status` shows every host's running commit; release
+transitions currently act on one home at a time, and fleet-wide transitions are
+planned work ([unified cluster lifecycle](../../future/infra/unified-cluster-lifecycle.md)).
 
 <!-- TODO(image): cluster topology — gateway + N runner machines -->
 

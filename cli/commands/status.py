@@ -14,11 +14,11 @@ additionally — rather than delegating wholesale.
 from __future__ import annotations
 
 from contextlib import suppress
+from pathlib import Path
 
 from cli.commands._cluster_instance import print_data_plane_status
 from cli.commands._converge_redis_bridge import print_redis_bridge_status
 from cli.commands._probe import (
-    _cluster_pin_status,
     _detect_prod_source_drift,
     _print_service_row,
 )
@@ -30,34 +30,11 @@ from cli.commands._repo import (
 )
 from ops.service_spec import ServiceSpec
 from shared import service_selection
-from shared.cluster_drift import prod_source_pin_relation
 from shared.machine import MachineRoles
-
-# Cluster-pin line marks, keyed by `prod_source_pin_relation`. "ahead" means HEAD
-# moved past the pin: a stray `git pull`, or a rollout that landed while the pin
-# was not advanced. The pin is a floor, not a ceiling — nothing resets the tree
-# back to it; `ava cluster update` advances the pin to the live HEAD.
-_PIN_MARKS = {
-    "aligned": "✓ aligned",
-    "behind": "⚠ behind pin (run `ava cluster update`)",
-    "ahead": "⚠ ahead of pin — HEAD moved past it (stray `git pull`, or a rollout "
-    "that landed without advancing the pin); `ava cluster update` brings the pin up",
-    "diverged": "⚠ diverged from pin (run `ava cluster update`)",
-    "unknown": "⚠ off pin (run `ava cluster update`)",
-}
-
-# What every non-aligned relation means while a cluster update is actually running.
-# Mid-rollout the checkout legitimately moves ahead of a pin that is only written
-# once the gateway lands the target, so the standing hints accuse an in-flight
-# rollout of being a stray `git pull` — on 2026-07-28 that line, read live in a
-# rollout log, is what a false alarm was built on. During an update the honest
-# reading of any drift is "not converged yet", and none of the remedies apply:
-# `ava cluster update` is what is already running.
-_PIN_MARK_DURING_UPDATE = "· update in progress — this host has not converged yet"
 
 
 def _update_in_flight() -> bool:
-    """Read the cluster deploy lease for the advisory pin-drift hint."""
+    """Whether a live cluster deploy lease is held (package refresh skips then)."""
     with suppress(Exception):
         from shared.cluster_lock import update_lock_holder
 
@@ -144,51 +121,87 @@ def cmd_status() -> int:
         print_redis_bridge_status()
 
     # any installed host: warn if the prod source ($AVA_HOME/source) has drifted
-    # off `main`. It is the checkout the live cluster runs from, so it must be
+    # off `main`. A source-run home executes that checkout, so it must be
     # reviewed `main` — a feature branch there means the host runs un-reviewed
-    # code, and the next rollout force-discards those commits (work in a
-    # worktree, never the prod tree).
+    # code (work in a worktree, never the prod tree).
     if roles:
         drift_branch = _detect_prod_source_drift()
         if drift_branch is not None:
             where = "a detached HEAD" if drift_branch == "HEAD" else f"branch '{drift_branch}'"
             print(
                 f"\n⚠ prod source ($AVA_HOME/source) is on {where}, not `main`.\n"
-                f"   The live cluster runs this tree — it must be reviewed `main`; a "
-                f"feature branch here runs un-reviewed code and the next rollout "
-                f"force-discards its commits.\n"
+                f"   A source-run home executes this tree — it must be reviewed `main`; a "
+                f"feature branch here runs un-reviewed code on the next restart.\n"
                 f"   Develop in a worktree, never the prod checkout. Recover: stash / "
                 f"branch any work, then `git -C $AVA_HOME/source checkout main`."
             )
 
-    # any installed host: show the cluster pin (cluster_target_sha — the commit the
-    # last rollout pinned the cluster to) vs this host's HEAD, so a node that missed
-    # a rollout is visible. Read-only / non-fatal (skipped when no pin yet or the DB
-    # is unreachable). The fail-fast-on-drift step is future (commit-pinned-cluster).
-    if roles:
-        pin_status = _cluster_pin_status()
-        if pin_status is not None:
-            pin, head = pin_status
-            updating = _update_in_flight()
-            if head is None:
-                head_s = "unknown"
-                mark = (
-                    _PIN_MARK_DURING_UPDATE
-                    if updating
-                    else "⚠ HEAD unreadable (run `ava cluster update`)"
-                )
-            else:
-                head_s = head[:7]
-                relation = prod_source_pin_relation(pin, head)
-                mark = (
-                    _PIN_MARK_DURING_UPDATE
-                    if updating and relation != "aligned"
-                    else _PIN_MARKS[relation]
-                )
-            print(f"\ncluster pin: {pin[:7]} — this host HEAD {head_s} [{mark}]")
+    # This home's current release identity, from its own durable records: the
+    # selected image, or the source checkout it runs, plus any incomplete home
+    # operation. There is no cluster-wide pin; the release journal is the record.
+    print()
+    for line in _release_identity_lines(Path(repo)):
+        print(line)
 
     _print_gateway_cluster_status()
     return 0
+
+
+def _release_identity_lines(repo: Path) -> list[str]:
+    """This home's release identity and any incomplete home operation.
+
+    A selected image (`$AVA_HOME/releases/current-release`) is the release; a
+    home without one runs its source checkout. Unreadable records print as
+    unreadable — never replaced by a guess or by a historical value.
+    """
+    from shared.cluster_drift import checkout_head_sha
+    from shared.paths import ava_home
+    from shared.runtime_release import current_pointer
+
+    home = ava_home()
+    try:
+        selected = current_pointer(home / "releases")
+    except (OSError, ValueError) as exc:
+        lines = [f"release: ✗ selector unreadable ({exc})"]
+    else:
+        if selected is None:
+            head = checkout_head_sha(repo)
+            lines = [
+                f"release: source checkout {repo} at {head[:7] if head else 'unreadable HEAD'}"
+            ]
+        else:
+            artifact, manifest = selected
+            lines = [f"release: image {artifact[:12]} (manifest {manifest[:12]})"]
+    operation = _home_operation_line(home)
+    if operation is not None:
+        lines.append(operation)
+    return lines
+
+
+def _home_operation_line(home: Path) -> str | None:
+    """The active release/PITR operation unless it completed cleanly."""
+    from cli.release_transition.journal import read_operation
+    from shared.verified_file import regular_bytes
+
+    try:
+        journal = Path(regular_bytes(home / "updates" / "active").decode().strip())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        return f"  operation: ✗ active pointer unreadable ({exc})"
+    try:
+        operation = read_operation(journal)
+    except (OSError, ValueError) as exc:
+        return f"  operation: ✗ journal {journal} unreadable ({exc})"
+    if operation.terminal and operation.error is None:
+        return None
+    request = operation.request
+    line = f"  operation: {request.kind} {str(request.id)[:8]} — phase {operation.phase}"
+    if operation.direction is not None:
+        line += f", direction {operation.direction}"
+    if operation.error is not None:
+        line += f", error: {operation.error}"
+    return line
 
 
 def _print_host_resources() -> None:

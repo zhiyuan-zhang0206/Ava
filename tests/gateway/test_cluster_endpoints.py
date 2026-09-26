@@ -953,7 +953,7 @@ class TestAgentMachineList:
 
         now = datetime.now(UTC)
 
-        async def _fake_gather(rows, local_name, *, cluster_target_sha=None):  # type: ignore[no-untyped-def]
+        async def _fake_gather(rows, local_name):  # type: ignore[no-untyped-def]
             return [
                 MachineStatus(
                     name="control-test",

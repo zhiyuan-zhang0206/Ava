@@ -1,4 +1,4 @@
-"""Gateway status, source drift, cluster pin, and host readings; split from tests/cli/test_commands.py (task #4554)."""
+"""Gateway status, source drift, release identity, and host readings; split from tests/cli/test_commands.py (task #4554)."""
 
 from __future__ import annotations
 
@@ -381,80 +381,97 @@ def test_cmd_status_warns_on_prod_source_drift(monkeypatch: pytest.MonkeyPatch, 
     assert "ava-7/fix" in out
 
 
-# ─── cluster pin (cluster_target_sha) status ─────────────────────────────────
+# ─── release identity (replaces the retired cluster pin line) ────────────────
 
 
-def test_cluster_pin_status_no_pin(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No pin set yet → None (no line to show)."""
-    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda: None)
-    assert _probe_commands._cluster_pin_status() is None
-
-
-def test_cluster_pin_status_returns_pin_and_head(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin set → (target_sha, this_host_head)."""
-    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda: "abc1234")
-    monkeypatch.setattr("cli.commands._probe._prod_source_head_sha", lambda: "abc1234")
-    assert _probe_commands._cluster_pin_status() == ("abc1234", "abc1234")
-
-
-def test_cluster_pin_status_db_unreachable_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A down central DB → None (ava status must still run; the pin is diagnostic)."""
-    import psycopg
-
-    def _boom() -> str | None:
-        raise psycopg.OperationalError("connection refused")
-
-    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", _boom)
-    assert _probe_commands._cluster_pin_status() is None
-
-
-def test_cmd_status_shows_cluster_pin_aligned(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    """cmd_status prints the cluster-pin line; HEAD == pin → aligned."""
+def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
+    """Isolate `ava status` to its release section: a runner-only role, no probes."""
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: None)
-    monkeypatch.setattr("cli.commands.status._cluster_pin_status", lambda: ("abc1234", "abc1234"))
-    rc = _status_commands.cmd_status()
-    assert rc == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert "cluster pin: abc1234" in out
-    assert "aligned" in out
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
 
 
-@pytest.mark.parametrize(
-    ("relation", "expected"),
-    [
-        ("behind", "behind pin"),
-        ("ahead", "ahead of pin"),
-        ("diverged", "diverged from pin"),
-        ("unknown", "off pin"),
-    ],
-)
-def test_cmd_status_cluster_pin_drift_wording(
-    monkeypatch: pytest.MonkeyPatch, capsys, relation, expected
+def test_cmd_status_prints_no_frozen_cluster_pin(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    """HEAD != pin: the mark reflects the git relation to the pin, not a flat 'behind'.
-    'ahead' is the stray-`git pull` case the old flat wording mislabelled as behind."""
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: None)
-    monkeypatch.setattr("cli.commands.status._cluster_pin_status", lambda: ("aaaaaaa", "bbbbbbb"))
-    monkeypatch.setattr("cli.commands.status.prod_source_pin_relation", lambda _p, _h: relation)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _status_commands.cmd_status()
-    assert rc == 0
-    assert expected in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    """The cluster pin has no writer; a historical value must not be presented
+    as the current target, nor a bare `ava cluster update` offered as a remedy."""
+    _quiet_status(monkeypatch, tmp_path)
+    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda **_kw: "a" * 40)
+
+    assert _status_commands.cmd_status() == 0
+    out = capsys.readouterr().out
+    assert "cluster pin" not in out
+    assert "ava cluster update" not in out
 
 
-def test_cmd_status_cluster_pin_head_unreadable(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    """HEAD can't be read (head is None) → 'HEAD unreadable', no relation computed."""
-    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: None)
-    monkeypatch.setattr("cli.commands.status._cluster_pin_status", lambda: ("aaaaaaa", None))
-    rc = _status_commands.cmd_status()
-    assert rc == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert "HEAD unreadable" in out
+def test_cmd_status_names_the_selected_release_image(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    _quiet_status(monkeypatch, tmp_path)
+    (tmp_path / "releases").mkdir()
+    (tmp_path / "releases" / "current-release").write_text(
+        '{"artifact_digest":"' + "a" * 64 + '","manifest_digest":"' + "b" * 64 + '"}',
+        encoding="ascii",
+    )
+
+    assert _status_commands.cmd_status() == 0
+    assert f"release: image {'a' * 12} (manifest {'b' * 12})" in capsys.readouterr().out
+
+
+def test_cmd_status_names_the_source_checkout_it_runs(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    _quiet_status(monkeypatch, tmp_path)
+    monkeypatch.setattr("shared.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)
+
+    assert _status_commands.cmd_status() == 0
+    out = capsys.readouterr().out
+    assert re.search(r"release: source checkout \S+ at c{7}\n", out)
+
+
+def test_cmd_status_reports_an_unreadable_selector(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """An unreadable selector is shown as such, never replaced by a guess."""
+    _quiet_status(monkeypatch, tmp_path)
+    (tmp_path / "releases").mkdir()
+    (tmp_path / "releases" / "current-release").write_text("{}", encoding="ascii")
+
+    assert _status_commands.cmd_status() == 0
+    assert "release: ✗ selector unreadable" in capsys.readouterr().out
+
+
+def test_cmd_status_shows_an_incomplete_home_operation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """An interrupted release is part of the current identity: its journal phase
+    and chosen direction print beside the selector."""
+    from types import SimpleNamespace
+    from uuid import UUID
+
+    _quiet_status(monkeypatch, tmp_path)
+    journal = tmp_path / "updates" / "op" / "operation.json"
+    journal.parent.mkdir(parents=True)
+    (tmp_path / "updates" / "active").write_text(f"{journal}\n")
+    operation = SimpleNamespace(
+        request=SimpleNamespace(kind="release", id=UUID(int=0xABCDEF)),
+        phase="observing",
+        direction="previous",
+        error=None,
+        terminal=False,
+    )
+    monkeypatch.setattr(
+        "cli.release_transition.journal.read_operation",
+        lambda path: operation if path == journal else pytest.fail(str(path)),
+    )
+
+    assert _status_commands.cmd_status() == 0
+    assert (
+        "  operation: release 00000000 — phase observing, direction previous"
+        in capsys.readouterr().out
+    )
 
 
 # ─── gateway-backed CLI paths (status snapshot) ────────────────────────────
@@ -516,8 +533,7 @@ def test_status_prints_a_live_host_reading(monkeypatch: pytest.MonkeyPatch, caps
     from cli.commands import status as status_mod
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(status_mod, "_cluster_pin_status", lambda: ("aaaaaaa", "aaaaaaa"))
-    monkeypatch.setattr(status_mod, "prod_source_pin_relation", lambda _p, _h: "aligned")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "_release_identity_lines", lambda _repo: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
     monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
@@ -532,13 +548,12 @@ def test_status_prints_a_live_host_reading(monkeypatch: pytest.MonkeyPatch, caps
 def test_status_host_reading_failure_does_not_hide_the_rest(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
-    """A host without psutil still gets the service table and the pin section —
+    """A host without psutil still gets the service table and the release section —
     the reading degrades to its own reason line, it does not abort the verb."""
     from cli.commands import status as status_mod
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(status_mod, "_cluster_pin_status", lambda: ("aaaaaaa", "aaaaaaa"))
-    monkeypatch.setattr(status_mod, "prod_source_pin_relation", lambda _p, _h: "aligned")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(status_mod, "_release_identity_lines", lambda _repo: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(status_mod, "_detect_prod_source_drift", lambda: None)
     monkeypatch.setattr(status_mod, "_print_gateway_cluster_status", lambda: None)
     monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)

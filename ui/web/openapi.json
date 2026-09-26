@@ -8714,28 +8714,6 @@
             },
             "type": "array",
             "title": "Machines"
-          },
-          "cluster_target_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cluster Target Sha"
-          },
-          "cluster_last_known_good_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cluster Last Known Good Sha"
           }
         },
         "type": "object",
@@ -11251,17 +11229,6 @@
             ],
             "title": "Head Sha"
           },
-          "on_pin": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "On Pin"
-          },
           "running_sha": {
             "anyOf": [
               {
@@ -11293,22 +11260,6 @@
               }
             ],
             "title": "Deploy Hold"
-          },
-          "cluster_last_known_good_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cluster Last Known Good Sha"
-          },
-          "settle_waited_on": {
-            "type": "boolean",
-            "title": "Settle Waited On",
-            "default": false
           },
           "identity_mismatch": {
             "type": "boolean",

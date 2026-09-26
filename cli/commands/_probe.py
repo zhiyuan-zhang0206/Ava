@@ -13,12 +13,11 @@ from typing import Any, NamedTuple
 
 from cli.commands._repo import ServiceSpec, session_name
 from shared.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
-from shared.cluster_drift import prod_source_head_sha as _prod_source_head_sha
 from shared.deploy_timing import CRITICAL_SERVICE_SESSIONS as CRITICAL_SERVICE_SESSIONS
 from shared.deploy_timing import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
-__all__ = ["_detect_prod_source_drift", "_prod_source_head_sha"]
+__all__ = ["_detect_prod_source_drift"]
 
 logger = logging.getLogger(__name__)
 
@@ -436,23 +435,3 @@ def _print_service_row(
     if not suffix and probe.detail:
         suffix = f"   -- {probe.detail}"
     print(f"{sess.ljust(name_w)}  {session_mark}     {probe_mark} ({probe.label}){suffix}")
-
-
-def _cluster_pin_status() -> tuple[str, str | None] | None:
-    """For the `ava status` cluster-pin line: returns `(target_sha, this_host_head)`
-    — `this_host_head` is None when the prod source HEAD can't be read. Returns None
-    when no rollout has pinned a commit yet, or the pin can't be read at all.
-
-    `ava status` is a host diagnostic command that must survive any failure of the
-    pin subsystem (DB down, missing row, schema error), so the broad catch here is
-    a deliberate CLI-boundary guard: the pin line is best-effort and is simply
-    omitted on any error rather than aborting the whole status screen."""
-    from shared.cluster_pin import get_cluster_target_sha
-
-    try:
-        pin = get_cluster_target_sha()
-    except Exception:
-        return None
-    if pin is None:
-        return None
-    return pin, _prod_source_head_sha()

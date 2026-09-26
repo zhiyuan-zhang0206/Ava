@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.routers import _roster_probe, _roster_rows
+from gateway.routers import _roster_probe
 from gateway.routers import status as status_router
 
 _OPS_URL = "http://wsl:18121"
@@ -1136,69 +1136,31 @@ class TestDetachedRecoveryDial:
         assert _roster_probe._recovery_inflight == set()
 
 
-class TestPinVerdict:
-    def test_no_pin_is_none(self) -> None:
-        assert _roster_rows.pin_verdict("abc1234", None) is None
-
-    def test_unknown_head_is_none(self) -> None:
-        assert _roster_rows.pin_verdict(None, "abc1234") is None
-
-    def test_on_pin_true(self) -> None:
-        assert _roster_rows.pin_verdict("abc1234", "abc1234") is True
-
-    def test_off_pin_false(self) -> None:
-        assert _roster_rows.pin_verdict("abc1234", "def5678") is False
-
-
-class TestClusterPinInPanel:
-    def test_panel_carries_pin_and_local_on_pin(
+class TestPanelCarriesNoFrozenPin:
+    def test_panel_reports_the_checkout_without_a_pin_verdict(
         self,
         db_conn: psycopg.Connection,
         fake_flag: Path,
         stub_machine_identity: None,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """_get_cluster_status reads the pin once → ClusterPanel.cluster_target_sha
-        + each machine's on_pin verdict (local pure-gateway row's head from the
-        lightweight prod_source_head_sha read)."""
+        """Nothing writes the cluster pin or the known-good anchor any more; the
+        panel reports each node's checkout and never reads those historical
+        values, so they cannot be presented as the cluster's current target."""
         _ = fake_flag, stub_machine_identity
         _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway")
-        monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda: "abc1234")
+
+        def _forbidden(**_kw: object) -> str:
+            raise AssertionError("the status panel must not read the retired pin")
+
+        monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", _forbidden)
+        monkeypatch.setattr("shared.cluster_pin.get_last_known_good_sha", _forbidden)
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
             panel = status_router._get_cluster_status(cur)
-        assert panel.cluster_target_sha == "abc1234"
-        by_name = {m.name: m for m in panel.machines}
-        assert by_name["cloud-test"].head_sha == "abc1234"
-        assert by_name["cloud-test"].on_pin is True
-
-    def test_local_off_pin_false(
-        self,
-        db_conn: psycopg.Connection,
-        fake_flag: Path,
-        stub_machine_identity: None,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _ = fake_flag, stub_machine_identity
-        _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway")
-        monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda: "abc1234")
-        monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "def5678")
-        with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(cur)
-        assert panel.machines[0].on_pin is False
-
-    def test_no_pin_leaves_on_pin_none(
-        self,
-        db_conn: psycopg.Connection,
-        fake_flag: Path,
-        stub_machine_identity: None,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _ = fake_flag, stub_machine_identity
-        _insert_machine(db_conn, "cloud-test", "https://ava.example.com", "gateway")
-        monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", lambda: None)
-        monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "def5678")
-        with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(cur)
-        assert panel.cluster_target_sha is None
-        assert panel.machines[0].on_pin is None
+        body = panel.model_dump()
+        assert "cluster_target_sha" not in body
+        assert "cluster_last_known_good_sha" not in body
+        (machine,) = panel.machines
+        assert machine.head_sha == "abc1234"
+        assert "on_pin" not in machine.model_dump()

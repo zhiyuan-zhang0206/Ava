@@ -219,3 +219,58 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
     # register_self was reached with the loopback URL and rejected it; the caller
     # translated that into a non-zero exit rather than a persisted dead row.
     assert calls == ["http://127.0.0.1:8106"]
+
+
+# ─── remediation hints name commands that exist ──────────────────────────────
+
+
+def _assert_named_commands_parse(text: str) -> None:
+    """Every backticked `ava ...` command in an operator hint parses; none is a
+    bare `ava cluster update`, which requires a prepared release request."""
+    import re
+
+    from cli.parsers import build_parser
+
+    parser = build_parser()
+    for command in re.findall(r"`(ava [^`]+)`", text):
+        parser.parse_args(command.split()[1:])  # SystemExit(2) fails the test
+    assert "ava cluster update" not in text
+
+
+def test_register_schema_behind_hint_names_working_commands(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import psycopg
+
+    def _missing_table(*, url: str | None = None) -> None:
+        del url
+        raise psycopg.errors.UndefinedTable('relation "machines" does not exist')
+
+    monkeypatch.setattr("shared.machines.register_self", _missing_table)
+    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+
+    rc = _real_register_machine_or_die(
+        cast(SetupValues, {"machine_name": "gw"}), frozenset({"gateway"})
+    )
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "`ava stop` then `ava start` on the gateway" in err
+    _assert_named_commands_parse(err)
+
+
+def test_code_behind_schema_hint_names_working_commands(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import cli.commands._repo as _repo_commands
+    from shared.migrations import CodeBehindSchema
+
+    def _ahead(_url: str) -> None:
+        raise CodeBehindSchema("DB has migrations this checkout lacks")
+
+    monkeypatch.setattr("shared.migrations.assert_schema_current", _ahead)
+
+    assert _repo_commands._assert_schema_current_or_die() == 1
+    err = capsys.readouterr().err
+    assert "gateway's revision" in err
+    _assert_named_commands_parse(err)
