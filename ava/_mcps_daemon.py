@@ -39,8 +39,8 @@ from loguru import logger
 
 from shared.config import settings
 
-from ._mcp_config import assert_requirements, is_transport_error, load_mcp_config, server_url
 from ._mcp_oauth import _OAUTH_FLOW_TIMEOUT_S
+from .mcp_config import assert_requirements, is_transport_error, load_mcp_config, server_url
 
 
 def _load_config() -> dict[str, dict[str, Any]]:
@@ -122,7 +122,7 @@ def _is_transport_error(exc: BaseException) -> bool:
     """Return True when *exc* indicates the MCP server process or stdio pipe
     died and a reconnect + retry is appropriate.
 
-    Shared with the in-process SDK (`ava._mcp_config.is_transport_error`) so
+    Shared with the in-process SDK (`ava.mcp_config.is_transport_error`) so
     both sides agree on the retry seam. Notably treats the SDK-synthesized
     `MCPError(CONNECTION_CLOSED)` — raised `from None` when the stdio peer's
     read loop hits EOF, so the __cause__ probe alone missed it (2026-08-13
@@ -166,7 +166,7 @@ async def _connect_server(server: str) -> Any:
     from mcp.client.stdio import stdio_client
 
     from ._mcp_browser import connect_browser_direct
-    from ._mcp_config import resolve_command, server_cwd
+    from .mcp_config import resolve_command, server_cwd
 
     cfg = _load_config()
     spec = cfg[server]

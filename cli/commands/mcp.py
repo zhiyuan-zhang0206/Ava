@@ -54,9 +54,9 @@ from cli.commands._pkg_source import AcquiredSource, SourcePathNotFoundError
 
 
 def _machine_config_file() -> Path:
-    from ava._mcp_config import _machine_config_path
+    from ava.mcp_config import machine_config_path
 
-    return _machine_config_path()
+    return machine_config_path()
 
 
 def _read_machine_config(path: Path) -> dict[str, Any]:
@@ -167,7 +167,7 @@ def _server_summary(spec: Any) -> str:
 def cmd_mcp_list() -> int:
     """`ava mcp list` — print the merged server set, flagging each server's
     origin (machine / installed / plugin-built-in) and which are disabled."""
-    from ava._mcp_config import MCPError, load_mcp_config
+    from ava.mcp_config import MCPError, load_mcp_config
     from shared.install_registry import installed_mcp_names
     from shared.mcp_enabled import McpEnabledConfigError, read_enabled
 
@@ -238,7 +238,7 @@ def cmd_mcp_disable(name: str) -> int:
 
 
 def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
-    from ava._mcp_config import load_mcp_config
+    from ava.mcp_config import load_mcp_config
     from shared.mcp_enabled import local_config_path, set_mcp_enabled
 
     set_mcp_enabled(name, enabled=enabled)
@@ -290,10 +290,10 @@ def _package_server_name(mcp_json: Path) -> str:
         ValueError: the file is unreadable, has no `mcpServers`, or does not
             declare exactly one server.
     """
-    from ava._mcp_config import MCPError, _read_servers
+    from ava.mcp_config import MCPError, read_servers
 
     try:
-        servers = _read_servers(mcp_json)
+        servers = read_servers(mcp_json)
     except MCPError as e:
         raise ValueError(str(e)) from e
     if len(servers) != 1:
@@ -307,11 +307,11 @@ def _package_server_name(mcp_json: Path) -> str:
 def _builtin_server_names() -> set[str]:
     """Names of the servers shipped in the repo's `<repo>/ava_builtins/mcps/` — an installed
     package may not reuse one of these (it would be shadowed)."""
-    from ava._mcp_config import _builtin_mcp_paths, _read_servers
+    from ava.mcp_config import builtin_mcp_paths, read_servers
 
     names: set[str] = set()
-    for path in _builtin_mcp_paths():
-        names |= set(_read_servers(path))
+    for path in builtin_mcp_paths():
+        names |= set(read_servers(path))
     return names
 
 
@@ -337,13 +337,13 @@ def _landed_env(dest: Path, name: str) -> dict[str, str]:
     An installed MCP's secrets live here (see `_apply_env_overrides`), so this is
     what `upgrade` reads before re-landing in order to carry them forward.
     """
-    from ava._mcp_config import MCPError, _read_servers
+    from ava.mcp_config import MCPError, read_servers
 
     mcp_json = dest / ".mcp.json"
     if not mcp_json.is_file():
         return {}
     try:
-        servers = _read_servers(mcp_json)
+        servers = read_servers(mcp_json)
     except MCPError:
         return {}
     env = servers.get(name, {}).get("env")
@@ -710,10 +710,10 @@ def cmd_mcp_upgrade(name: str, *, force: bool = False) -> int:
                 file=sys.stderr,
             )
             return 1
-        from ava._mcp_config import MCPError, _read_servers
+        from ava.mcp_config import MCPError, read_servers
 
         try:
-            servers = _read_servers(mcp_json)
+            servers = read_servers(mcp_json)
         except MCPError as e:
             print(f"[ava mcp upgrade] bad .mcp.json: {e}", file=sys.stderr)
             return 1

@@ -9,7 +9,7 @@ tags:
 # MCP Installation & Startup Form
 
 ## Startup Form: relative paths, never uv run
-For own server layers, `.mcp.json` uses a **relative** interpreter path `.venv/bin/python`. Spawn cwd comes from `ava/_mcp_config.py:server_cwd(name)` by **effective layer**: installed → its package directory (own isolated venv); built-in → **repo root** (repo venv, `-m <pkg>` finds the top-level package); plugin/machine → None (third-party command line, not reinterpreted).
+For own server layers, `.mcp.json` uses a **relative** interpreter path `.venv/bin/python`. Spawn cwd comes from `ava/mcp_config.py:server_cwd(name)` by **effective layer**: installed → its package directory (own isolated venv); built-in → **repo root** (repo venv, `-m <pkg>` finds the top-level package); plugin/machine → None (third-party command line, not reinterpreted).
 **Why not `uv run`**: it is a persistent wrapper process; at the 100-300 agent density target every agent×server would hang a wrapper — pure overhead. Pinning cwd for built-in also removes the old dependency on the agent's incidental cwd.
 
 ## Installation Mechanism (native vs installed, mirroring skills)
