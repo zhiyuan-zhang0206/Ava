@@ -173,6 +173,12 @@ def process_metadata() -> dict[str, Any]:
                 "created_at": stable_create_time(process),
                 "parent_pid": process.ppid(),
             }
+            if facts["name"] == "node":
+                # A Node controller (DeepSeek Harness) is identified by its
+                # script, not its interpreter; only argv[1] is recorded.
+                argv = process.cmdline()
+                if len(argv) > 1:
+                    facts["script"] = argv[1]
             if depth == 0:
                 result.update(facts)
             else:
