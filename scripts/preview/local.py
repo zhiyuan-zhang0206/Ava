@@ -166,8 +166,6 @@ class Preview:
             ],
         )
         self.command("frontend-dependencies", ["npm", "ci"], cwd=self.source / "ui/web")
-        # Last before start: the origin names the port block first start allocates.
-        self.runtime("allow-browser-origin")
         self.data["state"] = "prepared"
         self.save()
 

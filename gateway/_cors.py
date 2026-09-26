@@ -37,12 +37,32 @@ def _origin_forms(scheme: str, hostname: str, port: int) -> list[str]:
     return [explicit]
 
 
+def _app_origins() -> list[str]:
+    """Loopback origins of this cluster's own reserved Next.js app port.
+
+    `AVA_APP_PORT` is the `app` slot start reserved in this home's registry
+    record and wrote to its `.env` — the port the frontend service binds, so
+    no caller predicts it. Next.js binds 127.0.0.1 only: a browser on this host
+    reaches it as `127.0.0.1` or `localhost`; `[::1]` and every non-loopback
+    host are never served and never allowed. Gate proxies this same listener
+    under the loopback entry origins, so allowing the app's own origin trusts
+    no content those do not; it serves a browser loading the app directly when
+    Gate is not in the service selection. No reserved port derives nothing —
+    never a guessed `entry + 1`.
+    """
+    port = settings.services.app_port
+    if port is None:
+        return []
+    return [f"http://localhost:{port}", f"http://127.0.0.1:{port}"]
+
+
 def cors_allowed_origins() -> list[str]:
     """Return the exact browser origins allowed to call the gateway.
 
     An explicit allowlist is authoritative. Otherwise derive the local
-    frontend origins, the same frontend entry on the gateway URL's host (the
-    Origin the Gate UI sends when it lives on the gateway host but the
+    frontend origins — the Gate entry and the reserved app port, on loopback
+    only (`_app_origins`) — the same frontend entry on the gateway URL's host
+    (the Origin the Gate UI sends when it lives on the gateway host but the
     frontend port), and the gateway URL's own origin — its scheme, host, and
     port — which is the Origin header a browser sends for same-origin
     requests to the gateway itself (e.g. the Grafana proxy under /grafana).
@@ -55,6 +75,7 @@ def cors_allowed_origins() -> list[str]:
     origins = [
         f"http://localhost:{frontend_port}",
         f"http://127.0.0.1:{frontend_port}",
+        *_app_origins(),
     ]
     if settings.gateway.browser_origin:
         origins.append(settings.gateway.browser_origin)

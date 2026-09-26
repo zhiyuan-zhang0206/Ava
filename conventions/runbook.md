@@ -1377,8 +1377,10 @@ The frontend resolves the gateway as `${location.hostname}:8000` (frontend
 `:3000` and gateway `:8000` are co-located on the gateway host, different
 ports). Gateway CORS accepts exact origins only. An empty
 `AVA_GATEWAY_CORS_ALLOWED_ORIGINS` derives localhost, `127.0.0.1`, and the
-configured gateway host at the frontend entry port; set the variable to a
-comma-separated list to replace that derived allowlist. Cookie-authenticated
+configured gateway host at the frontend entry port, plus localhost and
+`127.0.0.1` at the cluster's reserved app port (`AVA_APP_PORT`, loopback-only
+like the Next.js bind); set the variable to a comma-separated list to replace
+that derived allowlist. Cookie-authenticated
 state changes also reject a present, non-allowlisted `Origin`. On a host where
 another service holds the gateway port, set
 `AVA_GATEWAY_PORT` plus the matching

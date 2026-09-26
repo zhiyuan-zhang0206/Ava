@@ -30,9 +30,9 @@ lifecycle; the controller has no alternate service launcher.
 
 Gate is not in that allowlist, so open the printed frontend app URL directly: the
 browser loads Next.js from the app port and calls the gateway cross-origin. The
-last preparation step computes the port block that first start allocates from the
-run's still-empty private registry and adds that exact loopback app origin to the
-private configuration as the gateway's CORS allowlist.
+controller configures no origin: the gateway's derived CORS allowlist includes the
+loopback origins of the app port that start reserved for this home
+(`AVA_APP_PORT`), so the allowed origin cannot drift from the allocated block.
 
 Each run owns its home, registry, port reservation and native Postgres, Redis and
 PgBouncer. It inherits only a small OS environment allowlist, with no production
@@ -42,7 +42,7 @@ actual gateway and agent-host. Success requires the recorded execution body to b
 `3`, not merely a model response or a timestamp containing that digit. The
 following observer check requires identity probes for all four services, a
 frontend HTTP response and an authenticated CORS response for that exact browser
-origin, so an origin that missed the allocated block fails verification.
+origin, so a gateway that does not allow the reserved app origin fails verification.
 
 On macOS the normal chain is `launchd -> signed helper -> ava-root`. Each run
 uses its own helper artifact directory and home-specific job, preserving the

@@ -13,7 +13,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from scripts.preview import local, runtime
+from scripts.preview import local
 
 
 def git(repo: Path, *args: str) -> str:
@@ -202,7 +202,6 @@ def test_profile_survives_bare_start_without_controller_environment(
         return True
 
     monkeypatch.setattr(cluster, "_port_free", port_free)
-    runtime.allow_browser_origin(preview.run)
 
     class PreparedError(Exception):
         pass
@@ -222,30 +221,14 @@ def test_profile_survives_bare_start_without_controller_environment(
     assert all(persisted[key] == value for key, value in preview.data["profile"].items())
     assert persisted["AVA_SERVICE_PATH"] == admitted_path
     assert persisted["AVA_MACHINE_HOST"] == "127.0.0.1"
-    # The origin named before start is the direct app origin start actually reserved.
+    # The gateway derives the direct browser origin from the app port start
+    # reserved; the preview configuration names no origin of its own.
     (record,) = cluster.load_registry(path=preview.run / "clusters.json").values()
-    app = cluster.record_app_port(record)
-    assert persisted["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] == (
-        f"http://127.0.0.1:{app},http://localhost:{app}"
-    )
+    assert persisted["AVA_APP_PORT"] == str(cluster.record_app_port(record))
+    assert "AVA_GATEWAY_CORS_ALLOWED_ORIGINS" not in persisted
     monkeypatch.setenv("PATH", str(tmp_path / "manager-tools"))
     start_intent.prepare_start(build_parser().parse_args(["start"]))
     assert env_path.read_bytes() == before
-
-
-def test_browser_origin_is_the_last_preparation_before_start(
-    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    preview = local.create(repo, "HEAD", tmp_path / "runs")
-    steps: list[str] = []
-
-    def command(name: str, _argv: list[str], **_kwargs: object) -> None:
-        steps.append(name)
-
-    monkeypatch.setattr(preview, "command", command)
-    monkeypatch.setattr(preview, "runtime", steps.append)
-    preview.prepare()
-    assert steps[-2:] == ["frontend-dependencies", "allow-browser-origin"]
 
 
 def test_first_business_admission_precedes_observer_check(

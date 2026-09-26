@@ -32,27 +32,6 @@ def require_success(response: httpx.Response) -> None:
         raise
 
 
-def allow_browser_origin(run: Path) -> None:
-    """Name the direct browser origin in the private first-start configuration.
-
-    Gate is outside the preview roster, so browsers load Next.js from the app
-    port and call the gateway cross-origin. First start allocates this home's
-    block from the run's still-empty private registry; allocating the same block
-    here names that exact origin before the gateway exists. `check` proves it.
-    """
-    from shared.cluster import ClusterRecord, allocate_ports, load_registry, record_app_port
-
-    if load_registry(path=run / "clusters.json"):
-        raise RuntimeError("Preview browser origin must be configured before first start")
-    planned = ClusterRecord(allocate_ports(set()), str(run / "home"), created_at="")
-    app_port = record_app_port(planned)
-    with (run / "profile.env").open("a") as profile:
-        profile.write(
-            "AVA_GATEWAY_CORS_ALLOWED_ORIGINS="
-            f"http://127.0.0.1:{app_port},http://localhost:{app_port}\n"
-        )
-
-
 def describe(run: Path, home: Path) -> None:
     from ops.roster import build_services
     from shared.cluster import get_record, record_app_port
@@ -220,10 +199,7 @@ def main() -> None:
     home = run / "home"
     sys.path.insert(0, str(run / "source"))
     action = sys.argv[2]
-    # Settings-free actions: before first start or after destroy.
-    if action == "allow-browser-origin":
-        allow_browser_origin(run)
-        return
+    # Settings-free action: after destroy.
     if action == "verify-stopped":
         verify_stopped(run, home)
         return

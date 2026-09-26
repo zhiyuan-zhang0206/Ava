@@ -14,22 +14,6 @@ import pytest
 from scripts.preview import runtime
 
 
-def test_browser_origin_is_named_only_before_first_start(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    profile = tmp_path / "profile.env"
-    profile.write_text("AVA_OS_JOBS_ENABLED=0\n")
-    registered = {
-        "gateway_home": str(home),
-        "ports": {"gateway": 18054, "frontend": 18055, "app": 18069},
-        "created_at": "2026-09-26T00:00:00Z",
-    }
-    (tmp_path / "clusters.json").write_text(json.dumps({str(home): registered}))
-    # After start the block is reserved; a fresh allocation would name another port.
-    with pytest.raises(RuntimeError, match="before first start"):
-        runtime.allow_browser_origin(tmp_path)
-    assert profile.read_text() == "AVA_OS_JOBS_ENABLED=0\n"
-
-
 @pytest.mark.parametrize("fault", ["origin", "credentials", "authentication", None])
 def test_browser_readiness_requires_cross_origin_auth(
     monkeypatch: pytest.MonkeyPatch, fault: str | None
