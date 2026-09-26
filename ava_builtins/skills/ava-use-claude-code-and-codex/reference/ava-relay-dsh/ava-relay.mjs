@@ -28,11 +28,13 @@ import { createInterface } from 'node:readline'
 export const name = 'ava-relay'
 export const inject = ['agents', 'jobs', 'shellEnv']
 
-const SOURCE = Object.freeze({ kind: 'plugin', plugin: 'ava-relay', form: 'relay' })
+const PLUGIN = 'ava-relay'
 const STUB_KEYS = ['SID', 'AGENT', 'AVA_IMPERSONATION_RELAY_TOKEN', 'AVA_IMPERSONATION_RELAY_PY']
 const STUB_SUFFIX = '.env'
 const POLL_MS = 1000
 const STDERR_TAIL_CHARS = 8000
+// dsh bounds a notice's one-line summary to 120 characters.
+const SUMMARY_MAX_CHARS = 120
 
 function userMessage(text, source) {
   return Object.freeze({
@@ -41,6 +43,13 @@ function userMessage(text, source) {
     content: Object.freeze([Object.freeze({ type: 'text', text })]),
     source,
   })
+}
+
+/** A pushed envelope as a `notice`: the collapsed transcript row shows its first line. */
+function relayMessage(text) {
+  const first = text.split('\n', 1)[0].trim() || 'Ava relay message'
+  const summary = first.length <= SUMMARY_MAX_CHARS ? first : `${first.slice(0, SUMMARY_MAX_CHARS - 1)}…`
+  return userMessage(text, Object.freeze({ kind: 'plugin', plugin: PLUGIN, form: 'notice', summary }))
 }
 
 /** Claim a stub by rename (one consumer wins), read it, and delete it. */
@@ -90,7 +99,7 @@ function startRelay(ctx, agent, stub) {
         try {
           const text = JSON.parse(line)
           if (typeof text !== 'string') throw new Error(`relay line is not a JSON string: ${line}`)
-          agent.steer(userMessage(text, SOURCE))
+          agent.steer(relayMessage(text))
         } catch (error) {
           // Stop the relay rather than the host: its heartbeat ends, and Ava
           // stops the takeover with the pending input preserved.
@@ -155,7 +164,7 @@ async function runTakeover(ctx, file) {
     if (session !== agent.session) return
     if (event.type === 'tool/call') {
       echo(`[tool] ${event.data.name} ${String(event.data.arguments).slice(0, 400)}\n`)
-    } else if (event.type === 'user/message' && event.data.source?.plugin === SOURCE.plugin) {
+    } else if (event.type === 'user/message' && event.data.source?.plugin === PLUGIN) {
       echo(`[ava-relay] ${event.data.content.map((block) => block.text ?? '').join(' ').slice(0, 400)}\n`)
     } else if (event.type === 'turn/end' && event.data.reason.kind !== 'completed') {
       const { reason } = event.data
@@ -169,7 +178,7 @@ async function runTakeover(ctx, file) {
 export function apply(ctx, config) {
   const dir = mkdtempSync(join(tmpdir(), 'ava-relay-dsh-'))
   ctx.shellEnv.register({
-    name: 'ava-relay',
+    name: PLUGIN,
     variables: {
       DSH_AVA_RELAY_STUB: {
         description: 'Path where `ava impersonate request --provider dsh` leaves the Ava relay credential for this session.',

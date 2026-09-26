@@ -331,8 +331,10 @@ def test_dsh_launcher_boots_headless_with_the_relay_plugin_as_its_runner(tmp_pat
     command = module._dsh_command(tmp_path, "/bin/node", "/bin/dsh", tmp_path / "p.yml")
     assert command == (
         f"cd {tmp_path} && DSH_PERMISSION_MODE=danger-full-access "
-        f"exec /bin/node /bin/dsh --profile headless --patch {tmp_path / 'p.yml'}"
+        f"/bin/node /bin/dsh --profile headless --patch {tmp_path / 'p.yml'}; "
+        "printf 'dsh %s with status %s\\n' exited \"$?\""
     )
+    assert not module._EXITED.search(command)  # the echoed command never reads as an exit
 
 
 def test_dsh_relay_emits_one_json_string_per_line(capsys: pytest.CaptureFixture[str]) -> None:
@@ -429,9 +431,10 @@ def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) ->
     steered: list[dict[str, Any]] = result["steered"]
     assert [m["content"][0]["text"] for m in steered] == ["Ava control active.", envelope]
     assert all(m["role"] == "user" for m in steered)
-    assert all(
-        m["source"] == {"kind": "plugin", "plugin": "ava-relay", "form": "relay"} for m in steered
-    )
+    assert [m["source"] for m in steered] == [
+        {"kind": "plugin", "plugin": "ava-relay", "form": "notice", "summary": summary}
+        for summary in ("Ava control active.", "Ava message agent=42 lease=3 ids=7")
+    ]
     assert result["kind"] == "ava-relay" and result["owned"] and result["stubGone"]
     assert result["outcome"] == {"status": "completed", "detail": "exit code: 0"}
     assert result["anonymous"] == {}
