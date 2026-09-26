@@ -290,7 +290,7 @@ export const HEADER_CLS =
 // BAR_HEIGHT_PX / BAR_HEIGHT_CLASS in @/lib/layout (h-11 = 44px), the same
 // line findClosestStuckHeaderId measures against. A work block's child card
 // pins one level deeper instead (STICKY_CHILD_HEADER_CLS below). While
-// `isStuck`, the header switches to the elevated opaque variant that masks the
+// `isStuck`, the header switches to the elevated frosted-glass surface over the
 // body scrolling beneath it; the resting header remains transparent.
 export const STICKY_HEADER_CLS = "sticky top-11 z-10";
 
@@ -302,18 +302,18 @@ export const STICKY_HEADER_CLS = "sticky top-11 z-10";
 // it. Tailwind needs the literal class string (underscores = the calc spaces).
 export const STICKY_CHILD_HEADER_CLS =
   "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5]";
-// The shared pinned surface is opaque, including on hover: HEADER_CLS's
-// translucent hover tint must never expose the scrolling message underneath.
-// All seals are paint-only so pinning cannot change the measured header height
-// and feed a ResizeObserver/scroll loop. The 2px top overlap closes the raster
-// seam under HeaderBar (or the parent turn); the 16px shadow covers the right
-// scrollbar gutter. The separator sits INSIDE the bottom edge, without a
-// differently colored extension between the hover surface and the line.
+// A single frosted pane covers the header and its 2px top overlap, preserving
+// the translucent hover without an unblurred seam under HeaderBar/parent turn.
+// The button stays transparent: painting the pane twice would flatten the glass.
+// All edges are paint-only to preserve measured height and avoid a pin loop.
+// Sticky z-index contains the pane behind the label; the 16px shadow seals the
+// scrollbar gutter and the separator sits inside the pane's bottom edge.
 export const STUCK_HEADER_CLS =
-  "bg-background hover:bg-background rounded-none " +
+  "bg-transparent hover:bg-transparent rounded-none " +
   "shadow-[16px_0_0_0_var(--background)] " +
-  "before:absolute before:inset-x-0 before:-top-[2px] before:h-[2px] before:content-[''] " +
-  "before:bg-background before:pointer-events-none " +
+  "before:absolute before:inset-x-0 before:-top-[2px] before:bottom-0 before:-z-10 before:content-[''] " +
+  "before:bg-background/95 hover:before:bg-accent/30 before:backdrop-blur-md before:pointer-events-none " +
+  "before:transition-colors before:duration-150 before:ease-out motion-reduce:before:transition-none " +
   "after:absolute after:inset-x-0 after:bottom-0 after:h-px after:content-[''] " +
   "after:bg-border after:pointer-events-none " +
   "transition-[color] duration-150 ease-out motion-reduce:transition-none";

@@ -604,9 +604,13 @@ describe("CardHeader sticky header (task #3136)", () => {
     );
     const btn = container.querySelector("button")!;
     expect(btn.getAttribute("data-stuck")).toBe("true");
-    expect(btn.className).toContain("hover:bg-background");
+    expect(btn.className).toContain("hover:bg-transparent");
     expect(btn.className).not.toContain("hover:bg-accent/30");
-    expect(btn.className).not.toContain("backdrop-blur");
+    expect(btn.className).toContain("before:backdrop-blur-md");
+    expect(btn.className).toContain("before:bg-background/95");
+    expect(btn.className).toContain("hover:before:bg-accent/30");
+    expect(btn.className).toContain("before:bottom-0");
+    expect(btn.className).toContain("before:-z-10");
     // All edge treatments are paint-only; nested pin geometry stays stable.
     expect(btn.className).toContain("16px_0_0_0_var(--background)");
     expect(btn.className).toContain("before:-top-[2px]");

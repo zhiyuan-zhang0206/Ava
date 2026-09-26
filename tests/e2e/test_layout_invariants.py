@@ -492,20 +492,27 @@ _STICKY_SURFACE = """el => {
   return {
     rect: el.getBoundingClientRect().toJSON(),
     alpha: alpha(style.backgroundColor),
-    topAlpha: alpha(top.backgroundColor),
+    paneAlpha: alpha(top.backgroundColor),
+    paneBlur: top.backdropFilter,
+    paneZ: top.zIndex,
+    paneBottom: parseFloat(top.bottom),
     topStart: parseFloat(top.top),
-    topEnd: parseFloat(top.top) + parseFloat(top.height),
     lineBottom: parseFloat(line.bottom),
     lineHeight: parseFloat(line.height),
   };
 }"""
 
 
-def _assert_sticky_sealed(page: Page, header_selector: str) -> dict[str, float]:
+def _assert_sticky_sealed(
+    page: Page, header_selector: str, *, hovered: bool = False
+) -> dict[str, float]:
     surface = page.locator(header_selector).evaluate(_STICKY_SURFACE)
-    assert surface["alpha"] == 255, "scrolling text can bleed through the header"
-    assert surface["topAlpha"] == 255, "top raster seam is not masked"
-    assert surface["topStart"] <= -1 and surface["topEnd"] == 0
+    assert surface["alpha"] == 0, "button background flattens the frosted pane"
+    expected_alpha = 77 if hovered else 242
+    assert abs(surface["paneAlpha"] - expected_alpha) <= 1, "glass tint changed"
+    assert surface["paneBlur"] == "blur(12px)", "backdrop blur is missing"
+    assert surface["paneZ"] == "-10", "pane must stay behind the label"
+    assert surface["topStart"] <= -1 and surface["paneBottom"] == 0
     assert surface["lineBottom"] == 0, "separator is detached from the header edge"
     assert surface["lineHeight"] == 1
     return surface["rect"]
@@ -550,6 +557,8 @@ def test_pinned_message_seal(
         header.hover()
         # Let a background-color transition reveal its final hover alpha.
         page.wait_for_timeout(200)
-        assert _assert_sticky_sealed(page, header_selector) == resting, "hover changed pin geometry"
+        assert _assert_sticky_sealed(page, header_selector, hovered=True) == resting, (
+            "hover changed pin geometry"
+        )
     finally:
         context.close()

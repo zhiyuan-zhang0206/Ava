@@ -16,11 +16,13 @@ During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/C
 
 ## Pinned headers
 
-Message, work-block, and nested detail headers share one opaque pinned surface.
-Hover emphasizes the label without making the background translucent. A paint-only
-2px top overlap seals the title-bar/parent-header seam, the right shadow covers
-the scrollbar gutter, and the 1px separator sits inside the bottom edge. Pinning
-changes no box dimensions or nested-header offsets.
+Message, work-block, and nested detail headers share one frosted-glass pane.
+It keeps the 95% background tint, 30% accent tint on hover, and backdrop blur.
+The pane spans the header and its paint-only 2px top overlap so the title-bar/
+parent-header seam receives the same blur and tint. The button itself stays
+transparent to avoid doubling the tint. The right shadow covers the scrollbar
+gutter and the 1px separator sits inside the bottom edge. Pinning changes no
+box dimensions or nested-header offsets.
 
 ## Segments and dividers
 

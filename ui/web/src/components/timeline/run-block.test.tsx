@@ -445,9 +445,13 @@ describe("TurnBlock component", () => {
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("true");
     expect(toggle.getAttribute("data-stuck")).toBe("true");
-    expect(toggle.className).toContain("hover:bg-background");
+    expect(toggle.className).toContain("hover:bg-transparent");
     expect(toggle.className).not.toContain("hover:bg-accent/30");
-    expect(toggle.className).not.toContain("backdrop-blur");
+    expect(toggle.className).toContain("before:backdrop-blur-md");
+    expect(toggle.className).toContain("before:bg-background/95");
+    expect(toggle.className).toContain("hover:before:bg-accent/30");
+    expect(toggle.className).toContain("before:bottom-0");
+    expect(toggle.className).toContain("before:-z-10");
     expect(toggle.className).toContain("16px_0_0_0_var(--background)");
     expect(toggle.className).toContain("before:-top-[2px]");
     expect(toggle.className).toContain("after:bottom-0");

@@ -16,7 +16,7 @@
 // Sticky header behavior (shared with the message cards — see card.tsx
 // CardHeader): when an expanded block's top scrolls past the viewport top
 // (accounting for the floating HeaderBar offset, BAR_HEIGHT_PX), its header
-// sticks at top-11 with the shared opaque pinned surface. The full detail rows
+// sticks at top-11 with the shared frosted-glass pinned surface. The full detail rows
 // (thinking/code/output) continue scrolling naturally underneath the stuck
 // header. A top-level message card (CardHeader with stickyHeader) pins on the
 // same line; findClosestStuckHeaderId resolves which of the two is stuck, and
