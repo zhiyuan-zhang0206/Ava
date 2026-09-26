@@ -371,7 +371,8 @@ def adopt_gateway_login(home: Path, endpoint: str) -> None:
 
 
 def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) -> Generation:
-    """Initialization authority: groups, legacy logins retired, ledger, generation 0."""
+    """Initialization authority: groups, monitor, legacy logins retired, ledger,
+    generation 0."""
     from functools import partial
 
     from shared import cluster
@@ -381,6 +382,7 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
     groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
     birth = authority.BirthAuthority()
     authority.ensure_groups(conn, owner=owner, database=database, groups=groups)
+    authority.ensure_monitor(conn, database=database)
     authority.retire_legacy_logins(conn, owner=owner, groups=groups, authority=birth)
     authority.create_ledger(home, owner=owner, groups=groups, authority=birth)
     authority.ensure_pooler_admin(home, encrypt=partial(authority.scram_verifier, conn))
@@ -394,7 +396,8 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
 def _admitted_generation(
     conn: psycopg.Connection[Any], home: Path, database: str, *, refresh: bool
 ) -> Generation:
-    """Ordinary start: re-grant after migrations, sweep, then the invariant holds."""
+    """Ordinary start: re-grant after migrations, converge the monitor, sweep,
+    then the invariant holds."""
     from shared import cluster
     from shared.cluster import authority
 
@@ -413,6 +416,7 @@ def _admitted_generation(
         )
     if refresh:
         authority.ensure_groups(conn, owner=ledger.owner, database=database, groups=ledger.groups)
+        authority.ensure_monitor(conn, database=database)
     authority.sweep(conn, home)
     authority.check_invariant(conn, home, database=database, readonly_grantees=READONLY_GRANTEES)
     return ledger.active

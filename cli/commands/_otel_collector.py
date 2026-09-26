@@ -88,21 +88,28 @@ def _host_port(host: str, port: int) -> str:
 # interval is 60s (not host_metrics' 30s): connection counts and redis memory
 # are slow-moving pressure gauges.
 _POSTGRES_RECEIVER_BLOCK = """
-  # This cluster's OWN Postgres — dialed DIRECT, never through PgBouncer: the
-  # receiver reads pg_stat_* views, which a transaction-pooled session cannot
-  # be trusted to serve consistently. The role is the cluster's NOSUPERUSER
-  # owner, so the receiver collects what that role can see (its own database's
-  # stats); metrics needing pg_monitor are simply absent rather than fatal.
+  # This cluster's OWN Postgres over the home's owner-only unix socket, never
+  # through PgBouncer: the receiver reads pg_stat_* views, which a
+  # transaction-pooled session cannot be trusted to serve consistently. It logs
+  # in as the stable monitoring role by peer (the collector runs as the home's
+  # OS user): that role has no password and is not a write generation, so no
+  # credential lives here and a rollout neither revokes nor rotates it. The
+  # contrib receiver refuses an empty password, so the value below is a fixed
+  # non-secret placeholder that peer authentication never asks for. The
+  # receiver prefixes a unix endpoint's host with "/".
   postgresql:
     endpoint: {pg_endpoint}
-    transport: tcp
+    transport: unix
     username: {pg_user}
-    password: {pg_password}
+    password: {pg_placeholder}
     databases: [{pg_database}]
     collection_interval: 60s
     tls:
       insecure: true
 """
+# Not a credential: pg_hba admits the monitoring role only by peer, and the role
+# has no verifier, so no password can ever authenticate it.
+_PEER_PLACEHOLDER = "peer-authenticated-no-password"
 
 _REDIS_RECEIVER_BLOCK = """
   # This cluster's OWN Redis. The receiver dials the default administrative
@@ -131,42 +138,60 @@ def _endpoint(url: str, what: str) -> str:
     return f"{parts.hostname}:{parts.port}"
 
 
-def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
+def _postgres_receiver_block(ava_home: Path) -> str:
+    """The receiver for this home's own Postgres: its socket, the monitoring role.
+
+    Everything comes from the home's registry record and identity; nothing is
+    read from a database URL, so no credential can reach the rendered file.
+    """
+    from shared.cluster import db_identity, get_record, record_postgres_port
+    from shared.cluster.authority import MONITOR_ROLE
+    from shared.pg_admin import pg_socket_path
+
+    record = get_record(ava_home)
+    if record is None:
+        raise RuntimeError(
+            "cannot build the otel-collector postgres receiver: no registry record "
+            f"for home {ava_home}"
+        )
+    socket_dir = pg_socket_path(ava_home).as_posix().lstrip("/")
+    return _POSTGRES_RECEIVER_BLOCK.format(
+        pg_endpoint=_yaml_quote(f"{socket_dir}:{record_postgres_port(record)}"),
+        pg_user=_yaml_quote(MONITOR_ROLE),
+        pg_placeholder=_yaml_quote(_PEER_PLACEHOLDER),
+        pg_database=_yaml_quote(db_identity()),
+    )
+
+
+def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[str, str]:
     """(receiver block, pipeline-list fragment) for this unit's own data plane.
 
     Empty pair on anything that does not own Postgres+Redis: a pure
     agent-runner's URLs point at the GATEWAY's data plane, so scraping from
     there would duplicate the gateway's own series under a second `host`
-    label. An unconfigured unit (roles None) has no URLs to read at all.
+    label. An unconfigured unit (roles None) has no URLs to read at all. The
+    Postgres receiver exists only for a home-owned instance: a remote-managed
+    plane has no owner-only socket or monitoring role here (its provider
+    monitors it).
     """
     if roles is None or "gateway" not in roles:
         return "", ""
     from shared.config import settings
-    from shared.db import UNANCHORED_DB_SENTINEL, direct_db_url
+    from shared.db import UNANCHORED_DB_SENTINEL
 
-    db_url = direct_db_url()
-    if db_url == UNANCHORED_DB_SENTINEL:
+    if settings.data_plane.db_url == UNANCHORED_DB_SENTINEL:
         return "", ""
-    pg = urlsplit(db_url)
     redis_url = settings.data_plane.redis_url
     from shared.cluster import redis_admin_url
 
     redis_admin = redis_admin_url()
     blocks: list[str] = []
     receivers: list[str] = []
-    if pg.password and settings.observability.telemetry_otlp_enabled:
-        blocks.append(
-            _POSTGRES_RECEIVER_BLOCK.format(
-                pg_endpoint=_endpoint(db_url, "postgres"),
-                pg_user=_yaml_quote(unquote(pg.username or "")),
-                pg_password=_yaml_quote(unquote(pg.password)),
-                pg_database=_yaml_quote(pg.path.lstrip("/")),
-            )
-        )
+    if settings.observability.telemetry_otlp_enabled and not settings.data_plane.is_remote:
+        blocks.append(_postgres_receiver_block(ava_home))
         receivers.append("postgresql")
-    # The contrib postgresql receiver rejects an empty password, so no-auth
-    # single-box homes omit only that receiver. Redis always authenticates
-    # with its admin password and stays observable in every posture.
+    # Redis always authenticates with its admin password and stays observable
+    # in every posture.
     blocks.append(
         _REDIS_RECEIVER_BLOCK.format(
             redis_endpoint=_endpoint(redis_url, "redis"),
@@ -370,7 +395,7 @@ def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> s
 
     obs = settings.observability
     loki_base, prom_base = _lgtm_fanout_bases(remote=roles != frozenset({"agent-runner"}))
-    data_plane_block, data_plane_pipeline = _data_plane_receivers(roles)
+    data_plane_block, data_plane_pipeline = _data_plane_receivers(roles, ava_home)
     substitutions = {
         "AVA_HOME": str(ava_home),
         "CLUSTER_LABEL": home_label(ava_home),

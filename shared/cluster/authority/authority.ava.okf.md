@@ -27,6 +27,7 @@ without `SET ROLE`. Custody of that connection belongs to the opener.
 | `ava_gateway` | `NOLOGIN` group: DML on every table, `USAGE, SELECT, UPDATE` on sequences, `EXECUTE` on every routine, `MAINTAIN` on the checkpoint tables; no TRUNCATE/REFERENCES/TRIGGER |
 | `ava_runner` | `NOLOGIN` group: the audited runner matrix (the historical login, demoted in place) |
 | `ava_g<n>_<class>` | `LOGIN NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, stored SCRAM verifier, owns nothing, no direct grant or setting, member of exactly its group with `INHERIT TRUE, SET FALSE, ADMIN FALSE` |
+| `ava_monitor` | stable, not a generation: `LOGIN INHERIT`, nothing elevated, **no password** (pg_hba admits it only by `peer` from the home's OS user over the owner-only socket), member of exactly `pg_read_all_stats` (`INHERIT TRUE, SET FALSE`), only direct grant `CONNECT` on the cluster database, owns nothing; the OTel collector's PostgreSQL receiver (`monitor.ensure_monitor`) |
 
 Both groups hold `CONNECT` (PUBLIC loses it) and `USAGE` on `public`.
 `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` covers objects later migrations
@@ -93,9 +94,14 @@ pooler first.
 violation together: owner or group shape, members other than the unrevoked
 pair, schema-owner membership, a revoked login that can log in or holds
 membership, an auxiliary login that is a superuser, owns objects or can write
-`public`, an ACL or default-privilege grantee outside owner/groups/PUBLIC
-(`EXECUTE`, `USAGE`, `TEMPORARY`) or an allowlisted read-only role, and PUBLIC
-`CONNECT`.
+`public`, a monitoring login that differs from its shape, an ACL or
+default-privilege grantee outside owner/groups/PUBLIC (`EXECUTE`, `USAGE`,
+`TEMPORARY`), the monitor (`CONNECT` only) or an allowlisted read-only role, and
+PUBLIC `CONNECT`. A missing monitor is not a violation; start creates it.
+
+The sweep and the closure census never touch the monitor: it is not a group
+member and can log in, so a rollout neither demotes it nor terminates its
+sessions.
 
 ## Delivery and wiring
 
@@ -108,8 +114,9 @@ processes, and where birth, ordinary start and the cutover call this library:
 `tests/lifecycle/db_authority/` runs on real PostgreSQL 17 through
 `authority_postgres`; `test_single_box.py` and `test_cutover.py` drive the real
 start steps and the cutover against a home-owned PostgreSQL, PgBouncer and
-Redis, and `test_delivery.py` covers delivery and the boot pass without a
-database. It uses a throwaway instance with peer-only admin and
-SCRAM for every other role, plus a template built by the superuser acting as
-the owner. Crash injection covers each durable boundary. A mutation of every
-guard turns at least one test red.
+Redis (including the collector's monitoring dial across a rollover), and
+`test_delivery.py` covers delivery and the boot pass without a database. It
+uses a throwaway instance with peer-only admin and SCRAM for every other role,
+plus a template built by the superuser acting as the owner. Crash injection
+covers each durable boundary. A mutation of every guard turns at least one test
+red.

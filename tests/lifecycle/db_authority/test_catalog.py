@@ -16,6 +16,7 @@ from shared.cluster.authority import (
     check_invariant,
     create_ledger,
     ensure_groups,
+    ensure_monitor,
     mint_generation,
     prove_closure,
     retire_legacy_logins,
@@ -62,6 +63,47 @@ def test_invariant_refuses_every_unknown_effect(
         with pytest.raises(CatalogRefusedError) as refused:
             check_invariant(conn, cluster.home, database=cluster.database)
     assert any(violation in item for item in refused.value.violations), refused.value.violations
+
+
+# (drift of the converged monitoring login, expected violation fragment)
+_MONITOR_DRIFT = [
+    ("ALTER ROLE ava_monitor PASSWORD 'monitor-password'", "ava_monitor has a password"),
+    ("ALTER ROLE ava_monitor CREATEROLE", "ava_monitor holds attributes"),
+    ("ALTER ROLE ava_monitor SET work_mem = '8MB'", "ava_monitor holds attributes"),
+    ("GRANT pg_monitor TO ava_monitor", "ava_monitor memberships"),
+    ("CREATE ROLE aux LOGIN; GRANT ava_monitor TO aux", "ava_monitor has members"),
+    ("GRANT SELECT ON agents TO ava_monitor", "grants SELECT to ava_monitor"),
+    ("GRANT CONNECT ON DATABASE postgres TO ava_monitor", "holds grants beyond CONNECT"),
+    (
+        "CREATE TABLE monitor_owned (x int); ALTER TABLE monitor_owned OWNER TO ava_monitor",
+        "ava_monitor owns objects or holds grants",
+    ),
+]
+
+
+@pytest.mark.parametrize(("mutation", "violation"), _MONITOR_DRIFT)
+def test_invariant_holds_the_monitoring_login_to_its_shape(
+    authority_postgres: AuthorityCluster, mutation: str, violation: str
+) -> None:
+    """The converged monitor (password-less LOGIN, INHERIT-only pg_read_all_stats,
+    CONNECT on the cluster database) passes the invariant; any drift is a
+    violation, and converging again refuses instead of repairing it."""
+    cluster = authority_postgres
+    with cluster.admin() as conn:
+        ensure_monitor(conn, database=cluster.database)
+        ensure_monitor(conn, database=cluster.database)
+        facts = conn.execute(
+            "SELECT rolcanlogin, rolpassword IS NULL, rolsuper FROM pg_authid"
+            " WHERE rolname = 'ava_monitor'"
+        ).fetchone()
+        assert facts == (True, True, False)
+        check_invariant(conn, cluster.home, database=cluster.database)
+        conn.execute(mutation)  # type: ignore[arg-type]
+        with pytest.raises(CatalogRefusedError) as refused:
+            check_invariant(conn, cluster.home, database=cluster.database)
+        assert any(violation in item for item in refused.value.violations), refused.value.violations
+        with pytest.raises(CatalogRefusedError):
+            ensure_monitor(conn, database=cluster.database)
 
 
 def test_invariant_admits_only_allowlisted_read_only_grantees(

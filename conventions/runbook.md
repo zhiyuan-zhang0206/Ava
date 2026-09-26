@@ -303,7 +303,9 @@ The data-plane posture is uniform — the default is multi-machine, a single box
 the case where the reachable address is loopback (no single-vs-multi branch). The internal
 data plane always authenticates, whatever the bearer
 ([details](data-plane-secret-split.md)). Postgres `pg_hba` admits the OS user only by
-`peer` on the owner-only socket (the administrator) and every other role by SCRAM; PgBouncer
+`peer` on the owner-only socket (the administrator, and through the `pg_ident` map the
+password-less monitoring role `ava_monitor` the collector scrapes as) and every other role
+by SCRAM; PgBouncer
 is always `auth_type = scram-sha-256` against a userlist holding exactly the active write
 generation's two SCRAM verifiers plus the admin-console entry `ava_pooler_admin`, and a
 changed userlist restarts the pooler (a reload keeps a removed user that already
@@ -1579,10 +1581,11 @@ resources. It fans out:
   baked into that unit's config at converge. Dashboards and alerts group by
   `machine_name`. A pure agent-runner's DB/Redis URLs point at the gateway's
   data plane, so its config omits those two receivers entirely rather than
-  duplicating the gateway's series. A gateway whose Postgres URL has an empty
-  password omits the contrib Postgres receiver (which rejects an empty
-  password) but keeps its Redis receiver, which always authenticates with the
-  Redis-admin password.
+  duplicating the gateway's series. A gateway's Postgres receiver dials its
+  own instance over the owner-only socket as the password-less monitoring role
+  `ava_monitor` (peer), so the config names no database credential and a
+  rollout leaves it scraping; a remote-managed plane omits it. The Redis
+  receiver always authenticates with the Redis-admin password.
 - **collector delivery metrics** — every sidecar scrapes its per-unit loopback
   self-metrics endpoint every 30s into `metrics/infra`
   (`AVA_OTELCOL_METRICS_PORT`, default 8888). The local watchdog probes the same

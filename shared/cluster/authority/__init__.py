@@ -10,6 +10,8 @@ Every catalog function takes the caller's admin connection (the OS-user
 superuser over the owner-only socket); this package never opens a connection.
 Ledger mutations take a typed authority token. ``delivery`` hands the active
 generation to the pooler, the launcher and admitted operator processes.
+``monitor`` keeps the one stable read-only login outside the generations: the
+collector's password-less, peer-authenticated statistics reader.
 """
 
 from __future__ import annotations
@@ -133,6 +135,15 @@ from shared.cluster.authority.model import (
 )
 from shared.cluster.authority.model import (
     VerifiedGeneration as VerifiedGeneration,
+)
+from shared.cluster.authority.monitor import (
+    MONITOR_MAP as MONITOR_MAP,
+)
+from shared.cluster.authority.monitor import (
+    MONITOR_ROLE as MONITOR_ROLE,
+)
+from shared.cluster.authority.monitor import (
+    ensure_monitor as ensure_monitor,
 )
 from shared.cluster.authority.roles import (
     PruneResult as PruneResult,

@@ -12,7 +12,7 @@ import os
 import platform
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import pytest
@@ -232,6 +232,32 @@ def test_unsupported_platform_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     assert downloaded == []
 
 
+_HOME = Path("/home/u/.ava")
+_PG_PORT = 5433
+# The gateway login a start process adopts into AVA_DB_URL (port 1: never dialed).
+_DELIVERED = "postgresql://ava_g3_gateway:generation-login-password@127.0.0.1:1/ava"
+
+
+def _local_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A loopback Redis and this home's registry record (the DB URL stays the caller's)."""
+    from shared import cluster
+
+    record = cluster.ClusterRecord(
+        ports=cast("cluster.ClusterPorts", {"postgres": _PG_PORT, "redis": 6380}),
+        gateway_home=str(_HOME),
+        created_at="test",
+    )
+
+    def _get_record(home: Path) -> cluster.ClusterRecord | None:
+        return record if home == _HOME else None
+
+    monkeypatch.setattr(cluster, "get_record", _get_record)
+    monkeypatch.setattr(
+        "shared.config.settings.data_plane.redis_url", "redis://ava:runtime@127.0.0.1:6380/0"
+    )
+    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
+
+
 def _render_real_template(
     monkeypatch: pytest.MonkeyPatch,
     roles: frozenset[str] | None,
@@ -244,11 +270,7 @@ def _render_real_template(
     observability_url: str = "",
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
-    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
-    monkeypatch.setattr(
-        "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
-    )
-    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
+    _local_data_plane(monkeypatch)
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", gateway_url)
     from shared.url_secret import url_with_host
 
@@ -265,7 +287,7 @@ def _render_real_template(
     monkeypatch.setattr("shared.machine.reachable_host", lambda: machine_host)
     monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
-    out = oc.generate_config(repo, Path("/home/u/.ava"), roles)
+    out = oc.generate_config(repo, _HOME, roles)
     # No placeholder left unconsumed. (A literal dollar survives on purpose:
     # the network-interface exclusion regexp's end-anchor, written $$ in the
     # template.)
@@ -379,15 +401,26 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A gateway-capable unit owns Postgres+Redis, so its sidecar carries the
-    postgresql + redis receivers, dialed DIRECT (never the pooler) with the
-    credentials the cluster's own URLs carry."""
+    postgresql + redis receivers. Postgres is dialed DIRECT (never the pooler)
+    over the home's owner-only socket as the password-less monitoring role,
+    never as the write-generation login the start process adopted (revoked by
+    the next rollout); Redis with its admin password."""
+    from shared.cluster.authority import MONITOR_ROLE
+    from shared.pg_admin import pg_socket_path
+
+    monkeypatch.setattr("shared.config.settings.data_plane.db_url", _DELIVERED)
     cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
+    rendered = yaml.safe_dump(cfg)
+    assert "generation-login-password" not in rendered and "ava_g3_gateway" not in rendered
     receivers = cfg["receivers"]
-    assert receivers["postgresql"]["endpoint"] == "10.0.0.2:5433"
-    assert receivers["postgresql"]["username"] == "ava"
-    assert receivers["postgresql"]["password"] == "abc"  # noqa: S105 — fixture value
+    socket_dir = pg_socket_path(_HOME).as_posix()
+    # The receiver prefixes a unix endpoint's host with "/" itself.
+    assert receivers["postgresql"]["endpoint"] == f"{socket_dir.lstrip('/')}:{_PG_PORT}"
+    assert receivers["postgresql"]["transport"] == "unix"
+    assert receivers["postgresql"]["username"] == MONITOR_ROLE
+    assert receivers["postgresql"]["password"] == oc._PEER_PLACEHOLDER
     assert receivers["postgresql"]["databases"] == ["ava"]
-    assert receivers["redis"]["endpoint"] == "10.0.0.2:6380"
+    assert receivers["redis"]["endpoint"] == "127.0.0.1:6380"
     assert receivers["redis"]["password"] == "abc"  # noqa: S105 — fixture value
     assert receivers["redis"]["password"] != "cluster-token"  # noqa: S105 — fixture token
     infra = cfg["service"]["pipelines"]["metrics/infra"]
@@ -414,22 +447,28 @@ def test_gateway_config_skips_postgres_receiver_when_otlp_export_is_disabled(
     assert "postgresql" not in cfg["service"]["pipelines"]["metrics/infra"]["receivers"]
 
 
-def test_gateway_config_skips_postgres_receiver_without_password(
+def test_remote_managed_plane_omits_the_postgres_receiver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The contrib postgresql receiver rejects an empty password, while the
-    redis receiver supports the no-auth single-box posture."""
-    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava@10.0.0.2:5433/ava")
+    """A remote-managed plane has no owner-only socket or monitoring role on
+    this host (its provider monitors it), so only Redis is scraped; the
+    provider's database credential never reaches the config."""
+    monkeypatch.setattr(
+        "shared.config.settings.data_plane.db_url",
+        "postgresql://ava:provider-password@10.0.0.2:5433/ava",
+    )
     monkeypatch.setattr("shared.config.settings.data_plane.redis_url", "redis://10.0.0.2:6380/0")
+    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://localhost:8000")
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "")
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "localhost")
+    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
 
-    cfg = yaml.safe_load(
-        oc.generate_config(repo, Path("/home/u/.ava"), frozenset({"gateway", "agent-runner"}))
-    )
+    rendered = oc.generate_config(repo, _HOME, frozenset({"gateway", "agent-runner"}))
+    cfg = yaml.safe_load(rendered)
 
+    assert "provider-password" not in rendered
     assert "postgresql" not in cfg["receivers"]
     assert cfg["receivers"]["redis"]["endpoint"] == "10.0.0.2:6380"
     assert cfg["service"]["pipelines"]["metrics/infra"]["receivers"] == [
@@ -1074,8 +1113,8 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
 
 def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Every split role's config carries the cluster bearer, and a gateway
-    also carries pg/redis credentials. The file is 0600 from first creation,
-    not write-as-0644 followed by chmod."""
+    also carries the Redis admin password. The file is 0600 from first
+    creation, not write-as-0644 followed by chmod."""
     if platform.system() == "Windows":
         pytest.skip("POSIX file modes only")
     (tmp_path / "otel-collector").mkdir(parents=True)
@@ -1084,10 +1123,6 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
     )
     monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
-    monkeypatch.setattr(
-        "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"
-    )
     monkeypatch.setattr(
         "shared.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )

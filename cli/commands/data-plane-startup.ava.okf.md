@@ -26,14 +26,16 @@ substitutes the bearer. Explicit remote-managed URLs retain provider authority.
 ## Authentication and the write generation
 
 `_pg_hba_body` always authenticates (the OS user by `peer` on the owner-only
-socket, every other role SCRAM) and `require_authenticated_hba` proves the
-running postmaster demands passwords after every rewrite. `_data_plane` wires
-the write generation
+socket, also as the password-less monitoring role `ava_monitor` through the
+`pg_ident` map `_pg_ident_body` writes; every other role SCRAM) and
+`require_authenticated_hba` proves the running postmaster demands passwords
+after every rewrite. `_data_plane` wires the write generation
 ([[shared/cluster/authority/wiring.ava.okf.md|delivery and wiring]]): birth runs
-groups -> retire legacy logins -> ledger -> mint generation 0 -> pooler serving
-that pair -> pooled proof of both logins -> activate; an ordinary start
-re-grants the groups after migrations, sweeps stale logins to `NOLOGIN` and
-holds on any catalog/ledger mismatch before the pooler. `db_delivery` gives
+groups -> monitor -> retire legacy logins -> ledger -> mint generation 0 ->
+pooler serving that pair -> pooled proof of both logins -> activate; an
+ordinary start re-grants the groups after migrations, converges the monitor,
+sweeps stale logins to `NOLOGIN` and holds on any catalog/ledger mismatch
+before the pooler. `db_delivery` gives
 each launched service its class login.
 
 ## Native custody

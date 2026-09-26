@@ -452,6 +452,7 @@ def _convert_db(home: Path, record: ClusterRecord, env: DbEnv) -> int:
     with admin_session(record, env.database) as conn:
         authority.retire_legacy_logins(conn, owner=env.owner, groups=groups, authority=cutover)
         authority.ensure_groups(conn, owner=env.owner, database=env.database, groups=groups)
+        authority.ensure_monitor(conn, database=env.database)
         authority.prove_closure(conn, _legacy_roles(conn, env))
         authority.create_ledger(home, owner=env.owner, groups=groups, authority=cutover)
         authority.ensure_pooler_admin(home, encrypt=partial(authority.scram_verifier, conn))

@@ -37,6 +37,8 @@ def _admin_peer_line() -> str:
 
 
 _ALWAYS_AUTH_LOOPBACK = [
+    # The collector's password-less monitoring role: peer, mapped from the OS user.
+    "local all ava_monitor peer map=ava_monitor",
     "local all all scram-sha-256",
     "host all all 127.0.0.1/32 scram-sha-256",
     "host all all ::1/128 scram-sha-256",
@@ -139,6 +141,14 @@ def test_pg_hba_body_authenticates_without_secret(monkeypatch: pytest.MonkeyPatc
     body = _ci._pg_hba_body("")
     assert "trust" not in body
     assert body.splitlines() == [_admin_peer_line(), *_ALWAYS_AUTH_LOOPBACK]
+
+
+def test_pg_ident_maps_only_the_os_user_to_the_monitoring_role() -> None:
+    """The ident map the monitor's peer line names admits exactly this OS user
+    as `ava_monitor`; it is the file's only mapping."""
+    import getpass
+
+    assert _ci._pg_ident_body() == f"ava_monitor {getpass.getuser()} ava_monitor\n"
 
 
 def test_pg_hba_body_scram_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:

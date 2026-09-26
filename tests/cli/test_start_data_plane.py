@@ -299,6 +299,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     monkeypatch.setattr(authority, "load_ledger", ledger)
     monkeypatch.setattr(authority, "require_ledger", ledger)
     monkeypatch.setattr(authority, "ensure_groups", record("groups"))
+    monkeypatch.setattr(authority, "ensure_monitor", record("monitor"))
     monkeypatch.setattr(authority, "retire_legacy_logins", record("retire-legacy"))
     monkeypatch.setattr(authority, "create_ledger", record("ledger"))
     monkeypatch.setattr(authority, "ensure_pooler_admin", record("pooler-admin"))
@@ -334,6 +335,7 @@ def test_ordinary_start_regrants_sweeps_and_checks_before_the_pooler(plane: _Pla
         "extension",
         "memory-vectors",
         "groups",
+        "monitor",
         "sweep",
         "invariant",
         "pooler",
@@ -354,6 +356,7 @@ def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(plane:
         "extension",
         "memory-vectors",
         "groups",
+        "monitor",
         "retire-legacy",
         "ledger",
         "pooler-admin",
@@ -396,7 +399,7 @@ def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
     monkeypatch.setattr(authority, "check_invariant", fail)
     with pytest.raises(authority.CatalogRefusedError, match="foreign grant"):
         complete_gateway_data_plane()
-    assert plane.calls == ["start", "extension", "memory-vectors", "groups", "sweep"]
+    assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor", "sweep"]
 
 
 class _Authority:

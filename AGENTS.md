@@ -65,7 +65,8 @@ secret (single-box default) leaves the user-facing API and frontend unauthentica
 binds every data-plane listener to loopback; a set secret adds this host's reachable
 address for Postgres and its pooler (Redis stays loopback, off-box inbound via the relay
 bridge). The internal data plane always authenticates: Postgres and PgBouncer admit only
-SCRAM application logins (the OS-user administrator uses `peer` on the owner-only socket),
+SCRAM application logins (the OS-user administrator and the collector's password-less
+monitoring role use `peer` on the owner-only socket),
 and Redis requires its generated passwords. Application processes never hold schema-owner
 or admin credentials: the owner is NOLOGIN, and each rollout's write generation — one
 gateway and one runner login inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`,

@@ -106,7 +106,7 @@ single-box hosts collapse to the local receiver even when their secret is set.
 - `shared/collector_artifact.py` — pinned downloader shared by release prep and
   `cli/commands/_otel_collector.py` converge. Converge and
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
-  empty-password Postgres receiver omission. Root health: `ops/spec.py`
+  the credential-free (peer, monitoring role) Postgres receiver. Root health: `ops/spec.py`
   (`ava-otel-collector`) + `services/healthchecks/otel_collector.py`.
 - `shared/trace.py` + `cli/commands/trace.py` + `cli/parsers/host.py` — the
   mirror `ava trace ship` replays, and the ship command.

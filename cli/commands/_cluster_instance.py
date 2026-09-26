@@ -56,6 +56,7 @@ from urllib.parse import urlsplit
 
 from shared.cluster import ensure_cluster_redis_acl, ownership
 from shared.cluster import postgres as owned_postgres
+from shared.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
 from shared.config import settings
 from shared.config.physical_backup import pitr_replication_hba_lines
 from shared.machine import reachable_host
@@ -212,9 +213,12 @@ def _pg_hba_body(cluster_secret: str) -> str:
 
     The OS user (the initdb bootstrap superuser) reaches Postgres only through
     `peer` on the owner-only socket — the administrator authority provisioning,
-    migrations and the authority fence use. Every other role authenticates with
-    SCRAM over the socket and loopback TCP; `NOLOGIN` roles (the schema owner,
-    the capability groups, revoked generations) never log in under any method.
+    migrations and the authority fence use. The same OS user reaches the
+    password-less monitoring login (the collector's statistics reader) through
+    `peer` with the `pg_ident` map `_pg_ident_body` writes. Every other role
+    authenticates with SCRAM over the socket and loopback TCP; `NOLOGIN` roles
+    (the schema owner, the capability groups, revoked generations) never log in
+    under any method.
 
     The bearer decides only reach: a secret cluster adds its reachable address
     and `trusted_cidrs` as SCRAM host lines, matching its bind posture
@@ -231,6 +235,7 @@ def _pg_hba_body(cluster_secret: str) -> str:
     no ambient-leak vector."""
     lines = [
         f"local all {getpass.getuser()} peer",
+        f"local all {MONITOR_ROLE} peer map={MONITOR_MAP}",
         "local all all scram-sha-256",
         "host all all 127.0.0.1/32 scram-sha-256",
         "host all all ::1/128 scram-sha-256",
@@ -243,6 +248,11 @@ def _pg_hba_body(cluster_secret: str) -> str:
             lines.append(f"host all all {cidr} scram-sha-256")
     lines += pitr_replication_hba_lines()
     return "\n".join(lines) + "\n"
+
+
+def _pg_ident_body() -> str:
+    """The only ident mapping: this OS user may log in as the monitoring role."""
+    return f"{MONITOR_MAP} {getpass.getuser()} {MONITOR_ROLE}\n"
 
 
 # The server asks a password-less client for one; libpq reports either wording.
@@ -361,6 +371,7 @@ def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
 def _start_pg(pg_port: int, cluster_secret: str) -> int:
     owner = ownership.require_postgres(_pg_data_dir(), pg_port, required=False)
     data = _ensure_pg_data()
+    (data / "pg_ident.conf").write_text(_pg_ident_body())
     (data / "pg_hba.conf").write_text(_pg_hba_body(cluster_secret))
     dial_host = _pg_dial_host()
     # Same gate as the pgbouncer path (task #1303, PR #47 P2): a no-secret

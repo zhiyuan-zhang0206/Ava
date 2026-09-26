@@ -46,22 +46,28 @@ def pg_socket_dir(socket_root: Path | None = None, *, home: Path | None = None) 
     (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so it cannot live under a
     deep `$AVA_HOME` / pytest-tmp data dir — a short `/tmp/ava-pg-<home-slug>`
     (keyed on the cluster home path, never a name) stays well under the cap. The
-    socket only serves local provisioning (the runtime connects over TCP); 0700
-    keeps it owner-only. `home` defaults to `ava_home()` resolved in THIS module;
+    socket serves only the OS user's peer logins — local provisioning and the
+    collector's monitoring role (the runtime connects over TCP); 0700 keeps it
+    owner-only. `home` defaults to `ava_home()` resolved in THIS module;
     the cli thin shell passes its own resolution so cli-layer steering (tests
     patch `cli.commands._cluster_instance.ava_home`) keeps flowing."""
+    if home is None:
+        from shared.paths import ava_home
+
+        home = ava_home()
+    return ensure_private_dir(pg_socket_path(home, socket_root))
+
+
+def pg_socket_path(home: Path, socket_root: Path | None = None) -> Path:
+    """`pg_socket_dir`'s path for `home`, computed without touching the filesystem
+    (for renderers that only name the socket, such as the collector config)."""
     # Lazy: `shared.cluster` imports this module (provisioning dials through
     # it), so a module-level import would make `shared.pg_admin` unimportable
     # before `shared.cluster`.
     from shared.cluster.derive import home_slug
 
-    if home is None:
-        from shared.paths import ava_home
-
-        home = ava_home()
     root = Path("/tmp") if socket_root is None else socket_root  # noqa: S108 — OS-fixed production socket root
-    d = root / f"ava-pg-{home_slug(home)}"
-    return ensure_private_dir(d)
+    return root / f"ava-pg-{home_slug(home)}"
 
 
 def pg_admin_url(pg_port: int) -> str:

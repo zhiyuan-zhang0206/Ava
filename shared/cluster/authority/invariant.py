@@ -11,10 +11,13 @@ reported together in one ``CatalogRefusedError``:
 - every recorded revoked login that still exists is an inert tombstone;
 - every other login (auxiliary: replication, operator read-only) is not a
   superuser, owns nothing and holds no write privilege on ``public``;
+- the stable monitoring login, when present, is exactly its shape
+  (``monitor.monitor_violations``);
 - every ACL grantee on the database, schema ``public`` and its objects, and
   every default privilege, is the object's owner, the schema owner, a group,
-  PUBLIC with only EXECUTE/USAGE/TEMPORARY, or an allowlisted read-only role
-  with only SELECT/USAGE/CONNECT; PUBLIC does not hold CONNECT.
+  PUBLIC with only EXECUTE/USAGE/TEMPORARY, the monitoring login with only
+  CONNECT, or an allowlisted read-only role with only SELECT/USAGE/CONNECT;
+  PUBLIC does not hold CONNECT.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from shared.cluster.authority.model import (
     Ledger,
     VerifiedGeneration,
 )
+from shared.cluster.authority.monitor import MONITOR_ROLE, monitor_violations
 from shared.cluster.authority.roles import verify_generation
 
 _PUBLIC_ALLOWED = frozenset({"EXECUTE", "USAGE", "TEMPORARY"})
@@ -174,6 +178,8 @@ def _grant_allowed(
         return True
     if grantee == "PUBLIC":
         return privilege in _PUBLIC_ALLOWED
+    if grantee == MONITOR_ROLE:
+        return privilege == "CONNECT"
     return grantee in readonly and privilege in _READONLY_ALLOWED
 
 
@@ -220,6 +226,7 @@ def check_invariant(
     violations += _membership_violations(conn, ledger)
     violations += _revoked_violations(conn, ledger)
     violations += _auxiliary_violations(conn, ledger)
+    violations += monitor_violations(conn, database=database)
     violations += _acl_violations(conn, ledger, readonly)
     verified: VerifiedGeneration | None = None
     if ledger.unrevoked is not None:

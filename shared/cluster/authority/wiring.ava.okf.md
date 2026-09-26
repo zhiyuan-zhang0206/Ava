@@ -26,19 +26,25 @@ the ledger's credential digest:
 ## Wiring
 
 - **Birth** (`cli/commands/_data_plane.complete_gateway_data_plane`, start
-  intent `configured`): `ensure_groups` -> `retire_legacy_logins(Birth)` ->
+  intent `configured`): `ensure_groups` -> `ensure_monitor` ->
+  `retire_legacy_logins(Birth)` ->
   `create_ledger` -> `ensure_pooler_admin` -> `mint_generation` -> pooler
   serving the pending pair -> a pooled `SELECT 1` as each login -> `activate`.
   A retry reconciles to the same generation 0.
-- **Ordinary start**: `ensure_groups` after migrations -> `sweep` ->
-  `check_invariant` (read-only grantees such as `grafana_ro`); a home with no
-  ledger is refused before any native effect.
+- **Ordinary start**: `ensure_groups` after migrations -> `ensure_monitor` ->
+  `sweep` -> `check_invariant` (read-only grantees such as `grafana_ro`); a home
+  with no ledger is refused before any native effect.
 - **Launch**: the root launcher delivers `AVA_DB_URL` + `AVA_DB_GENERATION` per
   service class; `shared/dotenv_boot` keeps a delivery naming this home's
   endpoint and consumes the gateway login for an admitted operator process;
   otherwise the first dial raises `NoDatabaseAuthorityError`.
 - **Cutover** (`scripts/cutover_db_authority.py`, step `db`):
-  `retire_legacy_logins(Cutover)` -> `ensure_groups` -> `prove_closure` over the
+  `retire_legacy_logins(Cutover)` -> `ensure_groups` -> `ensure_monitor` ->
+  `prove_closure` over the
   legacy roles -> ledger -> generation 0 -> pooler -> proof -> `activate` ->
   invariant -> credential-free `.env`.
+- **Monitoring** is not delivered: the collector's PostgreSQL receiver
+  (`cli/commands/_otel_collector.py`) dials the owner-only socket as
+  `ava_monitor` by `peer`, so its rendered config names no credential and a
+  rollout leaves it working.
 - The release transition's fence/authorize phases are not wired yet.

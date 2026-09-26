@@ -8,6 +8,7 @@ internal data plane always authenticates, whatever the bearer
 |---|---|---|
 | `AVA_CLUSTER_SECRET` | Gateway and enrolled runners | Control-plane bearer for gateway API, `/ops`, bootstrap, and machine registration; empty = unauthenticated user-facing API, loopback-only listeners |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority fence |
+| OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists and rollouts leave it alone |
 | `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home only | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`) |
 | `AVA_REDIS_ADMIN_PASSWORD` | Gateway only | Redis `default` user and `requirepass` |
 | `AVA_REDIS_PASSWORD` | Gateway file; embedded in `AVA_REDIS_URL` | Redis ACL runtime user |

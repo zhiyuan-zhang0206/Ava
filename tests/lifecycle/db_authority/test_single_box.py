@@ -421,6 +421,130 @@ def test_revoked_generation_login_is_not_resurrected_by_start(born: Born) -> Non
     )
 
 
+_ROLES = frozenset({"gateway", "agent-runner"})
+
+
+def _collector_postgres_receiver(born: Born, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """The rendered collector config's PostgreSQL receiver; the whole rendered
+    text carries no credential of the data plane."""
+    import yaml
+
+    from cli.commands import _otel_collector as oc
+
+    monkeypatch.setattr(settings.observability, "telemetry_otlp_enabled", True)
+    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
+    rendered = oc.generate_config(_REPO, born.home, _ROLES)
+    secret = authority.read_secret(born.home, authority.active_generation(born.home))
+    credentials = {
+        "gateway generation": secret.roles.gateway.password,
+        "runner generation": secret.roles.runner.password,
+        "pooler admin": authority.read_pooler_admin(born.home).password,
+    }
+    leaked = [name for name, value in credentials.items() if value in rendered]
+    assert leaked == [], f"collector config carries credentials: {leaked}"
+    return yaml.safe_load(rendered)["receivers"]["postgresql"]
+
+
+def _dial_as_receiver(receiver: dict[str, Any], database: str) -> psycopg.Connection[Any]:
+    """Dial exactly as otelcol-contrib's postgresql receiver builds its lib/pq
+    DSN: `host:port` endpoint, `/` prefixed for the unix transport."""
+    host, _, port = receiver["endpoint"].rpartition(":")
+    if receiver["transport"] == "unix":
+        host = "/" + host.lstrip("/")
+    return psycopg.connect(
+        host=host,
+        port=port,
+        user=receiver["username"],
+        password=receiver["password"],
+        dbname=database,
+        sslmode="disable",
+        connect_timeout=5,
+        autocommit=True,
+    )
+
+
+def _scrape_like_the_receiver(receiver: dict[str, Any]) -> None:
+    """The receiver's cluster-wide queries (on `postgres`) and per-database ones."""
+    with _dial_as_receiver(receiver, "postgres") as conn:
+        # Other sessions' activity/replication rows need the stats role.
+        assert conn.execute("SELECT pg_has_role('pg_read_all_stats', 'USAGE')").fetchone() == (
+            True,
+        )
+        sizes = conn.execute(
+            "SELECT datname, pg_database_size(datname) FROM pg_catalog.pg_database"
+            " WHERE datistemplate = false"
+        ).fetchall()
+        assert {name for name, _size in sizes} >= {"postgres", "ava"}
+        conn.execute("SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname")
+        conn.execute(
+            "SELECT coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), -1)"
+            " FROM pg_stat_replication"
+        )
+        conn.execute("SELECT coalesce(last_archived_time, CURRENT_TIMESTAMP) FROM pg_stat_archiver")
+        conn.execute("SHOW max_connections")
+    for database in receiver["databases"]:
+        with _dial_as_receiver(receiver, database) as conn:
+            tables = conn.execute(
+                "SELECT relname, pg_relation_size(relid) FROM pg_stat_user_tables"
+            ).fetchall()
+            assert "agents" in {name for name, _size in tables}
+            conn.execute("SELECT * FROM pg_statio_user_tables")
+            conn.execute("SELECT pg_relation_size(indexrelid) FROM pg_stat_user_indexes")
+
+
+def test_collector_postgres_receiver_keeps_no_credential_and_survives_rollover(
+    born: Born, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The collector's PostgreSQL receiver logs in as the stable monitoring
+    role by `peer` over the owner-only socket: no password at rest in its
+    config, no application data, and a write-generation rollover neither
+    breaks nor closes it."""
+    from uuid import uuid4
+
+    receiver = _collector_postgres_receiver(born, monkeypatch)
+    assert receiver["username"] == authority.MONITOR_ROLE
+    assert receiver["transport"] == "unix"
+    assert receiver["databases"] == ["ava"]
+    _scrape_like_the_receiver(receiver)
+    with _dial_as_receiver(receiver, "ava") as conn:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("SELECT id FROM agents LIMIT 1")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("INSERT INTO agents (id) VALUES (920001)")
+    # No password exists for the role: TCP (SCRAM) never admits it.
+    _refused(
+        host="127.0.0.1",
+        port=born.pg_port,
+        user=authority.MONITOR_ROLE,
+        password=receiver["password"],
+        dbname="ava",
+    )
+
+    old_gateway = born.login("gateway")
+    rollout = authority.OperationAuthority(operation=uuid4(), direction="candidate")
+    with _dial_as_receiver(receiver, "ava") as scraping, born.admin() as conn:
+        authority.revoke(conn, born.home, rollout)
+        authority.close_revoked(conn, born.home, rollout)
+        verified = authority.mint_generation(conn, born.home, rollout)
+        authority.activate(born.home, rollout, verified)
+        # The fence closed the old generation, not the monitoring session.
+        assert scraping.execute("SELECT session_user").fetchone() == (authority.MONITOR_ROLE,)
+        authority.check_invariant(
+            conn, born.home, database="ava", readonly_grantees=data_plane.READONLY_GRANTEES
+        )
+    assert authority.active_generation(born.home).number == 1
+    _refused(
+        host="127.0.0.1",
+        port=born.pg_port,
+        user=old_gateway[0],
+        password=old_gateway[1],
+        dbname="ava",
+    )
+    # The unchanged config keeps scraping under the new generation.
+    assert _collector_postgres_receiver(born, monkeypatch) == receiver
+    _scrape_like_the_receiver(receiver)
+
+
 def test_direct_exemption_dials_postgres_as_the_delivered_login(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
