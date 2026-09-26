@@ -305,14 +305,6 @@ def _gone(pids: list[int]) -> bool:
     )
 
 
-@pytest.mark.xfail(
-    sys.platform == "darwin",
-    strict=False,
-    reason=(
-        "open gap: on XNU a member inside fork() during killpg can leave a child that "
-        "ExecProcessDomain's enumerate-then-read scan misses (about 1 in 15-40 runs)"
-    ),
-)
 async def test_late_forks_after_worker_exit_close_before_acceptance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

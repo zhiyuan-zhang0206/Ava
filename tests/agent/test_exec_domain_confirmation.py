@@ -380,3 +380,97 @@ def test_confirmed_domain_does_not_reobserve_reused_numeric_group(
 
     monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", unknown)
     domain.close_confirmed(time.monotonic() + 5)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="XNU kernel group listing")
+def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> None:
+    from shared.exec_process_domain import _darwin_group_listing
+
+    receipt = tmp_path / "child"
+    code = (
+        "import subprocess,sys,pathlib; "
+        "p=subprocess.Popen([sys.executable,'-I','-c','import time;time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
+    )
+    root, domain = _exec_process.ExecProcessDomain.launch_posix(
+        [sys.executable, "-I", "-c", code, str(receipt)]
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not receipt.exists() or not _ended(psutil.Process(root.pid)):
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        child = int(receipt.read_text())
+        # The unreaped leader stays listed after exit, alongside its live member.
+        assert sorted(_darwin_group_listing(root.pid)) == sorted([root.pid, child])
+        domain.close_confirmed(time.monotonic() + 5)
+        assert _darwin_group_listing(root.pid) == [root.pid]
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(root.pid, 9)
+        root.wait(timeout=5)
+
+
+def _late_listing_domain(
+    monkeypatch: pytest.MonkeyPatch, late_rounds: int | None
+) -> tuple[subprocess.Popen[bytes], _exec_process.ExecProcessDomain, list[str]]:
+    """An empty live sample whose kernel listing names a late member for some rounds.
+
+    `late_rounds=None` keeps listing the late member in every round.
+    """
+    root, domain = _exec_process.ExecProcessDomain.launch_posix(
+        [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
+    )
+    events: list[str] = []
+    original = os.killpg
+
+    def signal_group(pid: int, sig: int) -> None:
+        events.append("signal")
+        original(pid, sig)
+
+    def empty(_pid: int) -> bool:
+        return False
+
+    def listing(pgid: int) -> list[int]:
+        assert pgid == root.pid
+        events.append("listing")
+        rounds = events.count("listing")
+        # A member forked after the sample enumerated PIDs; never signalled by number.
+        late = late_rounds is None or rounds <= late_rounds
+        return [root.pid, 0x7FFFFFFF] if late else [root.pid]
+
+    monkeypatch.setattr(os, "killpg", signal_group)
+    monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", empty)
+    monkeypatch.setattr("shared.exec_process_domain._darwin_group_listing", listing)
+    return root, domain, events
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="XNU late-fork closure listing")
+def test_listed_late_member_forces_another_signal_round(monkeypatch: pytest.MonkeyPatch) -> None:
+    root, domain, events = _late_listing_domain(monkeypatch, late_rounds=1)
+    try:
+        domain.close_confirmed(time.monotonic() + 5)
+        # The second round signals before its listing; XNU answers the
+        # zombie-only group with EPERM, which the round then verifies.
+        assert events == ["signal", "listing", "signal", "listing"]
+        assert root.wait(timeout=5) == -9
+    finally:
+        if root.returncode is None:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(root.pid, 9)
+            root.wait(timeout=5)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="XNU late-fork closure listing")
+def test_persistent_late_member_leaves_leader_unreaped(monkeypatch: pytest.MonkeyPatch) -> None:
+    root, domain, events = _late_listing_domain(monkeypatch, late_rounds=None)
+    try:
+        with pytest.raises(TimeoutError, match="besides its leader"):
+            domain.close_confirmed(time.monotonic() + 0.5)
+        assert events.count("signal") >= 2
+        assert root.returncode is None
+        assert psutil.Process(root.pid).ppid() == os.getpid()
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(root.pid, 9)
+        root.wait(timeout=5)
