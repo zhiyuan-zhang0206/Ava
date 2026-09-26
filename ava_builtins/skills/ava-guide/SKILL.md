@@ -45,7 +45,7 @@ capabilities.
 
 The executor's field manual is `.agents/skills/impersonator-guide/SKILL.md`; launching
 a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self`
-(see Ava Use Claude Code and Codex).
+(see the `ava-use-other-agents` skill).
 
 ## Sub-skills
 
