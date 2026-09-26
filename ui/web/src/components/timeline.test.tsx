@@ -571,22 +571,22 @@ describe("ItemView: system_prompt", () => {
     expect(screen.queryByText("· 3 lines")).toBeNull();
   });
 
-  it("clicking the turn toggle expands the turn AND the card body in one click", () => {
+  it("clicking the turn toggle opens the prompt card collapsed; a second click expands it", () => {
     setToggleState({ detailsMode: "none" });
     render(
       <TimelineView
         items={[makeItem({ kind: "system_prompt", payload: PROMPT, created_at: null })]}
       />,
     );
-    // Bug regression (#659): a detail block must expand ALL its inner content
-    // together — no per-category second click.
+    // User ruling 2026-09-26 (task #4780): in None mode the turn click opens
+    // the block's FRAME only — the inner card stays collapsed (chip visible,
+    // body hidden) and opens on its own header click. This scopes the #659
+    // one-click cascade to All/Last.
     fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(screen.getByText("· 3 lines")).toBeTruthy();
-    expect(screen.getByText(/Act via execute_code/)).toBeTruthy();
-    // Per-card collapse is still available: clicking the inner card header
-    // pins that one card closed.
-    fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.queryByText(/Act via execute_code/)).toBeNull();
+    fireEvent.click(screen.getByTestId("card-toggle"));
+    expect(screen.getByText(/Act via execute_code/)).toBeTruthy();
   });
 
   it("singular 'line' for a one-line prompt", () => {
@@ -2505,6 +2505,75 @@ describe("Details mode — collapse/expand", () => {
   });
 });
 
+// Manual turn expansion keeps the child detail blocks collapsed in None mode
+// (user ruling 2026-09-26, task #4780 — scoping the #659 one-click cascade to
+// All/Last): the click opens the turn's frame, its child rows appear as
+// collapsed cards, and each child still opens on its own header click.
+describe("Details mode 'none' — turn expansion keeps child blocks collapsed (#4780)", () => {
+  const turnToggle = () => screen.getByTestId("turn-toggle");
+
+  it("reveals the child rows collapsed; each opens on its own click", () => {
+    setToggleState({ detailsMode: "none" });
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            item_id: "1.0",
+            kind: "agent_reasoning",
+            payload: "hidden thought",
+            reasoning_ms: 8200,
+            reasoning_tokens: 1234,
+          }),
+          makeItem({ item_id: "1.1", kind: "agent_code", payload: "print('hidden code')" }),
+        ]}
+      />,
+    );
+
+    // Collapsed turn: the child rows are not mounted at all.
+    expect(turnToggle().getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("card-toggle")).toBeNull();
+
+    // Manual expand: the rows mount — collapsed (bodies stay hidden).
+    fireEvent.click(turnToggle());
+    expect(turnToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByTestId("card-toggle")).toHaveLength(2);
+    expect(screen.queryByText("hidden thought")).toBeNull();
+    expect(screen.queryByTestId("python-code")).toBeNull();
+
+    // Each child opens on its own click; its sibling stays collapsed.
+    fireEvent.click(screen.getAllByTestId("card-toggle")[0]);
+    expect(screen.getByText("hidden thought")).toBeTruthy();
+    expect(screen.queryByTestId("python-code")).toBeNull();
+    fireEvent.click(screen.getAllByTestId("card-toggle")[1]);
+    expect(screen.getByTestId("python-code").textContent).toContain("print('hidden code')");
+  });
+
+  it("keeps a child's manual expansion across the parent's collapse and re-expand", () => {
+    // Boundary semantics (task #4780): a child click is a per-card PIN, like
+    // every other expansion — collapsing the turn unmounts the rows but does
+    // not rewrite their state, so re-expanding the turn shows the child still
+    // open. A Details-mode re-pick still clears every pin (reset token).
+    setToggleState({ detailsMode: "none" });
+    render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "hidden thought" }),
+          makeItem({ item_id: "1.1", kind: "agent_code", payload: "print('code')" }),
+        ]}
+      />,
+    );
+    fireEvent.click(turnToggle());
+    fireEvent.click(screen.getAllByTestId("card-toggle")[0]);
+    expect(screen.getByText("hidden thought")).toBeTruthy();
+
+    fireEvent.click(turnToggle()); // parent collapse → rows unmount
+    expect(screen.queryByTestId("card-toggle")).toBeNull();
+    fireEvent.click(turnToggle()); // re-expand → the child pin survives
+    expect(screen.getByText("hidden thought")).toBeTruthy();
+    expect(screen.queryByTestId("python-code")).toBeNull();
+  });
+});
+
 // streamingCode flag should only apply to the last agent_code, not all of them.
 // Verifies that the index === items.length - 1 guard hasn't regressed.
 describe("streamingCode last-item only", () => {
@@ -2813,9 +2882,12 @@ describe("block-level copy/fork actions (MessageCard overlay)", () => {
     );
     // Turn is collapsed → no copy button anywhere
     expect(screen.queryByLabelText("Copy message")).toBeNull();
-    // Expanding the turn expands the inner card too (bug #659) — the copy
-    // button appears in the same click.
+    // None mode (#4780): opening the turn keeps the inner card collapsed, and
+    // copy attaches to expanded cards only — it appears on the CARD's own
+    // click, not the turn's.
     fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.queryByLabelText("Copy message")).toBeNull();
+    fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.getByLabelText("Copy message")).toBeTruthy();
     // Collapsing the inner card hides the copy button again.
     fireEvent.click(screen.getByTestId("card-toggle"));
@@ -3568,6 +3640,10 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
     expect(runToggle().getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(runToggle());
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
+    // None mode (#4780): the turn opens with its child rows collapsed; the
+    // code body appears on the child's own click.
+    expect(screen.getAllByTestId("card-toggle")).toHaveLength(2);
+    fireEvent.click(screen.getAllByTestId("card-toggle")[1]);
     expect(screen.getByTestId("python-code").textContent).toBe("thread A code");
 
     // A normal refresh of the same thread preserves the user's pin.
@@ -3581,6 +3657,7 @@ describe("turn-collapse (always on — Turns toggle controls expand/collapse)", 
       />,
     );
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
+    // The child's own pin survives the refresh too (same item id).
     expect(screen.getByTestId("python-code").textContent).toBe("thread A updated code");
 
     // Item ids restart in each thread; the matching id must not resurrect A's pin in B.
