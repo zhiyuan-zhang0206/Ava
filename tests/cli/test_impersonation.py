@@ -469,6 +469,9 @@ def test_request_relay_spec_is_checked_at_the_cli_boundary(
     claude_with_thread = _args(*base, "--provider", "claude", "--thread-id", "t")
     assert claude_with_thread.func(claude_with_thread) == 2
     assert "routes to its owner" in capsys.readouterr().err
+    dsh_with_remote = _args(*base, "--provider", "dsh", "--codex-remote", "unix:///tmp/x.sock")
+    assert dsh_with_remote.func(dsh_with_remote) == 2
+    assert "the dsh relay routes to its owner" in capsys.readouterr().err
 
 
 def test_relay_spec_is_checked_at_the_cli_boundary(
@@ -768,3 +771,28 @@ def test_failed_relay_stub_write_removes_partial_file(
     with pytest.raises(OSError, match="cannot secure stub"):
         cli._write_relay_stub(stub, agent_id=405, session_id=9, token="tok")  # noqa: S106
     assert not stub.exists()
+
+
+def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from unittest.mock import Mock
+
+    request = Mock(return_value={"id": "lease", "session_id": 9, "relay_token": "tok-9"})
+    monkeypatch.setattr(sessions, "request", request)
+    monkeypatch.delenv("DSH_AVA_RELAY_STUB", raising=False)
+    argv = ("request", "--name", "Fix", "--agent", "405", "--as", "dsh", "--ttl", "600")
+    args = (*argv, "--provider", "dsh", "--batch-window", "0")
+    assert cli.cmd_impersonate(_args(*args)) == 1  # no plugin: refused before any lease
+    request.assert_not_called()
+    assert "DSH_AVA_RELAY_STUB is unset" in capsys.readouterr().err
+    stub = tmp_path / "session-1.env"
+    monkeypatch.setenv("DSH_AVA_RELAY_STUB", str(stub))
+    assert cli.cmd_impersonate(_args(*args)) == 0
+    output = capsys.readouterr()
+    assert "relay_token" not in json.loads(output.out) and "tok-9" not in output.out + output.err
+    assert stub.read_text() == (
+        "SID=9\nAGENT=405\nAVA_IMPERSONATION_RELAY_TOKEN=tok-9\n"
+        f"AVA_IMPERSONATION_RELAY_PY={cli.sys.executable}\n"
+    )
+    assert (stub.stat().st_mode & 0o777) == 0o600

@@ -1,6 +1,8 @@
 """Self-takeover bootstrap names the launching agent, validates before launch, and pins the shared app-server topology."""
 
 import importlib.util
+import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -267,7 +269,7 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     assert "SENTINEL_4" in text, text[-2000:]
 
 
-@pytest.mark.parametrize("provider", ["codex", "claude"])
+@pytest.mark.parametrize("provider", ["codex", "claude", "dsh"])
 def test_launch_requires_native_identity_before_creating_workspace(
     provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -303,3 +305,149 @@ def test_codex_bootstrap_ignores_the_resident_flag() -> None:
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, relay_resident=True)
     assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
     assert "Ava relay plugin" not in message
+
+
+def test_dsh_bootstrap_names_the_session_plugin_relay() -> None:
+    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    message = bootstrap_message(42, "Fix login", "dsh", "brief", guide)
+    assert "--provider dsh" in message and "--as 'DeepSeek Harness: Fix login'" in message
+    assert "Ava relay plugin loaded into this DeepSeek Harness session" in message
+    assert "Monitor" not in message and "--codex-remote" not in message
+
+
+def test_dsh_launcher_boots_headless_with_the_relay_plugin_as_its_runner(tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("takeover_spawn_dsh", _REFERENCE / "spawn_dsh.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plugin = _REFERENCE / "ava-relay-dsh" / "ava-relay.mjs"
+    assert plugin == module._PLUGIN and plugin.is_file()
+    patch = module._patch(plugin, tmp_path / "launch.txt")
+    assert "- id: headless-runner\n  disabled: true" in patch
+    assert "- id: headless-startup\n  disabled: true" in patch
+    assert f"name: {json.dumps(str(plugin))}" in patch
+    assert f"takeoverFile: {json.dumps(str(tmp_path / 'launch.txt'))}" in patch
+    command = module._dsh_command(tmp_path, "/bin/node", "/bin/dsh", tmp_path / "p.yml")
+    assert command == (
+        f"cd {tmp_path} && DSH_PERMISSION_MODE=danger-full-access "
+        f"exec /bin/node /bin/dsh --profile headless --patch {tmp_path / 'p.yml'}"
+    )
+
+
+def test_dsh_relay_emits_one_json_string_per_line(capsys: pytest.CaptureFixture[str]) -> None:
+    """The plugin splits relay stdout by line: a multi-line envelope must stay one line."""
+    from cli.commands.impersonation_relay import host_emitter
+
+    host_emitter("dsh", None)("Ava message agent=42\n[id=7] kind=chat\nhi")
+    assert capsys.readouterr().out == '"Ava message agent=42\\n[id=7] kind=chat\\nhi"\n'
+
+
+_PLUGIN_HARNESS = """
+import { existsSync, writeFileSync } from 'node:fs'
+const [pluginPath, relayPy, out, mode, takeoverFile] = process.argv.slice(2)
+const plugin = await import(pluginPath)
+const steered = [], followed = [], created = [], disposers = []
+let contributor, stub
+const agent = {
+  id: 'session-1', session: { header: { id: 'session-1' } },
+  steer: (m) => steered.push(m), followup: (m) => followed.push(m),
+}
+const services = {
+  loader: { await: async () => {} },
+  agentDefaultModel: { currentSelection: () => ({ provider: 'p', model: 'm' }) },
+}
+const finish = (extra) => {
+  writeFileSync(out, JSON.stringify({ steered, followed, created, ...extra }))
+  disposers.forEach((dispose) => dispose())
+}
+const ctx = {
+  agents: {
+    get: (id) => (id === 'session-1' ? agent : undefined),
+    create: async (options) => { created.push(options); return { agent } },
+  },
+  shellEnv: { register: (c) => { contributor = c } },
+  effect: (fn) => { disposers.push(fn()) },
+  on: () => {},
+  get: (name) => services[name],
+  jobs: {
+    start(spec) {
+      const hooks = spec.run()
+      hooks.done.then((outcome) => finish({
+        kind: spec.kind, owned: spec.owner === agent, outcome,
+        stubGone: !existsSync(stub), anonymous: contributor.resolve({}),
+      }))
+      return 'ava-relay-1'
+    },
+  },
+}
+plugin.apply(ctx, mode === 'takeover' ? { takeoverFile } : {})
+if (mode === 'takeover') {
+  setTimeout(() => finish({ launchGone: !existsSync(takeoverFile) }), 200)
+} else {
+  stub = contributor.resolve({ agent }).DSH_AVA_RELAY_STUB
+  writeFileSync(stub, `SID=3\\nAGENT=42\\nAVA_IMPERSONATION_RELAY_TOKEN=tok-3\\nAVA_IMPERSONATION_RELAY_PY=${relayPy}\\n`)
+}
+"""
+
+
+def _run_plugin(tmp_path: Path, *args: str) -> dict[str, object]:
+    harness = tmp_path / "harness.mjs"
+    harness.write_text(_PLUGIN_HARNESS, encoding="utf-8")
+    out = tmp_path / "out.json"
+    plugin = _REFERENCE / "ava-relay-dsh" / "ava-relay.mjs"
+    subprocess.run(  # noqa: S603 — fixed argv: node, the test harness and fixture paths
+        ["node", str(harness), plugin.as_uri(), args[0], str(out), *args[1:]],
+        check=True,
+        timeout=60,
+    )
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the dsh plugin runs on Node.js")
+def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) -> None:
+    """Stub -> relay child with the scoped token -> each JSON line steered, envelopes intact."""
+    envelope = "Ava message agent=42 lease=3 ids=7\n[id=7] kind=chat from=user\nhi"
+    texts = tmp_path / "texts.json"
+    texts.write_text(json.dumps(["Ava control active.", envelope]), encoding="utf-8")
+    relay = tmp_path / "relay.sh"
+    relay.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$@" > {tmp_path}/argv.txt\n'
+        f'printf "%s" "$AVA_IMPERSONATION_RELAY_TOKEN" > {tmp_path}/token.txt\n'
+        f"exec {sys.executable} -c 'import json, sys; "
+        "from cli.commands.impersonation_relay import plugin_dsh; "
+        f"[plugin_dsh(text) for text in json.load(open(sys.argv[1]))]' {texts}\n",
+        encoding="utf-8",
+    )
+    relay.chmod(0o755)
+    result = _run_plugin(tmp_path, str(relay), "relay")
+    assert (tmp_path / "argv.txt").read_text().split() == [
+        "-m", "cli", "impersonate", "relay", "42", "--session", "3", "--provider", "dsh",
+    ]  # fmt: skip
+    assert (tmp_path / "token.txt").read_text() == "tok-3"
+    steered = result["steered"]
+    assert isinstance(steered, list)
+    assert [m["content"][0]["text"] for m in steered] == ["Ava control active.", envelope]
+    assert all(m["role"] == "user" for m in steered)
+    assert all(
+        m["source"] == {"kind": "plugin", "plugin": "ava-relay", "form": "relay"} for m in steered
+    )
+    assert result["kind"] == "ava-relay" and result["owned"] and result["stubGone"]
+    assert result["outcome"] == {"status": "completed", "detail": "exit code: 0"}
+    assert result["anonymous"] == {}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the dsh plugin runs on Node.js")
+def test_dsh_plugin_takeover_runner_submits_and_consumes_the_launch_message(
+    tmp_path: Path,
+) -> None:
+    launch = tmp_path / "launch.txt"
+    launch.write_text("You will take over Ava agent 42.", encoding="utf-8")
+    result = _run_plugin(tmp_path, "unused", "takeover", str(launch))
+    created = result["created"]
+    followed = result["followed"]
+    assert isinstance(created, list) and isinstance(followed, list)
+    assert [c["agentOptions"] for c in created] == [{"provider": "p", "model": "m"}]
+    assert [m["content"][0]["text"] for m in followed] == ["You will take over Ava agent 42."]
+    assert followed[0]["source"] == {"kind": "user"}
+    assert result["launchGone"]

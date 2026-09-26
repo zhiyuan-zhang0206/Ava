@@ -157,6 +157,9 @@ async function runTakeover(ctx, file) {
       echo(`[tool] ${event.data.name} ${String(event.data.arguments).slice(0, 400)}\n`)
     } else if (event.type === 'user/message' && event.data.source?.plugin === SOURCE.plugin) {
       echo(`[ava-relay] ${event.data.content.map((block) => block.text ?? '').join(' ').slice(0, 400)}\n`)
+    } else if (event.type === 'turn/end' && event.data.reason.kind !== 'completed') {
+      const { reason } = event.data
+      echo(`[turn ${reason.kind}]${reason.kind === 'error' ? ` ${reason.error.code}: ${reason.error.message}` : ''}\n`)
     }
   })
   echo(`dsh takeover session ${agent.id} (${selection.provider}/${selection.model})\n`)
