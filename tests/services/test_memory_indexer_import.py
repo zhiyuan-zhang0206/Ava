@@ -25,6 +25,8 @@ def _run_fresh_daemon_import(tmp_path: Path, code: str) -> subprocess.CompletedP
         "AVA_DB_URL=postgresql://unprovisioned@127.0.0.1:1/unprovisioned\n"
         "AVA_REDIS_URL=redis://127.0.0.1:1/0\n"
         "AVA_CLUSTER_SECRET=test-cluster-secret\n"
+        # A secured local owner URL needs the gateway-local owner password.
+        "AVA_DB_ADMIN_PASSWORD=test-db-owner-password\n"
         "AVA_OS_JOBS_ENABLED=false\n"
         "AVA_TELEMETRY_OTLP_ENABLED=false\n"
         "AVA_PGBOUNCER_ENABLED=false\n"
