@@ -19,9 +19,9 @@ export const SYSTEM_STATUS_QUERY_KEY = ["status"] as const;
 // readable even while the cluster is paused.
 export const CLUSTER_STATUS_QUERY_KEY = ["cluster-status"] as const;
 
-// Steady-state / in-flight poll intervals — see the cadence note above.
+// Steady-state / paused poll intervals.
 const IDLE_POLL_MS = 15_000;
-const UPDATING_POLL_MS = 5_000;
+const PAUSED_POLL_MS = 5_000;
 
 /**
  * Poll authenticated cluster status and drive reconnect state.
@@ -33,20 +33,19 @@ export function useClusterHealth(): void {
   const { data } = useQuery({
     queryKey: CLUSTER_STATUS_QUERY_KEY,
     queryFn: api.getClusterStatus,
-    // Function form: tighten while an update is in flight so the finish edge
-    // lands within seconds; idle at 15s otherwise. Failed fetches during the
-    // gateway restart window are tolerated — TanStack retries on its own
-    // cadence, and a missed poll just defers the edge detection by one
-    // interval (the watchdog still backstops).
+    // Function form: tighten while this host reads paused (a pause,
+    // maintenance hold or unfinished startup) so the resume edge lands within
+    // seconds; idle at 15s otherwise. Failed fetches during a gateway restart
+    // are tolerated — TanStack retries on its own cadence, and a missed poll
+    // just defers the edge detection by one interval.
     refetchInterval: (query) => {
-      const snap = query.state.data;
-      const updating = snap?.paused ?? false;
-      return updating ? UPDATING_POLL_MS : IDLE_POLL_MS;
+      const paused = query.state.data?.paused ?? false;
+      return paused ? PAUSED_POLL_MS : IDLE_POLL_MS;
     },
   });
 
   const paused = data?.paused ?? false;
-  // Edge-detect paused true -> false (update finished). prevPaused starts
+  // Edge-detect paused true -> false (the host resumed). prevPaused starts
   // false, so a first poll that lands while still paused arms the edge; the
   // following poll that sees it clear fires the reconnect. A cold start that
   // is already unpaused never triggers (false -> false).
@@ -55,8 +54,8 @@ export function useClusterHealth(): void {
     const wasPaused = prevPausedRef.current;
     prevPausedRef.current = paused;
     if (wasPaused && !paused) {
-      // Rollout/restart just completed — the old SSE socket was severed when
-      // the gateway bounced. Reopen it now and reconcile the agents list.
+      // The host resumed — an SSE socket may have been severed while the
+      // gateway was paused or restarting. Reopen it and reconcile the agents list.
       bumpReconnect();
       void queryClient.refetchQueries({ queryKey: AGENTS_QUERY_KEY });
     }

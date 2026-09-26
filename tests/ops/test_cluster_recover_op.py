@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Literal
 
 import pytest
@@ -64,31 +65,23 @@ def recover_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool]:
     monkeypatch.setattr(_ops, "claim_recovery_lock", _claim)
     monkeypatch.setattr(_ops, "release_update_lock", _release)
     monkeypatch.setattr(_ops, "unpause_local_cluster", lambda: calls.update(unpaused=True))
-    monkeypatch.setattr(
-        _ops.ui_update_state,
-        "read",
-        lambda: _ops.ui_update_state.UiUpdateSnapshot(status="inactive"),
-    )
     return calls
 
 
-def test_recover_clears_the_stranded_ui_marker_after_liveness_refusal_passes(
-    monkeypatch: pytest.MonkeyPatch, recover_calls: dict[str, bool]
+def test_recover_never_touches_a_leftover_ui_update_marker(
+    monkeypatch: pytest.MonkeyPatch, recover_calls: dict[str, bool], tmp_path: Path
 ) -> None:
+    """No lifecycle owns Gate's retired update marker; recovery neither reads nor
+    removes a file the retired updater left in the home."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    marker = tmp_path / "deploy-state.json"
+    marker.write_text('{"schema_version":2,"state":"updating","generation":"stranded"}')
     _set_lease(monkeypatch, None)
-    cleared: list[str] = []
-    monkeypatch.setattr(
-        _ops.ui_update_state,
-        "read",
-        lambda: _ops.ui_update_state.UiUpdateSnapshot(
-            status="updating", generation="stranded", kind="rollout"
-        ),
-    )
-    monkeypatch.setattr(_ops.ui_update_state, "clear", cleared.append)
 
     _ops.cluster_recover_op()
 
-    assert cleared == ["stranded"]
+    assert recover_calls["unpaused"] is True
+    assert marker.exists()
 
 
 def _set_lease(monkeypatch: pytest.MonkeyPatch, lease: DeployLease | None) -> None:
@@ -197,7 +190,6 @@ def test_recover_cas_loses_to_a_new_owner_without_unpausing_or_clearing(
     monkeypatch: pytest.MonkeyPatch, recover_calls: dict[str, bool]
 ) -> None:
     _set_lease(monkeypatch, None)
-    marker_clears: list[str] = []
 
     def _lose_claim(
         _recovery_holder: str,
@@ -213,20 +205,10 @@ def test_recover_cas_loses_to_a_new_owner_without_unpausing_or_clearing(
         "claim_recovery_lock",
         _lose_claim,
     )
-    monkeypatch.setattr(
-        _ops.ui_update_state,
-        "read",
-        lambda: _ops.ui_update_state.UiUpdateSnapshot(
-            status="updating", generation="winner", kind="rollout"
-        ),
-    )
-    monkeypatch.setattr(_ops.ui_update_state, "clear", marker_clears.append)
-
     with pytest.raises(ClusterUpdateInProgress, match="lease changed"):
         _ops.cluster_recover_op()
 
     assert recover_calls == {"released": False, "unpaused": False}
-    assert marker_clears == []
 
 
 def test_recycled_pid_on_an_old_lease_reads_as_dead(

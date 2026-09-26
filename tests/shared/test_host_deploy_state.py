@@ -64,36 +64,6 @@ def test_read_uses_the_callers_connection(
     assert state.posture == "paused"
 
 
-def test_host_transitions_never_mutate_an_existing_ui_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Host posture is control-plane state, not maintenance-page ownership.
-
-    A local pause/start inside a rollout must not create or clear the cluster UI
-    generation, which spans the full Phase-B tail.
-    """
-    marker = tmp_path / "deploy-state.json"
-    original = b'{"schema_version":2,"generation":"owner"}'
-    marker.write_bytes(original)
-
-    # Use an explicit sentinel file: an absence assertion against an unrelated
-    # tmp_path would be vacuous and could not catch host-state code clearing the
-    # real cluster marker.
-    from shared import ui_update_state
-
-    monkeypatch.setattr(ui_update_state, "state_path", lambda: marker)
-    hds.set_posture("paused")
-    hds.touch_updater_lease(ttl_s=600)
-    hds.clear_updater_lease()
-    hds.set_posture("idle")
-
-    state = hds.read()
-    assert state is not None
-    assert state.posture == "idle"
-    assert state.updater_lease_expires_at is None
-    assert marker.read_bytes() == original
-
-
 def test_invalid_posture_is_rejected() -> None:
     with pytest.raises(ValueError):
         hds.set_posture("bogus")

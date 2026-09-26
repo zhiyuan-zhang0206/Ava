@@ -1,79 +1,38 @@
 ---
 type: doc
-title: Cluster UI Update State
-description: Generation-guarded persistent ownership of Gate's updating page during a whole-cluster rollout or restart.
+title: Home Lifecycle Mutexes
+description: The two home-local advisory locks that serialize start/stop/pause with pause-owner publication and cluster recovery.
 tags:
 - deploy
-- gate
 - state
 ---
 
-# Cluster UI Update State
+# Home Lifecycle Mutexes
 
 ## What it is
 
-`shared/ui_update_state.py` owns `$AVA_HOME/deploy-state.json`, the durable
-fact that a whole-cluster rollout/restart currently owns the fleet UI. While
-active the file contains one schema-v2 generation, kind, stable RFC3339
-`started_at`, and diagnostic `updated_at`/phase/origin; normal completion
-removes it.
+`shared/ui_update_state.py` owns two OS advisory locks under `$AVA_HOME`:
 
-This is deliberately separate from host posture. `host_deploy_state` remains
-the online control-plane authority for pause/converge/updater liveness, while
-the UI marker spans gateway/frontend process replacement. `ava start`,
-pause/unpause, and updater lease renewal never write or clear the UI marker.
-No current lifecycle entry begins a marker; the gate still renders, and
-`ava cluster recover` still clears, one left by an interrupted owner.
+- `resource_lock` (`deploy-state.lifecycle.lock`) serializes long local
+  start/stop/pause transitions with a bounded wait.
+- `lifecycle_lock` (`deploy-state.owner.lock`) serializes the short
+  pause-owner publication against recovery's liveness proof and destructive
+  action.
 
-## Concurrency contract
+Recovery (`ava cluster recover`) takes the resource lock before the owner lock,
+the same order as the stop and resume operations in `ops/ops_cluster.py`.
 
-- Every begin/phase/clear holds `$AVA_HOME/deploy-state.lock` through
-  `shared.platform.file_lock`.
-- Writes are same-directory temp + file fsync + atomic replace + directory
-  fsync, so the lock-free gate reader sees only a complete old/new snapshot.
-- Phase updates and completion are generation-CAS operations inside the lock.
-  A late process from generation A cannot overwrite or unlink generation B.
-- `$AVA_HOME/deploy-state.owner.lock` serializes owner publication against
-  recovery proof and its destructive action. Normal publication holds it only
-  briefly. `$AVA_HOME/deploy-state.lifecycle.lock` serializes long local
-  start/stop/pause sections.
-  Recovery takes the resource lock before the owner lock and preserves any
-  unresolved retained updater handoff or publication envelope. The retired
-  detached updater command graph supplies no new producer of those envelopes.
-- Each mutex has an atomically replaced `.holder.json` sidecar with the last
-  holder's PID, purpose, start time and held/released state. It is diagnostic;
-  the OS lock remains the authority. A bounded wait names the last holder.
-- A hard-killed owner leaves the marker as honest interrupted-update state.
-  `ava cluster recover` may unpause only when the exact updater handoff and
-  bootstrap/normal recovery envelope is terminal-clearable; successful unpause
-  then force-clears this UI marker.
+## Diagnostics
 
-A rollback to pre-v2 code is outside the supported contract: rollback targets
-are recent known-good releases, and a pre-v2 `{posture, updated_at}` file now
-projects invalid (fail-safe) rather than being adopted — no host runs a pre-v2
-writer (fleet verified 2026-09-20).
+Each mutex has an atomically replaced `.holder.json` sidecar with the last
+holder's PID, purpose, start time and held/released state. It is diagnostic;
+the OS lock remains the authority. A bounded wait that times out names the last
+holder in its error.
 
-## Projection semantics
+## Invariants
 
-- Missing marker: inactive.
-- Valid v2 marker: updating until its exact owner or recovery clears it. Age
-  never changes the classification or invents a progress diagnosis.
-- Pre-v2 `{posture, updated_at}` shapes: retired — they project invalid (no
-  pre-v2 writer remains; fleet verified 2026-09-20).
-- Malformed/unknown marker: invalid → Gate renders Service unavailable and
-  emits a rate-limited warning; it never guesses that an update exists.
-
-Gate is an ordinary root-owned service. A full root transition may stop its
-entry listener; the persisted marker does not promise uninterrupted serving.
-While running, Gate reads one immutable snapshot per HTTP request. An active snapshot
-always renders System updating; without one, a gateway/app transport failure
-renders Service unavailable. The two failure phases cannot invent different
-states.
-
-An already-open SPA never owns this page or its clock. A lightweight same-origin
-`GET /__ava/deploy-state` poll asks Gate to re-project the current URL. The endpoint returns
-`{status,generation}` with `no-store` before any gateway/app probe.
-
-Stable v2 generation/`started_at` ownership is guaranteed by the lock-winning
-child that runs this code, from the introducing rollout onward; every host runs
-a v2 writer (fleet verified 2026-09-20).
+- The lock file names are stable. Renaming them would split mutual exclusion
+  between processes built from different revisions.
+- The module keeps no UI state. Gate keeps none either: a release transition
+  stops Gate with the rest of root, and a `$AVA_HOME/deploy-state.json` left by
+  the retired updater is inert.

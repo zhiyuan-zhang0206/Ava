@@ -59,13 +59,13 @@ injected by the canonical frontend build: visits there use same-origin gateway
 routes behind an HTTP/2-capable proxy, while existing direct frontend URLs
 retain gateway-port routing. The gate login follows the same entry selection.
 The proxy sends gateway routes directly to the gateway and frontend/navigation
-requests through the gate, preserving its maintenance generation boundary.
+requests through the gate.
 
 - **Half-dead watchdog**: 45s without any frame (even heartbeats) = socket stuck in OPEN (graceful restart / proxy hop) → the leader reopens it; a follower requests repair through the channel. Server sends a heartbeat frame roughly every 15s as liveness.
 - **CLOSED auto-reconnect**: unauthenticated streams never open; the leader probes `/api/auth/check` after a CLOSED stream — invalid session flips auth state and stays closed until login; valid session or failed probe → single-flight capped backoff reopen (1s doubled to 30s, reset on open). Followers only mirror connection state. The per-page fallback retains its existing retry timers and `retryNonce` levers. `onerror` dispatches CLOSED/CONNECTING/OPEN (unknown → throw); `ConnectionEvent` = open/reconnecting/closed/parse-failed.
 - `lib/sse-lifecycle.ts` owns the per-connection watchdog, retry timer, and legacy CLOSED auth probe for both system and alert providers. Each passes its own reconnect and notification callbacks; system emits connection events and uses the global reconnect nonce, while alerts invalidates its query caches on open and uses local reconnect state. Frame parsing and malformed-frame recovery remain provider-specific.
-- **Cluster reconnect**: the authenticated `/api/cluster/status` poll reconnects SSE and refetches agents when a confirmed pause clears. Paused state alone never claims an interrupted updater or authorizes recovery. Gate independently owns its maintenance projection.
-- Cluster update still uses the global store `reconnectNonce`; a shared follower relays a restart request to the leader. The per-page fallback retains separate system retry timers and AlertsProvider's independent watchdog and retry state.
+- **Cluster reconnect**: the authenticated `/api/cluster/status` poll reconnects SSE and refetches agents when a confirmed pause clears. Paused state alone never claims an interrupted updater or authorizes recovery.
+- The cluster reconnect uses the global store `reconnectNonce`; a shared follower relays a restart request to the leader. The per-page fallback retains separate system retry timers and AlertsProvider's independent watchdog and retry state.
 
 ## Hook directory
 

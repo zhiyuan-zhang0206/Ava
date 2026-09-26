@@ -59,7 +59,7 @@ are not implementation requirements for this revision.
    directories as `AVA_SERVICE_PATH` in its home configuration before first start
    with the new code; omit virtualenv directories. Do not derive this declaration
    from a later recovery caller's PATH. Deployment is separate from PR merge.
-   Cutover preconditions:
+   Cutover preconditions and one-time repairs:
    - Every cluster reads `deployment_state.managed_writer_evidence->'pending'
      IS NULL` before this release is admitted. The retired updater's checked
      publication recovery is gone, and no command clears a recorded pending
@@ -69,6 +69,18 @@ are not implementation requirements for this revision.
    - `$AVA_HOME/installed_sha` has no reader or writer; the source-tree check
      alerts only on checkout edits of a source-run home. Delete the file in the
      cutover record.
+   - Do not run `ava cluster recover` on a host while a legacy updater, rollout,
+     cluster-restart or hold-recovery session may still be alive there. No
+     current code spawns such a session, so recovery no longer probes for one:
+     a legacy session is invisible to it until it takes its database lease. The
+     remaining guards (updater handoff, deploy-lease holder PID probe, host
+     updater lease, maintenance admission) cover every current owner.
+   - `$AVA_HOME/deploy-state.json`, the retired updater's Gate marker, has no
+     reader or writer; Gate never renders an update page. Delete it in the
+     cutover record.
+   - The `cluster_pin` row keeps frozen legacy values that no surface shows;
+     only `ops.deploy_window` still reads its target to release a legacy settle
+     hold. Retire it with the controller storage below.
 
 ## Planned: remove retired controller storage
 

@@ -47,7 +47,7 @@ or visibility is lost.
 ## Zustand `store.ts` (Pure UI + Cluster Coordination)
 
 - **UI state**: `activeId`, composer focus token, mobile drawer, mobile inspector overlay (`mobileInspectorOpen`), toast, the terminate open-tasks notice (`openTasksNotice`), search. Spawn selections (`behavior.spawn_*`) and sidebar view mode/sort/stats (`display.sidebar_*`, hooks in `lib/sidebar.ts`) are **not here** — DB settings via `useUserSettings`.
-- **Cluster coordination**: `reconnectNonce` is the SSE-reconnect lever. `AppConnectionBanner` reads connection health directly. Maintenance ownership is never mirrored into Zustand: Gate's persisted snapshot is the fact, while SSE/poll only trigger a latched Gate reload.
+- **Cluster coordination**: `reconnectNonce` is the SSE-reconnect lever. `AppConnectionBanner` reads connection health directly. No maintenance or update state is mirrored into Zustand; a reload while the app is down is answered by Gate's unavailable page.
 
 ## Selected Timeline State
 

@@ -19,9 +19,7 @@ answered with files, session probes and log mtimes:
 
 The old signals were retired by the old-signal sweep (PR5): the `cluster_paused`
 file and `updating.flag` are no longer written or read, and every consumer reads
-this module's row. Gate's file is now owned separately by
-`shared.ui_update_state`: whole-cluster UI ownership must span local
-pause/converge/start transitions and the complete Phase-B tail.
+this module's row.
 
 Layering: `shared` must not import `cli`/`gateway`, and this module is read by
 the gateway middleware, maintenance, the updater and the gate — the

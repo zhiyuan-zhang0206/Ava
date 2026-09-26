@@ -554,7 +554,7 @@ supervisor socket for agent shells / watchers).
 <!-- lint:roster-table -->
 | Service (suffix)         | Runs                                     | Healthcheck |
 |--------------------------|------------------------------------------|-------------|
-| `gate` (gateway only) | `.venv/bin/python -m services.gate.daemon` (root-owned public HTTP entry on `:3000`: auth-gates and proxies the Next.js `frontend`, and renders the login/updating/unavailable maintenance pages from the shared UI-update snapshot) | `services.healthchecks.gate` (`GET /__ava/healthz` identity-verified) |
+| `gate` (gateway only) | `.venv/bin/python -m services.gate.daemon` (root-owned public HTTP entry on `:3000`: auth-gates and proxies the Next.js `frontend`, and renders the login and Service unavailable pages) | `services.healthchecks.gate` (`GET /__ava/healthz` identity-verified) |
 | `gateway` ★ (gateway only) | `.venv/bin/python scripts/start_gateway.py` (FastAPI 0.0.0.0:8000) | `services.healthchecks.gateway` (HTTP `/api/agents` 200) |
 | `ops` (agent-runner only) | `.venv/bin/python -m services.agent_ops.daemon` (inbound server on 0.0.0.0:<ops_port>; the gateway POSTs each cluster op to `/ops`, dispatched in-process via the gateway ops_* modules) | `services.healthchecks.ops` (`/healthz`) |
 | `agent-host` (agent-runner only) | `.venv/bin/python -m services.agent_host.daemon`: one host schedules local turns with bounded concurrency, shared workload/control pools and per-agent context. Idle has no task. `/stats` reports active turns and cache use. Normal update drains claim, checkpoint, continuation and execution resources before stopping this service. Uncancellable tasks are reported; killing the whole host interrupts every active turn on that runner. | `services.healthchecks.agent_host` (`/healthz` :8114) |
@@ -616,7 +616,7 @@ loopback, never `forwarded-allow-ips=*`.
 
 Route `/api` and its descendants, `/pages` and its descendants, and `/grafana`
 and its descendants directly to the gateway; all remaining requests go to the
-existing gate, including `/__ava/deploy-state`. The gate buffers frontend
+existing gate. The gate buffers frontend
 responses and must not proxy SSE. Preserve route prefixes, query strings,
 cookies, redirects, and immediate `text/event-stream` delivery. Keep the entry
 supervised independently of rollout service teardown.

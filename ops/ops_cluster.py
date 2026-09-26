@@ -232,7 +232,6 @@ def cluster_recover_op() -> dict[str, object]:
                 "an update is in flight on this host — its updater lease is live; "
                 "recovery refused; wait for it to finish or kill its session first"
             )
-        snapshot = ui_update_state.read()
         pause_snapshot = pause_owner.read()
         recovery_holder = f"recovery:{machine_name()}:pid{os.getpid()}"
         claim = claim_recovery_lock(recovery_holder, lease)
@@ -243,10 +242,6 @@ def cluster_recover_op() -> dict[str, object]:
             )
         try:
             unpause_local_cluster()
-            if snapshot.status == "updating" and snapshot.generation is not None:
-                ui_update_state.clear(snapshot.generation)
-            elif snapshot.status == "invalid":
-                ui_update_state.force_clear()
             if handoff.generation is not None:
                 updater_handoff.clear(handoff.generation)
             if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
@@ -260,8 +255,7 @@ def cluster_recover_op() -> dict[str, object]:
             release_update_lock(recovery_holder)
         cleared = claim.previous_holder
     logger.info(
-        "[cluster] manual recover: force-released lock (was {holder}) + unpaused + "
-        "cleared the UI update marker",
+        "[cluster] manual recover: force-released lock (was {holder}) + unpaused",
         holder=cleared,
     )
     return {"unlocked_holder": cleared}

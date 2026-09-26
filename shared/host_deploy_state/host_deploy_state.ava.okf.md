@@ -56,7 +56,7 @@ these storage primitives do not recreate its launch or recovery entrypoints.
 ## Notes
 
 - The cluster-level counterpart is [[cluster_lock.ava.okf.md|the cluster deploy lease]] (`deployment_state`); agents carry their own leases in `agents_meta`.
-- Gate maintenance ownership is a separate cluster-level fact in [[ui_update_state.ava.okf.md|Cluster UI Update State]]. Host posture transitions never write or clear it.
+- The home lifecycle mutexes that serialize local start/stop/pause with recovery are in [[ui_update_state.ava.okf.md|Home Lifecycle Mutexes]].
 
 The controller-driven stranded-hold writer, budget, local note queue, heartbeat
 alert, and status projection have been removed. Their five physical columns

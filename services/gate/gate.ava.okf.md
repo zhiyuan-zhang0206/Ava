@@ -23,22 +23,17 @@ listener ancestry before and after the request. An unrelated listener, an
 unknown process birth, or an unobservable root cannot certify readiness.
 `ava status` reports Gate in its ordinary root/probe service table.
 
-For product requests, Gate reads one immutable
-[[shared/ui_update_state.ava.okf.md|UI update snapshot]]. A valid active generation
-renders System updating from its stable start time. Without an active generation,
-Gateway/app transport failure renders Service unavailable; malformed state has
-the same unavailable projection. Auth forwards the session cookie to
-`/api/auth/check`; an authenticated response permits proxying the app. Login,
-updating, and unavailable pages are dependency-free static assets loaded at boot.
-Next.js navigation request headers and response security headers cross the proxy.
+For product requests, auth forwards the session cookie to `/api/auth/check`; an
+authenticated response permits proxying the app. A gateway or app transport
+failure renders Service unavailable; Gate does not guess whether the cause is a
+transition, a service, or the host. Gate keeps no update state: a release
+transition stops Gate with the rest of root, so no listener exists to describe
+it, and a `$AVA_HOME/deploy-state.json` left by the retired updater is ignored.
+The login and unavailable pages are dependency-free static assets loaded at
+boot. Next.js navigation request headers and response security headers cross
+the proxy. Normal root startup loads the candidate code and static assets.
 
-`GET /__ava/deploy-state` exposes `{status,generation}` with `no-store` before
-gateway/app probes. An already-open SPA uses it only as a reload hint; Gate owns
-the maintenance page and clock. This response exists only while Gate is running:
-a durable update marker does not imply an available entry listener during a root
-transition. Normal root startup loads the candidate code and static assets.
-
-The loopback product tests exercise auth, maintenance snapshots, proxy behavior,
-and health independently of dependencies. The native child test exercises real
+The loopback product tests exercise auth, the unavailable projection, proxy
+behavior, and health independently of dependencies. The native child test exercises real
 Gate startup, root IPC ownership, restart, stop, and rejection of a foreign
 listener. It does not prove macOS helper ancestry or a complete cluster rollout.

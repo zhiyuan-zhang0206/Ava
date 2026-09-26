@@ -101,13 +101,6 @@ def guard_requests(page: Page, *, surface: str) -> None:
             route.abort("blockedbyclient")
             return
         path = urlparse(route.request.url).path
-        if path == "/__ava/deploy-state":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body='{"status":"inactive","generation":null}',
-            )
-            return
         if not path.startswith("/api/"):
             route.continue_()
             return

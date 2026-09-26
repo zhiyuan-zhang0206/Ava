@@ -33,8 +33,7 @@ def is_paused(
     Status readers consume this database projection. HTTP admission instead reads
     the local journal. A projection read failure (DB unreachable) reads as
     NOT paused — the same conservative direction the old file stat had (an
-    unreadable flag was an absent flag). The offline maintenance page is owned
-    separately by the cluster orchestrator's Gate marker.
+    unreadable flag was an absent flag).
     """
     if state is _UNSET:
         try:

@@ -9,9 +9,9 @@
 <style>
 /*__THEME_CSS__*/
 
-/* The gate's generic unavailable screen — sibling of updating.html. It cannot
-   confirm a valid maintenance generation or a required component did not
-   answer. Gate does not invent whether the cause is state, service, or host. */
+/* The gate's generic unavailable screen: a required component did not answer.
+   Gate does not invent whether the cause is a transition, a service, or the
+   host. */
 
 .screen {
   align-items: center;
@@ -46,7 +46,7 @@
     </svg>
     <div class="headline stack">
       <h1>Service unavailable</h1>
-      <p class="muted">A valid maintenance state could not be confirmed, or a required service is unavailable. It may be a service failure or a machine/network problem. Retrying automatically…</p>
+      <p class="muted">A required service is unavailable. It may be a restart in progress, a service failure, or a machine/network problem. Retrying automatically…</p>
     </div>
   </main>
 </body>
