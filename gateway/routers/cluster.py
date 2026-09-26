@@ -376,7 +376,7 @@ def set_machine_staging(name: str, req: MachineStagingRequest) -> MachineDeleteR
     """Set or clear a machine's operator staging flag (`is_staging`).
 
     The staging latch is what keeps a registered staging host out of the
-    rollout target set — `ava start` on it clears its `stopped_at` like any
+    agent-runner target set — `ava start` on it clears its `stopped_at` like any
     host, and this flag is the exclusion (`shared.machines.list_agent_runners`
     skips is_staging rows). Backed by `shared.machines.set_staging`; the CLI
     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.

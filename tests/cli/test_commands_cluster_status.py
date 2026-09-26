@@ -435,3 +435,54 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
         parser.parse_args(command.split()[1:])  # SystemExit(2) fails the test
     assert "`ava restart`" in out
     assert "--restart-only" not in out
+
+
+# ─── ava cluster pause / resume / staging wording ────────────────────────────
+
+
+def _post_returns(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -> None:
+    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr(
+        "shared.http_dial.post",
+        lambda *_a, **_kw: _FakeResponse(payload),  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+
+def test_pause_names_what_a_paused_machine_is_hidden_from(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No rollout exists any more; a pause hides the machine from the roster,
+    the probe, cluster fan-outs and spawn."""
+    _post_returns(
+        monkeypatch,
+        {
+            "paused_at": "2026-09-27T00:00:00+00:00",
+            "pause_reason": "",
+            "terminated_agents": 0,
+            "force_marked_agents": 0,
+            "reassigned_tasks": 0,
+        },
+    )
+    assert _cluster_commands.cmd_cluster_pause("wsl") == 0
+    out = capsys.readouterr().out
+    assert "hidden from roster/probe/fan-out/spawn until resumed" in out
+    assert "rollout" not in out
+
+
+def test_resume_names_what_is_restored(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _post_returns(monkeypatch, {"name": "wsl", "resumed": True})
+    assert _cluster_commands.cmd_cluster_resume("wsl") == 0
+    out = capsys.readouterr().out
+    assert "wsl: resumed — probing / roster / fan-out / spawn restored" in out
+    assert "rollout" not in out
+
+
+def test_unmark_staging_names_the_fan_out_target_set(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _post_returns(monkeypatch, {"deleted": True})
+    assert _cluster_commands.cmd_cluster_mark_staging("wsl", is_staging=False) == 0
+    assert capsys.readouterr().out == "wsl: unmarked staging (now a fan-out target)\n"

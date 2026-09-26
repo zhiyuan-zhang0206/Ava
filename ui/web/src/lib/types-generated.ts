@@ -1908,7 +1908,7 @@ export interface paths {
          * @description Set or clear a machine's operator staging flag (`is_staging`).
          *
          *     The staging latch is what keeps a registered staging host out of the
-         *     rollout target set — `ava start` on it clears its `stopped_at` like any
+         *     agent-runner target set — `ava start` on it clears its `stopped_at` like any
          *     host, and this flag is the exclusion (`shared.machines.list_agent_runners`
          *     skips is_staging rows). Backed by `shared.machines.set_staging`; the CLI
          *     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
@@ -1992,7 +1992,7 @@ export interface paths {
          *        anyway.
          *     From the latch onward the machine vanishes from the roster / cluster panel /
          *     agents' list_machines, `list_agent_runners()` drops it (no probe, no offline
-         *     alert, rollout skips it) and ordinary spawns targeting it are refused (409).
+         *     alert, cluster fan-outs skip it) and ordinary spawns targeting it are refused (409).
          *     The separate transaction race between the pause latch and creation of a
          *     brand-new agent row is outside this resurrection boundary.
          *

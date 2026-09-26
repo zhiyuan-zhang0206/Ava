@@ -172,11 +172,11 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         (
             "mark-staging",
             "[cluster] mark a machine as staging — registered + roster-visible, "
-            "excluded from rollout targets (fan-out skips it). Operator-set; never touched by ava start",
+            "excluded from agent-runner fan-outs and probes. Operator-set; never touched by ava start",
         ),
         (
             "unmark-staging",
-            "[cluster] clear the staging flag — the machine becomes a normal rollout target again",
+            "[cluster] clear the staging flag — the machine becomes a normal fan-out target again",
         ),
     ):
         p_ = cluster_sub.add_parser(
@@ -190,14 +190,14 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
             "pause",
             "[cluster] temporarily pull a machine out of the cluster: drain its tasks "
             "(reassign in_progress to #405 with a note), terminate its agents, then "
-            "hide it from roster/probe/rollout/spawn (no offline alerts). Registration "
+            "hide it from roster/probe/fan-out/spawn (no offline alerts). Registration "
             "kept for `ava cluster resume`",
             True,
         ),
         (
             "resume",
             "[cluster] restore a paused machine as a normal cluster member (clears the "
-            "pause latch; probing/roster/rollout/spawn resume immediately). Prints the "
+            "pause latch; probing/roster/fan-out/spawn resume immediately). Prints the "
             "machine-side checklist (re-`ava start`, pg_hba if the reachable address changed)",
             False,
         ),

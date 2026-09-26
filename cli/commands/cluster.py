@@ -26,9 +26,9 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
 
     Thin client: POSTs /api/cluster/machines/{name}/staging on the gateway,
     which flips the operator staging flag on the machines row. A staging host
-    stays registered + roster-visible but is excluded from the rollout target
-    set (`list_agent_runners` / the fan-out). Exit 1 when the gateway reports
-    no such machine.
+    stays registered + roster-visible but is excluded from the agent-runner
+    target set (`list_agent_runners`: the heartbeat probe and cluster
+    fan-outs). Exit 1 when the gateway reports no such machine.
     """
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
@@ -44,7 +44,7 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
         print(f"no machine named {name!r} in the registry", file=sys.stderr)
         return 1
     resp.raise_for_status()
-    action = "marked staging" if is_staging else "unmarked staging (now a rollout target)"
+    action = "marked staging" if is_staging else "unmarked staging (now a fan-out target)"
     print(f"{name}: {action}")
     return 0
 
@@ -59,8 +59,8 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     the machine, resolves any open "machine offline" alert for it and sets the
     pause latch. From then on the machine is hidden from the roster / cluster
     panel / `ava.agents.list_machines()`, is not probed (no offline alerts),
-    is skipped by rollouts and refuses spawns — the cluster shows only its
-    active members. The registration row (URL/role) is preserved for resume.
+    is skipped by cluster fan-outs and refuses spawns — the cluster shows only
+    its active members. The registration row (URL/role) is preserved for resume.
     Exit 1 when the gateway reports no such machine or refuses (own gateway).
     """
     from shared.http_dial import post as dial_post
@@ -91,7 +91,7 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
         f"tasks drained to #405: {body['reassigned_tasks']}"
     )
     print(
-        "  hidden from roster/probe/rollout/spawn until resumed: "
+        "  hidden from roster/probe/fan-out/spawn until resumed: "
         f"`ava cluster resume {name}` (run on the gateway host)"
     )
     return 0
@@ -102,8 +102,8 @@ def cmd_cluster_resume(name: str) -> int:
     cluster member.
 
     Thin client: POSTs /api/cluster/machines/{name}/resume on the gateway,
-    which clears the pause latch; probing, the roster, rollout and spawn
-    acceptance resume immediately. Exit 1 when the gateway reports no such
+    which clears the pause latch; probing, the roster, cluster fan-outs and
+    spawn acceptance resume immediately. Exit 1 when the gateway reports no such
     machine. Prints the ops checklist for the machine's own side (it is away,
     and its reachable address may have changed while it was out).
     """
@@ -123,7 +123,7 @@ def cmd_cluster_resume(name: str) -> int:
     resp.raise_for_status()
     body = resp.json()
     if body["resumed"]:
-        print(f"{name}: resumed — probing / roster / rollout / spawn restored")
+        print(f"{name}: resumed — probing / roster / fan-out / spawn restored")
     else:
         print(f"{name}: was not paused (no-op)")
     print(

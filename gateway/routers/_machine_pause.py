@@ -192,7 +192,7 @@ async def pause_cluster_machine(
        anyway.
     From the latch onward the machine vanishes from the roster / cluster panel /
     agents' list_machines, `list_agent_runners()` drops it (no probe, no offline
-    alert, rollout skips it) and ordinary spawns targeting it are refused (409).
+    alert, cluster fan-outs skip it) and ordinary spawns targeting it are refused (409).
     The separate transaction race between the pause latch and creation of a
     brand-new agent row is outside this resurrection boundary.
 
