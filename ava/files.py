@@ -36,7 +36,7 @@ assert _home_at_load.is_absolute() and _home_at_load.is_dir(), (  # noqa: S101
 del _home_at_load
 
 
-def _resolve(path: str | Path) -> Path:
+def resolve(path: str | Path) -> Path:
     """Resolve a path: expand `~`, then prepend the agent's workspace
     (`$HOME` before a process identity is bound) if still relative."""
     # `expanduser` translates `~` / `~user`; if still a relative path,
@@ -107,7 +107,7 @@ def read(
     # context, so the returned text is scanned for injection patterns before it
     # leaves. Clean content is returned byte-for-byte (scan_content is a no-op).
     source = f"file.read:{path}"
-    p = _resolve(path)
+    p = resolve(path)
     # A SKILL.md body entering the context is skill consumption — attribute
     # it even though the generic file API bypasses the lazy proxy hook.
     _record_skill_read(p)
@@ -163,7 +163,7 @@ def write(path: str | Path, content: str) -> None:
     """Write, creating parent directories if needed."""
     path = coerce_str(path, "path", allow_types=(os.PathLike,))
     content = coerce_str(content, "content")
-    p = _resolve(path)
+    p = resolve(path)
     if _is_memory_note(p) and is_flagged(content):
         content = _flag_frontmatter(content)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -174,7 +174,7 @@ def append(path: str | Path, content: str) -> None:
     """Append to a file, creating it (and parent directories) if absent."""
     path = coerce_str(path, "path", allow_types=(os.PathLike,))
     content = coerce_str(content, "content")
-    p = _resolve(path)
+    p = resolve(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     # Appending injection-flagged content to a memory note taints the whole
     # note; rewrite it so the note's frontmatter carries the flag (a pure
@@ -247,7 +247,7 @@ def edit(path: str | Path, old: str, new: str, *, replace_all: bool = False) -> 
     old = coerce_str(old, "old")
     new = coerce_str(new, "new")
     replace_all = coerce_typed(replace_all, "replace_all", bool)
-    p = _resolve(path)
+    p = resolve(path)
     content = p.read_text(encoding="utf-8")
     count = content.count(old)
     if count == 0:
@@ -263,7 +263,7 @@ def edit(path: str | Path, old: str, new: str, *, replace_all: bool = False) -> 
 
 def glob(pattern: str = "*") -> list[Path]:
     pattern = coerce_str(pattern, "pattern")
-    p = _resolve(pattern)
+    p = resolve(pattern)
     # Path.glob in Python 3.12 doesn't accept an absolute pattern, and
     # `**` spanning multiple levels is cleaner via stdlib
     # `glob.glob(recursive=True)` than pathlib. Can refactor on 3.13+.
@@ -273,4 +273,4 @@ def glob(pattern: str = "*") -> list[Path]:
 def delete(path: str | Path) -> None:
     """Delete a file (not a directory)."""
     path = coerce_str(path, "path", allow_types=(os.PathLike,))
-    _resolve(path).unlink()
+    resolve(path).unlink()

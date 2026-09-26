@@ -486,7 +486,7 @@ def skills_in(roots: list[Path]) -> list[Skill]:
     return _flatten(builder.tree)
 
 
-def _names() -> list[Skill]:
+def names() -> list[Skill]:
     return _flatten(_scan_tree())
 
 
@@ -641,7 +641,7 @@ def _record_skill_invoked_by_path(path: str | Path) -> bool:
     p = Path(path).expanduser().absolute()
     if p.name != "SKILL.md":
         return False
-    for skill in _names():
+    for skill in names():
         if Path(skill["path"]).expanduser().absolute() == p.parent:
             _record_skill_invoked(skill)
             return True
@@ -659,7 +659,7 @@ def read(name: str) -> str:
     from ava.sdk_validation import coerce_str
 
     key = match_key(coerce_str(name, "name"))
-    for skill in _names():
+    for skill in names():
         if match_key(identifier(skill)) == key or match_key(skill["name"]) == key:
             return _consume_skill_body(skill)
     raise ValueError(f"no skill named {name!r} — `ava.help(ava.skills)` lists the loaded catalog")

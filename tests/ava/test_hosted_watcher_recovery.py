@@ -133,7 +133,7 @@ def _missing(agent_id: int, kind: str) -> None:
         if kind.startswith("at-")
         else None,
         template_version=TEMPLATE_VERSION,
-        generation=sessions._current_session_generation(),
+        generation=sessions.current_session_generation(),
     )
 
 

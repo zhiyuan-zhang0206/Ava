@@ -36,7 +36,7 @@ A watcher whose owner agent is **terminated for good** (never auto-resurrect-eli
 **Orphan governance (task #1726).** A watcher whose pty host died (crash / SIGKILL / a reaper sweep) is reparented to init with its session gone — still alive, still firing cron/at; 49 of 85 watcher processes on the fleet host were such multi-generation orphans. Two layers close this: (1) the generated bootstrap arms an **orphan guard** (template v4) — a daemon thread comparing `os.getppid()` against the boot-time parent every 5s, hard-exiting with code 125 on a mismatch, so host death → child death within seconds on every host-death path; (2) `reconcile()` SIGKILLs any live process still running a missing watcher's generated script before it rebuilds/marks the row — a rebuild that leaves the orphan alive stacks a new generation on it and both fire.
 
 ## Key Dependencies
-- [[shell.ava.okf.md]] — watcher underlying is a shell session: `ava/watcher.py:_spawn` uses `ava.shell.sessions._create_session` + `ava/shell/_background.py` for notification (unrelated to `services/watchdog`)
+- [[shell.ava.okf.md]] — watcher underlying is a shell session: `ava/watcher.py:_spawn` uses `ava.shell.sessions.create_session` + `ava/shell/background.py` for notification (unrelated to `services/watchdog`)
 - `shared/dotenv_boot.py:watcher_runner_env` validates an agent-profile launcher's `ava_runner` DB and runner Redis URLs before session allocation and passes them only to the watcher session. A secured default-home gateway refuses a launcher without that projection before creating a watcher; other homes and pure agent-runner units retain their child config source. The data-plane owner-URL guard remains the child-side boundary.
 
 ## Notes

@@ -55,7 +55,7 @@ Discovery sources (later overrides earlier on name collision):
   5. `<skill-dir>/commands/<name>.md`            — skill-carried (under the
                                                    carrying skill's namespace path)
 
-Sources 5 and 0 walk the *active* skill set (`ava.skills._names()`), inheriting
+Sources 5 and 0 walk the *active* skill set (`ava.skills.names()`), inheriting
 its install-registry gating. Source 0 gives every skill a same-named
 `/`-command for free; an explicit command file overrides it.
 
@@ -144,7 +144,7 @@ def _command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
                 for p in sorted(base.iterdir())
                 if p.is_dir() and not p.name.startswith((".", "_"))
             )
-    for sk in skills._names():
+    for sk in skills.names():
         dirs.append((Path(sk["path"]) / "commands", (*sk["namespace"], sk["name"])))
     return dirs
 
@@ -198,7 +198,7 @@ def _skill_commands() -> dict[str, Command]:
     it into a load-and-follow instruction rather than inlining a body.
     """
     out: dict[str, Command] = {}
-    for sk in skills._names():
+    for sk in skills.names():
         ident = skills.identifier(sk)
         out[ident] = {
             "name": ident,
