@@ -173,6 +173,31 @@ def test_provider_anchor_recognition(name: str, executable: str, recognized: boo
     assert _anchor_recognized(node) is recognized
 
 
+@pytest.mark.parametrize(
+    ("name", "script", "recognized"),
+    [
+        ("node", "/opt/homebrew/bin/dsh", True),
+        ("node", "/Users/u/.npm/_npx/0a1b/node_modules/.bin/dsh", True),
+        ("node", "/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js", True),
+        ("node", "/srv/app/server.js", False),
+        ("node", None, False),
+        ("python3.12", "/opt/homebrew/bin/dsh", False),
+    ],
+)
+def test_dsh_node_anchor_recognition(name: str, script: str | None, recognized: bool) -> None:
+    """DeepSeek Harness runs as ``node <dsh launcher>``: only the recorded script names it."""
+    node: dict[str, Any] = {
+        "pid": 4240,
+        "name": name,
+        "executable": f"/opt/homebrew/bin/{name}",
+        "created_at": 998.0,
+        "parent_pid": 1,
+    }
+    if script is not None:
+        node["script"] = script
+    assert _anchor_recognized(node) is recognized
+
+
 def test_same_pid_with_a_drifted_start_time_does_not_attest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -249,3 +274,28 @@ def test_terminal_sessions_report_stale_without_attestation(db_conn: Any) -> Non
     leases.release(lease["id"], attested_caller(lease), "Done")
     with pytest.raises(leases.ImpersonationError, match="stale-session"):
         leases.require_active(lease["id"], unrelated_caller())
+
+
+def test_dsh_request_mints_a_session_relay_credential(db_conn: Any) -> None:
+    """dsh runs its relay in the controller session, like claude: the request
+    mints the scoped credential, and a thread id or codex remote is refused."""
+    owner = _agent(db_conn)
+    caller = CallerIdentity(kind="external_agent", subject="dsh")
+    with pytest.raises(ValueError, match="dsh relay routes to its owner"):
+        leases.request(
+            owner.agent_id,
+            caller=caller,
+            reason="dsh",
+            relay_provider="dsh",
+            relay_thread_id="thread",
+        )
+    lease = leases.request(
+        owner.agent_id,
+        caller=caller,
+        ttl_seconds=300,
+        reason="dsh",
+        process_metadata=recorded_tree(),
+        relay_provider="dsh",
+    )
+    assert lease["relay_provider"] == "dsh"
+    assert lease["relay_token"]
