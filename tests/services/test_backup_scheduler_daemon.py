@@ -44,12 +44,11 @@ def test_module_entrypoint_runs_the_scheduler(tmp_path: Path) -> None:
     guard would silently exit 0, while a real entrypoint reaches the schema
     assertion and reports its traceback. The scheduler is a gateway process: its
     home ``.env`` is the authority for cluster-pinned keys, so that file carries
-    the gateway-local owner password instead of the inherited environment.
+    the data-plane URLs instead of the inherited environment.
     """
     (tmp_path / ".env").write_text(
         "AVA_DB_URL=postgresql://ava:test@127.0.0.1:1/ava\n"
         "AVA_REDIS_URL=redis://ava:test@127.0.0.1:1/0\n"
-        "AVA_DB_ADMIN_PASSWORD=test-db-owner-password\n"
     )
     env = dict(os.environ)
     env.update(

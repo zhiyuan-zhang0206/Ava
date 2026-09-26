@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import psutil
 import pytest
@@ -174,6 +176,16 @@ def test_timeout_reaps_foreground_descendant(tmp_path: Path) -> None:
     assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
 
 
+@pytest.fixture
+def start_process_environment() -> Iterator[None]:
+    """`prepare_start` pops the derived and identity keys from this process's
+    environment so the start pipeline boots from the home's `.env`; that
+    process-local effect ends with the test instead of leaking into later ones."""
+    with patch.dict(os.environ):
+        yield
+
+
+@pytest.mark.usefixtures("start_process_environment")
 def test_profile_survives_bare_start_without_controller_environment(
     repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
