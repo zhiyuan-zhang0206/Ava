@@ -9,7 +9,12 @@ Each module holds one cohesive slice of the entry-point machinery:
   help rendering, SDK-expand discovery, doc linting, and metering);
 - `help` — the `ava.help()` renderer (stub-format docs for SDK targets);
 - `plugins` — the plugin registration API (`register_namespace` family,
-  registries, exception hierarchy).
+  registries, exception hierarchy);
+- `wraps` — the wrap registration primitive behind `ava.extend.wrap`
+  (`ava/__init__.py` builds the curated `ava.extend` surface from it);
+- `plugin_loader` — the plugin-by-path loader (`load_plugin_module`,
+  `safe_load_plugin_module`, `scan_and_load`) the agent kernel drives at host
+  boot and graph build.
 
 `ava/__init__.py` re-exports the plugin-author entry points (`ava.help`,
 `ava.register_namespace`, ...). The agent kernel drives rendering through the

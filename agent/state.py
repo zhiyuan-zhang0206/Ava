@@ -650,6 +650,7 @@ def clear_plugin_registrations() -> None:
     _BASE_FIELD_DECLARED.clear()
     # avoid circular import: lazy import inside the function for cross-module reset points
     import ava
+    import ava.sdk_surface.wraps
     import ava.skill_sources
     from agent.graph._context_notes import _CONTEXT_NOTES, _FRAMEWORK_NOTE_COUNT
     from agent.graph._system_prompt import _FRAMEWORK_SECTION_COUNT, _SYSTEM_PROMPT_SECTIONS
@@ -667,7 +668,7 @@ def clear_plugin_registrations() -> None:
     clear_plugin_flags()
     plugin_contributions.clear()
     ava.clear_registered_namespaces()
-    ava._extend.clear_wraps()
+    ava.sdk_surface.wraps.clear_wraps()
     ava.skill_sources.clear()
 
 

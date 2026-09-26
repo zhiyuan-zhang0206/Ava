@@ -81,7 +81,7 @@ def _discover_all_namespaces() -> list[str]:
     bare `from . import X` line. The capability surfaces (`_CAPABILITY_SURFACES`)
     are skipped for the same anti-duplication reason: `# Capabilities` is their
     index. Private names (leading underscore, e.g. a stray
-    `_extend`) and any name removed via AVA_SDK_DISABLE are excluded too — a
+    `_settings`) and any name removed via AVA_SDK_DISABLE are excluded too — a
     disabled namespace must never be expanded back into the prompt. Returned
     sorted so the rendered order is deterministic. Discovery is recursive: any
     module with a public `__all_for_ava__` is descended into, so `shell.sessions`

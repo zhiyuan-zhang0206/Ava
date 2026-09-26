@@ -41,7 +41,7 @@ boundaries, already carried by codegen, and not debt.
    one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
    cover (`scripts/`, and any async pool left in `allowed`), or retire it if
    nothing remains.
-2. **Reach-in burn-down** (`private_imports`, 289 keys / 301 sites / 106
+2. **Reach-in burn-down** (`private_imports`, 286 keys / 297 sites / 105
    files), highest yield first: `cli/main.py` re-exports 121 private
    `cli.parsers.*._h_*` handlers so tests have one namespace to patch (a
    hand-maintained registry — bind handlers in their parser modules and patch
@@ -49,13 +49,10 @@ boundaries, already carried by codegen, and not debt.
    `shared.lm._plugin_providers`, `shared.agents.impersonation._impersonation_store`,
    `agent.graph._exec_protocol`, `agent._turn_progress`) each get a verdict:
    contract (export it) or internal (route callers through a door).
-   In `ava`, agent visibility is the `__all_for_ava__` whitelist —
-   `lint_agent_docstrings` keys on it too — so a framework module or name the
-   rest of the repo needs takes a public name without entering the agent's
-   view. Every `ava` reach-in has been promoted that way except `_extend` (3
-   keys), whose public name is taken by the plugin-author `ava.extend`
-   namespace: split it into `ava/sdk_wraps.py` (the wrap primitive behind
-   `ava.extend`) and `ava/plugin_loader.py` (the kernel's plugin loader).
+   `ava` carries no frozen reach-ins any more: agent visibility there is the
+   `__all_for_ava__` whitelist (which `lint_agent_docstrings` keys on too), not
+   the underscore, so every framework module or name another package needs took
+   a public name without entering the agent's view.
 3. **Locality sweeper class** — an index, not a wall: per-PR module spread and
    cross-package co-change pairs over a rolling window, reusing the lint's
    scanner per [lint-vs-sweeper](../../conventions/lint-vs-sweeper.md). Each

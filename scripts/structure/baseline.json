@@ -2,7 +2,7 @@
   "directories": {
     "agent": 34,
     "agent/graph": 42,
-    "ava": 37,
+    "ava": 36,
     "ava_builtins/skills": 35,
     "cli/commands": 152,
     "gateway": 44,
@@ -18,7 +18,7 @@
     "shared/lm": 24,
     "tests": 80,
     "tests/agent": 132,
-    "tests/ava": 65,
+    "tests/ava": 62,
     "tests/cli": 194,
     "tests/e2e": 31,
     "tests/gateway": 118,
@@ -611,10 +611,8 @@
     "tests/shared/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
   },
   "private_imports": {
-    "agent/_extensions.py::ava._extend": 2,
     "agent/_extensions.py::shared.plugins_config._discover_plugins": 1,
     "agent/_extensions.py::shared.plugins_config._report_dangling": 1,
-    "agent/_process_boot.py::ava._extend": 1,
     "agent/_runloop.py::agent.graph._llm_errors": 1,
     "agent/exec_child.py::agent.graph._agent_traceback": 1,
     "agent/exec_child.py::agent.graph._exec_protocol": 5,
@@ -634,7 +632,6 @@
     "agent/state.py::agent.graph._context_notes": 1,
     "agent/state.py::agent.graph._system_prompt": 1,
     "agent/state.py::agent.hooks._registry": 1,
-    "agent/state.py::ava._extend": 1,
     "ava/_settings.py::shared.db._restore_pooled_session": 1,
     "ava/_settings.py::shared.plugin_config_registry._PLUGIN_CONFIGS": 1,
     "ava/_settings.py::shared.redis_client._RESILIENCE_KWARGS": 1,

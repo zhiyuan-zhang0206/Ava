@@ -30,7 +30,7 @@ never leak into the live one.
 Reload is not a lifecycle. `clear_plugin_registrations()` at the top of the
 graph-build load clears the framework-side registries (hooks, state fields,
 prompt contributors, namespaces, the attribution ledger) and
-`ava._extend.clear_wraps` restores every wrapped target to its captured
+`ava.sdk_surface.wraps.clear_wraps` restores every wrapped target to its captured
 original, so registration starts from a pristine core each time. The surface
 form never resets: a child loads once, and importing `agent.state` for the
 reset would defeat the split (task #3633). Anything a
