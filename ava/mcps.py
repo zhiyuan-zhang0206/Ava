@@ -15,7 +15,7 @@ from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
 
-from ava._sdk_validation import coerce_str
+from ava.sdk_validation import coerce_str
 from ava.security import scan_content
 from shared.config import settings
 

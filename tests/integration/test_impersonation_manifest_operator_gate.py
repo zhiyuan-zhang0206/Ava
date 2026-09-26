@@ -489,7 +489,7 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A real SDK metering wrapper retains its pre-close admission through ``finally``."""
-    from ava import _sdk_metering, agent_identity
+    from ava import agent_identity, sdk_metering
     from ava.external import Attachment
 
     participant = LocalParticipant(str(v1_lease["id"]), owner.agent_id, 0, "held-sdk-finally")
@@ -507,7 +507,7 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
 
     # This is the production SDK recorder shape for ava.agents.send_message,
     # not a direct hand-built telemetry event.
-    recorded_send = _sdk_metering._make_recorder(held_send, "agents.send_message")
+    recorded_send = sdk_metering._make_recorder(held_send, "agents.send_message")
     worker = Thread(target=recorded_send)
     worker.start()
     assert entered.wait(timeout=2)

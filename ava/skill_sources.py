@@ -12,8 +12,8 @@ can clear it and the scanner can read it without either reaching through
 bench that scopes the skills surface out). Per-process state: each agent is its
 own process.
 
-This module is framework-internal (underscore-prefixed): not agent-facing, never
-in the `ava.help()` view.
+This module is framework-internal: not agent-facing, never in the
+`ava.help()` view.
 """
 
 from __future__ import annotations

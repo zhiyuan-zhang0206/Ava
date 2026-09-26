@@ -33,7 +33,7 @@ external caller profile so peer operations carry `agent:N`, then restores the
 ordinary profile when closed.
 
 Plugins load through the existing extension loader. Framework and plugin config
-views bind the agent's stored configuration, while `_external_state.load_snapshot`
+views bind the agent's stored configuration, while `external_state.load_snapshot`
 reads its checkpoint without writing it. Pending journal entries are replayed
 through their registered reducers after the checkpoint's applied receipt.
 

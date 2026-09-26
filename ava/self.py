@@ -4,8 +4,8 @@ import json as _json
 from typing import NoReturn
 
 import ava
-from ava._attach import attach as attach
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava.attachment_transport import attach as attach
+from ava.sdk_validation import coerce_str, coerce_typed
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt

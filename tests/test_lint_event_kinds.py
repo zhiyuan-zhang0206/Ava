@@ -81,7 +81,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "source_tree_reset",  # shared/source_tree_guard.py:repair_source_tree
         "lgtm_dashboard_render_failed",  # cli/commands/_lgtm_provisioning.py:_render_ava_ops_dashboard telemetry.emit("telemetry", ...)
         "event_log_drop",  # shared/telemetry_loss.py:loss_event constructs Event directly
-        "sdk_call",  # ava/_sdk_metering.py recorder (via shared/sdk_telemetry)
+        "sdk_call",  # ava/sdk_metering.py recorder (via shared/sdk_telemetry)
         # shared/plugin_activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
         # module constant, like sdk_call), so the literal scan cannot see it.
         "plugin_activation",

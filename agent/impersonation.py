@@ -187,7 +187,7 @@ async def settle_checkpoint(
         session = await asyncio.to_thread(activate, session["id"], incarnation)
     if session["status"] == "active":
         return True
-    from ava._external_state import decode_plugin_delta
+    from ava.external_state import decode_plugin_delta
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     snapshot = await graph.aget_state(config)

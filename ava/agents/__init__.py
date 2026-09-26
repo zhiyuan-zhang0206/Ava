@@ -7,7 +7,7 @@ from typing import Literal
 import ava
 import ava.agent_identity
 from ava import _gateway_client as _client
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava.sdk_validation import coerce_str, coerce_typed
 from shared.agents import AgentLaunchFailed as AgentLaunchFailed
 
 # Redundant-alias re-exports: importable from this module but deliberately not
@@ -503,7 +503,7 @@ def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
 def commands() -> list[CommandInfo]:
     """List the commands a peer agent accepts; invoke one by sending
     `/name <instruction>` as the message text."""
-    from ava._commands import discover_commands
+    from ava.composer_commands import discover_commands
 
     return [
         CommandInfo(

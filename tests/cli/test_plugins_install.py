@@ -326,7 +326,7 @@ def test_install_claude_code_plugin_mcp_only(unit_home: Path, tmp_path: Path) ->
 
 
 def test_install_claude_code_plugin_commands_surface(unit_home: Path, tmp_path: Path) -> None:
-    from ava._commands import discover_commands
+    from ava.composer_commands import discover_commands
 
     # commands-only plugin: no skills/agents/mcp, just commands/
     url = _make_claude_code_plugin_repo(

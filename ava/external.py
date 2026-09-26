@@ -16,7 +16,7 @@ from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_pl
 from shared.proc_tree import process_metadata
 
 from . import agent_identity
-from ._external_state import (
+from .external_state import (
     apply_plugin_delta,
     decode_plugin_delta,
     encode_plugin_delta,

@@ -369,7 +369,7 @@ throughout):
    saver-level injection fold delta threads at read time. Coverage: pool saver
    `get_tuple`/`aget_tuple` (folded values injected); `shared/agents/history/checkpoint.py` readers
    (messages / count with reconstruct fallback / segment / full / by-trace);
-   `ava/_external_state.load_snapshot`; fork chain copy (`_copy_checkpoint_chain`, writes
+   `ava/external_state.load_snapshot`; fork chain copy (`_copy_checkpoint_chain`, writes
    chain included); `agent/startup.py` inbound reconciliation; `scripts/restore_drill.py`;
    the self-evolution recorder. Vanilla data passes through unchanged — verified inert on
    real production read paths (production-clone subset, wrapped == native x5). Deployed to

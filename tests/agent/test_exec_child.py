@@ -543,7 +543,7 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(_exec_protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava._ensure_plugins_loaded", fake_ensure_plugins_loaded)
     monkeypatch.setattr("ava.security.take_findings", list)
-    monkeypatch.setattr("ava._attach.take_attachments", list)
+    monkeypatch.setattr("ava.attachment_transport.take_attachments", list)
 
     try:
         exec_child._run("request.json", "result.json")
