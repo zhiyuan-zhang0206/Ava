@@ -47,6 +47,44 @@ scope; an explicit directory target checks itself and its descendants, and
 an explicit file target checks the file and its containing directory. The
 baseline guard runs in both modes.
 
+## Locality: package doors and single owners
+
+Two AST rules keep a change, or a reader tracing one, inside one package plus
+its neighbors' public doors. The authoritative rule text — what counts as
+private, what a bypass is, today's single-owner decision — lives in the
+`scripts/lint_code_structure.py` module docstring (Rules 4 and 5); this
+section covers fixing a violation and maintaining its baseline.
+
+- **Rule 4 — package doors.** Importing a `_`-prefixed module or name from
+  outside the package that owns it fails. Fix it either by importing a public
+  name through the owner's `__init__.py`, or by promoting the name into the
+  owner's contract on purpose — export it / drop the underscore — so the
+  widened contract shows up in the diff. There is no inline escape hatch and
+  no allowlist: a name another package genuinely needs is, by definition,
+  part of that package's contract, so the fix is always to make the contract
+  honest rather than to excuse the reach-in. Test files are exempt (white-box
+  tests reach into privates by design).
+- **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
+  names design decisions with exactly one owning module — today,
+  `postgres-dial` (`shared/db_connections.py`). Any other module making that
+  decision is a bypass; fix it by routing through the owner. A site that
+  genuinely cannot goes in that decision's `allowed` map with a one-line
+  reason — an allowed module that stops bypassing fails as stale, so the map
+  cannot rot into a permission wall. Add a new single-owner decision by adding
+  an entry to `DECISIONS` with its owning module(s), a `find()` AST scanner,
+  and a `fix` message.
+
+Both rules freeze today's sites in the `private_imports` / `owner_bypasses`
+sections of `scripts/structure/baseline.json` as exact `path::target -> site
+count` maps. Unlike the line/directory budgets, the count must match reality
+exactly in both directions: a new or grown site fails, and a shrunk or removed
+site fails too until its baseline entry is lowered or deleted — so a fixed
+reach-in cannot silently return uncounted. Against the base revision both
+sections are shrink-only, with the same same-file pairing and git `-M`
+rename carry-over as the complexity/nesting baselines: a new key needs a
+same-file removal of equal or greater value (the private owner module moved),
+and a detected rename migrates the old key's entries to the new path by hand.
+
 ## Function quality budgets: complexity and nesting
 
 Every function and method in the same recursive `.py` scope has two budgets:
