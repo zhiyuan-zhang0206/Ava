@@ -68,9 +68,10 @@ writes each URL before bringing up storage; no runtime identity backfill exists.
 paths, native process birth and all listener PIDs must agree before config,
 reload or ACL effects. Redis ACL and maintenance shutdown each retain one
 observed connection; a reconnect loses authority and fails. PostgreSQL admin
-and pooler dials use only the home's canonical Unix socket directory. Every
-owned provisioning, checkpoint, grant and migration connection verifies its
-actual native backend against the home's postmaster before DDL. Explicit
+and pooler dials use only the home's canonical Unix socket directory. Owned
+provisioning, checkpoint, grant and migration dials verify their native
+backend against the home's postmaster before DDL, which acts as the schema
+owner (`shared.pg_admin`). Explicit
 remote-managed URLs retain provider authority. PgBouncer starts only after
 schema and runner grants exist. A live pooler with closed listeners retains
 custody: normal start cannot repeat its shutdown signal or escalate to force.

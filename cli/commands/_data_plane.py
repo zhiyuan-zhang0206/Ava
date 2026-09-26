@@ -204,11 +204,34 @@ def prepare_gateway_schema() -> None:
     cluster.ensure_checkpoint_schema(
         identity,
         base_admin_url=admin_url,
-        db_admin_password=settings.data_plane.db_admin_password,
         database_created=created,
         resume_partial=True,
         expected_data_dir=ava_home() / "pg",
     )
+
+
+def prepare_memory_vectors() -> None:
+    """Create or rebuild the pgvector memory table when that backend is selected.
+
+    The table is a derived cache keyed to the embedding provider's dimension.
+    Runtime connections only validate it; this start step is its one writer.
+    A local plane writes it acting as the schema owner, before the runner grants
+    refresh; a remote-managed plane uses its provider URL, like its migrations.
+    """
+    if settings.services.memory_search_backend != "pgvector":
+        return
+    import shared.db
+    from services.memory_indexer.backends.pgvector import prepare_table
+    from services.memory_indexer.embeddings.factory import get_provider
+    from shared.pg_admin import local_owner_authority
+
+    dim = get_provider().dim
+    if settings.data_plane.is_remote:
+        with shared.db.connect(direct=True) as conn:
+            prepare_table(conn, dim)
+        return
+    with local_owner_authority().session() as conn:
+        prepare_table(conn, dim)
 
 
 def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
@@ -229,6 +252,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
             cluster.ensure_pgvector_extension(
                 identity, base_admin_url=admin_url, expected_data_dir=ava_home() / "pg"
             )
+            prepare_memory_vectors()
             cluster.ensure_runner_role(
                 identity,
                 base_admin_url=admin_url,
@@ -245,6 +269,8 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
             )
             if rc:
                 raise RuntimeError("pooler did not become ready")
+    elif refresh_schema:
+        prepare_memory_vectors()
     from shared.cluster.derive import project_runner_db_url
 
     urls = [

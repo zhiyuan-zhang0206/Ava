@@ -145,7 +145,6 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
     cluster.ensure_checkpoint_schema(
         "ava_tinst",
         base_admin_url=ci.pg_admin_url(pg_port),
-        db_admin_password=_DB_ADMIN,
         database_created=True,
         expected_data_dir=Path(settings.general.ava_home) / "pg",
     )

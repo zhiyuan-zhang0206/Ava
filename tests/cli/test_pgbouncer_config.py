@@ -109,11 +109,15 @@ def test_render_ini_binds_loopback_never_all_interfaces() -> None:
 def test_migrations_apply_uses_direct_unbounded_connection() -> None:
     """The migration applier holds a SESSION advisory lock across its apply loop; a
     transaction pooler would drop it. It must open a direct connection, and its
-    DDL may exceed the 60s statement ceiling — the dial must be unbounded too."""
+    DDL may exceed the 60s statement ceiling — the dial must be unbounded too. A
+    remote plane dials its provider URL that way; a local plane dials the owner
+    authority over the postmaster's own socket, which carries no ceiling (proved
+    on real Postgres in tests/shared/test_pg_owner_authority.py)."""
     from cli.commands import migrations
 
     src = inspect.getsource(migrations.cmd_migrations_apply)
     assert "connect(direct=True, unbounded=True)" in src
+    assert "local_owner_authority()" in src
 
 
 def test_backup_defaults_to_direct_db_url() -> None:

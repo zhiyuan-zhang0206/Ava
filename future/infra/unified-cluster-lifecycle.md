@@ -154,7 +154,11 @@ frontend/control-plane bearer is empty
 ([decision](../../decisions/2026-09-26-internal-data-plane-always-authenticated.md)).
 The empty-secret convention in AGENTS.md changes when this lands.
 No database role, credential, schema or runtime-admission cutover is implemented
-by this plan.
+by this plan. The first prerequisite is in place: schema-creating DDL
+(baseline, checkpoint setup, migrations, the pgvector memory table) runs as the
+OS-user administrator acting as the schema owner over the home's socket
+(`shared.pg_admin`), so demoting the owner to NOLOGIN does not break it. Logical
+dumps, PITR reads and the release executor still dial the owner's URL.
 
 ## Remaining: qualify PITR custody and restart recovery
 

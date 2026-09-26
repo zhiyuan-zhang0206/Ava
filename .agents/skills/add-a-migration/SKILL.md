@@ -45,7 +45,9 @@ In CI, `scripts/lint_migrations.py` statically checks the timestamp filename for
 `db/schema.sql` stamps the baseline sentinel and no longer carries a `generate_series` seed,
 and that a migration whose strict (non-idempotent) DDL is already folded into the baseline
 is stamped in the seed — an unstamped strict delta dies on the first fresh-DB bootstrap, so
-lint fails it early. Local pre-check: `.venv/bin/python scripts/lint_migrations.py`. There is no
+lint fails it early. It also refuses `SET ROLE` / `RESET ROLE` / session-authorization
+changes: migrations run as the OS-user administrator acting as the schema owner, so every
+object stays owner-owned and only the owner's privileges apply. Local pre-check: `.venv/bin/python scripts/lint_migrations.py`. There is no
 continuity / next-number / cross-branch-collision check — timestamp names are collision-free by
 construction.
 

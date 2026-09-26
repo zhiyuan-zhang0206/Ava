@@ -22,8 +22,9 @@ schema; schema-changing rollout remains planned work.
 - **`db/schema.sql`** — the squashed **baseline**: the full current schema a
   fresh DB bootstraps from, and the source of truth for what the schema is now.
   `shared.cluster.provision_database` applies it to each cluster's own database
-  (created owned by the cluster's role, applied *as* that role so every object
-  is role-owned); tests build standalone DBs the same way. It stamps
+  (created owned by the cluster's role, applied by the administrator acting as
+  that role so every object is role-owned); tests build standalone DBs the same
+  way. It stamps
   the sentinel `00000000T000000_baseline` and current reset anchor
   `20260923T031516_schema-baseline` into `schema_migrations`.
   **A schema change must be reflected here in the same commit.**
@@ -43,6 +44,17 @@ That is the whole point of the timestamp prefix (second-precision UTC,
 `date -u +%Y%m%dT%H%M%S`): names are collision-free by construction, so parallel
 branches never fight over "the next number" and a merge cannot produce two
 migrations claiming the same slot.
+
+## Who dials
+
+On a locally owned data plane the applier connects as the administrator acting
+as the schema owner (`shared.pg_admin.local_owner_authority`): the OS user over
+the home's owner-only Unix socket, custody-checked against the home's
+postmaster, with `role=<owner>` as a startup option. Objects stay owner-owned,
+privilege checks see only the owner's rights, the dial bypasses PgBouncer (the
+session advisory lock survives) and carries no statement ceiling. The owner's
+own login is never used. A remote-managed plane dials its provider URL directly
+and unbounded instead.
 
 ## Only the gateway unit may apply
 

@@ -40,3 +40,17 @@ pidfile refuse. Clean stop retains the receipt; a subsequent launch replaces it
 only after positive native closure. PITR can then swap PGDATA and the next
 launch records the new directory identity. No clock tolerance or automatic
 legacy adoption exists; old unrecorded installations require operator cutover.
+
+## Admin authority
+
+`shared.pg_admin` builds every DDL-capable dial to this server. The OS user
+(the initdb bootstrap superuser) connects over the home's owner-only socket
+and binds the backend to the postmaster above. It acts as itself for roles,
+databases, extensions and grants. Object creation goes through
+`owner_session`/`OwnerAuthority` instead, with `role=<owner>` as a startup
+option: the baseline, checkpoint setup, migrations and the pgvector memory
+table stay owner-owned and see only the owner's privileges. The session role
+survives transaction rollback and `RESET ROLE`, and is verified before use.
+The owner therefore never has to log in, which is what lets it lose `LOGIN`
+later. `OwnerAuthority.conninfo` gives password-free libpq tools such as
+`pg_dump` the same owner-equivalent view.

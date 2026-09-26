@@ -22,14 +22,16 @@ listener when pooling is on (the default; 6433 on the default home), the direct
 Postgres port when off (5433). There is no separate pooler-port env key
 (`AVA_PGBOUNCER_PORT` is retired): the pooler port is a registry-record fact for
 the data-plane bring-up alone. The admin plane — migrations, `pg_dump`,
-provisioning — is the ONLY direct-Postgres consumer, deriving the direct URL
-from the registry record (`shared.db.direct_db_url`); everything else dials
-`AVA_DB_URL` as-is. Flipping `AVA_PGBOUNCER_ENABLED=false` is the kill-switch:
+provisioning — is the ONLY direct-Postgres consumer. Migrations and
+provisioning dial the home's owner-only socket as the OS user acting as the
+schema owner (`shared.pg_admin`), never the owner's own login; `pg_dump` still
+derives the direct URL from the registry record (`shared.db.direct_db_url`).
+Everything else dials `AVA_DB_URL` as-is. Flipping `AVA_PGBOUNCER_ENABLED=false` is the kill-switch:
 converge rewrites the URL to the direct port on the next `ava start` and the
 pooler never starts.
 
 Fresh install creates LangGraph's checkpoint schema with
-`PostgresSaver.setup()` as the cluster owner. Start never calls setup: after
+`PostgresSaver.setup()` acting as the cluster owner. Start never calls setup: after
 applying Ava's tracked SQL files, every capability reads the complete
 `checkpoint_migrations` set and requires the explicitly approved version.
 Checkpoint readers and agent boot therefore need CRUD but no schema CREATE.

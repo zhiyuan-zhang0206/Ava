@@ -10,6 +10,10 @@ cutover (`ensure_runner_role`, backed by `ensure_checkpoint_schema` for the
 LangGraph checkpoint tables the grants target). Identities are names-as-
 data: callers read them from the cluster's own `.env` URLs (`identity_from_url`)
 or pass the fixed `DATA_PLANE_IDENTITY` at birth, never from a cluster name.
+
+Every dial is the administrator (`shared.pg_admin`): as itself for roles,
+databases, extensions and grants, and acting as the owner (`owner_session`)
+for the objects the owner must own. The owner's own login is never used.
 """
 
 from __future__ import annotations
@@ -18,8 +22,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from shared.log import logger
-from shared.pg_admin import connect
-from shared.url_secret import url_with_userinfo
+from shared.pg_admin import connect, owner_conninfo, owner_session
 
 
 def _swap_db(url: str, db_name: str) -> str:
@@ -131,10 +134,11 @@ def provision_database(
 ) -> bool:
     """Atomically provision a cluster's Postgres database AND its owning role:
     ensure role `identity`, CREATE DATABASE `identity` OWNED BY it, and apply
-    db/schema.sql *as that role* so every object is role-owned. `identity` is the
-    shared db/role identifier (names-as-data — `DATA_PLANE_IDENTITY` at birth).
-    base_admin_url must connect as the loopback-`trust` bootstrap superuser to a
-    maintenance db (`postgres`) on the same Postgres.
+    db/schema.sql acting as that role (`owner_session`) so every object is
+    role-owned. `identity` is the shared db/role identifier (names-as-data —
+    `DATA_PLANE_IDENTITY` at birth). base_admin_url must connect as the
+    bootstrap superuser to a maintenance db (`postgres`) on the same Postgres;
+    `db_admin_password` only re-affirms the role's own login.
 
     Idempotent for a fully-provisioned DB (the role is re-affirmed + ownership
     adopted, then it returns). If the DB exists but its schema is incomplete (a
@@ -190,17 +194,18 @@ def provision_database(
             )
     schema_sql = (Path(__file__).resolve().parents[2] / "db" / "schema.sql").read_text()
     try:
-        # Apply the schema AS the cluster role so every object is owned by the role,
-        # not the bootstrap superuser — the role must own them to run later
-        # migrations. Connect with the role + its secret: over loopback `trust` the
-        # password is ignored, over scram it is checked (the role was just created
-        # with it), so this works both in prod and against a password-auth pg.
-        # schema.sql is a trusted multi-statement script read from disk; same
-        # pattern as shared/migrations.py applying a body.
-        role_url = url_with_userinfo(
-            _swap_db(base_admin_url, identity), identity, db_admin_password
-        )
-        with connect(role_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
+        # Apply the schema as the administrator ACTING AS the cluster role, so
+        # every object is owned by the role, not the bootstrap superuser — the
+        # role must own them for later migrations and its grants. The role never
+        # logs in here. schema.sql is a trusted multi-statement script read from
+        # disk; same pattern as shared/migrations.py applying a body.
+        with owner_session(
+            base_admin_url,
+            database=identity,
+            owner=identity,
+            expected_data_dir=expected_data_dir,
+            autocommit=True,
+        ) as conn:
             conn.execute(schema_sql)  # type: ignore[arg-type]
     except Exception:
         # Drop the half-built DB so the next provision attempt starts clean
@@ -221,9 +226,8 @@ def ensure_pgvector_extension(
     runtime roles never need to: pgvector's `vector.control` ships without
     `trusted = true`, which makes `CREATE EXTENSION` superuser-only by
     Postgres' own policy (deliberately not overridden on the injected control
-    file). Idempotent — normal gateway start prepares it before migration, so a cluster picks the extension up on its
-    next start, and the indexer's NOSUPERUSER `CREATE EXTENSION IF NOT
-    EXISTS` stays a harmless no-op (verified against a real injected tree).
+    file). Idempotent — normal gateway start prepares it before the pgvector
+    memory table, so a cluster picks the extension up on its next start.
 
     A Postgres that does not carry the extension binaries (a remote-managed
     plane, a brew/apt install without the pgvector package, or a vendored
@@ -393,15 +397,15 @@ def ensure_checkpoint_schema(
     identity: str,
     *,
     base_admin_url: str,
-    db_admin_password: str,
     database_created: bool = False,
     resume_partial: bool = False,
     expected_data_dir: Path | None = None,
 ) -> None:
     """Create the LangGraph checkpoint tables (idempotent) AS the cluster role.
 
-    Runs `PostgresSaver.setup()` as the cluster's MAIN role, so that role owns
-    the tables while runtime readers may use either it or `ava_runner`. Called
+    Runs `PostgresSaver.setup()` acting as the cluster's MAIN role
+    (`owner_session`), so that role owns the tables while runtime readers may
+    use either it or `ava_runner`. Called
     during first-start initialization BEFORE `ensure_runner_role`: the runner's
     table grants can only target existing tables, and a runner booted as
     `ava_runner` (post-cutover) never runs setup(): Postgres refuses `CREATE
@@ -421,32 +425,32 @@ def ensure_checkpoint_schema(
     """
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from shared.url_secret import url_with_userinfo
-
-    # Connect as the schema owner and retain the validated native connection
+    # Act as the schema owner and retain the validated native connection
     # throughout setup; PostgresSaver must not open an unchecked second dial.
-    role_url = url_with_userinfo(_swap_db(base_admin_url, identity), identity, db_admin_password)
+    owner_dsn = owner_conninfo(base_admin_url, database=identity, owner=identity)
     expected = _expected_checkpoint_schema_versions()
-    actual = _checkpoint_schema_versions(role_url, expected_data_dir=expected_data_dir)
+    actual = _checkpoint_schema_versions(owner_dsn, expected_data_dir=expected_data_dir)
     if actual == expected:
         return
     may_setup = database_created or resume_partial
     resumable = actual is None or actual == frozenset(range(len(actual)))
     if not may_setup or not resumable:
-        assert_checkpoint_schema_current(role_url, expected_data_dir=expected_data_dir)
+        assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
         return
     try:
         from psycopg.rows import dict_row
 
-        with connect(
-            role_url,
+        with owner_session(
+            base_admin_url,
+            database=identity,
+            owner=identity,
             expected_data_dir=expected_data_dir,
             autocommit=True,
             prepare_threshold=0,
             row_factory=dict_row,
         ) as conn:
             PostgresSaver(conn).setup()
-        assert_checkpoint_schema_current(role_url, expected_data_dir=expected_data_dir)
+        assert_checkpoint_schema_current(owner_dsn, expected_data_dir=expected_data_dir)
     except Exception:
         if database_created:
             drop_database(

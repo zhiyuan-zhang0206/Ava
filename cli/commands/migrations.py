@@ -8,6 +8,10 @@ their own entry points.
 
 from __future__ import annotations
 
+from typing import Any
+
+import psycopg
+
 from shared.runtime_migration import ReleaseMigrationContext
 
 
@@ -30,37 +34,45 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
     point-in-time read grant went stale; failure is raised, not returned.
     """
     import shared.db
-    from shared import cluster
-    from shared.migrations import apply_pending_migrations
+    from shared import cluster, pg_admin
+    from shared.config import settings
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
     # must first be mirrored in a paired Ava up/down migration. Failing before
     # Ava SQL runs keeps update recovery on the old code + old schema.
     cluster.assert_checkpoint_dependency_pinned()
 
-    # direct=True — the ONE sanctioned data-plane exemption (user ruling 2026-08:
-    # every consumer goes through PgBouncer; see shared/db.py `connect`).
-    # apply_pending_migrations holds a SESSION advisory lock (pg_advisory_lock,
-    # shared/migrations.py _MIGRATION_LOCK_KEY) across its whole apply loop, and
-    # transaction pooling hands the backend back to the pool at the end of each
-    # transaction — the lock would silently drop between statements, letting a
-    # concurrent applier interleave DDL. Migrations bypassing the pooler is the
-    # industry convention (PgBouncer docs: admin/DDL work must not run through a
-    # transaction pooler; every ORM/framework does the same).
-    # unbounded=True — migration DDL may legitimately exceed the 60s statement
-    # ceiling (large-table rebuilds, partition backfills); the applier must
-    # stay unbounded (shared/db.py PG_STATEMENT_TIMEOUT_*).
-    with shared.db.connect(direct=True, unbounded=True) as conn:
-        from shared.cluster.ownership import require_postgres_connection
-        from shared.config import settings
-        from shared.paths import ava_home
-
-        if not settings.data_plane.is_remote:
-            require_postgres_connection(conn, ava_home() / "pg")
-        if release is None:
-            done = apply_pending_migrations(conn)
-        else:
-            done = apply_pending_migrations(conn, release=release)
-    cluster.assert_checkpoint_schema_current(shared.db.direct_db_url())
+    # Both dials bypass PgBouncer — the ONE sanctioned data-plane exemption
+    # (user ruling 2026-08: every consumer goes through PgBouncer; see
+    # shared/db.py `connect`). apply_pending_migrations holds a SESSION
+    # advisory lock (pg_advisory_lock, shared/migrations.py _MIGRATION_LOCK_KEY)
+    # across its whole apply loop, and transaction pooling hands the backend
+    # back to the pool at the end of each transaction — the lock would silently
+    # drop between statements, letting a concurrent applier interleave DDL.
+    # Both are also unbounded: migration DDL may legitimately exceed the 60s
+    # statement ceiling (large-table rebuilds, partition backfills).
+    if settings.data_plane.is_remote:
+        # A remote-managed plane's provider URL is its only authority.
+        with shared.db.connect(direct=True, unbounded=True) as conn:
+            done = _apply(conn, release)
+        cluster.assert_checkpoint_schema_current(shared.db.direct_db_url())
+    else:
+        # A locally owned plane migrates as the administrator acting as the
+        # schema owner over the home's own socket: objects stay owner-owned and
+        # the owner's own login is never used.
+        authority = pg_admin.local_owner_authority()
+        with authority.session() as conn:
+            done = _apply(conn, release)
+        cluster.assert_checkpoint_schema_current(
+            authority.conninfo, expected_data_dir=authority.data_dir
+        )
     print(f"applied {len(done)} migration(s): {done}")
     return done
+
+
+def _apply(conn: psycopg.Connection[Any], release: ReleaseMigrationContext | None) -> list[str]:
+    from shared.migrations import apply_pending_migrations
+
+    if release is None:
+        return apply_pending_migrations(conn)
+    return apply_pending_migrations(conn, release=release)

@@ -6,7 +6,10 @@ pg/redis ports. A missing record (defensive) is a hard error, not a silent
 fall-through onto some shared instance.
 """
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -227,9 +230,12 @@ def test_collect_port_conflicts_env_layer_overrides_block_for_enrolled_unit(
 
 @pytest.fixture
 def completing_plane(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    from cli.commands import _health_preflight
+    from cli.commands import _data_plane, _health_preflight
 
     calls: list[str] = []
+    monkeypatch.setattr(
+        _data_plane, "prepare_memory_vectors", lambda: calls.append("memory-vectors")
+    )
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:6433/ava")
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://127.0.0.1:6380/0")
@@ -258,6 +264,7 @@ def test_grants_precede_first_pooler_login_and_consumer_probes(completing_plane:
     complete_gateway_data_plane()
     assert completing_plane == [
         "extension",
+        "memory-vectors",
         "grant",
         "pooler",
         "owner-probe",
@@ -291,7 +298,7 @@ def test_failed_grants_never_start_pooler_or_mark_provisioned(
     monkeypatch.setattr(cluster, "ensure_runner_role", fail)
     with pytest.raises(RuntimeError, match="grant refused"):
         complete_gateway_data_plane()
-    assert completing_plane == ["extension"]
+    assert completing_plane == ["extension", "memory-vectors"]
 
 
 def test_pooler_disabled_still_requires_owner_runner_and_redis_readiness(
@@ -303,12 +310,86 @@ def test_pooler_disabled_still_requires_owner_runner_and_redis_readiness(
     complete_gateway_data_plane()
     assert completing_plane == [
         "extension",
+        "memory-vectors",
         "grant",
         "owner-probe",
         "runner-probe",
         "redis-probe",
         "provisioned",
     ]
+
+
+class _Authority:
+    """Records the owner-authority dial `prepare_memory_vectors` must use."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self._calls = calls
+
+    @contextmanager
+    def session(self) -> Generator[str]:
+        self._calls.append("owner-session")
+        yield "owner-connection"
+
+
+def test_memory_vectors_prepared_as_owner_only_for_pgvector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pgvector table is start-time DDL through the owner authority at the
+    provider's dimension; any other backend dials nothing."""
+    from cli.commands._data_plane import prepare_memory_vectors
+    from services.memory_indexer.backends import pgvector
+    from services.memory_indexer.embeddings import factory
+    from shared import pg_admin
+
+    calls: list[str] = []
+    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: _Authority(calls))
+
+    def prepare(conn: str, dim: int) -> None:
+        calls.append(f"prepare:{conn}:{dim}")
+
+    monkeypatch.setattr(pgvector, "prepare_table", prepare)
+    monkeypatch.setattr(factory, "get_provider", lambda: SimpleNamespace(dim=3072))
+
+    monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
+    prepare_memory_vectors()
+    assert calls == []
+
+    monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
+    prepare_memory_vectors()
+    assert calls == ["owner-session", "prepare:owner-connection:3072"]
+
+
+def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remote-managed plane has no local owner authority; its provider URL
+    carries the table DDL, exactly as it carries the plane's migrations."""
+    import shared.db
+    from cli.commands._data_plane import prepare_memory_vectors
+    from services.memory_indexer.backends import pgvector
+    from services.memory_indexer.embeddings import factory
+    from shared import pg_admin
+
+    calls: list[str] = []
+
+    @contextmanager
+    def provider(**kwargs: object) -> Generator[str]:
+        calls.append(f"provider:{kwargs}")
+        yield "provider-connection"
+
+    def prepare(conn: str, dim: int) -> None:
+        calls.append(f"prepare:{conn}:{dim}")
+
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
+    monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
+    monkeypatch.setattr(shared.db, "connect", provider)
+    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: pytest.fail("no local admin"))
+    monkeypatch.setattr(pgvector, "prepare_table", prepare)
+    monkeypatch.setattr(factory, "get_provider", lambda: SimpleNamespace(dim=768))
+
+    prepare_memory_vectors()
+
+    assert calls == ["provider:{'direct': True}", "prepare:provider-connection:768"]
 
 
 @pytest.mark.parametrize("missing", ["db_admin_password", "redis_admin_password", "redis_password"])

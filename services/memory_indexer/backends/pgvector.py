@@ -16,11 +16,11 @@ rows the milvus backend keeps:
 
 The table is a **derived cache** (rebuildable from the memory pool by the
 indexer daemon's cold-start reconcile), exactly like the milvus collection.
-Writable connections create or rebuild it; read-only connections reject a
-missing or mismatched table before issuing persistent mutations. Schema
-management therefore lives in `connect()` rather than in the migrations
-system, which governs business data. It requires the pgvector binary in the
-cluster's Postgres — provisioned by
+Its DDL is not a migration (migrations govern business data and must apply
+without pgvector) and not a runtime effect either: the gateway's `ava start`
+creates or rebuilds it through `prepare_table`, acting as the schema owner,
+and every runtime `connect()` only validates it. It requires the pgvector
+binary in the cluster's Postgres — provisioned by
 `scripts/provision/database.sh` and CI's `install-pg-redis` action.
 
 Search is exact: `vector <=> %s::vector` over every row (a few thousand rows
@@ -60,7 +60,7 @@ read paths' contracts aligned)."""
 # statement (a plain LiteralString satisfies psycopg's execute typing); only
 # the vector dim is runtime data (the provider's width), composed with
 # psycopg.sql. The table is a derived cache — width mismatch or a missing
-# column (a pre-provider-era table) drops + recreates, see `_ensure_schema`.
+# column (a pre-provider-era table) drops + recreates, see `prepare_table`.
 _CREATE_TABLE_SQL = pgsql.SQL(
     """
 CREATE TABLE IF NOT EXISTS memory_embeddings (
@@ -207,26 +207,35 @@ def _schema_problem(client: psycopg.Connection, dim: int) -> str | None:
     return None
 
 
-def _ensure_schema(client: psycopg.Connection, dim: int, *, readonly: bool = False) -> None:
-    """Ensure the writable derived-cache schema, or validate it read-only.
-
-    Read-only validation never creates the pgvector extension/table or drops
-    a stale table. Only the indexer daemon's cold-start reconcile owns that
-    writable recovery path.
-    """
-    if readonly:
-        problem = _schema_problem(client, dim)
-        if problem is not None:
-            raise RuntimeError(
-                f"pgvector table {_TABLE!r} {problem}; a read-only connection will not "
-                "create or rebuild it. The indexer daemon's cold-start reconcile on "
-                "startup is the legitimate writer."
-            )
-        return
-
-    client.execute("CREATE EXTENSION IF NOT EXISTS vector")
+def _validate_schema(client: psycopg.Connection, dim: int) -> None:
+    """Validate the derived-cache table; runtime connections never create,
+    drop or rebuild it (`prepare_table` at start is its only writer)."""
     problem = _schema_problem(client, dim)
-    if problem is not None and problem != "is missing":
+    if problem is not None:
+        raise RuntimeError(
+            f"pgvector table {_TABLE!r} {problem}; runtime connections never create or "
+            "rebuild it. Run `ava start` on the gateway: it prepares the table for the "
+            "configured embedding dimension."
+        )
+
+
+def prepare_table(client: psycopg.Connection, dim: int) -> None:
+    """Create the derived-cache table at `dim`, rebuilding a stale one.
+
+    Called by the gateway's start preparation on a connection acting as the
+    schema owner, so the table stays owner-owned. A table with another width or
+    column set is dropped and recreated empty; the indexer daemon's cold-start
+    reconcile then re-embeds the pool. A database without the pgvector
+    extension (binaries absent) is left alone: the indexer's startup preflight
+    owns that failure and names the fix.
+    """
+    if client.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'").fetchone() is None:
+        _log.warning("[pgvector] extension absent; %s not prepared", _TABLE)
+        return
+    problem = _schema_problem(client, dim)
+    if problem is None:
+        return
+    if problem != "is missing":
         _log.warning(
             "[pgvector] table %s %s — dropping + recreating; the indexer daemon "
             "cold-start reconcile will rebuild the index",
@@ -244,7 +253,7 @@ class PGVectorBackend:
     The vector space is injected (factory wiring): `dim` is the table's
     vector width and `fingerprint` is stamped on every row — no import of
     provider constants. `connect()` opens a long-lived connection pool and
-    ensures the schema — the indexer daemon's path. The gateway's read path
+    validates the schema — the indexer daemon's path. The gateway's read path
     never calls `connect()`; each `search_topk_async` opens one short-lived
     connection instead (bounded by the caller's deadline, no pool lifecycle
     to leak).
@@ -285,7 +294,7 @@ class PGVectorBackend:
                 yield conn
 
     def connect(self) -> None:
-        """Open the connection pool + ensure extension/table/dim.
+        """Open the connection pool + validate the table at this dim.
 
         The pool exists so the indexer daemon's batched upserts do not pay a
         dial per batch; `shared.db.pool()` is the only sanctioned pool
@@ -293,7 +302,7 @@ class PGVectorBackend:
         self._pool = shared.db.pool()
         try:
             with self._pool.connection() as conn:
-                _ensure_schema(conn, self._dim, readonly=self._readonly)
+                _validate_schema(conn, self._dim)
         except Exception:
             self.close()
             raise
