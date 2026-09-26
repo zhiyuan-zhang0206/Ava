@@ -22,7 +22,6 @@ import shared.stop_timing as stop
 from shared import cluster_lock
 from shared.config import settings
 from shared.daemon.schedules.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
-from shared.host_deploy_state import UPDATER_LEASE_TTL_S
 
 # --- schedule supervision family ---------------------------------------------
 # Value lives in shared/daemon/schedules/schedule_timing.py: the gateway's schedule manager
@@ -138,12 +137,6 @@ CLOCKS: dict[str, Clock] = {
         SCHEDULE_STALL_ALERT_AFTER_S,
         "how long an enabled non-completed schedule may remain sessionless before alerting",
     ),
-    # --- updater family ---
-    "UPDATER_LEASE_TTL_S": Clock(
-        "updater",
-        lambda: UPDATER_LEASE_TTL_S,
-        "how long a crashed updater's lease keeps its host reading 'converging'",
-    ),
     # --- wedged family ---
     "WEDGED_AGE_SEC": Clock(
         "wedged",
@@ -237,14 +230,6 @@ CONSTRAINTS: list[Constraint] = [
         "the legacy adoption silence window must land inside the lease it "
         "shortens — at or beyond the TTL a dead predecessor's row could only "
         "ever be adopted by natural expiry, and the evidence gate would be inert",
-    ),
-    # --- updater family ---
-    Constraint(
-        "==",
-        "UPDATER_LEASE_TTL_S",
-        "NO_PROGRESS_TIMEOUT_S",
-        "a retained updater lease row shares the whole-run no-progress definition "
-        "rather than a competing calibration",
     ),
     # --- wedged family ---
     Constraint(

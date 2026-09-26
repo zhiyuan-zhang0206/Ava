@@ -28,8 +28,8 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 
 1. **Defined in a lattice family module** — `shared/timing.py`,
    `shared/deploy_timing.py`, `shared/stop_timing.py`,
-   `shared/daemon/schedules/schedule_timing.py`, `shared/cluster_lock.py`,
-   `shared/host_deploy_state.py`. These are the lattice's homes; registering a
+   `shared/daemon/schedules/schedule_timing.py`, `shared/cluster_lock.py`.
+   These are the lattice's homes; registering a
    new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
    reference to a clock registered in `shared.timing.CLOCKS`
@@ -94,15 +94,13 @@ _LATTICE_TERMS = (
 )
 
 # The lattice family modules: lattice vocabulary may be DEFINED here (and only
-# here). `shared/cluster_lock.py` and `shared/host_deploy_state.py` hold the
-# deploy-lease and updater-lease clocks respectively.
+# here). `shared/cluster_lock.py` holds the deploy-lease clocks.
 _FAMILY_MODULES = (
     "shared/timing.py",
     "shared/deploy_timing.py",
     "shared/stop_timing.py",
     "shared/daemon/schedules/schedule_timing.py",
     "shared/cluster_lock.py",
-    "shared/host_deploy_state.py",
 )
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")

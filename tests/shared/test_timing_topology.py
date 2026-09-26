@@ -16,7 +16,7 @@ def test_default_lattice_holds() -> None:
     """The full declared lattice must hold for the settings defaults.
 
     This is the topology pin: every constraint in `shared.timing.CONSTRAINTS`
-    (deploy / schedule-supervision / agent-lease / updater / wedged families) is asserted against the live default values. A change to
+    (deploy / schedule-supervision / agent-lease / wedged / stop families) is asserted against the live default values. A change to
     any default that inverts a load-bearing ordering fails here, with the
     constraint's intent in the failure message.
     """
@@ -35,14 +35,14 @@ def test_checker_catches_lt_violation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_checker_catches_eq_violation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A drifted updater lease TTL (no longer equal to NO_PROGRESS) must be
-    reported — two clocks disagreeing about "stopped making progress"."""
+    """A drifted settle hold (no longer equal to NO_PROGRESS) must be reported —
+    two clocks disagreeing about "stopped making progress"."""
     monkeypatch.setattr(
-        "shared.timing.UPDATER_LEASE_TTL_S",
+        "shared.cluster_lock.SETTLE_TTL_S",
         deploy.NO_PROGRESS_TIMEOUT_S + 100,
     )
     failures = validate_clock_lattice()
-    assert any("UPDATER_LEASE_TTL_S == NO_PROGRESS_TIMEOUT_S" in f for f in failures)
+    assert any("SETTLE_TTL_S == NO_PROGRESS_TIMEOUT_S" in f for f in failures)
 
 
 def test_checker_catches_derived_violation(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,9 +2,8 @@
 progress", and the rule that keeps the deploy lease alive across it.
 
 `NO_PROGRESS_TIMEOUT_S` is that single definition. Its consumers share it rather
-than calibrate their own: the settle hold (`shared.cluster_lock.SETTLE_TTL_S`),
-the updater lease TTL (`shared.host_deploy_state.UPDATER_LEASE_TTL_S`) and the ops
-daemon's wedge bound (`services.agent_ops.health`); the schedule-stall alert
+than calibrate their own: the settle hold (`shared.cluster_lock.SETTLE_TTL_S`)
+and the ops daemon's wedge bound (`services.agent_ops.health`); the schedule-stall alert
 (`shared.timing`) is ordered above it. Two clocks that disagree about
 "stopped making progress" are two chances to declare a host dead while it is
 working, or alive while it is not: in the 2026-07-29 incident the smallest of
