@@ -20,6 +20,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import shutil
 import stat
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ from typing import Literal, Never, cast
 import psutil
 
 import shared.paths
-from shared import atomic_io, spawn_receipt
+from shared import atomic_io
 from shared.native_process.ownership import create_time_matches, stable_create_time
 from shared.platform import file_lock
 from shared.updater_recovery import BootstrapRecoveryJournal
@@ -37,6 +38,10 @@ from shared.updater_recovery import BootstrapRecoveryJournal
 _LOCK_TIMEOUT_S = 5.0
 _BOOTSTRAP_RECOVERY_VERSION = 1
 _MAX_BOOTSTRAP_RECOVERY_BYTES = 256 * 1024
+# A generation token read back from the marker: the session-name character
+# class, so a tampered marker can never steer the clear-time GC out of
+# `run/updater-spawn/`.
+_GENERATION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 _log = logging.getLogger("shared.updater_handoff")
 
 
@@ -85,11 +90,14 @@ def lock_path() -> Path:
 def spawn_attempts_dir(generation: str) -> Path:
     """This unit's per-generation spawn-attempt evidence directory (I6 GC scope).
 
-    The layout and the name check live in ``shared.spawn_receipt``, the module
-    that owns the evidence -- this accessor only binds them to the unit home so
-    the clear-time GC can never be steered outside that directory.
+    The retired updater's gated spawns left their receipts and gates under
+    ``run/updater-spawn/<generation>``. Nothing writes there now; clear still
+    removes a retained generation's directory. The name check keeps that GC
+    inside the directory whatever the marker says.
     """
-    return spawn_receipt.spawn_attempt_dir(shared.paths.ava_home(), generation)
+    if not _GENERATION_PATTERN.fullmatch(generation):
+        raise ValueError("generation is not a valid spawn-attempt directory name")
+    return shared.paths.ava_home() / "run" / "updater-spawn" / generation
 
 
 def _timestamp(value: object, field: str) -> dt.datetime:

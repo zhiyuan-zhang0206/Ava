@@ -60,12 +60,8 @@ class WindowsTerminalBackend(SessionBackend):
         env: dict[str, str],
         login_shell: bool = True,
         exec_cmd: bool = True,
-        gate_fd: int | None = None,
-        receipt: tuple[Path, str] | None = None,
     ) -> bool:
         del login_shell, exec_cmd
-        if gate_fd is not None or receipt is not None:
-            raise NotImplementedError("Windows terminal resources have no POSIX spawn gate")
         record_path(name)  # validate before sending anything
         from shared.paths import root_run_dir
 

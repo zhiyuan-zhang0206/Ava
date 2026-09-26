@@ -19,7 +19,6 @@ from shared import (
     coding_session_owner_record,
     editable_install,
     pause_owner,
-    spawn_receipt,
     start_serving,
     ui_update_state,
 )
@@ -46,8 +45,6 @@ def _marker_write(case: str, path: Path) -> None:
         start_serving._write_state(
             start_serving.ServingState(state="starting", generation=_START_GENERATION)
         )
-    elif case == "receipt":
-        spawn_receipt._write_atomic_text(path, '{"z":1,"a":"value"}')
     elif case == "owner":
         key = coding_session_owner_record.CodingSessionKey("cluster", "workspace", "codex")
         coding_session_owner_record.write_unlocked(
@@ -63,13 +60,12 @@ def _marker_write(case: str, path: Path) -> None:
         raise AssertionError(case)
 
 
-@pytest.mark.parametrize("case", ["start", "receipt", "owner", "pause", "freeze", "ui"])
+@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "ui"])
 def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     modules = {
         "start": start_serving,
-        "receipt": spawn_receipt,
         "owner": coding_session_owner_record,
         "pause": pause_owner,
         "freeze": allocation_freeze,
@@ -97,8 +93,6 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
             + _START_GENERATION.encode()
             + b'","birth":null}'
         )
-    elif case == "receipt":
-        assert raw == b'{"z":1,"a":"value"}'
     elif case == "owner":
         assert isinstance(json.loads(raw), dict)
     else:
@@ -108,7 +102,7 @@ def test_marker_commit_survives_directory_sync_failure_and_cleans_temps(
         assert path.stat().st_mode & 0o777 == 0o600
 
 
-@pytest.mark.parametrize("case", ["start", "receipt", "owner", "pause", "freeze", "ui"])
+@pytest.mark.parametrize("case", ["start", "owner", "pause", "freeze", "ui"])
 def test_marker_replace_failure_keeps_old_content_and_cleans_temps(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

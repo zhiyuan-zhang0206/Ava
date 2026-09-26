@@ -39,7 +39,6 @@ on:
       - 'shared/updater_handoff.py'
       - 'services/agent_ops/bootstrap.py'
       - 'services/agent_ops/daemon.py'
-      - 'shared/spawn_receipt.py'
       - 'shared/updater_recovery.py'
       - 'shared/managed_writer_activation.py'
       - 'shared/managed_writer_publication.py'

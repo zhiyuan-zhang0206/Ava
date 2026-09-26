@@ -173,17 +173,8 @@ class HelperProcSessionBackend(SessionBackend):
         login_shell: bool = True,
         exec_cmd: bool = True,
         stderr_append: Path | None = None,
-        gate_fd: int | None = None,
-        receipt: tuple[Path, str] | None = None,
     ) -> bool:
-        """Spawn a session through the helper and persist its process identity.
-
-        The gated-spawn channel is Linux-only (design R8) and this backend is
-        the macOS permissions-helper route, so a gated request is refused
-        rather than silently launched without its gate and birth receipt.
-        """
-        if gate_fd is not None or receipt is not None:
-            raise NotImplementedError(f"{type(self).__name__} has no gated spawn")
+        """Spawn a session through the helper and persist its process identity."""
         if self.has_session(name):
             return True
 

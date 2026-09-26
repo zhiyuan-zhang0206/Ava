@@ -12,7 +12,6 @@ from pydantic import Field, HttpUrl, JsonValue, field_validator
 from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
-from shared.config.update_spawn_fields import UpdateSpawnFields
 
 _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
     "restart_required": "schedule",
@@ -22,7 +21,7 @@ _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
 }
 
 
-class GatewaySettings(UpdateSpawnFields, EnvSettings):
+class GatewaySettings(EnvSettings):
     provision_builtin_schedules: bool = Field(
         default=True,
         alias="AVA_PROVISION_BUILTIN_SCHEDULES",

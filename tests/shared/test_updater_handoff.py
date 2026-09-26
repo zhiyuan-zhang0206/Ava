@@ -161,6 +161,10 @@ def _normal_journal(stage: str) -> dict[str, object]:
     return recovery.NormalReleaseRecoveryJournal.model_validate(payload).model_dump(mode="json")
 
 
+# Captured before the autouse fixture swaps it for a tmp-path stand-in.
+_real_spawn_attempts_dir = handoff.spawn_attempts_dir
+
+
 def _write_handoff(
     generation: str = "g",
     *,
@@ -571,3 +575,20 @@ def test_failed_gc_keeps_the_generation_spawn_attempts(
     assert (attempts / "ava-ops.7.receipt.json").read_text(encoding="utf-8") == "{}"
     assert not handoff.state_path().exists()
     assert not handoff.bootstrap_state_path().exists()
+
+
+def test_spawn_attempt_dir_is_bound_to_the_unit_run_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    assert _real_spawn_attempts_dir("gen-1") == tmp_path / "run" / "updater-spawn" / "gen-1"
+
+
+@pytest.mark.parametrize("generation", ["", "../escape", "gen/../escape", ".hidden", "a b"])
+def test_spawn_attempt_dir_refuses_a_name_that_leaves_its_directory(
+    generation: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tampered marker generation must never steer the clear-time GC elsewhere."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    with pytest.raises(ValueError, match="spawn-attempt directory"):
+        _real_spawn_attempts_dir(generation)
