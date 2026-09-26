@@ -2960,7 +2960,7 @@
     "/api/cluster/resume": {
       "post": {
         "summary": "Post Cluster Resume",
-        "description": "Compensating unpause: restore posture and release native admission holds,\nexecuted by this host's ops server via a cluster_resume op.\n\nSymmetric inverse of `/api/cluster/stop`. The orchestration's failure path\nfans this out (by dialing each host's ops server) to every host it had paused.\nOperators recover a stranded host through `/api/cluster/recover`; this route\nrequires the opaque exact capability of the deploy that created the pause.",
+        "description": "Compensating unpause: restore posture and release native admission holds,\nexecuted by this host's ops server via a cluster_resume op.\n\nSymmetric inverse of `/api/cluster/stop`. The orchestration's failure path\nfans this out (by dialing each host's ops server) to every host it had paused.\nOperators recover a stranded host with `ava cluster recover` on that host; this\nroute requires the opaque exact capability of the deploy that created the pause.",
         "operationId": "post_cluster_resume_api_cluster_resume_post",
         "requestBody": {
           "content": {
@@ -2993,27 +2993,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/cluster/recover": {
-      "post": {
-        "summary": "Post Cluster Recover",
-        "description": "Operator stranded-cluster recovery — force-clear a pause + update lock left\nbehind by a hard-killed rollout, so the UI/SDK unblock and the next rollout can\nrun without waiting out the lock TTL.\n\nBypasses the cluster-paused 503 middleware (`/api/cluster/*`), so it is callable\nexactly when the cluster is wedged paused. Refuses (409) if an orchestration is\nactually in flight on this host — recovery is only for the no-session strand.\n\nReturns {\"unlocked_holder\": <prior lock holder or None>}.",
-        "operationId": "post_cluster_recover_api_cluster_recover_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Post Cluster Recover Api Cluster Recover Post"
                 }
               }
             }

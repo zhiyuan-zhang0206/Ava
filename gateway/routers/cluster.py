@@ -1,9 +1,9 @@
 """Cluster control + admin endpoints — /api/cluster/*.
 
 Covers maintenance / status / roster / admin events query / machines
-DELETE. These paths are exempt from the paused-host 503 middleware (see
-app.py `_PAUSE_BYPASS_PREFIXES`) because they are the recovery tools the
-gateway uses during pause.
+DELETE. These paths are exempt from the paused-host 503 middleware through
+their CONTROL_PLANE route contracts (`shared/api_contracts/contracts.py`)
+because they are the tools the gateway uses during pause.
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ from ops import cluster_rpc as _cluster_rpc
 from ops import ops_cluster as _ops
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
-from ops.ops_cluster import ClusterUpdateInProgress
 from ops.rpc_schemas import ClusterTransitionPayload
 from ops.schema_mismatch import status as schema_mismatch_status
 from shared import machines
@@ -42,11 +41,6 @@ from shared.machine import is_agent_runner, is_gateway, is_observability_station
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
-
-
-# Only the whole-cluster endpoints below emit this hint: the single-host update
-# relay and watchdog self-heal paths do not interrupt this gateway, and the
-# cluster-status poll remains their fallback signal.
 
 
 def _local_snapshot_blocking() -> ClusterStatus:
@@ -146,29 +140,11 @@ async def post_cluster_resume(body: ClusterTransitionPayload) -> dict[str, bool]
 
     Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
     fans this out (by dialing each host's ops server) to every host it had paused.
-    Operators recover a stranded host through `/api/cluster/recover`; this route
-    requires the opaque exact capability of the deploy that created the pause.
+    Operators recover a stranded host with `ava cluster recover` on that host; this
+    route requires the opaque exact capability of the deploy that created the pause.
     """
     await _dispatch_op(machine_name(), "cluster_resume", body.model_dump(mode="json"))
     return {"paused": False}
-
-
-@router.post("/api/cluster/recover", status_code=200)
-async def post_cluster_recover() -> dict[str, Any]:
-    """Operator stranded-cluster recovery — force-clear a pause + update lock left
-    behind by a hard-killed rollout, so the UI/SDK unblock and the next rollout can
-    run without waiting out the lock TTL.
-
-    Bypasses the cluster-paused 503 middleware (`/api/cluster/*`), so it is callable
-    exactly when the cluster is wedged paused. Refuses (409) if an orchestration is
-    actually in flight on this host — recovery is only for the no-session strand.
-
-    Returns {"unlocked_holder": <prior lock holder or None>}.
-    """
-    try:
-        return await asyncio.to_thread(_ops.cluster_recover_op)
-    except ClusterUpdateInProgress as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/api/cluster/stopping", status_code=200)

@@ -19,7 +19,6 @@ from gateway import loki_events
 from gateway._cors import cors_allowed_origins
 from gateway.app import app
 from ops import cluster_pause, cluster_status
-from shared.cluster_lock import DeployLease, RecoveryClaim
 from shared.start_serving import RootBirth
 
 
@@ -361,136 +360,6 @@ class TestLockHolderLiveness:
         assert ops_mod._lock_holder_is_live("garbage") is True
 
 
-class TestClusterRecoverEndpoint:
-    """`POST /api/cluster/recover` — operator force-clear of a stranded pause + lock."""
-
-    @staticmethod
-    def _lease(holder: str, kind: str | None = "rollout") -> object:
-        from shared.cluster_lock import DeployLease
-
-        return DeployLease(
-            holder=holder,
-            held_for_s=60.0,
-            expires_in_s=600.0,
-            kind=kind,  # pyright: ignore[reportArgumentType] — test builds the literal
-        )
-
-    def test_recovers_when_no_lease_and_no_updater(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
-
-        calls: list[str] = []
-        monkeypatch.setattr(ops_mod, "read_update_lease", lambda: None)
-        monkeypatch.setattr(ops_mod, "updater_lease_live", lambda: False)
-        monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
-
-        def _claim(
-            _holder: str, _observed: DeployLease | None, *, ttl_s: float = 60.0
-        ) -> RecoveryClaim:
-            del ttl_s
-            calls.append("claim")
-            return RecoveryClaim(acquired=True, previous_holder="stale-holder")
-
-        def _release(_holder: str) -> None:
-            calls.append("release")
-
-        monkeypatch.setattr(ops_mod, "claim_recovery_lock", _claim)
-        monkeypatch.setattr(
-            ops_mod,
-            "release_update_lock",
-            _release,
-        )
-        with TestClient(app) as client:
-            r = client.post("/api/cluster/recover")
-        assert r.status_code == 200
-        assert r.json() == {"unlocked_holder": "stale-holder"}
-        # Claim the exact observed generation, unpause while recovery owns the
-        # lease, then release only that recovery holder.
-        assert calls == ["claim", "unpause", "release"]
-
-    def test_recovers_when_holder_is_dead(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A held-but-stale lease (holder pid dead) is force-cleared at once — the
-        value-add over the watchdog, which would wait out the TTL. The lease's
-        kind alone must not refuse (the 2026-08-12 false refusal)."""
-        from ops import ops_cluster as ops_mod
-
-        calls: list[str] = []
-        monkeypatch.setattr(ops_mod, "read_update_lease", lambda: self._lease("mc:pid999"))
-        monkeypatch.setattr(ops_mod, "_lock_holder_is_live", lambda _h, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ops_mod, "updater_lease_live", lambda: False)
-        monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
-
-        def _claim(
-            _holder: str, _observed: DeployLease | None, *, ttl_s: float = 60.0
-        ) -> RecoveryClaim:
-            del ttl_s
-            calls.append("claim")
-            return RecoveryClaim(acquired=True, previous_holder="mc:pid999")
-
-        def _release(_holder: str) -> None:
-            calls.append("release")
-
-        monkeypatch.setattr(ops_mod, "claim_recovery_lock", _claim)
-        monkeypatch.setattr(
-            ops_mod,
-            "release_update_lock",
-            _release,
-        )
-        with TestClient(app) as client:
-            r = client.post("/api/cluster/recover")
-        assert r.status_code == 200
-        assert calls == ["claim", "unpause", "release"]
-
-    def test_refuses_409_when_updater_lease_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The lease-less watchdog-spawned updater is visible only through this
-        host's updater lease — a live one must refuse, untouched."""
-        from ops import ops_cluster as ops_mod
-
-        calls: list[str] = []
-        monkeypatch.setattr(ops_mod, "read_update_lease", lambda: None)
-        monkeypatch.setattr(ops_mod, "updater_lease_live", lambda: True)
-        monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
-
-        def _unexpected_claim(
-            _holder: str, _observed: DeployLease | None, *, ttl_s: float = 60.0
-        ) -> RecoveryClaim:
-            del ttl_s
-            calls.append("claim")
-            return RecoveryClaim(acquired=False)
-
-        monkeypatch.setattr(ops_mod, "claim_recovery_lock", _unexpected_claim)
-        with TestClient(app) as client:
-            r = client.post("/api/cluster/recover")
-        assert r.status_code == 409
-        assert "updater lease" in r.json()["detail"]
-        assert calls == []
-
-    def test_refuses_409_when_lease_holder_alive(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A lease whose holder process is still running (a live `ava cluster update
-        --local` included) must refuse, untouched — the pid-probe is the refusal's
-        gate, not the lease's kind."""
-        from ops import ops_cluster as ops_mod
-
-        calls: list[str] = []
-        monkeypatch.setattr(ops_mod, "read_update_lease", lambda: self._lease("mc:pid123"))
-        monkeypatch.setattr(ops_mod, "_lock_holder_is_live", lambda _h, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ops_mod, "unpause_local_cluster", lambda: calls.append("unpause"))
-
-        def _unexpected_claim(
-            _holder: str, _observed: DeployLease | None, *, ttl_s: float = 60.0
-        ) -> RecoveryClaim:
-            del ttl_s
-            calls.append("claim")
-            return RecoveryClaim(acquired=False)
-
-        monkeypatch.setattr(ops_mod, "claim_recovery_lock", _unexpected_claim)
-        with TestClient(app) as client:
-            r = client.post("/api/cluster/recover")
-        assert r.status_code == 409
-        assert "live process" in r.json()["detail"]
-        assert "rollout" in r.json()["detail"]  # the lease's kind still names what runs
-        assert calls == []
-
-
 class TestRetiredDeploymentEndpoints:
     @pytest.mark.parametrize(
         ("method", "path"),
@@ -499,15 +368,20 @@ class TestRetiredDeploymentEndpoints:
             ("POST", "/api/cluster/rollout"),
             ("POST", "/api/cluster/restart"),
             ("GET", "/api/cluster/update-check"),
+            ("POST", "/api/cluster/recover"),
         ],
     )
     def test_removed_ingress_cannot_dispatch_or_pause(
         self, monkeypatch: pytest.MonkeyPatch, method: str, path: str
     ) -> None:
+        """Stranded-host recovery is the host-local `ava cluster recover` verb only."""
+        from ops import ops_cluster as ops_mod
+
         def forbidden(*_args: object, **_kwargs: object) -> None:
             pytest.fail("retired HTTP ingress reached the old updater")
 
         monkeypatch.setattr(cluster_pause, "pause_local_cluster", forbidden)
+        monkeypatch.setattr(ops_mod, "cluster_recover_op", forbidden)
         with TestClient(app) as client:
             assert client.request(method, path).status_code == 404
         assert path not in app.openapi()["paths"]

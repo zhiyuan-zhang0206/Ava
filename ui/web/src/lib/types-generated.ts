@@ -1731,38 +1731,10 @@ export interface paths {
          *
          *     Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
          *     fans this out (by dialing each host's ops server) to every host it had paused.
-         *     Operators recover a stranded host through `/api/cluster/recover`; this route
-         *     requires the opaque exact capability of the deploy that created the pause.
+         *     Operators recover a stranded host with `ava cluster recover` on that host; this
+         *     route requires the opaque exact capability of the deploy that created the pause.
          */
         post: operations["post_cluster_resume_api_cluster_resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/recover": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Recover
-         * @description Operator stranded-cluster recovery — force-clear a pause + update lock left
-         *     behind by a hard-killed rollout, so the UI/SDK unblock and the next rollout can
-         *     run without waiting out the lock TTL.
-         *
-         *     Bypasses the cluster-paused 503 middleware (`/api/cluster/*`), so it is callable
-         *     exactly when the cluster is wedged paused. Refuses (409) if an orchestration is
-         *     actually in flight on this host — recovery is only for the no-session strand.
-         *
-         *     Returns {"unlocked_holder": <prior lock holder or None>}.
-         */
-        post: operations["post_cluster_recover_api_cluster_recover_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10491,28 +10463,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_recover_api_cluster_recover_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
         };

@@ -140,33 +140,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         PauseSemantics.CONTROL_PLANE,
         note="control-plane op — state machine",
     ),
-    ("POST", "/api/cluster/recover"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
-        note="control-plane op — state machine",
-    ),
     ("POST", "/api/cluster/stopping"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         PauseSemantics.CONTROL_PLANE,
         note="control-plane op — host self-report during stop",
-    ),
-    ("POST", "/api/cluster/update"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
-        note="control-plane op — triggers a rollout; repeats can double-fire",
-    ),
-    ("POST", "/api/cluster/rollout"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
-        note="control-plane op — triggers a rollout; repeats can double-fire",
-    ),
-    ("POST", "/api/cluster/restart"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
-        note="control-plane op — state machine",
-    ),
-    ("GET", "/api/cluster/update-check"): RouteContract(
-        pause=PauseSemantics.CONTROL_PLANE, note="control-plane read — observability during rollout"
     ),
     ("GET", "/api/cluster/status"): RouteContract(
         pause=PauseSemantics.CONTROL_PLANE, note="control-plane read — observability during rollout"
