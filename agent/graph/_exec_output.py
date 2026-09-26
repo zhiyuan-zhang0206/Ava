@@ -58,7 +58,7 @@ _OVERFLOW_KEEP = 20
 
 
 def _overflow_dir() -> Path:
-    return workspace_dir(ava.agent_identity.agent_id()) / _OVERFLOW_DIRNAME
+    return workspace_dir(ava.agent_identity.require_agent_id()) / _OVERFLOW_DIRNAME
 
 
 def wrap_code_output(
