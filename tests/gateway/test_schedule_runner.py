@@ -282,7 +282,7 @@ def test_run_loads_plugins_for_py_script(
     import ava
 
     calls: list[int] = []
-    monkeypatch.setattr(ava, "_ensure_plugins_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: calls.append(1))
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
     assert run(sid) == 0
@@ -321,7 +321,7 @@ def test_run_skips_plugin_load_for_non_py_command(
     import ava
 
     calls: list[int] = []
-    monkeypatch.setattr(ava, "_ensure_plugins_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: calls.append(1))
     sid = _insert_schedule(db_conn, script="exit 0\n", command="bash run.sh")
 
     assert run(sid) == 0

@@ -21,6 +21,7 @@ from agent.graph._system_prompt import (
     _sdk_expand_section,
     effective_sdk_expand,
 )
+from ava.sdk_surface import plugins, sdk_disable
 from shared.config import FIELD_INFOS, AgentSettings, settings
 
 # The framework-owned top-level namespaces the wildcard must always surface.
@@ -44,7 +45,7 @@ def _no_plugin_expansions(monkeypatch: pytest.MonkeyPatch) -> None:
     # Every case here reasons about the framework expand list alone; clear any
     # plugin-registered promotions so a leak from another test cannot prepend
     # stray paths. A test that needs a registration sets its own afterwards.
-    monkeypatch.setattr(ava, "_REGISTERED_SDK_EXPANSIONS", [])
+    monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", [])
 
 
 @pytest.fixture(autouse=True)
@@ -211,7 +212,7 @@ def test_missing_unregistered_expand_path_warns(
     """An unregistered missing path reaches the existing resolution warning."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["missing_sdk_namespace"])
     monkeypatch.setattr(settings.agent, "sdk_disable", [])
-    monkeypatch.setattr(ava, "_applied_disable_entries", set[str]())
+    monkeypatch.setattr(sdk_disable, "applied_disable_entries", set[str]())
 
     with caplog.at_level("WARNING", logger="agent.graph._system_prompt"):
         text = _sdk_expand_section()
@@ -225,7 +226,7 @@ def test_plugin_registrations_lead_the_wildcard(
 ) -> None:
     """Plugin-promoted paths keep their lead position ahead of the discovered
     set even when the configured list is just `["*"]`."""
-    monkeypatch.setattr(ava, "_REGISTERED_SDK_EXPANSIONS", ["cwd"])
+    monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", ["cwd"])
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     result = effective_sdk_expand()
     assert result[0] == "cwd"

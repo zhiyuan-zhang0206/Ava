@@ -5,7 +5,7 @@ signature/docstring cleaning), plus the predicate and callable shim that route
 builtin `help(ava.*)` calls through that renderer. The package entry re-exports
 `help` and the `_format_*` helpers tests reach directly, so `import ava;
 ava.help(...)` is unchanged. Children discovery lives in
-`ava/_exports/discovery.py`; this module imports it (one-way — discovery never
+`ava/sdk_surface/discovery.py`; this module imports it (one-way — discovery never
 imports help).
 """
 
@@ -380,8 +380,8 @@ def _format_multiline_const_block(name: str, base: type, value: str, doc: str | 
 # classes. Fields stay so the agent still sees attribute names; the full
 # contract (methods) is one help(ava.X.ClassName) away. Set by the system
 # prompt builder; on-demand help(ava.X) is unaffected.
-_COMPACT_CLASSES: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "_COMPACT_CLASSES", default=False
+compact_classes: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "ava_compact_classes", default=False
 )
 
 
@@ -434,7 +434,7 @@ def _is_synthesized_dataclass_doc(name: str, cls: type, own_doc: Any) -> bool:
 def _format_class_members(cls: type) -> list[str]:
     """Indented member entries of a class, honoring compact mode: field
     annotations (_Constant children) stay, methods and nested classes drop."""
-    compact = _COMPACT_CLASSES.get()
+    compact = compact_classes.get()
     parts: list[str] = []
     for child_name, child in _children(cls):
         if compact and not isinstance(child, _Constant):

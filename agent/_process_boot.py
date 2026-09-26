@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import ava
+from ava.sdk_surface import sdk_disable
 from ava.shell import sessions
 from shared.config.turn_view import turn_settings
 from shared.daemon.schedules.watcher import TEMPLATE_VERSION
@@ -29,16 +30,16 @@ def _apply_per_agent_sdk_disable() -> None:
     sdk_disable is applied at ``ava`` import time from the env var
     ``AVA_SDK_DISABLE``.  Per-agent overlay additions to sdk_disable are
     set on settings by ``apply_config_overlay`` and must be applied on top
-    of the env baseline — ``ava._apply_sdk_disable`` is idempotent, so
+    of the env baseline — ``sdk_disable.apply_sdk_disable`` is idempotent, so
     only genuinely new entries take effect.
     """
 
     if not turn_settings.agent.sdk_disable:
         return
-    env_entries = set(ava._sdk_disable_entries)
+    env_entries = set(sdk_disable.sdk_disable_entries)
     new_disable = [e for e in turn_settings.agent.sdk_disable if e not in env_entries]
     if new_disable:
-        ava._apply_sdk_disable(new_disable)
+        sdk_disable.apply_sdk_disable(new_disable)
 
 
 def _apply_per_agent_eval_isolation() -> None:
@@ -57,7 +58,7 @@ def _apply_per_agent_eval_isolation() -> None:
         disabled.append("web")
     if "understand" not in allowed_network:
         disabled.append("understand")
-    ava._apply_sdk_disable(disabled)
+    sdk_disable.apply_sdk_disable(disabled)
 
     agent_id = int(os.environ["AVA_AGENT_ID"])
     isolated_pool = workspace_dir(agent_id) / "memory-pool"

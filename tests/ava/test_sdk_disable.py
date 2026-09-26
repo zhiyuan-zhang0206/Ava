@@ -177,18 +177,19 @@ def test_whitespace_in_disable_list_is_tolerated() -> None:
     assert out.strip() == "ok"
 
 
-# ── _apply_sdk_disable re-entrant / cumulative tests ──────────────────────
+# ── apply_sdk_disable re-entrant / cumulative tests ──────────────────────
 
 
 def test_apply_sdk_disable_is_idempotent() -> None:
-    """Calling _apply_sdk_disable twice with the same entries is a no-op."""
+    """Calling apply_sdk_disable twice with the same entries is a no-op."""
     code, out, err = _run(
         """
         import ava
+        from ava.sdk_surface.sdk_disable import apply_sdk_disable
         # First call at import time (via env) disabled watcher
         assert not hasattr(ava, 'watcher')
         # Second call with same entry should be a no-op — no crash, no duplicate
-        ava._apply_sdk_disable(['watcher'])
+        apply_sdk_disable(['watcher'])
         assert not hasattr(ava, 'watcher')
         print('ok')
         """,
@@ -203,11 +204,12 @@ def test_apply_sdk_disable_is_cumulative() -> None:
     code, out, err = _run(
         """
         import ava
+        from ava.sdk_surface.sdk_disable import apply_sdk_disable
         # Env disabled watcher at import time
         assert not hasattr(ava, 'watcher')
         assert hasattr(ava, 'agents'), 'agents still present before second call'
         # Apply additional disable on top
-        ava._apply_sdk_disable(['agents'])
+        apply_sdk_disable(['agents'])
         assert not hasattr(ava, 'agents'), 'agents should be gone after second call'
         assert not hasattr(ava, 'watcher'), 'watcher should remain gone'
         assert hasattr(ava, 'files'), 'files should remain'
@@ -224,11 +226,12 @@ def test_apply_sdk_disable_dotted_cumulative() -> None:
     code, out, err = _run(
         """
         import ava
+        from ava.sdk_surface.sdk_disable import apply_sdk_disable
         # Env disabled self.terminate at import time
         assert not hasattr(ava.self, 'terminate')
         assert hasattr(ava.self, 'restart'), 'restart should remain'
         # Apply additional disable
-        ava._apply_sdk_disable(['self.restart'])
+        apply_sdk_disable(['self.restart'])
         assert not hasattr(ava.self, 'terminate'), 'terminate still gone'
         assert not hasattr(ava.self, 'restart'), 'restart now gone too'
         print('ok')
@@ -240,16 +243,17 @@ def test_apply_sdk_disable_dotted_cumulative() -> None:
 
 
 def test_apply_sdk_disable_applied_entries_tracked() -> None:
-    """_applied_disable_entries reflects both env and manual calls."""
+    """applied_disable_entries reflects both env and manual calls."""
     code, out, err = _run(
         """
         import ava
+        from ava.sdk_surface.sdk_disable import apply_sdk_disable, applied_disable_entries
         # After import: env entries are tracked
-        assert 'watcher' in ava._applied_disable_entries
+        assert 'watcher' in applied_disable_entries
         # Add a new one
-        ava._apply_sdk_disable(['agents'])
-        assert 'agents' in ava._applied_disable_entries
-        assert 'watcher' in ava._applied_disable_entries
+        apply_sdk_disable(['agents'])
+        assert 'agents' in applied_disable_entries
+        assert 'watcher' in applied_disable_entries
         print('ok')
         """,
         env_disable="watcher",
@@ -276,3 +280,43 @@ def test_help_still_renders_when_skills_is_disabled() -> None:
     )
     assert code == 0, err
     assert out.strip().endswith("ok")
+
+
+def test_env_disable_refuses_a_framework_module() -> None:
+    """Disabling framework code (identity, the surface machinery) would break the
+    framework, not scope the agent's view — `import ava` fails fast instead."""
+    code, _out, err = _run("import ava\n", env_disable="agent_identity")
+    assert code != 0
+    assert "ValueError" in err and "framework module ava.agent_identity" in err, err
+
+
+def test_runtime_disable_refuses_a_framework_module_and_its_members() -> None:
+    code, out, err = _run("""
+        from ava.sdk_surface.sdk_disable import apply_sdk_disable
+        for entry in ("sdk_surface", "agent_identity.establish"):
+            try:
+                apply_sdk_disable([entry])
+            except ValueError as exc:
+                print("refused", entry, "framework module" in str(exc))
+    """)
+    assert code == 0, err
+    assert out.splitlines()[:2] == [
+        "refused sdk_surface True",
+        "refused agent_identity.establish True",
+    ], out
+
+
+def test_unknown_names_and_already_disabled_namespaces_still_apply() -> None:
+    """A name that is no real `ava` submodule (a plugin namespace registered
+    later) stays disable-able, and a member of a namespace an earlier entry
+    already disabled does not trip the guard."""
+    code, out, err = _run("""
+        import ava
+        from ava.sdk_surface.sdk_disable import apply_sdk_disable, applied_disable_entries
+        apply_sdk_disable(["not_a_real_namespace"])
+        apply_sdk_disable(["agents"])
+        apply_sdk_disable(["agents.spawn"])
+        print(sorted(applied_disable_entries))
+    """)
+    assert code == 0, err
+    assert "['agents', 'agents.spawn', 'not_a_real_namespace']" in out, out

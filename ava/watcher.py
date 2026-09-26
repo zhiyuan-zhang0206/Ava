@@ -154,7 +154,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     not win. ``ava.agent_identity`` then lazily establishes identity from the env var
     on first use (``owns_loop=False``).
 
-    Plugin namespaces are loaded explicitly (``ava._ensure_plugins_loaded()``)
+    Plugin namespaces are loaded explicitly (``ava.ensure_plugins_loaded()``)
     before the script runs: a fresh child's ``import ava`` is the factory module
     with none of the agent process's plugin setattrs, so without this step
     ``ava.tasks`` (and every other plugin-registered namespace) would raise
@@ -270,7 +270,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         # module with none of the agent process's plugin setattrs. Identity is
         # set explicitly above; this is the symmetric step for plugin
         # namespaces.
-        "ava._ensure_plugins_loaded()\n"
+        "ava.ensure_plugins_loaded()\n"
         "try:\n"
         f"    runpy.run_path({str(script_path)!r}, run_name='__main__', init_globals={{'ava': ava}})\n"
         "finally:\n"

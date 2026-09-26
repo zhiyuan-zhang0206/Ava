@@ -258,7 +258,7 @@ def test_shell_hint_embeds_live_shell_run_contract(_load_ava_code_plugin: None):
     wrapper's signature or docstring drifts, this goes red and the hint follows
     (user ruling 2026-09-12)."""
     import ava as ava_sdk
-    from ava import _format_signature
+    from ava.sdk_surface.help import _format_signature
 
     hint = hint_for("shell")
 

@@ -369,7 +369,7 @@ def _module_doc_child_reference_violations(
 
 
 def _agent_visible_names(tree: ast.Module) -> set[str] | None:
-    """Mirror `ava/_exports/discovery.py:agent_visible_names` discovery, statically.
+    """Mirror `ava/sdk_surface/discovery.py:agent_visible_names` discovery, statically.
 
     Returns the set of names whose docstrings appear in agent-visible
     `help()` output for this module. `None` means "no `__all_for_ava__`
