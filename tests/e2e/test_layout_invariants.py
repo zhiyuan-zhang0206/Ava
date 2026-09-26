@@ -473,3 +473,83 @@ def test_keyboard_edges_leave_the_shell_intact(
         assert _shell_height_style(page) == ""
     finally:
         ctx.close()
+
+
+# Pinned message masking and edge continuity.
+_STICKY_SURFACE = """el => {
+  const style = getComputedStyle(el);
+  const top = getComputedStyle(el, '::before');
+  const line = getComputedStyle(el, '::after');
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  const alpha = color => {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, 1, 1);
+    return ctx.getImageData(0, 0, 1, 1).data[3];
+  };
+  return {
+    rect: el.getBoundingClientRect().toJSON(),
+    alpha: alpha(style.backgroundColor),
+    topAlpha: alpha(top.backgroundColor),
+    topStart: parseFloat(top.top),
+    topEnd: parseFloat(top.top) + parseFloat(top.height),
+    lineBottom: parseFloat(line.bottom),
+    lineHeight: parseFloat(line.height),
+  };
+}"""
+
+
+def _assert_sticky_sealed(page: Page, header_selector: str) -> dict[str, float]:
+    surface = page.locator(header_selector).evaluate(_STICKY_SURFACE)
+    assert surface["alpha"] == 255, "scrolling text can bleed through the header"
+    assert surface["topAlpha"] == 255, "top raster seam is not masked"
+    assert surface["topStart"] <= -1 and surface["topEnd"] == 0
+    assert surface["lineBottom"] == 0, "separator is detached from the header edge"
+    assert surface["lineHeight"] == 1
+    return surface["rect"]
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_pinned_message_seal(
+    width: int, theme: str, playwright_browser: Browser, frontend_target: str
+) -> None:
+    context = new_context(playwright_browser, width)
+    try:
+        page = open_page(
+            context,
+            frontend_target,
+            "/",
+            stub_api=not OVERRIDE_BASE_URL,
+            reconnect_sse=False,
+        )
+        wait_layout_settled(page)
+        # A transient DOM theme for CSS coverage, without changing stored preferences.
+        page.evaluate(
+            "theme => document.documentElement.classList.toggle('dark', theme === 'dark')", theme
+        )
+        row = page.locator('[data-item-id="1.2"]')
+        expect(row).to_be_visible()
+        header_selector = '[data-item-id="1.2"] [data-testid="card-toggle"]'
+        header = page.locator(header_selector)
+        if header.get_attribute("aria-expanded") == "false":
+            header.click()
+        row.evaluate("""el => {
+          const viewport = el.closest('[data-radix-scroll-area-viewport]');
+          viewport.scrollTop += el.getBoundingClientRect().top
+            - viewport.getBoundingClientRect().top + 100;
+        }""")
+        expect(header).to_have_attribute("data-stuck", "true")
+        page.mouse.move(1, 1)
+        resting = _assert_sticky_sealed(page, header_selector)
+        bar = page.locator('[data-testid="timeline-surface"] header').bounding_box()
+        assert bar is not None
+        assert abs(resting["top"] - (bar["y"] + bar["height"])) < 0.5
+        header.hover()
+        # Let a background-color transition reveal its final hover alpha.
+        page.wait_for_timeout(200)
+        assert _assert_sticky_sealed(page, header_selector) == resting, "hover changed pin geometry"
+    finally:
+        context.close()
