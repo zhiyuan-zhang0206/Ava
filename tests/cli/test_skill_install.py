@@ -76,7 +76,7 @@ def _commit_repo(repo: Path) -> str:
 
 
 def _installed_names() -> set[str]:
-    return {s["name"] for s in skills_mod._names()}
+    return {s["name"] for s in skills_mod.names()}
 
 
 def test_bare_standard_skill_from_local_path(unit_home: Path, tmp_path: Path) -> None:

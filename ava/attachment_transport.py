@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ava.files import _resolve
+from ava.files import resolve
 from ava.sdk_validation import coerce_str
 from shared.lm.attach_constants import (
     ATTACH_MAX_FILE_BYTES,
@@ -108,7 +108,7 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
             "ava.self.attach only works inside an agent turn (execute_code); "
             "outside a turn there is no runner to deliver the attachment"
         )
-    resolved = _resolve(path).resolve()
+    resolved = resolve(path).resolve()
     if not resolved.is_file():
         raise FileNotFoundError(f"path {str(path)!r} does not name an existing file ({resolved})")
     suffix = resolved.suffix.lower()

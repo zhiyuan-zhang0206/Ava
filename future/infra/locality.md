@@ -41,7 +41,7 @@ boundaries, already carried by codegen, and not debt.
    one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
    cover (`scripts/`, and any async pool left in `allowed`), or retire it if
    nothing remains.
-2. **Reach-in burn-down** (`private_imports`, 309 keys / 327 sites / 111
+2. **Reach-in burn-down** (`private_imports`, 298 keys / 315 sites / 109
    files), highest yield first: `cli/main.py` re-exports 121 private
    `cli.parsers.*._h_*` handlers so tests have one namespace to patch (a
    hand-maintained registry — bind handlers in their parser modules and patch
@@ -49,7 +49,7 @@ boundaries, already carried by codegen, and not debt.
    `shared.lm._plugin_providers`, `shared.agents.impersonation._impersonation_store`,
    `agent.graph._exec_protocol`, `agent._turn_progress`) each get a verdict:
    contract (export it) or internal (route callers through a door).
-   In `ava` (23 keys / 30 sites left), agent visibility is the
+   In `ava` (12 keys / 18 sites left), agent visibility is the
    `__all_for_ava__` whitelist — `lint_agent_docstrings` keys on it too — so a
    framework module the rest of the repo needs takes a public name without
    entering the agent's view (`ava/agent_identity.py` was the first, then
@@ -58,7 +58,12 @@ boundaries, already carried by codegen, and not debt.
    whose `post` / `patch` / `raise_from_response` plugins also use —
    `impersonation_replay`, `impersonation_launch`, and `mcp_config` — whose
    `read_servers` / `machine_config_path` / `builtin_mcp_paths` `cli` / `ops`
-   also reach through). Left, in
+   also reach through). The same underscore-drop applies to a private NAME
+   (not a whole module) reached across a package boundary inside `ava`:
+   `ava.shell.sessions.{current_session_generation, session_generation, reap,
+   create_session}`, the `ava.shell.background` submodule, `ava.files.resolve`,
+   `ava.agents.spawn_impl`, and `ava.skills.names` — none entered
+   `__all_for_ava__` either. Left, in
    order: `_extend`, whose public name
    is taken by the plugin-author `ava.extend` namespace; and the kernel's reads
    and writes of `ava/__init__.py` private render state (`_COMPACT_CLASSES`,

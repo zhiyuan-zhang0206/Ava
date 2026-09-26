@@ -342,15 +342,15 @@ class TestShellEntries:
         sent: dict[str, Any] = {}
         monkeypatch.setattr(
             _shell.sessions,
-            "_create_session",
+            "create_session",
             lambda name, **kw: created.update(name=name, **kw) or (42, "full"),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
-            _shell._background,
+            _shell.background,
             "allocate_output_path",
             lambda sid, _name: tmp_path / f"{sid}.log",  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(_shell._background, "notified_line", lambda *_a, **_kw: "line")  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_shell.background, "notified_line", lambda *_a, **_kw: "line")  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
             _shell.sessions,
             "send",

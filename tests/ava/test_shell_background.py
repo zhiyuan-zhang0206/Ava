@@ -1,5 +1,5 @@
 """ava.shell.run_background + the shared background-notice plumbing
-(ava/shell/_background.py).
+(ava/shell/background.py).
 
 The e2e tests run through the real PTY supervisor daemon + real bash
 (`_pty_sessions_env` fixture); POSIX-only, skip on Windows."""
@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 import ava
-from ava.shell import _background
+from ava.shell import background
 from shared.platform import IS_WINDOWS
 
 pytestmark = [
@@ -26,7 +26,7 @@ pytestmark = [
 
 def test_notified_line_structure(tmp_path: Path) -> None:
     log = tmp_path / "x.log"
-    line = _background.notified_line(
+    line = background.notified_line(
         "make build",
         agent_id=5,
         label="Background command 'build'",
@@ -46,7 +46,7 @@ def test_notified_line_structure(tmp_path: Path) -> None:
 
 
 def test_notified_line_keep_leaves_session_open(tmp_path: Path) -> None:
-    line = _background.notified_line(
+    line = background.notified_line(
         "sleep 1",
         agent_id=5,
         label="Background command 'nap'",
@@ -70,7 +70,7 @@ def test_notified_line_keep_leaves_session_open(tmp_path: Path) -> None:
 def test_notified_line_applies_notify_policy(
     tmp_path: Path, notify: str | None, expected_fragment: str
 ) -> None:
-    line = _background.notified_line(
+    line = background.notified_line(
         "make build",
         agent_id=5,
         label="Background command 'build'",
@@ -88,7 +88,7 @@ def test_notified_line_applies_notify_policy(
 
 def test_notified_line_rejects_unknown_notify(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="notify must be one of"):
-        _background.notified_line(
+        background.notified_line(
             "make build",
             agent_id=5,
             label="Background command 'build'",
@@ -101,7 +101,7 @@ def test_notified_line_rejects_unknown_notify(tmp_path: Path) -> None:
 
 def test_notified_line_rejects_multiline_cmd(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="single line"):
-        _background.notified_line(
+        background.notified_line(
             "a\nb",
             agent_id=5,
             label="x",
@@ -115,7 +115,7 @@ def test_notified_line_rejects_shell_active_label(tmp_path: Path) -> None:
     # label rides inside the double-quoted notice where only ${_ec} may expand;
     # shell-active characters must be rejected here, not just by callers.
     with pytest.raises(ValueError, match="shell-active"):
-        _background.notified_line(
+        background.notified_line(
             "echo hi",
             agent_id=5,
             label='x"; rm -rf ~; echo "',
@@ -133,7 +133,7 @@ def test_allocate_output_path_never_evicts_live_session_log(
     # while the session still runs — live sessions outrank the ring cap.
     from ava.shell import sessions as _sessions
 
-    d = _background.output_dir()
+    d = background.output_dir()
     d.mkdir(parents=True, exist_ok=True)
     for old_log in d.glob("*.log"):
         old_log.unlink()
@@ -141,33 +141,33 @@ def test_allocate_output_path_never_evicts_live_session_log(
     live_log = d / "7_cron.log"  # the oldest file, owned by live session 7
     live_log.write_text("standing watcher")
     os.utime(live_log, (base - 100, base - 100))
-    for i in range(_background._OUTPUT_KEEP + 5):
+    for i in range(background._OUTPUT_KEEP + 5):
         p = d / f"{100 + i}_seed.log"
         p.write_text("old")
         os.utime(p, (base + i, base + i))
     monkeypatch.setattr(_sessions, "list", lambda: {7: "cron"})  # pyright: ignore[reportUnknownArgumentType]
-    _background.allocate_output_path(999, "fresh")
+    background.allocate_output_path(999, "fresh")
     assert live_log.exists()
 
 
 def test_allocate_output_path_prunes_ring() -> None:
     # Logs live at a predictable spot: .shell_logs/<sid>_<name>.log in the
     # agent's workspace (the default base of the file/shell tools).
-    d = _background.output_dir()
+    d = background.output_dir()
     d.mkdir(parents=True, exist_ok=True)
     for old_log in d.glob("*.log"):
         old_log.unlink()
     # Seed more logs than the ring keeps, with strictly increasing mtimes.
     base = time.time() - 3600
-    for i in range(_background._OUTPUT_KEEP + 5):
+    for i in range(background._OUTPUT_KEEP + 5):
         p = d / f"{i}_seed.log"
         p.write_text("old")
         os.utime(p, (base + i, base + i))
-    path = _background.allocate_output_path(999, "fresh")
+    path = background.allocate_output_path(999, "fresh")
     assert path == d / "999_fresh.log"
     assert path.exists()  # touched up front: tailable before the command writes
     remaining = list(d.glob("*.log"))
-    assert len(remaining) <= _background._OUTPUT_KEEP
+    assert len(remaining) <= background._OUTPUT_KEEP
     assert path in remaining  # the newest survives the prune
 
 
@@ -195,7 +195,7 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     captured: dict[str, Any] = {}
     monkeypatch.setattr(
         _sessions,
-        "_create_session",
+        "create_session",
         lambda _name, cwd=None, ttl=None: (7, "full"),  # noqa: ARG005 — cwd/ttl are part of the patched signature  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_sessions, "send", lambda _id, cmd: captured.update(cmd=cmd))  # pyright: ignore[reportUnknownArgumentType]
@@ -223,7 +223,7 @@ def test_run_background_e2e_notice_log_and_close(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
 
     handle = ava.shell.run_background(
         "echo hello-bg; exit 3", name="test-bg", cwd=str(tmp_path), ttl=120
@@ -262,7 +262,7 @@ def test_run_background_failure_notify_reports_sigkill(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
 
     handle = ava.shell.run_background(
         "( bash -c 'kill -KILL $$' )",
@@ -299,7 +299,7 @@ def test_failed_cmd_closes_session_even_when_notice_fails(
     fake_cli = tmp_path / "fake-ava-fail"
     fake_cli.write_text("#!/bin/sh\nexit 1\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
 
     handle = ava.shell.run_background("false", name="test-bg-fail", cwd=str(tmp_path), ttl=120)
 
@@ -318,7 +318,7 @@ def test_run_background_keep_leaves_session(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)  # pyright: ignore[reportUnknownArgumentType]
 
     handle = ava.shell.run_background(
         "echo done", name="test-keep", cwd=str(tmp_path), keep=True, ttl=120
