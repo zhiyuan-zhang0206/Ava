@@ -322,7 +322,7 @@ ava.register_sdk_expand("tasks")
 
 # ── wrap ava.agents.spawn to add the fleet-only `label` arg ─────────────────
 # Replace-wrapper: it re-implements spawn to expose `label` (adding a keyword to
-# the surface, per the wrap contract) by calling `ava.agents._spawn_impl`
+# the surface, per the wrap contract) by calling `ava.agents.spawn_impl`
 # directly instead of `inner`. Declared short-circuit — `label` cannot thread
 # through the core spawn signature, so the wrapper owns the whole call; `inner`
 # is accepted only to satisfy the wrap protocol.
@@ -345,7 +345,7 @@ def _spawn_with_label(
             a preset is named inside it as {"preset": "name"} (task #4086).
         label: initial role name; omitted = auto-named.
     """
-    return ava.agents._spawn_impl(
+    return ava.agents.spawn_impl(
         prompt=prompt,
         fork_from=fork_from,
         machine=machine,

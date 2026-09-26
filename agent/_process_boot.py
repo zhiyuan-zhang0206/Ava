@@ -244,11 +244,11 @@ async def reconcile_agent_watchers(agent_id: int) -> bool:
         if not running:
             return True
         alive = sessions.list()
-        generation = sessions._current_session_generation()
+        generation = sessions.current_session_generation()
         return all(
             row["generation"] == generation
             and row["session_id"] in alive
-            and sessions._session_generation(row["session_id"]) == generation
+            and sessions.session_generation(row["session_id"]) == generation
             and (row["kind"] != "cron" or (row["template_version"] or 0) >= TEMPLATE_VERSION)
             for row in running
         )

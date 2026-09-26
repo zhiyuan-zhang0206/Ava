@@ -974,7 +974,7 @@ def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
         # No print output — cwd_note is set in state for the after-exec hook
         assert ava.state.ava_code__cwd_note is not None  # type: ignore[union-attr]
         assert f"Working directory set to {repo}" in ava.state.ava_code__cwd_note  # type: ignore[union-attr]
-        assert "demo-proj" in {s["name"] for s in ava_skills._names()}
+        assert "demo-proj" in {s["name"] for s in ava_skills.names()}
     finally:
         ava.state = None
         ava.state_update = None

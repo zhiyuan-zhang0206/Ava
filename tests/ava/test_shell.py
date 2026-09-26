@@ -169,7 +169,7 @@ def test_run_default_cwd_is_workspace(tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 def test_run_default_cwd_is_home_before_identity() -> None:
-    """Identity not bound (pre-bootstrap) → falls back to $HOME — consistent with ava.files._resolve's
+    """Identity not bound (pre-bootstrap) → falls back to $HOME — consistent with ava.files.resolve's
     pre-identity base, both surfaces share the same base in any state.
 
     Manually save/restore instead of monkeypatch: this module's `_isolated_agent` (usefixtures)

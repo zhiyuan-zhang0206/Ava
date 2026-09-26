@@ -389,7 +389,7 @@ def spawn(
     explicitly permits only the listed `web` or `understand` capability; `mcps`
     and `ui` are always disabled for isolated agents.
     """
-    return _spawn_impl(
+    return spawn_impl(
         prompt=prompt,
         fork_from=fork_from,
         machine=machine,
@@ -408,7 +408,7 @@ def retry_launch(agent_id: int) -> int:
     return _client.retry_launch(agent_id)
 
 
-def _spawn_impl(
+def spawn_impl(
     *,
     prompt: str | None,
     fork_from: int | None,

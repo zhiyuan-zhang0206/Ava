@@ -566,7 +566,7 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]
     from ava import skills
     from shared.packages.skills.skill_names import match_key
 
-    loaded = skills._names()
+    loaded = skills.names()
     by_ident = {match_key(skills.identifier(skill)): skill for skill in loaded}
     by_name = {match_key(skill["name"]): skill for skill in loaded}
     selected_targets = {

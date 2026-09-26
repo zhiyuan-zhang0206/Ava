@@ -273,14 +273,14 @@ def test_agent_shell_session(
         return None
 
     monkeypatch.setattr(sessions, "_record_ttl", _noop_record_ttl)
-    sessions._create_session("probe", ttl=120)
+    sessions.create_session("probe", ttl=120)
     launches = [
         a for a in captured_argv if a[:3] == [sys.executable, "-m", "shared.sessions.pty.cli"]
     ]
     assert launches, f"no pty CLI launch; saw {captured_argv!r}"
     argv = launches[-1]
     assert argv[3:5] == ["ava-agent-1-shell-3-probe", "new"]  # <name> <op>
-    _assert_clean(argv, label="ava.shell.sessions._create_session")
+    _assert_clean(argv, label="ava.shell.sessions.create_session")
     # the envfile is 0600 and holds only the host-scope forward view — the
     # secrets must not be in it either (they never reach the shell's env)
     envfile = Path(argv[-1])
