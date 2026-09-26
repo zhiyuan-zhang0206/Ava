@@ -1,8 +1,9 @@
 # External agent impersonation
 
-A trusted Codex or Claude Code process on an Ava agent's machine can take over
-its identity. Preparation drains native work and saves its checkpoint before
-activation. It does not ask the native model to approve. TTL is an explicit
+A trusted Codex, Claude Code or DeepSeek Harness (dsh) process on an Ava
+agent's machine can take over its identity. Preparation drains native work and
+saves its checkpoint before activation. It does not ask the native model to
+approve. TTL is an explicit
 recovery deadline, for renewal and the initial takeover alike — estimate it
 short: take the smallest window that covers the next slice (about 30 minutes
 when the work ahead looks like about an hour) and extend by renewal. A short
@@ -27,7 +28,7 @@ a usage error before anything runs.
 
 `--name` describes this session; `--as` is a free executor display name. The CLI
 also records observed process names, IDs, executable and parent chain, separately
-from the declaration. `--provider` selects `codex` or `claude` relay transport.
+from the declaration. `--provider` selects `codex`, `claude` or `dsh` relay transport.
 Codex's own thread UUID is a provider address, not the Ava session handle.
 Preserve `CODEX_HOME` and optionally supply `--codex-remote` so the native relay
 reaches the owning server. A Claude takeover launched through the launcher starts
@@ -36,6 +37,10 @@ stub the request writes, and the executor arms no Monitor watch — if no relay
 heartbeat starts, fall back to the manual flow. With `--no-relay-resident`, or on
 a host that starts the relay by hand, start the Monitor immediately after the
 request, armed with `timeout_ms: 1800000` and re-armed at each expiry notice.
+A dsh takeover runs from a DeepSeek Harness session that loaded the Ava relay
+plugin: the request writes the relay credential to the stub the plugin exports
+(`DSH_AVA_RELAY_STUB`) instead of printing it, fails before creating a lease
+when the plugin is absent, and the plugin starts the relay by itself.
 See [host setup](agent-impersonation-hosts.md).
 
 The resident Claude wrapper consumes one request per session. A second request
@@ -48,7 +53,7 @@ The response returns a per-agent integer `id` / `session_id`, starting at zero.
 There is no controller credential: control commands are authorized by the
 session id plus caller attestation — each command must run from a process that
 descends from the session's recorded controller tree (the executor process that
-made the request). Claude's relay uses the separate scoped
+made the request). The claude and dsh relays use the separate scoped
 `AVA_IMPERSONATION_RELAY_TOKEN`; that credential belongs to the relay, never to
 the controller. Status/list responses omit credentials.
 
