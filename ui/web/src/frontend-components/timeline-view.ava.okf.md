@@ -48,7 +48,7 @@ After a compact, `display.compact_history_sessions` controls automatic history p
 
 ## Deep collapse
 
-`runs.classifyItem` classifies items as primary (agent replies + human inbound, always visible) / secondary (thinking / code / output, inter-agent messages, system inbound, compact, system_prompt, note marker) / bare (ephemeral marker). Adjacent secondary items form a `TurnBlock`; Details All/Last/None controls its default expansion, with Last opening the active final turn.
+`runs.classifyItem` classifies items as primary (agent replies + human inbound, always visible) / secondary (thinking / code / output, inter-agent messages, system inbound, compact, system_prompt, note marker) / bare (ephemeral marker). Adjacent secondary items form a `TurnBlock`; Details All/Last/None controls its default expansion, with Last opening the active final turn. In None mode an opened turn keeps its nested blocks collapsed (each opens on its own click); All/Last cascade the expansion into them (task #4780).
 
 ## Turn timer
 
