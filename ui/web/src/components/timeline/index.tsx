@@ -49,7 +49,10 @@
 //    All blocks follow the global Details mode (useContentToggle
 //    — DB-backed user settings — acting as expand-all / collapse-all), the
 //    system prompt defaults collapsed, and the conversation / marker kinds default
-//    expanded; clicking a header overrides one item. The ephemeral system markers
+//    expanded; clicking a header overrides one item. In None mode a turn that
+//    is opened by hand reveals its child rows collapsed — each child opens on
+//    its own click (#4780); All/Last keep the one-click cascade into the
+//    children (#659). The ephemeral system markers
 //    (compact_done / cancelled / error / unrecognized) have no card and render
 //    bare. messageCardConfig is the pure per-kind visual mapping; cardConfigFor
 //    memoizes it per item ref + resolved color map (WeakMap) so a row's config
@@ -1009,6 +1012,8 @@ export function TimelineView({
     index: number,
     source: "buffer" | "canonical",
     rank: number,
+    // Set by an open parent turn in All/Last modes only — None keeps the
+    // children collapsed when the turn is opened by hand (#4780).
     forceExpand?: boolean,
   ) => {
     const renderKey = source === "buffer"
@@ -1267,9 +1272,12 @@ export function TimelineView({
                         {virtualEnabled && childRange.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: childRange.before }} aria-hidden="true" /> : null}
                         {group.items.slice(childRange.start, childRange.end).map((it, offset) => {
                           const index = childRange.start + offset;
+                          // Task #4780 (user ruling 2026-09-26): in None mode the turn was expanded by
+                          // hand — reveal its child rows COLLAPSED (each opens on its own click); All/Last
+                          // keep the #659 one-click cascade for their auto-expand paths.
                           return (
                             <div key={virtualRows[index]} data-virtual-row={virtualRows[index]}>
-                              {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, runExpanded)}
+                              {renderRow(it, entry.indexOffset + group.startIndex + index, entry.source, entry.rank, effectiveDetailsMode !== "none")}
                             </div>
                           );
                         })}

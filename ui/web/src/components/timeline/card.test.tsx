@@ -74,10 +74,11 @@ describe("messageCardConfig", () => {
     expect(cfg!.fixedDefault).toBe(false);
   });
 
-  it("agent_reasoning → rich=reasoning", () => {
+  it("agent_reasoning → rich=reasoning, collapsed when a None-mode turn is opened", () => {
     const cfg = messageCardConfig(item("agent_reasoning"));
     expect(cfg!.rich).toBe("reasoning");
-    expect(cfg!.fixedDefault).toBe(true);
+    // Task #4780: a turn opened by hand keeps its children collapsed.
+    expect(cfg!.fixedDefault).toBe(false);
   });
 
   it("agent_code → rich=code", () => {

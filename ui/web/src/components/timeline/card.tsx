@@ -76,8 +76,13 @@ export interface CardConfig {
   readonly bg: string;
   // Card-wide text color (lifecycle / memory markers tint their whole card).
   readonly cardText?: string;
-  // Default expanded state — in All mode this is overridden to true,
-  // in Last mode overridden based on position, in None mode overridden to false.
+  // The kind's own default for a revealed turn child (None mode; All/Last are
+  // decided by the mode table). False for nearly every kind — a turn opened by
+  // hand shows its children COLLAPSED (user ruling 2026-09-26, task #4780, so
+  // each child opens on its own click). True only where the content must be
+  // visible the moment the block is revealed: attach thumbnails ARE the
+  // attached media (open by default — user ruling 2026-08-26; kept open when
+  // the 2026-08-30 ruling folded it into the details block).
   readonly fixedDefault: boolean;
   // Whether the header stamps the item timestamp (left-aligned after the title).
   readonly headerTs: boolean;
@@ -130,7 +135,7 @@ export function messageCardConfig(
         title: null,
         border: colors.reasoning.border,
         bg: colors.reasoning.bg ?? "",
-        fixedDefault: true,
+        fixedDefault: false,
         headerTs: true,
       };
     case "agent_code":
@@ -141,7 +146,7 @@ export function messageCardConfig(
         // Deeper border than agent_chat — the tool call is the load-bearing action.
         border: colors.agent_code.border,
         bg: "bg-card",
-        fixedDefault: true,
+        fixedDefault: false,
         headerTs: true,
       };
     case "code_output":
@@ -151,7 +156,7 @@ export function messageCardConfig(
         title: null,
         border: colors.code_output.border,
         bg: colors.code_output.bg ?? "",
-        fixedDefault: true,
+        fixedDefault: false,
         headerTs: true,
       };
     case "agent_chat": {
@@ -169,8 +174,10 @@ export function messageCardConfig(
       };
     }
     case "attach":
-      // Attached media (ava.self.attach) — always open so the image
-      // thumbnails are visible without a click (user ruling 2026-08-26).
+      // Attached media (ava.self.attach) — open by default so the image
+      // thumbnails are visible without a click once the card is revealed
+      // (user ruling 2026-08-26; kept open when the 2026-08-30 ruling folded
+      // it into the details block).
       return {
         rich: null,
         icon: Paperclip,
