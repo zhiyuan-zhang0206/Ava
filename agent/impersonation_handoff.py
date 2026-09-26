@@ -126,7 +126,7 @@ async def deliver_handoff(
     import httpx
 
     from agent.impersonation import flush_checkpoint
-    from ava._impersonation_events import consume_recorded_events
+    from ava.impersonation_replay import consume_recorded_events
     from shared.log import logger
 
     try:

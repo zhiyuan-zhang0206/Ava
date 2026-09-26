@@ -186,7 +186,7 @@ def test_v1_attachment_send_message_certifies_from_the_central_receipt(
     """Attachment-owned ``ava.agents.send_message`` completes only on exact replay."""
     import httpx
 
-    from ava import _impersonation_events as reader
+    from ava import impersonation_replay as reader
     from services.agent_host.impersonation_events import reconcile_one
 
     owner, _ = native_checkpoint

@@ -438,7 +438,7 @@ def test_extra_before_final_read_refuses_and_late_extra_alerts_without_demoting(
     v1_lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ava import _impersonation_events as reader
+    from ava import impersonation_replay as reader
     from services.agent_host.impersonation_events import _watch_completed_manifest_integrity
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "No expected events")
@@ -611,7 +611,7 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
 
     import httpx
 
-    from ava import _impersonation_events as reader
+    from ava import impersonation_replay as reader
     from cli.commands.impersonation import _send
     from services.agent_host.impersonation_events import reconcile_one
     from shared.agents.messages import delivery_outbox as outbox

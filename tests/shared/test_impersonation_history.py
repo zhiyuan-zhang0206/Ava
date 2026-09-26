@@ -314,7 +314,7 @@ def test_late_events_refresh_handoff_after_native_receipt_and_manifest_closes_re
     import httpx
     from psycopg.types.json import Jsonb
 
-    from ava import _impersonation_events as reader
+    from ava import impersonation_replay as reader
     from services.agent_host.impersonation_events import reconcile_one
 
     def workspace_for_agent(_agent_id: int) -> Path:

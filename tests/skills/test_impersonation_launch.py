@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ava._impersonation_launch import bootstrap_message
+from ava.impersonation_launch import bootstrap_message
 from shared import coding_session_owner
 
 _REFERENCE = (
