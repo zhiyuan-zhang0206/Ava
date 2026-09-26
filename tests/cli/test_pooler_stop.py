@@ -5,8 +5,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import secrets
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -26,9 +28,98 @@ from shared.cluster import ownership
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
 from shared.pg_tools import throwaway_postgres
-from tests._containers import _free_port, _wait_port
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="native POSIX pooler")
+
+
+# Port 1 on loopback never listens for an unprivileged test: a refused dial is
+# the stop path's proof that this home has no Redis, and no other process can
+# take the port between allocation and use (the unanchored sentinel's choice).
+_ABSENT_REDIS = "redis://127.0.0.1:1"
+_BIND_ATTEMPTS = 5
+# The pooler port comes from a range no OS ephemeral allocator hands out (macOS
+# 49152+, Linux 32768+) and no cluster port block uses (18000-20000): a draining
+# pooler closes its listener while it waits, and a port-0 allocation elsewhere in
+# the suite must not be able to land on it before the final stop checks custody.
+_PRIVATE_PORTS = range(21000, 30000)
+
+
+def _private_port() -> int:
+    for _attempt in range(64):
+        port = _PRIVATE_PORTS[secrets.randbelow(len(_PRIVATE_PORTS))]
+        with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+        return port
+    pytest.fail("no free private pooler port")
+
+
+def _pooler_config(directory: Path, port: int, backend_port: int) -> str:
+    return (
+        "[databases]\n"
+        f"test = host=127.0.0.1 port={backend_port} dbname=ava_citest user=ava\n"
+        "[pgbouncer]\nlisten_addr=127.0.0.1\n"
+        f"listen_port={port}\nauth_type=trust\nauth_file={directory / 'userlist.txt'}\n"
+        f"pidfile={directory / 'pgbouncer.pid'}\nlogfile={directory / 'pgbouncer.log'}\n"
+        "pool_mode=transaction\nunix_socket_dir=\nadmin_users=ava\n"
+    )
+
+
+def _kill(identity: OwnedProcess | None) -> None:
+    if identity is not None and identity.live():
+        process = psutil.Process(identity.pid)
+        assert OwnedProcess.capture(process) == identity
+        process.kill()
+        with contextlib.suppress(psutil.NoSuchProcess):
+            process.wait(timeout=5)
+
+
+def _owned_listener(identity: OwnedProcess | None, port: int) -> bool:
+    """Whether `identity` alone listens on `port` (bounded wait for its bind)."""
+    deadline = time.monotonic() + 5
+    while identity is not None and identity.live() and time.monotonic() < deadline:
+        try:
+            if ownership.require_listener(identity, port):
+                return True
+        except RuntimeError:
+            # A foreign listener took the port between allocation and bind, or
+            # the pooler has not bound yet; only our own listener proves custody.
+            if ownership.strict_listeners_on(port):
+                return False
+        time.sleep(0.01)
+    return False
+
+
+def _start_private_pooler(
+    binary: str, directory: Path, backend_port: int
+) -> tuple[OwnedProcess, int]:
+    """Start the fixture pooler on a port it provably owns.
+
+    A free-port probe is only a hint: another process can bind the port before
+    PgBouncer does. Custody is proven by the listener table, and a lost port is
+    retried on a fresh one instead of failing the test that follows.
+    """
+    config = directory / "pgbouncer.ini"
+    record = directory / "pgbouncer.pid"
+    for _attempt in range(_BIND_ATTEMPTS):
+        port = _private_port()
+        config.write_text(_pooler_config(directory, port, backend_port))
+        record.unlink(missing_ok=True)
+        subprocess.run(  # noqa: S603 — private fixture configuration and captured native process
+            [binary, "-d", str(config)], check=True, capture_output=True, timeout=5
+        )
+        deadline = time.monotonic() + 5
+        while not record.exists():
+            assert time.monotonic() < deadline, "private pooler did not publish its PID"
+            time.sleep(0.01)
+        identity = ownership.pooler(config, record)
+        if _owned_listener(identity, port):
+            assert identity is not None
+            return identity, port
+        _kill(identity)
+    pytest.fail(f"no private pooler port could be bound in {_BIND_ATTEMPTS} attempts")
 
 
 @pytest.fixture
@@ -41,37 +132,17 @@ def native_pooler(
     monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
     monkeypatch.setattr(pooler, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:12345/test")
-    monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
+    monkeypatch.setattr(settings.data_plane, "redis_url", _ABSENT_REDIS)
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
-    port = _free_port()
     directory = tmp_path / "pgbouncer"
     directory.mkdir()
     config = directory / "pgbouncer.ini"
-    record = directory / "pgbouncer.pid"
     (directory / "userlist.txt").write_text('"ava" ""\n')
     with throwaway_postgres() as direct:
-        backend = urlsplit(direct)
-        config.write_text(
-            "[databases]\n"
-            f"test = host=127.0.0.1 port={backend.port} dbname=ava_citest user=ava\n"
-            "[pgbouncer]\nlisten_addr=127.0.0.1\n"
-            f"listen_port={port}\nauth_type=trust\nauth_file={directory / 'userlist.txt'}\n"
-            f"pidfile={record}\nlogfile={directory / 'pgbouncer.log'}\n"
-            "pool_mode=transaction\nunix_socket_dir=\nadmin_users=ava\n"
-        )
-        subprocess.run(  # noqa: S603 — private fixture configuration and captured native process
-            [binary, "-d", str(config)], check=True, capture_output=True, timeout=5
-        )
-        identity = None
+        backend_port = urlsplit(direct).port
+        assert backend_port is not None
+        identity, port = _start_private_pooler(binary, directory, backend_port)
         try:
-            _wait_port(port, timeout=5)
-            deadline = time.monotonic() + 5
-            while not record.exists():
-                assert time.monotonic() < deadline, "private pooler did not publish its PID"
-                time.sleep(0.01)
-            identity = ownership.pooler(config, record)
-            assert identity is not None
-            ownership.require_listener(identity, port)
             with psycopg.connect(direct, autocommit=True) as conn:
                 conn.execute("CREATE TABLE pooler_stop_receipt (value integer)")
             yield (
@@ -80,14 +151,7 @@ def native_pooler(
                 direct,
             )
         finally:
-            if identity is None and record.exists():
-                identity = ownership.pooler(config, record)
-            if identity is not None and identity.live():
-                process = psutil.Process(identity.pid)
-                assert OwnedProcess.capture(process) == identity
-                process.kill()
-                with contextlib.suppress(psutil.NoSuchProcess):
-                    process.wait(timeout=5)
+            _kill(identity)
 
 
 @pytest.mark.parametrize(
