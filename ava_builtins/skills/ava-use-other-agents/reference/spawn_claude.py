@@ -73,6 +73,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from _claude_first_run import _preset_claude_first_run  # noqa: E402
+from _claude_panel import _check_logged_in, _claude_ui_ready  # noqa: E402
 
 _DEFAULT_TTL_SECONDS = 24 * 3600
 
@@ -156,15 +157,6 @@ def _contract_path() -> Path:
     return Path(__file__).resolve().parent / "collaboration_protocol.md"
 
 
-def _claude_ui_ready(output: str) -> bool:
-    """Require the title and a composer cue, normalizing Unicode prompt spacing."""
-    normalized = re.sub(r"[^\S\r\n]", " ", output)
-    composer = "? for shortcuts" in normalized or (
-        bool(re.search(r"(?m)^ *\u276f ", normalized)) and "bypass permissions on" in normalized
-    )
-    return bool(re.search(r"\bClaude\s+Code\b", normalized)) and composer
-
-
 def _check_missing_claude(failure_marker: Path | None, output: str = "") -> None:
     # A launched shell has a private marker. Its echoed command can wrap into
     # arbitrary screen lines, so its screen text is never failure evidence.
@@ -203,6 +195,7 @@ def _wait_for_ready(sid: int, timeout: float = 30.0, *, failure_marker: Path | N
                 "in PATH or $HOME/.local/bin/claude"
             ) from exc
         _check_missing_claude(failure_marker, output)
+        _check_logged_in(output)
         if _claude_ui_ready(output):
             time.sleep(2)  # brief stability pause
             try:
@@ -211,6 +204,7 @@ def _wait_for_ready(sid: int, timeout: float = 30.0, *, failure_marker: Path | N
                 _check_missing_claude(failure_marker)
                 raise RuntimeError(f"Claude session {sid} exited before it became ready") from exc
             _check_missing_claude(failure_marker, stable)
+            _check_logged_in(stable)
             if _claude_ui_ready(stable):
                 print("  -> ready (Claude Code UI)")
                 return
