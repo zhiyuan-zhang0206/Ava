@@ -22,7 +22,7 @@ from agent.graph._exec import exec_node
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_checkpoint
 from agent.startup import _wrap_saver_writes_with_nstep_interval
-from ava._external_state import encode_plugin_delta
+from ava.external_state import encode_plugin_delta
 from shared.agents import impersonation as leases
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.caller_identity import CallerIdentity

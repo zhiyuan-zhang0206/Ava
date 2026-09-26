@@ -14,7 +14,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava.sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.config import settings
 from shared.lm._call import answer_text

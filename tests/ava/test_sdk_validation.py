@@ -1,7 +1,7 @@
 """Unified SDK argument validation — the trailing-comma guard.
 
 Every ava.* entry point validates its own arguments through the shared
-`ava._sdk_validation` helpers (one implementation, user ruling 2026-08-28):
+`ava.sdk_validation` helpers (one implementation, user ruling 2026-08-28):
 
 - string-expected arguments unwrap a one-element list/tuple whose element is a
   string (the LLM trailing-comma class that 422'd the gateway — issue #1343,
@@ -31,7 +31,7 @@ from ava import files as _files
 from ava import shell as _shell
 from ava import ui as _ui
 from ava import watcher as _watcher
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava.sdk_validation import coerce_str, coerce_typed
 
 # ── helper units ─────────────────────────────────────────────────────────────
 

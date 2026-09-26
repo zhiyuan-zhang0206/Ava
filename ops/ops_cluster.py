@@ -591,8 +591,8 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     result also carries this runner's enabled MCP names as phase-2 groundwork.
     """
     from ava import skills
-    from ava._commands import discover_commands
     from ava._mcp_config import load_mcp_config
+    from ava.composer_commands import discover_commands
     from shared.mcp_enabled import read_enabled
 
     cwd, wanted = _agent_skill_view_inputs(pool, agent_id)

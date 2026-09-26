@@ -335,10 +335,10 @@ def test_wrap_captures_the_base_callable_below_a_metering_recorder(
     plugins load) is not a wrap layer. A wrap captures and chains over the base
     callable below it — so clear_wraps restores the base, and no stale recorder
     stays alive inside the wrap chain."""
-    from ava import _sdk_metering
+    from ava import sdk_metering
 
     ns, fn = probe
-    ns.fn = _sdk_metering._make_recorder(fn, "probe.fn")
+    ns.fn = sdk_metering._make_recorder(fn, "probe.fn")
 
     with PluginContext("myplugin"):
         wrap("probe.fn", lambda inner, *a, **kw: inner(*a, **kw))  # pyright: ignore[reportUnknownArgumentType]

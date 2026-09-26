@@ -19,7 +19,7 @@ onto Ava as a single installed plugin under `<dest_root>/<name>/` that contribut
   (`ava/_mcp_config.py`, scanning `~/.ava/plugins/*/.mcp.json`) merges it in —
   so the bundled servers connect on next use, no extra wiring.
 - its **commands** (when the plugin ships `commands/`): the directory is copied
-  to `<dest_root>/<name>/commands/`, where `ava/_commands.py:discover_commands`
+  to `<dest_root>/<name>/commands/`, where `ava/composer_commands.py:discover_commands`
   (scanning `~/.ava/plugins/*/commands/`) surfaces them as composer `/`-commands —
   no extra wiring.
 

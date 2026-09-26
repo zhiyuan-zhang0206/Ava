@@ -1,10 +1,10 @@
 """Composer commands endpoint — `GET /api/commands`.
 
-Lists the registered prompt templates (see `ava._commands`) for the web
+Lists the registered prompt templates (see `ava.composer_commands`) for the web
 Composer's `/`-autocomplete. Read-only filesystem scan; no auth beyond the
 gateway's default session gate. Only the metadata the dropdown needs is
 returned — the body is never sent to the browser, since expansion happens
-server-side in the agent's claim node (`ava._commands.expand_command`).
+server-side in the agent's claim node (`ava.composer_commands.expand_command`).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ _AGENT_SKILL_VIEW_TIMEOUT_S = 3.0
 
 def _local_commands() -> list[CommandItem]:
     """The gateway-local fallback and backwards-compatible no-agent view."""
-    from ava._commands import discover_commands
+    from ava.composer_commands import discover_commands
 
     return [
         CommandItem(

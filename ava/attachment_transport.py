@@ -11,8 +11,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ava._sdk_validation import coerce_str
 from ava.files import _resolve
+from ava.sdk_validation import coerce_str
 from shared.lm.attach_constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_LABEL_CHARS,

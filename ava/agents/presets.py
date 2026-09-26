@@ -8,7 +8,7 @@ from datetime import datetime
 
 from ava import _gateway_client as _client
 from ava._gateway_client import PresetNotFoundError as PresetNotFoundError
-from ava._sdk_validation import coerce_str
+from ava.sdk_validation import coerce_str
 
 
 @dataclass

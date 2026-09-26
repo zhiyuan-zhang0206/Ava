@@ -12,7 +12,7 @@ import tempfile
 from typing import Any
 
 import ava._watcher_reconcile as _reconcile
-from ava._sdk_validation import coerce_str
+from ava.sdk_validation import coerce_str
 from ava.shell import _background
 from ava.shell import sessions as _sessions
 from shared.daemon.schedules.watcher import (

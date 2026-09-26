@@ -3,7 +3,7 @@
 from typing import NoReturn
 
 from ava import agent_identity
-from ava._sdk_validation import coerce_str
+from ava.sdk_validation import coerce_str
 from shared.lifecycle import AgentImpersonation
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 

@@ -28,7 +28,7 @@ Two consumers asked for it (issue #40):
 | `sdkWraps` | the wrapper does not call `inner` exactly once — a short-circuit or a retry, i.e. the wrap changed control flow | the wrap target (`files.read`) |
 | `systemPromptSections` | the contributor returns a non-empty section at prompt-build time (spawn / compact only — no per-turn cost) | the section function name |
 | `state` | — | covered by the `hooks` record: plugin state writes travel through hook returns, so a separate probe would double-count |
-| `sdkNamespaces` | — | already metered as `sdk_call` by `ava/_sdk_metering.py`; counting it here too would double-count |
+| `sdkNamespaces` | — | already metered as `sdk_call` by `ava/sdk_metering.py`; counting it here too would double-count |
 
 **Only plugin registrations are recorded.** `plugin` is `None` for the
 framework's own hooks and prompt sections (registered outside a `PluginContext`)
