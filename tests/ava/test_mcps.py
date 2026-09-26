@@ -1347,7 +1347,7 @@ def test_unknown_tool_keeps_kwargs_signature(mock_session: MagicMock) -> None:
 def test_help_renderer_shows_real_params_for_mcp_tool(mock_session: MagicMock) -> None:
     """ava.help's signature renderer (_format_signature) displays real parameter names for MCP tools,
     no longer (**kwargs: Any)."""
-    from ava import _format_signature
+    from ava.sdk_surface.help import _format_signature
 
     mock_session.list_tools.return_value = MagicMock(
         tools=[
