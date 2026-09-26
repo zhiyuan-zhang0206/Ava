@@ -25,7 +25,7 @@ from unittest.mock import patch
 import pytest
 
 import ava
-import ava._boot
+import ava.agent_identity
 
 # Permission tests are ineffective when run as root (root bypasses all fs permissions). CI container
 # defaults to root, local dev / prod is non-root.
@@ -38,7 +38,7 @@ _skip_if_root = pytest.mark.skipif(
 def no_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Simulate pre-bootstrap process (conftest's global `_agent_id = 1` is removed),
     relative path falls back to `$HOME` resolution."""
-    monkeypatch.setattr(ava._boot, "_agent_id", None)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
 

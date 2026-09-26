@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent import state as state_module
-from ava import _boot, external
+from ava import agent_identity, external
 from ava._external_state import decode_plugin_delta, load_snapshot
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
@@ -48,8 +48,8 @@ def native_checkpoint(
     for name, value in registrations:
         monkeypatch.setattr(state_module, name, value)
     monkeypatch.setattr(state_module, "AgentState", state_module.AgentState)
-    monkeypatch.setattr(_boot, "_external_identity", None)
-    monkeypatch.setattr(_boot, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_external_identity", None)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
     monkeypatch.setattr(ava, "state", None)
     monkeypatch.setattr(ava, "state_update", None)
 
@@ -107,7 +107,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
     with external.attach(lease["id"]):
         assert agent_id == ava.self.AGENT_ID
-        assert _boot.require_actor() == f"agent:{agent_id}"
+        assert agent_identity.require_actor() == f"agent:{agent_id}"
         assert ava.state.messages[0].content == "Native task"
         assert handle.read().seen == {"native"}
         handle.update({"seen": {"external"}})
@@ -285,8 +285,8 @@ def test_external_memory_write_uses_borrowed_identity(
 
     owner, _ = native_checkpoint
     stale_id = owner.agent_id + 1000
-    monkeypatch.setattr(_boot, "_agent_id", stale_id if stale_process_identity else None)
-    monkeypatch.setattr(_boot, "_owns_loop", False)
+    monkeypatch.setattr(agent_identity, "_agent_id", stale_id if stale_process_identity else None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", False)
     monkeypatch.setitem(vars(ava), "memory", memory_sdk)
     monkeypatch.setattr(paths, "workspace_dir", workspace)
     monkeypatch.setattr(paths, "memory_dir", lambda: tmp_path / "shared")
@@ -330,8 +330,8 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
         return tmp_path / str(agent_id)
 
     owner, _ = native_checkpoint
-    monkeypatch.setattr(_boot, "_agent_id", owner.agent_id + 1000)
-    monkeypatch.setattr(_boot, "_owns_loop", False)
+    monkeypatch.setattr(agent_identity, "_agent_id", owner.agent_id + 1000)
+    monkeypatch.setattr(agent_identity, "_owns_loop", False)
     monkeypatch.setattr(paths, "workspace_dir", workspace)
     monkeypatch.setattr(notes, "workspace_dir", workspace)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)

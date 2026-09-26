@@ -268,12 +268,12 @@ def test_chain_read_failure_degrades_and_is_not_cached(chain: _FakeChain) -> Non
 def test_chain_read_is_cached_per_process(
     chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("ava._boot._agent_id", 1)
+    monkeypatch.setattr("ava.agent_identity._agent_id", 1)
     _write_entry(600351, "rules", _wrap("cached block"))
     chain.rows = [_local_row(600351)]
     assert inherit.inherited_memory_note() is not None
     assert inherit.inherited_memory_note() is not None
-    assert chain.calls == [1]  # the boot identity in tests; read once
+    assert chain.calls == [1]  # the established agent id; read once
 
 
 def test_content_is_deterministic(chain: _FakeChain) -> None:

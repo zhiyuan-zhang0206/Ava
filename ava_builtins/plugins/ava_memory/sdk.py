@@ -593,7 +593,7 @@ def write(
     description = coerce_str(description, "description", allow_none=True)
     tags = coerce_typed(tags, "tags", (list, tuple), allow_none=True)
     store = coerce_str(store, "store")
-    from ava._boot import require_agent_id
+    from ava.agent_identity import require_agent_id
 
     agent_id = require_agent_id()
     entry, is_shared = _entry_path(slug, store, agent_id)

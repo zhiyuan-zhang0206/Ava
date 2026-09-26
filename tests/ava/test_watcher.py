@@ -642,7 +642,7 @@ def test_launch_carries_agent_and_session_to_child(
     boot = _boot_text(wid)
     # Identity is inlined; ava is imported for init_globals
     assert f'os.environ["AVA_AGENT_ID"] = "{_agent_row}"' in boot
-    assert "ava._boot.establish" not in boot
+    assert "ava.agent_identity.establish" not in boot
     assert "import ava" in boot
     assert "runpy.run_path" in boot
     assert "init_globals" in boot
@@ -670,7 +670,7 @@ def test_launch_writes_script_verbatim_and_runs_via_runpy(
     assert "runpy.run_path" in boot
     # Identity is inlined into the bootstrap
     assert f'os.environ["AVA_AGENT_ID"] = "{_agent_row}"' in boot
-    assert "ava._boot.establish" not in boot
+    assert "ava.agent_identity.establish" not in boot
     assert "import ava" in boot
     assert "init_globals" in boot
     assert f"watcher_{wid}.py" in boot

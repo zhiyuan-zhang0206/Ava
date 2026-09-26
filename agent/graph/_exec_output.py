@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import BaseMessage
 
 import ava
-import ava._boot
+import ava.agent_identity
 from shared.agents.messages.inbound import InterruptReason
 from shared.config import now_timestamp, settings
 from shared.log import logger
@@ -58,7 +58,7 @@ _OVERFLOW_KEEP = 20
 
 
 def _overflow_dir() -> Path:
-    return workspace_dir(ava._boot.agent_id()) / _OVERFLOW_DIRNAME
+    return workspace_dir(ava.agent_identity.agent_id()) / _OVERFLOW_DIRNAME
 
 
 def wrap_code_output(

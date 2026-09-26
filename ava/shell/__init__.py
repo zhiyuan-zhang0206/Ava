@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
-from ava import _boot
+from ava import agent_identity
 from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.paths import workspace_dir
@@ -123,7 +123,7 @@ def run(
     # back to $HOME — the same base files._resolve uses, never the process
     # cwd, so the two surfaces agree in every state.
     if cwd is None:
-        aid = _boot.agent_id()
+        aid = agent_identity.agent_id()
         # agent id is typed int but is None until a bootstrap establishes it.
         cwd = str(workspace_dir(aid)) if aid is not None else str(Path.home())  # pyright: ignore[reportUnnecessaryComparison]
     completed = subprocess.run(  # noqa: S602
@@ -201,7 +201,7 @@ def run_background(
     notify = _background.validate_notify(coerce_str(notify, "notify", allow_none=True))
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
-    aid = _boot.agent_id()
+    aid = agent_identity.agent_id()
     if cwd is None:
         cwd = str(workspace_dir(aid))
     session_id, _full = sessions._create_session(name, cwd=cwd, ttl=ttl)

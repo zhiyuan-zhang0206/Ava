@@ -28,7 +28,7 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 import ava
-import ava._boot as _ava_boot
+import ava.agent_identity as _ava_identity
 from agent.graph._system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
@@ -45,12 +45,12 @@ def _default_cwd() -> str:
     """Initial cwd for a fresh agent state: the agent's own workspace.
 
     State is first created inside a bootstrapped agent process, after
-    `ava._boot.establish` has bound the identity — so a real run starts in
+    `ava.agent_identity.establish` has bound the identity — so a real run starts in
     `$AVA_HOME/workspaces/<agent_id>/` (created here on first touch). Direct
     state construction without a bootstrap (tests, dev REPL) has no agent and
     therefore no workspace; $HOME is the documented pre-bootstrap placeholder
-    (see `ava._boot.agent_id`)."""
-    aid = _ava_boot.agent_id()
+    (see `ava.agent_identity.agent_id`)."""
+    aid = _ava_identity.agent_id()
     if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() returns None pre-bootstrap
         return str(Path.home())
     return str(workspace_dir(aid))

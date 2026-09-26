@@ -533,16 +533,16 @@ async def test_reconcile_all_open_pages_reserves_with_turn_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """P1 (#1312 adversarial review): the hosted daemon process has no agent
-    identity, and the re-serve arm reads ava._boot.agent_id() — the pass must
+    identity, and the re-serve arm reads ava.agent_identity.agent_id() — the pass must
     bind the agent's turn identity so serve() registers for the right agent.
     Runs the REAL reconcile path (not a fake) to pin the mechanism."""
-    import ava._boot
+    import ava.agent_identity
     from agent.startup import reconcile_all_open_pages
 
     identities: list[int | None] = []
 
     def _fake_serve(*args, **kwargs) -> object:
-        identities.append(ava._boot.agent_id())  # pyright: ignore[reportUnknownArgumentType]
+        identities.append(ava.agent_identity.agent_id())  # pyright: ignore[reportUnknownArgumentType]
         return object()
 
     monkeypatch.setattr("ava.ui.serve", _fake_serve)  # pyright: ignore[reportUnknownArgumentType]
