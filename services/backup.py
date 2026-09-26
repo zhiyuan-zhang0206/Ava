@@ -71,6 +71,7 @@ from services.pitr.logical_dump_names import (
 )
 from shared.config import settings
 from shared.db import connect, direct_db_url
+from shared.pg_admin import local_owner_authority
 from shared.pg_tools import pg_tool
 from shared.platform import LockTimeoutError, file_lock
 from shared.private_storage import ensure_private_dir, ensure_private_file
@@ -252,6 +253,23 @@ def _prune(directory: Path) -> list[Path]:
             path.unlink()
             removed.append(path)
     return removed
+
+
+def dump_source() -> str:
+    """The dial `pg_dump` reads this cluster's whole database through.
+
+    A locally owned plane dumps as the administrator acting as the schema owner
+    over the home's owner-only socket (`shared.pg_admin`): password-free,
+    custody-checked against this home's postmaster, and independent of the
+    write generations a rollout revokes, so a dump never needs, and never dies
+    with, a delivered login. A remote-managed plane's provider URL
+    (`direct_db_url`) is its only authority; `_passwordless_conninfo` keeps its
+    password off argv. Both bypass PgBouncer: pg_dump holds one snapshot across
+    many statements, which a transaction pooler cannot keep.
+    """
+    if settings.data_plane.is_remote:
+        return direct_db_url()
+    return local_owner_authority().verified_conninfo()
 
 
 def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
@@ -657,11 +675,7 @@ def _run_backup(
     anything: `pg_dump` and the encryption pass (see `_run_with_progress`).
     """
     now = _require_aware(now) if now is not None else datetime.now(UTC)
-    # direct_db_url() (the admin-plane direct URL, derived from the
-    # registry record): pg_dump needs a real Postgres session (it holds a consistent
-    # snapshot across many statements); running it through a transaction pooler is
-    # meaningless and breaks. Admin plane bypasses PgBouncer.
-    db_url = db_url if db_url is not None else direct_db_url()
+    db_url = db_url if db_url is not None else dump_source()
     directory = ensure_private_dir(directory)
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])

@@ -626,13 +626,13 @@ def test_run_backup_failure_leaves_no_plaintext(
 
 @pytest.mark.skipif(not backup.pg_tool("pg_dump").exists(), reason="needs a native pg_dump binary")
 def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Real pg_dump against the session's provisioned Postgres: dump lands under
-    the managed name, the .partial intermediate is gone, and old dumps prune."""
+    """Real pg_dump of the session's Postgres (an explicit dial: not a born home): dump
+    lands under the managed name, the .partial is gone, and old dumps prune."""
     for i in range(1, settings.services.backup_keep + 1):
         _touch(bdir, f"test-2026060{i}-030000.dump")
 
     _disable_offsite(monkeypatch)
-    path = backup.run_backup(_dt(2026, 6, 10, 3, 0))
+    path = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url=settings.data_plane.db_url)
 
     assert path.parent == bdir
     assert logical_dump_names.DUMP_NAME_RE.match(path.name)

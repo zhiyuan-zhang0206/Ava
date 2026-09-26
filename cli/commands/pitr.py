@@ -23,7 +23,6 @@ from services.pitr.rollback_snapshot_archive import (
 )
 from services.pitr.store_factory import get_store_group
 from shared.config import settings
-from shared.db import direct_db_url
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
 
@@ -307,6 +306,7 @@ def cmd_pitr_drill(
     from services.pitr.base_operation_runtime import (
         RestoreWorkerInput,
         live_data_directory,
+        live_probe_conninfo,
         restore_key_path,
         restore_store_args,
         run_drill_input,
@@ -328,7 +328,7 @@ def cmd_pitr_drill(
             config.pitr_store_backend,
             restore_store_args(config),
             RestoreSpaceBudget(0, 0, 0),
-            direct_db_url(),
+            live_probe_conninfo(),
             live_data_directory(),
             pg_tool("pg_ctl"),
             pg_tool("pg_verifybackup"),

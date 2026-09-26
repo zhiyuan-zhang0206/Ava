@@ -216,7 +216,7 @@ def test_restore_worker_input_builds_baidu_store_args(
         settings.physical_backup, "pitr_baidu_credentials_file", tmp_path / "creds.json"
     )
     monkeypatch.setattr(settings.physical_backup, "pitr_baidu_token_file", tmp_path / "token.json")
-    monkeypatch.setattr(restore_runtime, "direct_db_url", lambda: "postgresql://x")
+    monkeypatch.setattr(restore_runtime, "live_probe_conninfo", lambda: "dbname=x")
     monkeypatch.setattr(restore_runtime, "live_data_directory", lambda: "/live/data")
 
     def fake_pg_tool(_name: str) -> Path:
@@ -245,7 +245,7 @@ def test_restore_worker_input_builds_cos_store_args(
     )
     monkeypatch.setattr(settings.physical_backup, "pitr_cos_bucket", "ava-pitr-1250000000")
     monkeypatch.setattr(settings.physical_backup, "pitr_cos_region", "ap-guangzhou")
-    monkeypatch.setattr(restore_runtime, "direct_db_url", lambda: "postgresql://x")
+    monkeypatch.setattr(restore_runtime, "live_probe_conninfo", lambda: "dbname=x")
     monkeypatch.setattr(restore_runtime, "live_data_directory", lambda: "/live/data")
 
     def fake_pg_tool(_name: str) -> Path:

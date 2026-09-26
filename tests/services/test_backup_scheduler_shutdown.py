@@ -96,7 +96,7 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
     stack = contextlib.ExitStack()
     for patcher in (
         patch.object(backup, "backup_dir", return_value=root / "artifacts"),
-        patch.object(backup, "direct_db_url", return_value="postgresql://ava@127.0.0.1:1/test"),
+        patch.object(backup, "dump_source", return_value="postgresql://ava@127.0.0.1:1/test"),
         patch.object(backup, "pg_tool", return_value=Path("pg_dump")),
         patch.object(backup, "_db_size_breakdown", return_value="test"),
         patch.object(backup, "_run_with_progress", run),

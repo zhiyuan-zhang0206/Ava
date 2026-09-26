@@ -7,10 +7,11 @@ bootstrap superuser (the initdb user):
   roles, databases, extensions, grants on the cluster's behalf.
 - `owner_session` / `OwnerAuthority` — the administrator ACTING AS the schema
   owner (`role=<owner>` in the startup options): schema baseline, checkpoint
-  setup, migrations, start-time derived-cache DDL, and password-free
-  owner-equivalent `pg_dump`. Objects are created owner-owned and privilege
-  checks see exactly the owner's rights, but the owner itself never logs in,
-  so it can later lose LOGIN without breaking these paths.
+  setup, migrations, start-time derived-cache DDL, logical backups, PITR
+  probes and rollback-snapshot retirement, and password-free owner-equivalent
+  `pg_dump`. Objects are created owner-owned and privilege checks see exactly
+  the owner's rights, but the owner itself never logs in, so it can later lose
+  LOGIN without breaking these paths.
 
 Moved down from `cli.commands._cluster_instance` (tech audit 2026-08-31, QA
 #1133 P2 observation): the PITR services reach for the admin URL but must not
@@ -157,6 +158,21 @@ class OwnerAuthority:
     def conninfo(self) -> str:
         """Password-free conninfo for libpq tools and read-only verification."""
         return owner_conninfo(self.admin_url, database=self.database, owner=self.owner)
+
+    def verified_conninfo(self) -> str:
+        """`conninfo` for a client that cannot run the custody check itself.
+
+        A libpq tool (`pg_dump`) or a worker process dials the conninfo on its
+        own, so one custody-checked `session` first proves that the home's
+        owner-only socket reaches this home's postmaster and assumes the owner.
+
+        Raises:
+            RuntimeError: the backend is not owned by this home, or the session
+                did not assume the owner.
+        """
+        with self.session():
+            pass
+        return self.conninfo
 
     @contextmanager
     def session(self, **kwargs: Any) -> Generator[psycopg.Connection[Any]]:

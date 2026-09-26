@@ -10,8 +10,6 @@ from functools import partial
 from pathlib import Path
 from typing import cast
 
-import psycopg
-
 from services.pitr.base_manifest import CandidateManifest
 from services.pitr.operation_custody import OperationKind
 from services.pitr.restore_drill import validate_drill_inputs
@@ -28,7 +26,6 @@ from services.pitr.store_factory import get_store_group
 from services.pitr.worker_process import run_operation
 from shared.config import settings
 from shared.config.physical_backup import PhysicalBackupSettings
-from shared.db import direct_db_url
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool
 from shared.process_env import forwarded_proxy_env, restricted_process_env
@@ -152,29 +149,40 @@ def input_for(candidate: CandidateManifest) -> RestoreWorkerInput:
         config.pitr_store_backend,
         store_args,
         RestoreSpaceBudget(config.pitr_spool_hard_bytes, logical_peak, _EMERGENCY_FLOOR_BYTES),
-        direct_db_url(),
+        live_probe_conninfo(),
         live_data_directory(),
         pg_tool("pg_ctl"),
         pg_tool("pg_verifybackup"),
     )
 
 
+def live_probe_conninfo() -> str:
+    """The dial the restricted worker's live probes (identity, live counts) use.
+
+    This home's administrator acting as the schema owner over the owner-only
+    socket (`shared.pg_admin`): password-free, so the worker's stdin carries
+    no credential, and independent of the write generations a rollout
+    revokes. The worker cannot run the custody check itself, so it runs here
+    before the conninfo is handed over. PITR is local-only: a remote-managed
+    plane has no local owner authority and refuses.
+    """
+    from shared.pg_admin import local_owner_authority
+
+    return local_owner_authority().verified_conninfo()
+
+
 def live_data_directory() -> str:
     """The live instance's PGDATA, certified on the admin connection.
 
-    The restore worker's live-identity probe runs on the runtime role
-    (AVA_DB_URL), which must stay free of settings-read privileges:
-    PG 17 gates `current_setting('data_directory')` behind
-    pg_read_all_settings, and the 2026-08-30 activation died on exactly that
-    grant gap. The controller reads the value once on the admin connection
-    and hands it to the worker in its request instead."""
-    from shared.cluster import get_record, record_postgres_port
-    from shared.pg_admin import pg_admin_url
+    The restore worker's live probes run as the schema owner, which must stay
+    free of settings-read privileges: PG 17 gates
+    `current_setting('data_directory')` behind pg_read_all_settings, and the
+    2026-08-30 activation died on exactly that grant gap. The controller reads
+    the value once on the custody-checked admin session and hands it to the
+    worker in its request instead."""
+    from services.pitr.activation_runtime import pitr_admin_session
 
-    record = get_record(ava_home())
-    if record is None:
-        raise RuntimeError("cluster registry record is missing")
-    with psycopg.connect(pg_admin_url(record_postgres_port(record))) as conn:
+    with pitr_admin_session() as conn:
         row = conn.execute("SELECT current_setting('data_directory')").fetchone()
     if row is None:
         raise RuntimeError("PostgreSQL omitted its data directory")
@@ -205,7 +213,11 @@ async def run_restore(candidate: CandidateManifest) -> dict[str, str]:
 
 
 def _secrets(inputs: RestoreWorkerInput) -> dict[str, str]:
-    """The live URL may embed a password: stdin only, never the retained request."""
+    """The live dial reaches the worker on stdin only, never the retained request.
+
+    It is the password-free owner conninfo (`live_probe_conninfo`); stdin still
+    keeps every dial out of the operation's persisted controls.
+    """
     return {"live_db_url": inputs.live_db_url}
 
 

@@ -104,14 +104,18 @@ def test_migrations_apply_uses_direct_unbounded_connection() -> None:
     assert "local_owner_authority()" in src
 
 
-def test_backup_defaults_to_direct_db_url() -> None:
-    """pg_dump needs a real Postgres session (consistent snapshot); it must use the
-    admin-plane direct URL (shared.db.direct_db_url), never the one URL as-is
-    (AVA_DB_URL carries the pooler port when pooling is on)."""
+def test_backup_defaults_to_a_direct_dump_source() -> None:
+    """pg_dump needs a real Postgres session (consistent snapshot); it never dials
+    the one URL as-is (AVA_DB_URL carries the pooler port when pooling is on). A
+    remote plane dumps through its provider's direct URL; a local plane through
+    the owner authority over the postmaster's own socket (proved on a born home
+    in tests/lifecycle/db_authority/test_backup_pitr.py)."""
     from services import backup
 
-    src = inspect.getsource(backup._run_backup)
-    assert "direct_db_url" in src
+    assert "dump_source()" in inspect.getsource(backup._run_backup)
+    src = inspect.getsource(backup.dump_source)
+    assert "direct_db_url()" in src
+    assert "local_owner_authority()" in src
     assert ".pooled_db_url" not in src
 
 

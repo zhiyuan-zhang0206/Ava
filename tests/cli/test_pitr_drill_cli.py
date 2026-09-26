@@ -101,7 +101,7 @@ def _drill_cli(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> Non
         return ()
 
     monkeypatch.setattr(commands, "_resolve_drill_candidate", resolve)
-    monkeypatch.setattr(commands, "direct_db_url", lambda: "postgresql://live")
+    monkeypatch.setattr(runtime, "live_probe_conninfo", lambda: "dbname=live")
     monkeypatch.setattr(commands, "pg_tool", Path)
     monkeypatch.setattr(runtime, "live_data_directory", lambda: "/live/data")
     monkeypatch.setattr(runtime, "restore_key_path", key)

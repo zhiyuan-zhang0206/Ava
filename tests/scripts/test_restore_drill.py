@@ -115,7 +115,8 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
         return None
 
     monkeypatch.setattr(restore_drill.backup, "_publish_offsite", _no_publish)
-    artifact = restore_drill.backup.run_backup()
+    # The session database is not a born home: dump it through an explicit dial.
+    artifact = restore_drill.backup.run_backup(db_url=settings.data_plane.db_url)
     report, elapsed = restore_drill.run_drill(artifact)
 
     assert report.agents == 1

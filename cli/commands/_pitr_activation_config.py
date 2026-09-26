@@ -6,8 +6,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg import sql
@@ -20,16 +22,28 @@ from services.pitr.activation_runtime import (
     pitr_env_is_desired,
 )
 from services.pitr.activation_state import ActivationRecord, load_record, write_record_cas
+from shared import pg_admin
 from shared.cluster import get_record, record_postgres_port
 from shared.config import settings
 from shared.paths import ava_home
 
 
-def _pg_connection() -> psycopg.Connection[tuple[object, ...]]:
+@contextmanager
+def _pg_connection() -> Generator[psycopg.Connection[Any]]:
+    """The admin session the archive settings are read and altered on.
+
+    `shared.pg_admin.connect` binds the backend to this home's recorded
+    postmaster before any `ALTER SYSTEM` or settings read.
+    """
     cluster = get_record(ava_home())
     if cluster is None:
         raise RuntimeError("cluster registry record is missing")
-    return psycopg.connect(pg_admin_url(record_postgres_port(cluster)), autocommit=True)
+    with pg_admin.connect(
+        pg_admin_url(record_postgres_port(cluster)),
+        expected_data_dir=ava_home() / "pg",
+        autocommit=True,
+    ) as conn:
+        yield conn
 
 
 def _alter(name: str, value: str) -> None:

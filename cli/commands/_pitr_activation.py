@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import LiteralString
 
 import psycopg
-from psycopg.conninfo import make_conninfo
 
 from cli.commands._pitr_activation_config import (
     apply_wal_config,
@@ -186,6 +185,7 @@ def _validate_secrets() -> dict[str, str]:
 def _read_pg_state() -> dict[str, str]:
     from cli.commands._cluster_instance import pg_admin_url
     from shared.cluster import db_identity, get_record, ownership, record_postgres_port
+    from shared.pg_admin import OwnerAuthority
 
     if (record := get_record(ava_home())) is None:
         raise RuntimeError("cluster registry record is missing")
@@ -215,14 +215,21 @@ def _read_pg_state() -> dict[str, str]:
         current["postmaster_started_at"] = str(
             scalar(conn, "SELECT pg_postmaster_start_time()::text")
         )
-    direct_url = make_conninfo(pg_admin_url(record_postgres_port(record)), dbname=expected_db)
-    with psycopg.connect(direct_url, autocommit=True) as conn:
-        ownership.require_postgres_connection(conn, ava_home() / "pg")
+    # The pre-activation dump reads as the schema owner (the administrator
+    # acting as the owner over the same socket), never as the superuser itself
+    # or a write-generation login; the session proves custody and the role.
+    dump_target = OwnerAuthority(
+        admin_url=pg_admin_url(record_postgres_port(record)),
+        database=expected_db,
+        owner=expected_db,
+        data_dir=ava_home() / "pg",
+    )
+    with dump_target.session(autocommit=True) as conn:
         current["dbname"] = str(scalar(conn, "SELECT current_database()"))
         direct_system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
     if current["dbname"] != expected_db or direct_system_id != system_id:
-        raise RuntimeError("direct dump target differs from the verified cluster database")
-    current["direct_db_url"] = direct_url
+        raise RuntimeError("dump target differs from the verified cluster database")
+    current["dump_conninfo"] = dump_target.conninfo
     if server_version // 10000 != 17:
         raise RuntimeError("running PostgreSQL server is not major version 17")
     current["system_identifier"] = system_id
@@ -393,7 +400,7 @@ def _prepare_snapshot(home: Path, record: ActivationRecord) -> ActivationRecord:
     else:
         snapshot = backup_snapshot.create_pre_activation_snapshot(
             operation_id=record.operation_id,
-            db_url=pg_settings["direct_db_url"],
+            db_url=pg_settings["dump_conninfo"],
             progress=lambda line: print(f"→ pre-activation data snapshot: {line}", flush=True),
         )
     _require_same_pg_state(pg_settings, "during snapshot")

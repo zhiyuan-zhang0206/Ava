@@ -53,5 +53,7 @@ table stay owner-owned and see only the owner's privileges. The session role
 survives transaction rollback and `RESET ROLE`, and is verified before use.
 The owner therefore never logs in: it is created `NOLOGIN` without a password,
 and application processes log in only as write generations
-(`shared.cluster.authority`). `OwnerAuthority.conninfo` gives password-free libpq tools such as
-`pg_dump` the same owner-equivalent view.
+(`shared.cluster.authority`). `OwnerAuthority.verified_conninfo` gives a
+client that cannot run the custody check itself (`pg_dump`, the PITR restore
+worker) the same password-free, owner-equivalent view after one custody-checked
+session.

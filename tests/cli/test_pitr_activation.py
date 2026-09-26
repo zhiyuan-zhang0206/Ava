@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 from cli.commands import _pitr_activation as activation
 from cli.commands import _pitr_activation_config as activation_config
@@ -291,7 +292,7 @@ def test_activate_persists_snapshot_before_wal_pending(
         "archive_timeout": "0",
         "wal_compression": "off",
         "system_identifier": "42",
-        "direct_db_url": "dbname=ava",
+        "dump_conninfo": "dbname=ava",
         "postmaster_started_at": "2026-08-29 00:00:00+00",
     }
     credentials = _credentials()
@@ -1016,7 +1017,7 @@ def test_shadow_pg_gate_accepts_pg17_disabled_archive_command() -> None:
 def test_credential_evidence_changes_fail_independently_of_pg_state(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    pg = {"archive_mode": "off", "direct_db_url": "dbname=ava"}
+    pg = {"archive_mode": "off", "dump_conninfo": "dbname=ava"}
     record = ActivationRecord.start(operation_id="op-1", origin="cli").advance(
         "snapshot_pending",
         pre_activation_pg_settings=pg,
@@ -1052,7 +1053,6 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
     import shutil
     import subprocess
     import tempfile
-    from types import SimpleNamespace
 
     from shared.pg_tools import pg_tool
 
@@ -1086,16 +1086,17 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
         capture_output=True,
     )
     try:
+        import psycopg
+
         monkeypatch.setattr(activation_config, "ava_home", lambda: tmp_path)
+        # The scratch server has no home receipt: a plain admin session stands in
+        # for the custody-checked one.
         monkeypatch.setattr(
             activation_config,
-            "get_record",
-            lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
-        )
-        monkeypatch.setattr(
-            activation_config,
-            "pg_admin_url",
-            lambda _pg_port: f"postgresql://ava@/postgres?host={sock}&port={port}",
+            "_pg_connection",
+            lambda: psycopg.connect(
+                f"postgresql://ava@/postgres?host={sock}&port={port}", autocommit=True
+            ),
         )
 
         value = "cp %p /spool/%f --hard-bytes 123"
@@ -1193,9 +1194,23 @@ def test_frozen_pg_state_contract_with_real_reader(
 
     postgres.start(data, port, argv, dict(os.environ), ready=ready, timeout=30)
     try:
-        # The reader dials the database the suite URL names (`db_identity`).
+        # The reader dials the database the suite URL names (`db_identity`), owned
+        # by the NOLOGIN schema owner of that name its dump target acts as.
+        admin = ["-h", str(sock), "-p", str(port), "-U", "ava"]
         subprocess.run(  # noqa: S603
-            [pg_tool("createdb"), "-h", str(sock), "-p", str(port), "-U", "ava", db_identity()],
+            [
+                pg_tool("psql"),
+                *admin,
+                "-d",
+                "postgres",
+                "-c",
+                f"CREATE ROLE {db_identity()} NOLOGIN",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(  # noqa: S603
+            [pg_tool("createdb"), *admin, "-O", db_identity(), db_identity()],
             check=True,
             capture_output=True,
         )
@@ -1211,6 +1226,10 @@ def test_frozen_pg_state_contract_with_real_reader(
         )
 
         frozen = activation._read_pg_state()
+        # The pre-activation dump reads as the NOLOGIN schema owner, password-free.
+        target = conninfo_to_dict(frozen["dump_conninfo"])
+        assert target["options"] == f"-c role={db_identity()}"
+        assert target["dbname"] == db_identity() and "password" not in target
         # Real PG17 masks archive_command as '(disabled)' while mode is off —
         # the shadow gate must accept exactly this display.
         assert frozen["archive_command"] == "(disabled)"
@@ -1256,8 +1275,9 @@ def test_switch_wal_runs_on_pitr_admin_connection(
     """The 2026-08-30 failure: the switch ran on shared.db.direct_db_url (the
     runtime identity, no pg_switch_wal) while every read-only preflight check
     passed on the superuser connection. The mutation must dial the SAME admin
-    URL the privilege probe certifies."""
-    dialed: list[str] = []
+    URL the privilege probe certifies, bound to this home's postmaster before
+    the switch runs."""
+    events: list[tuple[str, object]] = []
 
     class _FakeRow:
         @staticmethod
@@ -1273,6 +1293,7 @@ def test_switch_wal_runs_on_pitr_admin_connection(
 
         def execute(self, query: str) -> _FakeRow:
             assert "pg_switch_wal" in query
+            events.append(("execute", query))
             return _FakeRow()
 
     monkeypatch.setattr(
@@ -1282,10 +1303,17 @@ def test_switch_wal_runs_on_pitr_admin_connection(
     )
     monkeypatch.setattr(
         "services.pitr.activation_runtime.psycopg.connect",
-        lambda conninfo, **_kw: (dialed.append(conninfo), _FakeConn())[1],
+        lambda conninfo, **_kw: (events.append(("dial", conninfo)), _FakeConn())[1],
     )
+
+    def custody(_conn: object, data: Path) -> None:
+        events.append(("custody", data))
+
+    monkeypatch.setattr("shared.cluster.ownership.require_postgres_connection", custody)
     assert activation._switch_wal() == "00000001000000A20000008D"
-    assert dialed == ["postgresql://super@/postgres?host=/sock&port=5433"]
+    assert [kind for kind, _ in events] == ["dial", "custody", "execute"]
+    assert events[0][1] == "postgresql://super@/postgres?host=/sock&port=5433"
+    assert events[1][1] == activation_runtime.ava_home() / "pg"
 
 
 def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1318,6 +1346,11 @@ def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
         "services.pitr.activation_runtime.psycopg.connect",
         fake_connect,
     )
+
+    def custody(_conn: object, _data: Path) -> None:
+        return None
+
+    monkeypatch.setattr("shared.cluster.ownership.require_postgres_connection", custody)
     with pytest.raises(RuntimeError, match="pg_switch_wal"):
         activation_runtime.probe_switch_privilege()
     assert "has_function_privilege" in called[0]
@@ -1420,16 +1453,26 @@ def test_probe_switch_privilege_against_real_pg(
         capture_output=True,
     )
     try:
-        admin_url = f"postgresql://ava@/postgres?host={sock}&port={port}"
-        monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: admin_url)
-        activation_runtime.probe_switch_privilege()  # superuser: passes
-        # A role without the grant: the probe must refuse (the prod failure shape).
         import psycopg
 
+        # The scratch server has no home receipt: plain sessions stand in for
+        # the custody-checked admin session.
+        admin_url = f"postgresql://ava@/postgres?host={sock}&port={port}"
+        monkeypatch.setattr(
+            activation_runtime,
+            "pitr_admin_session",
+            lambda: psycopg.connect(admin_url, autocommit=True),
+        )
+        activation_runtime.probe_switch_privilege()  # superuser: passes
+        # A role without the grant: the probe must refuse (the prod failure shape).
         with psycopg.connect(admin_url, autocommit=True) as conn:
             conn.execute("CREATE ROLE limited LOGIN")
         limited_url = f"postgresql://limited@/postgres?host={sock}&port={port}"
-        monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: limited_url)
+        monkeypatch.setattr(
+            activation_runtime,
+            "pitr_admin_session",
+            lambda: psycopg.connect(limited_url, autocommit=True),
+        )
         with pytest.raises(RuntimeError, match="pg_switch_wal"):
             activation_runtime.probe_switch_privilege()
     finally:
@@ -1530,10 +1573,7 @@ def _wire_proof_world(
 
     stem = ack_file_stem or str(ack_raw["archive_name"])
     monkeypatch.setattr(activation_runtime, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(
-        "services.pitr.activation_runtime.psycopg.connect",
-        lambda _conninfo, **_kw: _ArchiverConn(stem),
-    )
+    monkeypatch.setattr(activation_runtime, "pitr_admin_session", lambda: _ArchiverConn(stem))
     if observed is None:
         ack = ack_manifest_from_raw(ack_raw)
         observed = RemoteObjectAck(

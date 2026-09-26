@@ -62,6 +62,15 @@ mandatory.
   remote data.
 - The second gate also requires an explicit local least-privilege replication
   URL; the ordinary cluster owner remains `NOSUPERUSER` without `REPLICATION`.
+- Database dials never use a write-generation login. Capture facts, the
+  restore worker's live probes and the operator drill's live counts read as
+  the administrator acting as the schema owner over the home's owner-only
+  socket (`shared.pg_admin`); the worker receives that password-free conninfo
+  on stdin after the controller's custody-checked session. Server
+  administration (WAL switch, archiver and `pg_hba` reads, `ALTER SYSTEM`,
+  `data_directory`) runs on the administrator as itself over a
+  `shared.pg_admin.connect` session bound to the home's recorded postmaster
+  (`pitr_admin_session`).
 
 ## Operation custody
 

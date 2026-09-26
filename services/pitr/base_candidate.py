@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import psutil
 import psycopg
@@ -33,7 +34,7 @@ from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 from services.pitr.operation_custody import NativeProcess, OperationWorker, owned_receipts
 from services.pitr.space_budget import CandidateSpaceBudget, require_candidate_space
 from services.pitr.worker_process import StopSignal
-from shared.db import direct_db_url
+from shared.pg_admin import OwnerAuthority, local_owner_authority
 from shared.pg_tools import pg_tool
 
 
@@ -80,15 +81,15 @@ def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
         staged.unlink(missing_ok=True)
 
 
-def _migration_set_sha256(db_url: str) -> str:
-    with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+def _migration_set_sha256(conn: psycopg.Connection[Any]) -> str:
+    with conn.cursor() as cur:
         cur.execute("SELECT name FROM schema_migrations ORDER BY name")
         names = [str(row[0]) for row in cur.fetchall()]
     return hashlib.sha256("\n".join(names).encode()).hexdigest()
 
 
-def _server_facts(db_url: str) -> tuple[int, str, int, int, str]:
-    with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+def _server_facts(conn: psycopg.Connection[Any]) -> tuple[int, str, int, int, str]:
+    with conn.cursor() as cur:
         cur.execute(
             "SELECT current_setting('server_version_num'), system_identifier, "
             "timeline_id, bytes_per_wal_segment, current_database() FROM pg_control_system(), "
@@ -155,12 +156,12 @@ def _validate_replication_hba(replication: Mapping[str, object]) -> None:
     connection". Fail closed BEFORE the backup when no loaded rule covers the
     PITR role, so the operator sees an actionable cause instead of a bare exit
     code."""
-    from services.pitr.activation_runtime import pitr_admin_url
+    from services.pitr.activation_runtime import pitr_admin_session
 
     role = str(replication.get("user") or "")
     host = str(replication.get("host") or "")
     try:
-        with psycopg.connect(pitr_admin_url()) as conn, conn.cursor() as cur:
+        with pitr_admin_session() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT database, user_name, error FROM pg_hba_file_rules "
                 "WHERE type <> 'local' AND address IS NOT NULL"
@@ -288,7 +289,6 @@ def _birth_candidate(
     root: Path,
     chain_id: str,
     budget: CandidateSpaceBudget,
-    db_url: str,
     replication_db_url: str,
     stop: StopSignal,
 ) -> tuple[Path, CandidateFacts]:
@@ -301,16 +301,7 @@ def _birth_candidate(
         (root / "base-facts").mkdir(parents=True, exist_ok=True, mode=0o700)
         _recover_owned_partials(root)
         require_candidate_space(partial.parent, budget)
-        _validate_replication_contract(db_url, replication_db_url)
-        postgres_major, system_id, wal_segment_size, timeline, database_name = _server_facts(db_url)
-        facts = CandidateFacts(
-            postgres_major,
-            system_id,
-            wal_segment_size,
-            timeline,
-            _migration_set_sha256(db_url),
-            database_name,
-        )
+        facts = _capture_facts(local_owner_authority(), replication_db_url)
         _record_owner(root, chain_id)
         partial.mkdir(mode=0o700)
         command = [
@@ -334,6 +325,28 @@ def _birth_candidate(
         partial.replace(ready)
         _fsync_dir(ready.parent)
     return ready, facts
+
+
+def _capture_facts(owner: OwnerAuthority, replication_db_url: str) -> CandidateFacts:
+    """The capture-time identity facts, read as this home's schema owner.
+
+    The administrator acting as the owner over the home's own socket
+    (`shared.pg_admin`) is custody-checked against the home's postmaster and
+    needs no write-generation login; the replication URL must name the same
+    server port.
+    """
+    _validate_replication_contract(owner.conninfo, replication_db_url)
+    with owner.session() as conn:
+        postgres_major, system_id, wal_segment_size, timeline, database_name = _server_facts(conn)
+        migration_set_sha256 = _migration_set_sha256(conn)
+    return CandidateFacts(
+        postgres_major,
+        system_id,
+        wal_segment_size,
+        timeline,
+        migration_set_sha256,
+        database_name,
+    )
 
 
 def _record_owner(root: Path, chain_id: str, state: str = "running") -> None:
@@ -549,7 +562,6 @@ def prepare_base_candidate(
     key_id: str,
     store: RestartableStreamingObjectStore,
     budget: CandidateSpaceBudget,
-    db_url: str | None = None,
     replication_db_url: str,
     stop: StopSignal | None = None,
     now: datetime | None = None,
@@ -557,7 +569,6 @@ def prepare_base_candidate(
 ) -> CandidateManifest:
     """Prepare uploaded candidate evidence; the controller commits after closure."""
 
-    db_url = direct_db_url() if db_url is None else db_url
     now = datetime.now(UTC) if now is None else now.astimezone(UTC)
     stop = threading.Event() if stop is None else stop
     reconcile_runtime_state(root, key=key, key_id=key_id)
@@ -578,7 +589,6 @@ def prepare_base_candidate(
             root=root,
             chain_id=chain_id,
             budget=budget,
-            db_url=db_url,
             replication_db_url=replication_db_url,
             stop=stop,
         )

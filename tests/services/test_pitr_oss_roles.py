@@ -426,7 +426,7 @@ def test_restore_worker_input_builds_oss_store_args(
         "pitr_oss_viewer_credentials_file",
         tmp_path / "viewer.json",
     )
-    monkeypatch.setattr(restore_runtime, "direct_db_url", lambda: "postgresql://x")
+    monkeypatch.setattr(restore_runtime, "live_probe_conninfo", lambda: "dbname=x")
     monkeypatch.setattr(restore_runtime, "live_data_directory", lambda: "/live/data")
     monkeypatch.setattr(restore_runtime, "pg_tool", lambda _name: Path("/usr/bin/true"))  # type: ignore[no-untyped-call]
 

@@ -17,6 +17,7 @@ import threading
 import time
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from services.pitr import base_candidate
@@ -257,12 +258,10 @@ def test_validate_replication_hba_requires_a_rule_covering_the_role(
     rules: list[tuple[str, str, str | None]],
     covers: bool,
 ) -> None:
-    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_url", lambda: "admin-url")
-
-    def _connect(_url: str) -> _FakeConn:
+    def _session() -> _FakeConn:
         return _FakeConn(rules)
 
-    monkeypatch.setattr(base_candidate.psycopg, "connect", _connect)
+    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_session", _session)
     replication = {"user": "ava_pitr_repl", "host": "127.0.0.1", "port": "5433"}
     if covers:
         _validate_replication_hba(replication)
@@ -274,11 +273,10 @@ def test_validate_replication_hba_requires_a_rule_covering_the_role(
 def test_validate_replication_hba_wraps_probe_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def boom(_url: str) -> _FakeConn:
+    def boom() -> _FakeConn:
         raise RuntimeError("registry missing")
 
-    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_url", lambda: "admin-url")
-    monkeypatch.setattr(base_candidate.psycopg, "connect", boom)
+    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_session", boom)
     with pytest.raises(BaseCandidateError, match="cannot verify the replication pg_hba"):
         _validate_replication_hba({"user": "ava_pitr_repl", "host": "127.0.0.1"})
 
@@ -365,7 +363,12 @@ def test_validate_replication_contract_fails_closed_without_replication_row(
         capture_output=True,
     )
     try:
-        monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_url", lambda: admin)
+        # The scratch server has no home receipt: its session stands in for the
+        # custody-checked admin session.
+        monkeypatch.setattr(
+            "services.pitr.activation_runtime.pitr_admin_session",
+            lambda: psycopg.connect(admin, autocommit=True),
+        )
         with pytest.raises(BaseCandidateError, match="physical-replication rule"):
             _validate_replication_contract(db_url, repl_url)
 
@@ -527,7 +530,6 @@ def test_resumed_candidate_records_its_worker_before_verification(
             key_id="key",
             store=object(),  # type: ignore[arg-type]  # verification stops first
             budget=CandidateSpaceBudget(0, 0, 0, 0),
-            db_url="postgresql://unused",
             replication_db_url="postgresql://unused",
         )
     assert json.loads(owner.read_text())["chain_id"] == candidate.chain_id
@@ -576,7 +578,6 @@ def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
             key_id="key",
             store=object(),  # type: ignore[arg-type]  # verification ends first
             budget=CandidateSpaceBudget(0, 0, 0, 0),
-            db_url="postgresql://unused",
             replication_db_url="postgresql://unused",
         )
     rejected = json.loads(owner.read_text())["state"] == "rejected"
