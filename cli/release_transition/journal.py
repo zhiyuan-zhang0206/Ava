@@ -16,6 +16,7 @@ from typing import Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
 
+from cli.release_transition.native import DARWIN, LINUX
 from cli.release_transition.pitr_evidence import PitrProgress, PitrSeal
 from cli.release_transition.request import AnyRequest, PitrRequest, Record, ReleaseRef, Request
 from shared.atomic_io import write_text_atomic
@@ -42,7 +43,6 @@ Phase = Literal[
 ]
 Direction = Literal["candidate", "previous"]
 _MAX_JOURNAL_BYTES = 256 * 1024
-_DARWIN_KIND = "darwin-launchd-v1"
 # Terminal evidence when launchd holds no facts: the recorded boot or login
 # domain ended (see cli/release_transition/launcher_macos.py::_current).
 _DARWIN_ENDED = frozenset({"boot-changed", "domain-lost"})
@@ -66,6 +66,18 @@ _PITR_NEXT: dict[str, str] = {
     "resuming": "proving",
     "proving": "complete",
 }
+
+
+def _kind(launch: dict[str, JsonValue]) -> str:
+    """The launch record's required adapter kind; any other value fails validation.
+
+    Every launch is planned by its own adapter, which always writes its kind.
+    There is no systemd-shaped default for a record that carries none.
+    """
+    kind = launch.get("kind")
+    if kind in (LINUX, DARWIN):
+        return kind
+    raise ValueError(f"launch record has an unrecognized adapter kind: {kind!r}")
 
 
 class Retirement(Record):
@@ -112,6 +124,12 @@ class Operation(Record):
             raise ValueError("native dispatch requires retained launch intent")
         if (self.native is not None or self.retirement is not None) and not self.launch_attempted:
             raise ValueError("native identity and retirement require recorded dispatch")
+        return self
+
+    @model_validator(mode="after")
+    def coherent_launch_kind(self) -> Self:
+        if self.launch is not None:
+            _kind(self.launch)
         return self
 
     @property
@@ -250,8 +268,8 @@ def _native_process(record: dict[str, JsonValue]) -> OwnedProcess:
 
 
 def _darwin(launch: dict[str, JsonValue]) -> bool:
-    """macOS launches carry their kind; every other record keeps the systemd contract."""
-    return "kind" in launch and launch["kind"] == _DARWIN_KIND
+    """True for the darwin kind, False for linux; any other or missing kind fails fast."""
+    return _kind(launch) == DARWIN
 
 
 def _same_native_receipt(
@@ -290,7 +308,7 @@ def _darwin_terminal(terminal: dict[str, JsonValue]) -> bool:
     code or signal is claimed, and domain loss needs a recorded audit session.
     """
     ended = (terminal["kind"], terminal["state"], terminal["helper"], terminal["executor"])
-    if ended != (_DARWIN_KIND, "not running", None, None):
+    if ended != (DARWIN, "not running", None, None):
         return False
     evidence = terminal["evidence"]
     if evidence == "launchd":

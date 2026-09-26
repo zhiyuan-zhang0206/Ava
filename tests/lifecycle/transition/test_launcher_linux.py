@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
-from cli.release_transition import journal
+from cli.release_transition import journal, native
 from cli.release_transition import launcher_linux as linux
 from cli.release_transition.request import ReleaseRef, Request
 from shared.native_process.ownership import OwnedProcess
@@ -122,6 +122,14 @@ def _readback_seams(
 
     monkeypatch.setattr(linux, "_property_json", property_json)
     monkeypatch.setattr(linux, "_owner", _constant(OwnedProcess(pid, 1.5, 150)))
+
+
+def test_plan_launch_writes_its_own_required_adapter_kind(
+    planned: dict[str, JsonValue],
+) -> None:
+    assert planned["kind"] == linux.LINUX
+    assert native.recorded_kind(planned) == linux.LINUX
+    assert native.for_launch(planned) is linux
 
 
 def test_launch_requires_exact_record_before_any_native_effect(

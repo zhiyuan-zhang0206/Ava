@@ -270,7 +270,7 @@ def test_explicit_rollback_captures_maintenance_generation(
 def test_rollback_refuses_unclosed_executor(pitr_request: PitrRequest) -> None:
     journal.create(pitr_request)
     with journal.exclusive(pitr_request.path) as handle:
-        handle.record_launch({"unit": "private"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "private"})
         handle.mark_launch_attempted()
         with pytest.raises(ValueError, match="retirement"):
             handle.decide_rollback("a" * 64, maintenance_at=pitr_request.created_at)
@@ -287,7 +287,7 @@ def test_rollback_submission_preserves_held_generation_or_renews_after_resume(
     journal.create(pitr_request)
     home = Path(pitr_request.home)
     with journal.exclusive(pitr_request.path) as handle:
-        handle.record_launch({"unit": "captured", "boot_id": "boot"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "captured", "boot_id": "boot"})
         handle.mark_launch_attempted()
         handle.advance("provisioning")
         with authorized_pitr(pitr_request.path, handle.pitr_record_write):
@@ -340,7 +340,7 @@ def test_rollback_cannot_decide_while_native_attempt_is_unknown(
 
     journal.create(pitr_request)
     with journal.exclusive(pitr_request.path) as handle:
-        handle.record_launch({"unit": "captured"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "captured"})
         handle.mark_launch_attempted()
     before = pitr_request.path.read_bytes()
 
@@ -468,7 +468,7 @@ def test_native_exec_replay_preserves_original_receipt_and_strict_native_identit
     elif changed is not None:
         replay[changed] = 42 if changed in {"pid", "starttime"} else "replacement"
     with journal.exclusive(pitr_request.path) as handle:
-        handle.record_launch({"unit": "private"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "private"})
         handle.mark_launch_attempted()
         handle.record_native(original)
         before = pitr_request.path.read_bytes()
@@ -487,7 +487,7 @@ def test_no_tick_native_exec_replay_rejects_even_small_birth_drift(
     journal.create(pitr_request)
     original: dict[str, JsonValue] = {"pid": 41, "birth": 100.0, "starttime": None}
     with journal.exclusive(pitr_request.path) as handle:
-        handle.record_launch({"unit": "private"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "private"})
         handle.mark_launch_attempted()
         handle.record_native(original)
         with pytest.raises(ValueError, match="identity changed"):

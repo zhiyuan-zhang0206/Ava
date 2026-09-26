@@ -9,10 +9,12 @@ tags: [cluster-lifecycle, release, macos]
 
 `launcher_macos.py` is the macOS native adapter selected by `native.py`, the
 one dispatch point: a recorded launch is read back, retired and continued by
-the adapter of its recorded `kind` (a record without one is the journal's
-systemd contract); a new launch uses the host's adapter or refuses. It owns
-only the finite executor. The persistent home helper keeps owning ava-root.
-Records and job-group closure live in `launchd_custody.py`.
+the adapter of its recorded `kind`, which every launch plan writes and which
+every read or write of the journal requires; a missing or unrecognized kind is
+a fail-fast refusal, never a systemd default. A new launch uses the host's
+adapter or refuses. It owns only the finite executor. The persistent home
+helper keeps owning ava-root. Records and job-group closure live in
+`launchd_custody.py`.
 
 ## Launch
 

@@ -18,6 +18,7 @@ import psutil
 from pydantic import Field, JsonValue, TypeAdapter
 
 from cli.release_transition.journal import Journal, exclusive, read_operation
+from cli.release_transition.native import LINUX
 from cli.release_transition.native import require_private_operation as _private_operation
 from cli.release_transition.request import Record
 from shared.native_process.ownership import OwnedProcess
@@ -49,7 +50,7 @@ _PROPERTIES = (
 
 
 class LinuxLaunch(Record):
-    kind: Literal["linux-systemd-v1"] = "linux-systemd-v1"
+    kind: Literal["linux-systemd-v1"] = LINUX
     operation: str
     attempt: int = Field(ge=0)
     home: str

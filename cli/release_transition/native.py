@@ -41,16 +41,20 @@ def require_private_operation(path: Path, home: Path) -> None:
 
 
 def recorded_kind(record: Mapping[str, JsonValue]) -> JsonValue:
-    """A launch record's adapter kind, classified exactly as the journal does.
+    """A launch record's required adapter kind; there is no default kind.
 
-    macOS records always carry their kind; a record without one keeps the
-    original systemd contract (journal ``_darwin``), whose adapter validates it.
+    Every launch record is written by its adapter's own launch plan, which
+    always carries its kind. A record with no ``kind`` at all is a fail-fast
+    refusal (never a raw ``KeyError``, never a silent Linux default).
     """
-    return record.get("kind", LINUX)
+    try:
+        return record["kind"]
+    except KeyError:
+        raise ValueError("release launch record has no adapter kind; there is no default") from None
 
 
 def for_launch(record: Mapping[str, JsonValue]) -> ModuleType:
-    """The adapter that owns an already recorded launch; unknown kinds refuse."""
+    """The adapter that owns an already recorded launch; unknown or missing kinds refuse."""
     kind = recorded_kind(record)
     if kind == LINUX:
         from cli.release_transition import launcher_linux

@@ -137,7 +137,7 @@ def test_interrupted_intent_is_retained_and_exact_replay_is_read_only(
 ) -> None:
     journal.create(request_record)
     with pytest.raises(KeyboardInterrupt), journal.exclusive(request_record.path) as handle:
-        handle.record_launch({"pid": 123, "birth": 456.0, "starttime": 789})
+        handle.record_launch({"kind": journal.LINUX, "pid": 123, "birth": 456.0, "starttime": 789})
         _advance(handle, phase)
         raise KeyboardInterrupt
 
@@ -241,7 +241,7 @@ def test_interrupted_native_dispatch_cannot_be_repeated(request_record: Request)
             handle.mark_launch_attempted()
         with pytest.raises(ValueError, match="cannot precede native dispatch"):
             handle.record_native({"pid": 123})
-        handle.record_launch({"job": "retained-external-executor"})
+        handle.record_launch({"kind": journal.LINUX, "job": "retained-external-executor"})
         dispatched = handle.mark_launch_attempted()
     assert dispatched.launch_attempted
     assert dispatched.native is None
@@ -256,7 +256,7 @@ def test_interrupted_native_dispatch_cannot_be_repeated(request_record: Request)
 def test_native_birth_is_recorded_once_and_retained_across_replay(request_record: Request) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
-        handle.record_launch({"job": "retained-external-executor"})
+        handle.record_launch({"kind": journal.LINUX, "job": "retained-external-executor"})
         handle.mark_launch_attempted()
         birth: dict[str, JsonValue] = {"pid": 123, "birth": 456.0, "starttime": 789}
         handle.record_native(birth)
@@ -268,6 +268,33 @@ def test_native_birth_is_recorded_once_and_retained_across_replay(request_record
         expected = handle.operation
     assert journal.create(request_record) == expected
     assert _file_state(request_record.path) == before
+
+
+@pytest.mark.parametrize(
+    "bad_launch",
+    [
+        {"unit": "executor-0", "boot_id": "boot"},
+        {"kind": "windows-job-v1", "unit": "executor-0"},
+        {"kind": None, "unit": "executor-0"},
+    ],
+)
+def test_launch_record_requires_a_recognized_adapter_kind(
+    request_record: Request, bad_launch: dict[str, JsonValue]
+) -> None:
+    journal.create(request_record)
+    with (
+        journal.exclusive(request_record.path) as handle,
+        pytest.raises(ValueError, match="unrecognized adapter kind"),
+    ):
+        handle.record_launch(bad_launch)
+
+
+def test_reading_a_journal_with_an_invalid_launch_kind_refuses(request_record: Request) -> None:
+    operation = journal.create(request_record)
+    raw = operation.model_dump(mode="json") | {"launch": {"unit": "executor-0", "boot_id": "boot"}}
+    request_record.path.write_text(json.dumps(raw))
+    with pytest.raises(ValueError, match="unrecognized adapter kind"):
+        journal.read_operation(request_record.path)
 
 
 def test_stale_journal_cas_cannot_overwrite_a_newer_decision(request_record: Request) -> None:
@@ -333,12 +360,12 @@ def test_transition_cannot_skip_intent_or_regress(request_record: Request) -> No
         for phase in invalid:
             with pytest.raises(ValueError, match="invalid release transition"):
                 handle.advance(phase)
-        handle.record_launch({"pid": 123})
+        handle.record_launch({"kind": journal.LINUX, "pid": 123})
         retained = _file_state(request_record.path)
-        handle.record_launch({"pid": 123})
+        handle.record_launch({"kind": journal.LINUX, "pid": 123})
         assert _file_state(request_record.path) == retained
         with pytest.raises(ValueError, match="replace its recorded native launch"):
-            handle.record_launch({"pid": 456})
+            handle.record_launch({"kind": journal.LINUX, "pid": 456})
         handle.advance("quiescing")
         with pytest.raises(ValueError, match="invalid release transition"):
             handle.advance("prepared")
@@ -438,7 +465,7 @@ def test_repeated_continuations_cannot_publish_an_unreadable_journal(
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
-        handle.record_launch({"unit": "initial", "boot_id": "boot"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "initial", "boot_id": "boot"})
         handle.mark_launch_attempted()
         _advance(handle, "starting")
         # Retain a realistic lower phase after a first proven-dead executor.
@@ -461,7 +488,12 @@ def test_repeated_continuations_cannot_publish_an_unreadable_journal(
             expected = handle.operation
             try:
                 handle.record_launch(
-                    {"unit": f"next-{attempt}", "boot_id": "boot", "payload": "x" * 65536}
+                    {
+                        "kind": journal.LINUX,
+                        "unit": f"next-{attempt}",
+                        "boot_id": "boot",
+                        "payload": "x" * 65536,
+                    }
                 )
             except ValueError as exc:
                 assert "capacity exceeded" in str(exc)
@@ -480,7 +512,12 @@ def test_journal_capacity_counts_utf8_bytes_before_atomic_publication(
     with journal.exclusive(request_record.path) as handle:
         before = _file_state(request_record.path)
         with pytest.raises(ValueError, match="capacity exceeded"):
-            handle.record_launch({"payload": "\N{LATIN SMALL LETTER E WITH ACUTE}" * 140000})
+            handle.record_launch(
+                {
+                    "kind": journal.LINUX,
+                    "payload": "\N{LATIN SMALL LETTER E WITH ACUTE}" * 140000,
+                }
+            )
         assert _file_state(request_record.path) == before
         assert journal.read_operation(request_record.path) == handle.operation
 
@@ -498,7 +535,7 @@ def test_native_retirement_intent_and_absence_survive_crashes(request_record: Re
     with journal.exclusive(request_record.path) as handle:
         with pytest.raises(ValueError, match="deletion intent"):
             handle.record_retired()
-        handle.record_launch({"unit": "executor-0", "boot_id": "boot"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "executor-0", "boot_id": "boot"})
         handle.mark_launch_attempted()
         handle.record_native(
             {key: closed[key] for key in ("unit", "boot_id", "invocation_id", "cgroup")}
@@ -538,7 +575,7 @@ def test_native_cleanup_cannot_retire_live_or_foreign_jobs(
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
-        handle.record_launch({"unit": "executor-0", "boot_id": "boot"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "executor-0", "boot_id": "boot"})
         handle.mark_launch_attempted()
         before = _file_state(request_record.path)
         closed: dict[str, JsonValue] = {
@@ -556,7 +593,7 @@ def test_new_operation_requires_previous_executor_retirement(request_record: Req
     journal.create(request_record)
     next_request = request_record.model_copy(update={"id": uuid4()})
     with journal.exclusive(request_record.path) as handle:
-        handle.record_launch({"unit": "executor-0", "boot_id": "boot"})
+        handle.record_launch({"kind": journal.LINUX, "unit": "executor-0", "boot_id": "boot"})
         handle.mark_launch_attempted()
         _advance(handle, "complete")
     before = _file_state(_active(request_record))

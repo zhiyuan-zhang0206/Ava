@@ -107,8 +107,10 @@ switches images. Missing or changed completed evidence refuses before effects.
 ## Executor custody
 
 The native adapter owns executor birth, observation, and retirement. `native.py`
-is the one dispatch point: a recorded launch uses the adapter of its `kind`;
-a new launch uses the host's adapter or refuses. Linux is described in
+is the one dispatch point: a recorded launch uses the adapter of its required
+`kind`, written by every launch plan; a missing or unrecognized kind refuses,
+never a default, both at dispatch and on journal read/validation. A new launch
+uses the host's adapter or refuses. Linux is described in
 [[cli/release_transition/launcher_linux.ava.okf.md]], macOS in
 [[cli/release_transition/launcher_macos.ava.okf.md]]. The journal keeps each
 kind's native evidence and closure rules distinct. An uncertain dispatch
