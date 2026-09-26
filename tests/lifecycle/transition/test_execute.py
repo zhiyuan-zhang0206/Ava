@@ -63,7 +63,7 @@ class ControllerLost(BaseException):
 class Effects(LocalTransition):
     def __init__(self, request: Request, *, fail: str = "", crash: bool = False) -> None:
         self.request = request
-        self.events: list[tuple[str, str]] = []
+        self.events: list[tuple[str, Direction | None]] = []
         self.fail = fail
         self.crash = crash
         self.selector = "previous"

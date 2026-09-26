@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 
 from services.ava_root.wiring import WiringContext
 from shared.native_process.ownership import OwnedProcess
+from shared.platform import CREATE_NO_WINDOW
 from shared.sessions.pty.allocation_freeze import locked_freeze_state
 from shared.windows_terminal.backend import query
 from shared.windows_terminal.record import NativeBirth, TerminalRecord, publish, read, record_path
@@ -107,7 +108,7 @@ def _launch_owner(record: TerminalRecord, environment: dict[str, str]) -> Termin
             stdin=subprocess.PIPE,
             stdout=output,
             stderr=subprocess.STDOUT,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=CREATE_NO_WINDOW,
             close_fds=True,
         )
         launcher = NativeBirth.capture(OwnedProcess.capture(psutil.Process(owner.pid)))

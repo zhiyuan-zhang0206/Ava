@@ -833,9 +833,22 @@ def test_env_apply_resumes_after_provisioning_crash(
     record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
     original = envfile.replace_env_bytes_cas
 
-    def interrupted(*args: object, **kwargs: object) -> None:
+    def interrupted(
+        path: Path,
+        *,
+        payload: bytes,
+        expected_digest: str,
+        target_digest: str,
+        audit_site: str | None = None,
+    ) -> None:
         if after_write:
-            original(*args, **kwargs)
+            original(
+                path,
+                payload=payload,
+                expected_digest=expected_digest,
+                target_digest=target_digest,
+                audit_site=audit_site,
+            )
         raise RuntimeError("crash during env write")
 
     monkeypatch.setattr(envfile, "replace_env_bytes_cas", interrupted)
@@ -1152,7 +1165,7 @@ def test_frozen_pg_state_contract_with_real_reader(
         capture_output=True,
     )
     argv = [
-        pg_tool("postgres"),
+        str(pg_tool("postgres")),
         "-D",
         str(data),
         "-p",

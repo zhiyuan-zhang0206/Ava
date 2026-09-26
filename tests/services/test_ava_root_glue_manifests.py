@@ -153,7 +153,9 @@ def test_session_host_attach_table_matches_the_g6b_ruling() -> None:
     }
 
 
-def test_windows_manifest_is_direct_and_preserves_path_arguments(tmp_path, monkeypatch):
+def test_windows_manifest_is_direct_and_preserves_path_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import shlex
 
     monkeypatch.setattr(gen, "sys", SimpleNamespace(platform="win32"))

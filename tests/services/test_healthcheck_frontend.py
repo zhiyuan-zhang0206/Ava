@@ -54,7 +54,7 @@ def test_is_alive_curl_fails(monkeypatch: pytest.MonkeyPatch) -> None:
         return _FakeResult(returncode=7)  # curl exit 7 = "Failed to connect"
 
     monkeypatch.setattr(hc, "_expected_owner", _owner_of_this_process)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     assert hc.probe_frontend().alive is False
@@ -66,7 +66,7 @@ def test_is_alive_curl_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_expected_owner", _owner_of_this_process)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})  # pyright: ignore[reportUnknownArgumentType]
     assert hc.probe_frontend().alive is False
 
 
@@ -76,7 +76,7 @@ def test_is_alive_curl_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(hc.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_expected_owner", _owner_of_this_process)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})  # pyright: ignore[reportUnknownArgumentType]
     assert hc.probe_frontend().alive is False
 
 
@@ -150,7 +150,7 @@ def test_expected_owner_is_none_when_the_tree_unit_is_not_running(
 
 def test_live_endpoint_is_unavailable_when_no_root_answers(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_root_client(monkeypatch, unreachable=True)
-    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})  # pyright: ignore[reportUnknownArgumentType]
     assert hc.probe_frontend().verdict.value == "unavailable"
 
 
@@ -177,7 +177,7 @@ def test_expected_owner_rejects_reused_pid(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_owned_listener_with_failed_http_is_down(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_root_client(monkeypatch, response=_root_response(state="running", pid=os.getpid()))
-    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})
+    monkeypatch.setattr(hc, "_listener_pids", lambda _port: {os.getpid()})  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(hc, "_http_ok", lambda: False)
     probe = hc.probe_frontend()
     assert probe.verdict.value == "down"

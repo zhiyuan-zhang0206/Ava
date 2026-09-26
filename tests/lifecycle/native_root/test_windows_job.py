@@ -92,7 +92,9 @@ os._exit(259)
         # Popen waits on its original native handle and retains it afterward.
         # Exit 259 is also STILL_ACTIVE: exit-code comparison is not liveness.
         assert child.wait(timeout=5) == 259
-        assert int(child._handle) > 0
+        # subprocess.Popen._handle is a genuine Windows-only runtime attribute
+        # (set in Popen._execute_child) that typeshed's public stub omits.
+        assert int(getattr(child, "_handle")) > 0  # noqa: B009
         assert not identity.live()
     finally:
         if child.poll() is None:

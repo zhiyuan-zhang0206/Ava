@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from services.healthchecks import permissions_helper as hc
 from services.permissions_helper import client
+from shared.native_process.ownership import OwnedProcess
 
 # Real `launchctl print` excerpts (F5 run-09/10c/11 evidence), shortened. The
 # stuck shape deliberately keeps BOTH the top-level `state = spawn scheduled`
@@ -132,11 +135,17 @@ def test_ping_uses_short_timeout_and_helper_wire_protocol(
         paths.append(path)
         return sock
 
+    def _fake_helper_parent(_sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
+        return cast(OwnedProcess, object()), cast(OwnedProcess, object())
+
+    def _fake_parent_still_live(_root: OwnedProcess, _parent: OwnedProcess, pid: int) -> bool:
+        return pid == 42
+
     socket_path = tmp_path / "helper.sock"
     monkeypatch.setattr(client, "_connect", connect)
     monkeypatch.setattr(hc, "permissions_helper_socket", lambda: socket_path)
-    monkeypatch.setattr(hc, "_helper_parent", lambda _: (object(), object()))
-    monkeypatch.setattr(hc, "_parent_still_live", lambda _root, _parent, pid: pid == 42)
+    monkeypatch.setattr(hc, "_helper_parent", _fake_helper_parent)
+    monkeypatch.setattr(hc, "_parent_still_live", _fake_parent_still_live)
 
     assert hc._ping()
     assert paths == [str(socket_path)]
@@ -234,7 +243,9 @@ def test_probe_is_total_and_non_macos_is_up(monkeypatch: pytest.MonkeyPatch) -> 
     assert "probe error" in verdict.detail
 
 
-def test_unverifiable_helper_parent_never_reports_protocol_health(monkeypatch):
+def test_unverifiable_helper_parent_never_reports_protocol_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def missing_parent():
         raise hc._ParentEvidenceError("root parent is not observable")
 
@@ -243,16 +254,30 @@ def test_unverifiable_helper_parent_never_reports_protocol_health(monkeypatch):
     assert hc.probe().verdict.value == "unavailable"
 
 
-def test_connected_helper_peer_must_be_root_native_parent(monkeypatch):
+def test_connected_helper_peer_must_be_root_native_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
+
+    import psutil
 
     from shared.root_control import client as root_client
 
     root = SimpleNamespace(pid=10, live=lambda: True)
     parent = SimpleNamespace(pid=20, live=lambda: True)
+
+    def _fake_process(_pid: int | None) -> SimpleNamespace:
+        return SimpleNamespace(parent=object)
+
+    def _fake_capture(_process: psutil.Process) -> SimpleNamespace:
+        return parent
+
+    def _fake_peer_pid(_sock: socket.socket) -> int:
+        return 30
+
     monkeypatch.setattr(root_client, "root_process", lambda: root)
-    monkeypatch.setattr(hc.psutil, "Process", lambda _: SimpleNamespace(parent=object))
-    monkeypatch.setattr(hc.OwnedProcess, "capture", lambda _: parent)
-    monkeypatch.setattr("shared.root_control.client.peer_pid", lambda _: 30)
+    monkeypatch.setattr(hc.psutil, "Process", _fake_process)
+    monkeypatch.setattr(hc.OwnedProcess, "capture", _fake_capture)
+    monkeypatch.setattr("shared.root_control.client.peer_pid", _fake_peer_pid)
     with pytest.raises(hc._ParentEvidenceError, match="not the captured root parent"):
-        hc._helper_parent(object())
+        hc._helper_parent(cast(socket.socket, object()))

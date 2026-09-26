@@ -4,11 +4,14 @@ import json
 import subprocess
 import sys
 from contextlib import suppress
+from typing import cast
 
 import psutil
 import pytest
 
+from shared.windows_terminal.record import TerminalRecord, read
 from tests.lifecycle.native_root.test_windows_root import (
+    _root,
     ended,
     root_fixture,
     sleeping_service,
@@ -16,6 +19,12 @@ from tests.lifecycle.native_root.test_windows_root import (
 )
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="native Windows terminal Job proof")
+
+
+def _read_record(name: str) -> TerminalRecord:
+    record = read(name)
+    assert record is not None
+    return record
 
 
 @pytest.fixture
@@ -31,8 +40,6 @@ def terminal_backend(native_env, monkeypatch):
 def test_terminal_brokered_from_service_survives_root_exit_then_closes_complete_job(
     tmp_path, native_env, terminal_backend
 ):
-    from shared.windows_terminal.record import read
-
     descendant = tmp_path / "terminal-child"
     terminal_code = sleeping_service(descendant)
     command = subprocess.list2cmdline([sys.executable, "-u", "-c", terminal_code])
@@ -58,21 +65,22 @@ while True: time.sleep(0.02)
             )
             wait_for(descendant.exists, "terminal descendant did not start")
             member = psutil.Process(int(descendant.read_text()))
-            before = read("native-terminal")
+            before = _read_record("native-terminal")
             assert before.state == "running"
-            assert before.root.pid == client.status()["result"]["root"]["pid"]
+            assert before.owner is not None
+            assert before.root.pid == cast(int, _root(client.status())["pid"])
             assert before.owner.identity().live()
             assert terminal_backend.new_session(
                 "native-terminal", command, tmp_path, env=native_env
             )
-            assert read("native-terminal").domain == before.domain
+            assert _read_record("native-terminal").domain == before.domain
             assert client.shutdown()["ok"]
             assert root.wait(timeout=15) == 0
             assert before.owner.identity().live()
             assert member.is_running()
             assert terminal_backend.kill_session("native-terminal", graceful=True, timeout=15)[0]
             wait_for(lambda: ended(member), "terminal close left a Job member")
-            receipt = read("native-terminal")
+            receipt = _read_record("native-terminal")
             assert receipt.state == "closed" and receipt.empty_job_observed
             assert not terminal_backend.list_sessions()
     finally:
@@ -83,7 +91,7 @@ while True: time.sleep(0.02)
 def test_terminal_owner_death_closes_members_without_fabricating_receipt(
     tmp_path, native_env, terminal_backend
 ):
-    from shared.windows_terminal.record import read, record_path
+    from shared.windows_terminal.record import record_path
 
     descendant = tmp_path / "terminal-child"
     command = subprocess.list2cmdline([sys.executable, "-u", "-c", sleeping_service(descendant)])
@@ -97,7 +105,8 @@ def test_terminal_owner_death_closes_members_without_fabricating_receipt(
         assert terminal_backend.new_session("lost-terminal", command, tmp_path, env=native_env)
         wait_for(descendant.exists, "terminal descendant did not start")
         member = psutil.Process(int(descendant.read_text()))
-        original = read("lost-terminal")
+        original = _read_record("lost-terminal")
+        assert original.owner is not None
         assert original.owner.identity().live()
         psutil.Process(original.owner.pid).kill()
         wait_for(lambda: ended(member), "owner death left native Job members")
@@ -106,4 +115,4 @@ def test_terminal_owner_death_closes_members_without_fabricating_receipt(
             terminal_backend.kill_session("lost-terminal", graceful=False)
         with pytest.raises(RuntimeError, match="custody requires reconciliation"):
             terminal_backend.new_session("lost-terminal", command, tmp_path, env=native_env)
-        assert read("lost-terminal").domain == original.domain
+        assert _read_record("lost-terminal").domain == original.domain

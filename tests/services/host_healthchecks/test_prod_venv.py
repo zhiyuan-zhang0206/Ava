@@ -14,7 +14,7 @@ from services.healthchecks import prod_venv as hc
 
 
 @pytest.fixture(autouse=True)
-def isolated(monkeypatch, tmp_path):
+def isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(hc.cluster_drift, "prod_source_dir", lambda: tmp_path)
     interpreter = tmp_path / ".venv/bin/python"
     interpreter.parent.mkdir(parents=True)
@@ -26,7 +26,9 @@ def _package_files(site: Path) -> dict[Path, bytes]:
     return {p.relative_to(site): p.read_bytes() for p in site.rglob("*") if p.is_file()}
 
 
-def test_explicit_checkout_and_isolated_environment(monkeypatch, tmp_path):
+def test_explicit_checkout_and_isolated_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("VIRTUAL_ENV", "/other/.venv")
     monkeypatch.setenv("PYTHONPATH", "/other")
     run = Mock(return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""))
@@ -40,7 +42,7 @@ def test_explicit_checkout_and_isolated_environment(monkeypatch, tmp_path):
         assert call.kwargs["timeout"] == 5
 
 
-def test_dependency_timeout_does_not_skip_import_check(monkeypatch):
+def test_dependency_timeout_does_not_skip_import_check(monkeypatch: pytest.MonkeyPatch) -> None:
     run = Mock(
         side_effect=[
             subprocess.TimeoutExpired("uv", 5),
@@ -54,8 +56,11 @@ def test_dependency_timeout_does_not_skip_import_check(monkeypatch):
     assert run.call_count == 2
 
 
-def test_missing_python_does_not_spawn_a_diagnostic(monkeypatch):
-    monkeypatch.setattr(hc.editable_install, "_venv_python", lambda _: None)
+def test_missing_python_does_not_spawn_a_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _no_python(_source_root: Path) -> Path | None:
+        return None
+
+    monkeypatch.setattr(hc.editable_install, "_venv_python", _no_python)
     run = Mock(side_effect=AssertionError("must not spawn"))
     monkeypatch.setattr(hc.proc, "run_bounded", run)
     assert "venv python missing" in hc._violations()[0]

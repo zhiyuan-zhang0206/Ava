@@ -372,7 +372,7 @@ def test_root_health_tick_uses_latest_timestamp_gauge(otlp_backend) -> None:
 def test_root_health_gauges_keep_separate_home_identity_and_expected_only(otlp_backend) -> None:
     """A completed sibling cluster cannot supply the missing first sample."""
     backend, _, metric_reader = otlp_backend
-    backend.export_batch(
+    backend.export_batch(  # pyright: ignore[reportUnknownMemberType]
         [
             _event(
                 event_name="root_health_expected",
@@ -397,7 +397,7 @@ def test_root_health_gauges_keep_separate_home_identity_and_expected_only(otlp_b
             ),
         ]
     )
-    backend.flush()
+    backend.flush()  # pyright: ignore[reportUnknownMemberType]
     metrics = _metrics(metric_reader)
     expected = metrics["ava_root_health_expected_expected_since_timestamp"]
     assert {point.attributes["home_id"] for point in expected.data.data_points} == {

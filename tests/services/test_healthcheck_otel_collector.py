@@ -21,9 +21,19 @@ def test_collector_protocol_success_requires_root_owned_listeners(
     from shared.root_control import client
 
     owner = OwnedProcess(101, 12.0, None)
-    monkeypatch.setattr(client, "owned_process", lambda _unit: owner)
-    monkeypatch.setattr(hc, "strict_listeners_on", lambda _port: [202])
-    monkeypatch.setattr(hc, "leader_owns_pids", lambda _expected, _pids: owned)
+
+    def _fake_owned_process(_unit: str) -> OwnedProcess | None:
+        return owner
+
+    def _fake_strict_listeners_on(_port: int) -> list[int]:
+        return [202]
+
+    def _fake_leader_owns_pids(_expected: OwnedProcess, _pids: set[int]) -> bool:
+        return owned
+
+    monkeypatch.setattr(client, "owned_process", _fake_owned_process)
+    monkeypatch.setattr(hc, "strict_listeners_on", _fake_strict_listeners_on)
+    monkeypatch.setattr(hc, "leader_owns_pids", _fake_leader_owns_pids)
     monkeypatch.setattr(hc, "_is_alive", lambda: True)
 
     result = hc.probe_collector()
@@ -35,10 +45,17 @@ def test_collector_cannot_certify_a_listener_without_root_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from shared.daemon_health import ProbeVerdict
+    from shared.native_process.ownership import OwnedProcess
     from shared.root_control import client
 
-    monkeypatch.setattr(client, "owned_process", lambda _unit: None)
-    monkeypatch.setattr(hc, "strict_listeners_on", lambda _port: [202])
+    def _fake_owned_process(_unit: str) -> OwnedProcess | None:
+        return None
+
+    def _fake_strict_listeners_on(_port: int) -> list[int]:
+        return [202]
+
+    monkeypatch.setattr(client, "owned_process", _fake_owned_process)
+    monkeypatch.setattr(hc, "strict_listeners_on", _fake_strict_listeners_on)
     monkeypatch.setattr(hc, "_is_alive", lambda: pytest.fail("unknown ownership must not pass"))
     assert hc.probe_collector().verdict is ProbeVerdict.UNAVAILABLE
 
@@ -61,8 +78,11 @@ def test_collector_root_failure_is_unavailable(monkeypatch: pytest.MonkeyPatch) 
     def fail(_unit: str) -> None:
         raise client.RootClientError("root status unavailable")
 
+    def _fake_strict_listeners_on(_port: int) -> list[int]:
+        return [202]
+
     monkeypatch.setattr(client, "owned_process", fail)
-    monkeypatch.setattr(hc, "strict_listeners_on", lambda _port: [202])
+    monkeypatch.setattr(hc, "strict_listeners_on", _fake_strict_listeners_on)
     assert hc.probe_collector().verdict is ProbeVerdict.UNAVAILABLE
 
 

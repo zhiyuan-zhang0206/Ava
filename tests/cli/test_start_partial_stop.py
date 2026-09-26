@@ -1,5 +1,6 @@
 """A proven pre-application start can stop without a nonexistent DB drain."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -7,13 +8,19 @@ import pytest
 from cli.commands import _temporary_stop as stop
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
 from shared import cluster, paths, start_serving
+from shared.hold_driver import HoldDriver
+from shared.machine import MachineRoles
+
+
+def _port_always_free(_port: int) -> bool:
+    return True
 
 
 @pytest.fixture
 def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(cluster, "_port_free", lambda _p: True)
+    monkeypatch.setattr(cluster, "_port_free", _port_always_free)
     prepare_identity(
         IdentityInput(
             home,
@@ -68,19 +75,41 @@ def test_any_application_evidence_refuses_partial_shortcut(
 def test_partial_stop_uses_native_cleanup_without_database_drain(
     partial_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    steps = []
+    steps: list[str] = []
+
+    def _fake_stop_plan(
+        *, preserve_sessions: frozenset[str], keep_browser: bool, keep_infra: bool
+    ) -> tuple[MachineRoles, frozenset[str], frozenset[str]]:
+        return frozenset({"gateway"}), frozenset(), frozenset()
+
+    def _fake_pause_agents(
+        timeout: float = 0, *, driver: HoldDriver | None = None, reap: bool = False
+    ) -> None:
+        pytest.fail("unstarted home has no work to drain")
+
+    def _fake_services_phase_action(
+        *, preserved: frozenset[str], deadline: float
+    ) -> Callable[[], object]:
+        return lambda: steps.append("root")
+
+    def _fake_stop_browser(_deadline: float) -> None:
+        steps.append("browser")
+
+    def _fake_stop_extras(_deadline: float) -> None:
+        steps.append("extras")
+
+    def _fake_stop_data_plane(timeout: float, *, save: bool = True) -> list[str]:
+        steps.append("native")
+        return []
+
     monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: None)
     monkeypatch.setattr("shared.proc.hosting_supervised_session", lambda: None)
-    monkeypatch.setattr(
-        stop, "_stop_plan", lambda **_kw: (frozenset({"gateway"}), frozenset(), frozenset())
-    )
-    monkeypatch.setattr(
-        stop, "pause_agents", lambda *_a, **_kw: pytest.fail("unstarted home has no work to drain")
-    )
-    monkeypatch.setattr(stop, "_services_phase_action", lambda **_kw: lambda: steps.append("root"))
-    monkeypatch.setattr(stop, "_stop_browser", lambda _d: steps.append("browser"))
-    monkeypatch.setattr(stop, "_stop_extras", lambda _d: steps.append("extras"))
-    monkeypatch.setattr(stop, "stop_data_plane", lambda *_a, **_kw: steps.append("native"))
+    monkeypatch.setattr(stop, "_stop_plan", _fake_stop_plan)
+    monkeypatch.setattr(stop, "pause_agents", _fake_pause_agents)
+    monkeypatch.setattr(stop, "_services_phase_action", _fake_services_phase_action)
+    monkeypatch.setattr(stop, "_stop_browser", _fake_stop_browser)
+    monkeypatch.setattr(stop, "_stop_extras", _fake_stop_extras)
+    monkeypatch.setattr(stop, "stop_data_plane", _fake_stop_data_plane)
     assert (
         stop.stop(
             require_confirmation=False,

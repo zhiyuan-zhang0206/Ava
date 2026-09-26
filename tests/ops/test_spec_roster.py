@@ -9,6 +9,7 @@ re-export façade so the "single source" property can't silently regress.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from typing import cast
@@ -368,15 +369,32 @@ def test_healthy_protocol_cannot_certify_an_unowned_listener(
 ) -> None:
     from services.healthchecks import owned_service
     from shared.daemon_health import DaemonProbe
+    from shared.native_process.ownership import OwnedProcess
 
-    monkeypatch.setattr(roster, "probe_home", lambda *_a, **_kw: DaemonProbe.up("healthy"))
-    monkeypatch.setattr(roster, "_browser_probe", lambda: DaemonProbe.up("healthy"))
-    monkeypatch.setattr(
-        "shared.daemon_health._probe_daemon", lambda *_a, **_kw: DaemonProbe.up("healthy")
-    )
-    monkeypatch.setattr(roster, "daemon_identity", lambda *_a: lambda: DaemonProbe.up("healthy"))
-    monkeypatch.setattr(owned_service, "listener_pids", lambda _port: {12345})
-    monkeypatch.setattr(owned_service, "owned_process", lambda _service: None)
+    def _fake_probe_home(*_a: object, **_kw: object) -> DaemonProbe:
+        return DaemonProbe.up("healthy")
+
+    def _fake_browser_probe() -> DaemonProbe:
+        return DaemonProbe.up("healthy")
+
+    def _fake_probe_daemon(*_a: object, **_kw: object) -> DaemonProbe:
+        return DaemonProbe.up("healthy")
+
+    def _fake_daemon_identity(*_a: object) -> Callable[[], DaemonProbe]:
+        return lambda: DaemonProbe.up("healthy")
+
+    def _fake_listener_pids(_port: int) -> set[int]:
+        return {12345}
+
+    def _fake_owned_process(_service: str) -> OwnedProcess | None:
+        return None
+
+    monkeypatch.setattr(roster, "probe_home", _fake_probe_home)
+    monkeypatch.setattr(roster, "_browser_probe", _fake_browser_probe)
+    monkeypatch.setattr("shared.daemon_health._probe_daemon", _fake_probe_daemon)
+    monkeypatch.setattr(roster, "daemon_identity", _fake_daemon_identity)
+    monkeypatch.setattr(owned_service, "listener_pids", _fake_listener_pids)
+    monkeypatch.setattr(owned_service, "owned_process", _fake_owned_process)
 
     item = next(item for item in roster.build_services() if item.session == service)
     assert item.identity_probe is not None
@@ -389,11 +407,14 @@ def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
     carries no field we control, so a 200 there says nothing about whose Chrome
     answered."""
     from services.browser.probe import probe_browser
+    from shared.daemon_health import DaemonProbe
 
     browser = next(s for s in roster.build_services() if s.session == "browser")
-    assert isinstance(browser.identity_probe, partial)
-    assert browser.identity_probe.args[0] == "browser"
-    assert browser.identity_probe.args[2] is roster._browser_probe
+    probe = browser.identity_probe
+    assert isinstance(probe, partial)
+    probe = cast("partial[DaemonProbe]", probe)
+    assert probe.args[0] == "browser"
+    assert probe.args[2] is roster._browser_probe
     assert probe_browser is not None  # the lazy import target exists
 
 

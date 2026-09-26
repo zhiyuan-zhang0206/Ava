@@ -7,14 +7,30 @@ import sys
 import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
+from typing import cast
 
 import psutil
 import pytest
+
+from shared.platform import CREATE_NO_WINDOW
+from shared.root_control.ipc import ResponsePayload
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32", reason="native Windows Job/pipe/console proof"
 )
 REPO = Path(__file__).resolve().parents[3]
+
+
+def _result(response: ResponsePayload) -> dict[str, object]:
+    return cast("dict[str, object]", response.get("result"))
+
+
+def _root(response: ResponsePayload) -> dict[str, object]:
+    return cast("dict[str, object]", _result(response)["root"])
+
+
+def _units(result: dict[str, object]) -> list[dict[str, object]]:
+    return cast("list[dict[str, object]]", result["units"])
 
 
 def wait_for(predicate, detail: str, timeout: float = 10):
@@ -74,7 +90,7 @@ def root_fixture(
         env=env,
         stdout=log,
         stderr=subprocess.STDOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=CREATE_NO_WINDOW,
     )
     client = RootClient(run / "ava-root.sock", timeout=2)
     captured_root = None
@@ -85,7 +101,7 @@ def root_fixture(
             raise AssertionError((tmp_path / "root.log").read_text())
         try:
             response = client.status()
-            captured_root = native_identity(response["result"]["root"])
+            captured_root = native_identity(_root(response))
             return response["ok"]
         except Exception:
             return False
@@ -136,11 +152,11 @@ def test_native_protocol_generation_and_graceful_job_closure(tmp_path, native_en
     with root_fixture(tmp_path, native_env, sleeping_service(receipt)) as (proc, client, run, _):
         wait_for(receipt.exists, "service grandchild did not start")
         member = psutil.Process(int(receipt.read_text()))
-        initial = client.status()["result"]
+        initial = _result(client.status())
         assert client.up("svc")["ok"]
-        repeated = client.status()["result"]
-        assert initial["units"][0]["pid"] == repeated["units"][0]["pid"]
-        assert initial["units"][0]["create_time"] == repeated["units"][0]["create_time"]
+        repeated = _result(client.status())
+        assert _units(initial)[0]["pid"] == _units(repeated)[0]["pid"]
+        assert _units(initial)[0]["create_time"] == _units(repeated)[0]["create_time"]
         assert client.down("svc")["ok"]
         wait_for(lambda: ended(member), "graceful down left a Job member")
         assert not list((run / "custody").iterdir())
@@ -158,7 +174,7 @@ def test_root_death_kills_entire_job_but_retains_custody(tmp_path, native_env):
     ):
         wait_for(receipt.exists, "service grandchild did not start")
         member = psutil.Process(int(receipt.read_text()))
-        psutil.Process(client.status()["result"]["root"]["pid"]).kill()
+        psutil.Process(cast(int, _root(client.status())["pid"])).kill()
         proc.wait(timeout=5)
         wait_for(lambda: ended(member), "root death left a Job member")
         assert (run / "custody/svc.json").exists()
@@ -215,7 +231,7 @@ def test_native_pipe_rejects_bad_frames_and_recovers(tmp_path, native_env):
     ):
         raw, peer = roundtrip(run / "ava-root.sock", b'{"verb":"invented"}\n', 2)
         assert json.loads(raw)["code"] == "unknown_verb"
-        assert peer == client.status()["result"]["root"]["pid"]
+        assert peer == cast(int, _root(client.status())["pid"])
         with pytest.raises((OSError, ValueError)):
             roundtrip(run / "ava-root.sock", b"x" * (MAX_MESSAGE_BYTES + 1) + b"\n", 0.5)
         assert client.status()["ok"]

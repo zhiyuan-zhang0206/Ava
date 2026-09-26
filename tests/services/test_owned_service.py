@@ -7,7 +7,7 @@ import socket
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 
 import psutil
@@ -19,7 +19,7 @@ from shared.native_process.ownership import OwnedProcess
 
 
 @contextlib.contextmanager
-def unix_server() -> Iterator[tuple[Path, OwnedProcess]]:
+def unix_server() -> Generator[tuple[Path, OwnedProcess]]:
     if sys.platform not in {"darwin", "linux"}:
         pytest.skip("native Unix peer PID contract is supported on macOS and Linux")
     with tempfile.TemporaryDirectory(prefix="ava-peer-", dir="/tmp") as directory:
@@ -87,8 +87,11 @@ def test_unobservable_root_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> No
     def unavailable(_service: str) -> None:
         raise probe.RootClientError("ownership socket unavailable")
 
+    def _fake_listener_pids(_port: int) -> set[int]:
+        return {123}
+
     monkeypatch.setattr(probe, "owned_process", unavailable)
-    monkeypatch.setattr(probe, "listener_pids", lambda _port: {123})
+    monkeypatch.setattr(probe, "listener_pids", _fake_listener_pids)
     assert probe.probe("milvus").verdict.value == "unavailable"
 
 

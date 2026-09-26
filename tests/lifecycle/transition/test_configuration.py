@@ -84,7 +84,7 @@ def test_stage_refuses_changed_inputs_before_settings_or_effects(
         {"phase": phase, "request": request, "direction": "candidate"}
     )
 
-    def read(_path: Path) -> SimpleNamespace:
+    def read(_path: Path) -> Operation:
         return operation
 
     monkeypatch.setattr(stage, "read_operation", read)

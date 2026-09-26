@@ -5,6 +5,7 @@ import contextlib
 import json
 import subprocess
 from types import SimpleNamespace
+from typing import cast
 
 import psutil
 import pytest
@@ -42,6 +43,9 @@ def test_status_still_requires_native_pipe_peer_identity(tmp_path, monkeypatch, 
 
 
 async def test_terminal_monitor_rechecks_completion_after_waiting_for_close_lock():
+    from services.ava_root.custody import ServiceCustody
+    from shared.windows_terminal.record import TerminalRecord
+
     class Job:
         closed = False
 
@@ -53,7 +57,11 @@ async def test_terminal_monitor_rechecks_completion_after_waiting_for_close_lock
         return 0
 
     job = Job()
-    owner = TerminalOwner(None, SimpleNamespace(job=job, wait=waited), None)
+    fake_process = cast(
+        "process.ApplicationProcess",
+        SimpleNamespace(job=cast("winjob.WindowsJob", job), wait=waited),
+    )
+    owner = TerminalOwner(cast("TerminalRecord", None), fake_process, cast("ServiceCustody", None))
     await owner._lock.acquire()
     observer = asyncio.create_task(owner.observe())
     await asyncio.sleep(0)  # Observer has entered its loop and is waiting for close.
@@ -88,7 +96,7 @@ async def test_consoleless_live_member_never_becomes_a_closure_receipt(tmp_path,
     from services.ava_root.custody import ServiceCustody
 
     member = OwnedProcess.capture(psutil.Process())
-    job = SimpleNamespace(active_processes=lambda: 1)
+    job = cast("winjob.WindowsJob", SimpleNamespace(active_processes=lambda: 1))
     application = process.ApplicationProcess(member.pid, 123, job, contextlib.ExitStack())
     monkeypatch.setattr(application, "members", lambda: {member})
     monkeypatch.setattr(
@@ -169,7 +177,9 @@ async def test_job_zero_count_still_waits_for_every_observed_native_exit(tmp_pat
 
     native_exited = False
     observed = OwnedProcess(100, 42.0, None)
-    job = SimpleNamespace(active_processes=lambda: 0, terminate=lambda: None)
+    job = cast(
+        "winjob.WindowsJob", SimpleNamespace(active_processes=lambda: 0, terminate=lambda: None)
+    )
     application = process.ApplicationProcess(100, 123, job, contextlib.ExitStack())
     snapshots = iter([{observed}, set()])
     monkeypatch.setattr(application, "members", lambda: next(snapshots))

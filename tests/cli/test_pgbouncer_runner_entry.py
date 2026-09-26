@@ -26,8 +26,8 @@ def _ensure_from_home_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
     monkeypatch.setattr(pg, "pgbouncer_bin", lambda: str(Path(__file__)))
     monkeypatch.setattr(pg, "_pg_socket_dir", lambda: tmp_path / "pg-socket")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(pg.ownership, "pooler", lambda *_a: None)
-    monkeypatch.setattr(pg.ownership, "require_listener", lambda *_a, **_k: None)
+    monkeypatch.setattr(pg.ownership, "pooler", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pg.ownership, "require_listener", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg.subprocess, "run", lambda *_args, **_kwargs: _CompletedOk())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(pg, "_admin_reachable", lambda *_args, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType]
