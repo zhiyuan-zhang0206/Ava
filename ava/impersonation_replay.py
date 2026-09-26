@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
+import psycopg
 from psycopg.types.json import Jsonb
 
 from ava._gateway_transport import _get
@@ -11,7 +12,9 @@ from shared.agents.impersonation._impersonation_store import lock_lease
 from shared.agents.impersonation.impersonation_events import consume_events
 from shared.agents.impersonation.impersonation_history import event_belongs_to_agent
 from shared.agents.impersonation_manifest import (
+    ManifestNotSealedError,
     certify,
+    freeze_manifest,
     frozen_items,
     is_protocol_v1,
     set_pending_reason,
@@ -40,7 +43,7 @@ def consume_recorded_events(session: dict[str, Any], *, page_budget: int = 4) ->
         if lease["events_completed_at"] is not None:
             return
         protocol_v1 = is_protocol_v1(lease)
-        if _awaits_manifest_freeze(lease, protocol_v1=protocol_v1):
+        if _awaits_manifest_freeze(conn, lease, protocol_v1=protocol_v1):
             return
         start = _replay_start(lease, protocol_v1=protocol_v1)
         cursor: list[dict[str, Any]] = lease["events_cursor"] or [
@@ -123,8 +126,21 @@ def _reader_filters(session: dict[str, Any], kind: str) -> dict[str, Any]:
     return {"category": "audit"}
 
 
-def _awaits_manifest_freeze(lease: dict[str, Any], *, protocol_v1: bool) -> bool:
-    return protocol_v1 and lease["manifest_frozen_at"] is None
+def _awaits_manifest_freeze(
+    conn: psycopg.Connection, lease: dict[str, Any], *, protocol_v1: bool
+) -> bool:
+    if not protocol_v1 or lease["manifest_frozen_at"] is not None:
+        return False
+    if lease["ended_at"] is None:
+        return True
+    # Expiry closes admission but must not wait for participants to hand back
+    # control. The runner can freeze later, only once every receipt has sealed.
+    try:
+        freeze_manifest(conn, lease)
+    except ManifestNotSealedError:
+        return True
+    lease.update(lock_lease(conn, str(lease["id"])))
+    return False
 
 
 def _replay_start(lease: dict[str, Any], *, protocol_v1: bool) -> Any:

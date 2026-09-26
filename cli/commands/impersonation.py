@@ -221,7 +221,7 @@ def _dispatch(args: argparse.Namespace) -> int:
             args.agent_id,
             name=args.name,
             executor_name=args.caller,
-            process_metadata=process_metadata(),
+            process_metadata={**process_metadata(), "invoked_python": sys.executable},
             ttl_seconds=args.ttl,
             reason=args.reason,
             provider=args.relay_provider,
