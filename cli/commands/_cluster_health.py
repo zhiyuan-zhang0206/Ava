@@ -397,15 +397,24 @@ def _editable_install_failure() -> str | None:
     )
 
 
-def _source_tree_failure() -> str | None:
-    """Report source drift or unavailable inspection without repairing files.
+def _source_tree_failure(home: Path) -> str | None:
+    """Report source tamper or unavailable inspection without repairing files.
 
-    This alert-only check cannot authorize rollback: selecting a release does
-    not repair arbitrary edits. An unreadable checkout is unknown, never healthy.
+    Applies only to a home that executes its source checkout. A home with a
+    selected release image runs verified image bytes, so a leftover checkout
+    cannot reach running code; an unreadable selector leaves the executing code
+    unknown, never healthy. This alert-only check cannot authorize rollback:
+    selecting a release does not repair arbitrary edits.
     """
     import shared.cluster_drift
     import shared.source_tree_guard as stg
+    from shared.runtime_release import current_pointer
 
+    try:
+        if current_pointer(home / "releases") is not None:
+            return None
+    except (OSError, ValueError) as exc:
+        return f"prod source tree guard skipped: release selector unreadable ({exc})"
     source_root = shared.cluster_drift.prod_source_dir()
     if source_root is None:
         return None
@@ -422,7 +431,7 @@ def _run_source_tree_check(home: Path) -> int | None:
     """Run check 8 — alert-only, so it bypasses ``_unhealthy`` (a tampered
     tree is the 2026-08-28 outage class, but rollback does not undo an on-disk
     edit). Returns None when the check passes, 1 when it alerts."""
-    failure = _source_tree_failure()
+    failure = _source_tree_failure(home)
     if failure is None:
         return None
     message = f"FAIL: source tree — {failure}"
@@ -568,10 +577,11 @@ def _check_alert_only_health(home: Path) -> int:
     print("  ✓ editable install records")
 
     # 8. Source-tree integrity — alert-only, same class as checks 5-7: a
-    # tampered prod checkout is the 2026-08-28 outage class (edited source
-    # broke `import ava` for every agent on the box), but rolling back code
-    # does not undo an on-disk edit — the converge guard resets the tree on
-    # the next start/update. The probe detects and alerts; it never writes.
+    # tampered checkout that a source-run home executes is the 2026-08-28
+    # outage class (edited source broke `import ava` for every agent on the
+    # box), but rolling back code does not undo an on-disk edit. The probe
+    # detects and alerts; it never writes, and nothing repairs the tree for
+    # the operator.
     source_check = _run_source_tree_check(home)
     if source_check is not None:
         return source_check

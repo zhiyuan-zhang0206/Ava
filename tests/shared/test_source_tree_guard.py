@@ -1,4 +1,4 @@
-"""Regression guards for the source-tree integrity guard (detector + repair)."""
+"""Regression guards for the source-tree integrity detector."""
 
 from __future__ import annotations
 
@@ -119,20 +119,21 @@ def test_tracked_modification_is_a_violation(
     assert any("tracked change" in v and "tracked.txt" in v for v in violations)
 
 
-def test_head_moved_off_installed_commit_is_a_violation(
+def test_head_move_alone_is_not_a_violation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A clean-looking checkout (git status empty) is still tampered when HEAD
-    no longer matches the last fully installed commit."""
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
+    """A clean checkout whose HEAD moved is not tampering. No current lifecycle
+    records an installed commit for a source checkout, so a legacy
+    `$AVA_HOME/installed_sha` bookmark left behind by the retired updater must
+    not turn a legitimate checkout move into a permanent alert."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     repo = _init_source(tmp_path / "source")
-    first = _git(repo, "rev-parse", "HEAD")
+    (home / "installed_sha").write_text(_git(repo, "rev-parse", "HEAD") + "\n")
     _commit(repo, "y", "c2")
-    monkeypatch.setattr("shared.source_integrity.get", lambda: first)
 
-    violations = stg.source_tree_violations(repo)
-
-    assert any("installed commit" in v for v in violations)
+    assert stg.source_tree_violations(repo) == ()
 
 
 def test_non_git_checkout_signals_guard_skipped(
@@ -182,194 +183,19 @@ def test_git_command_failure_signals_guard_skipped(
     assert stg.source_tree_violations(repo) == ("guard skipped: git unavailable",)
 
 
-def test_git_failure_keeps_partial_findings(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Blindness is marked on top of whatever the guard did manage to see:
-    tracked tamper found by `status` is never dropped because `rev-parse`
-    failed."""
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
-    repo = _init_source(tmp_path / "source")
-    (repo / "tracked.txt").write_text("TAMPERED")
-    status_ok = subprocess.CompletedProcess([], returncode=0, stdout=" M tracked.txt\n", stderr="")
-
-    def _status_ok_then_fail(
-        _source: Path, *_args: str, _timeout: float = 5.0
-    ) -> subprocess.CompletedProcess[str] | None:
-        return status_ok if "status" in _args else None
-
-    monkeypatch.setattr(stg, "_git", _status_ok_then_fail)
-
-    violations = stg.source_tree_violations(repo)
-
-    assert any("tracked change" in v and "tracked.txt" in v for v in violations)
-    assert tuple(v for v in violations if v.startswith(stg.GUARD_SKIPPED_PREFIX)) == (
-        "guard skipped: git unavailable",
-    )
-
-
-# --- repair ---
-
-
-def test_repair_resets_head_to_installed_commit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo = _init_source(tmp_path / "source")
-    first = _git(repo, "rev-parse", "HEAD")
-    second = _commit(repo, "y", "c2")
-    monkeypatch.setattr("shared.source_integrity.get", lambda: first)
-
-    repair = stg.repair_source_tree(repo)
-
-    assert repair is not None
-    assert repair.reset_from == second
-    assert repair.reset_to == first
-    assert repair.errors == ()
-    assert (repo / "tracked.txt").read_text() == "x"
-    assert _git(repo, "rev-parse", "HEAD") == first
-
-
-def test_repair_resets_dirty_tracked_files_at_installed_head(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The outage's main shape: a tracked file edited in place and never
-    committed leaves HEAD == installed — the reset must still revert it."""
-    repo = _init_source(tmp_path / "source")
-    head = _git(repo, "rev-parse", "HEAD")
-    monkeypatch.setattr("shared.source_integrity.get", lambda: head)
-    (repo / "tracked.txt").write_text("TAMPERED")
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def record_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr("shared.telemetry.emit", record_emit)
-
-    repair = stg.repair_source_tree(repo)
-
-    assert repair is not None
-    assert repair.reset_from == head
-    assert repair.reset_to == head
-    assert repair.errors == ()
-    assert (repo / "tracked.txt").read_text() == "x"
-    assert len(emitted) == 1  # a repair that acted must leave an audit trail
-
-
-def test_repair_cleans_untracked_and_keeps_whitelist(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo = _init_source(tmp_path / "source")
-    monkeypatch.setattr("shared.source_integrity.get", lambda: _git(repo, "rev-parse", "HEAD"))
-    (repo / "junk.txt").write_text("j")
-    (repo / "junkdir").mkdir()
-    (repo / "junkdir" / "inner.txt").write_text("i")
-    (repo / "frontend" / ".next").mkdir(parents=True)
-    (repo / "frontend" / ".next" / "build.txt").write_text("b")
-
-    repair = stg.repair_source_tree(repo)
-
-    assert repair is not None
-    assert repair.reset_from is None
-    assert repair.errors == ()
-    assert not (repo / "junk.txt").exists()
-    assert not (repo / "junkdir").exists()
-    assert (repo / "frontend" / ".next" / "build.txt").exists()
-    assert repair.cleaned == ("junk.txt", "junkdir/inner.txt")
-    assert repair.kept_whitelisted == ("frontend/.next/build.txt",)
-
-
-def test_repair_keeps_gitignored_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The clean step (``git clean -fd``, no ``-x``) leaves gitignored runtime
-    data in place, so the ledger survives repairs like a whitelisted artefact."""
-    repo = _init_source(tmp_path / "source")
-    (repo / ".gitignore").write_text("scripts/ci_usage/\n")
-    _git(repo, "add", ".gitignore")
-    _git(repo, "commit", "-m", "ignore ci usage ledger")
-    monkeypatch.setattr("shared.source_integrity.get", lambda: _git(repo, "rev-parse", "HEAD"))
-    ledger = repo / "scripts" / "ci_usage" / "ledger.jsonl"
-    ledger.parent.mkdir(parents=True)
-    ledger.write_text("{}\n")
-
-    repair = stg.repair_source_tree(repo)
-
-    assert repair is not None
-    assert repair.errors == ()
-    assert repair.cleaned == ()
-    assert repair.kept_whitelisted == ()
-    assert ledger.exists()
-
-
-def test_repair_emits_telemetry_when_it_acts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo = _init_source(tmp_path / "source")
-    monkeypatch.setattr("shared.source_integrity.get", lambda: _git(repo, "rev-parse", "HEAD"))
-    (repo / "junk.txt").write_text("j")
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def record_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr("shared.telemetry.emit", record_emit)
-
-    stg.repair_source_tree(repo)
-
-    assert emitted == [
-        (
-            ("telemetry", "source_tree_reset"),
-            {
-                "level": "warning",
-                "source": "converge",
-                "attributes": {
-                    "reset_from": None,
-                    "reset_to": None,
-                    "cleaned": ["junk.txt"],
-                    "kept_whitelisted": [],
-                },
-            },
-        )
-    ]
-
-
-def test_repair_on_clean_tree_is_a_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    repo = _init_source(tmp_path / "source")
-    monkeypatch.setattr("shared.source_integrity.get", lambda: _git(repo, "rev-parse", "HEAD"))
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def record_emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr("shared.telemetry.emit", record_emit)
-
-    repair = stg.repair_source_tree(repo)
-
-    assert repair is not None
-    assert repair.reset_from is None
-    assert repair.cleaned == ()
-    assert repair.errors == ()
-    assert emitted == []
-
-
-def test_repair_non_git_checkout_is_none(tmp_path: Path) -> None:
-    repo = tmp_path / "plain"
-    repo.mkdir()
-
-    assert stg.repair_source_tree(repo) is None
-
-
 # --- whitelist self-check ---
 
 
 def test_whitelist_validation_rejects_empty() -> None:
-    """An empty whitelist would flag every untracked file as tamper and make
-    repair delete the runtime artifacts — the guard must fail fast instead."""
+    """An empty whitelist would flag every untracked file, the runtime artifacts
+    included, as tamper — the guard must fail fast instead."""
     with pytest.raises(ValueError, match="must be non-empty"):
         stg._validate_whitelist(())
 
 
 def test_whitelist_validation_rejects_catch_all_patterns() -> None:
     """A catch-all pattern whitelists arbitrary paths — detection would be
-    always empty and repair never act (the silent-no-op misconfiguration)."""
+    always empty (the silent-no-op misconfiguration)."""
     for bad in (("*",), ("**",), ("*/*",), ("frontend/", "*")):
         with pytest.raises(ValueError, match="arbitrary paths"):
             stg._validate_whitelist(bad)

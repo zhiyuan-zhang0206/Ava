@@ -66,6 +66,9 @@ are not implementation requirements for this revision.
      publication. It keeps fencing every deploy-lease acquire, including PITR
      provisioning, until an operator resolves it in the cutover record from its
      retained evidence. The fence itself stays.
+   - `$AVA_HOME/installed_sha` has no reader or writer; the source-tree check
+     alerts only on checkout edits of a source-run home. Delete the file in the
+     cutover record.
 
 ## Planned: remove retired controller storage
 

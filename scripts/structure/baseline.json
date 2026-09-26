@@ -399,8 +399,6 @@
     "shared/runtime_publication_input.py::resolve_runtime_publication_input": 16,
     "shared/runtime_release.py::verify_release": 33,
     "shared/packages/skills/skill_index.py::_scan_root": 24,
-    "shared/source_tree_guard.py::repair_source_tree": 28,
-    "shared/source_tree_guard.py::source_tree_violations": 15,
     "shared/updater_handoff.py::_read_unlocked": 16,
     "shared/updater_recovery.py::NormalReleaseRecoveryJournal.coherent_phase": 16,
     "shared/windows_console_signal.py::send_private_console_break": 22,

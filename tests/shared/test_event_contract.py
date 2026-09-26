@@ -99,8 +99,7 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     agent_boot_failed (Task #1704's visible process-boot failure marker) +
     gate_auth_probe_failed (Task #1736's gate auth-probe failure
     classification event) + plugin_load_failed (2026-08-28 observability
-    station batch) + source_tree_reset (Task #1905's source-tree guard
-    repair audit).
+    station batch).
     Bump deliberately when adding a telemetry event, never to silence a
     drift."""
     from shared.telemetry import _TELEMETRY_KINDS
@@ -223,9 +222,11 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # (task #4728's parked orphan settlement) raises it to 220; the backup/PITR
     # operation custody alert (backup_operation_custody) raises it to 221.
     # The recovery wake pacing pair (task #4722: host_recovery_wake_started /
-    # host_recovery_wake_released) raises it to 222.
+    # host_recovery_wake_released) raises it to 222. Retiring the source-tree
+    # repair (its source_tree_reset audit had no emitter left) lowers it by one;
+    # the current total, asserted below, is 220.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 221
+    assert len(_TELEMETRY_KINDS) == 220
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

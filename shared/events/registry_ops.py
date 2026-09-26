@@ -155,11 +155,6 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "poisoned editable install repaired before an exec child spawn",
         tier="anomaly",
     ),
-    "source_tree_reset": _telemetry(
-        "source_tree_reset",
-        "prod source checkout reset to the installed commit / cleaned of untracked files",
-        tier="anomaly",
-    ),
     "lgtm_dashboard_render_failed": _telemetry(
         "lgtm_dashboard_render_failed",
         "ava-ops dashboard render failed during converge; the previous provisioning file was kept",

@@ -321,20 +321,6 @@ def running_sha_path() -> Path:
     return ava_home() / "running_sha"
 
 
-def installed_sha_path() -> Path:
-    """Path of the `$AVA_HOME/installed_sha` file that records the commit this
-    host last fully installed (checked out + uv sync + migrations applied).
-
-    Written by `ava cluster update` after a successful checkout + sync + migrate, and
-    by `ava start` right after it applies pending migrations. Read by the
-    source-integrity guard at `ava start` to detect manual git operations in
-    the source tree that bypass the update flow.
-
-    Returns the path only; ``shared.source_integrity`` owns read/write.
-    """
-    return ava_home() / "installed_sha"
-
-
 def computer_mcp_socket() -> Path:
     """Unix socket of the per-machine shared computer MCP service
     ($AVA_HOME/run/computer-mcp.sock). The per-agent bridge / the MCP daemon's

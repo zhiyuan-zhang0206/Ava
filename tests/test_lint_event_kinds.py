@@ -74,7 +74,6 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "editable_pth_repaired",  # shared/editable_install.py:repair_editable_ava_pth
         "editable_direct_url_repaired",  # shared/editable_install.py:repair_editable_direct_url
         "exec_editable_install_poisoned",  # shared/editable_install.py:guard_editable_install
-        "source_tree_reset",  # shared/source_tree_guard.py:repair_source_tree
         "lgtm_dashboard_render_failed",  # cli/commands/_lgtm_provisioning.py:_render_ava_ops_dashboard telemetry.emit("telemetry", ...)
         "event_log_drop",  # shared/telemetry_loss.py:loss_event constructs Event directly
         "sdk_call",  # ava/_sdk_metering.py recorder (via shared/sdk_telemetry)
