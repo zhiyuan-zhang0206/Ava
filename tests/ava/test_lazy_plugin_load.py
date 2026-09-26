@@ -1,4 +1,4 @@
-"""ava.__getattr__ env-gated lazy plugin-namespace load + ava._ensure_plugins_loaded.
+"""ava.__getattr__ env-gated lazy plugin-namespace load + ava.ensure_plugins_loaded.
 
 A process an agent launched (AVA_AGENT_ID forwarded, no bootstrap to hook — a
 bare `python x.py` in a persistent shell session) self-loads plugin namespaces
@@ -22,6 +22,7 @@ import pytest
 
 import ava
 from ava import agent_identity
+from ava.sdk_surface import plugins
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +36,7 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(agent_identity, "_owns_loop", agent_identity._owns_loop)
     # Save existing namespace objects before clearing
     _saved_ns: dict[str, Any] = {}
-    for _name in list(ava._REGISTERED_NAMESPACES):
+    for _name in list(plugins._REGISTERED_NAMESPACES):
         _obj = getattr(ava, _name, None)
         if _obj is not None:
             _saved_ns[_name] = _obj
@@ -46,14 +47,14 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # conflict checks since we know these were originally here)
     for _name, _obj in _saved_ns.items():
         setattr(ava, _name, _obj)
-        if _name not in ava._REGISTERED_NAMESPACES:
-            ava._REGISTERED_NAMESPACES[_name] = "<restored>"
+        if _name not in plugins._REGISTERED_NAMESPACES:
+            plugins._REGISTERED_NAMESPACES[_name] = "<restored>"
         if _name not in ava.__all_for_ava__:
             ava.__all_for_ava__.append(_name)
 
 
 def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
-    """Replace agent._extensions.load_extensions (reached by _ensure_plugins_loaded
+    """Replace agent._extensions.load_extensions (reached by ensure_plugins_loaded
     via importlib) with a spy that records calls and optionally registers a namespace.
     Avoids the heavy, DB-touching real load in a unit test."""
     import agent._extensions as extensions
@@ -148,8 +149,8 @@ def test_db_url_forward_wins_over_lazy_load(monkeypatch: pytest.MonkeyPatch) -> 
 def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _spy_loader(monkeypatch, register=None)
 
-    ava._ensure_plugins_loaded()
-    ava._ensure_plugins_loaded()
+    ava.ensure_plugins_loaded()
+    ava.ensure_plugins_loaded()
 
     assert calls == [1]  # latched: loads at most once per process
     assert ava._plugins_loaded is True
@@ -174,7 +175,7 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
 
     monkeypatch.setattr(extensions, "load_extensions", boom)
 
-    ava._ensure_plugins_loaded()  # must not raise
+    ava.ensure_plugins_loaded()  # must not raise
 
     assert ava._plugins_loaded is True
     assert any("failed in this launched child" in r["message"] for r in loguru_records)
@@ -209,7 +210,7 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     monkeypatch.delattr(extensions, "load_extensions")
     monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
 
-    ava._ensure_plugins_loaded()  # must not raise
+    ava.ensure_plugins_loaded()  # must not raise
 
     assert ava._plugins_loaded is False  # deferred, not latched
     assert calls == []
@@ -220,7 +221,7 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
     monkeypatch.setattr(extensions.__spec__, "_initializing", False)
 
-    ava._ensure_plugins_loaded()
+    ava.ensure_plugins_loaded()
 
     assert calls == [1]
     assert ava._plugins_loaded is True

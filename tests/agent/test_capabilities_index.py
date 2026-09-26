@@ -28,6 +28,7 @@ import ava
 import ava.skills as skills_mod
 from agent.graph._capabilities import _disabled_by_sdk_config, capabilities_section
 from agent.graph._system_prompt import _delegation_check_section, build_system_prompt
+from ava.sdk_surface import sdk_disable
 from shared.config import FIELD_INFOS, settings
 
 
@@ -319,7 +320,7 @@ def test_runtime_removed_surface_renders_nothing(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The eval-isolation boundary removes SDK surfaces at runtime via
-    `ava._apply_sdk_disable` (mcps, ui, tasks, ...) without touching
+    `sdk_disable.apply_sdk_disable` (mcps, ui, tasks, ...) without touching
     `settings.agent.sdk_disable` — the boot of an isolated eval agent crashed
     in `_mcp_index_lines` when `ava.mcps` was gone but the config check could
     not see it. The applied-disable registry records the removal, so a removed
@@ -327,7 +328,7 @@ def test_runtime_removed_surface_renders_nothing(
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
     monkeypatch.delattr(ava, "mcps", raising=False)
-    monkeypatch.setattr(ava, "_applied_disable_entries", {"mcps"})
+    monkeypatch.setattr(sdk_disable, "applied_disable_entries", {"mcps"})
 
     text = capabilities_section()
     assert "- `ava.skills.alpha` — Alpha desc" in text
@@ -342,7 +343,7 @@ def test_applied_disable_registry_marks_runtime_removed_path(
     _write_skill(fake_skills_dir, "alpha", "alpha", "Alpha desc")
 
     monkeypatch.delattr(ava.agents, "get_last_message", raising=False)
-    monkeypatch.setattr(ava, "_applied_disable_entries", {"agents.get_last_message"})
+    monkeypatch.setattr(sdk_disable, "applied_disable_entries", {"agents.get_last_message"})
     assert _disabled_by_sdk_config("agents.get_last_message") is True
 
 

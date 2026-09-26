@@ -56,7 +56,7 @@ def native_checkpoint(
     def loader_stub(**_kwargs: object) -> None:
         """Accept the `surface` kwarg attach passes (ignored)."""
 
-    monkeypatch.setattr(ava, "_ensure_plugins_loaded", loader_stub)
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
     with PluginContext("integration"):
         handle = state_module.register_plugin_state(IntegrationPlugin)
     state_module.build_agent_state()

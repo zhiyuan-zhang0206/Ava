@@ -424,8 +424,8 @@ def test_boot_loads_plugins_before_running_script(tmp_path: pathlib.Path) -> Non
     # (ava.tasks etc.) before it runpys the watcher script — otherwise the script
     # AttributeErrors on any plugin namespace. Order matters: load then run.
     boot = watcher._build_boot(tmp_path / "x.py", None, 42)
-    assert "ava._ensure_plugins_loaded()" in boot
-    assert boot.index("ava._ensure_plugins_loaded()") < boot.index("runpy.run_path")
+    assert "ava.ensure_plugins_loaded()" in boot
+    assert boot.index("ava.ensure_plugins_loaded()") < boot.index("runpy.run_path")
     compile(boot, "<boot>", "exec")  # must be valid Python
 
 
@@ -833,7 +833,7 @@ def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
     assert 'os.environ["AVA_AGENT_ID"] = "42"' in boot
     env_line = boot.index('os.environ["AVA_AGENT_ID"]')
     assert env_line < boot.index("import ava")  # before the ava import, not just before use
-    assert env_line < boot.index("ava._ensure_plugins_loaded()")
+    assert env_line < boot.index("ava.ensure_plugins_loaded()")
     assert env_line < boot.index("runpy.run_path")
     compile(boot, "<boot>", "exec")  # must be valid Python
 

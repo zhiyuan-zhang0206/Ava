@@ -403,7 +403,7 @@ def run(schedule_id: int) -> int:
             runner_argv = sys.argv
             sys.argv = [str(script_path)]
             try:
-                ava._ensure_plugins_loaded()
+                ava.ensure_plugins_loaded()
                 runpy.run_path(str(script_path), run_name="__main__")
             finally:
                 sys.argv = runner_argv
