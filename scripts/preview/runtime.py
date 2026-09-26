@@ -32,13 +32,18 @@ def configure(run: Path, home: Path) -> None:
         raise RuntimeError("Install did not register this preview")
     # Detached services and later stop commands use the exact recorded profile.
     profile = json.loads((run / "run.json").read_text())["profile"]
+    app_port = record_app_port(record)
+    # The OS-managed entry gate is absent; browsers connect to Next.js directly.
+    profile["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] = (
+        f"http://127.0.0.1:{app_port},http://localhost:{app_port}"
+    )
     upsert_env(home / ".env", profile)
     config = {
         "services": sorted(SERVICES),
         "disabled_services": sorted({s.session for s in build_services()} - SERVICES),
         "ports": record.ports,
         "gateway_url": f"http://127.0.0.1:{record.ports['gateway']}",
-        "frontend_url": f"http://127.0.0.1:{record_app_port(record)}",
+        "frontend_url": f"http://127.0.0.1:{app_port}",
     }
     (run / "config.json").write_text(json.dumps(config, indent=2) + "\n")
 
@@ -61,11 +66,13 @@ def check(run: Path, home: Path) -> None:
         if not failures:
             response = httpx.get(config["frontend_url"], timeout=10)
             response.raise_for_status()
+            check_browser_access(config["gateway_url"], config["frontend_url"])
             (run / "check.json").write_text(
                 json.dumps(
                     {
                         "services": sorted(SERVICES),
                         "frontend_http": response.status_code,
+                        "browser_api_access": "passed",
                         "home": str(home),
                     },
                     indent=2,
@@ -75,6 +82,22 @@ def check(run: Path, home: Path) -> None:
             return
         time.sleep(1)
     raise RuntimeError(f"Services not ready: {failures}")
+
+
+def check_browser_access(gateway_url: str, frontend_url: str) -> None:
+    """The no-auth preview must answer the browser's exact cross-origin request."""
+    import httpx
+
+    response = httpx.get(
+        gateway_url + "/api/auth/check", headers={"Origin": frontend_url}, timeout=10
+    )
+    response.raise_for_status()
+    if (
+        response.headers.get("access-control-allow-origin") != frontend_url
+        or response.headers.get("access-control-allow-credentials") != "true"
+        or response.json()["authenticated"] is not True
+    ):
+        raise RuntimeError("Preview browser cannot authenticate to its gateway")
 
 
 def smoke(run: Path) -> None:

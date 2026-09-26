@@ -35,10 +35,12 @@ Postgres, Redis, PgBouncer and allocated ports. It disables OS jobs, GUI handove
 desktop/browser services and remote memory synchronization. The launch environment
 omits inherited Ava settings, Python overrides and provider credentials; it never
 seeds a production `.env`. Use the printed **frontend app URL** directly; the
-OS-managed gate is deliberately absent in this profile.
+OS-managed gate is deliberately absent in this profile. The preview explicitly
+allows its direct loopback app origins in the gateway's CORS policy.
 
 Verification requires identity probes for all four services, a frontend HTTP
-response and a real agent turn: a scripted model asks `execute_code` to run
+response, an authenticated CORS response for that exact browser origin, and a
+real agent turn: a scripted model asks `execute_code` to run
 `print(1 + 2)`, and the committed timeline must contain exactly that code and the
 output body `3`. The scripted reply alone cannot pass. This checks source boot
 and execution; it does not prove installed release update/rollback, multiple

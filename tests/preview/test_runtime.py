@@ -6,10 +6,76 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from scripts.preview import runtime
+
+
+def test_configure_allows_the_direct_app_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dotenv import dotenv_values
+
+    from ops import roster
+    from shared import cluster
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / "run.json").write_text(json.dumps({"profile": {"AVA_OS_JOBS_ENABLED": "0"}}))
+    record = cluster.ClusterRecord(
+        ports=cast(cluster.ClusterPorts, {"gateway": 18054, "frontend": 18055, "app": 18069}),
+        gateway_home=str(home),
+        created_at="2026-09-26T00:00:00Z",
+    )
+
+    def get_record(_home: str) -> cluster.ClusterRecord:
+        return record
+
+    monkeypatch.setattr(cluster, "get_record", get_record)
+    monkeypatch.setattr(roster, "build_services", list)
+    runtime.configure(tmp_path, home)
+    assert dotenv_values(home / ".env")["AVA_GATEWAY_CORS_ALLOWED_ORIGINS"] == (
+        "http://127.0.0.1:18069,http://localhost:18069"
+    )
+    assert json.loads((tmp_path / "config.json").read_text())["frontend_url"] == (
+        "http://127.0.0.1:18069"
+    )
+
+
+@pytest.mark.parametrize("fault", ["origin", "credentials", "authentication", None])
+def test_browser_readiness_requires_cross_origin_auth(
+    monkeypatch: pytest.MonkeyPatch, fault: str | None
+) -> None:
+    import httpx
+
+    origin = "http://127.0.0.1:18069"
+    headers = {
+        "access-control-allow-origin": origin,
+        "access-control-allow-credentials": "true",
+    }
+    if fault == "origin":
+        headers["access-control-allow-origin"] = "http://127.0.0.1:18055"
+    if fault == "credentials":
+        del headers["access-control-allow-credentials"]
+
+    def get(url: str, **kwargs: object) -> httpx.Response:
+        assert url == "http://127.0.0.1:18054/api/auth/check"
+        assert kwargs["headers"] == {"Origin": origin}
+        return httpx.Response(
+            200,
+            headers=headers,
+            json={"authenticated": fault != "authentication"},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx, "get", get)
+    if fault is None:
+        runtime.check_browser_access("http://127.0.0.1:18054", origin)
+    else:
+        with pytest.raises(RuntimeError, match="Preview browser cannot authenticate"):
+            runtime.check_browser_access("http://127.0.0.1:18054", origin)
 
 
 @pytest.mark.parametrize("body", ["(no output)", "Traceback: error at line 3", "13", "3\nError"])
@@ -76,7 +142,7 @@ def test_incomplete_install_stops_native_redis_with_no_registry(tmp_path: Path) 
     socket = data / "redis.sock"
     with (tmp_path / "redis.log").open("w") as output:
         child = subprocess.Popen(  # noqa: S603 — local Redis, private dir/socket, no TCP port
-            [redis, "--port", "0", "--unixsocket", str(socket), "--save", "", "--appendonly", "no"],
+            [redis, "--port", "0", "--unixsocket", socket.name, "--save", "", "--appendonly", "no"],
             cwd=data,
             stdout=output,
             stderr=subprocess.STDOUT,
