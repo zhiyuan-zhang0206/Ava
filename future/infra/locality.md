@@ -41,7 +41,7 @@ boundaries, already carried by codegen, and not debt.
    one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
    cover (`scripts/`, and any async pool left in `allowed`), or retire it if
    nothing remains.
-2. **Reach-in burn-down** (`private_imports`, 305 keys / 321 sites / 111
+2. **Reach-in burn-down** (`private_imports`, 347 keys / 391 sites / 125
    files), highest yield first: `cli/main.py` re-exports 121 private
    `cli.parsers.*._h_*` handlers so tests have one namespace to patch (a
    hand-maintained registry — bind handlers in their parser modules and patch
@@ -49,6 +49,14 @@ boundaries, already carried by codegen, and not debt.
    `shared.lm._plugin_providers`, `shared.agents.impersonation._impersonation_store`,
    `agent.graph._exec_protocol`, `agent._turn_progress`) each get a verdict:
    contract (export it) or internal (route callers through a door).
+   The `ava/_*.py` modules the framework and plugins reach into (42 keys;
+   `ava._boot` 25 sites, `ava._gateway_client` and `ava._mcp_config` 11 each)
+   are the clearest contract case: agent visibility is the `__all_for_ava__`
+   whitelist, so they can take public module names without entering the
+   agent's view. `lint_agent_docstrings` still keys its dev-facing exemption on
+   underscore path segments; switch it to agent-surface reachability
+   (`ava.agent_visible_names()`) first, so a renamed framework module is not
+   held to agent-docstring rules.
 3. **Locality sweeper class** — an index, not a wall: per-PR module spread and
    cross-package co-change pairs over a rolling window, reusing the lint's
    scanner per [lint-vs-sweeper](../../conventions/lint-vs-sweeper.md). Each
@@ -62,7 +70,7 @@ boundaries, already carried by codegen, and not debt.
    more modules, the description names the leaked decision and either closes
    it or files a task (`write-a-pr-description` skill).
 6. **More single-owner decisions**, each added to `DECISIONS` only once its
-   owner exists: the process identity key (one fix touched 21 files, and
-   `ava/_boot.py` is a framework-tier module that can own it) is the next
-   candidate; `shared/config` as a registration hub needs a design pass
+   owner exists: the process identity key (one fix touched 21 files; its
+   natural owner is `ava/_boot.py` once that becomes a public module) is the
+   next candidate; `shared/config` as a registration hub needs a design pass
    first.

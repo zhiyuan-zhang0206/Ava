@@ -22,17 +22,6 @@ _BASELINE_PATH = "scripts/structure/baseline.json"
 # White-box tests reach into privates by design; only test *directories* are
 # exempt, since a governed module may legitimately be named test_*.py.
 _TEST_DIR = re.compile(r"(^|/)tests?/")
-# Packages whose `_` prefix marks a different axis than package privacy, with the
-# convention that says so. A private module directly under such a package is a
-# framework tier: importable by other governed packages, hidden from agents.
-FRAMEWORK_TIERS: dict[str, str] = {
-    "ava": (
-        "ava/_*.py modules are the framework / plugin-author tier: the underscore hides "
-        "them from the agent-facing ava.* surface (conventions/sdk-docstring-discipline.md), "
-        "not from other packages"
-    ),
-}
-
 Sites = dict[str, list[int]]
 
 
@@ -167,17 +156,8 @@ class _Reach:
         }
         for target, owner in sorted(targets):
             inside = self.importer == owner or self.importer.startswith(f"{owner}.")
-            if not inside and not self._framework_tier(target, owner):
+            if not inside:
                 self.sites.setdefault(f"{self.rel_path}::{target}", []).append(lineno)
-
-    def _framework_tier(self, target: str, owner: str) -> bool:
-        """A private module or package owned by the tier package itself (`ava._boot`).
-
-        An owner of `ava` plus a target that is a module means the private component
-        sits directly under `ava`; a private name inside an agent-facing module
-        (`ava.files._x`, a `_helper` in `ava/__init__.py`) is not a module.
-        """
-        return owner in FRAMEWORK_TIERS and _is_module(target, self.repo_root)
 
 
 def private_imports(

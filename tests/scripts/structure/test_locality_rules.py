@@ -208,80 +208,40 @@ def test_a_long_attribute_chain_counts_the_site_once(tmp_path: pathlib.Path) -> 
     assert sites == {"gateway/x.py::shared.lm._effort": [2]}
 
 
-# --- private_imports: FRAMEWORK_TIERS ----------------------------------------
+# --- private_imports: `ava` has no exemption ---------------------------------
+# Agent visibility in `ava` is the `__all_for_ava__` whitelist, not the
+# underscore, so `ava/_*.py` is package-private like any other package.
 
 
-def test_framework_tier_import_from_is_not_flagged(tmp_path: pathlib.Path) -> None:
+@pytest.mark.parametrize(
+    ("files", "source", "key"),
+    [
+        ({"ava/_boot.py": "x = 1\n"}, "from ava import _boot\n", "ava._boot"),
+        ({"ava/_boot.py": "def f(): ...\n"}, "import ava\nava._boot.f()\n", "ava._boot"),
+        ({"ava/_pkg/__init__.py": "x = 1\n"}, "from ava import _pkg\n", "ava._pkg"),
+        ({"ava/__init__.py": "def _fn(): ...\n"}, "from ava import _fn\n", "ava._fn"),
+        ({"ava/files.py": "x = 1\n"}, "from ava.files import _x\n", "ava.files._x"),
+        ({"ava/shell/_x.py": "y = 1\n"}, "from ava.shell import _x\n", "ava.shell._x"),
+    ],
+    ids=["private-module", "attribute", "private-package", "init-name", "module-name", "nested"],
+)
+def test_ava_privates_are_flagged_from_outside_ava(
+    tmp_path: pathlib.Path, files: dict[str, str], source: str, key: str
+) -> None:
+    for rel, text in files.items():
+        _write(tmp_path, rel, text)
+
+    sites = locality.private_imports(_parse(source), "gateway/x.py", ("ava", "gateway"), tmp_path)
+
+    assert list(sites) == [f"gateway/x.py::{key}"]
+
+
+def test_ava_privates_are_open_inside_ava(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, "ava/_boot.py", "x = 1\n")
+
     tree = _parse("from ava import _boot\n")
 
-    assert locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path) == {}
-
-
-def test_framework_tier_attribute_reach_in_is_not_flagged(tmp_path: pathlib.Path) -> None:
-    _write(tmp_path, "ava/_boot.py", "def f(): ...\n")
-    tree = _parse("import ava\nava._boot.f()\n")
-
-    assert locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path) == {}
-
-
-def test_a_nested_package_under_the_tier_is_not_itself_a_tier(tmp_path: pathlib.Path) -> None:
-    """`ava.shell` is not a FRAMEWORK_TIERS entry (only the bare `ava` root is);
-    a private submodule owned by `ava.shell` is a normal package door."""
-    _write(tmp_path, "ava/shell/_x.py", "y = 1\n")
-    tree = _parse("from ava.shell import _x\n")
-
-    sites = locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path)
-
-    assert sites == {"gateway/x.py::ava.shell._x": [1]}
-
-
-def test_framework_tier_covers_a_private_package_too(tmp_path: pathlib.Path) -> None:
-    _write(tmp_path, "ava/_pkg/__init__.py", "x = 1\n")
-    tree = _parse("from ava import _pkg\n")
-
-    assert locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path) == {}
-
-
-def test_framework_tier_requires_the_private_name_to_be_a_real_module(
-    tmp_path: pathlib.Path,
-) -> None:
-    """`_private_fn` is only a function defined inside `ava/__init__.py` — there is
-    no `ava/_private_fn.py` or `ava/_private_fn/` on disk, so it is not itself a
-    module or package and the tier exemption (which only covers a module/package
-    directly under `ava`) does not apply."""
-    _write(tmp_path, "ava/__init__.py", "def _private_fn(): ...\n")
-    tree = _parse("from ava import _private_fn\n")
-
-    sites = locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path)
-
-    assert sites == {"gateway/x.py::ava._private_fn": [1]}
-
-
-def test_framework_tier_does_not_cover_a_name_private_one_level_deeper(
-    tmp_path: pathlib.Path,
-) -> None:
-    """`_x` is owned by `ava.files` (a module-level private name, per the
-    module-vs-directory owner rule), not directly by the tier root `ava` — the
-    narrowed exemption only covers a private component sitting directly under
-    `ava` itself."""
-    _write(tmp_path, "ava/files.py", "x = 1\n")
-    tree = _parse("from ava.files import _x\n")
-
-    sites = locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path)
-
-    assert sites == {"gateway/x.py::ava.files._x": [1]}
-
-
-def test_framework_tier_narrowing_applies_to_the_attribute_form_too(
-    tmp_path: pathlib.Path,
-) -> None:
-    _write(tmp_path, "ava/files.py", "def _resolve(): ...\n")
-    tree = _parse("import ava.files\nava.files._resolve()\n")
-
-    sites = locality.private_imports(tree, "gateway/x.py", ("ava", "gateway"), tmp_path)
-
-    assert sites == {"gateway/x.py::ava.files._resolve": [2]}
+    assert locality.private_imports(tree, "ava/files.py", ("ava",), tmp_path) == {}
 
 
 # --- private_imports: shadowed aliases (the `rebound` set) ------------------
