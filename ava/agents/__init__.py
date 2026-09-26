@@ -374,16 +374,17 @@ def spawn(
     base and the explicit fields win per key.
 
     A fork keeps the source agent's effective config so its inherited context
-    stays cache-valid: at fork, `config_overlay` may only ADD skills to
+    stays cache-valid: at fork, `config_overlay` may only ADD entries to
     `skills_to_inject_into_system_prompt` / `skills_to_expand_at_start`
     (supersets — loaded at the context tail); any other change raises
     ForkConfigChangeNotAllowed.
 
-    Identity-class config you do not name — model, reasoning effort, skill set,
-    prompt shaping — is taken from the cluster default at spawn time and frozen
-    onto the new agent for its whole life, so a later change to that default
-    never re-brains it. Operational knobs (compaction thresholds, timeouts) stay
-    live and follow the cluster. `config_overlay={"eval_isolation": True,
+    Identity-class config you do not name — model, reasoning effort, the inject
+    and expand lists, prompt shaping — is taken from the shared default at spawn
+    time and frozen onto the new agent for its whole life, so a later change to
+    that default never re-brains it. Operational knobs (compaction thresholds,
+    timeouts) stay live and follow the shared default.
+    `config_overlay={"eval_isolation": True,
     "eval_network_allowlist": ["web"]}` starts an eval-isolated agent and
     explicitly permits only the listed `web` or `understand` capability; `mcps`
     and `ui` are always disabled for isolated agents.
