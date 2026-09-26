@@ -445,15 +445,18 @@ describe("TurnBlock component", () => {
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("true");
     expect(toggle.getAttribute("data-stuck")).toBe("true");
-    expect(toggle.className).toContain("backdrop-blur-md");
-    // The stuck variant carries its paint-only edge treatment: a 16px right
-    // box-shadow seal over the scroller gutter (#3224) and a ::after band
-    // covering child-pin slits with the separator line at its bottom (#3308,
-    // retuned by #3536 — no element border, no height compensation).
-    expect(toggle.className).toContain("shadow-[");
+    expect(toggle.className).toContain("hover:bg-transparent");
+    expect(toggle.className).not.toContain("hover:bg-accent/30");
+    expect(toggle.className).toContain("before:backdrop-blur-md");
+    expect(toggle.className).toContain("before:bg-background/95");
+    expect(toggle.className).toContain("hover:before:bg-accent/30");
+    expect(toggle.className).toContain("before:bottom-0");
+    expect(toggle.className).toContain("before:-z-10");
     expect(toggle.className).toContain("16px_0_0_0_var(--background)");
-    expect(toggle.className).toContain("after:border-b");
-    expect(toggle.className).not.toContain("0_2px_0_0_var(--background)");
+    expect(toggle.className).toContain("before:-top-[2px]");
+    expect(toggle.className).toContain("after:bottom-0");
+    expect(toggle.className).toContain("after:h-px");
+    expect(toggle.className).not.toContain("after:top-full");
     expect(toggle.className).not.toContain("-mb-px");
     expect(toggle.className).toContain("motion-reduce:transition-none");
   });
