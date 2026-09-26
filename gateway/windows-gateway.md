@@ -7,7 +7,8 @@ decision to scope Windows this way is
 
 Available today for a gateway on Windows hardware: run it inside WSL2. That is
 Linux, so the whole Linux path applies unchanged — native pg/redis via
-`install.sh --role gateway`, or containers via `docker-compose.windows.yml`.
+`ava start --serve-gateway --serve-agent-runner`, or containers via
+`docker-compose.windows.yml`.
 
 ## The four blockers
 
@@ -55,9 +56,6 @@ default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`
 
 ## Also missing
 
-- **Birth.** `scripts/install.sh` is bash and dies on `uname` before role
-  dispatch; `cli/install_cluster.py` has no platform branch at all. A Windows
-  gateway needs a birth path that is not a shell script.
 - **Unix sockets throughout the data plane.** `_pg_socket_dir()` hardcodes
   `/tmp/ava-pg-<slug>`, `pg_admin_url()` is
   `postgresql://<user>@/postgres?host=<socket-dir>`, `_start_pg` passes

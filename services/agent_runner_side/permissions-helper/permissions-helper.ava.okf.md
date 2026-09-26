@@ -47,9 +47,25 @@ TCC keys grants on the helper's code identity. A stable certificate plus fixed b
 ## Root seeding
 The helper also seeds `ava-root` (`root_seed` / `root_status` / `root_stop`): [[root-seeding.ava.okf.md]].
 
+## Finite Executor Mode
+The same signed binary doubles as a one-shot release executor: invoked as
+`--finite-executor v1 --cwd DIR --env K=V ... -- ARGV`, entered before the
+normal serve path — no TCC registration, no socket, no root keeper. It
+requires being a launchd job process-group leader and refuses otherwise. It
+spawns one executor into that same process group (no `SETSID`/`SETPGROUP`),
+environment built only from the explicit `--env` pairs, and forwards
+`TERM`/`INT`/`HUP` to the unreaped child under a lock that also gates
+reaping, so a forwarded signal can never land on a reused PID.
+
+Exit codes: `0` executor ok, `80` executor failed, `81` executor killed by
+signal, plus its own refusal codes (`64` usage, `65` not a job leader, `71`
+spawn failed, `75` interrupted before spawn, `82` custody lost). `ping`
+advertises `finite_executor_v1: true`. Full custody protocol (launch,
+readback, closure/retirement): [[cli/release_transition/launcher_macos.ava.okf.md|macOS release executor custody]].
+
 ## Key Dependencies
 - [[tool-calls.ava.okf.md]] — skills that drive the desktop call this helper via `services.permissions_helper.client`
-- [[../../cli/cli.ava.okf.md|CLI/converge]] — the converge phase (`cli/commands/_converge.py:_ensure_permissions_helper`) builds+signs+loads during `ava start`/`ava update`; the following `_ensure_screen_capture` and `_ensure_accessibility` steps probe both helper grants and record unavailable statuses for the next agent startup to report
+- [[cli/cli.ava.okf.md|CLI/converge]] — the converge phase (`cli/commands/_converge.py:_ensure_permissions_helper`) builds+signs+loads during `ava start`/`ava cluster update`; the following `_ensure_screen_capture` and `_ensure_accessibility` steps probe both helper grants and record unavailable statuses for the next agent startup to report
 
 ## Entry Points
 - `services/permissions_helper/lifecycle.py` — bring-up called by converge

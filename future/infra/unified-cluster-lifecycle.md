@@ -177,10 +177,15 @@ groups. A saved PID/PGID, a timeout, or an empty process census alone cannot gra
 closure or permit deletion of partial backup/restore evidence. The shared direct
 launch boundary now retains the actual child handle and refuses reaping after
 uncertain closure; its PITR and logical-backup consumers retain unresolved
-evidence. Interrupted multi-group sessions still lack complete child-owner
-closure proof. Resolve that ownership model and qualify its native failure paths
-before the PITR operation end to end; do not add another restart or cleanup
-fallback, or infer closure from another process census.
+evidence. Each PITR/backup operation is now one directly owned worker process
+group with no subgroups
+([PITR operation custody](../../services/pitr/operation-custody.ava.okf.md)).
+The remaining custody gaps: controller death on plain POSIX/macOS has no
+platform owner (for example a Linux cgroup) able to prove closure without the
+original controller, so retirement past that point still needs a human; and a
+macOS late-fork race in `shared/exec_process_domain.py` is being qualified
+separately. Do not add another restart or cleanup fallback, or infer closure
+from another process census.
 
 ## Remaining: macOS finite executor
 

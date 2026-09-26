@@ -514,9 +514,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # reappearing in any of them is the regression, and it is invisible on review
 # because it looks exactly like a correct bound.
 _GIT_DRIVING_MODULES = (
-    "ops/cluster_deploy.py",
     "ops/ops_cluster.py",
-    "cli/commands/_update_git.py",
     "shared/cluster_drift.py",
 )
 
