@@ -40,7 +40,7 @@ def test_missing_runner_password_fails_loudly(monkeypatch: pytest.MonkeyPatch) -
         "shared.runtime_config.read_env_aliases", Mock(return_value={"AVA_DB_URL": _OWNER_URL})
     )
 
-    with pytest.raises(RuntimeError, match="AVA_RUNNER_DB_PASSWORD is not set"):
+    with pytest.raises(RuntimeError, match="AVA_RUNNER_DB_PASSWORD is missing"):
         derive.runner_db_url_projection(_OWNER_URL)
 
 

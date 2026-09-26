@@ -155,7 +155,7 @@ def test_inject_without_gateway_url_fails_fast(
         "fetch_bootstrap_config",
         lambda *_a, **_k: called.append("fetch"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    with pytest.raises(bootstrap.BootstrapFetchError, match="ava enroll"):
+    with pytest.raises(bootstrap.BootstrapFetchError, match=r"ava start .*--gateway-url"):
         bootstrap.inject_config_from_gateway()
     assert called == []  # never fetched without a URL
 
