@@ -10,7 +10,9 @@ What the agent can't see, write however you want.
 
 Specific coverage (**all mandatory**):
 
-- module / class / public function docstrings in `ava/*.py`
+- module / class / public function docstrings in the `ava/` modules on the agent surface — a module
+  that declares `__all_for_ava__`, or the module of a namespace listed in `ava/__init__.py`'s
+  `__all_for_ava__` (the `_` prefix plays no part: visibility is the whitelist)
 - module / function / class docstrings in namespaces registered by plugins via `register_namespace(name, module)`
   (plugin `_*.py` private modules count too — as long as the namespace exports them to the agent, they're covered)
 - docstrings of callables hung on an existing namespace via `register_namespace_member(namespace, name, fn)`
@@ -169,4 +171,4 @@ Python surfaces, so they keep heading form rather than stub form).
    skill discovery belongs to the skills index section. `ava/skills.py` is the
    one exempt module (enforced by `lint_agent_docstrings`).
 
-`ava/_extend.py` and the other `ava/_*.py` private modules are exceptions (audience is plugin authors, not the agent) — they may keep the dev perspective.
+Every other `ava/` module — framework code such as `ava/_extend.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.
