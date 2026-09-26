@@ -11,24 +11,29 @@ chain plus the keeper's crash semantics:
   launch     bootstrap the throwaway launchd job, wait for the helper
   chain      launchd -> helper -> root -> unit parentage via ps + root status
   attribute  a unit's TCCAccessPreflight requests resolve to the helper (F11)
-  restart    kill -9 the root: the helper restarts it; the old unit keeps
-             running (the design's "lose attribution, not service"); with
-             --sample-restart the phase also samples the whole tree chain +
-             TCC attribution around the crash (F12, task #3377)
   conflict   kill -9 the helper: launchd relaunches it; the relaunched helper
-             finds the orphan root, rests in `conflict` (no double-spawn, no
-             kill), `root_stop` without force is refused, force disposes the
-             orphan, and an explicit re-seed brings a fresh tree up; with
+             finds the orphan root and rests in `conflict` (no double-spawn,
+             no signal to the foreign PID); `root_stop` is refused with or
+             without force; native recovery through the orphan's own
+             `shutdown` verb closes its tree, and the keeper seeds a fresh
+             root on the freed run dir as the relaunched helper's child; with
              --sample-conflict the phase also samples the whole tree chain +
              TCC attribution across the helper death/replacement window
              (F12b, task #3380)
+  restart    kill -9 the root: its units keep running (the design's "lose
+             attribution, not service"); the keeper relaunches root, and the
+             replacement refuses cold start while the killed generation's
+             service custody is unresolved, so no duplicate tree is born; with
+             --sample-restart the phase also samples the surviving units'
+             chain + TCC attribution around the crash (F12, task #3377)
 
-Nothing here touches production: the binary is throwaway-signed, every path
-lives under the workdir, and the launchd job uses its own test label (never
-the production helper's). The helper's first-run registration nudge is
-disabled via AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION=1 -- an Aqua-session
-helper with a fresh code identity would otherwise raise TCC dialogs on a
-machine nobody is sitting at.
+The helper binds its home to the seed file's directory, so the seed lives in
+the root run dir. Nothing here touches production: the binary is
+throwaway-signed, every path lives under the workdir, and the launchd job uses
+its own test label (never the production helper's). The helper's first-run
+registration nudge is disabled via AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION=1
+-- an Aqua-session helper with a fresh code identity would otherwise raise TCC
+dialogs on a machine nobody is sitting at.
 
 Exit 0 = every phase passed. Evidence (ps/logs/status snapshots) is retained
 under the workdir; pass --cleanup to remove it. Run with the repository venv,
@@ -50,6 +55,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
@@ -237,8 +243,13 @@ def _tail(path: Path, limit: int = 4000) -> str:
         return "<missing>"
 
 
-def _seed_config(workdir: Path) -> dict:
-    return json.loads((workdir / "seed.json").read_text())
+def _refusal(call: Callable[[], object]) -> str:
+    """The error text of a call that must be refused ("" when it was accepted)."""
+    try:
+        call()
+    except Exception as exc:  # the refusal message is the assertion
+        return str(exc)
+    return ""
 
 
 def _ping_or_none(helper_client, sock: Path):
@@ -279,12 +290,19 @@ def _status_if_conflict(helper_root_status):
     return status if status.get("state") == "conflict" else None
 
 
-def _status_if_state(helper_root_status, wanted: str):
+def _status_if_refused(helper_root_status, restarts_before: int):
+    """The keeper once a replacement root has exited `refused` after the crash."""
     try:
         status = helper_root_status()
     except Exception:
         return None
-    return status if status.get("state") == wanted else None
+    refused = status.get("last_exit", {}).get("kind") == "refused"
+    return status if refused and int(status["restarts"]) > restarts_before else None
+
+
+def _probe_pids(probe: Path) -> set[int]:
+    """Every live unit-probe process of this workdir, whoever spawned it."""
+    return {int(pid) for pid in _run(["pgrep", "-f", str(probe)], check=False).stdout.split()}
 
 
 def _relaunched_helper(label: str, old_pid: int):
@@ -306,20 +324,20 @@ def _ppid_of(pid: int) -> int:
     return int(proc.stdout.strip())
 
 
-def _root_status(run_dir: Path) -> dict[str, Any]:
-    """Read the K1 tree snapshot over the raw control socket (stdlib only).
+def _root_call(run_dir: Path, verb: str) -> dict[str, Any]:
+    """Send one K1 verb over the raw control socket (stdlib only).
 
-    The smoke drives the root as a black box — process tree, socket, status
-    verb — so it never depends on the root package's client API.
+    The smoke drives the root as a black box — process tree, socket, K1
+    verbs — so it never depends on the root package's client API.
     """
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(10.0)
         sock.connect(str(run_dir / _ROOT_SOCKET))
-        sock.sendall(b'{"verb": "status"}\n')
+        sock.sendall(json.dumps({"verb": verb}).encode() + b"\n")
         line = sock.makefile("rb").readline()
     response = json.loads(line)
     if not response.get("ok"):
-        _fail("root", f"status refused: {response}")
+        _fail("root", f"{verb} refused: {response}")
     return cast("dict[str, Any]", response["result"])
 
 
@@ -502,6 +520,23 @@ def _f12_summary_text(label: str, samples: dict[str, Any]) -> str:
     )
 
 
+def _f12_finish(
+    evidence: Path,
+    samples: dict[str, Any],
+    label: str,
+    expectations: list[tuple[str, list[int] | None, int]],
+) -> None:
+    """Join the tccd window, save the sampling record, fail on attribution violations."""
+    _f12_join_tccd(evidence, samples, name=f"{label}-tccd-window.txt")
+    print(_f12_summary_text(label, samples))
+    violations = _f12_expect_attribution(samples, expectations)
+    if violations:
+        samples["violations"] = violations
+    _save(evidence, f"{label}-sampling.json", json.dumps(samples, indent=2))
+    if violations:
+        _fail(label, f"attribution violations: {'; '.join(violations)}")
+
+
 def _f12_join_tccd(
     evidence: Path, samples: dict[str, Any], *, name: str = "f12-tccd-window.txt"
 ) -> None:
@@ -578,7 +613,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     from services.permissions_helper import client as helper_client
 
     def root_status() -> dict[str, Any]:
-        return _root_status(run_dir)
+        return _root_call(run_dir, "status")
 
     def helper_root_status() -> dict[str, Any]:
         return cast("dict[str, Any]", helper_client.root_status(sock_path=helper_sock))
@@ -623,8 +658,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
         # ---- fixtures ------------------------------------------------------
         # Fresh run surface: stale fixtures/logs from an earlier run must not
-        # satisfy this run's waits (the attribution split and the graceful-stop
-        # check read files, not memory).
+        # satisfy this run's waits (the attribution split and the custody
+        # refusal check read files, not memory), and a stale run dir's custody
+        # records or stop intents would refuse this run's root outright.
+        shutil.rmtree(run_dir, ignore_errors=True)
+        run_dir.mkdir(parents=True)
         for stale in [
             *workdir.glob("unit-*"),
             workdir / "root.stdout.log",
@@ -672,13 +710,14 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "stderr": str(workdir / "root.stderr.log"),
             "env": {"HOME": str(Path.home()), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
         }
-        (workdir / "seed.json").write_text(json.dumps(seed, indent=2))
+        seed_path = run_dir / "seed.json"
+        seed_path.write_text(json.dumps(seed, indent=2))
         plist = {
             "Label": label,
             "ProgramArguments": [str(exe)],
             "EnvironmentVariables": {
                 "AVA_PERMISSIONS_HELPER_SOCKET": str(helper_sock),
-                "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(workdir / "seed.json"),
+                "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(seed_path),
                 "AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION": "1",
             },
             "RunAtLoad": True,
@@ -811,93 +850,17 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 "attribute", f"units resolve to helper {helper_pid} ({', '.join(attributed)})"
             )
 
-        # ---- restart (root crash) -----------------------------------------
-        f12: dict[str, Any] = {"points": {}}
-        old_chain = [helper_pid, root_pid, *initial_units.values()]
-        if args.sample_restart:
-            f12["points"]["pre"] = _f12_point(
-                workdir, "pre", list(initial_units.items()), old_chain
-            )
-        _kill(root_pid, signal.SIGKILL)
-        if args.sample_restart:
-            f12["kill_ts"] = round(time.time(), 3)
-            f12["points"]["gap"] = _f12_point(
-                workdir, "gap", list(initial_units.items()), old_chain
-            )
-        restarted = _wait_for(
-            "root restarted",
-            lambda: _status_if_running(root_status, excluding=root_pid),
-            _RESTART_WAIT_S,
-            "restart",
-        )
-        if args.sample_restart:
-            f12["new_root_ts"] = round(time.time(), 3)
-        new_root_pid = int(restarted["root"]["pid"])
-        recorded_pids.add(new_root_pid)
-        dead_units = {unit_id: pid for unit_id, pid in initial_units.items() if not _pid_alive(pid)}
-        if dead_units:
-            _fail("restart", f"old units died with the root: {dead_units}")
-        keeper = helper_root_status()
-        if int(keeper["restarts"]) < 1:
-            _fail("restart", f"keeper restarts={keeper['restarts']} did not record the crash")
-        new_units = {unit_id: int(_unit_entry(restarted, unit_id)["pid"]) for unit_id in _UNIT_IDS}
-        recorded_pids.update(new_units.values())
-        if args.sample_restart:
-            all_units = [*initial_units.items(), *new_units.items()]
-            chain_pids = [helper_pid, new_root_pid, *new_units.values(), *initial_units.values()]
-            f12["points"]["respawn"] = _f12_point(workdir, "respawn", all_units, chain_pids)
-            time.sleep(_F12_STABLE_S)
-            f12["points"]["stable"] = _f12_point(workdir, "stable", all_units, chain_pids)
-            f12.update(
-                {
-                    "helper_pid": helper_pid,
-                    "old_root_pid": root_pid,
-                    "new_root_pid": new_root_pid,
-                    "keeper": keeper,
-                }
-            )
-            _f12_join_tccd(evidence, f12)
-            print(_f12_summary_text("f12-restart", f12))
-            violations = _f12_expect_attribution(
-                f12,
-                [
-                    ("pre", list(initial_units.values()), helper_pid),
-                    ("gap", list(initial_units.values()), helper_pid),
-                    ("respawn", [*initial_units.values(), *new_units.values()], helper_pid),
-                    ("stable", [*initial_units.values(), *new_units.values()], helper_pid),
-                ],
-            )
-            if violations:
-                f12["violations"] = violations
-            _save(evidence, "f12-restart-sampling.json", json.dumps(f12, indent=2))
-            if violations:
-                _fail("f12", f"restart attribution violations: {'; '.join(violations)}")
-        _save(
-            evidence,
-            "restart.txt",
-            _ps_line(helper_pid, new_root_pid, *initial_units.values(), *new_units.values())
-            + "\nold units alive after root crash: "
-            + f"{[uid for uid, pid in initial_units.items() if _pid_alive(pid)]}"
-            + f"\nnew root {new_root_pid}, new units {new_units}",
-        )
-        _save(evidence, "keeper-status-restart.json", json.dumps(keeper, indent=2))
-        phase_pass(
-            "restart",
-            f"root {root_pid} -> {new_root_pid}; old units kept running"
-            + ("; F12 sampling saved" if args.sample_restart else ""),
-        )
-
         # ---- conflict (helper crash) --------------------------------------
         # F12b (task #3380): sample the whole tree + TCC attribution across the
         # helper death/replacement window at five points -- h0 before the kill
         # (control: every request must resolve to the old helper), h1 right
         # after it, h2 once the relaunched helper reports `conflict`, h3 after
-        # the orphan tree is disposed, h4 once the re-seed is stable (re-seeded
+        # the orphan tree is closed, h4 once the re-seed is stable (re-seeded
         # units must resolve to the new helper). h1-h3 are the measurement:
         # what responsibility looks like between death and replacement.
         conflict_f12: dict[str, Any] = {"points": {}}
-        ab_units = [*initial_units.items(), *new_units.items()]
-        ab_chain = [helper_pid, new_root_pid, *new_units.values(), *initial_units.values()]
+        ab_units = list(initial_units.items())
+        ab_chain = [helper_pid, root_pid, *initial_units.values()]
         if args.sample_conflict:
             conflict_f12["points"]["h0"] = _f12_point(workdir, "h0", ab_units, ab_chain)
         _kill(helper_pid, signal.SIGKILL)
@@ -917,50 +880,39 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             _ROOT_WAIT_S,
             "conflict",
         )
-        if int(conflict["conflict"]["pid"]) != new_root_pid:
-            _fail(
-                "conflict",
-                f"conflict pid {conflict['conflict']['pid']} != orphan root {new_root_pid}",
-            )
+        if int(conflict["conflict"]["pid"]) != root_pid:
+            _fail("conflict", f"conflict pid {conflict['conflict']['pid']} != orphan {root_pid}")
         _save(evidence, "keeper-status-conflict.json", json.dumps(conflict, indent=2))
         if args.sample_conflict:
             conflict_f12["points"]["h2"] = _f12_point(
                 workdir, "h2", ab_units, [new_helper_pid, *ab_chain]
             )
 
-        refused = False
-        try:
-            helper_client.stop_root(sock_path=helper_sock)
-        except Exception as exc:  # the refusal message is the assertion
-            refused = "refusing to stop root" in str(exc)
-        if not refused:
-            _fail("conflict", "root_stop without force was not refused")
+        # The helper never signals a root it did not seed: a plain stop and a
+        # forced one (raw wire -- the client has no force) are both refused.
+        refusals = (
+            _refusal(lambda: helper_client.stop_root(sock_path=helper_sock)),
+            _refusal(lambda: helper_client._call("root_stop", force=True, sock_path=helper_sock)),
+        )
+        if "native recovery is required" not in refusals[0] or "force" not in refusals[1]:
+            _fail("conflict", f"root_stop over the orphan root was not refused: {refusals}")
+        _save(evidence, "conflict-refusals.txt", "\n".join(refusals))
 
-        helper_client.stop_root(force=True, sock_path=helper_sock)
-        stopped = _wait_for(
-            "orphan disposed",
-            lambda: _status_if_state(helper_root_status, "stopped"),
+        # Native recovery: the orphan closes its own tree through its control
+        # socket; once the run dir is free the keeper seeds a fresh root itself.
+        if _root_call(run_dir, "shutdown") != {"shutdown_requested": True}:
+            _fail("conflict", "the orphan root did not accept its own shutdown")
+        orphan_tree = [root_pid, *initial_units.values()]
+        _wait_for(
+            "orphan tree closed",
+            lambda: not any(_pid_alive(pid) for pid in orphan_tree),
             _RESTART_WAIT_S,
             "conflict",
         )
-        _wait_for(
-            "orphan root gone", lambda: not _pid_alive(new_root_pid), _RESTART_WAIT_S, "conflict"
-        )
-        _save(evidence, "keeper-status-disposed.json", json.dumps(stopped, indent=2))
         if args.sample_conflict:
             conflict_f12["points"]["h3"] = _f12_point(
                 workdir, "h3", ab_units, [new_helper_pid, *ab_chain]
             )
-        if (
-            "stop signal received; stopping the tree"
-            not in (workdir / "root.stderr.log").read_text()
-        ):
-            _fail(
-                "conflict",
-                "orphan root did not log a graceful SIGTERM stop (signal masked?)",
-            )
-
-        helper_client.seed_root(cast("Any", _seed_config(workdir)), sock_path=helper_sock)
         reseeded = _wait_for(
             "reseeded root",
             lambda: _status_if_keeper_running(helper_root_status),
@@ -970,20 +922,23 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         reseeded_pid = int(reseeded["pid"])
         recorded_pids.add(reseeded_pid)
         reseeded_status = _wait_for(
-            "reseeded tree", lambda: _status_if_running(root_status), _ROOT_WAIT_S, "conflict"
+            "reseeded tree",
+            lambda: _status_if_running(root_status, excluding=root_pid),
+            _ROOT_WAIT_S,
+            "conflict",
         )
         reseeded_units = {
             unit_id: int(_unit_entry(reseeded_status, unit_id)["pid"]) for unit_id in _UNIT_IDS
         }
-        reseeded_unit_pid = reseeded_units["heartbeat"]
         recorded_pids.update(reseeded_units.values())
         if _ppid_of(reseeded_pid) != new_helper_pid:
             _fail("conflict", "reseeded root is not the relaunched helper's child")
+        _save(evidence, "keeper-status-reseeded.json", json.dumps(reseeded, indent=2))
         _save(
             evidence,
             "conflict-reseed.txt",
-            _ps_line(new_helper_pid, new_root_pid, reseeded_pid, reseeded_unit_pid)
-            + f"\nreseeded root {reseeded_pid} is child of helper {new_helper_pid}; unit {reseeded_unit_pid}",
+            _ps_line(new_helper_pid, reseeded_pid, *reseeded_units.values())
+            + f"\nreseeded root {reseeded_pid} is child of helper {new_helper_pid}",
         )
         if args.sample_conflict:
             time.sleep(_F12_STABLE_S)
@@ -991,35 +946,79 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                 workdir,
                 "h4",
                 [*ab_units, *reseeded_units.items()],
-                [new_helper_pid, reseeded_pid, *reseeded_units.values(), *initial_units.values()],
+                [new_helper_pid, reseeded_pid, *reseeded_units.values()],
             )
-            _f12_join_tccd(evidence, conflict_f12, name="f12-conflict-tccd-window.txt")
-            print(_f12_summary_text("f12b", conflict_f12))
-            violations = _f12_expect_attribution(
-                conflict_f12,
-                [
-                    ("h0", [*initial_units.values(), *new_units.values()], helper_pid),
-                    ("h4", list(reseeded_units.values()), new_helper_pid),
-                ],
-            )
-            if violations:
-                conflict_f12["violations"] = violations
             conflict_f12.update(
                 {
                     "old_helper_pid": helper_pid,
                     "new_helper_pid": new_helper_pid,
-                    "new_root_pid": new_root_pid,
+                    "orphan_root_pid": root_pid,
                     "reseeded": reseeded_units,
                 }
             )
-            _save(evidence, "f12-conflict-sampling.json", json.dumps(conflict_f12, indent=2))
-            if violations:
-                _fail("f12b", f"conflict attribution violations: {'; '.join(violations)}")
-        old_heartbeat = initial_units["heartbeat"]
-        if _pid_alive(old_heartbeat):
-            _kill(old_heartbeat, signal.SIGTERM)
+            _f12_finish(
+                evidence,
+                conflict_f12,
+                "f12-conflict",
+                [
+                    ("h0", list(initial_units.values()), helper_pid),
+                    ("h4", list(reseeded_units.values()), new_helper_pid),
+                ],
+            )
         phase_pass(
-            "conflict", f"orphan {new_root_pid} detected + disposed; reseeded root {reseeded_pid}"
+            "conflict", f"orphan {root_pid} refused + closed natively; reseeded root {reseeded_pid}"
+        )
+
+        # ---- restart (root crash) -----------------------------------------
+        f12: dict[str, Any] = {"points": {}}
+        survivors = list(reseeded_units.items())
+        chain = [new_helper_pid, reseeded_pid, *reseeded_units.values()]
+        restarts_before = int(helper_root_status()["restarts"])
+        if args.sample_restart:
+            f12["points"]["pre"] = _f12_point(workdir, "pre", survivors, chain)
+        _kill(reseeded_pid, signal.SIGKILL)
+        if args.sample_restart:
+            f12["kill_ts"] = round(time.time(), 3)
+            f12["points"]["gap"] = _f12_point(workdir, "gap", survivors, chain)
+        keeper = _wait_for(
+            "replacement root refused",
+            lambda: _status_if_refused(helper_root_status, restarts_before),
+            _RESTART_WAIT_S,
+            "restart",
+        )
+        if "custody requires reconciliation" not in (workdir / "root.stderr.log").read_text():
+            _fail("restart", "the replacement root did not refuse on retained service custody")
+        dead_units = {unit_id: pid for unit_id, pid in survivors if not _pid_alive(pid)}
+        if dead_units:
+            _fail("restart", f"units died with the root: {dead_units}")
+        probes = _probe_pids(probe)
+        if probes != set(reseeded_units.values()):
+            _fail("restart", f"unit probes {sorted(probes)} are not just the survivors")
+        if args.sample_restart:
+            f12["points"]["refused"] = _f12_point(workdir, "refused", survivors, chain)
+            time.sleep(_F12_STABLE_S)
+            f12["points"]["stable"] = _f12_point(workdir, "stable", survivors, chain)
+            f12.update({"helper_pid": new_helper_pid, "root_pid": reseeded_pid, "keeper": keeper})
+            _f12_finish(
+                evidence,
+                f12,
+                "f12-restart",
+                [
+                    (point, list(reseeded_units.values()), new_helper_pid)
+                    for point in ("pre", "gap", "refused", "stable")
+                ],
+            )
+        _save(
+            evidence,
+            "restart.txt",
+            _ps_line(new_helper_pid, *reseeded_units.values())
+            + f"\nroot {reseeded_pid} killed; unit probes alive: {sorted(probes)}",
+        )
+        _save(evidence, "keeper-status-restart.json", json.dumps(keeper, indent=2))
+        phase_pass(
+            "restart",
+            f"root {reseeded_pid} killed; units kept running; replacement refused on custody"
+            + ("; F12 sampling saved" if args.sample_restart else ""),
         )
 
         print("\nSMOKE PASS: " + ", ".join(phases))
@@ -1028,7 +1027,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         print(str(failure))
         if helper_sock.exists():
             with contextlib.suppress(Exception):
-                helper_client.stop_root(force=True, sock_path=helper_sock)
+                helper_client.stop_root(sock_path=helper_sock)
         print(f"helper stderr tail:\n{_tail(workdir / 'helper.stderr.log')}")
         print(f"root stderr tail:\n{_tail(workdir / 'root.stderr.log')}")
         print(f"evidence retained at: {evidence}")

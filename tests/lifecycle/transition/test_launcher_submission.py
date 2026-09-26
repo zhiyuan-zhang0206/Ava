@@ -42,6 +42,9 @@ def test_public_submission_loses_predecessor_while_waiting_for_home_lock_without
     request_file = _request_file(planned, monkeypatch)
     old_path = Path(str(planned["operation"]))
     prior = journal.read_operation(old_path)
+    # The planned operation is a release transition: only that request kind
+    # carries the previous/candidate pair the predecessor check compares.
+    assert isinstance(prior.request, Request)
     request = prior.request.model_copy(update={"id": uuid4()})
     request_file.write_text(request.model_dump_json())
     store = Path(request.home) / "releases"
