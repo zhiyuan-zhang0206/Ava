@@ -107,10 +107,15 @@ class EnvField:
 # browser_capable() keys off, and $HOME, which POSIX tools (gh, git, ssh, ...)
 # resolve their config dirs from (macOS bash 3.2 does NOT restore HOME in a
 # login shell when it is absent from the inherited env — 2026-08-06 agents lost
-# HOME and `gh auth status` flipped to "not logged in"). Forwarded non-empty
-# only: an empty $DISPLAY means "no display", and forwarding "" would make a
-# stripped display falsely look present in the child.
-_HOST_PASSTHROUGH_ROWS = tuple(EnvField(key) for key in ("DISPLAY", "WAYLAND_DISPLAY", "HOME"))
+# HOME and `gh auth status` flipped to "not logged in"). $USER / $LOGNAME are the
+# same class: a login shell does not restore them either, and the macOS Claude
+# Code CLI looks its keychain login up by account name — an agent PTY without
+# USER read a logged-in CLI as "Not logged in" (2026-09-26 Mode B takeover).
+# Forwarded non-empty only: an empty $DISPLAY means "no display", and
+# forwarding "" would make a stripped display falsely look present in the child.
+_HOST_PASSTHROUGH_ROWS = tuple(
+    EnvField(key) for key in ("DISPLAY", "WAYLAND_DISPLAY", "HOME", "USER", "LOGNAME")
+)
 HOST_PASSTHROUGH_KEYS = frozenset(row.key for row in _HOST_PASSTHROUGH_ROWS)
 
 # The machine's network proxy configuration (issue #2095). A service child that
@@ -547,7 +552,7 @@ def session_forward_keys() -> frozenset[str]:
     cluster-scope value, no agent-scope knob, no non-modeled AVA_* identity
     (audit F-s3-4: the old denylist forwarded AVA_AGENT_ID into daemon
     sessions). The ambient passthroughs
-    (DISPLAY/WAYLAND_DISPLAY/HOME) and the temp-dir vars are applied by
+    (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME) and the temp-dir vars are applied by
     `child_env`, not part of this set. A new host-scope field is forwarded
     automatically unless it is deliberately finalizer-only."""
     return _scope_aliases("host") - {MANIFEST_CERTIFICATION_SECRET_ENV}
@@ -628,7 +633,7 @@ def child_env(role: ProcessRole, platform: str) -> dict[str, str]:
     `platform` ("posix" | "windows") selects the delivery semantics: on
     Windows the dict replaces the child env wholesale, so the system keys ride
     (non-empty); POSIX needs none of them (the child's login shell rebuilds).
-    Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME), the temp-dir vars and the
+    Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME), the temp-dir vars and the
     machine's network proxy configuration (NETWORK_PROXY_KEYS — the one egress
     channel a build child needs; issue #2095) are carried non-empty only — an
     empty $DISPLAY means "no display".
