@@ -2,7 +2,7 @@
 
 from typing import NoReturn
 
-from ava import _boot
+from ava import agent_identity
 from ava._sdk_validation import coerce_str
 from shared.lifecycle import AgentImpersonation
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
@@ -14,8 +14,8 @@ __all_for_ava__ = []
 
 
 def _native_incarnation() -> RuntimeIncarnation:
-    _boot.assert_self_action("impersonation")
-    incarnation = current_incarnation(_boot.require_agent_id())
+    agent_identity.assert_self_action("impersonation")
+    incarnation = current_incarnation(agent_identity.require_agent_id())
     if incarnation is None:
         raise RuntimeError("impersonation acceptance requires the admitted native runtime")
     return incarnation

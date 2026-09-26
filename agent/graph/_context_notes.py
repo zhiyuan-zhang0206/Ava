@@ -150,7 +150,7 @@ def fork_notes() -> list[HumanMessage]:
 def _established_agent_id(note: str) -> int | None:
     """Resolve the current agent identity for a standing note, or None.
 
-    Reads through `ava._boot.agent_id()`, which resolves the hosted runner's
+    Reads through `ava.agent_identity.agent_id()`, which resolves the hosted runner's
     turn contextvar first: the agent host hosts many agents' turns in one
     process and establishes no process-wide id, so reading the `_agent_id`
     process slot directly would silently drop the note from every hosted head
@@ -159,7 +159,7 @@ def _established_agent_id(note: str) -> int | None:
     (snapshot renders, dev REPL, container mode) stays quiet at normal levels,
     but a production regression leaves a trace.
     """
-    from ava._boot import agent_id
+    from ava.agent_identity import agent_id
 
     aid = agent_id()
     if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() is None pre-bootstrap.

@@ -29,7 +29,7 @@ __all_for_ava__ = [
 ]
 
 # AGENT_ID is the agent-facing read of this process's identity. The canonical
-# slot lives framework-internally in `ava._boot` (set once by the bootstrap at
+# slot lives framework-internally in `ava.agent_identity` (set once by the bootstrap at
 # process startup); this is a re-export served by the module `__getattr__`
 # below, NOT a stored attribute — so the kernel never reaches through this
 # disable-able `ava.self` module to learn who it is, and `AVA_SDK_DISABLE` can
@@ -55,9 +55,9 @@ def __getattr__(name: str) -> object:
         # routes through the doc-carrying constant renderer there.
         # Local import: the MACHINE_SPEC branch's `import ava` makes `ava` a
         # function-local name, so reach the bootstrap slot explicitly here.
-        import ava._boot
+        import ava.agent_identity
 
-        return ava._boot.agent_id()
+        return ava.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
         import ava
         from shared.machine import machine_description, machine_name
@@ -136,11 +136,11 @@ def _publish_self_inbound_wake() -> None:
     `RedisInboundListener` and stays inside the ACL grant."""
     from redis.exceptions import ResponseError
 
-    from ava import _boot
+    from ava import agent_identity
     from shared.cluster import inbound_channel
     from shared.log import logger
 
-    channel = inbound_channel(_boot.agent_id())
+    channel = inbound_channel(agent_identity.require_agent_id())
     try:
         ava.REDIS.publish(channel, "0")
     except ResponseError as exc:
@@ -165,9 +165,9 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     persistent per-agent settings.
     """
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
-    from ava import _boot
+    from ava import agent_identity
 
-    _boot.assert_self_action("restart")
+    agent_identity.assert_self_action("restart")
     payload_json: str | None = None
     if config_overlay:
         from shared.plugin_config_registry import validate_config_overlay
@@ -204,12 +204,12 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
                 "UPDATE agents_meta "
                 "SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
                 "WHERE id = %s",
-                (_json.dumps(dict(config_overlay)), _boot.agent_id()),
+                (_json.dumps(dict(config_overlay)), agent_identity.agent_id()),
             )
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
             "VALUES (%s, '', 'restart', 'self', %s::jsonb)",
-            (_boot.agent_id(), payload_json),
+            (agent_identity.agent_id(), payload_json),
         )
     _publish_self_inbound_wake()
     raise AgentRestart
@@ -219,14 +219,14 @@ def terminate() -> NoReturn:
     """Your conversation state is preserved; a message from a peer or the
     user resurrects you with full context.
     """
-    from ava import _boot
+    from ava import agent_identity
 
-    _boot.assert_self_action("terminate")
+    agent_identity.assert_self_action("terminate")
     with ava.DB.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, '', 'terminate', 'self')",
-            (_boot.agent_id(),),
+            (agent_identity.agent_id(),),
         )
     _publish_self_inbound_wake()
     raise AgentTermination
@@ -245,7 +245,7 @@ def pause_heartbeat(duration: float) -> None:
             ava.self.restart(config_overlay=...)).
     """
     duration = coerce_typed(duration, "duration", (int, float))
-    from ava import _boot
+    from ava import agent_identity
 
     if not duration > 0:
         raise ValueError(f"duration must be greater than 0 seconds, got {duration!r}")
@@ -261,13 +261,13 @@ def pause_heartbeat(duration: float) -> None:
     with ava.DB.cursor() as cur:
         cur.execute(
             "INSERT INTO heartbeat_pause_log (agent_id, duration_s) VALUES (%s, %s)",
-            (_boot.agent_id(), float(duration)),
+            (agent_identity.agent_id(), float(duration)),
         )
         cur.execute(
             "UPDATE agents_meta "
             "SET heartbeat_paused_until = now() + make_interval(secs => %s) "
             "WHERE id = %s",
-            (float(duration), _boot.agent_id()),
+            (float(duration), agent_identity.agent_id()),
         )
         from shared import telemetry
 
@@ -275,7 +275,7 @@ def pause_heartbeat(duration: float) -> None:
             "telemetry",
             "heartbeat_paused",
             level="info",
-            agent_id=_boot.agent_id(),
+            agent_id=agent_identity.agent_id(),
             # int cast stabilizes the emitted metric kind (task #4011).
             attributes={"duration_s": round(duration)},
         )
@@ -294,20 +294,20 @@ def compact(summary: str) -> NoReturn:
     Verbatim tail (exclude the compaction request that triggered this).
     """
     summary = coerce_str(summary, "summary")
-    from ava import _boot
+    from ava import agent_identity
 
-    _boot.assert_self_action("compact")
+    agent_identity.assert_self_action("compact")
     with ava.DB.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind) "
             "VALUES (%s, %s, 'compact_summary')",
-            (_boot.agent_id(), summary),
+            (agent_identity.agent_id(), summary),
         )
         from shared.audit_events import insert_event_log
 
         insert_event_log(
             event_type="compact",
-            agent_id=_boot.agent_id(),
+            agent_id=agent_identity.agent_id(),
             source="self",
             payload={"compact_kind": "summary", "length": len(summary)},
         )
@@ -323,7 +323,7 @@ def compact(summary: str) -> NoReturn:
     publish_best_effort_sync(
         settings.data_plane.events_channel,
         CompactRequest(
-            agent_id=_boot.agent_id(),
+            agent_id=agent_identity.require_agent_id(),
             content=f"[compact requested, {len(summary)} chars]",
         ).model_dump_json(),
         context="compact_request",

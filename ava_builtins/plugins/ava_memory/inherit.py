@@ -232,7 +232,7 @@ def inherited_memory_note() -> HumanMessage | None:
     if depth <= 0:
         logger.debug("[inherited-memory] disabled by settings (depth={})", depth)
         return None
-    from ava._boot import agent_id
+    from ava.agent_identity import agent_id
 
     aid = agent_id()
     if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() is None pre-bootstrap.

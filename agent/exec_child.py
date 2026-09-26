@@ -25,7 +25,7 @@ files + signals:
   process group; Windows cancel/timeout immediately closes the Job Object;
   a watchdog `os._exit(124)` bounds this child's life if the parent dies first.
 
-Identity: `ava._boot.establish(agent_id, owns_loop=True)` — owns_loop stays
+Identity: `ava.agent_identity.establish(agent_id, owns_loop=True)` — owns_loop stays
 True so `ava.self.terminate/restart/compact` keep working exactly as they do
 in the agent process (their inbound INSERTs go to the same database over
 `ava.DB`); the resulting `_LifecycleExit` is caught here and reported as a
@@ -93,10 +93,10 @@ _RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
 
 def _import_runtime() -> None:
     """Load the SDK only after `main` can turn a boot failure into a result."""
-    global ava, _boot  # noqa: PLW0603
+    global ava, agent_identity  # noqa: PLW0603
 
     import ava
-    from ava import _boot
+    from ava import agent_identity
 
 
 def _line_buffered_output() -> None:
@@ -468,7 +468,7 @@ def _run(request_path: str, result_path: str) -> None:
 
     birth, overlay = _pop_overlay_env()
     if request.agent_id is not None:
-        _boot.establish(request.agent_id, owns_loop=True)
+        agent_identity.establish(request.agent_id, owns_loop=True)
         if request.incarnation is not None:
             from shared.runtime_incarnation import bind_child_incarnation
 

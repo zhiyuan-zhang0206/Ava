@@ -694,7 +694,7 @@ def _workspace_section() -> str:
     own path."""
     import ava
 
-    aid = ava._boot.agent_id()
+    aid = ava.agent_identity.agent_id()
     if aid is None or not settings.agent.workspace_in_system_prompt:
         return ""
     # Ensure the workspace directory exists (mkdir side effect).

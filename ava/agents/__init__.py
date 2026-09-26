@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal
 
 import ava
-import ava._boot
+import ava.agent_identity
 from ava import _gateway_client as _client
 from ava._sdk_validation import coerce_str, coerce_typed
 from shared.agents import AgentLaunchFailed as AgentLaunchFailed
@@ -427,7 +427,7 @@ def _spawn_impl(
     machine = coerce_str(machine, "machine", allow_none=True)
     config = coerce_typed(config, "config", dict, allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
-    spawner = ava._boot.require_actor()
+    spawner = ava.agent_identity.require_actor()
     if config:
         # The `preset` key is spawn-boundary metadata, not a Settings field: it
         # must not reach the overlay validators, which reject unknown keys.
@@ -520,7 +520,7 @@ def send_message(agent_id: int, content: str) -> None:
     """  # lint-docstring: ok "auto-resurrected" is public behaviour, not impl detail
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content", allow_types=(list,))
-    source = ava._boot.require_actor()
+    source = ava.agent_identity.require_actor()
     _client.send_message(agent_id, content=content, source=source)
 
 
@@ -563,7 +563,7 @@ def send_system_note(
     if task_id is not None and tag != NoteTag.TASK.value:
         raise ValueError("task_id requires tag='task'")
     resurrect = coerce_typed(resurrect, "resurrect", bool)
-    source = ava._boot.require_actor()
+    source = ava.agent_identity.require_actor()
     return _client.send_system_note(
         agent_id,
         content=content,
@@ -587,7 +587,7 @@ def get_last_message(agent_id: int) -> str | None:
     from ava.security import scan_content
 
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    caller = ava._boot.require_actor()
+    caller = ava.agent_identity.require_actor()
     message = _client.get_last_message(agent_id, caller)
     if message is not None:
         scan_content(message, source=f"peer.last_message:{agent_id}")

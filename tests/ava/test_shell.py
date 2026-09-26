@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 import ava
-import ava._boot
+import ava.agent_identity
 from ava import shell
 from shared.platform import IS_WINDOWS
 
@@ -163,7 +163,7 @@ def test_run_default_cwd_is_workspace(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
     out = ava.shell.run("pwd")
-    expected = tmp_path / "workspaces" / str(ava._boot._agent_id)
+    expected = tmp_path / "workspaces" / str(ava.agent_identity._agent_id)
     assert Path(out.strip()).resolve() == expected.resolve()
     assert expected.is_dir()  # workspace_dir mkdir on demand
 
@@ -175,13 +175,13 @@ def test_run_default_cwd_is_home_before_identity() -> None:
     Manually save/restore instead of monkeypatch: this module's `_isolated_agent` (usefixtures)
     already swaps _agent_id to a worker fake id before test body runs; monkeypatch.setattr's snapshot
     would capture that fake id and restore it last in teardown, leaking the fake id to subsequent tests."""
-    original = ava._boot._agent_id
-    ava._boot._agent_id = None
+    original = ava.agent_identity._agent_id
+    ava.agent_identity._agent_id = None
     original_env = os.environ.pop("AVA_AGENT_ID", None)
     try:
         out = ava.shell.run("pwd")
     finally:
-        ava._boot._agent_id = original
+        ava.agent_identity._agent_id = original
         if original_env is not None:
             os.environ["AVA_AGENT_ID"] = original_env
     assert Path(out.strip()).resolve() == Path.home().resolve()

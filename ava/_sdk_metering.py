@@ -39,7 +39,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import ava
-from ava import _boot
+from ava import agent_identity
 
 # Identity set of live recorder objects. install() skips a target only when the
 # current top callable *is* one of these — robust to `ava.extend`'s wrap machinery,
@@ -64,14 +64,14 @@ def _caller() -> Generator[None, None, None]:
 
     identity = {}
     with contextlib.suppress(Exception):
-        _boot._try_establish_from_env()
-        borrowed = _boot._external_agent_id
-        turn = _boot.current_turn_agent_id()
+        agent_identity._try_establish_from_env()
+        borrowed = agent_identity._external_agent_id
+        turn = agent_identity.current_turn_agent_id()
         agent_id = borrowed if borrowed is not None else turn
         if agent_id is None:
-            agent_id = _boot._agent_id
+            agent_id = agent_identity._agent_id
         external = external_caller()
-        source = f"agent:{agent_id}" if agent_id else (_boot._actor or "system")
+        source = f"agent:{agent_id}" if agent_id else (agent_identity._actor or "system")
         if external and borrowed is None and turn is None:
             source = external.source()
         identity = {

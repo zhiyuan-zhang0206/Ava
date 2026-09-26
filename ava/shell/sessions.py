@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import ava
-import ava._boot
+import ava.agent_identity
 from ava._sdk_validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.cluster import session_name
@@ -28,7 +28,7 @@ def _agent_prefix() -> str:
     # Generic prefix for all shell sessions of the current agent:
     # `ava-agent-<agent_id>-`. The agent's process, its shells, and
     # its watchers all share this prefix; kill_all filters on it.
-    return f"{session_name(f'agent-{ava._boot.agent_id()}')}-"
+    return f"{session_name(f'agent-{ava.agent_identity.agent_id()}')}-"
 
 
 def _shell_prefix() -> str:
@@ -49,13 +49,13 @@ def _next_session_index_from_db() -> int:
     from ava._settings import DB_URL
     from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
 
-    agent_id = ava._boot.agent_id()
-    if agent_id is None:  # type: ignore[unnecessary-isinstance]  # _boot.agent_id() returns None pre-bootstrap (type annotation is int for call-site simplicity)
+    agent_id = ava.agent_identity.agent_id()
+    if agent_id is None:
         raise RuntimeError(
             "Cannot allocate a session index: this process has no agent identity. "
             "ava.shell.sessions.new() requires an agent process or a background "
             "script launched by one (which receives the identity via "
-            "ava._boot.establish). Running a standalone script that imports ava "
+            "ava.agent_identity.establish). Running a standalone script that imports ava "
             "does not set an agent identity."
         )
     # PG_KEEPALIVE_KWARGS: this runs inside the agent's exec sandbox, so a
@@ -192,7 +192,7 @@ def _record_ttl(session_id: int, ttl: float) -> None:
             cur.execute(
                 "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
                 "VALUES (%s, %s, now() + make_interval(secs => %s))",
-                (ava._boot.agent_id(), session_id, ttl),
+                (ava.agent_identity.agent_id(), session_id, ttl),
             )
             conn.commit()
     except Exception as exc:
@@ -241,11 +241,11 @@ def _create_session(
     # The override rides the backend's 0600 envfile, not argv (issue #974).
     backend = get_shell_backend()
     if cwd is None:
-        agent_id = ava._boot.agent_id()
-        # agent id is typed int but is None until a bootstrap establishes it
-        # (same fallback as ava.shell.run — the DB call above already raised
-        # pre-bootstrap, so this is only about resolving the base).
-        cwd = str(workspace_dir(agent_id)) if agent_id is not None else str(Path.home())  # pyright: ignore[reportUnnecessaryComparison]
+        agent_id = ava.agent_identity.agent_id()
+        # agent_id() is None until a bootstrap establishes it (same fallback as
+        # ava.shell.run — the DB call above already raised pre-bootstrap, so
+        # this is only about resolving the base).
+        cwd = str(workspace_dir(agent_id)) if agent_id is not None else str(Path.home())
     # The id is allocated before the host-level PTY admission gate. During an
     # operator freeze a refused attempt therefore leaves a harmless gap in this
     # monotonic per-agent sequence. Never roll it back or reuse it: an old
@@ -359,10 +359,10 @@ def kill(id: int) -> None:
     # the very watcher this kill ended (the same visibility discipline the boot
     # script's clean-exit delete follows).
     try:
-        from ava import _boot
+        from ava import agent_identity
         from shared.daemon.schedules.watcher_registry import delete_watcher
 
-        delete_watcher(int(_boot.agent_id()), id)
+        delete_watcher(agent_identity.require_agent_id(), id)
     except Exception:
         logger.warning(
             "watcher registry row delete failed after killing session %s — "
@@ -387,10 +387,10 @@ def kill_all() -> int:
     # back as a second live instance). Fail-soft: a registry blip must not
     # make the cleanup itself fail — visible for the same reason as kill().
     try:
-        from ava import _boot
+        from ava import agent_identity
         from shared.daemon.schedules.watcher_registry import delete_watcher, watcher_session_ids
 
-        agent_id = int(_boot.agent_id())
+        agent_id = agent_identity.require_agent_id()
         for session_id in watcher_session_ids(agent_id=agent_id):
             delete_watcher(agent_id, session_id)
     except Exception:
@@ -419,7 +419,7 @@ def renew(id: int, *, ttl: float) -> datetime:
     ttl = _validate_ttl(coerce_typed(ttl, "ttl", (int, float)))
     # Not this agent's / not alive -> ValueError, same rule as send/capture.
     _resolve(id)
-    agent_id = int(ava._boot.agent_id())
+    agent_id = ava.agent_identity.require_agent_id()
     from shared.daemon.schedules.watcher_registry import watcher_session_ids
 
     if id in watcher_session_ids(agent_id):

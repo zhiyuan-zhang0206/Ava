@@ -33,7 +33,7 @@ def _spawn_self(monkeypatch: pytest.MonkeyPatch) -> int:
     subprocess.
     """
     aid = ava.agents.spawn()
-    monkeypatch.setattr(ava._boot, "_agent_id", aid)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", aid)
     return aid
 
 

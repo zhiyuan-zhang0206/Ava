@@ -672,7 +672,7 @@ def _record_skill_invoked(skill: Skill) -> None:
     run only emits one event per skill. Skipped silently outside an agent
     process; a write failure is logged and swallowed.
     """
-    from ava._boot import require_agent_id
+    from ava.agent_identity import require_agent_id
 
     try:
         agent = require_agent_id()

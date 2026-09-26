@@ -23,7 +23,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Mirror `test_lazy_lm_import._CLEAN_ENV_STRIP` — with AVA_AGENT_ID forwarded,
-# `import ava` self-loads plugin namespaces (`_boot.is_launched_child`),
+# `import ava` self-loads plugin namespaces (`agent_identity.is_launched_child`),
 # inflating the import by ~13MB and adding plugin modules (recon #3586 §2.6).
 _CLEAN_ENV_STRIP = frozenset(
     {

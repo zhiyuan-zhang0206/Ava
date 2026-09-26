@@ -31,7 +31,7 @@ def test_compact_survives_publish_failure(
 ) -> None:
     """A throwing redis on the CompactRequest publish must not stop compact from
     committing its compact_summary inbound and raising _SystemHalt."""
-    ava._boot._agent_id = spawn_agent()  # self identity
+    ava.agent_identity._agent_id = spawn_agent()  # self identity
 
     # Only the CompactRequest publish (publish_best_effort_sync → sync_redis) is
     # broken; the self-inbound wake uses ava.REDIS directly and is already

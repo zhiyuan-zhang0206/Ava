@@ -87,7 +87,7 @@ def test_uses_workspace_relative_path_semantics(
 ) -> None:
     _exec_child(monkeypatch, tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr("ava.files._boot.agent_id", lambda: None)
+    monkeypatch.setattr("ava.files.agent_identity.agent_id", lambda: None)
     image = tmp_path / "relative.png"
     image.write_bytes(b"png")
 

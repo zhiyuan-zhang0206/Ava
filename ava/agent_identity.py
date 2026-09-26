@@ -111,7 +111,7 @@ def is_launched_child() -> bool:
     `AVA_AGENT_ID`, so no identity establishes).
 
     Establishes from the environment first (so a fresh child that has not
-    touched `_boot` yet reports correctly), then reports the launched-child
+    touched `agent_identity` yet reports correctly), then reports the launched-child
     signal. This gates the lazy plugin-namespace load in `ava.__getattr__`: only
     such a child self-loads plugins on first unknown-attribute access — so a bare
     `python x.py` in a persistent shell session gets `ava.tasks` et al. without a
@@ -124,7 +124,7 @@ def is_launched_child() -> bool:
     return _agent_id is not None and not _owns_loop
 
 
-def agent_id() -> int:
+def agent_id() -> int | None:
     """Resolve the agent id used to attribute this process's work.
 
     A validated borrowed identity takes precedence, followed by the hosted turn
@@ -140,7 +140,7 @@ def agent_id() -> int:
     if turn is not None:
         return turn
     _try_establish_from_env()
-    return _agent_id  # type: ignore[return-value]
+    return _agent_id
 
 
 def require_agent_id() -> int:

@@ -307,7 +307,7 @@ def _exec_watcher(
     with fakes before exec — the template itself stays untouched. `_wake`'s delivery
     is stubbed through ava._gateway_client; pass `send` to script a failing stub
     (the wake-retry tests, task #3525)."""
-    from ava import _boot, _gateway_client
+    from ava import _gateway_client, agent_identity
 
     script = script.replace("import datetime as _dt\n", "_dt = _FakeDT\n").replace(
         "import time as _time\n", "_time = _fake_time\n"
@@ -320,7 +320,7 @@ def _exec_watcher(
     def _record(*a: object, **k: object) -> None:
         sent.append((a, k))
 
-    monkeypatch.setattr(_boot, "agent_id", lambda: 3115)
+    monkeypatch.setattr(agent_identity, "agent_id", lambda: 3115)
     monkeypatch.setattr(_gateway_client, "send_message", send if send is not None else _record)
     monkeypatch.setenv("AVA_WATCHER_SESSION_ID", "77")
     exec(script, {"__name__": "__watcher__", "_FakeDT": _FakeDT, "_fake_time": fake_time})
