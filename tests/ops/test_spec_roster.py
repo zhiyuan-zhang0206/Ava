@@ -71,8 +71,9 @@ def test_agent_host_spec_launches_under_the_agent_profile() -> None:
     consumption matches the `agent` profile. The capabilities-derived marker
     (agent-runner-only -> "runner") would crash it at import (settings.agent
     read — 2026-08-30 soak startup); the spec must carry the explicit override
-    so BOTH launch paths (ava start / ava restart spec path AND the watchdog
-    respawn path) agree."""
+    so the root launcher's per-service environment
+    (`_root_driver._service_extra_env`) applies the "agent" profile marker to
+    this session."""
     agent_host = next(s for s in roster.build_services() if s.session == "agent-host")
     assert agent_host.profile == "agent"
     assert service_spec.profile_marker(agent_host) == "agent"

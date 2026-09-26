@@ -56,8 +56,9 @@ install setup already created both its schema effects and its
 name; the down SQL reverses the schema effect and deletes the upstream version
 row. Real-Postgres tests must cover both existing-N-1 update/down and fresh-N
 birth -> first-start registration/down. Until all of that ships together, the
-dependency-drift gate fails before any database mutation, preserving update
-recovery and automatic rollback.
+dependency-drift gate fails before any database mutation, preserving the
+ability to recover an interrupted update and to roll back to a previously
+retained image.
 
 **Identity is the home path** — there is no cluster name; the display label is
 the home's basename. A cluster's database and the Postgres role that owns it
@@ -189,7 +190,7 @@ incident and escape analysis are in
 
 Production runtime transitions use a verified prepared release request. Editable
 installation repair is a development-checkout operation; see
-[Python installation](../cli/python-install.ava.okf.md).
+[Editable Install Guard](../cli/commands/editable-install-guard.ava.okf.md).
 
 A typical small deployment runs the **gateway as a single-box unit** on an
 always-on host (`gateway,agent-runner`, one home `~/.ava`, code `~/.ava/source`,

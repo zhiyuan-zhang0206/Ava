@@ -482,8 +482,6 @@ export function applySystemEvent(
     case "task_updated":
       // task board — useTasks invalidate-refetches on these; they never enter
       // the per-agent timeline.
-      // root resilience provider owns the full-screen update takeover; this
-      // cluster-level event never enters an agent timeline.
     case "timeline_snapshot":
       // Handled by store.processSseEvent before applySystemEvent —
       // does not go through the delta reducer; uses mergeSnapshotWithStreaming directly.

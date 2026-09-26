@@ -30,7 +30,7 @@
   },
   "files": {
     "scripts/ci_utils.py": 2022,
-    "scripts/two_section_chain_smoke.py": 1059,
+    "scripts/two_section_chain_smoke.py": 1058,
     "tests/agent/test_ava_code_plugin.py": 1599,
     "tests/agent/test_ava_fleet_plugin.py": 882,
     "tests/agent/test_ava_sdk_reminder_plugin.py": 1088,
@@ -300,7 +300,7 @@
     "scripts/qa_receipt.py::approved": 18,
     "scripts/tcc-onboard-helper-grants.py::main": 45,
     "scripts/test_selector.py::select_tests": 27,
-    "scripts/two_section_chain_smoke.py::main": 67,
+    "scripts/two_section_chain_smoke.py::main": 61,
     "scripts/update_model_pricing.py::parse_deepseek_pricing": 37,
     "services/agent_host/dispatcher.py::InboundWakeDispatcher.scan_once": 21,
     "services/agent_ops/dispatch_sync.py::dispatch_sync": 20,

@@ -2,11 +2,11 @@ import { expect, it, vi } from "vitest";
 
 import { reloadThroughGate } from "./gate-maintenance";
 
-it("coalesces interleaved SSE and poll reload hints for one page lifetime", () => {
+it("coalesces racing reload hints for one page lifetime", () => {
   const reload = vi.fn();
 
-  reloadThroughGate(reload); // SSE
-  reloadThroughGate(reload); // persisted-state poll races it
+  reloadThroughGate(reload); // first poll tick
+  reloadThroughGate(reload); // a second tick races it
 
   expect(reload).toHaveBeenCalledTimes(1);
 });

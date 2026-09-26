@@ -1,21 +1,27 @@
 # Cluster consistency: commit-level pinning (vs schema-level)
 
-> **Status: increments A and B are both built. What remains — hard fail-fast
-> enforcement — has been overtaken by a later decision and needs re-litigating
-> before it is built.**
+> **Status: increment A still stands. Increment B's rollback mechanism and the
+> `ops/controllers/` drift-response watchdog described below were both retired
+> by the unified cluster lifecycle rework
+> ([`../infra/unified-cluster-lifecycle.md`](../infra/unified-cluster-lifecycle.md));
+> what remains open is re-litigated against that model, not this one.**
 >
-> - **Increment A (persist + visualize) — done.** `cluster_target_sha` is a standing
->   value in the `cluster_pin` table (`shared/cluster_pin.py`); the gateway writes it
->   after each rollout and `ava status` surfaces per-node drift from it.
-> - **Increment B (health-probe + rollback) — done.** `last_known_good_sha`,
->   `ava cluster health-probe`, `ava cluster rollback --to <tag|sha>`, and OS cron
->   registration all shipped; see
->   [`../../decisions/2026-06-29-self-evolution-rollback.md`](../../decisions/2026-06-29-self-evolution-rollback.md).
-> - **Drift response — done, but as reconcile, not refusal.** `ops/controllers/pin.py`
->   tightened the watchdog trigger from schema-drift to SHA-drift exactly as bullet 2
->   below proposed: an off-pin agent-runner force-updates to the pin (backoff-guarded,
->   declines while a cluster update holds the lock); a gateway drift only warns,
->   because it needs the full rollout path.
+> - **Increment A (persist + visualize) — still true.** `cluster_target_sha` is a
+>   standing value in the `cluster_pin` table (`shared/cluster_pin.py`); the gateway
+>   writes it after each rollout and `ava status` surfaces per-node drift from it.
+> - **Increment B (health-probe + rollback) — superseded.** There is no
+>   `ava cluster rollback --to <tag|sha>` verb (only the unrelated
+>   `ava cluster pitr rollback`). Releases now go through one immutable prepared
+>   image (`ava cluster update --prepared REQUEST`); a rollback is a transition
+>   back to the previous retained image through that same operation, not a
+>   health-probe-triggered auto-rollback — the independent health-probe rollback
+>   was removed (health checks and alerts remain). See
+>   [`../../cli/release_transition/release_transition.ava.okf.md`](../../cli/release_transition/release_transition.ava.okf.md).
+> - **Drift response — retired.** `ops/controllers/pin.py` (the SHA-drift
+>   watchdog this bullet used to describe) was deleted along with the rest of
+>   `ops/controllers/` in the old in-place updater's removal; `ava status` still
+>   surfaces pin drift (increment A), but nothing here force-updates a drifted
+>   node any more.
 > - **Still not built:** the *hard* half — a drifted node **refusing work**. But
 >   [`2026-07-19-fail-fast-vs-reconcile-boundary.md`](../../decisions/2026-07-19-fail-fast-vs-reconcile-boundary.md)
 >   classifies pin drift as **world drift → reconcile toward spec** (no learner in

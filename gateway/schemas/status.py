@@ -58,12 +58,6 @@ class ClusterPanel(BaseModel):
     current_serve_agent_runner: bool
     current_serve_observability_station: bool = False
     current_paused: bool  # whether the current gateway is paused (local is_paused())
-    # The whole-cluster orchestration in flight on this gateway, or None
-    # when idle. A rollout / restart runs for minutes in a detached session after
-    # the trigger POST returns; this is the durable in-flight signal the panel
-    # disables the Update / Restart actions on (current_paused only flips once the
-    # orchestration reaches the gateway's own stop, leaving an early window
-    # where a second trigger could fire).
     machines: list[MachineStatus]
     # The cluster's pinned commit (`cluster_target_sha`), or None if no rollout
     # has pinned one yet. Lets the panel show "cluster pinned to <sha>" alongside

@@ -1,7 +1,8 @@
 /** Ask the always-up Gate to project the persisted UI update snapshot.
  *
- * The SPA never renders or times a maintenance page. SSE and polling are only
- * hints that make the browser re-request its current URL through the Gate.
+ * The SPA never renders or times a maintenance page. GateMaintenanceProvider's
+ * poll is the only hint that makes the browser re-request its current URL
+ * through the Gate.
  */
 let reloadRequested = false;
 export const UI_UPDATE_QUERY_KEY = ["ui-update-state"] as const;
@@ -9,9 +10,10 @@ export const UI_UPDATE_QUERY_KEY = ["ui-update-state"] as const;
 export function reloadThroughGate(
   reload: () => void = () => window.location.reload(),
 ): void {
-  // The SSE hint and the snapshot poll can resolve in either order. They share
-  // this page-lifetime latch so the race produces one Gate navigation, never a
-  // reload storm. A successful navigation creates a fresh module instance.
+  // A poll tick can fire more than once before the page navigates away; this
+  // page-lifetime latch keeps repeat calls a no-op so the race produces one
+  // Gate navigation, never a reload storm. A successful navigation creates a
+  // fresh module instance.
   if (reloadRequested) return;
   reloadRequested = true;
   reload();

@@ -1306,11 +1306,14 @@ jobs:
       - name: Two-section chain smoke (keeper semantics)
         run: |
           # The macOS adapter's behavioral gate (task #3209): launchd -> helper
-          # -> root -> unit parentage, the root-crash keepalive, and the
-          # helper-crash conflict / dispose / reseed path. The F11
-          # tccd-attribution phase is skipped here because hosted runners
-          # restrict `log show`; run the script without --skip-attribution on a
-          # dev host for that phase.
+          # -> root -> unit parentage, the helper-crash conflict path (the
+          # relaunched helper finds the orphan root, refuses to stop it, and
+          # the orphan closes its own tree so the helper can reseed a fresh
+          # root), and the root-crash restart path (units keep running; the
+          # replacement root refuses cold start while the killed generation's
+          # service custody is unresolved). The F11 tccd-attribution phase is
+          # skipped here because hosted runners restrict `log show`; run the
+          # script without --skip-attribution on a dev host for that phase.
           uv run python scripts/two_section_chain_smoke.py --skip-attribution
 
       - name: Tear down helper launchd job
