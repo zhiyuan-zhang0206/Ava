@@ -90,27 +90,25 @@ def postgres() -> Generator[str]:
         yield url
 
 
+_RUNNER_LOGIN = "ava_g0_runner"
 _RUNNER_PASSWORD = "suite-runner-password"  # noqa: S105 — throwaway pg only
 
 
 def runner_projection(db_url: str | None = None) -> str:
-    """`db_url` (default: the suite's owner URL) as the `ava_runner` projection
-    the agent launcher injects into every agent-profile child.
+    """`db_url` (default: the suite's owner URL) as the runner-class login the
+    agent launcher injects into every agent-profile child.
 
     Such a child holds no owner password (dotenv_boot drops it), so an owner
-    URL cannot configure it. Creates or re-affirms the runner role first.
+    URL cannot configure it. The login is a write generation's runner login
+    shape (`grant_runner_login` on the suite database, dialled directly), then
+    carried onto `db_url`, which may be a pooler URL.
     """
-    from shared.cluster import ensure_runner_role
-    from shared.cluster.derive import project_runner_db_url
     from shared.config import settings
+    from shared.url_secret import url_with_userinfo
 
     admin = settings.data_plane.db_url
-    ensure_runner_role(
-        "ava_citest",
-        base_admin_url=admin.rsplit("/", 1)[0] + "/postgres",
-        runner_password=_RUNNER_PASSWORD,
-    )
-    return project_runner_db_url(db_url or admin, _RUNNER_PASSWORD)
+    grant_runner_login(admin, owner="ava_citest", login=_RUNNER_LOGIN, password=_RUNNER_PASSWORD)
+    return url_with_userinfo(db_url or admin, _RUNNER_LOGIN, _RUNNER_PASSWORD)
 
 
 @contextmanager

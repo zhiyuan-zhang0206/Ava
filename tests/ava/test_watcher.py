@@ -2313,7 +2313,7 @@ def test_cron_concurrent_registration_through_pooler(
     # PgBouncer's trust mode still requires the user in an auth_file (it
     # trusts the password, not the username); the password field is ignored.
     auth_file = tmp_path / "pgbouncer-users.txt"
-    auth_file.write_text('"ava_citest" ""\n"ava" ""\n"ava_runner" ""\n')
+    auth_file.write_text('"ava_citest" ""\n"ava" ""\n"ava_g0_runner" ""\n')
     ini = tmp_path / "pgbouncer.ini"
     ini.write_text(
         f"""[databases]
