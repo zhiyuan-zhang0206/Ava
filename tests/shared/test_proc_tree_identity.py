@@ -105,9 +105,11 @@ def test_native_signal_keeps_exact_birth_and_preserves_sibling(
             monkeypatch.delattr(os, "pidfd_open", raising=False)
             monkeypatch.delattr(signal, "pidfd_send_signal", raising=False)
             original = proc_tree.stable_create_time
-            monkeypatch.setattr(
-                proc_tree, "stable_create_time", lambda process: original(process) + 3600
-            )
+
+            def skewed(process: psutil.Process) -> float:
+                return original(process) + 3600
+
+            monkeypatch.setattr(proc_tree, "stable_create_time", skewed)
         assert owner.send_signal(signal.SIGTERM)
         assert children[0].wait(timeout=5) == -signal.SIGTERM
         assert sibling.live()

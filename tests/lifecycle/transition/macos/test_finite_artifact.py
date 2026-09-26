@@ -184,6 +184,16 @@ _PROTOCOLS = {"finite_executor_v1": True, "root_stop_intent_v1": True, "helper_s
         ({"pong": True, "pid": 2**22 + 7, **_PROTOCOLS}, 2**22 + 7, "not observable"),
         ({"pong": True, "pid": os.getpid(), **_PROTOCOLS}, os.getpid(), "not a live launchd job"),
     ],
+    # Explicit ids: the default would embed this worker's PID, and xdist
+    # refuses a collection that differs between workers.
+    ids=[
+        "missing-finite-protocol",
+        "boolean-pid",
+        "missing-pid",
+        "self-reported-other-pid",
+        "unobservable-pid",
+        "not-a-launchd-job",
+    ],
 )
 def test_home_helper_is_the_kernel_socket_peer_with_the_finite_protocol(
     tmp_path: Path,

@@ -42,9 +42,13 @@ def observe_process(expected: ExpectedProcess) -> ProcessVerdict:
     """
     try:
         process = psutil.Process(expected.pid)
-        if sys.platform == "linux" and expected.starttime is None:
-            return "unknown"
-        if expected.starttime is not None:
+        if expected.starttime is None:
+            if sys.platform == "linux":
+                return "unknown"
+            if not create_time_matches(stable_create_time(process), expected.create_time):
+                # Non-Linux native timestamps compare exactly.
+                return "identity_mismatch"
+        else:
             actual = pid_starttime_ticks(expected.pid)
             if actual is None:
                 if psutil.pid_exists(expected.pid):
@@ -52,9 +56,6 @@ def observe_process(expected: ExpectedProcess) -> ProcessVerdict:
                 return "exited"
             if actual != expected.starttime:
                 return "identity_mismatch"
-        elif not create_time_matches(stable_create_time(process), expected.create_time):
-            # Non-Linux native timestamps compare exactly.
-            return "identity_mismatch"
         return "exited" if process.status() == psutil.STATUS_ZOMBIE else "alive"
     except psutil.NoSuchProcess:
         return "exited"

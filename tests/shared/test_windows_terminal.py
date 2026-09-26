@@ -92,6 +92,13 @@ def test_pipe_peer_must_be_the_exact_recorded_owner(
         return encode(ok_response(running.model_dump(mode="json"))), owner_pid + 1
 
     monkeypatch.setattr(backend, "roundtrip", _fake_roundtrip)
+
+    # The Windows birth record carries no Linux start ticks, so a POSIX host
+    # cannot prove the owner live; liveness is not under test, the peer is.
+    def _live(_self: OwnedProcess) -> bool:
+        return True
+
+    monkeypatch.setattr(OwnedProcess, "live", _live)
     with pytest.raises(RuntimeError, match="recorded native owner"):
         backend.query(running)
 

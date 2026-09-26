@@ -113,9 +113,14 @@ class OwnedProcess:
             if sys.platform == "win32":
                 return _windows_live(self)
             process = psutil.Process(self.pid)
-            if sys.platform == "linux" and self.starttime is None:
-                raise RuntimeError(f"missing Linux start ticks for PID {self.pid}")
-            if self.starttime is not None:
+            # Branch on the recorded field first: a platform-first test lets
+            # the Linux type check narrow it and flag the later comparison.
+            if self.starttime is None:
+                if sys.platform == "linux":
+                    raise RuntimeError(f"missing Linux start ticks for PID {self.pid}")
+                if not self.birth_matches(process):
+                    return False
+            else:
                 actual = _start_ticks(self.pid)
                 if actual is None:
                     if not psutil.pid_exists(self.pid):
@@ -124,8 +129,6 @@ class OwnedProcess:
                     raise RuntimeError(f"cannot verify process identity for PID {self.pid}")
                 if actual != self.starttime:
                     return False
-            elif not self.birth_matches(process):
-                return False
             return process.status() not in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
         except psutil.NoSuchProcess:
             return False
@@ -145,10 +148,10 @@ class OwnedProcess:
             process = psutil.Process(self.pid)
             if not self.same_birth(OwnedProcess.capture(process)):
                 raise RuntimeError(f"native identity changed before signal: {self.pid}")
-            if descriptor is None:
-                process.send_signal(signum)
-            else:
+            if sys.platform == "linux":
                 pidfd.send_signal(descriptor, signum)
+            else:
+                process.send_signal(signum)
             return True
         except (ProcessLookupError, psutil.NoSuchProcess):
             return False
