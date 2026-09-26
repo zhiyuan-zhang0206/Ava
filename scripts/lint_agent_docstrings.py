@@ -1,9 +1,13 @@
 """Lint agent-visible docstrings — block Chinese characters + framework impl details.
 
-Runs in pre-commit. Scope: `ava/*.py` (excluding private `_*.py` modules / `_`-prefixed packages and
-`hooks.py`) + `plugins/*/*.py`. These docstrings are concatenated into the
-LLM system prompt via `ava.help()` and `register_system_prompt_section`;
-violations land in the agent's context window verbatim.
+Runs in pre-commit. Scope: the `ava/` modules on the agent surface — a module that
+declares `__all_for_ava__`, or the module of a namespace listed in
+`ava/__init__.py`'s `__all_for_ava__` — plus plugin modules bound to a
+namespace and every `plugin.py`. Agent visibility is that whitelist, never the
+`_` prefix, so a framework module with a public name stays out of scope. These
+docstrings are concatenated into the LLM system prompt via `ava.help()` and
+`register_system_prompt_section`; violations land in the agent's context
+window verbatim.
 
 ## What gets banned
 
@@ -195,18 +199,64 @@ def _discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
     return namespace_files
 
 
-def _is_in_scope(path: Path, plugin_namespace_files: set[Path]) -> bool:
+def _declares_agent_surface(tree: ast.Module) -> bool:
+    """The module assigns (or serves as a property) `__all_for_ava__`."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "__all_for_ava__":
+            return True
+        targets = (
+            node.targets
+            if isinstance(node, ast.Assign)
+            else [node.target]
+            if isinstance(node, ast.AnnAssign)
+            else []
+        )
+        if any(isinstance(t, ast.Name) and t.id == "__all_for_ava__" for t in targets):
+            return True
+    return False
+
+
+def _top_level_surface(repo_root: Path) -> list[str]:
+    """Names in `ava/__init__.py`'s `__all_for_ava__` list literal."""
+    tree = ast.parse((repo_root / "ava/__init__.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "__all_for_ava__" for t in node.targets)
+            and isinstance(node.value, ast.List)
+        ):
+            return [e.value for e in node.value.elts if isinstance(e, ast.Constant)]
+    raise ValueError("ava/__init__.py declares no __all_for_ava__ list literal")
+
+
+def _discover_agent_surface_modules(repo_root: Path) -> set[Path]:
+    """`ava/` module files on the agent surface: a module declaring
+    `__all_for_ava__`, or the module / package `__init__` of a top-level
+    namespace. Everything else under `ava/` is framework code, whatever its name."""
+    namespaces = {
+        path
+        for name in _top_level_surface(repo_root)
+        for path in (repo_root / f"ava/{name}.py", repo_root / f"ava/{name}/__init__.py")
+        if path.is_file()
+    }
+    surface: set[Path] = set()
+    for path in repo_root.glob("ava/**/*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        if path in namespaces or _declares_agent_surface(
+            ast.parse(path.read_text(encoding="utf-8"))
+        ):
+            surface.add(path.resolve())
+    return surface
+
+
+def _is_in_scope(
+    path: Path, plugin_namespace_files: set[Path], ava_surface_files: set[Path]
+) -> bool:
     """True if file's docstrings need linting."""
     rel = str(path).replace("\\", "/")
     if rel.startswith("ava/"):
-        # Any underscore-prefixed path segment marks a framework-private
-        # module or package (top-level `_*.py`, or a package like
-        # `ava/_exports/`) — its docstrings are dev-facing, never rendered
-        # into the agent's view, so the `_*.py` exemption applies by segment
-        # rather than by bare filename.
-        if any(part.startswith("_") for part in rel[len("ava/") :].split("/")):
-            return False
-        return path.name != "hooks.py"
+        return path.resolve() in ava_surface_files
     if rel.startswith("ava_builtins/plugins/") and path.suffix == ".py":
         # plugin.py: scanned for wrap targets (see _check_file).
         if path.name == "plugin.py":
@@ -463,10 +513,12 @@ def _check_agents_md(repo_root: Path) -> list[tuple[Path, int, str]]:
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     plugin_namespace_files = _discover_plugin_namespace_modules(repo_root)
+    ava_surface_files = _discover_agent_surface_modules(repo_root)
     files = sorted(
         p
         for p in repo_root.rglob("*.py")
-        if ".venv" not in p.parts and _is_in_scope(p.relative_to(repo_root), plugin_namespace_files)
+        if ".venv" not in p.parts
+        and _is_in_scope(p.relative_to(repo_root), plugin_namespace_files, ava_surface_files)
     )
 
     violations: list[tuple[Path, int, str]] = []

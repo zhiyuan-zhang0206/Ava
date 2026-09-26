@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import ast
 import textwrap
+from pathlib import Path
+
+import pytest
 
 from scripts.lint_agent_docstrings import (
     _SKILL_REF_RE,
+    _discover_agent_surface_modules,
     _docstring_violations,
+    _is_in_scope,
     _module_doc_child_reference_violations,
+    _top_level_surface,
 )
 
 
@@ -172,3 +178,124 @@ def test_new_impl_keywords_flagged() -> None:
     assert "agents_meta" in joined
     assert "presentation detail" in joined
     assert "reverse reference" in joined
+
+
+# ── agent-surface whitelist scope (2026-09) ──────────────────────────────────
+#
+# Which `ava/` files get agent-docstring linting used to be decided by the `_`
+# prefix (any underscore path segment => out of scope, which accidentally also
+# excluded every `__init__.py`). It's now decided by the agent-surface
+# whitelist: a module declares `__all_for_ava__` itself, or it is the
+# `ava/<name>.py` / `ava/<name>/__init__.py` for a `<name>` listed in
+# `ava/__init__.py`'s `__all_for_ava__`. The underscore plays no part.
+
+
+def _write(path: Path, source: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(source))
+
+
+def test_discover_agent_surface_modules(tmp_path: Path) -> None:
+    ava_dir = tmp_path / "ava"
+
+    _write(ava_dir / "__init__.py", '__all_for_ava__ = ["files", "shell"]\n')
+    # Top-level namespace module (no marker of its own) -> IN.
+    _write(ava_dir / "files.py", '"""Files stub."""\n')
+    # Namespace package `__init__` (no marker) -> IN.
+    _write(ava_dir / "shell" / "__init__.py", '"""Shell namespace."""\n')
+    # Declares its own marker -> IN, regardless of not being a namespace.
+    _write(
+        ava_dir / "shell" / "sessions.py",
+        '''
+        __all_for_ava__ = ["new"]
+
+
+        def new():
+            """Start a session."""
+        ''',
+    )
+    # The key regression: a framework module renamed from `_boot.py` to a
+    # public name, with no marker and not listed as a namespace -> OUT.
+    _write(ava_dir / "boot.py", '"""Framework module with a public name."""\n')
+    # Private-prefixed, no marker -> OUT (underscore alone proves nothing).
+    _write(ava_dir / "_extend.py", '"""Private framework module."""\n')
+    # Annotated assignment form of the marker -> IN.
+    _write(ava_dir / "_x.py", "__all_for_ava__: list[str] = []\n")
+    # Property form of the marker -> IN.
+    _write(
+        ava_dir / "mcps_like.py",
+        """
+        class P:
+            @property
+            def __all_for_ava__(self):
+                ...
+        """,
+    )
+
+    surface = _discover_agent_surface_modules(tmp_path)
+
+    expected = {
+        (ava_dir / "__init__.py").resolve(),
+        (ava_dir / "files.py").resolve(),
+        (ava_dir / "shell" / "__init__.py").resolve(),
+        (ava_dir / "shell" / "sessions.py").resolve(),
+        (ava_dir / "_x.py").resolve(),
+        (ava_dir / "mcps_like.py").resolve(),
+    }
+    assert surface == expected
+
+
+def test_top_level_surface_raises_without_marker(tmp_path: Path) -> None:
+    _write(tmp_path / "ava" / "__init__.py", '"""No marker declared here."""\n')
+
+    with pytest.raises(ValueError):
+        _top_level_surface(tmp_path)
+
+
+def test_is_in_scope_consults_provided_surface_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    surface = {(tmp_path / "ava" / "files.py").resolve()}
+
+    assert _is_in_scope(Path("ava/files.py"), set(), surface) is True
+    assert _is_in_scope(Path("ava/boot.py"), set(), surface) is False
+
+
+def test_is_in_scope_plugin_paths_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    namespace_helper = (tmp_path / "ava_builtins/plugins/x/_walk.py").resolve()
+    plugin_namespace_files = {namespace_helper}
+
+    # plugin.py itself is always scanned (dev-facing wrap-target check).
+    assert (
+        _is_in_scope(Path("ava_builtins/plugins/x/plugin.py"), plugin_namespace_files, set())
+        is True
+    )
+    # A helper bound to a namespace -> in scope.
+    assert (
+        _is_in_scope(Path("ava_builtins/plugins/x/_walk.py"), plugin_namespace_files, set()) is True
+    )
+    # A helper NOT bound to any namespace -> out of scope.
+    assert (
+        _is_in_scope(Path("ava_builtins/plugins/x/other_helper.py"), plugin_namespace_files, set())
+        is False
+    )
+
+
+def test_real_repo_surface_excludes_underscore_and_includes_init_modules() -> None:
+    # Regression check against the actual repo tree: `ava/agents/__init__.py`
+    # and `ava/shell/__init__.py` were previously excluded by the `_` rule
+    # (their path has no underscore segment, but `__init__.py` was special-
+    # cased out); `ava/_boot.py` and `ava/_extend.py` are framework-private
+    # and declare no marker, so they stay out under the new rule too.
+    repo_root = Path(__file__).resolve().parents[1]
+
+    surface = _discover_agent_surface_modules(repo_root)
+
+    assert (repo_root / "ava/agents/__init__.py").resolve() in surface
+    assert (repo_root / "ava/shell/__init__.py").resolve() in surface
+    assert (repo_root / "ava/_boot.py").resolve() not in surface
+    assert (repo_root / "ava/_extend.py").resolve() not in surface
