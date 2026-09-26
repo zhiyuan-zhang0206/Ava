@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -390,7 +391,7 @@ if (mode === 'takeover') {
 """
 
 
-def _run_plugin(tmp_path: Path, *args: str) -> dict[str, object]:
+def _run_plugin(tmp_path: Path, *args: str) -> dict[str, Any]:
     harness = tmp_path / "harness.mjs"
     harness.write_text(_PLUGIN_HARNESS, encoding="utf-8")
     out = tmp_path / "out.json"
@@ -425,8 +426,7 @@ def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) ->
         "-m", "cli", "impersonate", "relay", "42", "--session", "3", "--provider", "dsh",
     ]  # fmt: skip
     assert (tmp_path / "token.txt").read_text() == "tok-3"
-    steered = result["steered"]
-    assert isinstance(steered, list)
+    steered: list[dict[str, Any]] = result["steered"]
     assert [m["content"][0]["text"] for m in steered] == ["Ava control active.", envelope]
     assert all(m["role"] == "user" for m in steered)
     assert all(
@@ -444,9 +444,8 @@ def test_dsh_plugin_takeover_runner_submits_and_consumes_the_launch_message(
     launch = tmp_path / "launch.txt"
     launch.write_text("You will take over Ava agent 42.", encoding="utf-8")
     result = _run_plugin(tmp_path, "unused", "takeover", str(launch))
-    created = result["created"]
-    followed = result["followed"]
-    assert isinstance(created, list) and isinstance(followed, list)
+    created: list[dict[str, Any]] = result["created"]
+    followed: list[dict[str, Any]] = result["followed"]
     assert [c["agentOptions"] for c in created] == [{"provider": "p", "model": "m"}]
     assert [m["content"][0]["text"] for m in followed] == ["You will take over Ava agent 42."]
     assert followed[0]["source"] == {"kind": "user"}

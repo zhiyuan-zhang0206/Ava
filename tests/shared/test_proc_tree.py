@@ -191,7 +191,11 @@ def test_process_metadata_records_the_script_of_a_node_ancestor(
     node = _FakeProcess(20, "node", ["node", "/opt/homebrew/bin/dsh", "web"], shell)
     caller = _FakeProcess(30, "python3.12", ["python", "-m", "cli"], node)
     monkeypatch.setattr(proc_tree.psutil, "Process", lambda: caller)
-    monkeypatch.setattr(proc_tree, "stable_create_time", lambda _process: 1.0)
+
+    def stable(_process: object) -> float:
+        return 1.0
+
+    monkeypatch.setattr(proc_tree, "stable_create_time", stable)
     metadata = proc_tree.process_metadata()
     assert metadata["pid"] == 30 and "script" not in metadata
     node_facts, shell_facts = metadata["ancestors"]
