@@ -165,8 +165,11 @@ def test_expected_owner_rejects_reused_pid(monkeypatch: pytest.MonkeyPatch) -> N
                     "id": "frontend",
                     "state": "running",
                     "pid": os.getpid(),
+                    # A different birth of this PID: Linux compares start ticks
+                    # (a missing value is unknown evidence and raises), other
+                    # platforms the native create time.
                     "create_time": 1.0,
-                    "starttime": None,
+                    "starttime": None if owner.starttime is None else owner.starttime + 1,
                 }
             ],
         },

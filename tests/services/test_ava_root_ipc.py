@@ -335,9 +335,13 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
 ) -> None:
     from types import SimpleNamespace
 
+    from shared.native_process import ownership
     from shared.root_control import client
 
+    # Both halves of the rule read the platform: the client's tick requirement
+    # and the identity comparison itself.
     monkeypatch.setattr(client, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform=platform))
 
     def alive(_self: OwnedProcess) -> bool:
         return True
