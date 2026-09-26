@@ -32,7 +32,7 @@ def drive(journal: Journal, driver: LocalTransition) -> None:
                     driver.select(operation)
                     journal.advance("starting")
                 case "starting":
-                    driver.start(operation)
+                    driver.start(journal)
                     journal.advance("observing")
                 case "observing":
                     driver.observe(operation)

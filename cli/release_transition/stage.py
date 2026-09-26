@@ -1,10 +1,12 @@
-"""The sole root boot unit's finite, operation-authorized start action."""
+"""The finite, operation-authorized start action: in the Linux root boot unit, or as
+a finite tool of the recorded macOS executor whose home helper births root."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 from cli.release_transition.boot import start_image
@@ -29,12 +31,7 @@ def start_operation(path: Path) -> int:
     home = Path(request.home)
     os.environ["AVA_HOME"] = request.home
     os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
-    # The updater job may request start; it cannot become the new root's
-    # lifetime owner. Existing PID publication also checks ControlPID/birth.
-    from shared.os_boot_unit import in_boot_unit
-
-    if not in_boot_unit(home):
-        raise RuntimeError("Linux release start must run inside the ordinary root boot unit")
+    _require_native_root_owner(operation, home)
     from shared.release_operation import authorized_start
 
     release = operation.reference
@@ -42,6 +39,37 @@ def start_operation(path: Path) -> int:
         result = start_image(home, Path(request.registry), release)
         _require_inputs(operation)
         return result
+
+
+def _require_native_root_owner(operation: Operation, home: Path) -> None:
+    """The updater job may request start; it cannot become the new root's lifetime owner."""
+    from cli.release_transition.native import helper_root
+
+    if not helper_root(operation.launch):
+        # Existing PID publication also checks ControlPID/birth.
+        from shared.os_boot_unit import in_boot_unit
+
+        if not in_boot_unit(home):
+            raise RuntimeError("Linux release start must run inside the ordinary root boot unit")
+        return
+    if sys.platform != "darwin":
+        raise RuntimeError("a macOS release start must run on macOS")
+    # macOS ordinary start never spawns root: the home helper's keeper does, as
+    # its own child. Only the recorded executor may run this finite action.
+    import psutil
+
+    from cli.release_transition.launchd_custody import NativeReceipt
+    from shared.native_process.ownership import OwnedProcess
+
+    if operation.native is None:
+        raise RuntimeError("macOS release start requires the recorded executor receipt")
+    executor = NativeReceipt.model_validate(operation.native).executor.owned()
+    try:
+        parent = OwnedProcess.capture(psutil.Process(os.getppid()))
+    except psutil.Error as exc:
+        raise RuntimeError("macOS release start cannot observe its parent") from exc
+    if not parent.same_birth(executor) or not executor.live():
+        raise RuntimeError("macOS release start must be a finite tool of the recorded executor")
 
 
 def main() -> int:
@@ -137,8 +165,6 @@ def observe_operation(path: Path) -> int:
     from cli.commands._repo import _services_for_roles_annotated
     from cli.commands._root_driver import _start_roster, _wait_for_service_tree, admit_live_start
     from shared.machine import machine_role
-    from shared.os_boot_unit import _manager_properties, _process_cgroup, unit_name
-    from shared.root_control.client import root_process
     from shared.service_selection import resolve_selection
 
     roles = machine_role()
@@ -147,18 +173,7 @@ def observe_operation(path: Path) -> int:
     roster = _start_roster(roles, disabled)
     if not admit_live_start(roster, runtime.code_root, roles, reconcile=True, runtime=runtime):
         raise RuntimeError("selected application root is absent")
-    root = root_process()
-    expected_group = f"/system.slice/{unit_name(Path(request.home))}"
-    native = _manager_properties(Path(request.home))
-    if (
-        root is None
-        or native["MainPID"] != str(root.pid)
-        or native["ControlPID"] != "0"
-        or native["ActiveState"] != "active"
-        or native["ControlGroup"] != expected_group
-        or _process_cgroup(root.pid) != expected_group
-    ):
-        raise RuntimeError("selected root is not independently owned by its boot service")
+    _require_root_owned(operation, Path(request.home))
     wait = _wait_for_service_tree(roster, timeout_s=60)
     if wait.unready or wait.non_critical_unready:
         raise RuntimeError("selected root has incomplete service readiness")
@@ -168,6 +183,34 @@ def observe_operation(path: Path) -> int:
 
         observe_postgres(operation)
     return 0
+
+
+def _require_root_owned(operation: Operation, home: Path) -> None:
+    """The live root belongs to the platform's persistent owner, not to this operation."""
+    from cli.release_transition.native import helper_root
+
+    if helper_root(operation.launch):
+        if sys.platform != "darwin":
+            raise RuntimeError("a macOS release observation must run on macOS")
+        # admit_live_start already bound root to the home helper keeper
+        # (ppid, keeper PID, run dir); the executor then checks the journaled
+        # birth, the helper's kernel identity and the pinned seed.
+        return
+    from shared.os_boot_unit import _manager_properties, _process_cgroup, unit_name
+    from shared.root_control.client import root_process
+
+    root = root_process()
+    expected_group = f"/system.slice/{unit_name(home)}"
+    native = _manager_properties(home)
+    if (
+        root is None
+        or native["MainPID"] != str(root.pid)
+        or native["ControlPID"] != "0"
+        or native["ActiveState"] != "active"
+        or native["ControlGroup"] != expected_group
+        or _process_cgroup(root.pid) != expected_group
+    ):
+        raise RuntimeError("selected root is not independently owned by its boot service")
 
 
 if __name__ == "__main__":

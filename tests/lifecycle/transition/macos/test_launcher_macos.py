@@ -312,11 +312,11 @@ def test_launch_inputs_must_print_exactly() -> None:
 
 
 def test_macos_admission_is_a_typed_scope_before_effects(harness: Harness) -> None:
+    """PITR refuses; a same-schema release reaches the common release preflight."""
     request = journal.read_operation(harness.path).request
     with pytest.raises(ValueError, match="PITR is not admitted on macOS"):
         macos.admit_request(PitrRequest.model_construct(id=uuid4()))
-    with pytest.raises(RuntimeError, match="not connected"):
-        macos.admit_request(request)
+    macos.admit_request(request)
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,8 @@
-"""Use the existing Linux root boot unit, separate from the finite updater."""
+"""Use the existing Linux root boot unit, separate from the finite updater.
+
+The stage subprocesses (preflight, observation) are platform-neutral; macOS
+starts root through the persistent home helper instead: root_macos.py.
+"""
 
 from __future__ import annotations
 
@@ -27,12 +31,20 @@ def _context(home: Path, registry: Path, image: VerifiedRelease) -> BootUnitCont
 
 
 def _environment(context: BootUnitContext) -> tuple[tuple[str, str], ...]:
-    # The service PATH declaration is read from the home's persisted settings.
-    # No caller credential, editable import path, or shell startup file travels.
+    return stage_environment(context.home, context.registry, context.home_dir)
+
+
+def stage_environment(home: Path, registry: Path, home_dir: Path) -> tuple[tuple[str, str], ...]:
+    """The complete environment of every stage action, on every platform.
+
+    The service PATH declaration is read from the home's persisted settings.
+    No caller credential, editable import path, or shell startup file travels.
+    Start and observation share it, so the root launch digest is reproducible.
+    """
     return (
-        ("HOME", str(context.home_dir)),
-        ("AVA_HOME", str(context.home)),
-        ("AVA_CLUSTER_REGISTRY", str(context.registry)),
+        ("HOME", str(home_dir)),
+        ("AVA_HOME", str(home)),
+        ("AVA_CLUSTER_REGISTRY", str(registry)),
         ("PATH", os.defpath),
     )
 

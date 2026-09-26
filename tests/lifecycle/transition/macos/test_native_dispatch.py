@@ -13,7 +13,7 @@ from pydantic import JsonValue
 from cli.release_transition import execute, journal, native, submit
 from cli.release_transition import launcher_linux as linux
 from cli.release_transition import launcher_macos as macos
-from cli.release_transition.request import PitrRequest
+from cli.release_transition.request import PitrRequest, Request
 from shared import os_boot_unit, paths
 from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import Harness
@@ -47,11 +47,10 @@ def test_host_adapter_has_no_fallback(monkeypatch: pytest.MonkeyPatch, harness: 
     with pytest.raises(RuntimeError, match="no fallback"):
         native.for_host(request)
     monkeypatch.setattr(native, "_host_platform", lambda: "darwin")
-    with pytest.raises(RuntimeError, match="not connected"):
-        native.for_host(request)
+    assert native.for_host(request) is macos
 
 
-def test_darwin_submission_refuses_pitr_and_release_before_any_reservation(
+def test_darwin_submission_refuses_pitr_before_any_reservation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path.resolve() / "home"
@@ -68,6 +67,37 @@ def test_darwin_submission_refuses_pitr_and_release_before_any_reservation(
     pitr = PitrRequest.model_construct(id=uuid4(), home=str(home))
     with pytest.raises(ValueError, match="PITR is not admitted on macOS"):
         submit.submit_request(pitr)
+    assert not (home / "updates").exists()
+
+
+def test_darwin_release_scope_is_the_common_preflight_before_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A macOS release passes admission and meets the same single-home scope gate."""
+    home = tmp_path.resolve() / "home"
+    home.mkdir()
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
+    monkeypatch.setattr(native, "_host_platform", lambda: "darwin")
+    gates: list[str] = []
+
+    class Scoped:
+        def __init__(self, request: object) -> None:
+            gates.append("admitted")
+
+        def preflight(self) -> None:
+            gates.append("preflight")
+            raise ValueError("this operation requires one local gateway data plane")
+
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("an out-of-scope release must refuse before reservation")
+
+    monkeypatch.setattr(submit, "LocalTransition", Scoped)
+    monkeypatch.setattr(submit, "create", unexpected)
+    request = Request.model_construct(id=uuid4(), home=str(home), kind="release")
+    with pytest.raises(ValueError, match="one local gateway data plane"):
+        submit.submit_request(request)
+    assert gates == ["admitted", "preflight"]
     assert not (home / "updates").exists()
 
 

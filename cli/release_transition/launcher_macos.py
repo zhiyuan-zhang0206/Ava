@@ -137,16 +137,18 @@ def _sha256(path: Path) -> str:
 
 
 def admit_request(request: Request | PitrRequest) -> None:
-    """Typed macOS scope, checked before any journal reservation or effect."""
+    """Typed macOS scope, checked before any journal reservation or effect.
+
+    A release starts root through the persistent home helper (root_macos.py).
+    Its single-home, same-schema, no-retained-terminal scope is the common
+    release preflight (`LocalTransition.preflight`, `verify_pair`); the helper's
+    finite and seed-report protocols are required when the launch is planned.
+    """
     if isinstance(request, PitrRequest):
         raise ValueError(  # noqa: TRY004 — typed scope refusal on the CLI refusal path
             "PITR is not admitted on macOS: its data-plane owners create process groups "
             "outside launchd job cleanup"
         )
-    raise RuntimeError(
-        "macOS release start through the persistent home helper is not connected; "
-        "the finite executor adapter refuses before quiescing"
-    )
 
 
 def _require_launch_text(values: list[str]) -> None:

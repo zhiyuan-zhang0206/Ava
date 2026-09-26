@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services.permissions_helper import client, finite_artifact, lifecycle
+from services.permissions_helper import client, finite_artifact, hardened_runtime, lifecycle
 from shared import paths
 from shared.native_process.ownership import OwnedProcess
 
@@ -21,6 +21,8 @@ _STABLE = (
     'identifier "com.ava.permissions-helper" and certificate leaf = '
     'H"82109deba414c340272640ab32671d1f464174da"'
 )
+_CS_VALID = 0x1
+_RUNTIME = 0x10000  # CS_RUNTIME: signed with the hardened runtime
 
 
 def _home(tmp_path: Path) -> Path:
@@ -144,6 +146,7 @@ def test_signature_must_satisfy_the_expected_requirement(
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="does not satisfy"):
         lifecycle.verified_signed_requirement(app)
     monkeypatch.setattr(lifecycle, "_probe", _probe(verify, 0))
+    monkeypatch.setattr(lifecycle, "_signed_code_flags", lambda _app: _RUNTIME)
     monkeypatch.setattr(lifecycle, "_read_dr", lambda _app: 'identifier "x" and cdhash H"1"')
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="requirement drift"):
         lifecycle.verified_signed_requirement(app)
@@ -153,6 +156,7 @@ def test_signature_must_satisfy_the_expected_requirement(
 
 def test_running_process_must_satisfy_its_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
     verify = ["codesign", "--verify", f"-R={_STABLE}", "4242"]
+    monkeypatch.setattr(hardened_runtime, "running_code_flags", lambda _pid: _CS_VALID | _RUNTIME)
     monkeypatch.setattr(lifecycle, "_probe", _probe(verify, 3))
     with pytest.raises(RuntimeError, match="does not satisfy its signed identity"):
         finite_artifact.require_running_identity(4242, _STABLE)
@@ -160,7 +164,65 @@ def test_running_process_must_satisfy_its_requirement(monkeypatch: pytest.Monkey
     finite_artifact.require_running_identity(4242, _STABLE)
 
 
-_PROTOCOLS = {"finite_executor_v1": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True}
+@pytest.mark.parametrize(
+    "flags",
+    [
+        0x2,  # ad hoc, not valid
+        _CS_VALID,  # valid without the hardened runtime: DYLD_* was honoured at start
+        _RUNTIME,  # hardened runtime whose kernel status is no longer valid
+    ],
+)
+def test_running_process_must_be_a_valid_hardened_runtime_image(
+    monkeypatch: pytest.MonkeyPatch, flags: int
+) -> None:
+    """Review P2-A: an injected image still satisfies `codesign -R`; its flags do not."""
+
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("the requirement must not be tested for an unhardened running image")
+
+    monkeypatch.setattr(hardened_runtime, "running_code_flags", lambda _pid: flags)
+    monkeypatch.setattr(lifecycle, "_probe", unexpected)
+    with pytest.raises(RuntimeError, match="lacks a valid hardened runtime"):
+        finite_artifact.require_running_identity(4242, _STABLE)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="csops is a macOS kernel call")
+def test_running_code_flags_are_the_kernel_status_of_that_process() -> None:
+    assert hardened_runtime.running_code_flags(os.getpid()) & _CS_VALID
+    with pytest.raises(RuntimeError, match="code-signing status"):
+        hardened_runtime.running_code_flags(2**31 - 7)
+
+
+def test_signed_file_must_carry_the_hardened_runtime_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = _app(_home(tmp_path)).parents[2]
+    monkeypatch.setattr(lifecycle, "_expected_dr", lambda: _STABLE)
+    monkeypatch.setattr(lifecycle, "_read_dr", lambda _app: _STABLE)
+    verify = ["codesign", "--verify", "--strict", f"-R={_STABLE}", str(app)]
+    display = ["codesign", "--display", "--verbose=2", str(app)]
+
+    def probe(flags: str) -> Callable[..., subprocess.CompletedProcess[bytes]]:
+        def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            assert cmd in (verify, display)
+            shown = f"Executable={app}\nCodeDirectory v=20500 size=9 flags={flags} hashes=1\n"
+            return subprocess.CompletedProcess(cmd, 0, b"", shown.encode())
+
+        return run
+
+    monkeypatch.setattr(lifecycle, "_probe", probe("0x0(none)"))
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="lacks the hardened runtime"):
+        lifecycle.verified_signed_requirement(app)
+    monkeypatch.setattr(lifecycle, "_probe", probe("0x10002(adhoc,runtime)"))
+    assert lifecycle.verified_signed_requirement(app) == _STABLE
+
+
+_PROTOCOLS = {
+    "finite_executor_v1": True,
+    "root_stop_intent_v1": True,
+    "helper_shutdown_v1": True,
+    "root_seed_report_v1": True,
+}
 
 
 @pytest.mark.parametrize(
@@ -174,6 +236,13 @@ _PROTOCOLS = {"finite_executor_v1": True, "root_stop_intent_v1": True, "helper_s
                 "root_stop_intent_v1": True,
                 "helper_shutdown_v1": True,
             },
+            os.getpid(),
+            "finite executor protocols",
+        ),
+        # A helper that cannot report its retained root seed refuses before any
+        # release work: the macOS start proves the pinned seed through it.
+        (
+            {"pong": True, "pid": os.getpid(), **_PROTOCOLS, "root_seed_report_v1": False},
             os.getpid(),
             "finite executor protocols",
         ),
@@ -260,11 +329,16 @@ def test_forged_ad_hoc_bundle_claiming_the_stable_requirement_is_refused(
     assert lifecycle._read_dr(app) == _STABLE
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="does not satisfy"):
         lifecycle.verified_signed_requirement(app)
-    # The same ad-hoc code does satisfy a requirement it can meet (control).
+    # The same ad-hoc code does satisfy a requirement it can meet (control),
+    # once it is signed with the hardened runtime admission requires.
     ad_hoc = f'identifier "{lifecycle.HELPER_BUNDLE_ID}"'
     honest = [*forged[:-3], "--requirements", f"=designated => {ad_hoc}", str(app)]
     subprocess.run(honest, check=True, capture_output=True, timeout=60)  # noqa: S603 — fixed tool, disposable bundle
     monkeypatch.setattr(lifecycle, "_expected_dr", lambda: ad_hoc)
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="lacks the hardened runtime"):
+        lifecycle.verified_signed_requirement(app)
+    hardened = [*honest[:4], *hardened_runtime.SIGNING_OPTIONS, *honest[4:]]
+    subprocess.run(hardened, check=True, capture_output=True, timeout=60)  # noqa: S603 — fixed tool, disposable bundle
     assert lifecycle.verified_signed_requirement(app) == ad_hoc
 
 
@@ -290,6 +364,7 @@ def test_home_helper_running_image_must_satisfy_the_stable_requirement(
     monkeypatch.setattr(OwnedProcess, "capture", staticmethod(lambda _process: owner))
     monkeypatch.setattr(OwnedProcess, "live", lambda _self: True)
     monkeypatch.setattr(lifecycle, "_expected_dr", lambda: _STABLE)
+    monkeypatch.setattr(hardened_runtime, "running_code_flags", lambda _pid: _CS_VALID | _RUNTIME)
     checked: list[list[str]] = []
 
     def probe(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
@@ -302,3 +377,5 @@ def test_home_helper_running_image_must_satisfy_the_stable_requirement(
     assert checked == [["codesign", "--verify", f"-R={_STABLE}", "4242"]]
     monkeypatch.setattr(lifecycle, "_probe", _probe(checked[0], 0))
     assert finite_artifact.home_helper_executable(home) == executable
+    # The release start also binds the helper's kernel-authenticated birth.
+    assert finite_artifact.home_helper(home) == (owner, executable)

@@ -97,6 +97,10 @@ class Operation(Record):
     retirement: Retirement | None = None
     attempt: int = Field(default=0, ge=0)
     retired_executors: tuple[dict[str, JsonValue], ...] = ()
+    # macOS only: the home helper and the root its keeper spawned for this start
+    # (cli/release_transition/launchd_custody.py::RootCustody). It survives
+    # executor attempts; a new direction or helper birth replaces it.
+    root: dict[str, JsonValue] | None = None
     error: str | None = Field(default=None, max_length=2048)
 
     @model_validator(mode="after")
@@ -130,6 +134,17 @@ class Operation(Record):
     def coherent_launch_kind(self) -> Self:
         if self.launch is not None:
             _kind(self.launch)
+        return self
+
+    @model_validator(mode="after")
+    def coherent_root(self) -> Self:
+        if self.root is None:
+            return self
+        from cli.release_transition.launchd_custody import RootCustody
+
+        RootCustody.model_validate(self.root)
+        if self.pitr is not None or (self.launch is not None and not _darwin(self.launch)):
+            raise ValueError("helper root custody belongs only to a macOS release")
         return self
 
     @property
@@ -496,6 +511,57 @@ class Journal:
                 raise ValueError("native executor identity changed")
             return self.operation
         return self._replace(native=record)
+
+    def _require_root_start(self) -> None:
+        current = self.operation
+        if (
+            current.pitr is not None
+            or current.phase != "starting"
+            or current.launch is None
+            or not current.launch_attempted
+            or not _darwin(current.launch)
+        ):
+            raise ValueError("helper root custody is journaled only while a macOS release starts")
+
+    def root_intent(self, record: dict[str, JsonValue]) -> Operation:
+        """Retain helper birth and keeper baseline before the macOS start effect.
+
+        A receipt of this direction is verified, never replaced. An earlier
+        intent under the same helper keeps its baseline, so a keeper restart
+        before the receipt stays visible; a new helper or direction starts over.
+        """
+        from cli.release_transition.launchd_custody import RootCustody
+
+        self._require_root_start()
+        current = self.operation
+        intent = RootCustody.model_validate(record)
+        if intent.root is not None or intent.direction != current.direction:
+            raise ValueError("root start intent must precede its receipt for this direction")
+        if current.root is not None:
+            prior = RootCustody.model_validate(current.root)
+            if prior.direction == intent.direction and prior.root is not None:
+                raise ValueError("a recorded root receipt is verified, never replaced")
+            if prior.direction == intent.direction and prior.helper == intent.helper:
+                return current
+        return self._replace(root=intent.model_dump(mode="json"))
+
+    def root_started(self, record: dict[str, JsonValue]) -> Operation:
+        """The start effect's root, under exactly the intent's helper and keeper baseline."""
+        from cli.release_transition.launchd_custody import RootCustody
+
+        self._require_root_start()
+        current = self.operation
+        receipt = RootCustody.model_validate(record)
+        if current.root is None or receipt.root is None:
+            raise ValueError("root receipt requires its journaled start intent")
+        prior = RootCustody.model_validate(current.root)
+        if prior.root is not None:
+            if prior != receipt:
+                raise ValueError("a recorded root receipt cannot change")
+            return current
+        if prior.model_copy(update={"root": receipt.root}) != receipt:
+            raise ValueError("root receipt differs from its intent's direction, helper or baseline")
+        return self._replace(root=receipt.model_dump(mode="json"))
 
     def request_retirement(self, terminal: dict[str, JsonValue]) -> Operation:
         """Retain closure and deletion intent before retiring a native unit."""

@@ -1135,6 +1135,9 @@ def test_fresh_build_signs_with_the_stable_certificate(
         "--force",
         "--sign",
         lifecycle._CERT_CN,
+        # Hardened runtime: dyld ignores DYLD_* for the helper (review P2-A).
+        "--options",
+        "runtime",
         "--identifier",
         lifecycle._BUNDLE_ID,
         "--requirements",

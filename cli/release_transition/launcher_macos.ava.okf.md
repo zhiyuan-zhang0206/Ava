@@ -1,7 +1,7 @@
 ---
 type: doc
 title: macOS release executor custody
-description: One finite launchd job per attempt runs the signed helper's finite mode; fail-closed readback, group-scoped closure proven for every terminal, exact-label retirement and boot/login recovery.
+description: One finite launchd job per attempt runs the hardened, stably signed helper's finite mode; fail-closed readback, group-scoped closure proven for every terminal, exact-label retirement and boot/login recovery.
 tags: [cluster-lifecycle, release, macos]
 ---
 
@@ -38,10 +38,16 @@ requirement>` describe one unchanged file (inode and ctime bracket both).
 `codesign --verify` without `-R` accepts an ad-hoc bundle that merely embeds
 the stable requirement text. A continuation must use the identical artifact.
 
+The helper is signed with the hardened runtime, so dyld ignores `DYLD_*` (for
+example from `launchctl setenv`). Admission requires it on the file and in the
+running image's kernel status (`csops`: valid and `CS_RUNTIME`) of the home
+helper and every finite helper readback: `codesign -R <pid>` alone passes for a
+process whose inserted library ran before `main`.
+
 The finite mode (`helper/main.swift`, entered before any desktop setup) first
-re-executes itself with an empty environment (launchd adds its session
-environment, possibly `DYLD_*`), requires being a launchd job process-group
-leader, registers its TERM/INT/HUP sources before ignoring them, publishes the
+re-executes itself with an empty environment (hygiene only: it runs after
+dyld), requires being a launchd job process-group leader, registers its
+TERM/INT/HUP sources before ignoring them, publishes the
 group receipt (helper PID = PGID, audit session) by exclusive rename, then
 spawns exactly one executor without SETSID/SETPGROUP with envp only from
 `--env`. After reaping the executor it closes its own group while it still
@@ -111,14 +117,13 @@ next attempt label once.
 
 ## Current scope
 
-darwin `for_host` admission refuses every request before reservation: the
-macOS root-start branch through the persistent home helper (`root_service` /
-`stage`) is not connected. Unit tests cover the parser, journal evidence,
-adapter paths and real process groups (`test_launchd_custody.py`). Opt-in
-native tests (`AVA_NATIVE_RELEASE_LAUNCHER=1`, stable-identity signing with
-`AVA_NATIVE_SIGNED_HELPER=1`) run disposable jobs for natural exit, lost
-bootstrap response, concurrent launch, executor and helper KILL, SIGTERM-
-ignoring members (helper-side closure, pinned escalation, refusal with and
-without a receipt), SIGUSR1/2 terminals and the escaped-group control. Logout
-and reboot recovery is unit-tested only. This is transport and custody
-evidence, not application A/B/A.
+darwin `for_host` admits a same-schema release `Request` (common release
+preflight scope); root start goes through the persistent home helper:
+[[cli/release_transition/root_macos.ava.okf.md]]. `PitrRequest` refuses before
+reservation. Unit tests cover the parser, journal evidence, adapter paths and
+real process groups. Opt-in native tests (`AVA_NATIVE_RELEASE_LAUNCHER=1`,
+stable identity with `AVA_NATIVE_SIGNED_HELPER=1`) run disposable jobs for
+natural exit, lost bootstrap response, concurrent launch, executor and helper
+KILL, SIGTERM-ignoring members, SIGUSR1/2 terminals, the escaped-group control
+and `DYLD_INSERT_LIBRARIES` injection (unhardened control refused, hardened
+helper unaffected). Logout and reboot are unit-tested only.

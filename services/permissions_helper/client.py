@@ -211,6 +211,8 @@ class PingResult(TypedDict):
     pid: NotRequired[int]
     root_stop_intent_v1: NotRequired[bool]
     helper_shutdown_v1: NotRequired[bool]
+    finite_executor_v1: NotRequired[bool]
+    root_seed_report_v1: NotRequired[bool]  # `root_status.seed` is reported
     preflight_screen: bool  # Screen Recording grant held
     ax_trusted: NotRequired[bool]  # Accessibility grant held (macOS only)
 
@@ -301,6 +303,16 @@ class RootSeedConfig(TypedDict):
     env: NotRequired[dict[str, str]]
 
 
+class RootSeedReport(TypedDict):
+    """The seed the keeper holds for its next spawn; its environment is withheld."""
+
+    argv: list[str]
+    cwd: str
+    run_dir: str
+    stdout: str
+    stderr: str
+
+
 class RootExitInfo(TypedDict):
     """How the root process last ended (a `last_exit` on `RootStatus`)."""
 
@@ -326,6 +338,7 @@ class RootStatus(TypedDict):
     restarts: int
     stop_requested: bool
     run_dir: NotRequired[str]
+    seed: NotRequired[RootSeedReport]  # present while seeded (`root_seed_report_v1`)
     pid: NotRequired[int]  # the keeper's live root child
     last_exit: NotRequired[RootExitInfo]
     next_restart_in_s: NotRequired[float]

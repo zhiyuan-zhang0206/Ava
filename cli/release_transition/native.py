@@ -67,6 +67,15 @@ def for_launch(record: Mapping[str, JsonValue]) -> ModuleType:
     raise ValueError(f"unknown native executor kind: {kind!r}")
 
 
+def helper_root(launch: Mapping[str, JsonValue] | None) -> bool:
+    """Whether ava-root belongs to the macOS home helper for this recorded launch.
+
+    Only a recorded darwin launch selects the helper; any other operation keeps
+    the Linux boot-unit contract, whose own native checks refuse off Linux.
+    """
+    return launch is not None and recorded_kind(launch) == DARWIN
+
+
 def _host_platform() -> str:
     return sys.platform
 

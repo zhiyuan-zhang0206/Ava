@@ -95,8 +95,8 @@ class Effects(LocalTransition):
             self.selector_writes += 1
         assert operation == self._effect("selecting")
 
-    def start(self, operation: Operation) -> None:
-        assert operation == self._effect("starting")
+    def start(self, journal: Journal) -> None:
+        assert journal.operation == self._effect("starting")
 
     def observe(self, operation: Operation) -> None:
         assert operation == self._effect("observing")

@@ -222,30 +222,53 @@ from another process census.
 Implemented (see [macOS executor custody](../../cli/release_transition/launcher_macos.ava.okf.md)):
 one finite launchd job per operation attempt runs `--finite-executor` of the
 same stably signed helper artifact the live home helper runs, admitted by
-`codesign -R` against the stable requirement and identified through the
-kernel's socket peer. The executor and its finite tools inherit the job's
-process group; the helper re-executes without launchd's session environment,
-publishes its group before spawning, keeps its direct child until reaped and
-closes its own group (TERM, then KILL) before exiting, because launchd's own
-cleanup is a single SIGTERM to the group. `native.py` is the one adapter
-dispatch; the release journal records helper birth, executor birth and
-terminal evidence separately and binds a receipt to its attempt. `launchctl
-print` readback is an explicit contract for the measured macOS 26 format:
-missing fields, unknown formats, pending spawns, failed queries and non-exact
-absence retain custody. Every terminal closure proves the group empty;
-survivors are killed only while the recorded executor pins the group, else
-closure refuses with their evidence. A reboot, or a new login session with the
-recorded owners gone and the group empty, is positive closure. Opt-in native
-tests on 26.6.2 cover natural exit, lost bootstrap response, concurrent launch,
-executor and helper KILL, SIGTERM-ignoring members, SIGUSR1/2 terminals,
-continuation, stable-identity signing and the escaped-group negative control.
+`codesign -R` against the stable requirement, the hardened runtime on the file
+and in the running image's kernel status, and identified through the kernel's
+socket peer. The hardened runtime makes dyld ignore `DYLD_*`; the helper's
+empty-environment re-exec is only environment hygiene. The executor and its
+finite tools inherit the job's process group; the helper publishes its group
+before spawning, keeps its direct child until reaped and closes its own group
+(TERM, then KILL) before exiting, because launchd's own cleanup is a single
+SIGTERM to the group. `native.py` is the one adapter dispatch; the release
+journal records helper birth, executor birth and terminal evidence separately
+and binds a receipt to its attempt. `launchctl print` readback is an explicit
+contract for the measured macOS 26 format: missing fields, unknown formats,
+pending spawns, failed queries and non-exact absence retain custody. Every
+terminal closure proves the group empty; survivors are killed only while the
+recorded executor pins the group, else closure refuses with their evidence. A
+reboot, or a new login session with the recorded owners gone and the group
+empty, is positive closure.
 
-Pending before macOS admission:
+Release start through the persistent home helper is connected (see
+[macOS release root start](../../cli/release_transition/root_macos.ava.okf.md)),
+so macOS admits a same-schema release for one local gateway home with no
+retained terminal writers. The executor runs the selected image's ordinary
+start as a finite tool; the keeper births root outside the job. The journal
+retains helper birth and keeper restart baseline before the effect and the
+root birth after it; observation requires that exact root, the keeper's held
+seed, `seed.json` and the live argv pinned to the image; recovery stops the
+candidate through the keeper and starts the previous image the same way.
 
-- Release start through the persistent home helper: the `root_service` /
-  `stage` branch (helper-seeded root birth, helper-parent readiness proof,
-  pinned seed as steady state). Until then macOS submission refuses before
-  reservation.
+Proven natively (opt-in, macOS 26.6.2, ad hoc and stable identity, both signed
+with the hardened runtime): finite job transport and custody (natural exit,
+lost bootstrap response, concurrent launch, executor and helper KILL,
+SIGTERM-ignoring members, SIGUSR1/2 terminals, continuation, escaped group);
+`DYLD_INSERT_LIBRARIES` injection (the unhardened control's constructor runs in
+custody and admission refuses it; the hardened helper ignores it, is admitted
+and keeps its TCC grants); and, with a disposable helper job and minimal
+retained images whose stage stands in for ordinary start, release A -> B -> A,
+candidate start failure, a keeper-respawned candidate, a stage killed
+mid-start and executor loss after the effect (each completing on the recorded
+direction), and a killed helper (held, nothing signalled). Unit-tested only:
+the data-plane birth bracket, logout and reboot recovery, and the stage's
+recorded-executor guard.
+
+Pending:
+
+- Release A/B/A with real application images through a real finite job and the
+  production-signed home helper, including logout/shutdown interruption and
+  reboot replay. A previous image older than the macOS stage branch cannot be
+  the recovery target.
 - A descendant that creates its own group or session is visible only while
   its parent lives and survives job cleanup. Automatic recovery after such an
   escape needs a stronger owner boundary (for example the job's resource
@@ -254,9 +277,9 @@ Pending before macOS admission:
 - A job-group member that outlives both recorded owners after an external
   helper kill cannot be proven to belong to the attempt; recovery stays an
   operator action named by the refusal.
-- Signed-helper release A/B/A on macOS with a real home helper, including
-  candidate failure, previous-image start and native logout/shutdown
-  interruption (logout and reboot recovery are unit-tested only).
+- A killed home helper orphans its root: custody checks and ordinary stop
+  refuse, nothing is signalled and the operation holds. The operator closes the
+  orphan before retrying; that retry is not exercised natively.
 
 ## Verification and recovery policy
 

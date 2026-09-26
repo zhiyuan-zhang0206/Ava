@@ -116,6 +116,21 @@ class NativeReceipt(Record):
     executor: Birth
 
 
+class RootCustody(Record):
+    """The persistent home helper and the ava-root it spawned for one start direction.
+
+    Intent (``root`` unset) is journaled before the start effect. ``restarts`` is
+    the keeper's unexpected-exit count at intent: a larger count, a different
+    helper birth or a different root birth later means the observed root is not
+    the one the start effect produced.
+    """
+
+    direction: Literal["candidate", "previous"]
+    helper: Birth
+    restarts: int = Field(ge=0)
+    root: Birth | None = None
+
+
 class GroupReceipt(Record):
     """Published by the finite helper before its only spawn; absent means nothing spawned."""
 

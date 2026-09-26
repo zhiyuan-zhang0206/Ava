@@ -3,10 +3,11 @@
 A finite launchd job per release attempt runs ``--finite-executor`` of the same
 stably signed helper that owns this home's ava-root. The executable comes from
 the live helper process the kernel reports as the listener on this home's
-socket, whose running image satisfies the stable requirement. The artifact must
-be this home's installed bundle in owner-controlled directories, and the file
-that is hashed is the file whose signature satisfies the stable requirement
-(``codesign -R``). A path, a build-state file or an unsigned or ad-hoc copy is
+socket, whose running image is a valid hardened-runtime image satisfying the
+stable requirement. The artifact must be this home's installed bundle in
+owner-controlled directories, and the file that is hashed is the file whose
+signature satisfies the stable requirement (``codesign -R``) with the hardened
+runtime. A path, a build-state file or an unsigned or ad-hoc copy is
 never accepted in its place.
 """
 
@@ -23,7 +24,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from shared.native_process.ownership import OwnedProcess
 from shared.verified_file import regular_bytes
 
-FINITE_PROTOCOLS = ("finite_executor_v1", "root_stop_intent_v1", "helper_shutdown_v1")
+# A macOS release needs the finite mode plus the keeper's durable stop, shutdown
+# and seed report: admission refuses an older helper before any work stops.
+FINITE_PROTOCOLS = (
+    "finite_executor_v1",
+    "root_stop_intent_v1",
+    "helper_shutdown_v1",
+    "root_seed_report_v1",
+)
 _APP = "AvaPermissionsHelper.app"
 _EXECUTABLE = Path("Contents") / "MacOS" / "AvaPermissionsHelper"
 
@@ -52,7 +60,12 @@ def home_app(home: Path) -> Path:
 
 
 def require_running_identity(pid: int, requirement: str) -> None:
-    """The running image of ``pid`` satisfies ``requirement`` (kernel code-signing state)."""
+    """The running image of ``pid`` is a valid hardened-runtime image satisfying ``requirement``.
+
+    Both come from the kernel's code-signing state of that process: without the
+    hardened runtime, a library inserted through ``DYLD_*`` runs before ``main``
+    while the image still satisfies the requirement.
+    """
     from services.permissions_helper import lifecycle
 
     try:
@@ -62,11 +75,16 @@ def require_running_identity(pid: int, requirement: str) -> None:
 
 
 def home_helper_executable(home: Path) -> Path:
-    """The executable of this home's live helper, which also births ava-root.
+    """The executable of this home's live helper, which also births ava-root."""
+    return home_helper(home)[1]
+
+
+def home_helper(home: Path) -> tuple[OwnedProcess, Path]:
+    """This home's live helper birth and executable, authenticated by the kernel.
 
     The helper is identified by the kernel's record of the socket listener, not
-    by the PID it reports about itself, and its running image must satisfy the
-    stable requirement.
+    by the PID it reports about itself, and its running image must be a valid
+    hardened-runtime image satisfying the stable requirement.
     """
     from services.permissions_helper import client, lifecycle
     from shared import paths
@@ -92,7 +110,7 @@ def home_helper_executable(home: Path) -> Path:
     require_running_identity(peer, lifecycle.expected_requirement())
     if not owner.live():
         raise RuntimeError("home helper changed during signature verification")
-    return executable
+    return owner, executable
 
 
 def _require_owned_directories(app: Path) -> None:

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 import shared.paths
+from services.permissions_helper import hardened_runtime
 from services.permissions_helper.launchd_job import (
     HELPER_BUNDLE_ID,
     clear_helper_stop_intent,
@@ -297,6 +298,8 @@ def _source_content_hash() -> str:
     for path in sorted(p for p in _LOCALES.rglob("*") if p.is_file()):
         digest.update(path.relative_to(_LOCALES).as_posix().encode() + path.read_bytes())
     digest.update(_expected_dr().encode())
+    # A signing-policy change is a new artifact, never an in-place re-sign.
+    digest.update(" ".join(hardened_runtime.SIGNING_OPTIONS).encode())
     return digest.hexdigest()
 
 
@@ -346,14 +349,26 @@ def verified_signed_requirement(app: Path) -> str:
         raise PermissionsHelperBuildError(
             f"signed helper does not satisfy the stable identity requirement: {app}"
         )
+    if not _signed_code_flags(app) & hardened_runtime.CS_RUNTIME:
+        raise PermissionsHelperBuildError(f"signed helper lacks the hardened runtime: {app}")
     return _verify_dr(app)
 
 
-def verified_running_requirement(pid: int, requirement: str) -> None:
-    """The running process's kernel code-signing state satisfies `requirement`.
+def _signed_code_flags(app: Path) -> int:
+    proc = _probe(["codesign", "--display", "--verbose=2", str(app)])
+    flags = hardened_runtime.code_directory_flags(proc.stderr.decode(errors="replace"))
+    if proc.returncode != 0 or flags is None:
+        raise PermissionsHelperBuildError(f"cannot read the helper's code-signing flags: {app}")
+    return flags
 
-    This checks the image that executes, not whatever file its path names now.
-    """
+
+def verified_running_requirement(pid: int, requirement: str) -> None:
+    """The running image (not whatever file its path names now) is hardened and satisfies it."""
+    if not hardened_runtime.running_hardened(pid):
+        raise PermissionsHelperBuildError(
+            f"running helper process {pid} lacks a valid hardened runtime; "
+            "code injected at its start cannot be excluded"
+        )
     if _probe(["codesign", "--verify", f"-R={requirement}", str(pid)]).returncode != 0:
         raise PermissionsHelperBuildError(
             f"running helper process {pid} does not satisfy its signed identity"
@@ -619,6 +634,7 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
                 "--force",
                 "--sign",
                 _CERT_CN,
+                *hardened_runtime.SIGNING_OPTIONS,
                 "--identifier",
                 _BUNDLE_ID,
                 "--requirements",

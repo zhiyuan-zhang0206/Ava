@@ -378,6 +378,8 @@ def _operation_fixture(image: VerifiedRelease, phase: str) -> SimpleNamespace:
         request=request,
         direction="candidate",
         pitr=None,
+        # The recorded executor kind selects the Linux boot-unit root owner.
+        launch={"kind": "linux-systemd-v1"},
         reference=reference,
         require_configuration=require_captured_configuration,
     )

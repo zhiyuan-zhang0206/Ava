@@ -41,6 +41,7 @@ from services.permissions_helper import finite_artifact, lifecycle
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
 from shared.runtime_release import file_sha256
+from tests.lifecycle.transition.macos import native_fixture
 
 pytestmark = [
     pytest.mark.skipif(
@@ -88,43 +89,13 @@ while not (directory / 'fixture-finish').exists():
     time.sleep(0.02)
 """
 _PLATFORM = "macOS-fixture"
-_BUNDLE_REQUIREMENT = f'identifier "{lifecycle.HELPER_BUNDLE_ID}"'
-
-
-def _run(argv: list[str], *, timeout: float = 60) -> str:
-    result = subprocess.run(  # noqa: S603 — fixed native tools and disposable fixture paths
-        argv, capture_output=True, text=True, timeout=timeout, check=False
-    )
-    if result.returncode:
-        raise RuntimeError(f"native fixture command failed: {argv!r}: {result.stderr}")
-    return result.stdout
+_BUNDLE_REQUIREMENT = native_fixture.BUNDLE_REQUIREMENT
+_run = native_fixture.run
 
 
 @pytest.fixture(scope="module")
 def helper_app(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    root = tmp_path_factory.mktemp("helper").resolve()
-    if os.environ.get("AVA_NATIVE_SIGNED_HELPER") == "1":
-        app, _rebuilt = lifecycle.build_and_sign(destination=root)
-        return app
-    app = root / "AvaPermissionsHelper.app"
-    executable = app / "Contents/MacOS/AvaPermissionsHelper"
-    executable.parent.mkdir(parents=True)
-    shutil.copyfile(lifecycle._INFO_PLIST, app / "Contents/Info.plist")
-    _run(["swiftc", "-O", str(lifecycle._SOURCE), "-o", str(executable)], timeout=300)
-    _run(
-        [
-            "codesign",
-            "--force",
-            "--sign",
-            "-",
-            "--identifier",
-            lifecycle.HELPER_BUNDLE_ID,
-            "--requirements",
-            f"=designated => {_BUNDLE_REQUIREMENT}",
-            str(app),
-        ]
-    )
-    return app
+    return native_fixture.build_helper_app(tmp_path_factory.mktemp("helper").resolve())
 
 
 def _image(home: Path) -> ReleaseRef:

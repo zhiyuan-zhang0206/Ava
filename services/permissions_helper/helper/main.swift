@@ -1200,7 +1200,18 @@ final class RootKeeper {
             "restarts": restarts,
             "stop_requested": stopRequested,
         ]
-        if let seed { out["run_dir"] = seed.runDir }
+        if let seed {
+            out["run_dir"] = seed.runDir
+            // The launch face this keeper would spawn next (crash restart). The
+            // environment is withheld: it carries the root's private secrets.
+            out["seed"] = [
+                "argv": seed.argv,
+                "cwd": seed.cwd,
+                "run_dir": seed.runDir,
+                "stdout": seed.stdoutPath,
+                "stderr": seed.stderrPath,
+            ]
+        }
         if let seedError {
             out["seed_error"] = seedError
         }
@@ -1244,7 +1255,8 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "finite_executor_v1": true, "preflight_screen": CGPreflightScreenCaptureAccess(),
+                      "finite_executor_v1": true, "root_seed_report_v1": true,
+                      "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
         case "file_read": result = try fileRead(req)
@@ -1690,10 +1702,15 @@ func runPanelMode() -> Never {
 // desktop-helper setup: no permission registration, socket, session table, root
 // keeper or restart.
 //
-// launchd starts every job with its session environment, which can carry DYLD_*
-// injection into this custody process. The mode first re-executes this same
-// image with an empty environment (exec keeps the PID, the job process group
-// and pending signals); the executor environment is built only from `--env`.
+// launchd starts every job with its session environment. The mode first
+// re-executes this same image with an empty environment (exec keeps the PID, the
+// job process group and pending signals); the executor environment is built
+// only from `--env`. The re-exec is environment hygiene, not an injection
+// defence: dyld maps DYLD_INSERT_LIBRARIES and runs their constructors before
+// `main`, and such code could hide the environment from this check. Only the
+// hardened runtime signature (`codesign --options runtime`, no dyld or library
+// validation exception) makes dyld ignore DYLD_* for this binary; admission
+// requires it from the running image's kernel code-signing status.
 //
 // It spawns exactly one executor in launchd's job process group (no SETSID or
 // SETPGROUP). Before that spawn it publishes the group receipt (helper PID, PGID
@@ -1785,7 +1802,10 @@ func finiteRefuse(_ code: FiniteExit, _ message: String) -> Never {
     exit(code.rawValue)
 }
 
-/// Re-execute this image once with an empty environment before any other work.
+/// Re-execute this image once with an empty environment before any other work,
+/// so the executor and later diagnostics never inherit launchd's session
+/// variables. It runs after dyld, so it cannot undo library injection; the
+/// hardened runtime prevents that (see the mode comment above).
 /// The check reads the kernel's exec-time envp (the array after argv's NULL),
 /// not `environ`: CoreFoundation adds __CF_USER_TEXT_ENCODING to `environ` at
 /// startup, so the current environment is never empty and would loop.
