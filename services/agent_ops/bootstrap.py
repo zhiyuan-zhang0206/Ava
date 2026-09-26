@@ -1,8 +1,9 @@
-"""Read-only evidence helpers retained by the retired updater coordinator.
+"""Read-only prepared-observation helpers retained from the retired updater.
 
-The ops daemon has no bootstrap serving entry or restricted effect dispatcher.
-These data/readback helpers remain until their old coordinator consumers are
-removed; they do not provide a runnable daemon or wire mutation ingress.
+The ops daemon has no bootstrap serving entry or restricted effect dispatcher,
+and no production code imports this module; its remaining consumer is the
+runtime-prepare CI proof (`scripts/prove_ops_bootstrap.py`). It provides no
+runnable daemon or wire mutation ingress.
 """
 
 from __future__ import annotations
@@ -18,12 +19,10 @@ from pathlib import Path
 
 import psutil
 import psycopg
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import Field, SecretStr, field_validator
 
-from shared.hop_ledger import build_ledger_payload
 from shared.managed_writer_barrier import RolloutIdentity, lock_rollout
 from shared.managed_writer_observation import (
-    ChallengeRequest,
     ExpectedUnitWriters,
     ObservationChallenge,
     UnitObserver,
@@ -181,23 +180,3 @@ async def observe_response(
         return result
     except (psycopg.Error, RuntimeError, ValueError):
         return (409, b'{"error":"bootstrap operation is unavailable or stale"}', "application/json")
-
-
-async def ledger_response(context: PreparedObservation, body: bytes) -> tuple[int, bytes, str]:
-    """Challenge-gated read of the hop ledger; a damaged slot stays a 200 read."""
-    try:
-        request = ChallengeRequest.model_validate_json(body)
-    except ValidationError:
-        return 400, b'{"error":"invalid challenge request"}', "application/json"
-    if (
-        request.challenge != context.challenge.challenge
-        or datetime.now(UTC) >= context.challenge.valid_until
-    ):
-        return 409, b'{"error":"unknown or expired challenge"}', "application/json"
-    payload = await asyncio.to_thread(
-        build_ledger_payload, Path(context.expected.home), context.challenge.challenge
-    )
-    # The read may block on the OS; expiry applies after collection too.
-    if datetime.now(UTC) >= context.challenge.valid_until:
-        return 409, b'{"error":"challenge expired during ledger read"}', "application/json"
-    return 200, json.dumps(payload).encode(), "application/json"

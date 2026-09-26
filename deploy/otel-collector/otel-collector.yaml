@@ -156,15 +156,6 @@ $REMOTE_OTLP_RECEIVER
     poll_interval: 30s
     polls_to_archive: 50
     max_concurrent_files: 200
-  filelog/orchestration:
-    include:
-      - $AVA_HOME/logs/updater-*.log
-      - $AVA_HOME/logs/rollout-*.log
-    start_at: end
-    include_file_name: true
-    include_file_path: false
-    storage: file_storage/logoffsets
-    poll_interval: 30s
 $DATA_PLANE_RECEIVERS
 processors:
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
@@ -190,9 +181,8 @@ processors:
       log_record:
         - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
   # Session-log labeling (filelog receivers; replaces promtail's per-file
-  # service label): service.name <- the file's session name (strip .out.log /
-  # the -<epoch> suffix), guarded so event logs (no log.file.name) pass
-  # through untouched.
+  # service label): service.name <- the file's session name (strip .out.log),
+  # guarded so event logs (no log.file.name) pass through untouched.
   transform/filelog_service:
     log_statements:
       - context: log
@@ -201,7 +191,6 @@ processors:
         statements:
           - set(attributes["tmp_svc"], attributes["log.file.name"])
           - replace_pattern(attributes["tmp_svc"], "\\.out\\.log$$", "")
-          - replace_pattern(attributes["tmp_svc"], "^(updater|rollout)-[0-9]+$$", "$$1")
           - set(resource.attributes["service.name"], attributes["tmp_svc"])
           - delete_key(attributes, "tmp_svc")
   batch:
@@ -328,7 +317,7 @@ service:
       processors: [memory_limiter, filter/cluster_allow, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
-      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/services, filelog/orchestration]
+      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/services]
       processors: [memory_limiter, filter/cluster_allow, transform/promote_event_labels, transform/filelog_service, batch]
       exporters: [otlphttp/loki]
     metrics:

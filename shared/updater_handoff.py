@@ -296,8 +296,7 @@ def write_bootstrap_recovery(generation: str, journal: dict[str, object]) -> Non
             or current.generation != generation
             or current.owner_pid != process.pid
             or current.owner_create_time is None
-            # The owner re-reads its own start time; the tolerance stays for
-            # handoffs recorded by older code (whole-second wall-clock moves).
+            # The owner re-reads its own stable native birth; identity is exact.
             or not create_time_matches(stable_create_time(process), current.owner_create_time)
         ):
             raise BootstrapRecoveryInvalidError("bootstrap writer lost exact handoff ownership")
@@ -352,8 +351,7 @@ def write_normal_release_recovery(generation: str, journal: dict[str, object]) -
             or current.generation != generation
             or current.owner_pid != process.pid
             or current.owner_create_time is None
-            # The owner re-reads its own start time; the tolerance stays for
-            # handoffs recorded by older code (whole-second wall-clock moves).
+            # The owner re-reads its own stable native birth; identity is exact.
             or not create_time_matches(stable_create_time(process), current.owner_create_time)
         ):
             raise BootstrapRecoveryInvalidError("normal writer lost exact handoff ownership")

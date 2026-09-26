@@ -211,23 +211,6 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         None,
         "exec child boot: _apply_per_agent_sdk_disable reads it after the overlay",
     ),
-    # The caller-side stop-incomplete recovery (task #3942): the updater leg
-    # reads the pair at its post-stop failure exit - the moment the host is
-    # mid-stop and the data plane may be down - so both must resolve without a
-    # full config build. Same kill-switch contract as the rows above: pending
-    # override > env/.env > the compiled default.
-    LiteField(
-        "stop_incomplete_recovery",
-        "literal",
-        None,
-        "cli/commands/_update_stop_recovery.py _recovery_enabled() - the caller arm's switch",
-    ),
-    LiteField(
-        "stop_incomplete_recovery_timeout_seconds",
-        "literal",
-        None,
-        "cli/commands/_update_stop_recovery.py _attempt_timeout_s() - the attempt's deadline",
-    ),
 )
 
 # The named validity rules `_lite.py` implements for the `check` column.

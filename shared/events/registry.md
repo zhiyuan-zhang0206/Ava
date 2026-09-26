@@ -23,7 +23,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
-| audit (category=audit) | `events` | 29 | event stream |
+| audit (category=audit) | `events` | 25 | event stream |
 | telemetry (category=telemetry) | `events` | 220 | event stream |
 | log (category=log) | `events` | 13 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
@@ -55,7 +55,7 @@ spans go through the trace channel (30d).
 
 ---
 
-## 2. Audit events (29 primary category=audit; 29 status_change with extra_categories)
+## 2. Audit events (25 primary category=audit; 25 status_change with extra_categories)
 
 **Meaning convention**: category=audit rows are append-only operation audits, one row
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
@@ -91,10 +91,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_start` | computer-use task session opened (first action with a task_id) | business | task_id, first_tool, first_action_at | events |
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
-| `managed_writer_recovery_claimed` | recovery claimed the abandoned rollout lease holding a durable pending publication | business | — | events |
-| `managed_writer_recovery_completed` | recovery replaced the abandoned pending publication under a new lease and closure | business | — | events |
-| `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
-| `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
 ## 3. Telemetry events (category=telemetry, 220)
 

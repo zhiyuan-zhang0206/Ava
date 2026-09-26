@@ -16,28 +16,6 @@ from pydantic import Field
 class UpdateSpawnFields:
     """The gated-spawn adjudication fields, in `gateway` domain order."""
 
-    update_spawn_ambiguity_wait_seconds: float = Field(
-        default=30.0,
-        gt=0,
-        allow_inf_nan=False,
-        alias="AVA_UPDATE_SPAWN_AMBIGUITY_WAIT_SECONDS",
-        description=(
-            "Hard ceiling (seconds) on the bounded wait while a gated session spawn's "
-            "outcome is still undecided (the session gate is held but no birth "
-            "receipt has appeared yet). The caller shrinks it further to half the "
-            "remaining challenge budget; a wait that expires without proof is "
-            "adjudicated 'ambiguous' and the release refused, never assumed. 30 "
-            "mirrors the reparent helper's own launch ceiling "
-            "(_SPAWN_HELPER_TIMEOUT_S = 30.0)."
-        ),
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     update_spawn_gate_poll_seconds: float = Field(
         default=0.05,
         gt=0,

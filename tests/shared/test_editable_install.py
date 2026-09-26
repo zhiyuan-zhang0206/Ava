@@ -827,16 +827,15 @@ def test_editable_pth_write_window_opens_hardened_dist_info_directory(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX directory modes are not Windows ACLs")
-def test_editable_site_packages_dirs_finds_protected_directory_without_ava_records(
-    tmp_path: Path,
-) -> None:
-    """A partial sync cannot hide its protected directory by deleting records."""
+def test_protected_paths_survive_a_sync_that_deleted_the_records(tmp_path: Path) -> None:
+    """A partial sync cannot hide its protected directories by deleting records."""
     source_root = tmp_path / "prod" / "source"
     site_packages = source_root / ".venv" / "lib" / "python3.12" / "site-packages"
-    site_packages.mkdir(parents=True)
-    site_packages.chmod(0o555)
-
-    assert editable_install.editable_site_packages_dirs(source_root) == (site_packages,)
+    bin_dir = source_root / ".venv" / "bin"
+    for path in (site_packages, bin_dir):
+        path.mkdir(parents=True)
+        path.chmod(0o555)
+    assert editable_install.protected_editable_paths(source_root) == (site_packages, bin_dir)
 
 
 def test_write_window_skips_path_that_disappears_before_entry(tmp_path: Path) -> None:

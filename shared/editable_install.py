@@ -172,9 +172,11 @@ def editable_dist_info_dirs(source_root: Path) -> tuple[Path, ...]:
 
 
 def protected_editable_paths(source_root: Path) -> tuple[Path, ...]:
-    """Existing directories shared by converge protection and every write window.
+    """Existing directories every write window opens.
 
-    Discover bin even if a half-uninstall removed the launcher or records.
+    Earlier converge protection passes left these read-only (``0o555``) on
+    existing hosts. Discover bin even if a half-uninstall removed the launcher
+    or records.
     Windows keeps its legacy dist-info write adjustment, but skips POSIX
     site-packages/bin protection; converge itself is a no-op there.
     """

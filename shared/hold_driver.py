@@ -70,10 +70,9 @@ class ProcessRef:
         means the question could not be answered and must not be treated as
         death.
         """
-        # Method-local (shared/proc.py precedent): the in-process updater's
-        # pre-checkout import closure must not reach shared.session_record /
-        # shared.native_process.ownership, so the post-checkout image loads the new files
-        # (the PR #932 class); tests/cli/test_update_import_timing.py pins it.
+        # Function-local so each call reads the owner modules' current bindings
+        # (conventions/python-conventions.md, "Reach a stubbable name through its
+        # owning module"); the probe tests stub `pid_starttime_ticks` there.
         from shared.native_process import pid_starttime_ticks
         from shared.native_process.ownership import create_time_matches, stable_create_time
 
@@ -178,8 +177,7 @@ def _argv_head(proc: psutil.Process) -> str:
 
 def _capture(proc: psutil.Process) -> ProcessRef | None:
     """Best-effort capture of one live process; None when unreadable."""
-    # Deferred like ProcessRef.probe: keep the updater's pre-checkout closure
-    # off shared.session_record / shared.native_process.ownership.
+    # Function-local like ProcessRef.probe.
     from shared.native_process import pid_starttime_ticks
     from shared.native_process.ownership import stable_create_time
 

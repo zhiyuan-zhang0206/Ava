@@ -187,8 +187,6 @@
     "cli/commands/_pitr_activation_config.py::apply_wal_config": 17,
     "cli/commands/_release_inventory.py::_launchd": 17,
     "cli/commands/_release_inventory.py::collect_inventory": 15,
-    "cli/commands/_release_services.py::_command": 32,
-    "cli/commands/_release_services.py::observe_normal_service": 26,
     "cli/commands/_root_driver.py::_wait_for_root_services_ready": 25,
     "cli/commands/_temporary_stop.py::_stop_terminals": 20,
     "cli/commands/_temporary_stop.py::stop": 22,

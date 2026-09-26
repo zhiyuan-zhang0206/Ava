@@ -106,7 +106,6 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/release_transition/identity.py": "Refuse a nonlocal/fleet topology before effects in the first one-host release adapter; never dispatch by role.",
     "cli/commands/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
     "ops/agent_pause.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
-    "ops/cluster_pause.py": "Does this unit serve an agent host whose live daemon identity must answer before a pre-stop hold release restores local posture (what do I serve)",
     "cli/commands/_maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
     "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
     "shared/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
@@ -118,7 +117,6 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "ops/ops_inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
     "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
     "cli/commands/_release_inventory.py": "verified installed image reads the real annotated service roster for the unit receipt (read-only, WHEEL_RUNTIME-guarded; no serve decision)",
-    "cli/commands/_release_services.py": "verified candidate updater rechecks the local annotated roster before any service stop or start (read-only, WHEEL_RUNTIME-guarded; no routing decision)",
 }
 
 

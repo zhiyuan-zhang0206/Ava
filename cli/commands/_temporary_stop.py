@@ -184,10 +184,10 @@ def _stop_extras(deadline: float) -> None:
 
 # The compensating `ava start` gets its own budget: the failed stop already spent
 # the shared deadline, and this restore is what the operator is waiting on. 600s
-# matches `UV_SYNC_TIMEOUT_S`, the longest single step a start can legitimately
-# run on its own (a source-integrity `uv sync`), so a compensation cut off at
-# this bound is wedged, not slow. Deliberately a local constant rather than a
-# `PAUSE_TIMEOUT_SECONDS` reuse: the two bound different jobs.
+# covers the longest single step a start can legitimately run on its own (a
+# source-integrity `uv sync`), so a compensation cut off at this bound is wedged,
+# not slow. Deliberately a local constant rather than a `PAUSE_TIMEOUT_SECONDS`
+# reuse: the two bound different jobs.
 _COMPENSATION_TIMEOUT_S = 600.0
 
 

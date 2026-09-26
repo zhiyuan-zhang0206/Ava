@@ -58,26 +58,6 @@ _REAP_TIMEOUT_S = 5.0
 # drain the new hang — the whole defect one layer down.
 _DRAIN_TIMEOUT_S = 5.0
 
-# The detached orchestration sessions — `ops/cluster_session.py`'s service names
-# through `shared.cluster.session_name` — are the sanctioned hosts of an
-# in-process host transition (the stop leg does not target them), so
-# `hosting_supervised_session` exempts them. Spelled as the composed literals to
-# keep this leaf module below `shared.cluster` in the import graph. The dry-run
-# exemption lets its detached child reach the non-mutating `--local --dry-run`
-# leg; it remains outside the deploy in-flight scan in `ops.cluster_session`.
-# `ava-hold-recover` (task #3142) is the bounded completion of a stranded update
-# hold: it runs the same stop/start/resume an operator runs by hand, hosted by
-# its own detached session for exactly the same reason the updater is.
-_ORCHESTRATION_SESSIONS = frozenset(
-    {
-        "ava-rollout",
-        "ava-rollout-dryrun",
-        "ava-updater",
-        "ava-cluster-restart",
-        "ava-hold-recover",
-    }
-)
-
 # A recorded pid counts as the recorded session only while the live process's
 # start time matches the record — the supervisors' own pid-recycling rule
 # (`posixproc` / `winproc` / the pty backend all use this same 2 s tolerance).
@@ -90,27 +70,22 @@ def hosting_supervised_session() -> str | None:
     of its ancestors — or None when the lineage is clear.
 
     The question a host-transition verb must ask before running in-process: the
-    stop leg of an update/restart kills every service session's whole tree, and
-    agents + their shells are quiesced/reaped with it, so an orchestration
-    launched from inside one of those trees is killed by its own stop mid-flight
-    (2026-08-12: an agent ran `ava cluster update --local` in its pty-hosted
-    background shell; stopping ava-pty-supervisor force-killed the supervisor's
-    whole tree — rollout included — stranding the cluster paused with every
-    service down). Windows preserves nested live-session subtrees during a kill,
-    so its 2026-08-24 updater restart is safe inside `ava-ops`; the guard asks the
-    kill path's predicate rather than approximating that boundary. The detached
-    orchestration sessions are exempt: they are exactly the hosts the detached
-    form sanctions.
+    stop leg of a stop/restart kills every service session's whole tree, and
+    agents + their shells are quiesced/reaped with it, so a transition launched
+    from inside one of those trees is killed by its own stop mid-flight
+    (2026-08-12: a host transition run in an agent's pty-hosted background shell
+    died when stopping ava-pty-supervisor force-killed the supervisor's whole
+    tree, stranding the cluster paused with every service down). Windows
+    preserves nested live-session subtrees during a kill, so a restart run inside
+    `ava-ops` survives it; the guard asks the kill path's predicate rather than
+    approximating that boundary.
 
     A record whose process is gone, or whose pid the OS recycled onto a
     different process (start-time mismatch), does not count.
     """
-    # Deliberately method-local: the in-process updater's post-checkout stop must
-    # load these from the new tree; a module-scope import leaves their old version
-    # in sys.modules before checkout. `shared.native_process.ownership` belongs here too — it
-    # imports `shared.session_record` at module scope, so importing it at module
-    # scope would put the record module back in the pre-checkout closure.
-    # See shared/session_backend.py.
+    # Function-local: `shared.paths` pulls in `shared.config` settings and
+    # `shared.winproc` its session stack, which this leaf module keeps out of its
+    # import-time closure; each call also reads the owners' current bindings.
     from shared import winproc
     from shared.native_process.ownership import stable_create_time
     from shared.paths import run_dir
@@ -123,8 +98,6 @@ def hosting_supervised_session() -> str | None:
         return None
     for record_path in (run_dir() / "sessions").glob("*.json"):
         name = record_path.stem
-        if name in _ORCHESTRATION_SESSIONS:
-            continue
         record = SessionRecord.read(record_path)
         if record is None or record.pid not in lineage:
             continue

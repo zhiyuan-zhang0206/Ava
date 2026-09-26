@@ -333,57 +333,6 @@ def adopt_pending_collection(conn: psycopg.Connection, collection: ManagedWriter
     )
 
 
-def recover_pending_publication(
-    conn: psycopg.Connection,
-    abandoned: RolloutIdentity,
-    replacement: PendingPublication,
-    fresh_collection: ManagedWriterCollection,
-) -> None:
-    """Explicit recovery CAS requires fresh complete closure under the NEW lease.
-
-    TTL expiry alone is not old-holder exit evidence and cannot clear pending.
-    The existing takeover producer must include that holder among managed writers
-    and positively establish its exit before acquiring its replacement lease.
-    Recovery preserves current and keeps births frozen; it does not publish.
-    """
-    if (
-        replacement.collection is not None
-        or replacement.migration is not None
-        or replacement.unit_readbacks
-        or replacement.operation == abandoned
-    ):
-        raise ManagedWriterBarrierError("recovery requires a new operation and fresh collection")
-    lock_rollout(conn, replacement.operation)
-    state = _locked_publication(conn)
-    if state.pending is None or state.pending.operation != abandoned:
-        raise ManagedWriterBarrierError("abandoned pending operation no longer matches")
-    if replacement.challenge == state.pending.challenge:
-        raise ManagedWriterBarrierError("recovery must issue a new observation challenge")
-    prepared = tuple(
-        ManagedUnit(
-            machine=unit.machine,
-            home=unit.home,
-            inventory_digest=unit.prepared_receipt_digest,
-        )
-        for unit in replacement.units
-    )
-    validate_collection_for_write(
-        conn,
-        fresh_collection,
-        operation=replacement.operation,
-        candidate_digest=replacement.candidate_digest,
-        expected_challenge=replacement.challenge,
-        prepared_units=prepared,
-    )
-    _store(
-        conn,
-        WriterPublication(
-            current=state.current,
-            pending=replacement.model_copy(update={"collection": fresh_collection}),
-        ),
-    )
-
-
 def require_current_publication(
     conn: psycopg.Connection,
     actual: PublishedUnit,

@@ -1,7 +1,8 @@
 """Setup-field resolution (env > $AVA_HOME/<name> file > CLI arg).
 
-Called by `cmd_start`, which writes the resolved value to file when the arg is
-given so subsequent starts need no flags.
+Called by `cmd_start`. Resolution never writes `$AVA_HOME/<name>`; the first
+start's durable identity is persisted by `cli/start_identity.py`, so subsequent
+starts need no flags.
 
 Capabilities (serve_gateway / serve_agent_runner / serve_observability_station)
 are independent booleans, each resolved env (settings bool) >
@@ -142,12 +143,11 @@ _SETUP_FIELDS: tuple[_SetupField, ...] = (
 
 
 def _resolve_capability(cap: _Capability, arg_value: bool | None) -> bool:  # noqa: FBT001 — tri-state capability flag, passed by name
-    """env (settings bool) > `$AVA_HOME/<file>` > arg (write file + return) > False.
+    """env (settings bool) > `$AVA_HOME/<file>` > arg > False.
 
     A non-None env / file / arg is honored as-is; only when all three are unset
-    does the capability default to off. When the arg is given, write the file so
-    a subsequent `ava start` resolves the same value without the flag (mirroring
-    `_resolve_setup_field`'s persistence behavior).
+    does the capability default to off. The arg is not written back (see the
+    module docstring).
     """
     from shared.machine import parse_serve_value
     from shared.paths import ava_home
@@ -166,10 +166,10 @@ def _resolve_capability(cap: _Capability, arg_value: bool | None) -> bool:  # no
 
 
 def _resolve_setup_field(field: _SetupField, arg_value: str | None) -> str | None:
-    """env > file > arg (write file + return) > None.
+    """env > file > arg > None.
 
-    If arg is given, validate before writing — invalid values raise immediately
-    (do not persist the bad value to file).
+    The field's validator gates whichever source wins; an invalid value raises
+    immediately. The arg is not written back (see the module docstring).
     """
     from shared.paths import ava_home
 

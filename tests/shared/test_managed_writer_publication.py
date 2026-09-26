@@ -30,7 +30,6 @@ from shared.managed_writer_publication import (
     WriterPublication,
     adopt_pending_collection,
     begin_pending_publication,
-    recover_pending_publication,
     require_current_publication,
 )
 
@@ -573,27 +572,6 @@ def test_adoption_rejects_replay_and_drift(publication_db: psycopg.Connection, c
         adopt_pending_collection(publication_db, collected)
     row = publication_db.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
     assert row is not None and row[0]["pending"]["collection"] is None
-
-
-def test_recovery_requires_new_closure_and_preserves_current(
-    publication_db: psycopg.Connection,
-) -> None:
-    current = seed_current(publication_db)
-    abandoned = pending(publication_db, current)
-    begin_pending_publication(publication_db, abandoned)
-    old_collection = closure(publication_db, abandoned)
-    adopt_pending_collection(publication_db, old_collection)
-    successor = pending(publication_db, current)
-    with pytest.raises(ManagedWriterBarrierError):
-        recover_pending_publication(publication_db, abandoned.operation, successor, old_collection)
-    collected = closure(publication_db, successor)
-    recover_pending_publication(publication_db, abandoned.operation, successor, collected)
-    row = publication_db.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
-    assert row is not None
-    assert row[0]["current"] == current.model_dump(mode="json")
-    assert row[0]["pending"]["operation"] == successor.operation.model_dump(mode="json")
-    with pytest.raises(ManagedWriterBarrierError, match="no longer matches"):
-        recover_pending_publication(publication_db, abandoned.operation, successor, collected)
 
 
 def test_settled_publication_outlives_lease(publication_db: psycopg.Connection) -> None:

@@ -19,7 +19,6 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_maintenance_survives_old_timestamp_and_every_ordinary_resume() -> None:
     pause_owner.begin_maintenance("migration", WHEN - timedelta(days=10))
     assert maintenance.held()
-    assert not pause_owner.finalize_natural_resume()
     assert not pause_owner.mark_resumed("migration", WHEN - timedelta(days=10))
     assert not pause_owner.clear("migration", WHEN - timedelta(days=10))
     with pytest.raises(RuntimeError, match="explicit resume"):

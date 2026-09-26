@@ -242,22 +242,20 @@ lifecycle and never launches or restarts the stack.
 Tempo is remote and selected by `AVA_TELEMETRY_TEMPO_ENDPOINT`; native Grafana
 and Prometheus use `AVA_TELEMETRY_TEMPO_QUERY_URL` for queries and scraping.
 The local lifecycle neither probes nor manages Tempo. The collector's filelog
-receivers ship session and orchestration logs directly to Loki.
+receivers ship session logs directly to Loki.
 
 ## Session logs in Loki
 
 The collector splits raw output into disjoint receivers. `filelog/sessions`
 admits only `$AVA_HOME/logs/ava-agent-*-shell-*.out.log` transcripts;
 `filelog/services` admits the broad `*.out.log` service set but excludes every
-`ava-agent-*` file and the collector's own output; `filelog/orchestration`
-ships updater/rollout tees. Agent main stdout is banner-only on this surface,
-and its structured records already arrive through OTLP, so excluding it loses
-no diagnostic stream while avoiding content-fingerprint collisions.
+`ava-agent-*` file and the collector's own output. Agent main stdout is
+banner-only on this surface, and its structured records already arrive through
+OTLP, so excluding it loses no diagnostic stream while avoiding
+content-fingerprint collisions.
 
-All three filelog receivers poll every 30 seconds (orchestration included as of
-task #3290 - it previously ran at the unset default of 200ms). The session and
-service receivers archive 50 generations of EOF metadata and cap discovery at
-200 concurrent files. The slower poll cuts discovery churn 150x, the archive
+Both filelog receivers poll every 30 seconds, archive 50 generations of EOF
+metadata and cap discovery at 200 concurrent files. The slower poll cuts discovery churn 150x, the archive
 lets a returning EOF file reuse its reader metadata, and the cap bounds the
 discovered set. File names become resource
 `service.name`, which Loki exposes as `service_name`; read offsets persist under

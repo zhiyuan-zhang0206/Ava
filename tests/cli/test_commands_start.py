@@ -122,3 +122,35 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "--machine-name" in err
     assert "--gateway-url" in err
+
+
+def test_setup_field_resolves_env_then_home_file_then_arg_without_persisting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """env > `$AVA_HOME/<name>` file > CLI arg; a validator gates every source,
+    and a CLI arg is never written back to the home (start identity owns it)."""
+    from shared import paths
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    checked: list[str] = []
+    field = _setup_commands._SetupField(
+        name="machine_name",
+        cli_flag="--machine-name",
+        env_var="AVA_MACHINE_NAME",
+        hint="<name>",
+        validator=checked.append,
+    )
+
+    monkeypatch.setattr(settings.general, "machine_name", "")
+    assert _setup_commands._resolve_setup_field(field, None) is None
+    assert _setup_commands._resolve_setup_field(field, "from-arg") == "from-arg"
+    assert not (home / "machine_name").exists()
+
+    (home / "machine_name").write_text(" from-file \n")
+    assert _setup_commands._resolve_setup_field(field, "from-arg") == "from-file"
+
+    monkeypatch.setattr(settings.general, "machine_name", " from-env ")
+    assert _setup_commands._resolve_setup_field(field, "from-arg") == "from-env"
+    assert checked == ["from-arg", "from-file", "from-env"]

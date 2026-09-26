@@ -203,7 +203,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_MILVUS_DATA_DIR",
     "AVA_MEMORY_ROOT",
     "AVA_PROJECT_ROOT",
-    "AVA_WATCHDOG_INTERVAL_SECONDS",
     "AVA_OPS_CONCURRENCY",
   ],
   "config-health": [
@@ -225,8 +224,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_TASK_MAINTENANCE_PIDFILE",
     "AVA_EVENTS_MAINTENANCE_PIDFILE",
     "AVA_GATEWAY_PIDFILE",
-    "AVA_GATEWAY_WATCHDOG_PIDFILE",
-    "AVA_AGENT_RUNNER_WATCHDOG_PIDFILE",
     "AVA_MEMORY_INDEXER_PIDFILE",
     "AVA_OPS_PIDFILE",
   ],

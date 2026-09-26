@@ -24,14 +24,6 @@ def test_default_lattice_holds() -> None:
     assert failures == [], "lattice violated:\n  " + "\n  ".join(failures)
 
 
-def test_dispatch_client_outlives_owner_wait_and_release_preflight() -> None:
-    """A true start must not surface as a client timeout and invite a retry."""
-    release_preflight_max_s = 3 * 15.0
-    assert (
-        deploy.ORCHESTRATION_OWNER_WAIT_S + release_preflight_max_s
-    ) < deploy.CLUSTER_DISPATCH_TIMEOUT_S
-
-
 # --- the checker must catch every kind of violation it declares ---------------
 
 

@@ -183,12 +183,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_CONSUME_ABANDON_GRACE",
     ): "independent: pubsub consume-abandon window, no lattice neighbour",
     (
-        "services/agent_host/daemon.py",
-        "_STRAY_STOP_GRACE_S",
-    ): "independent: SIGTERM drain window for a roster-gated stray at hosted bring-up; "
-    "the watchdog round is the backstop but no ordering safety depends on this value "
-    "(it only bounds how long bring-up waits before handing over), no lattice neighbour",
-    (
         "shared/events/contract.py",
         "DELIVERY_STALLED_KEYS",
     ): "SQL key set for the delivery_stalled view, not a clock",
@@ -204,11 +198,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "ava_builtins/plugins/lm_anthropic/provider.py",
         "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
     ): "LLM thinking-token budget, not a wall-clock constant",
-    ("ops/updater_reap.py", "REAP_CLEARED_QUALIFIER"): "SQL qualifier string, not a clock",
-    (
-        "ops/agent_launch.py",
-        "_LAUNCH_CONFIRM_POLL_INTERVAL_SEC",
-    ): "independent: poll granularity (50 ms), orders nothing",
     (
         "gateway/schedule_runner.py",
         "_STALL_TIMEOUT_S",
@@ -229,13 +218,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     ): "independent: the at-watcher session's post-fire reclamation window (wake delivery + "
     "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "
     "no lattice neighbour and no ordering safety depends on this value",
-    (
-        "services/healthchecks/browser.py",
-        "_RESPAWN_GRACE_S",
-    ): "independent: post-respawn CDP cold-start bound in the ava-browser healthcheck — a "
-    "bounded, consumer-local wait read off the live session record (an unreadable age falls "
-    "through to the respawn); its only cadence reference, the 60s watchdog round it spans, "
-    "is not a lattice clock, so no lattice neighbour",
     (
         "ava_builtins/skills/ava-use-claude-code-and-codex/reference/watch_work.py",
         "STALL_SECONDS",

@@ -537,7 +537,6 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
             "statements": [
                 'set(attributes["tmp_svc"], attributes["log.file.name"])',
                 'replace_pattern(attributes["tmp_svc"], "\\\\.out\\\\.log$", "")',
-                'replace_pattern(attributes["tmp_svc"], "^(updater|rollout)-[0-9]+$", "$1")',
                 'set(resource.attributes["service.name"], attributes["tmp_svc"])',
                 'delete_key(attributes, "tmp_svc")',
             ],
@@ -553,7 +552,6 @@ def test_logs_merge_event_and_filelog_transforms_before_batch(
         "otlp/remote",
         "filelog/sessions",
         "filelog/services",
-        "filelog/orchestration",
     ]
     assert logs["processors"] == [
         "memory_limiter",
@@ -722,9 +720,6 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
         "polls_to_archive": 50,
         "max_concurrent_files": 200,
     }
-
-    orchestration = cfg["receivers"]["filelog/orchestration"]
-    assert orchestration["poll_interval"] == "30s"
 
 
 def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queues(

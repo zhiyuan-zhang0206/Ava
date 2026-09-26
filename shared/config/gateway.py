@@ -12,7 +12,6 @@ from pydantic import Field, HttpUrl, JsonValue, field_validator
 from pydantic_settings import NoDecode
 
 from shared.config._base import EnvSettings
-from shared.config.managed_writer_fields import ManagedWriterFields
 from shared.config.update_spawn_fields import UpdateSpawnFields
 
 _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
@@ -23,7 +22,7 @@ _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
 }
 
 
-class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
+class GatewaySettings(UpdateSpawnFields, EnvSettings):
     provision_builtin_schedules: bool = Field(
         default=True,
         alias="AVA_PROVISION_BUILTIN_SCHEDULES",
@@ -277,47 +276,6 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
         },
     )
 
-    update_backup_precheck: bool = Field(
-        default=True,
-        alias="AVA_UPDATE_BACKUP_PRECHECK",
-        description=(
-            "Refuse `ava cluster update`'s gateway stop while a logical-backup job "
-            "or off-site publish is in flight on this host (task #3661; the "
-            "2026-09-16 wave abort was the stop meeting the daily dump's off-site "
-            "publish). false (0) dispatches anyway."
-        ),
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    update_managed_writer: bool = Field(
-        default=False,
-        alias="AVA_UPDATE_MANAGED_WRITER",
-        description=(
-            "Gate the managed-writer activation flow in `ava cluster update` "
-            "(task #4121). false (0): every rollout runs the legacy flow unchanged. "
-            "true: a rollout enters managed-writer mode only when both readiness "
-            "guards exist and are True -- the checked normal-release activation "
-            "(CHECKED_ACTIVATION_READY, task #4117) and the completed rollout wiring "
-            "(MANAGED_WRITER_WIRING_COMPLETE, task #4128 E2); with either guard missing "
-            "it runs the legacy flow and records a visible blocked decision (rollout log, "
-            "rollout telemetry, `managed_writer_blocked` event, `ava cluster "
-            "status`). Flip only in the same ceremony as the checked-activation "
-            "change (tasks #4117/#4121); roll back by setting false again -- the "
-            "next rollout runs legacy."
-        ),
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     pause_lifecycle_wait_seconds: float = Field(
         default=300.0,
         ge=0,
@@ -333,47 +291,6 @@ class GatewaySettings(UpdateSpawnFields, ManagedWriterFields, EnvSettings):
             "give-up point. Maintenance-authored commands never wait. 0 refuses "
             "immediately (pre-#3591 behavior). Cluster-pinned; must be finite and "
             "non-negative."
-        ),
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    stop_incomplete_recovery: bool = Field(
-        default=True,
-        alias="AVA_STOP_INCOMPLETE_RECOVERY",
-        description=(
-            "Caller-side bounded recovery of a half-done update stop (task #3942): an "
-            "agent-runner leg whose graceful stop exits non-zero, while its own "
-            "maintenance generation still sits between stopping and stopped, spends "
-            "ONE bounded attempt at its own internal start before returning the stop "
-            "rc. It declines unless the episode is provably its own. False skips "
-            "that attempt and leaves the stop failure visible for operator inspection. "
-            "There is no automatic watchdog recovery."
-        ),
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    stop_incomplete_recovery_timeout_seconds: float = Field(
-        default=120.0,
-        gt=0,
-        allow_inf_nan=False,
-        alias="AVA_STOP_INCOMPLETE_RECOVERY_TIMEOUT_SECONDS",
-        description=(
-            "Deadline of that one bounded attempt (task #3942): the internal `ava "
-            "start` child is killed at this bound, so a hung start cannot hold the "
-            "updater's verdict past a bounded window. The 120s default covers a "
-            "normal start on a healthy host (launch plus readiness); a start still "
-            "running at the bound leaves the stop failure visible. Must be finite and "
-            "positive."
         ),
         json_schema_extra={
             "restart_required": "",

@@ -20,9 +20,6 @@ does not remove these SQL guards.
   `managed_writer_evidence.pending` refuses a generic takeover even after expiry.
 - `renew_update_lock` and `release_update_lock` require the exact holder. Release,
   settle conversion and settle release cannot discard pending publication evidence.
-- `claim_pending_recovery_lease` in `shared/cluster_pending_recovery.py` requires
-  the exact inspected pending operation and matching dead lease identity, while
-  preserving the target SHA.
 - `read_update_lease` returns holder, age, expiry, kind and structured settle facts.
   `update_lock_holder` and `update_lock_refusal_detail` expose the same authority
   to admission and diagnostics.

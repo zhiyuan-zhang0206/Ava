@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
@@ -37,7 +36,6 @@ from shared.cluster_lock import (
     update_lock_holder,
     update_lock_refusal_detail,
 )
-from shared.cluster_pending_recovery import claim_pending_recovery_lease
 from shared.config import settings
 
 
@@ -230,7 +228,7 @@ def test_stale_recovery_snapshot_cannot_replace_a_reclaimed_lease() -> None:
     assert update_lock_holder() == "new"
 
 
-# ─── the pending-publication takeover + refusal detail (task #4093, slice 1a) ─
+# ─── the pending-publication refusal detail (task #4093, slice 1a) ─
 
 
 def _pending_operation(
@@ -271,76 +269,6 @@ def _seed_pending_rollout(
             ),
         )
     db_conn.commit()
-
-
-def test_pending_recovery_claim_replaces_the_dead_rollout(db_conn: psycopg.Connection) -> None:
-    """The takeover replaces only the row whose journaled operation is exactly the
-    one the caller inspected — and preserves the rollout target it was resuming."""
-    operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation)
-
-    claim = claim_pending_recovery_lease(
-        "recovery:pid7", expected_operation=operation, observed=None
-    )
-
-    assert claim.acquired is True
-    assert claim.previous_holder == "gateway:pid123"
-    assert claim.acquired_at is not None
-    assert claim.target_sha == "e" * 40
-    row = db_conn.execute(
-        "SELECT holder, target_sha, phase, kind, expires_at > clock_timestamp() "
-        "FROM deployment_state WHERE id=1"
-    ).fetchone()
-    assert row == ("recovery:pid7", "e" * 40, "updating", "rollout", True)
-
-
-def test_pending_recovery_claim_refuses_a_changed_journal_operation(
-    db_conn: psycopg.Connection,
-) -> None:
-    operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation)
-    changed = {**operation, "target_sha": "f" * 40}
-
-    claim = claim_pending_recovery_lease("recovery", expected_operation=changed, observed=None)
-
-    assert claim.acquired is False
-    row = db_conn.execute("SELECT holder, target_sha FROM deployment_state WHERE id=1").fetchone()
-    assert row == ("gateway:pid123", "e" * 40)
-
-
-def test_pending_recovery_claim_is_pinned_to_the_observed_dead_identity(
-    db_conn: psycopg.Connection,
-) -> None:
-    """A live-looking lease is replaceable only while BOTH its holder and acquired_at
-    still match the snapshot whose process death was proven — a rollout landing after
-    the proof wins instead of being clobbered."""
-    operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation, expired=False)
-    row = db_conn.execute("SELECT holder, acquired_at FROM deployment_state WHERE id=1").fetchone()
-    assert row is not None
-
-    stale = claim_pending_recovery_lease(
-        "recovery:stale",
-        expected_operation=operation,
-        observed=(row[0], datetime(2026, 1, 1, tzinfo=UTC)),
-    )
-    assert stale.acquired is False
-
-    claim = claim_pending_recovery_lease(
-        "recovery:fresh", expected_operation=operation, observed=(row[0], row[1])
-    )
-    assert claim.acquired is True
-    assert claim.previous_holder == "gateway:pid123"
-
-
-def test_pending_recovery_claim_refuses_a_settle_hold(db_conn: psycopg.Connection) -> None:
-    """Only an executing rollout qualifies: a settle hold's row is never touched."""
-    operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation, phase="settling", settle_hosts=["win"])
-
-    claim = claim_pending_recovery_lease("recovery", expected_operation=operation, observed=None)
-
-    assert claim.acquired is False
 
 
 def test_update_lock_refusal_detail_names_the_pending_recovery(
