@@ -197,7 +197,7 @@ class TestShow:
                 "url": "http://gateway/page",
             }
 
-        monkeypatch.setattr(ava._gateway_client, "register_page", _register)
+        monkeypatch.setattr(ava.gateway_client, "register_page", _register)
         ava.ui.show("timed", port=12000, ttl=12.9)
         assert captured["ttl_seconds"] == 12
 
@@ -215,7 +215,7 @@ class TestShow:
                 "url": "http://gateway/page",
             }
 
-        monkeypatch.setattr(ava._gateway_client, "register_page", _register)
+        monkeypatch.setattr(ava.gateway_client, "register_page", _register)
         ava.ui.show("plain", port=12000)
         assert "ttl_seconds" not in captured
 
@@ -287,7 +287,7 @@ class TestServe:
                 "url": "http://gateway/page",
             }
 
-        monkeypatch.setattr(ava._gateway_client, "register_page", _register)
+        monkeypatch.setattr(ava.gateway_client, "register_page", _register)
         ava.ui.serve(str(tmp_path), "srv-ttl", port=12000, ttl=30)
         assert captured["ttl_seconds"] == 30
 

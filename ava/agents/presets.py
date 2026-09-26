@@ -6,8 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from ava import _gateway_client as _client
-from ava._gateway_client import PresetNotFoundError as PresetNotFoundError
+from ava import gateway_client as _client
+from ava.gateway_client import PresetNotFoundError as PresetNotFoundError
 from ava.sdk_validation import coerce_str
 
 

@@ -41,7 +41,7 @@ boundaries, already carried by codegen, and not debt.
    one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
    cover (`scripts/`, and any async pool left in `allowed`), or retire it if
    nothing remains.
-2. **Reach-in burn-down** (`private_imports`, 321 keys / 353 sites / 119
+2. **Reach-in burn-down** (`private_imports`, 317 keys / 342 sites / 116
    files), highest yield first: `cli/main.py` re-exports 121 private
    `cli.parsers.*._h_*` handlers so tests have one namespace to patch (a
    hand-maintained registry — bind handlers in their parser modules and patch
@@ -49,14 +49,14 @@ boundaries, already carried by codegen, and not debt.
    `shared.lm._plugin_providers`, `shared.agents.impersonation._impersonation_store`,
    `agent.graph._exec_protocol`, `agent._turn_progress`) each get a verdict:
    contract (export it) or internal (route callers through a door).
-   In `ava` (24 keys / 44 sites left), agent visibility is the
+   In `ava` (31 keys / 45 sites left), agent visibility is the
    `__all_for_ava__` whitelist — `lint_agent_docstrings` keys on it too — so a
    framework module the rest of the repo needs takes a public name without
    entering the agent's view (`ava/agent_identity.py` was the first, then
    `sdk_validation`, `composer_commands`, `attachment_transport`,
-   `skill_sources`, `sdk_metering`, and `external_state`). Left, in order:
-   `_gateway_client`, whose `_post` / `_patch` /
-   `_raise_from_response` plugins also use; `_impersonation_events` /
+   `skill_sources`, `sdk_metering`, `external_state`, and `gateway_client` —
+   whose `post` / `patch` / `raise_from_response` plugins also use). Left, in
+   order: `_impersonation_events` /
    `_impersonation_launch`, which nothing inside `ava` uses; `_mcp_config`,
    read by `cli` / `ops` through private helpers; `_extend`, whose public name
    is taken by the plugin-author `ava.extend` namespace; and the kernel's reads
