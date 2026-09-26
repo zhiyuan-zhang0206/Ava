@@ -12,6 +12,7 @@ from pathlib import Path
 # immediately — no coalescing of routine arrivals, the former effective value.
 _TAKEOVER_TTL_SECONDS = 3600
 _TAKEOVER_BATCH_WINDOW_SECONDS = 0
+_EXECUTOR_LABELS = {"codex": "Codex", "claude": "Claude", "dsh": "DeepSeek Harness"}
 
 
 def bootstrap_message(
@@ -25,8 +26,8 @@ def bootstrap_message(
     relay_resident: bool = False,
 ) -> str:
     """Name both identities explicitly and inline the briefing in the launch message."""
-    if provider not in ("codex", "claude") or not name.strip():
-        raise ValueError("A takeover needs a session name and codex/claude provider")
+    if provider not in _EXECUTOR_LABELS or not name.strip():
+        raise ValueError("A takeover needs a session name and a codex/claude/dsh provider")
     command = shlex.join(
         [
             sys.executable,
@@ -39,7 +40,7 @@ def bootstrap_message(
             "--name",
             name,
             "--as",
-            f"{provider.title()}: {name}",
+            f"{_EXECUTOR_LABELS[provider]}: {name}",
             "--provider",
             provider,
             "--ttl",
@@ -63,6 +64,13 @@ def bootstrap_message(
     )
     if provider == "codex":
         routing = codex_routing
+    elif provider == "dsh":
+        routing = (
+            "Its relay starts automatically: the Ava relay plugin loaded into this DeepSeek "
+            "Harness session consumes the credential stub the request writes and pushes "
+            "inbound messages into this session. Run the request from your shell tool; there "
+            "is nothing else to arm. If no relay heartbeat starts, the takeover is rejected."
+        )
     elif relay_resident:
         routing = (
             "Its relay is started automatically for this session by the loaded Ava relay "

@@ -347,8 +347,8 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
     """Activation gate: the bound relay must be up before the takeover stands.
 
     codex — provision the scoped credential, spawn the relay here, and wait for
-    its first heartbeat. claude — its relay runs inside the controller's own
-    session; require a fresh heartbeat instead. Any failure rolls the lease to
+    its first heartbeat. claude / dsh — the relay runs inside the controller's
+    own session; require a fresh heartbeat instead. Any failure rolls the lease to
     'rejected' with a loud reason (fail_acceptance) and returns False; native
     control resumes. A lease that is no longer 'accepted' returns False without
     a transition — someone else already ended it.
@@ -359,9 +359,10 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
         provision_relay,
         relay_get,
     )
+    from shared.agents.impersonation._impersonation_store import SESSION_RELAY_PROVIDERS
 
     provider = session["relay_provider"]
-    if provider == "claude":
+    if provider in SESSION_RELAY_PROVIDERS:
         if session["automatic"]:
             from shared.agents.impersonation import native_status as read_status
 
@@ -528,7 +529,7 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
       durable mint mark belongs to an earlier incarnation and whose last beat
       predates this process start, may be re-provisioned -- only inside the
       fresh-start window (AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS).
-    - a claude controller-session relay can never be re-provisioned from here:
+    - a claude / dsh controller-session relay can never be re-provisioned from here:
       a stale heartbeat always stops the lease.
 
     Hot-path cost (fresh heartbeat): one `native_status` read, the anchor
@@ -572,7 +573,7 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
 
     # Component B: the bound relay.
     if session["relay_provider"] != "codex":
-        # A controller-session relay (claude) cannot be re-provisioned from
+        # A controller-session relay (claude / dsh) cannot be re-provisioned from
         # here and has no native-side mint record to read: a stale heartbeat
         # stops the lease (task #3998, variant A).
         await _abort_for_death(session, agent_id, "relay", "the bound relay stopped heartbeating")
