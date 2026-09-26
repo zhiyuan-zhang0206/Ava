@@ -32,20 +32,23 @@ boundaries, already carried by codegen, and not debt.
 
 ## Left, in order
 
-1. **Postgres door burn-down** (`owner_bypasses`, 28 modules). Extend
+1. **Postgres door burn-down** (`owner_bypasses`, 29 modules / 61 sites). Extend
    `shared.db.connect()` / `pool()` so the door owns the transport posture while
    the caller owns the target (an explicit URL for provisioning, PITR, and
    restore drills), and add the async pool factory the agent host and eval
    pools lack. Migrate the sites; genuine exceptions become reasoned `allowed`
    entries. Collapse the three drifted `watch_idle.py` reference copies into
-   one. Then retire `scripts/lint_pool_keepalives.py` — Rule 5 subsumes it.
-2. **Reach-in burn-down** (`private_imports`, 308 keys), highest yield first:
-   `cli/main.py` imports 121 private `cli.parsers.*._h_*` handlers (a
-   hand-maintained registry — let each parser module register its handlers
-   through the `cli.parsers` door); then the most reached-into privates
-   (`ava._mcp_config`, `shared.lm._effort`, `ava._boot`, `agent._turn_progress`)
-   each get a verdict: contract (export it) or internal (route callers through
-   a door).
+   one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
+   cover (`scripts/`, and any async pool left in `allowed`), or retire it if
+   nothing remains.
+2. **Reach-in burn-down** (`private_imports`, 294 keys / 306 sites / 108
+   files), highest yield first: `cli/main.py` re-exports 121 private
+   `cli.parsers.*._h_*` handlers so tests have one namespace to patch (a
+   hand-maintained registry — bind handlers in their parser modules and patch
+   there); then the most reached-into privates (`shared.lm._effort`,
+   `shared.lm._plugin_providers`, `shared.agents.impersonation._impersonation_store`,
+   `agent.graph._exec_protocol`, `agent._turn_progress`) each get a verdict:
+   contract (export it) or internal (route callers through a door).
 3. **Locality sweeper class** — an index, not a wall: per-PR module spread and
    cross-package co-change pairs over a rolling window, reusing the lint's
    scanner per [lint-vs-sweeper](../../conventions/lint-vs-sweeper.md). Each
@@ -59,6 +62,7 @@ boundaries, already carried by codegen, and not debt.
    more modules, the description names the leaked decision and either closes
    it or files a task (`write-a-pr-description` skill).
 6. **More single-owner decisions**, each added to `DECISIONS` only once its
-   owner exists: the process identity key (one fix touched 21 files) is the
-   next candidate; `shared/config` as a registration hub needs a design pass
+   owner exists: the process identity key (one fix touched 21 files, and
+   `ava/_boot.py` is a framework-tier module that can own it) is the next
+   candidate; `shared/config` as a registration hub needs a design pass
    first.

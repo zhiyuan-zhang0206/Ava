@@ -43,33 +43,41 @@ so the list cannot rot into a permission wall.
 
 ### Rule 4: package doors (locality)
 
-A `_`-prefixed module or name is private to the package that owns it: the
-package directory itself for a private submodule, the module's package for a
-module-level private name. Importing it from outside that package bypasses the
-package door, so the importer depends on an implementation detail the owner never
-promised to keep. Fix: import a public name through the owner's `__init__.py`, or
-promote the name into the owner's contract on purpose (export it / drop the
-underscore) so the widened contract is visible in the diff. No allowlist: a name
-another package needs is contract by definition. Test files are exempt (white-box
-tests reach into privates by design).
+A `_`-prefixed module or name is private to the package that owns it, resolved
+the way Python resolves it: when `<prefix>.py` exists the name is package-private
+to that module's package (a same-named docs folder beside it changes nothing);
+otherwise the prefix is the package owning the private submodule. Reaching it from
+outside that package, by import or by attribute access on an imported module
+(`import ava.x as m; m._y`), bypasses the package door: the importer depends on an
+implementation detail the owner never promised to keep. Fix: use a public name
+through the owner's `__init__.py`, or promote the name into the owner's contract
+on purpose (export it / drop the underscore) so the widened contract is visible in
+the diff. No per-site allowlist: a name another package needs is contract by
+definition. `locality.FRAMEWORK_TIERS` names the packages whose `_` marks another
+axis by documented convention (today `ava/_*.py`: hidden from agents, open to the
+framework). Files under a tests/ directory are exempt.
 
 ### Rule 5: single decision owners (locality)
 
 `scripts/structure/locality.py:DECISIONS` names design decisions that have exactly
 one owning module; any other module making that decision is a bypass. Today:
-`postgres-dial` — every psycopg connect and `*ConnectionPool` construction belongs
-to `shared/db_connections.py`, which owns the transport posture. A site that
-genuinely cannot go through the owner goes in that decision's `allowed` map with
-a one-line reason; an allowed module that stops bypassing fails as stale.
+`postgres-dial` — a psycopg connect (module, class, or `from psycopg import
+connect`) or a construction of a psycopg_pool pool or of this repo's own
+`*ConnectionPool` subclass belongs to `shared/db_connections.py`, which owns the
+transport posture. A site that genuinely cannot go through the owner goes in that
+decision's `allowed` map with a one-line reason; an allowed module that stops
+bypassing, or no longer exists, fails as stale.
 
 Rules 4 and 5 freeze today's sites in the `private_imports` / `owner_bypasses`
 baseline sections as `path::target -> site count`. Unlike the budgets, the
 frozen counts must match reality exactly: a new or grown site is a violation,
 and a removed one fails until its entry is lowered or deleted, so a fixed
-reach-in cannot silently return. Against the base revision they are shrink-only
-like complexity/nesting: a new key needs a paired same-file removal of equal or
-greater value (the private owner module moved), and git -M renames carry keys.
-Why locality: conventions/python-conventions.md.
+reach-in cannot silently return. Against the base revision they are shrink-only:
+a new key needs a same-file removal of the SAME private name with equal or
+greater value (its owner module moved), and git -M renames carry keys. A file
+split, a move to another file, or a swap for a different private name cannot
+carry a frozen site — fix the site instead. Why locality:
+conventions/python-conventions.md.
 
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
@@ -284,7 +292,7 @@ def _scan_file(path: Path, rel_path: str, tree: ast.Module | None = None) -> lis
                 )
             )
 
-    out.extend(locality.allowlist_errors(tree, rel_path))
+    out.extend(locality.allowlist_errors(tree, rel_path, _SCAN_DIRS))
     return out
 
 
@@ -487,8 +495,10 @@ def _section_guard(
     errors: list[str] = []
     additions = current.keys() - previous.keys()
     paired = kind in quality.QUALITY_SECTIONS or kind in locality.SECTIONS
-    if paired:
+    if kind in quality.QUALITY_SECTIONS:
         additions = set(quality.unpaired_additions(current, previous))
+    elif kind in locality.SECTIONS:
+        additions = set(locality.unpaired_additions(current, previous))
     for name in sorted(additions):
         moved_to = _renamed_to(kind, name, renames or {})
         if moved_to is not None:
@@ -498,9 +508,12 @@ def _section_guard(
             )
             continue
         rule = (
-            "added key without a paired same-file removal of equal or greater value"
-            if paired
-            else "baseline is shrink-only"
+            "baseline is shrink-only"
+            if not paired
+            else "added key without a paired same-file removal of equal or greater value"
+            if kind in quality.QUALITY_SECTIONS
+            else "added key without a same-file removal of the same private name: a split, "
+            "move or swap cannot carry a frozen site — route it through the door or owner"
         )
         errors.append(f"{_BASELINE_PATH}: added {kind} entry {name} — {rule}")
     for name in sorted(current.keys() & previous.keys()):
@@ -642,6 +655,7 @@ def _check_ast_and_quality(
             sites, baseline, scanned=scanned, repo_root=_REPO_ROOT, renames=renames
         )
     )
+    errors.extend(locality.missing_allowlist_errors(_REPO_ROOT))
     quality.render_warnings(measurements["complexity"], full=full)
     return errors
 

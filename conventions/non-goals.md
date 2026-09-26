@@ -176,10 +176,11 @@ first and ask "what changed that made it worth doing".
   depth gain. (c) `scripts/` files are standalone entrypoints; the `lint_*` prefix already groups
   them. The [directory budget](python-conventions.md#directory-budget-20-direct-entries) now caps
   flat growth, so over-budget directories do get split — but the split follows cohesion, so each
-  new package `__init__` is a real door, never a barrel formed by name prefix. The axis that
-  matters, per-module interface width, is enforced separately by the
+  new package `__init__` is a real door, never a barrel formed by name prefix. What makes such a
+  door real is guarded by the
   [locality rules](python-conventions.md#locality-package-doors-and-single-owners): a private
-  reach-in or a bypassed single owner fails whichever directory it crosses.
+  reach-in or a bypassed single owner fails whichever directory it crosses, so widening an
+  interface has to happen visibly, in the owner's contract.
 
 - ~~**Add observability columns to `agents` table (terminated_at / total_turns / token usage etc.)**~~:
   done by event sourcing path (2026-05-07). No new observability columns; new observability dimensions =
