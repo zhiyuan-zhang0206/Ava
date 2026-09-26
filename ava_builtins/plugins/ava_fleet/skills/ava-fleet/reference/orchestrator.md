@@ -105,7 +105,7 @@ Every worker's prompt already indexes every loaded skill, and its own pre-work c
 
 ### The Flow
 
-1. **Name it in the prompt.** Say which skill the worker should use — "Use Claude Code (`claude`) via the `ava-use-claude-code-and-codex` skill for the coding work." The worker loads it on demand with `ava.help(ava.skills.<name>)`.
+1. **Name it in the prompt.** Say which skill the worker should use — "Use Claude Code (`claude`) via the `ava-use-other-agents` skill for the coding work." The worker loads it on demand with `ava.help(ava.skills.<name>)`.
 2. **Preload only when it must be read first.** A short discipline skill that has to be active from turn one goes in `config_overlay={"skills_to_expand_at_start": [...]}` — full text as a system note, re-injected after each compact. A large reference skill stays index-only; preloading it just buys tokens.
 3. **Narrow only deliberately.** `skills_to_inject_into_system_prompt` subtracts from the index — it shortens what the worker reads, it does not take a capability away (`ava.help(ava.skills)` still lists everything, and any skill loads by name). Use it to keep a focused worker's index short, never to hand it one.
 

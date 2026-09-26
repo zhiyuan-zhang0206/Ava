@@ -2,7 +2,7 @@
 
 Five reference watchers wake the launching agent with a single send at their
 trigger point: ``watch_idle.py`` (ava-watcher, ava-goal, and ava-fleet), ``watch_work.py``
-(ava-use-claude-code-and-codex), and ``gather_files.py``
+(ava-use-other-agents), and ``gather_files.py``
 (ava-dynamic-workflow). A gateway / agent restart window (an update wave,
 ``ava cluster update``) outlasts the SDK's own 3 quick retries; before this the
 exception killed the watcher and the wake was lost (2026-09-17, task #3694 —
@@ -50,7 +50,7 @@ watch_idle_modules = [
 ]
 watch_work = _load(
     "watch_work_retry_under_test",
-    _REPO / "ava_builtins/skills/ava-use-claude-code-and-codex/reference/watch_work.py",
+    _REPO / "ava_builtins/skills/ava-use-other-agents/reference/watch_work.py",
 )
 gather_files = _load(
     "gather_files_under_test",

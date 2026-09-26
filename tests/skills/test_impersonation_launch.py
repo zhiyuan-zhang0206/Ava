@@ -13,9 +13,7 @@ import pytest
 from ava._impersonation_launch import bootstrap_message
 from shared import coding_session_owner
 
-_REFERENCE = (
-    Path(__file__).parents[2] / "ava_builtins/skills/ava-use-claude-code-and-codex/reference"
-)
+_REFERENCE = Path(__file__).parents[2] / "ava_builtins/skills/ava-use-other-agents/reference"
 _ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
 
 

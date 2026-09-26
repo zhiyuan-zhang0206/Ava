@@ -151,7 +151,7 @@ def _session_exists(name: str) -> bool:
 
 
 def _contract_path() -> Path:
-    # This script lives in skills/ava-use-claude-code-and-codex/reference/;
+    # This script lives in skills/ava-use-other-agents/reference/;
     # the collaboration protocol is in the same directory.
     return Path(__file__).resolve().parent / "collaboration_protocol.md"
 
