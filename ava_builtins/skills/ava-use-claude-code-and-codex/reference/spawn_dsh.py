@@ -23,6 +23,7 @@ The session runs with ``DSH_PERMISSION_MODE=danger-full-access``: nobody
 answers approval prompts in a PTY takeover, the same hands-off posture as the
 Codex and Claude launchers. The launch message and the patch live in the
 generation's private state directory; the plugin deletes the message once read.
+dsh runs under the PTY shell, so a failed boot is reported with its output.
 
 Output: owner-record fields (``adopted`` / ``session_id`` / ``generation`` …),
 one ``key=value`` per line.
@@ -33,6 +34,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import re
 import shlex
 import shutil
 import sys
@@ -47,6 +49,7 @@ _HERE = Path(__file__).resolve().parent
 _PLUGIN = _HERE / "ava-relay-dsh" / "ava-relay.mjs"
 _DEFAULT_TTL_SECONDS = 24 * 3600
 _READY_MARKER = "dsh takeover session "
+_EXITED = re.compile(r"dsh exited with status \d+")
 _LAUNCH_FILE = "launch.txt"
 _PATCH_FILE = "ava-relay.patch.yml"
 
@@ -95,11 +98,17 @@ def _write_private(path: Path, text: str) -> None:
 
 
 def _dsh_command(workspace: Path, node: str, dsh: str, patch: Path) -> str:
+    """Run dsh under the PTY shell (no ``exec``) so a failed boot stays readable.
+
+    The exit line is printed through a format string: the echoed command
+    itself never matches ``_EXITED``.
+    """
     return (
         f"cd {shlex.quote(workspace.as_posix())} && "
         "DSH_PERMISSION_MODE=danger-full-access "
-        f"exec {shlex.quote(node)} {shlex.quote(dsh)} --profile headless "
-        f"--patch {shlex.quote(patch.as_posix())}"
+        f"{shlex.quote(node)} {shlex.quote(dsh)} --profile headless "
+        f"--patch {shlex.quote(patch.as_posix())}; "
+        "printf 'dsh %s with status %s\\n' exited \"$?\""
     )
 
 
@@ -107,15 +116,13 @@ def _wait_for_session(sid: int, timeout: float = 90.0) -> str:
     """The plugin echoes its session id right before it submits the launch message."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            output = ava.shell.sessions.capture(sid)
-        except ValueError as exc:
-            raise RuntimeError(
-                f"dsh session {sid} exited before its takeover session opened"
-            ) from exc
-        for line in output.splitlines():
+        lines = ava.shell.sessions.capture(sid).splitlines()
+        for line in lines:
             if line.startswith(_READY_MARKER):
                 return line.removeprefix(_READY_MARKER).split()[0]
+            if _EXITED.fullmatch(line.strip()):
+                tail = "\n".join(lines[-20:])
+                raise RuntimeError(f"dsh exited before its takeover session opened:\n{tail}")
         time.sleep(1)
     raise RuntimeError(f"dsh did not open its takeover session in PTY {sid} within {timeout:.0f} s")
 
