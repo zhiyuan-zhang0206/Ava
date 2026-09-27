@@ -170,8 +170,6 @@
     "ava_builtins/skills/ava-use-other-agents/reference/spawn_claude.py::main": 19,
     "ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py::main": 19,
     "ava_builtins/skills/ava-use-other-agents/reference/watch_work.py::watch": 34,
-    "ava_builtins/skills/gmail/reference/_smtp.py::forward": 15,
-    "ava_builtins/skills/gmail/reference/_smtp.py::reply": 18,
     "ava_builtins/skills/web-ai/console/reference/ask.py::main": 22,
     "cli/commands/extensions/_claude_code_plugin.py::materialize": 22,
     "cli/commands/cluster/health.py::run_health_probe": 19,
@@ -579,7 +577,9 @@
     "tests/skills/test_impersonation_launch.py::test_self_takeover_bootstrap_inlines_brief_and_links_real_guide": 17,
     "tests/test_lint_marker_contract.py::test_system_note_writers_use_notetag_values": 15,
     "agent/runloop.py::_handle_fatal_llm_error": 26,
-    "ava_builtins/skill_support/self_evolution/record.py::build_record": 57
+    "ava_builtins/skill_support/self_evolution/record.py::build_record": 57,
+    "ava_builtins/skill_support/gmail/smtp.py::forward": 15,
+    "ava_builtins/skill_support/gmail/smtp.py::reply": 18
   },
   "nesting": {
     "agent/hooks/_registry.py::make_hook_runner.<locals>.run": 7,
@@ -689,7 +689,6 @@
     "ava_builtins/plugins/ava_memory/skills/scripts/gen_indexes.py::sys.path": 1,
     "ava_builtins/plugins/ava_memory/skills/scripts/rebuild_memory_index.py::sys.path": 1,
     "ava_builtins/plugins/ava_memory/skills/scripts/steward.py::sys.path": 1,
-    "ava_builtins/skills/gmail/reference/feed.py::sys.path": 1,
     "ava_builtins/skills/telegram-send-file/scripts/send_file.py::sys.path": 1,
     "ava_builtins/skills/web-ai/console/reference/ask.py::importlib.util.spec_from_file_location": 1,
     "ava_builtins/skills/web-ai/deep-research/reference/research.py::importlib.util.spec_from_file_location": 1,

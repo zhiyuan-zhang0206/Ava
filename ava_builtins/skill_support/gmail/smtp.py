@@ -19,7 +19,7 @@ from functools import cache as _cache
 from pathlib import Path
 from typing import Any
 
-from _imap import (
+from ava_builtins.skill_support.gmail.imap import (
     ALL_MAIL,
     GmailError,
     _account,
@@ -37,7 +37,7 @@ SMTP_PORT = 587  # STARTTLS; the App Password authenticates SMTP as well as IMAP
 # --------------------------------------------------------------------------- #
 
 
-def _addr_list(raw: str | None) -> list[str]:
+def addr_list(raw: str | None) -> list[str]:
     """Parse a comma-separated address header into bare addresses (RFC 5322 uses
     commas; `getaddresses` does not split on `;`)."""
     if not raw:
@@ -108,7 +108,7 @@ def _smtp_send(msg: EmailMessage) -> None:
         s.send_message(msg)
 
 
-def _msg_summary(msg: EmailMessage) -> dict[str, Any]:
+def msg_summary(msg: EmailMessage) -> dict[str, Any]:
     # get_content() raises on a multipart (attachment) message, so read the body
     # via get_body, which returns the message itself when it is single-part.
     body_part = msg.get_body(preferencelist=("plain",))
@@ -124,8 +124,8 @@ def _msg_summary(msg: EmailMessage) -> dict[str, Any]:
     }
 
 
-def _sent_summary(msg: EmailMessage, *, sent: bool) -> dict[str, Any]:
-    return {"sent": sent, **_msg_summary(msg)}
+def sent_summary(msg: EmailMessage, *, sent: bool) -> dict[str, Any]:
+    return {"sent": sent, **msg_summary(msg)}
 
 
 def send(
@@ -143,14 +143,14 @@ def send(
     paths to attach. `dry_run=True` builds and returns the composed message
     (headers + body + attachment names) WITHOUT touching SMTP, so the caller can
     inspect it before committing to a real send. `sent` is False under dry_run."""
-    to_list = _addr_list(to) if isinstance(to, str) else list(to)
+    to_list = addr_list(to) if isinstance(to, str) else list(to)
     if not to_list:
         raise ValueError("send needs at least one recipient")
-    cc_list = _addr_list(cc) if isinstance(cc, str) else list(cc or [])
+    cc_list = addr_list(cc) if isinstance(cc, str) else list(cc or [])
     msg = _compose(to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach)
     if not dry_run:
         _smtp_send(msg)
-    return _sent_summary(msg, sent=not dry_run)
+    return sent_summary(msg, sent=not dry_run)
 
 
 def reply(
@@ -175,13 +175,13 @@ def reply(
     _, orig = _full(ids[-1])
     acct = _account().lower()
 
-    to = _addr_list(orig["Reply-To"]) or _addr_list(orig["From"])
+    to = addr_list(orig["Reply-To"]) or addr_list(orig["From"])
     if not to:
         raise GmailError(f"cannot reply to {message_id!r}: original has no Reply-To/From address")
     cc: list[str] = []
     if reply_all:
         seen = {a.lower() for a in to} | {acct}
-        for addr in _addr_list(orig["To"]) + _addr_list(orig["Cc"]):
+        for addr in addr_list(orig["To"]) + addr_list(orig["Cc"]):
             if addr.lower() not in seen:
                 cc.append(addr)
                 seen.add(addr.lower())
@@ -203,7 +203,7 @@ def reply(
     )
     if not dry_run:
         _smtp_send(msg)
-    return _sent_summary(msg, sent=not dry_run)
+    return sent_summary(msg, sent=not dry_run)
 
 
 def _carry_attachments(msg: EmailMessage, orig: Message) -> None:
@@ -239,10 +239,10 @@ def forward(
         raise GmailError(f"no message with Message-Id {message_id!r}")
     _, orig = _full(ids[-1])
 
-    to_list = _addr_list(to) if isinstance(to, str) else list(to)
+    to_list = addr_list(to) if isinstance(to, str) else list(to)
     if not to_list:
         raise ValueError("forward needs at least one recipient")
-    cc_list = _addr_list(cc) if isinstance(cc, str) else list(cc or [])
+    cc_list = addr_list(cc) if isinstance(cc, str) else list(cc or [])
 
     subject = (orig["Subject"] or "").strip()
     if not subject.lower().startswith("fwd:"):
@@ -266,7 +266,7 @@ def forward(
     _carry_attachments(msg, orig)
     if not dry_run:
         _smtp_send(msg)
-    return _sent_summary(msg, sent=not dry_run)
+    return sent_summary(msg, sent=not dry_run)
 
 
 # --------------------------------------------------------------------------- #
@@ -309,10 +309,10 @@ def draft(
     the Drafts folder of every Gmail client, editable and sendable from there
     (the agent-drafts / human-sends flow). The returned `message_id` is the
     handle for `draft_delete`. `dry_run=True` composes without writing."""
-    to_list = _addr_list(to) if isinstance(to, str) else list(to)
+    to_list = addr_list(to) if isinstance(to, str) else list(to)
     if not to_list:
         raise ValueError("draft needs at least one recipient")
-    cc_list = _addr_list(cc) if isinstance(cc, str) else list(cc or [])
+    cc_list = addr_list(cc) if isinstance(cc, str) else list(cc or [])
     msg = _compose(to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach)
     if not dry_run:
         folder = _drafts_folder()
@@ -321,7 +321,7 @@ def draft(
         )
         if typ != "OK":
             raise GmailError(f"APPEND to {folder!r} failed (typ={typ}): {data!r}")
-    return {"drafted": not dry_run, **_msg_summary(msg)}
+    return {"drafted": not dry_run, **msg_summary(msg)}
 
 
 def draft_delete(message_id: str) -> dict[str, Any]:
