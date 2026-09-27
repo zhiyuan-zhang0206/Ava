@@ -15,9 +15,11 @@ change release semantics; each is a thin wrapper that resolves paths under
 `$AVA_HOME` and calls the same functions `python -m cli.release_prepare`, the
 release-cycle preview, and `ava cluster update --prepared` already call.
 
-There is no fleet model on this branch yet (`cli/release_fleet/`, slice FC-7:
-`FleetRequest`, a coordinator, per-unit journals). `release request`'s
-`--exclude`/`--reason` name a multi-host fleet exclusion and always refuse —
+There is no fleet model on this branch yet (slice FC-7: `FleetRequest`, a
+coordinator, per-unit journals); `cli/release_fleet/` so far holds only the
+pure workload policy it will call ([[cli/release_fleet/release_fleet.ava.okf.md]]).
+`release request`'s `--exclude`/`--reason` name a multi-host fleet exclusion
+and always refuse —
 this slice closes the fleet-and-cutover plan's gap 4 ("no operator Request
 builder") for exactly one host, not for a fleet.
 

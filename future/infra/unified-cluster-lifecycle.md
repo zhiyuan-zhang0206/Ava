@@ -356,9 +356,12 @@ last-known-good. Alert delivery is configurable, including a user-selected agent
 the alert recipient does not become the automatic recovery authority.
 
 The independent health-probe rollback and known-good writers are removed.
-The new executor's frozen-cohort workload threshold and known-good publication
-policy are still unimplemented pre-cutover work. Health alerts remain active;
-removing an old decision path is not evidence that its replacement is complete.
+The new executor's frozen-cohort workload threshold, alert routing and
+known-good publication exist only as a pure policy module
+([fleet workload policy](../../cli/release_fleet/release_fleet.ava.okf.md));
+no executor calls it yet, so none of it is in force before the fleet
+coordinator (FC-7) connects it. Health alerts remain active; removing an old
+decision path is not evidence that its replacement is complete.
 
 Current local serving proofs do not complete this plan. Acceptance requires
 normal teardown, interrupted recovery and release A/B/A evidence, removal of
