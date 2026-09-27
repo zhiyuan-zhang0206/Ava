@@ -49,18 +49,30 @@ read of the pass and before any signal. Two proofs count.
     the session and none of the captured members are alive. No kernel fact
     observable at that moment separates it from a member of a new session that
     received S after the pid was recycled. Only elapsed time does.
-  - So a proof stands for `_PROOF_FRESH_S` (1 s) after the last witness. That
-    is half the "pid reuse cannot land inside a couple of seconds" bound
+  - So a proof stands for `_PROOF_FRESH_S` (1 s) after it was last renewed.
+    That is half the "pid reuse cannot land inside a couple of seconds" bound
     that `shared/proc_tree.py`'s identity check already relies on.
+  - A witness renews it. So does a proven pass that read any process in the
+    session: that read shows the session alive after the scan began, even if
+    the process exited before it could be pinned. A chain of short-lived
+    processes thus keeps the proof current while passes keep reading its hops.
 
-Anything a pass cannot prove is logged and left running.
+A process a pass cannot prove is logged with its pid and command name, once
+per kill or per stop, and left running.
 
 The stop keeps its proof current while it waits:
 
 - Each grace poll refreshes every session's capture with one shared scan
   (`session_tree.refresh`), adding new descendants and proven session members.
-- A member can fork while that scan runs, so a quiet poll counts only after a
-  second, immediate poll is quiet too.
+  A capture nothing can prove any more is still scanned, so a process left in
+  its session is logged.
+- The scan reads session ids first, with a bare `getsid` per pid, newest pids
+  first. A fork-and-exit chain's current hop is the newest process and lives a
+  few milliseconds, so it is read while it exists; behind a full psutil pass
+  over some 800 processes it was already gone.
+- A poll is quiet only when its scan read no process in the session, pinned or
+  not, and no captured process lives. A member can fork while that scan runs,
+  so a quiet poll counts only after a second, immediate poll is quiet too.
 - The kill leg starts with one more refresh and passes each capture's proof to
   the kill.
 
@@ -109,20 +121,28 @@ session, and whatever outlived the SIGKILL is out of its reach too.
 
 ## Consequences
 
-- **What escapes.** A helper escapes only if, when the stop looks for it, no
-  captured member is alive and no proof is younger than a second. Examples
-  are a stop process stalled for over a second, or a chain of fork-and-exit
-  hops that outruns every scan. The escape is logged. The stop's result is
-  unchanged by it.
+- **What escapes.**
+  - A process the stop cannot prove: no captured process alive and no proof
+    renewed in the last second, for example because the stop process stalled
+    for over a second. It is logged once, with its pid and command name, and
+    keeps the grace polling until its deadline. The stop's result is unchanged
+    by it.
+  - A fork-and-exit chain whose hops all die before two consecutive scans
+    read any of them. Nothing logs it, because no scan saw it. Chains of
+    3 ms x 60, 8 ms x 40 and 10 ms x 150 hops are taken, and tests lock that.
+  - A chain still forking after the stop has finished.
 - **Theoretical corner.** The witness argument assumes that the shell's pid
   was not recycled onto one of the session's own descendants, which then led
   its own session and has itself already exited. That requires the whole
   original session to end, and the pid space to wrap, inside the kill.
-- **Host graceful kill.** The host's graceful kill (`kill --graceful`, which
-  the TTL reaper uses) carries no fresh proof. A helper forked on TERM is
-  therefore still reachable there only through a surviving witness.
-  Interactive shells ignore TERM, which keeps the frozen shell as that
-  witness.
+- **The host's kill op.** The TTL reaper, `ava.shell.sessions.kill` and every
+  other production caller reach it in its forced mode (`kill_session` and
+  `kill_session_with_verdict` default to `graceful=False`, which runs the PTY
+  CLI's plain `kill`). That mode freezes the live shell first, so the shell
+  witnesses every pass. Only the op's graceful mode, which no production
+  caller uses, lets the shell die before the sweep. It carries no fresh
+  proof, so it reaches a helper forked on TERM only through a captured
+  process that is still alive.
 - **Kill-op latency.** A kill op waits only for the members it signalled. A
   member it may not signal has its liveness read once, so it no longer spends
   the TTL reaper's 5 s dispatch budget.
