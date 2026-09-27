@@ -88,10 +88,10 @@ failed unit start is marked failed, with no automatic retry yet; a release
 moves between two distinct commits (a same-commit rebuild is `adopt`'s); the
 request builder runs in the admitted image until FC-7b.
 
-Still awaiting a ruling:
-
-1. `stopping` is the plan's `closing`; `starting` + `observing` its
-   `starting_gateway`.
-2. Units' barrier deadlines are journaled in their instruction; a
-   continuation keeps the original deadline.
-3. An abort at `prepared` completes as `aborted` rather than refusing.
+Ruled on 2026-09-28
+([decision](../../decisions/2026-09-28-fleet-coordinator-ruled-details.md)):
+`stopping` is the plan's `closing`; `starting` + `observing` its
+`starting_gateway` — the code's names win, and the plan document is updated
+to match. Units' barrier deadlines are journaled in their instruction, and a
+continuation keeps the original deadline rather than recomputing one. An
+abort at `prepared` completes as `aborted` rather than refusing.
