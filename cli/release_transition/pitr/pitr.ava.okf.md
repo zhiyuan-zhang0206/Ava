@@ -33,8 +33,11 @@ configuration, auto.conf, expected archive settings and the current PostgreSQL
 birth. The executor replaces itself with its exact recorded image argv and
 environment to load fresh Settings; PID and native invocation remain unchanged.
 
-Preflight and quiescing admit a live persistent terminal or schedule — production
-always has them, so refusing would make activation impossible there
+PITR stays single-box: preflight and quiescing hold its reserved gateway home
+to the fleet inventory's single-unit gate (`inventory.require_fleet_of_one`,
+[[cli/release_fleet/coordinator.ava.okf.md|fleet coordinator]]). They admit a
+live persistent terminal or schedule — production always has them, so refusing
+would make activation impossible there
 ([decision](../../../decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md)
 item 2). After the maintenance drain, `stop_apps` closes them exactly like a
 release's stop phase: a bounded wait for their work to finish while root still

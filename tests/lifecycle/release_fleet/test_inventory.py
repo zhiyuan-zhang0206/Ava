@@ -3,12 +3,14 @@
 `check_inventory` is pure. `require_fleet_of_one` / `require_topology` read the
 loaded identity, Settings and the `machine_units` / `machines` rows; those
 reads are replaced here (the rows are real on PostgreSQL in
-tests/lifecycle/db_authority/test_fleet_of_one.py).
+tests/lifecycle/db_authority/test_fleet_of_one.py). PITR stays single-box
+through the same gate.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -143,3 +145,37 @@ def test_a_remote_unit_request_always_refuses(prepared: FleetRequest) -> None:
     request = _request(units=(_spec(_RUNNER),), coordinator=_ENDPOINT)
     with pytest.raises(ValueError, match="dbgen-8"):
         require_topology(request.unit_request(_RUNNER))
+
+
+def test_pitr_admits_only_its_reserved_gateway_home_as_a_fleet_of_one(
+    prepared: FleetRequest, lone_gateway: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PITR's preflight is the fleet-of-one gate on its reserved gateway home. It
+    admits live terminals, which `stop_apps` closes like a release's stop phase
+    (decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2), and
+    refuses any other registered writer or another machine's operation."""
+    import shared.machine
+    from cli.release_transition.pitr import transition
+    from shared import runtime_release
+
+    def selected(_store: Path) -> str:
+        return "selected"
+
+    driver = object.__new__(transition.PitrTransition)
+    driver.request = SimpleNamespace(  # type: ignore[assignment]
+        home=prepared.home,
+        registry=prepared.registry,
+        machine=prepared.machine,
+        require_configuration=lambda: None,
+        image=SimpleNamespace(selector="selected"),
+    )
+    driver.home = Path(prepared.home)
+    monkeypatch.setattr(runtime_release, "current_pointer", selected)
+    driver.preflight()
+    lone_gateway["units"].add(_RUNNER.order)
+    with pytest.raises(ValueError, match="every registered unit must be this home"):
+        driver.preflight()
+    lone_gateway["units"].discard(_RUNNER.order)
+    monkeypatch.setattr(shared.machine, "machine_name", lambda: "another")
+    with pytest.raises(ValueError, match="loaded machine differs"):
+        driver.preflight()

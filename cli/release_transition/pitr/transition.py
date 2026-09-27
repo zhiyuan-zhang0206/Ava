@@ -105,13 +105,24 @@ class PitrTransition:
         return read_operation(self.request.path).maintenance_at
 
     def preflight(self) -> None:
-        from cli.release_transition.identity import require_local_writers
         from shared.runtime_release import current_pointer
 
         self.request.require_configuration()
         if current_pointer(self.home / "releases") != self.request.image.selector:
             raise ValueError("PITR must use the currently selected retained image")
-        require_local_writers(self.request)
+        self._require_fleet_of_one()
+
+    def _require_fleet_of_one(self) -> None:
+        """PITR stays single-box: its reserved gateway home is the cluster's only unit."""
+        from cli.release_fleet.inventory import require_fleet_of_one
+        from cli.release_transition.identity import require_reservation
+        from shared.cluster import registry_path
+        from shared.machine import machine_name
+
+        if machine_name() != self.request.machine:
+            raise ValueError("the loaded machine differs from the PITR operation's")
+        require_reservation(self.request, active_registry=registry_path())
+        require_fleet_of_one(self.home)
 
     def _record(self, journal: Journal) -> ActivationRecord:
         operation, progress = journal.operation, journal.operation.pitr
@@ -283,12 +294,11 @@ class PitrTransition:
         journal.provisioned(seal, data_stopped=data_stopped)
 
     def quiesce(self, operation: Operation) -> None:
-        from cli.release_transition.identity import require_local_writers
         from cli.release_transition.root_service import preflight
         from ops import agent_pause
 
         require_inputs(operation)
-        require_local_writers(self.request)
+        self._require_fleet_of_one()
         preflight(operation, self.image, previous=False)
         from shared import maintenance
 

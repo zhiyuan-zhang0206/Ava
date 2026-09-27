@@ -26,8 +26,8 @@ distinct commits over one schema. A `UnitRequest` (kind `unit`) is one unit's
 home request; its id and `created_at` are the fleet's, so the maintenance
 hold identity is the same everywhere. `inventory.py` requires every
 registered unit to be the gateway, included or excluded, a paused machine's
-always excluded; `require_fleet_of_one(home)` is the single-unit gate (PITR
-can adopt it); any listed unit refuses naming slices dbgen-8 and FC-9.
+always excluded; `require_fleet_of_one(home)` is the single-unit gate (PITR's
+too); any listed unit refuses naming slices dbgen-8 and FC-9.
 
 Both kinds are the home journal's `Operation`: `progress.py` adds
 `FleetProgress` (admitted generation, units with their last instruction and

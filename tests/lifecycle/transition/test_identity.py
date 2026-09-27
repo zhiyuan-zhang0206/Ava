@@ -1,10 +1,8 @@
 """Captured registry authority must admit both release starts before any drain."""
 
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -96,84 +94,3 @@ def test_registry_symlink_is_not_an_admitted_authority(prepared: FleetRequest) -
     redirected = prepared.model_copy(update={"registry": str(link)})
     with pytest.raises(ValueError, match="active registry authority"):
         require_reservation(redirected, active_registry=link)
-
-
-class _Rows:
-    def __init__(self, rows: list[tuple[str, ...]]) -> None:
-        self.rows = rows
-
-    def fetchall(self) -> list[tuple[str, ...]]:
-        return self.rows
-
-
-class _Units:
-    """Exactly this home's unit and machine rows."""
-
-    def __init__(self, home: str) -> None:
-        self.home = home
-
-    def __enter__(self) -> "_Units":
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        return None
-
-    def execute(self, sql: str) -> _Rows:
-        return _Rows([("unit", self.home)] if "machine_units" in sql else [("unit",)])
-
-
-def _live_terminal() -> None:
-    raise RuntimeError("persistent terminals/schedules ... will not kill or replay them")
-
-
-def test_release_writer_boundary_admits_terminals_its_stop_phase_closes(
-    prepared: FleetRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A live terminal is no longer a release refusal: production always has
-    schedules and PTYs, and the stop phase closes them (FC-6)."""
-    import shared.cluster
-    import shared.db
-    import shared.machine
-    from cli.commands import service_stop
-    from cli.release_transition.identity import require_local_writers
-    from shared.config import settings
-
-    monkeypatch.setitem(os.environ, "AVA_HOME", prepared.home)
-    monkeypatch.setattr(shared.machine, "machine_name", lambda: "unit")
-    monkeypatch.setattr(shared.machine, "machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(shared.cluster, "registry_path", lambda: Path(prepared.registry))
-    monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: False))
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    monkeypatch.setattr(settings.data_plane, "data_plane_host", "")
-    monkeypatch.setattr(shared.db, "connect", lambda: _Units(prepared.home))
-    monkeypatch.setattr(service_stop, "require_no_terminals", _live_terminal)
-    require_local_writers(prepared)
-
-
-def test_pitr_preflight_admits_terminals_its_stop_phase_closes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A live terminal is no longer a PITR refusal either: production always
-    has schedules and PTYs, and `stop_apps` closes them like a release's stop
-    phase (decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2)."""
-    from cli.commands import service_stop
-    from cli.release_transition import identity
-    from cli.release_transition.pitr import transition
-    from shared import runtime_release
-
-    driver = object.__new__(transition.PitrTransition)
-    driver.request = SimpleNamespace(  # type: ignore[assignment]
-        require_configuration=lambda: None, image=SimpleNamespace(selector="selected")
-    )
-    driver.home = tmp_path
-
-    def selected(_store: Path) -> str:
-        return "selected"
-
-    def one_host(_request: object) -> None:
-        return None
-
-    monkeypatch.setattr(runtime_release, "current_pointer", selected)
-    monkeypatch.setattr(identity, "require_local_writers", one_host)
-    monkeypatch.setattr(service_stop, "require_no_terminals", _live_terminal)
-    driver.preflight()
