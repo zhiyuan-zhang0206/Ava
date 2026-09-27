@@ -76,15 +76,17 @@ _DOUBLE_FORK_JOB = (
 # A foreground job whose TERM handler forks a helper and exits at once. The
 # helper is born after the stop's signals and its parent is gone before the next
 # poll; the shell has already died of its hangup. It keeps the shell's POSIX
-# session. `{disposition}` is the helper's own HUP/TERM disposition.
+# session. `{disposition}` is the helper's own HUP/TERM disposition. It records
+# its pid first: with SIG_DFL, a shell slow to handle its own hangup (a loaded
+# box) forwards HUP to the job's group, which then includes the helper.
 _FORK_ON_TERM_JOB = (
     "import os,signal,sys,time\n"
     "def on_term(*_):\n"
     "    if os.fork() == 0:\n"
-    "        signal.signal(signal.SIGTERM, signal.{disposition})\n"
-    "        signal.signal(signal.SIGHUP, signal.{disposition})\n"
     "        open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
     "        os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+    "        signal.signal(signal.SIGTERM, signal.{disposition})\n"
+    "        signal.signal(signal.SIGHUP, signal.{disposition})\n"
     "        while True: time.sleep(0.1)\n"
     "    os._exit(0)\n"
     "signal.signal(signal.SIGTERM, on_term)\n"
