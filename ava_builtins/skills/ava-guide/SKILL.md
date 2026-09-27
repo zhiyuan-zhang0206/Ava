@@ -43,7 +43,8 @@ and ends with `ava impersonate release --summary`. The
 Python attachment (`ava.external.attach`) remains for the executor's other `ava.*`
 capabilities.
 
-The executor's field manual is `.agents/skills/impersonator-guide/SKILL.md`; launching
+The executor's field manual is `.agents/skills/impersonator-guide/SKILL.md` (one host guide per
+coding tool under its `reference/`); launching
 a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self`
 (see the `ava-use-other-agents` skill).
 

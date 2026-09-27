@@ -13,6 +13,8 @@ from pathlib import Path
 _TAKEOVER_TTL_SECONDS = 3600
 _TAKEOVER_BATCH_WINDOW_SECONDS = 0
 _EXECUTOR_LABELS = {"codex": "Codex", "claude": "Claude", "dsh": "DeepSeek Harness"}
+# The impersonator guide's host-specific half, beside its SKILL.md.
+_HOST_GUIDES = {"codex": "codex.md", "claude": "claude_code.md", "dsh": "deepseek_harness.md"}
 
 
 def bootstrap_message(
@@ -86,7 +88,8 @@ def bootstrap_message(
     return (
         f"You will take over Ava agent {agent_id}, the agent that launched you. "
         f"The briefing:\n{brief}\n\n"
-        f"Read the impersonator guide at {guide}. "
+        f"Read the impersonator guide at {guide} and its {_EXECUTOR_LABELS[provider]} host "
+        f"guide at {guide.parent / 'reference' / _HOST_GUIDES[provider]}. "
         f"Start the named impersonation with: {command}\n{routing}\n"
         "No controller credential is issued: control commands (say/inbox/ack/renew/release) run "
         "under this session's id and are pinned to this process tree. Wait for status active "
