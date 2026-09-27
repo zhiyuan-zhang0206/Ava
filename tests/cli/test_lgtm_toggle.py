@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _lgtm, _lgtm_native
+from cli.commands.observability import lgtm as _lgtm
+from cli.commands.observability import lgtm_native as _lgtm_native
 
 
 class _Result:

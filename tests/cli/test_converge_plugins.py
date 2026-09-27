@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _converge, memory
+from cli.commands import _converge
 from cli.commands._converge_plugins import ScaffoldResult, run_plugin_scaffolds
+from cli.commands.extensions import memory
 from shared import memory_repo, paths, proc
 from shared.config import settings
 from shared.machine import set_identity

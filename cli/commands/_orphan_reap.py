@@ -49,7 +49,7 @@ def _reap_orphan_listeners(
 
     Returns [(service, port, pid)] of reaped orphans for the stop output.
     """
-    from cli.commands.pgbouncer import _terminate_verified
+    from cli.commands.data_plane.pgbouncer import terminate_verified
     from shared.port_preflight import listeners_on, process_mentions, unit_port_map
     from shared.proc import process_cmdline
 
@@ -66,7 +66,7 @@ def _reap_orphan_listeners(
                 process = Path(cmdline[0]).name if cmdline else "unknown process"
                 print(f"  · not claiming {port}: belongs to {process} (pid {pid})")
                 continue
-            if _terminate_verified(pid, label=f"orphan {svc} on port {port}"):
+            if terminate_verified(pid, label=f"orphan {svc} on port {port}"):
                 reaped.append((svc, port, pid))
     return reaped
 

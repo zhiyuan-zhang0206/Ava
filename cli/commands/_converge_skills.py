@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cli.commands._skill_package import contains_skill_md
+from cli.commands.extensions.skill_package import contains_skill_md
 from shared import install_registry, paths
 from shared.cluster import is_default_home
 from shared.host.converge.converge_preserve_report import report_converge_preserve

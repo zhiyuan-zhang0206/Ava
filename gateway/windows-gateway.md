@@ -18,7 +18,7 @@ Not a rough port — an absent one.
 - `shared/runtime_binaries.py` vendors Postgres for `darwin` and
   `linux-x86_64`; `_platform_key()` raises for Windows. Redis is not vendored on
   any platform yet ("a prebuilt we publish — not here yet").
-- `_redis_server_bin()` / `_redis_cli_bin()` (`cli/commands/cluster_instance.py`)
+- `_redis_server_bin()` / `_redis_cli_bin()` (`cli/commands/data_plane/cluster_instance.py`)
   resolve the `redis@8.2` brew keg on macOS and a bare `redis-server` elsewhere. No `.exe`, no
   Memurai branch.
 - `start_redis` passes `--daemonize yes`. Windows redis forks do not implement
@@ -71,7 +71,7 @@ unconditionally in the Windows start roster and fails every time.
 
 ### 4. PgBouncer is POSIX-only and on by default
 
-`cli/commands/pgbouncer.py` signals with `os.kill(pid, SIGHUP)` /
+`cli/commands/data_plane/pgbouncer.py` signals with `os.kill(pid, SIGHUP)` /
 `os.kill(pid, 0)`. On Windows `os.kill(pid, 0)` **terminates** the target — the
 hazard `shared/proc.py` documents and routes around. PgBouncer is enabled by
 default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`.

@@ -53,7 +53,7 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 |---|---|---|
 | Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/_converge_skills.py`, `okf/skills/load-directory-sync.ava.okf.md` |
 | Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit guards), `enabled`, schema `version` field as a migration anchor | `shared/install_registry.py` |
-| Explicit update verbs | `ava skill update [name...] [--force]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name> [--force]`, `ava mcp upgrade` — all with the R5 conflict contract and staged/atomic replacement | `cli/commands/skill.py`, `plugins.py`, `mcp.py` |
+| Explicit update verbs | `ava skill update [name...] [--force]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name> [--force]`, `ava mcp upgrade` — all with the R5 conflict contract and staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
 | Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `_converge_skills.py`, `plugins.py`, `shared/plugins_config.py` |
 | Supply-chain gate | `shared/packages/skills/skill_scan.py` on every ingest (critical → refuse, `--accept-risk` recorded, trust never auto-promoted) | `shared/packages/skills/skill_scan.py`, `shared/install_registry.py` |
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `shared/plugin_manifest.py`, `conventions/plugin-spec-v2.md` |
@@ -324,7 +324,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Registry schema v2: `UpdateState` / `ChannelState` fields, lazy migration (retired, batch b5 2026-09-20: a v1 file is refused), defaults resolution from settings (`shared/config/packages.py`: per-class default mode/interval, base tick, master switch).
 - `ava packages status` (read-only) + `--json` — including the host version and each package's declared range (§5.5).
 - Version plumbing: optional manifest support for skill packages; the core-content CI check (declared ranges must include the repo's current version); the derived host-version policy recorded in [`conventions/host-versioning.md`](../../conventions/host-versioning.md) (no bump discipline; `[project].version` remains only as the wheel-mode fallback).
-- Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/packages/packages.ava.okf.md`, and the `ava-modification-layers` / `develop-a-plugin` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
+- Docs: the ruling entry + this elaboration (landed together); update `okf/skills/load-directory-sync.ava.okf.md`, `cli/commands/extensions/packages.ava.okf.md`, and the `ava-modification-layers` / `develop-a-plugin` skill phrasing ('kernel-shipped base set, changed via L4') when P1/P2 land.
 - Acceptance at landing: v1 file loads, migrates on next write, defaults visible in status; no behavior change elsewhere (test lock: registry round-trip + migration) — the v1 leg later retired, batch b5 2026-09-20: v1 files are refused.
 
 ### P1 — skills fast lane (the POC; the deliverable the user can feel) — **landed: PR #2368**
@@ -396,7 +396,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 ## Appendix A — current-state evidence (for reviewers)
 
 - Load dir sync + R5 bootstrap-only: `cli/commands/_converge_skills.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
-- Explicit update verbs + conflicts: `cli/commands/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/mcp.py`.
+- Explicit update verbs + conflicts: `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
 - Rollout skill refresh legs: `cli/commands/_update_local.py:85` (`_refresh_builtin_skills`), `cli/commands/_update_agent_runner.py:250`.
 - Registry model: `shared/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
 - Plugin discovery + loaders: `shared/plugins_config.py:_discover_plugins`, `agent/_extensions.py:load_extensions`, `shared/lm/_plugin_providers.py`; roots: `shared/paths.py:repo_plugins_dir/plugins_dir`, `shared/runtime_interpreter.py:external_plugin_read_root`.

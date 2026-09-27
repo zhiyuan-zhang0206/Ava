@@ -12,7 +12,9 @@ from threading import Barrier
 
 import pytest
 
-from cli.commands import _grafana_render, _otel_collector, observatory_urls
+from cli.commands.observability import grafana_render as _grafana_render
+from cli.commands.observability import observatory_urls
+from cli.commands.observability import otel_collector as _otel_collector
 from ops import pty_close_notices
 from shared import (
     atomic_io,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 import shared.db
-from cli.commands import _otel_collector as oc
+from cli.commands.observability import otel_collector as oc
 from services.heartbeat import station_probe
 from shared.config import settings
 from tests.cli.test_converge_otel_collector import _render_real_template

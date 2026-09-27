@@ -190,7 +190,7 @@ def _otel_collector_gate_reason() -> str | None:
     """Why otel-collector is gated out, or None when it should run.
 
     This is the roster sibling of ``ensure_otel_collector_step`` in
-    ``cli/commands/_otel_collector.py`` and ``_collector_serves_this_home`` in
+    ``cli/commands/observability/otel_collector.py`` and ``_collector_serves_this_home`` in
     ``services/healthchecks/otel_collector.py``. All three share
     ``collector_allowed_for_home`` (marker OR station capability OR explicit
     ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``ava start``,

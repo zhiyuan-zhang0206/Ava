@@ -194,7 +194,7 @@ def test_restart_handler_forwards_the_parsed_config_overlay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The restart parser keeps the JSON string intact for its HTTP command."""
-    from cli.commands import agents as agents_commands
+    from cli.commands.agents import control as agents_commands
 
     calls: list[tuple[int, str | None, str | None]] = []
 

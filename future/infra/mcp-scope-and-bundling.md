@@ -108,7 +108,7 @@ An MCP declaration carries `{source, scope}` — not just a config dict:
   same-named default — which both `ava/mcps.py:_load_config` (in-process) and
   `ava/_mcps_daemon.py:_load_config` (the daemon) now delegate to. **Also
   landed:** `ava plugins install` can now *deliver* a plugin-bundled `.mcp.json`
-  into `~/.ava/plugins/<name>/` (`cli/commands/_claude_code_plugin.py`, alongside any
+  into `~/.ava/plugins/<name>/` (`cli/commands/extensions/_claude_code_plugin.py`, alongside any
   bundled agents) — feeding the existing plugin source, no new loader path.
   **Landed (2026-07-19):** a standalone installed registry package (`type="mcp"`)
   as a third source. `ava mcp install <git-url|local-dir>` lands a self-contained
@@ -120,7 +120,7 @@ An MCP declaration carries `{source, scope}` — not just a config dict:
   cwd = the package dir (`installed_mcp_dir`), so its deps stay out of core — no
   `uv run` (a resident wrapper). Discord was the first server moved out this way
   (as a standalone package), removing `discord-py` from core deps — removed entirely on 2026-08-12 (user ruling: no longer maintained). `ava mcp
-  install` mirrors `ava plugins install` (shared `cli/commands/_pkg_source.py`).
+  install` mirrors `ava plugins install` (shared `cli/commands/extensions/_pkg_source.py`).
 - **scope** — `agent` (default; current per-agent daemon) | `machine` (a new
   machine-level daemon: socket not keyed by `agent_id`, shared, ref-counted by
   connected agents). No `identity` field — single-identity assumption.

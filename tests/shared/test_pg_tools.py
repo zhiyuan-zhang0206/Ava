@@ -2,7 +2,7 @@
 the Postgres session timezone pin (tz audit PR-1).
 
 `pg_shm_args` / `pg_tz_args` feed the `pg_ctl -o` string of both startup paths
-— the per-cluster data plane (`cli/commands/cluster_instance.py`) and the
+— the per-cluster data plane (`cli/commands/data_plane/cluster_instance.py`) and the
 throwaway test/eval clusters (`throwaway_postgres`). `pg_shm_args`' two
 settings move Postgres' main shared memory region and its dynamic segments out
 of POSIX shm (/dev/shm on Linux) into files under the data directory, so an

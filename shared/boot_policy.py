@@ -35,7 +35,7 @@ on the theory that the 60 s OS watchdog probe was the real long-run net and
 cap would have reintroduced this same outage with a longer fuse: a box that
 boots while its VPN is down for 45 minutes would recover on macOS and stay down
 forever on Linux/Windows. The probe
-(`cli/commands/_cluster_watchdog_probe.py`) repairs exactly one thing — a dead
+(`cli/commands/cluster/watchdog_probe.py`) repairs exactly one thing — a dead
 watchdog session — and says so: "It does NOT run `ava start`, and it does
 not touch any other service." Neither it nor the watchdog it revives ever runs
 the gateway env refresh, the converge phase, or this cluster's pg/redis

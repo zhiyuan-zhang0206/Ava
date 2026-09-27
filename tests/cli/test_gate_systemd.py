@@ -242,7 +242,10 @@ def test_legacy_pid_must_be_owned_and_gone_before_start(
     pidfile.write_text("123")
     monkeypatch.setattr("shared.proc.process_alive", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._converge_gate.gate_pid_is_ours", lambda *_: owned)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands.pgbouncer._terminate_verified", lambda *_, **__: stopped)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        "cli.commands.data_plane.pgbouncer.terminate_verified",
+        lambda *_, **__: stopped,  # pyright: ignore[reportUnknownArgumentType]
+    )
     if owned and stopped:
         ensure(tmp_path)
         assert not pidfile.exists()

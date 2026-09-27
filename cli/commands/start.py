@@ -81,10 +81,10 @@ def _consume_rollout_parent_handoff() -> bool:
 def _ensure_gateway_data_plane() -> int:
     """Bring up this cluster's data plane — local instance or remote probe.
 
-    The implementation lives in `cli/commands/_data_plane.py` (this module's
+    The implementation lives in `cli/commands/data_plane/bringup.py` (this module's
     line budget); the wrapper keeps the name tests and callers patch.
     """
-    from cli.commands._data_plane import ensure_gateway_data_plane
+    from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 
     return ensure_gateway_data_plane()
 
@@ -455,7 +455,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # journaled target. Bring-up above recognizes that target; finish its env +
     # in-process adoption before the first migration or lease dial.
     if "gateway" in roles:
-        from cli.commands._data_plane_admin_secrets import (
+        from cli.commands.data_plane.admin_secrets import (
             resume_pending_data_plane_admin_secrets,
         )
 
@@ -513,7 +513,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # extension provisioning belongs to its owner.
 
     if "gateway" in roles and not settings.data_plane.is_remote:
-        from cli.commands.cluster_instance import pg_admin_url
+        from cli.commands.data_plane.cluster_instance import pg_admin_url
         from shared.cluster import db_identity, get_record
         from shared.cluster.provision import ensure_pgvector_extension
         from shared.paths import ava_home
@@ -532,7 +532,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # than on every start. Gateway-only: the admin credential lives in the
     # gateway's .env, and a runner has no business touching roles.
     if applied and "gateway" in roles:
-        from cli.commands.ensure_db_role import refresh_runner_grants_after_migration
+        from cli.commands.data_plane.ensure_db_role import refresh_runner_grants_after_migration
 
         refresh_runner_grants_after_migration()
 
@@ -541,7 +541,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # before any service session can inherit the owner URLs. Fresh installs
     # already minted the independent values at birth, so this is a no-op there.
     if "gateway" in roles:
-        from cli.commands._data_plane_admin_secrets import ensure_data_plane_admin_secrets
+        from cli.commands.data_plane.admin_secrets import ensure_data_plane_admin_secrets
 
         try:
             ensure_data_plane_admin_secrets(

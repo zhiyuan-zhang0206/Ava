@@ -23,7 +23,7 @@ from uuid import UUID
 import pytest
 from websockets.sync.server import Server, ServerConnection, unix_serve
 
-from cli.commands import codex_app_server
+from cli.commands.agents import codex_app_server
 
 THREAD_ID = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 

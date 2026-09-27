@@ -271,7 +271,7 @@ def _birth(*, home: Path, secret: str) -> int:
     The data-plane identifier (db / role / ACL user) is the fixed
     `DATA_PLANE_IDENTITY` — birth is the one place the identifier is *chosen*;
     everywhere else reads it back from the `.env` URLs as data."""
-    from cli.commands import cluster_lifecycle as lifecycle
+    from cli.commands.cluster import registry as lifecycle
     from shared import cluster as cl
     from shared.envfile import upsert_env
 
@@ -299,7 +299,7 @@ def _birth(*, home: Path, secret: str) -> int:
         )
         return rc
     try:
-        from cli.commands.cluster_instance import pg_admin_url
+        from cli.commands.data_plane.cluster_instance import pg_admin_url
 
         base_admin_url = pg_admin_url(rec.ports["postgres"])
         base_db_url, base_redis_url = cl.per_cluster_base_urls(rec)

@@ -77,10 +77,10 @@ the rest of the `_`-prefixed steps are enumerated in
 
 - `cli/main.py:main()` — argparse entrypoint + enroll/preflight special routing; `cli/parsers/` — the settings-free argparse tree (builders + handlers per domain); `cli/preflight.py:require_installed_home()` — settings-free installed-home gate
 - `cli/install_cluster.py:cmd_install_cluster()` — install-time birth; `cli/enroll.py:run_enroll` — config-free enrollment
-- `cli/commands/cluster_lifecycle.py` — registry allocation + `ls/down/destroy` (`--path` addressed); `start.py` / `status.py` / `cluster_instance.py`
+- `cli/commands/cluster/registry.py` — registry allocation + `ls/down/destroy` (`--path` addressed); `start.py` / `status.py` / `data_plane/cluster_instance.py`
 
 ## Notes
 
 - Prod `ava` = `~/.local/bin/ava` → symlink to the prod checkout, acting on `~/.ava`; in a dev worktree, `.venv/bin/ava` acts on that worktree's cluster (via the `.ava_home` pointer).
 - Each cluster has its own pg/redis; isolation is home-directory isolation (instances under `$AVA_HOME` + port blocks), not db names / redis indexes in a shared instance.
-- Children: [[cli/cluster.ava.okf.md]] (the `ava cluster` verb group) · [[cli/install_cluster.ava.okf.md]] (install-time birth) · [[cli/commands/commands.ava.okf.md]] (the module split) · [[cli/commands/packages/packages.ava.okf.md]] (the plugins / skill / mcp package surface) · [[cli/mcp_server.ava.okf.md]] (`ava mcp serve` — this cluster AS an MCP server).
+- Children: [[cli/cluster.ava.okf.md]] (the `ava cluster` verb group) · [[cli/install_cluster.ava.okf.md]] (install-time birth) · [[cli/commands/commands.ava.okf.md]] (the module split) · [[cli/commands/extensions/packages.ava.okf.md]] (the plugins / skill / mcp package surface) · [[cli/mcp_server.ava.okf.md]] (`ava mcp serve` — this cluster AS an MCP server).

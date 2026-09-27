@@ -1,4 +1,4 @@
-"""cli.commands._lgtm — native converge bring-up gating tests.
+"""cli.commands.observability.lgtm — native converge bring-up gating tests.
 
 The local LGTM backends are a host singleton; converge runs on every `ava
 start` of every cluster on the box, so the bring-up must fire ONLY on the home
@@ -20,8 +20,8 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
-from cli.commands import _lgtm, _lgtm_native, observatory_urls
 from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.observability import lgtm, lgtm_native, observatory_urls
 
 # S104-flagged literal reused by the mismatch-warning parametrize — a config
 # value under test, not a bind.
@@ -31,8 +31,8 @@ _WILDCARD_LISTEN = "0.0.0.0"  # noqa: S104
 @pytest.fixture(autouse=True)
 def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     """These existing lifecycle cases exercise the Darwin implementation."""
-    monkeypatch.setattr(_lgtm_native.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(_lgtm_native.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(lgtm_native.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(lgtm_native.platform, "machine", lambda: "arm64")
 
 
 # The fixed document the S3 dashboard render is stubbed to: the assertions
@@ -135,9 +135,9 @@ def test_no_marker_never_touches_native_backends(
     ctx = _ctx(tmp_path)
     ctx.ava_home.mkdir(parents=True)
     runs: list[list[str]] = []
-    monkeypatch.setattr(_lgtm.subprocess, "run", lambda cmd, **_kw: runs.append(cmd))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(lgtm.subprocess, "run", lambda cmd, **_kw: runs.append(cmd))  # pyright: ignore[reportUnknownArgumentType]
 
-    _lgtm.ensure_lgtm_stack_step(ctx)
+    lgtm.ensure_lgtm_stack_step(ctx)
     assert runs == []
 
 
@@ -156,9 +156,9 @@ def test_marker_runs_start_sh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
         calls.append((cmd, Path(str(kw["cwd"]))))
         return _Result()
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
+    monkeypatch.setattr(lgtm.subprocess, "run", fake_run)
 
-    _lgtm.ensure_lgtm_stack_step(ctx)
+    lgtm.ensure_lgtm_stack_step(ctx)
     assert calls == [(["bash", "start.sh"], ctx.repo / "deploy" / "lgtm")]
 
 
@@ -177,9 +177,9 @@ def test_marker_starts_without_docker_cli(monkeypatch: pytest.MonkeyPatch, tmp_p
         runs.append(cmd)
         return _Result()
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", record_run)
+    monkeypatch.setattr(lgtm.subprocess, "run", record_run)
 
-    _lgtm.ensure_lgtm_stack_step(ctx)
+    lgtm.ensure_lgtm_stack_step(ctx)
     assert runs == [["bash", "start.sh"]]
 
 
@@ -193,10 +193,10 @@ def test_failing_start_sh_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     class _Failed:
         returncode = 1
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(lgtm.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(RuntimeError, match=r"start\.sh exited 1"):
-        _lgtm.ensure_lgtm_stack_step(ctx)
+        lgtm.ensure_lgtm_stack_step(ctx)
 
 
 def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_defaults(
@@ -215,30 +215,30 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     assert "address: 127.0.0.1" in loki
     assert (
         "--web.listen-address={lgtm_listen_host}:{lgtm_prometheus_port}"
-        in _lgtm_native._NATIVE_CONSTANTS["prometheus"].arguments
+        in lgtm_native._NATIVE_CONSTANTS["prometheus"].arguments
     )
 
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "127.0.0.1")
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
     rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: 127.0.0.1" in rendered_loki
     assert "grpc_listen_address: 127.0.0.1" in rendered_loki
     prometheus_plist = plistlib.loads(
-        _lgtm_native._render_plist("prometheus", native_dir, home).encode()
+        lgtm_native._render_plist("prometheus", native_dir, home).encode()
     )
     assert "--web.listen-address=127.0.0.1:9090" in prometheus_plist["ProgramArguments"]
 
     # A non-loopback setting flows through to the rendered listeners.
     monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "10.0.0.5")
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
     rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: 10.0.0.5" in rendered_loki
     assert "grpc_listen_address: 10.0.0.5" in rendered_loki
     prometheus_plist = plistlib.loads(
-        _lgtm_native._render_plist("prometheus", native_dir, home).encode()
+        lgtm_native._render_plist("prometheus", native_dir, home).encode()
     )
     assert "--web.listen-address=10.0.0.5:9090" in prometheus_plist["ProgramArguments"]
 
@@ -256,7 +256,7 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
         "shared.config.settings.observability.lgtm_grafana_listen_host",
         "0.0.0.0",  # noqa: S104 — asserted config default, not a bind
     )
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
     grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
     assert "http_addr = 0.0.0.0" in grafana_ini
     assert "http_port = 3003" in grafana_ini
@@ -266,7 +266,7 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     assert "preinstall_disabled = true" in grafana_ini
 
     monkeypatch.setattr("shared.config.settings.observability.lgtm_grafana_listen_host", "10.0.0.5")
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
     grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
     assert "http_addr = 10.0.0.5" in grafana_ini
     assert "http_port = 3003" in grafana_ini
@@ -322,14 +322,14 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
         "http://tempo.test:14318/",
     )
 
-    _lgtm_native._render_configs(repo, native_dir, home)
-    plist = plistlib.loads(_lgtm_native._render_plist("grafana", native_dir, home).encode())
+    lgtm_native._render_configs(repo, native_dir, home)
+    plist = plistlib.loads(lgtm_native._render_plist("grafana", native_dir, home).encode())
     grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
     runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
     run_script = (native_dir / "grafana/run.sh").read_text(encoding="utf-8")
     prometheus = yaml.safe_load((native_dir / "config/prometheus.yml").read_text(encoding="utf-8"))
 
-    assert plist["Label"] == _lgtm_native.native_label("grafana", home)
+    assert plist["Label"] == lgtm_native.native_label("grafana", home)
     assert plist["ProgramArguments"] == [str(native_dir.resolve() / "grafana/run.sh")]
     assert plist["EnvironmentVariables"] == {"AVA_HOME": str(home.resolve())}
     assert "{{" not in grafana_ini
@@ -394,7 +394,7 @@ def test_native_provisioning_renders_remote_observatory_urls(
         "postgresql://grafana_ro@10.0.0.72:5433/ava_main",
     )
 
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
     assert "AVA_TELEMETRY_LOKI_URL=http://10.0.0.46:3100" in rendered_runtime_env
@@ -428,7 +428,7 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
     )
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
 
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
 
     rendered_runtime_env = (native_dir / "config/runtime.env").read_text(encoding="utf-8")
     assert "AVA_ALERTS_WEBHOOK_URL=http://127.0.0.1:8000/api/alerts" in rendered_runtime_env
@@ -445,7 +445,7 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
 
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
     datasources = native_dir / "config/provisioning/datasources/datasources.yml"
     # The rendered tree carries $__env{} references (URLs live in runtime.env),
     # so a meaningful user edit replaces a reference with a hardcoded URL.
@@ -455,7 +455,7 @@ def test_native_provisioning_preserves_user_edited_rendered_files(
     assert user_edit != datasources.read_text(encoding="utf-8")
     datasources.write_text(user_edit, encoding="utf-8")
 
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
 
     assert "http://user.example:3100" in datasources.read_text(encoding="utf-8")
     assert "$__env{AVA_TELEMETRY_LOKI_URL}" not in datasources.read_text(encoding="utf-8")
@@ -471,7 +471,7 @@ def test_native_provisioning_removes_stale_rendered_files(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
 
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
     stale = native_dir / "config/provisioning/datasources/old.yml"
     stale.write_text("stale", encoding="utf-8")
     hashes_path = native_dir / "config/provisioning-hashes.json"
@@ -479,7 +479,7 @@ def test_native_provisioning_removes_stale_rendered_files(
     hashes["datasources/old.yml"] = hashlib.sha256(b"stale").hexdigest()
     hashes_path.write_text(json.dumps(hashes), encoding="utf-8")
 
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
 
     assert not stale.exists()
 
@@ -495,22 +495,22 @@ def test_ensure_kickstarts_grafana_when_config_changed(
     native_dir = home / "lgtm/native"
     (native_dir / "config").mkdir(parents=True)
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "platform_tag",
         lambda: "darwin_arm64",
     )
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "_load_versions",
         lambda _repo: {},  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "_download_and_verify",
         lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "_agents_dir",
         lambda: tmp_path / "plists",
     )
@@ -523,17 +523,17 @@ def test_ensure_kickstarts_grafana_when_config_changed(
             return subprocess.CompletedProcess(args, 0, "", "")
         return subprocess.CompletedProcess(args, 0, "", "")
 
-    monkeypatch.setattr(_lgtm_native, "_launchctl", fake_launchctl)
+    monkeypatch.setattr(lgtm_native, "_launchctl", fake_launchctl)
     monkeypatch.setattr(
-        _lgtm_native, "platform", type("P", (), {"system": staticmethod(lambda: "Darwin")})()
+        lgtm_native, "platform", type("P", (), {"system": staticmethod(lambda: "Darwin")})()
     )
 
-    _lgtm_native.ensure_lgtm_native(repo, home)
+    lgtm_native.ensure_lgtm_native(repo, home)
 
     kickstarts = [c for c in calls if c[0] == "kickstart"]
     assert len(kickstarts) == 1, kickstarts
     assert kickstarts[0][1] == "-k"
-    assert kickstarts[0][2] == f"gui/{os.getuid()}/{_lgtm_native.native_label('grafana', home)}"
+    assert kickstarts[0][2] == f"gui/{os.getuid()}/{lgtm_native.native_label('grafana', home)}"
     assert "kickstarted" in capsys.readouterr().err
 
 
@@ -547,22 +547,22 @@ def test_ensure_no_kickstart_when_config_unchanged(
     native_dir = home / "lgtm/native"
     (native_dir / "config").mkdir(parents=True)
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "platform_tag",
         lambda: "darwin_arm64",
     )
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "_load_versions",
         lambda _repo: {},  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "_download_and_verify",
         lambda *_a, **_k: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "_agents_dir",
         lambda: tmp_path / "plists",
     )
@@ -575,14 +575,14 @@ def test_ensure_no_kickstart_when_config_unchanged(
             return subprocess.CompletedProcess(args, 0, "", "")
         return subprocess.CompletedProcess(args, 0, "", "")
 
-    monkeypatch.setattr(_lgtm_native, "_launchctl", fake_launchctl)
+    monkeypatch.setattr(lgtm_native, "_launchctl", fake_launchctl)
     monkeypatch.setattr(
-        _lgtm_native, "platform", type("P", (), {"system": staticmethod(lambda: "Darwin")})()
+        lgtm_native, "platform", type("P", (), {"system": staticmethod(lambda: "Darwin")})()
     )
 
-    _lgtm_native.ensure_lgtm_native(repo, home)
+    lgtm_native.ensure_lgtm_native(repo, home)
     first = len(calls)
-    _lgtm_native.ensure_lgtm_native(repo, home)
+    lgtm_native.ensure_lgtm_native(repo, home)
 
     kickstarts = [c for c in calls[first:] if c[0] == "kickstart"]
     assert kickstarts == []
@@ -629,21 +629,21 @@ def test_observability_url_validation_warns_and_falls_back(
 def test_native_converge_renders_grafana_password_only_when_configured(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(_lgtm_native, "_launchctl", _no_launchctl)
+    monkeypatch.setattr(lgtm_native, "_launchctl", _no_launchctl)
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
-    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "_agents_dir", lambda: agents_dir)
     # Non-secret fixture; production reads the credential from settings.alerts.grafana_admin_password.
     monkeypatch.setattr(
         "shared.config.settings.alerts.grafana_admin_password",
         SecretStr("fake-key-for-test"),
     )
 
-    _lgtm_native.ensure_lgtm_native(repo, home)
+    lgtm_native.ensure_lgtm_native(repo, home)
 
     credential_file = home / "lgtm/native/grafana/admin_password"
     rendered = credential_file.read_text(encoding="utf-8")
@@ -655,17 +655,17 @@ def test_native_converge_renders_grafana_password_only_when_configured(
 def test_native_converge_leaves_unconfigured_grafana_password_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(_lgtm_native, "_launchctl", _no_launchctl)
+    monkeypatch.setattr(lgtm_native, "_launchctl", _no_launchctl)
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
-    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "_agents_dir", lambda: agents_dir)
     monkeypatch.setattr("shared.config.settings.alerts.grafana_admin_password", None)
 
-    _lgtm_native.ensure_lgtm_native(repo, home)
+    lgtm_native.ensure_lgtm_native(repo, home)
 
     credential_file = home / "lgtm/native/grafana/admin_password"
     run_script = (home / "lgtm/native/grafana/run.sh").read_text(encoding="utf-8")
@@ -695,7 +695,7 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
         "shared.config.settings.observability.telemetry_tempo_endpoint", intake_endpoint
     )
 
-    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+    lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
 
     captured = capsys.readouterr()
     if warns:
@@ -754,7 +754,7 @@ def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
-    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+    lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
 
     captured = capsys.readouterr()
     for env_var in expected_warns:
@@ -793,7 +793,7 @@ def test_native_config_warns_only_when_read_urls_stay_loopback_after_widening(
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
-    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
+    lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
 
     captured = capsys.readouterr()
     assert captured.err == ""
@@ -854,12 +854,12 @@ def test_native_step_runs_only_for_the_marker_home(
         calls.append((repo, home))
 
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "ensure_lgtm_native",
         record_ensure,
     )
 
-    _lgtm_native.ensure_lgtm_native_step(ctx)
+    lgtm_native.ensure_lgtm_native_step(ctx)
 
     assert calls == [(ctx.repo, ctx.ava_home)]
 
@@ -889,9 +889,9 @@ def test_native_step_runs_for_station_role_without_marker(
     def record_ensure(repo: Path, home: Path, *, station: bool = False) -> None:
         calls.append((repo, home, station))
 
-    monkeypatch.setattr(_lgtm_native, "ensure_lgtm_native", record_ensure)
+    monkeypatch.setattr(lgtm_native, "ensure_lgtm_native", record_ensure)
 
-    _lgtm_native.ensure_lgtm_native_step(ctx)
+    lgtm_native.ensure_lgtm_native_step(ctx)
 
     assert calls == [(ctx.repo, ctx.ava_home, True)]
 
@@ -912,9 +912,9 @@ def test_stack_step_runs_for_station_role_without_marker(
         calls.append(cmd)
         return _Result()
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
+    monkeypatch.setattr(lgtm.subprocess, "run", fake_run)
 
-    _lgtm.ensure_lgtm_stack_step(ctx)
+    lgtm.ensure_lgtm_stack_step(ctx)
 
     assert calls == [["bash", "start.sh"]]
 
@@ -934,19 +934,19 @@ def test_station_role_renders_full_native_set_without_marker(
     home = tmp_path / "station-home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
-    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
-    monkeypatch.setattr(_lgtm_native, "_launchctl", _no_launchctl)
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr(lgtm_native, "_launchctl", _no_launchctl)
 
-    _lgtm_native.ensure_lgtm_native(repo, home, station=True)
+    lgtm_native.ensure_lgtm_native(repo, home, station=True)
 
     native_dir = home / "lgtm/native"
     for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
         assert (native_dir / "config" / name).is_file()
     assert (native_dir / "grafana" / "run.sh").is_file()
     for name in ("loki", "prometheus", "grafana"):
-        label = _lgtm_native.native_label(name, home)
+        label = lgtm_native.native_label(name, home)
         assert (agents_dir / f"{label}.plist").is_file()
     assert (native_dir / "data" / "loki").is_dir()
     assert (native_dir / "data" / "prom").is_dir()
@@ -967,14 +967,14 @@ def test_native_storage_dir_default_matches_historical_layout(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", "")
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
     rendered_loki = yaml.safe_load((native_dir / "config/loki.yaml").read_text(encoding="utf-8"))
     assert rendered_loki["common"]["path_prefix"] == str((home / "lgtm/native/data/loki").resolve())
     assert rendered_loki["compactor"]["working_directory"] == str(
         (home / "lgtm/native/data/loki/compactor").resolve()
     )
     prometheus_plist = plistlib.loads(
-        _lgtm_native._render_plist("prometheus", native_dir, home).encode()
+        lgtm_native._render_plist("prometheus", native_dir, home).encode()
     )
     assert (
         "--storage.tsdb.path=" + str((home / "lgtm/native/data/prom").resolve())
@@ -989,7 +989,7 @@ def test_native_storage_dir_parameterized(monkeypatch: pytest.MonkeyPatch, tmp_p
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", "/data/obs")
-    _lgtm_native._render_configs(repo, native_dir, home)
+    lgtm_native._render_configs(repo, native_dir, home)
     rendered_loki = yaml.safe_load((native_dir / "config/loki.yaml").read_text(encoding="utf-8"))
     assert rendered_loki["common"]["path_prefix"] == "/data/obs/loki"
     assert (
@@ -998,7 +998,7 @@ def test_native_storage_dir_parameterized(monkeypatch: pytest.MonkeyPatch, tmp_p
     )
     assert rendered_loki["compactor"]["working_directory"] == "/data/obs/loki/compactor"
     prometheus_plist = plistlib.loads(
-        _lgtm_native._render_plist("prometheus", native_dir, home).encode()
+        lgtm_native._render_plist("prometheus", native_dir, home).encode()
     )
     assert "--storage.tsdb.path=/data/obs/prom" in prometheus_plist["ProgramArguments"]
 
@@ -1013,13 +1013,13 @@ def test_station_role_creates_configured_storage_dirs(
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
     storage = tmp_path / "obs-data"
-    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(_lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
-    monkeypatch.setattr(_lgtm_native, "_launchctl", _no_launchctl)
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
+    monkeypatch.setattr(lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr(lgtm_native, "_launchctl", _no_launchctl)
     monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", str(storage))
 
-    _lgtm_native.ensure_lgtm_native(repo, home, station=True)
+    lgtm_native.ensure_lgtm_native(repo, home, station=True)
 
     assert (storage / "loki").is_dir()
     assert (storage / "prom").is_dir()
@@ -1030,12 +1030,10 @@ def test_native_label_and_plist_are_scoped_to_the_cluster_home(tmp_path: Path) -
     from shared.cluster import home_slug
 
     home = tmp_path / "home"
-    label = _lgtm_native.native_label("loki", home)
+    label = lgtm_native.native_label("loki", home)
 
     assert label == f"com.ava.loki.{home_slug(home)}"
-    rendered = plistlib.loads(
-        _lgtm_native._render_plist("loki", tmp_path / "native", home).encode()
-    )
+    rendered = plistlib.loads(lgtm_native._render_plist("loki", tmp_path / "native", home).encode())
     assert rendered["Label"] == label
 
 
@@ -1066,11 +1064,11 @@ def test_lgtm_start_bootstraps_the_labels_rendered_by_converge(
     def no_configs(_repo: Path, _native_dir: Path, _home: Path) -> None:
         return None
 
-    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "darwin_arm64")
-    monkeypatch.setattr(_lgtm_native, "_load_versions", no_versions)
-    monkeypatch.setattr(_lgtm_native, "_render_configs", no_configs)
-    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
-    _lgtm_native.ensure_lgtm_native(Path(__file__).resolve().parents[2], ava_home)
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(lgtm_native, "_load_versions", no_versions)
+    monkeypatch.setattr(lgtm_native, "_render_configs", no_configs)
+    monkeypatch.setattr(lgtm_native, "_agents_dir", lambda: agents_dir)
+    lgtm_native.ensure_lgtm_native(Path(__file__).resolve().parents[2], ava_home)
 
     result = _run_native_start(env)
 
@@ -1078,7 +1076,7 @@ def test_lgtm_start_bootstraps_the_labels_rendered_by_converge(
     launchctl_calls = launchctl_log.read_text(encoding="utf-8").splitlines()
     domain = f"gui/{os.getuid()}"
     for name in ("loki", "prometheus", "grafana"):
-        label = _lgtm_native.native_label(name, ava_home)
+        label = lgtm_native.native_label(name, ava_home)
         plist = agents_dir / f"{label}.plist"
         assert f"print {domain}/{label}" in launchctl_calls
         assert f"bootstrap {domain} {plist}" in launchctl_calls
@@ -1094,7 +1092,7 @@ def test_native_converge_retires_legacy_and_foreign_jobs_only_after_current_job_
     (home / "lgtm-host").touch()
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
-    current = _lgtm_native.native_label("loki", home)
+    current = lgtm_native.native_label("loki", home)
     legacy = "com.ava.loki"
     foreign = "com.ava.loki.other-home"
     legacy_plist = agents_dir / f"{legacy}.plist"
@@ -1111,10 +1109,10 @@ def test_native_converge_retires_legacy_and_foreign_jobs_only_after_current_job_
     def no_configs(_repo: Path, _native_dir: Path, _home: Path) -> None:
         return None
 
-    monkeypatch.setattr(_lgtm_native, "platform_tag", darwin_arm64)
-    monkeypatch.setattr(_lgtm_native, "_load_versions", no_versions)
-    monkeypatch.setattr(_lgtm_native, "_render_configs", no_configs)
-    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr(lgtm_native, "platform_tag", darwin_arm64)
+    monkeypatch.setattr(lgtm_native, "_load_versions", no_versions)
+    monkeypatch.setattr(lgtm_native, "_render_configs", no_configs)
+    monkeypatch.setattr(lgtm_native, "_agents_dir", lambda: agents_dir)
     calls: list[list[str]] = []
 
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -1135,17 +1133,17 @@ def test_native_converge_retires_legacy_and_foreign_jobs_only_after_current_job_
             loaded.add(current)
         return subprocess.CompletedProcess(command, 0 if label in loaded else 1, "", "")
 
-    monkeypatch.setattr(_lgtm_native.subprocess, "run", fake_run)
+    monkeypatch.setattr(lgtm_native.subprocess, "run", fake_run)
 
-    _lgtm_native.ensure_lgtm_native(tmp_path / "repo", home)
+    lgtm_native.ensure_lgtm_native(tmp_path / "repo", home)
 
     assert legacy_plist.exists() is not current_loaded
     assert foreign_plist.exists() is not current_loaded
     assert (agents_dir / f"{current}.plist").exists()
     booted_out = {call[-1] for call in calls if call[1] == "bootout"}
     expected_bootouts = {
-        f"gui/{_lgtm_native.os.getuid()}/{legacy}",
-        f"gui/{_lgtm_native.os.getuid()}/{foreign}",
+        f"gui/{lgtm_native.os.getuid()}/{legacy}",
+        f"gui/{lgtm_native.os.getuid()}/{foreign}",
     }
     assert booted_out == (expected_bootouts if current_loaded else set())
     assert all(current not in call[-1] for call in calls if call[1] == "bootout")
@@ -1157,19 +1155,19 @@ def test_bootout_native_jobs_removes_this_homes_slugged_plists(
     home = tmp_path / "home"
     agents_dir = tmp_path / "LaunchAgents"
     agents_dir.mkdir()
-    for name in _lgtm_native._NATIVE_CONSTANTS:
-        label = _lgtm_native.native_label(name, home)
+    for name in lgtm_native._NATIVE_CONSTANTS:
+        label = lgtm_native.native_label(name, home)
         (agents_dir / f"{label}.plist").write_bytes(plistlib.dumps({"Label": label}))
-    monkeypatch.setattr(_lgtm_native, "_agents_dir", lambda: agents_dir)
+    monkeypatch.setattr(lgtm_native, "_agents_dir", lambda: agents_dir)
     calls: list[list[str]] = []
 
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(_lgtm_native.subprocess, "run", fake_run)
+    monkeypatch.setattr(lgtm_native.subprocess, "run", fake_run)
 
-    _lgtm_native.bootout_native_jobs(home)
+    lgtm_native.bootout_native_jobs(home)
 
     assert not list(agents_dir.glob("*.plist"))
     assert [call[1] for call in calls] == ["print", "bootout"] * 3

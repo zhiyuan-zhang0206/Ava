@@ -7,7 +7,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from cli.commands import _otel_collector as collector
+from cli.commands.observability import otel_collector as collector
 from gateway.app import app
 from shared import config, runtime_config
 from shared.config.observability import ObservabilitySettings

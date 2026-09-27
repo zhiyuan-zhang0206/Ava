@@ -16,7 +16,7 @@ from shared.process_env import update_process_env as _update_process_env
 
 ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV = "AVA_ROLLOUT_PARENT_CREDENTIAL_HANDOFF"
 # Protocol v1 means the parent can replay the frozen five-field transition
-# payload in ``cli.commands._data_plane_admin_secrets._Transition``. A future
+# payload in ``cli.commands.data_plane.admin_secrets._Transition``. A future
 # incompatible journal must advertise a new value; a v1 parent then fails closed
 # and the child defers credential mutation.
 ROLLOUT_PARENT_CREDENTIAL_HANDOFF_VERSION = "v1"

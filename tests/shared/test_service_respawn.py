@@ -230,7 +230,7 @@ def test_respawn_force_ignores_the_source_switch_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The watchdog-probe's contract is dumb revival that ignores every gate
-    (cli/commands/_cluster_watchdog_probe.py passes force=True) — a dead
+    (cli/commands/cluster/watchdog_probe.py passes force=True) — a dead
     watchdog must be revived even mid-update, or the host loses supervision
     for the whole window."""
     monkeypatch.setattr(_sr_mod, "session_name", lambda svc: f"t-{svc}")  # pyright: ignore[reportUnknownArgumentType]

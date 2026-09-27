@@ -14,7 +14,7 @@ from typing import Any, cast
 import pytest
 
 from cli.commands import cmd_pitr_multipart_abort, cmd_pitr_multipart_list
-from cli.commands import pitr as pitr_commands
+from cli.commands.data_plane import pitr as pitr_commands
 from services.pitr import oss_credentials
 from services.pitr.oss_multipart import OSSMultipartUploads
 from tests.services.oss_test_support import FakeOssBucket

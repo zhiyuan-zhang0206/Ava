@@ -115,7 +115,7 @@ _ALLOWED_FILES = frozenset(
         "shared/config/data_plane.py",  # _self_machine_host reads AVA_MACHINE_HOST/AVA_HOME at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and shared.machine imports settings (circular)
         "shared/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import
         "shared/runtime_config.py",  # path bootstrap; cannot import Settings (circular dep)
-        "cli/commands/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first
+        "cli/commands/management/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first
         "shared/bootstrap.py",  # fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing shared.config here is the import cycle this module exists to break
         "shared/external_caller.py",  # per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection
         "services/agent_ops/bootstrap.py",  # restricted prepared observer consumes an explicit pre-resolved child projection before ordinary Settings can fetch the stopped gateway
@@ -155,7 +155,7 @@ _ALLOWED_FILES = frozenset(
         "shared/platform_probes.py",  # display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not ava runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators
         "ava/watcher.py",  # _spawn() bootstrap code uses os.environ.get in a string literal for the child process bootstrap
         "ava/agent_identity.py",  # _try_establish_from_env() reads os.environ["AVA_AGENT_ID"] as a lazy fallback; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent
-        "cli/commands/impersonation.py",  # AVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity
+        "cli/commands/agents/impersonation.py",  # AVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity
         "shared/proc_tree.py",  # process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config
         "ava/attachment_transport.py",  # attach() reads the one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; it is not Settings config and only an exec child receives it
         "shared/observability.py",  # endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit

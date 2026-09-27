@@ -14,81 +14,55 @@ this package namespace.
 
 from __future__ import annotations
 
-from cli.commands._cluster_boot_unit import (
-    cmd_boot_unit_install,
-    cmd_boot_unit_status,
-    cmd_boot_unit_uninstall,
-)
-from cli.commands._cluster_cancel import cmd_cluster_cancel
-from cli.commands._cluster_cron import (
-    cmd_cron_register,
-    cmd_cron_unregister,
-)
-from cli.commands._cluster_health import cmd_health_probe
-from cli.commands._cluster_hold_watchdog import (
-    cmd_hold_watchdog,
-    cmd_hold_watchdog_register,
-    cmd_hold_watchdog_unregister,
-)
-from cli.commands._cluster_recover import cmd_cluster_recover
-from cli.commands._cluster_recover_pending import cmd_cluster_recover_pending
 from cli.commands._cluster_rollback import cmd_rollback
-from cli.commands._cluster_watchdog_probe import (
-    cmd_watchdog_probe,
-    cmd_watchdog_probe_register,
-    cmd_watchdog_probe_unregister,
-)
 from cli.commands._converge import cmd_converge
 from cli.commands._firewall import (
     cmd_firewall_status,
     cmd_firewall_sync,
 )
-from cli.commands._grafana_render import cmd_grafana_render
-from cli.commands._lgtm import (
-    cmd_lgtm_off,
-    cmd_lgtm_on,
-    cmd_lgtm_status,
-)
-from cli.commands._pitr_activation import (
-    cmd_pitr_activate,
-    cmd_pitr_rollback,
-    cmd_pitr_status,
-)
 from cli.commands._update_dispatch import cmd_update
-from cli.commands.cluster import (
+from cli.commands.agents.pty import (
+    cmd_pty_freeze,
+    cmd_pty_resume,
+    cmd_pty_status,
+)
+from cli.commands.cluster.boot_unit import (
+    cmd_boot_unit_install,
+    cmd_boot_unit_status,
+    cmd_boot_unit_uninstall,
+)
+from cli.commands.cluster.cancel import cmd_cluster_cancel
+from cli.commands.cluster.control import (
     cmd_cluster_mark_staging,
     cmd_cluster_pause,
     cmd_cluster_restart,
     cmd_cluster_resume,
     cmd_cluster_status,
 )
-from cli.commands.cluster_lifecycle import (
+from cli.commands.cluster.cron import (
+    cmd_cron_register,
+    cmd_cron_unregister,
+)
+from cli.commands.cluster.health import cmd_health_probe
+from cli.commands.cluster.hold_watchdog import (
+    cmd_hold_watchdog,
+    cmd_hold_watchdog_register,
+    cmd_hold_watchdog_unregister,
+)
+from cli.commands.cluster.recover import cmd_cluster_recover
+from cli.commands.cluster.recover_pending import cmd_cluster_recover_pending
+from cli.commands.cluster.registry import (
     cmd_cluster_destroy,
     cmd_cluster_down,
     cmd_cluster_ls,
 )
-from cli.commands.ensure_db_role import cmd_ensure_db_role
-from cli.commands.logs import (
-    cmd_logs_retention,
-    cmd_logs_rotate,
+from cli.commands.cluster.watchdog_probe import (
+    cmd_watchdog_probe,
+    cmd_watchdog_probe_register,
+    cmd_watchdog_probe_unregister,
 )
-from cli.commands.mcp import (
-    cmd_mcp_add,
-    cmd_mcp_disable,
-    cmd_mcp_enable,
-    cmd_mcp_install,
-    cmd_mcp_list,
-    cmd_mcp_remove,
-    cmd_mcp_uninstall,
-    cmd_mcp_upgrade,
-)
-from cli.commands.packages import (
-    cmd_packages_policy,
-    cmd_packages_refresh,
-    cmd_packages_rollback,
-    cmd_packages_status,
-)
-from cli.commands.pitr import (
+from cli.commands.data_plane.ensure_db_role import cmd_ensure_db_role
+from cli.commands.data_plane.pitr import (
     cmd_pitr_drill,
     cmd_pitr_multipart_abort,
     cmd_pitr_multipart_list,
@@ -101,7 +75,28 @@ from cli.commands.pitr import (
     cmd_pitr_snapshot_retire,
     cmd_pitr_snapshot_verify,
 )
-from cli.commands.plugins import (
+from cli.commands.data_plane.pitr_activation import (
+    cmd_pitr_activate,
+    cmd_pitr_rollback,
+    cmd_pitr_status,
+)
+from cli.commands.extensions.mcp import (
+    cmd_mcp_add,
+    cmd_mcp_disable,
+    cmd_mcp_enable,
+    cmd_mcp_install,
+    cmd_mcp_list,
+    cmd_mcp_remove,
+    cmd_mcp_uninstall,
+    cmd_mcp_upgrade,
+)
+from cli.commands.extensions.packages import (
+    cmd_packages_policy,
+    cmd_packages_refresh,
+    cmd_packages_rollback,
+    cmd_packages_status,
+)
+from cli.commands.extensions.plugins import (
     cmd_plugins_disable,
     cmd_plugins_enable,
     cmd_plugins_install,
@@ -110,12 +105,7 @@ from cli.commands.plugins import (
     cmd_plugins_update,
     cmd_plugins_upgrade,
 )
-from cli.commands.pty import (
-    cmd_pty_freeze,
-    cmd_pty_resume,
-    cmd_pty_status,
-)
-from cli.commands.skill import (
+from cli.commands.extensions.skill import (
     cmd_skill_disable,
     cmd_skill_enable,
     cmd_skill_install,
@@ -125,13 +115,23 @@ from cli.commands.skill import (
     cmd_skill_update,
     cmd_skill_upgrade,
 )
+from cli.commands.observability.grafana_render import cmd_grafana_render
+from cli.commands.observability.lgtm import (
+    cmd_lgtm_off,
+    cmd_lgtm_on,
+    cmd_lgtm_status,
+)
+from cli.commands.observability.logs import (
+    cmd_logs_retention,
+    cmd_logs_rotate,
+)
+from cli.commands.observability.trace import cmd_trace_ship
 from cli.commands.start import cmd_start
 from cli.commands.status import cmd_status
 from cli.commands.stop import (
     cmd_restart,
     cmd_stop,
 )
-from cli.commands.trace import cmd_trace_ship
 
 __all__ = [
     "cmd_boot_unit_install",

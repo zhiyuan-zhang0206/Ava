@@ -48,7 +48,7 @@ def noop_infra(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Patch out the side-effecting birth steps + pin the checkout root to a
     throwaway dir (the .ava_home pointer write must not touch the real worktree).
     Returns the throwaway checkout dir."""
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     monkeypatch.setattr(
         gw,
@@ -140,7 +140,7 @@ def test_worktree_birth_idempotent_keeps_secret(
     """A re-install is a no-op birth: the record survives, the secret state is not
     changed (a no-secret home stays secret-less), and the data-plane bring-up is
     not re-run."""
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = tmp_path / ".ava-idem"
     assert _install(home) == 0
@@ -445,7 +445,7 @@ def test_entry_rejects_cluster_flag(capsys: pytest.CaptureFixture[str]) -> None:
 def test_provision_failure_rolls_back_created_record(
     isolated_registry: Path, noop_infra: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     def _boom(_name: str, **_kw: object) -> None:
         raise RuntimeError("pg unreachable mid-provision")
@@ -464,7 +464,7 @@ def test_repair_run_on_existing_record_never_rolls_it_back(
     lost its AVA_DB_URL — e.g. a clobbered .env) re-runs birth with
     created=False, and a transient provision failure must NOT deregister the
     existing record — that would free a live cluster's port block."""
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = tmp_path / ".ava-live"
     assert _install(home) == 0
@@ -495,7 +495,7 @@ def test_incomplete_birth_retry_carries_repair_not_database_creation_authority(
     It must not claim this invocation created the existing private database; the
     two authorities have distinct cleanup consequences.
     """
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = tmp_path / ".ava-interrupted-birth"
     assert _install(home) == 0
@@ -601,7 +601,7 @@ def test_prod_home_birth_does_not_seed_a_floor(
 def test_instance_failure_rolls_back_created_record(
     isolated_registry: Path, noop_infra: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     monkeypatch.setattr(
         gw,

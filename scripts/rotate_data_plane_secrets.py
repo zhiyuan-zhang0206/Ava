@@ -23,8 +23,8 @@ import psycopg
 import redis
 from dotenv import dotenv_values
 
-from cli.commands.cluster_instance import pg_admin_url
-from cli.commands.pgbouncer import ensure_pgbouncer, pgbouncer_reachable
+from cli.commands.data_plane.cluster_instance import pg_admin_url
+from cli.commands.data_plane.pgbouncer import ensure_pgbouncer, pgbouncer_reachable
 from shared.cluster import (
     RUNNER_DB_PASSWORD_ENV,
     RUNNER_ROLE,

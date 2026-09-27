@@ -81,19 +81,19 @@ def _h_mcp_serve(_args: argparse.Namespace) -> int:
 
 
 def _h_memory_refresh(_args: argparse.Namespace) -> int:
-    from cli.commands.memory import cmd_memory_refresh
+    from cli.commands.extensions.memory import cmd_memory_refresh
 
     return cmd_memory_refresh()
 
 
 def _h_memory_init(_args: argparse.Namespace) -> int:
-    from cli.commands.memory import cmd_memory_init
+    from cli.commands.extensions.memory import cmd_memory_init
 
     return cmd_memory_init()
 
 
 def _h_memory_search(args: argparse.Namespace) -> int:
-    from cli.commands.memory import cmd_memory_search
+    from cli.commands.extensions.memory import cmd_memory_search
 
     return cmd_memory_search(args.query, limit=args.limit, json_output=args.json)
 

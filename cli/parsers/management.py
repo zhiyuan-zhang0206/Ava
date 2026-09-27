@@ -24,49 +24,49 @@ def _config_overlay_json(value: str) -> str:
 
 
 def _h_config_audit(args: argparse.Namespace) -> int:
-    from cli.commands.config import h_config_audit
+    from cli.commands.management.config import h_config_audit
 
     return h_config_audit(args)
 
 
 def _h_config_get(args: argparse.Namespace) -> int:
-    from cli.commands.config import h_config_get
+    from cli.commands.management.config import h_config_get
 
     return h_config_get(args)
 
 
 def _h_config_set(args: argparse.Namespace) -> int:
-    from cli.commands.config import h_config_set
+    from cli.commands.management.config import h_config_set
 
     return h_config_set(args)
 
 
 def _h_config_unset(args: argparse.Namespace) -> int:
-    from cli.commands.config import h_config_unset
+    from cli.commands.management.config import h_config_unset
 
     return h_config_unset(args)
 
 
 def _h_presets_ls(_args: argparse.Namespace) -> int:
-    from cli.commands.presets import h_presets_ls
+    from cli.commands.management.presets import h_presets_ls
 
     return h_presets_ls(_args)
 
 
 def _h_presets_get(args: argparse.Namespace) -> int:
-    from cli.commands.presets import h_presets_get
+    from cli.commands.management.presets import h_presets_get
 
     return h_presets_get(args)
 
 
 def _h_presets_create(args: argparse.Namespace) -> int:
-    from cli.commands.presets import h_presets_create
+    from cli.commands.management.presets import h_presets_create
 
     return h_presets_create(args)
 
 
 def _h_presets_update(args: argparse.Namespace) -> int:
-    from cli.commands.presets import h_presets_update
+    from cli.commands.management.presets import h_presets_update
 
     if (
         args.name is None
@@ -84,31 +84,31 @@ def _h_presets_update(args: argparse.Namespace) -> int:
 
 
 def _h_presets_delete(args: argparse.Namespace) -> int:
-    from cli.commands.presets import h_presets_delete
+    from cli.commands.management.presets import h_presets_delete
 
     return h_presets_delete(args)
 
 
 def _h_schedules_ls(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_ls
+    from cli.commands.management.schedules import h_schedules_ls
 
     return h_schedules_ls(args)
 
 
 def _h_schedules_get(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_get
+    from cli.commands.management.schedules import h_schedules_get
 
     return h_schedules_get(args)
 
 
 def _h_schedules_create(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_create
+    from cli.commands.management.schedules import h_schedules_create
 
     return h_schedules_create(args)
 
 
 def _h_schedules_update(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_update
+    from cli.commands.management.schedules import h_schedules_update
 
     if (
         args.name is None
@@ -129,50 +129,50 @@ def _h_schedules_update(args: argparse.Namespace) -> int:
 
 
 def _h_schedules_delete(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_delete
+    from cli.commands.management.schedules import h_schedules_delete
 
     return h_schedules_delete(args)
 
 
 def _h_schedules_start(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_start
+    from cli.commands.management.schedules import h_schedules_start
 
     return h_schedules_start(args)
 
 
 def _h_schedules_stop(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_stop
+    from cli.commands.management.schedules import h_schedules_stop
 
     return h_schedules_stop(args)
 
 
 def _h_schedules_restart(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_restart
+    from cli.commands.management.schedules import h_schedules_restart
 
     return h_schedules_restart(args)
 
 
 def _h_schedules_logs(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_logs
+    from cli.commands.management.schedules import h_schedules_logs
 
     return h_schedules_logs(args)
 
 
 def _h_schedules_runs(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_runs
+    from cli.commands.management.schedules import h_schedules_runs
 
     return h_schedules_runs(args)
 
 
 def _h_schedules_provision(args: argparse.Namespace) -> int:
-    from cli.commands.schedules import h_schedules_provision
+    from cli.commands.management.schedules import h_schedules_provision
 
     return h_schedules_provision(args)
 
 
 def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava config` — read / set / unset cluster + host config via the gateway. The
-    # handlers defer the cli.commands.config import (which loads Settings) so
+    # handlers defer the cli.commands.management.config import (which loads Settings) so
     # `ava --help` builds the parser without a configured .env.
     config_p = sub.add_parser(
         "config",

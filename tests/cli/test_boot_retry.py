@@ -67,7 +67,7 @@ def test_it_does_not_give_up_after_a_long_outage(
 
     This is the property the OS watchdog probe does NOT provide: it revives a
     dead watchdog session and nothing else ("It does NOT run `ava start`",
-    per `cli/commands/_cluster_watchdog_probe.py`), and neither it nor the
+    per `cli/commands/cluster/watchdog_probe.py`), and neither it nor the
     watchdog it revives runs the gateway env refresh, converge, or the pg/redis
     bring-up. So a `ava boot` that gave up would leave the host down until a
     human noticed — the original outage, with a longer fuse. macOS gets the same

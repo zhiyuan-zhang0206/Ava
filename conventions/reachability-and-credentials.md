@@ -4,7 +4,7 @@ Cross-machine dialing in a split cluster has exactly two facts to get right:
 **where** each unit can be reached, and **what credential** authenticates the
 call. This document is the single written contract for both. Code that
 advertises an endpoint, dials a remote endpoint, or verifies a credential
-references this file (see `shared/machines.py`, `cli/commands/_otel_collector.py`,
+references this file (see `shared/machines.py`, `cli/commands/observability/otel_collector.py`,
 `gateway/routers/pages.py`, `services/heartbeat/station_probe.py`).
 
 ## Endpoint advertisement

@@ -391,7 +391,7 @@ def test_real_sigint_kills_child_and_replays_journal_before_recovery(tmp_path: P
             import time
             from pathlib import Path
             sys.path.insert(0, {str(repo_root)!r})
-            from cli.commands import _data_plane_admin_secrets as split
+            from cli.commands.data_plane import admin_secrets as split
             from cli.commands.start import _consume_rollout_parent_handoff
             from shared.platform import file_lock
             assert _consume_rollout_parent_handoff()
@@ -415,7 +415,7 @@ def test_real_sigint_kills_child_and_replays_journal_before_recovery(tmp_path: P
         f"""\
         from pathlib import Path
         from dotenv import dotenv_values
-        from cli.commands import _data_plane_admin_secrets as split
+        from cli.commands.data_plane import admin_secrets as split
         from cli.commands import _update_local as local
         from cli.commands import update
         from shared import cluster

@@ -6,7 +6,7 @@ converge, e.g. a boot-retry storm, must not manufacture `old == new` records). A
 differing byte still takes the full write path, so normalization of quoted or
 oddly-spaced lines is preserved.
 
-Lives in `shared` (stdlib-only, no settings import) so both `cli.commands.cluster_lifecycle`
+Lives in `shared` (stdlib-only, no settings import) so both `cli.commands.cluster.registry`
 and the settings-free `cli.enroll` can use one copy. `env_line_key` reads a line's key with the
 same grammar the settings parser uses (`export KEY=v` sets `KEY`; #2981).
 """

@@ -1,6 +1,6 @@
 """Real bring-up of a per-cluster Postgres+Redis instance.
 
-Exercises cli.commands.cluster_instance end to end: initdb a fresh per-cluster
+Exercises cli.commands.data_plane.cluster_instance end to end: initdb a fresh per-cluster
 Postgres under a temp $AVA_HOME, start it on an ephemeral port with the
 socket-trust / TCP-scram posture, start a per-cluster Redis with requirepass =
 an independent Redis-admin password, provision the role+db+schema, then connect over the runtime
@@ -24,12 +24,12 @@ import psycopg
 import pytest
 import redis
 
-from cli.commands import cluster_instance as ci
 from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._converge_steps import _ensure_redis_url_identity_step
-from cli.commands._data_plane import ensure_gateway_data_plane
-from cli.commands._data_plane_admin_secrets import ensure_data_plane_admin_secrets
-from cli.commands.pgbouncer import pgbouncer_bin, stop_pgbouncer
+from cli.commands.data_plane import cluster_instance as ci
+from cli.commands.data_plane.admin_secrets import ensure_data_plane_admin_secrets
+from cli.commands.data_plane.bringup import ensure_gateway_data_plane
+from cli.commands.data_plane.pgbouncer import pgbouncer_bin, stop_pgbouncer
 from shared import cluster
 from shared.cluster import provision_database
 from shared.config import settings
@@ -72,7 +72,7 @@ def _gateway_config(
 
     monkeypatch.setattr(cluster, "get_record", _record)
     # The split module imports this registry seam at module load time.
-    monkeypatch.setattr("cli.commands._data_plane_admin_secrets.get_record", _record)
+    monkeypatch.setattr("cli.commands.data_plane.admin_secrets.get_record", _record)
     (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
     return home
 
@@ -270,7 +270,7 @@ def test_credential_split_preserves_distinct_redis_user(
         return next(minted)
 
     monkeypatch.setattr(
-        "cli.commands._data_plane_admin_secrets.secrets.token_urlsafe", _token_urlsafe
+        "cli.commands.data_plane.admin_secrets.secrets.token_urlsafe", _token_urlsafe
     )
     assert ensure_data_plane_admin_secrets() is True
     with psycopg.connect(settings.data_plane.db_url) as conn:
@@ -357,7 +357,7 @@ def test_bringup_with_pgbouncer_enabled(
     # clears the state so subsequent pooled connections open fresh server links.
     import time as _time
 
-    from cli.commands.pgbouncer import ensure_pgbouncer as _ensure_pgb
+    from cli.commands.data_plane.pgbouncer import ensure_pgbouncer as _ensure_pgb
 
     stop_pgbouncer()
     _time.sleep(0.2)

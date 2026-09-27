@@ -9,7 +9,7 @@ tags:
 
 # Config CLI
 
-`cli/commands/config.py` implements `ava config get/set/unset`. The normal
+`cli/commands/management/config.py` implements `ava config get/set/unset`. The normal
 path is a thin client for `GET/PUT /api/config`: it resolves the gateway URL
 and cluster bearer credential from the process environment or unit files, then
 sends only the requested merge-patch delta. It never restarts processes; the

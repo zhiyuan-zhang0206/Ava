@@ -2,9 +2,9 @@
 
 The normal path drains home-owned Gate/helper/LGTM through _stop_supervised;
 its real OS/process regressions live in test_stop_supervised.py. These cases
-also retain the portable _terminate_verified coverage used by force teardown.
+also retain the portable terminate_verified coverage used by force teardown.
 
-**The `_terminate_verified` cases drive REAL child processes.** They used to run
+**The `terminate_verified` cases drive REAL child processes.** They used to run
 against a fake `os.kill` table, and that is precisely how this function shipped
 three POSIX-only spellings — `os.kill(pid, SIGTERM)`, `os.kill(pid, 0)` as a
 liveness probe, `signal.SIGKILL` — into a path `_do_stop` takes on every platform:
@@ -28,15 +28,15 @@ import psutil
 import pytest
 
 from cli.commands._stop_extras import stop_gate_service, stop_permissions_helper
-from cli.commands.pgbouncer import _terminate_verified
+from cli.commands.data_plane.pgbouncer import terminate_verified
 
-# -- _terminate_verified ------------------------------------------------------
+# -- terminate_verified ------------------------------------------------------
 
 
 def _detached_sleeper(tmp_path: Path, *, ignores_term: bool = False) -> int:
     """A real process that is deliberately **not this test's child**, and its pid.
 
-    `_terminate_verified` only ever targets daemons — the pooler, an orphan port
+    `terminate_verified` only ever targets daemons — the pooler, an orphan port
     listener, the gate — never a child of the caller, and the difference is
     load-bearing for the assertions below: a killed CHILD becomes a zombie until its
     parent waits, and a zombie answers every liveness probe as alive. Spawning
@@ -100,7 +100,7 @@ def test_terminate_verified_graceful(tmp_path: Path, capsys: pytest.CaptureFixtu
     grace period is up, and never reaches the force kill."""
     pid = _detached_sleeper(tmp_path)
     try:
-        assert _terminate_verified(pid, label="pgbouncer") is True
+        assert terminate_verified(pid, label="pgbouncer") is True
         assert "✓ pgbouncer stopped" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     finally:
         _reap(pid)
@@ -113,7 +113,7 @@ def test_terminate_verified_already_gone(tmp_path: Path, capsys: pytest.CaptureF
     psutil.Process(pid).kill()
     assert _wait_gone(pid), "the fixture process did not exit"
 
-    assert _terminate_verified(pid, label="pgbouncer") is True
+    assert terminate_verified(pid, label="pgbouncer") is True
     assert "✓ pgbouncer stopped" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -123,7 +123,7 @@ def test_terminate_verified_forced(tmp_path: Path, capsys: pytest.CaptureFixture
     and reported as forced — the caller must be able to tell the two apart."""
     pid = _detached_sleeper(tmp_path, ignores_term=True)
     try:
-        assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.3) is True
+        assert terminate_verified(pid, label="pgbouncer", timeout_s=0.3) is True
         assert "⚠ pgbouncer stopped (forced kill)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     finally:
         _reap(pid)
@@ -147,8 +147,8 @@ def test_terminate_verified_survivor_is_never_reported_as_stopped(
 
         # Patched where it is looked up: `pgbouncer` imports the name at module
         # scope, so patching `shared.proc` would leave that binding untouched.
-        monkeypatch.setattr("cli.commands.pgbouncer.process_alive", _never_gone)
-        assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.1) is False
+        monkeypatch.setattr("cli.commands.data_plane.pgbouncer.process_alive", _never_gone)
+        assert terminate_verified(pid, label="pgbouncer", timeout_s=0.1) is False
         assert "survived the force kill" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     finally:
         _reap(pid)
@@ -162,9 +162,9 @@ def test_terminate_verified_uses_no_raw_posix_signal_calls() -> None:
     `shared.proc` is where each already has a working twin."""
     import inspect
 
-    from cli.commands import pgbouncer
+    from cli.commands.data_plane import pgbouncer
 
-    source = inspect.getsource(pgbouncer._terminate_verified)
+    source = inspect.getsource(pgbouncer.terminate_verified)
     body = source.split('"""')[-1]  # the docstring names them to explain them
     for spelling in ("os.kill", "SIGKILL", "SIGTERM"):
         assert spelling not in body, f"{spelling} is back on the stop path"
@@ -278,8 +278,8 @@ def test_helper_non_macos_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 def test_lgtm_stop_preserves_desired_state_and_data(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from cli.commands._lgtm_native import native_label
     from cli.commands._stop_extras import stop_lgtm_services
+    from cli.commands.observability.lgtm_native import native_label
     from shared.lgtm_local import BACKENDS
 
     home = _home(monkeypatch, tmp_path)
@@ -337,7 +337,7 @@ def test_a_pid_this_user_may_not_signal_is_reported_as_a_survivor(
 
         monkeypatch.setattr(sp.os, "kill", _refuse)
 
-        assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.2) is False
+        assert terminate_verified(pid, label="pgbouncer", timeout_s=0.2) is False
         assert "survived the force kill" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
         assert psutil.pid_exists(pid), "the stop must not have killed it by another route"
     finally:

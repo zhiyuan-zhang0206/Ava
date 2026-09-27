@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import cluster_instance as _ci
+from cli.commands.data_plane import cluster_instance as _ci
 from shared.config import settings
 
 

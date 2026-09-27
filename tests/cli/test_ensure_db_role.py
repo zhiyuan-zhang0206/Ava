@@ -18,8 +18,8 @@ import psycopg
 import pytest
 from dotenv import dotenv_values
 
-from cli.commands import cluster_instance as ci
 from cli.commands import cmd_ensure_db_role
+from cli.commands.data_plane import cluster_instance as ci
 from shared import cluster as cl
 from shared import paths
 from shared.pg_tools import throwaway_postgres

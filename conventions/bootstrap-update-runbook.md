@@ -20,7 +20,7 @@ re-triggers the stall deterministically.
    code with a non-empty cohort.** Split the fleet into hops instead.
 2. **Order the windows:** Hop 1 (rollout) -> converge the excluded hosts ->
    PITR activation/rollback. PITR also takes the cluster update lock
-   (`cli/commands/_pitr_activation.py`), so a PITR window defers the pin
+   (`cli/commands/data_plane/pitr_activation.py`), so a PITR window defers the pin
    self-heal that converges the excluded hosts.
 3. Rollouts are user-triggered; the operator (Cluster Operator) executes.
 

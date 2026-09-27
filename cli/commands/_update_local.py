@@ -44,11 +44,11 @@ from pathlib import Path
 from cli.commands import _update_backup_gate as _backup_gate
 from cli.commands import _update_git as _git_mod
 from cli.commands import _update_uv_sync
-from cli.commands._data_plane_admin_secrets import resume_pending_data_plane_admin_secrets
 from cli.commands._repo import session_name
 from cli.commands._update_git import GitPullFailed, GitPullResult
 from cli.commands._update_recover import _recover_rc
 from cli.commands._update_report import _print_local_launch_failure_block
+from cli.commands.data_plane.admin_secrets import resume_pending_data_plane_admin_secrets
 from shared.config import refresh_data_plane_settings
 from shared.rollout_handoff import child_process_env
 from shared.rollout_telemetry import stage as _stage_telemetry
@@ -88,7 +88,7 @@ def _refresh_builtin_skills(repo: Path) -> None:
 
     Runs `ava skill update` in a FRESH subprocess on the just-landed tree, for
     the same reason the boot below is a fresh process: this interpreter's
-    already-imported `cli.commands.skill` is pre-pull code, and the update
+    already-imported `cli.commands.extensions.skill` is pre-pull code, and the update
     table must be the new revision's.
 
     Never fatal: `ava skill update` exits 1 on conflicts (locally edited

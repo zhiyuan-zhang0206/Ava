@@ -14,26 +14,26 @@ from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_pre
 
 
 def test_pin_cell_on_pin() -> None:
-    from cli.commands.cluster import _pin_cell
+    from cli.commands.cluster.control import _pin_cell
 
     assert _pin_cell(on_pin=True, head_sha="abc1234def") == "✓ abc1234"
 
 
 def test_pin_cell_off_pin() -> None:
-    from cli.commands.cluster import _pin_cell
+    from cli.commands.cluster.control import _pin_cell
 
     assert _pin_cell(on_pin=False, head_sha="abc1234def") == "✗ abc1234"
 
 
 def test_pin_cell_unknown() -> None:
-    from cli.commands.cluster import _pin_cell
+    from cli.commands.cluster.control import _pin_cell
 
     assert _pin_cell(None, None) == "? —"
 
 
 def test_code_cell_matches_checkout() -> None:
     """running_sha == head_sha → the short SHA with no drift marker."""
-    from cli.commands.cluster import _code_cell
+    from cli.commands.cluster.control import _code_cell
 
     assert _code_cell(running_sha="abc1234def", head_sha="abc1234def") == "abc1234"
 
@@ -41,14 +41,14 @@ def test_code_cell_matches_checkout() -> None:
 def test_code_cell_drift_marks_stale_process() -> None:
     """running_sha != head_sha → ⚠ + running short SHA (process running stale code
     vs its checkout, even when pin reads ✓)."""
-    from cli.commands.cluster import _code_cell
+    from cli.commands.cluster.control import _code_cell
 
     assert _code_cell(running_sha="999888777", head_sha="abc1234def") == "⚠ 9998887"
 
 
 def test_code_cell_unknown_running_sha() -> None:
     """No running_sha recorded → em dash."""
-    from cli.commands.cluster import _code_cell
+    from cli.commands.cluster.control import _code_cell
 
     assert _code_cell(running_sha=None, head_sha="abc1234def") == "—"
 
@@ -58,7 +58,7 @@ def test_status_cell_identity_mismatch_outranks_online() -> None:
     wrong-identity responder is never shown as a plain online host."""
     from datetime import UTC, datetime
 
-    from cli.commands.cluster import _status_cell
+    from cli.commands.cluster.control import _status_cell
 
     stopped = datetime(2026, 6, 1, 6, 0, tzinfo=UTC)
     assert _status_cell(online=True, identity_mismatch=True, stopped_at=None) == "MISMATCH"
@@ -182,10 +182,10 @@ def test_cmd_status_gateway_cluster_serves_line_shows_station(
 ) -> None:
     """`ava status`'s gateway cluster-status supplement renders the station
     capability in the serves: line when the gateway snapshot carries it
-    (the function imports _fetch_gateway_cluster_status at call time, so the
+    (the function imports fetch_gateway_cluster_status at call time, so the
     module attribute patch is the rebind that takes effect)."""
     monkeypatch.setattr(
-        "cli.commands.cluster._fetch_gateway_cluster_status",
+        "cli.commands.cluster.control.fetch_gateway_cluster_status",
         lambda: {
             "machine_name": "station-a",
             "serve_gateway": False,

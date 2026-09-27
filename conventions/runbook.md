@@ -307,7 +307,7 @@ rebuilt audit line.
 Postgres and Redis run as native processes (no Docker — the binaries come from brew's
 `redis@8.2` keg on macOS / apt on Linux, but Ava drives them directly via `pg_ctl` + `redis-server`,
 not `brew services`/launchd/systemd). Every cluster — including `main` — brings up its
-OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/cluster_instance.py`):
+OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/data_plane/cluster_instance.py`):
 `initdb` into `$AVA_HOME/pg` (template-cached through a host-level dir beside the
 registry, so a new cluster / a test spins up by directory copy rather than a fresh
 multi-second init), plus `redis-server` with its data dir under `$AVA_HOME/redis`.
@@ -722,7 +722,7 @@ nodes co-located with their code:
 | `$AVA_HOME` layout, what derives from the home | `shared/paths/paths.ava.okf.md` |
 | plugin enable config (`plugins_config.json`) | `shared/plugins_config.ava.okf.md` |
 | `installed.json` schema, installable shapes, the scanner gate | `shared/install_registry/install_registry.ava.okf.md` |
-| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/packages/packages.ava.okf.md` |
+| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages.ava.okf.md` |
 | machine name, capability set, `machines` table, spawn-target 400 invariant | `shared/machine.ava.okf.md` |
 | which services each capability contributes | `services/services.ava.okf.md` |
 
@@ -1916,7 +1916,7 @@ and user systemd units on Linux amd64 run Loki, Prometheus (GOMEMLIMIT
 2GiB / 1GiB), and Grafana. Unit names include the home slug; Linux ownership
 also checks the loaded unit file and exact executable. Explicit host listen
 ports permit isolated homes; defaults remain 3100/9090/3003 plus Loki gRPC
-9095. See [native lifecycle](../cli/commands/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
+9095. See [native lifecycle](../cli/commands/observability/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
 override targets the remote WSL Tempo. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
@@ -1996,7 +1996,7 @@ loop. Both the trace precheck and event exporter retry every five minutes; the
 event exporter records disabled/recovered attempts as real events in the JSONL
 mirror that survives the outage.
 
-**Ship** — `ava trace ship` (`cli/commands/trace.py`). Recovery replay reads
+**Ship** — `ava trace ship` (`cli/commands/observability/trace.py`). Recovery replay reads
 the mirror and bypasses the LOCAL sidecar, because replaying through it would
 write the replayed lines back into the mirror (watermark loop). A gateway or
 single-box unit POSTs straight to loopback

@@ -52,7 +52,7 @@ lazy-migration shim is retired — every writer has been v2-only since #2355),
 and a file carrying a *newer* version is refused as before — no build guesses
 at another shape; `load()` itself never writes.
 The surface over all of it: `ava packages status`
-([[../../cli/commands/packages/packages.ava.okf.md|the package commands]]).
+([[../../cli/commands/extensions/packages.ava.okf.md|the package commands]]).
 
 ## Trust tiers
 
@@ -104,7 +104,7 @@ The single write path — `mutate()` under `registry_lock`, its wrappers, and th
   cloned into `$AVA_HOME/skills/`.
 - **Claude Code plugin** — a directory holding `.claude-plugin/plugin.json`,
   materialized under `$AVA_HOME/plugins/<name>/` by
-  `cli/commands/_claude_code_plugin.py`. It may bundle any of: `skills/`
+  `cli/commands/extensions/_claude_code_plugin.py`. It may bundle any of: `skills/`
   (copied verbatim), `agents/` (turned into one orchestrator skill),
   `commands/` (copied verbatim, surfaced as composer `/`-commands by
   `ava/composer_commands.py:discover_commands`), or a root `.mcp.json` (merged by
@@ -139,7 +139,7 @@ projects.
 
 ## Key Dependencies
 
-- [[cli/commands/packages/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` operator surface
+- [[cli/commands/extensions/packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` operator surface
 - [[plugins_config.ava.okf.md]] — the sibling per-machine plugin enable config
 - [[okf/skills/skills.ava.okf.md|Skills]] — what a skill is and how the scanner loads one
 - [[okf/mcps/mcps.ava.okf.md|MCP integration]] — MCP server merge layers and launch form

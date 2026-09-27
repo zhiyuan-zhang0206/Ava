@@ -274,8 +274,8 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
     mid-transition."""
     from datetime import UTC, datetime
 
-    from cli.commands import _data_plane_admin_secrets as secrets_mod
     from cli.commands import start as start_mod
+    from cli.commands.data_plane import admin_secrets as secrets_mod
     from shared import pause_owner
     from shared.cluster_lock import DeployLease
 
@@ -324,8 +324,8 @@ def test_rollout_child_keeps_converging_before_parent_readiness(
 ) -> None:
     """An old parent has no handoff marker, so its executing lease is the
     compatibility proof: the fresh internal start must not revive agents."""
-    from cli.commands import _data_plane_admin_secrets as secrets_mod
     from cli.commands import start as start_mod
+    from cli.commands.data_plane import admin_secrets as secrets_mod
     from shared.cluster_lock import DeployLease
     from shared.rollout_handoff import ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV
 
@@ -374,8 +374,8 @@ def test_handoff_capable_rollout_child_may_commit_credential_transition(
 ) -> None:
     """The follow-up rollout carries v1 proof: credential mutation becomes
     legal while admission remains behind the same resume boundary."""
-    from cli.commands import _data_plane_admin_secrets as secrets_mod
     from cli.commands import start as start_mod
+    from cli.commands.data_plane import admin_secrets as secrets_mod
     from shared.rollout_handoff import (
         ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV,
         ROLLOUT_PARENT_CREDENTIAL_HANDOFF_VERSION,
@@ -507,8 +507,8 @@ def test_pending_credential_transition_replays_before_migrations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A crash journal is adopted before the first schema client is opened."""
-    from cli.commands import _data_plane_admin_secrets as secrets_mod
     from cli.commands import start as start_mod
+    from cli.commands.data_plane import admin_secrets as secrets_mod
 
     order: list[str] = []
     monkeypatch.setattr(

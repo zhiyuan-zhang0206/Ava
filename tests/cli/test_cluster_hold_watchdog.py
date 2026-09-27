@@ -1,4 +1,4 @@
-"""cli.commands._cluster_hold_watchdog — the completion attempt machine (task #3887).
+"""cli.commands.cluster.hold_watchdog — the completion attempt machine (task #3887).
 
 Pins the contract the OS scheduler depends on: the ladder per phase matches
 the official stop/start/resume recipe, the attempt budget bounds the whole
@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from cli.commands import _cluster_hold_watchdog as cw
+from cli.commands.cluster import hold_watchdog as cw
 from shared import hold_watchdog as hw
 
 _AT = datetime(2026, 9, 17, 22, 27, 46, tzinfo=UTC)

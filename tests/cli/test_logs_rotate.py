@@ -26,7 +26,7 @@ def _archive(path: Path) -> Path:
 def test_dry_run_reports_rotation_without_writing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_rotate
+    from cli.commands.observability.logs import cmd_logs_rotate
 
     log = _dated_file(tmp_path / "ava-gateway.out.log", b"gateway", _NOW - timedelta(days=1))
 
@@ -41,7 +41,7 @@ def test_dry_run_reports_rotation_without_writing(
 def test_copytruncate_preserves_path_and_inode_and_archives_content(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_rotate
+    from cli.commands.observability.logs import cmd_logs_rotate
 
     log = _dated_file(
         tmp_path / "ava-otel-collector.out.log", b"retry spam", _NOW - timedelta(days=1)
@@ -61,7 +61,7 @@ def test_copytruncate_preserves_path_and_inode_and_archives_content(
 def test_existing_daily_archive_makes_rotation_idempotent(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_rotate
+    from cli.commands.observability.logs import cmd_logs_rotate
 
     log = _dated_file(tmp_path / "ava-gateway.out.log", b"live", _NOW - timedelta(days=1))
     archive = _dated_file(_archive(log), b"first", _NOW)
@@ -75,7 +75,7 @@ def test_existing_daily_archive_makes_rotation_idempotent(
 
 
 def test_size_threshold_rotates_a_same_day_file(tmp_path: Path) -> None:
-    from cli.commands.logs import cmd_logs_rotate
+    from cli.commands.observability.logs import cmd_logs_rotate
 
     log = _dated_file(tmp_path / "ava-gateway.out.log", b"", _NOW)
     with log.open("r+b") as stream:
@@ -88,7 +88,7 @@ def test_size_threshold_rotates_a_same_day_file(tmp_path: Path) -> None:
 
 
 def test_utc_day_change_rotates_a_small_file(tmp_path: Path) -> None:
-    from cli.commands.logs import cmd_logs_rotate
+    from cli.commands.observability.logs import cmd_logs_rotate
 
     log = _dated_file(
         tmp_path / "ava-ops.out.log",
@@ -104,7 +104,7 @@ def test_utc_day_change_rotates_a_small_file(tmp_path: Path) -> None:
 def test_prior_utc_day_keeps_an_empty_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_rotate
+    from cli.commands.observability.logs import cmd_logs_rotate
 
     log = _dated_file(tmp_path / "ava-ops.out.log", b"", _NOW - timedelta(days=1))
 
@@ -117,7 +117,7 @@ def test_prior_utc_day_keeps_an_empty_file(
 def test_native_scope_excludes_grafana_archives_symlinks_and_nested_files(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_rotate
+    from cli.commands.observability.logs import cmd_logs_rotate
 
     logs_path = tmp_path / "logs"
     native = tmp_path / "lgtm" / "native" / "logs"
@@ -178,7 +178,7 @@ def test_io_error_is_reported_and_sets_failure_exit_code(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from cli.commands import logs
+    from cli.commands.observability import logs
 
     log = _dated_file(tmp_path / "ava-gateway.out.log", b"gateway", _NOW - timedelta(days=1))
 

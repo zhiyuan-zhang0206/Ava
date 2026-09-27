@@ -406,6 +406,6 @@ def _stop_services_inner(
 
 def stop_data_plane(timeout: float, *, save: bool = True) -> list[str]:
     """Stop this home's native data plane; never stop a remote-managed plane."""
-    from cli.commands._maintenance_data_plane import stop
+    from cli.commands.data_plane.maintenance_stop import stop
 
     return stop(timeout, save=save)

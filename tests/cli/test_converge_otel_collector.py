@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
-from cli.commands import _otel_collector as oc
+from cli.commands.observability import otel_collector as oc
 from shared import resilience
 
 
@@ -164,7 +164,7 @@ def test_ensure_skips_download_when_version_matches(
     downloaded: list[str] = []
     monkeypatch.setattr(
         oc,
-        "_download_and_verify",
+        "download_and_verify",
         lambda _tag, _dir: downloaded.append(_tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -196,7 +196,7 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
     downloaded: list[str] = []
     monkeypatch.setattr(
         oc,
-        "_download_and_verify",
+        "download_and_verify",
         lambda tag, _d: downloaded.append(tag),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -222,7 +222,7 @@ def test_unsupported_platform_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     downloaded: list[str] = []
     monkeypatch.setattr(
         oc,
-        "_download_and_verify",
+        "download_and_verify",
         lambda _t, _d: downloaded.append(_t),  # pyright: ignore[reportUnknownArgumentType]
     )
     oc.ensure_otel_collector(tmp_path / "repo", tmp_path, roles=None)
@@ -1136,7 +1136,7 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     (tmp_path / "otel-collector").mkdir(parents=True)
     (tmp_path / "otel-collector/otelcol-contrib").write_bytes(b"bin")
     (tmp_path / "otel-collector/version").write_text(oc.OTELCOL_CONTRIB_VERSION, encoding="utf-8")
-    monkeypatch.setattr(oc, "_download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(oc, "download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.db.direct_db_url", lambda: "postgresql://ava:abc@10.0.0.2:5433/ava")
     monkeypatch.setattr(
         "shared.config.settings.data_plane.redis_url", "redis://:abc@10.0.0.2:6380/0"

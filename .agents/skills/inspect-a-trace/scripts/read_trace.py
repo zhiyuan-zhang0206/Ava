@@ -187,7 +187,7 @@ def _gateway_get(gateway: str, path: str) -> dict:
     req = urllib.request.Request(url, headers=headers)
     # Bypass the system HTTP proxy: the gateway may be a private-cluster
     # address, and the macOS system proxy (127.0.0.1:7897) answers 502 for
-    # it. Same rationale as fetch_trace.py and cli/commands/trace.py.
+    # it. Same rationale as fetch_trace.py and cli/commands/observability/trace.py.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=60) as resp:
         return json.loads(resp.read().decode())

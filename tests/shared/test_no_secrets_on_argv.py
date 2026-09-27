@@ -334,7 +334,7 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The cluster's own redis: `--requirepass <secret>` and `redis-cli -a <secret>`
     would both publish the cluster secret. It goes through a 0600 conf file and
     `$REDISCLI_AUTH` instead."""
-    from cli.commands import cluster_instance as ci
+    from cli.commands.data_plane import cluster_instance as ci
 
     calls: list[list[str]] = []
 

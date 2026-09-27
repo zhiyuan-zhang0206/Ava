@@ -36,7 +36,7 @@ Ava code participates and a box with no agents running still reports.
   Redis-admin password, which is also its `requirepass`. A pure agent-runner's URLs point at
   the GATEWAY's data plane, so rendering those receivers there would only
   duplicate the gateway's series — `_data_plane_receivers` in
-  `cli/commands/_otel_collector.py` omits them, and the rendered config is
+  `cli/commands/observability/otel_collector.py` omits them, and the rendered config is
   0600 because it carries the secret. The Postgres contrib receiver is also
   omitted when the direct URL has an empty password because that receiver
   rejects empty credentials; Redis remains enabled and unauthenticated.
