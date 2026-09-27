@@ -563,8 +563,9 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
     change_at: str,
 ) -> None:
     from cli import main, start_intent
+    from cli.release_fleet.request import FleetRequest
     from cli.release_transition.journal import create
-    from cli.release_transition.request import ReleaseRef, Request
+    from cli.release_transition.request import ReleaseRef
     from shared.release_operation import authorized_start
 
     home = image.root.parent.parent
@@ -575,13 +576,15 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
         schema_digest=hashlib.sha256(b"baseline").hexdigest(),
         source_commit="b" * 40,
     )
-    request = Request(
+    request = FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(home.parent / "registry.json"),
         created_at=datetime.now(UTC),
         machine="fixture",
-        previous=reference.model_copy(update={"artifact_digest": "f" * 64}),
+        previous=reference.model_copy(
+            update={"artifact_digest": "f" * 64, "source_commit": "c" * 40}
+        ),
         candidate=reference,
         executor=reference,
         configuration_digest=configuration_digest(home),

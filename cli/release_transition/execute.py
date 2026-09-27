@@ -1,4 +1,8 @@
-"""Finite retained executor. It never edits source or launches application units."""
+"""Finite retained executor. It never edits source or launches application units.
+
+A fleet operation runs the coordinator (`cli.release_fleet.coordinator`), a
+remote unit's operation its follower, and a PITR operation its own phases.
+"""
 
 from __future__ import annotations
 
@@ -8,54 +12,9 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import Journal, Operation, exclusive, read_operation
-from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import PitrRequest
-
-
-def drive(journal: Journal, driver: LocalTransition) -> None:
-    """Each pending phase is reconciled against real effects before advancing."""
-    while not journal.operation.terminal:
-        operation = journal.operation
-        try:
-            match operation.phase:
-                case "prepared":
-                    driver.preflight()
-                    driver.preflight_authority()
-                    journal.advance("quiescing")
-                case "quiescing":
-                    driver.quiesce()
-                    journal.advance("stopping")
-                case "stopping":
-                    driver.stop(operation)
-                    journal.advance("fencing")
-                case "fencing":
-                    driver.fence(journal)
-                    journal.advance("selecting")
-                case "selecting":
-                    driver.select(operation)
-                    journal.advance("authorizing")
-                case "authorizing":
-                    driver.authorize(journal)
-                    journal.advance("starting")
-                case "starting":
-                    driver.start(journal)
-                    journal.advance("observing")
-                case "observing":
-                    driver.observe(operation)
-                    journal.advance("resuming")
-                case "resuming":
-                    driver.resume(operation)
-                    journal.advance("complete")
-                case _:
-                    raise ValueError("unknown release phase")  # noqa: TRY301 — exhaustive state dispatch
-        except (OSError, ValueError, RuntimeError) as exc:
-            detail = f"{type(exc).__name__}: {exc}"[:2048]
-            if operation.direction == "candidate" and operation.phase in {"starting", "observing"}:
-                journal.recover(detail)
-                continue
-            journal.fail(detail)
-            raise
 
 
 def execute(path: Path) -> None:
@@ -87,11 +46,16 @@ def execute(path: Path) -> None:
             require_inputs(journal.operation)
             with authorized_pitr(path, journal.pitr_record_write):
                 drive_pitr(journal)
-        else:
+        elif isinstance(request, FleetRequest):
+            from cli.release_fleet.coordinator import run_coordinator
             from cli.release_transition.authority import adopt_executor_authority
 
             adopt_executor_authority(Path(request.home))
-            drive(journal, LocalTransition(request))
+            run_coordinator(journal)
+        else:
+            from cli.release_fleet.follower import run_follower
+
+            run_follower(journal)
 
 
 def _executor_receipt(launch: dict[str, JsonValue]) -> dict[str, JsonValue]:

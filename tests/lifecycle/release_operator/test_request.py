@@ -15,9 +15,10 @@ from types import SimpleNamespace
 import pytest
 
 import shared.cluster as cluster_pkg
+from cli.release_fleet.request import FleetRequest
 from cli.release_operator import request as request_module
 from cli.release_operator.layout import receipt_path
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared import machine as shared_machine
 from shared import paths as shared_paths
 from shared.runtime_abi import current_abi
@@ -152,7 +153,7 @@ def test_happy_path_writes_a_request_ava_cluster_update_can_consume(
 
     assert code == 0
     assert out.stat().st_mode & 0o777 == 0o600
-    request = Request.model_validate_json(out.read_bytes())
+    request = FleetRequest.model_validate_json(out.read_bytes())
     assert request.home == str(home)
     assert request.registry == str(cluster_pkg.registry_path())
     assert request.machine == "test-unit"

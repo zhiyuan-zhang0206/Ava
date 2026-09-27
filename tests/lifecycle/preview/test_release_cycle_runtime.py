@@ -8,11 +8,12 @@ from typing import Any, NoReturn
 
 import pytest
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import root_service
 from cli.release_transition.journal import Operation, Retirement
 from cli.release_transition.launcher_linux import LinuxJob
 from cli.release_transition.native import LINUX
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from scripts.preview import release_cycle_runtime as runtime
 from scripts.preview import release_cycle_state as state
 from shared.native_process.ownership import OwnedProcess
@@ -39,7 +40,7 @@ def _native(*, live: bool = False, failed: bool = False) -> LinuxJob:
 
 @pytest.mark.parametrize("change", [None, "live", "rollback", "incomplete", "error", "failed"])
 def test_only_closed_successful_requested_transition_counts_as_complete(
-    request_record: Request, change: str | None
+    request_record: FleetRequest, change: str | None
 ) -> None:
     operation = at_phase(
         "observing" if change == "incomplete" else "complete",
@@ -56,7 +57,7 @@ def test_only_closed_successful_requested_transition_counts_as_complete(
 
 
 def test_already_retired_previous_operation_never_reacquires_mutation_authority(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     native = _native()
     operation = at_phase(
@@ -76,7 +77,7 @@ def test_already_retired_previous_operation_never_reacquires_mutation_authority(
 
 @pytest.mark.parametrize("wrong", [False, True])
 def test_steady_boot_uses_verified_pinned_image_in_existing_home_unit(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch, *, wrong: bool
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch, *, wrong: bool
 ) -> None:
     home = Path(request_record.home)
     root = home / "releases" / request_record.previous.artifact_digest
@@ -232,7 +233,7 @@ def test_termination_acceptance_never_substitutes_for_native_closure(
     assert evidence["result"] == "failed" and "native execution" in evidence["pending"]
 
 
-def _captured_request(request: Request, label: str = "ab") -> Path:
+def _captured_request(request: FleetRequest, label: str = "ab") -> Path:
     import hashlib
 
     run = Path(request.home).parent
@@ -245,7 +246,7 @@ def _captured_request(request: Request, label: str = "ab") -> Path:
 
 
 def test_dispatch_reverifies_image_and_invokes_only_public_cli_with_clean_environment(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import subprocess
 
@@ -332,7 +333,7 @@ def test_fixture_runs_isolated_before_trusting_its_installed_origin(
 
 @pytest.mark.parametrize("changed_attempt", [False, True])
 def test_executor_finishing_between_journal_and_native_reads_uses_final_same_attempt(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch, *, changed_attempt: bool
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch, *, changed_attempt: bool
 ) -> None:
     before = at_phase(
         "resuming",

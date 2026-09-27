@@ -10,8 +10,9 @@ from uuid import uuid4
 
 import pytest
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import create
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared.release_operation import (
     authorized_start,
     operation_in_flight,
@@ -29,8 +30,8 @@ def _operation(home: Path) -> Path:
         schema_digest="c" * 64,
         source_commit="d" * 40,
     )
-    candidate = previous.model_copy(update={"artifact_digest": "e" * 64})
-    request = Request(
+    candidate = previous.model_copy(update={"artifact_digest": "e" * 64, "source_commit": "9" * 40})
+    request = FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(home.parent / "clusters.json"),
@@ -373,7 +374,7 @@ def test_operation_start_cannot_bypass_missing_changed_or_unsettled_hold(
 def test_operation_start_rejects_naive_maintenance_timestamp(operation_path: Path) -> None:
     payload = json.loads(operation_path.read_bytes())
     payload["phase"] = "starting"
-    payload["request"]["created_at"] = "2026-01-01T00:00:00"
+    payload["fleet"]["maintenance_at"] = "2026-01-01T00:00:00"
     operation_path.write_text(json.dumps(payload))
     with authorized_start(operation_path), pytest.raises(ValueError, match="aware"):
         require_start_authorized(_home(operation_path))
@@ -386,9 +387,9 @@ def test_operation_in_flight_names_only_an_unfailed_incomplete_operation(
     explains no outage, and no active pointer means no operation."""
     home = _home(operation_path)
     identity = operation_path.parent.name
-    assert operation_in_flight(home) == f"release operation {identity} at prepared"
+    assert operation_in_flight(home) == f"fleet operation {identity} at prepared"
     _set_state(operation_path, phase="stopping")
-    assert operation_in_flight(home) == f"release operation {identity} at stopping"
+    assert operation_in_flight(home) == f"fleet operation {identity} at stopping"
     _set_state(operation_path, error="injected native failure")
     assert operation_in_flight(home) is None
     _set_state(operation_path, phase="complete", error=None)

@@ -22,10 +22,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_operator.current import current_release
 from cli.release_operator.layout import receipt_path, require_commit_shape
 from cli.release_prepare.models import PreparationReceipt
-from cli.release_transition.request import ReleaseRef, Request, verify_pair
+from cli.release_transition.request import ReleaseRef, verify_pair
 from shared.verified_file import regular_bytes
 
 
@@ -49,7 +50,7 @@ def _candidate_from_receipt(home: Path, commit: str) -> ReleaseRef:
     )
 
 
-def _build_request(*, commit: str, exclude: tuple[str, ...], reason: str | None) -> Request:
+def _build_request(*, commit: str, exclude: tuple[str, ...], reason: str | None) -> FleetRequest:
     from shared.cluster import registry_path
     from shared.machine import machine_name
     from shared.paths import ava_home
@@ -71,7 +72,7 @@ def _build_request(*, commit: str, exclude: tuple[str, ...], reason: str | None)
     previous, _ = found
     if previous.selector == candidate.selector:
         raise ValueError("the prepared candidate is already this home's active release")
-    request = Request(
+    request = FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(registry_path()),
@@ -86,7 +87,7 @@ def _build_request(*, commit: str, exclude: tuple[str, ...], reason: str | None)
     return request
 
 
-def _write_request(out: Path, request: Request) -> None:
+def _write_request(out: Path, request: FleetRequest) -> None:
     encoded = (request.model_dump_json() + "\n").encode()
     try:
         fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

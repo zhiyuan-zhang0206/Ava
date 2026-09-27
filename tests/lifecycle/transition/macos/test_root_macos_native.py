@@ -8,7 +8,7 @@ with its native birth) and a fixture stage that stands in for ordinary start:
 it persists the image's seed and calls ``root_seed``, the same calls
 ``_seed_via_helper`` makes. Real: the helper keeper, kernel-peer and signature
 authentication, ordinary root stop (``_stop_root_service_tree``), selector CAS,
-the journal, ``drive`` and the helper root custody. Not exercised here: the
+the journal, the fleet coordinator (a fleet of one) and the helper root custody. Not exercised here: the
 application start and readiness, the finite executor job around the start
 (proven by test_launcher_macos_native.py), the data plane (its bracket is
 replaced), logout and reboot. Cleanup stops the keeper's root, boots out the
@@ -38,19 +38,19 @@ import psutil
 import pytest
 
 from cli.commands import root_driver
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, root_macos, root_service
 from cli.release_transition import launcher_macos as macos
-from cli.release_transition.execute import drive
 from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.launchd_custody import RootCustody
-from cli.release_transition.local import LocalTransition
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from services.permissions_helper import client, lifecycle
 from shared import paths
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
 from shared.runtime_abi import current_abi
 from shared.runtime_release import MANIFEST_VERSION, VerifiedRelease, file_sha256
+from tests.lifecycle.release_fleet.fakes import OffDutyGateway, drive
 from tests.lifecycle.transition.macos import native_fixture
 from tests.lifecycle.transition.phases import journal_fence, journal_issue
 
@@ -347,29 +347,21 @@ class NativeHome:
         )
 
 
-class NativeTransition(LocalTransition):
+class NativeTransition(OffDutyGateway):
     """Real helper-root effects; only the application-level gates are absent.
 
     Quiescing, the single-home writer gate and the write-generation fence need
     the application database (the fence journals synthetic receipts here; it is
     proven on real PostgreSQL in tests/lifecycle/db_authority/); ordinary
-    stop's maintenance bookkeeping is replaced by its native root stop.
+    stop's maintenance bookkeeping is replaced by its native root stop. The
+    coordinator's own needs (deploy lease, evidence, publication) are the
+    in-memory fakes.
     """
 
-    def __init__(self, request: Request) -> None:
-        self.request = request
-        self.home = Path(request.home)
+    def __init__(self, request: FleetRequest) -> None:
+        super().__init__(request)
         self.previous = request.previous.verify(self.home)
         self.candidate = request.candidate.verify(self.home)
-
-    def preflight(self) -> None:
-        return
-
-    def preflight_authority(self) -> None:
-        return
-
-    def quiesce(self) -> None:
-        return
 
     def fence(self, journal: Journal) -> None:
         journal_fence(journal)
@@ -504,8 +496,8 @@ def native(
         shutil.rmtree(base)
 
 
-def _operation(native: NativeHome, previous: str, candidate: str) -> Request:
-    request = Request(
+def _operation(native: NativeHome, previous: str, candidate: str) -> FleetRequest:
+    request = FleetRequest(
         id=uuid4(),
         home=str(native.home),
         registry=str(native.registry),
@@ -526,7 +518,7 @@ def _operation(native: NativeHome, previous: str, candidate: str) -> Request:
     return request
 
 
-def _drive(request: Request) -> Operation:
+def _drive(request: FleetRequest) -> Operation:
     with journal.exclusive(request.path) as current:
         drive(current, NativeTransition(request))
     final = journal.read_operation(request.path)
@@ -535,7 +527,7 @@ def _drive(request: Request) -> Operation:
     return final
 
 
-def _retire_stand_in(request: Request) -> None:
+def _retire_stand_in(request: FleetRequest) -> None:
     """This process stood in for the finite job: its launch never reached launchd.
 
     The next operation requires the previous executor's recorded retirement;

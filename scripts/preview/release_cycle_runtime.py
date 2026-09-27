@@ -19,9 +19,10 @@ from uuid import uuid4
 
 from dotenv import dotenv_values
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import Operation, read_operation
 from cli.release_transition.launcher_linux import LinuxJob, readback, retire_current
-from cli.release_transition.request import ReleaseRef, Request, verify_pair
+from cli.release_transition.request import ReleaseRef, verify_pair
 from scripts.preview import local
 from scripts.preview.linux_observer import _require_context
 from scripts.preview.linux_runtime import bound_runtime
@@ -125,7 +126,7 @@ def prepare(
     if inputs["images"]["a"]["fixture"] != inputs["images"]["b"]["fixture"]:
         raise RuntimeError("A and B scripted fixture scenarios differ")
     for label, old, new in (("ab", a_ref, b_ref), ("ba", b_ref, a_ref)):
-        request = Request(
+        request = FleetRequest(
             id=uuid4(),
             home=str(run / "home"),
             registry=str(run / "clusters.json"),
@@ -187,12 +188,12 @@ def initial(run: Path) -> None:
     )
 
 
-def _operation(run: Path, label: str) -> Request:
+def _operation(run: Path, label: str) -> FleetRequest:
     encoded = regular_bytes(run / f"release-{label}-request.json")
     inputs = json.loads(regular_bytes(run / "release-inputs.json"))
     if hashlib.sha256(encoded).hexdigest() != inputs["requests"][label]["sha256"]:
         raise RuntimeError("captured cycle request changed")
-    request = Request.model_validate_json(encoded)
+    request = FleetRequest.model_validate_json(encoded)
     if request.home != str(run / "home") or request.registry != str(run / "clusters.json"):
         raise RuntimeError("cycle operation belongs to another preview")
     return request
@@ -232,7 +233,7 @@ def _closed_journal(operation: Operation, native: LinuxJob) -> Operation:
     return final
 
 
-def _sample(request: Request, *, cleanup: bool) -> tuple[Operation, LinuxJob | None]:
+def _sample(request: FleetRequest, *, cleanup: bool) -> tuple[Operation, LinuxJob | None]:
     operation = read_operation(request.path)
     if operation.request != request or operation.attempt != 0:
         raise RuntimeError("cycle operation changed inputs or retried a failed executor")

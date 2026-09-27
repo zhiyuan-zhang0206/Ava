@@ -12,14 +12,15 @@ from uuid import uuid4
 
 import pytest
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_operator import status as status_module
-from cli.release_transition.journal import Operation
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared import machine as shared_machine
 from shared import paths as shared_paths
 from shared.runtime_abi import current_abi
 from shared.runtime_release import activate_release
 from tests.lifecycle.release_operator.conftest import build_image, digest
+from tests.lifecycle.transition.phases import at_phase
 
 
 def _reference(label: str) -> ReleaseRef:
@@ -31,8 +32,8 @@ def _reference(label: str) -> ReleaseRef:
     )
 
 
-def _request(home: Path) -> Request:
-    return Request(
+def _request(home: Path) -> FleetRequest:
+    return FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(home.parent / "clusters.json"),
@@ -92,7 +93,7 @@ def test_reports_the_current_selection_read_only(home: Path) -> None:
 
 def test_reports_the_active_operation_read_only(home: Path) -> None:
     request = _request(home)
-    operation = Operation(request=request)
+    operation = at_phase("prepared", request=request)
     request.path.parent.mkdir(parents=True)
     request.path.write_text(operation.model_dump_json())
     (home / "updates/active").write_text(str(request.path))
@@ -109,7 +110,7 @@ def test_reports_the_active_operation_read_only(home: Path) -> None:
 
 def test_explicit_operation_id_reads_that_journal_directly(home: Path) -> None:
     request = _request(home)
-    operation = Operation(request=request)
+    operation = at_phase("prepared", request=request)
     request.path.parent.mkdir(parents=True)
     request.path.write_text(operation.model_dump_json())
     # Deliberately no "active" pointer: --operation must not depend on it.

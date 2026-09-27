@@ -10,10 +10,11 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import execute, journal, native, submit
 from cli.release_transition import launcher_linux as linux
 from cli.release_transition import launcher_macos as macos
-from cli.release_transition.request import PitrRequest, Request
+from cli.release_transition.request import PitrRequest
 from shared import os_boot_unit, paths
 from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import Harness
@@ -62,7 +63,7 @@ def test_darwin_submission_refuses_pitr_before_any_reservation(
     def unexpected(*_args: object, **_kwargs: object) -> None:
         pytest.fail("macOS admission must refuse before preflight or reservation")
 
-    monkeypatch.setattr(submit, "LocalTransition", unexpected)
+    monkeypatch.setattr(submit, "GatewayUnit", unexpected)
     monkeypatch.setattr(submit, "create", unexpected)
     pitr = PitrRequest.model_construct(id=uuid4(), home=str(home))
     with pytest.raises(ValueError, match="PITR is not admitted on macOS"):
@@ -92,9 +93,9 @@ def test_darwin_release_scope_is_the_common_preflight_before_reservation(
     def unexpected(*_args: object, **_kwargs: object) -> None:
         pytest.fail("an out-of-scope release must refuse before reservation")
 
-    monkeypatch.setattr(submit, "LocalTransition", Scoped)
+    monkeypatch.setattr(submit, "GatewayUnit", Scoped)
     monkeypatch.setattr(submit, "create", unexpected)
-    request = Request.model_construct(id=uuid4(), home=str(home), kind="release")
+    request = FleetRequest.model_construct(id=uuid4(), home=str(home), kind="fleet")
     with pytest.raises(ValueError, match="one local gateway data plane"):
         submit.submit_request(request)
     assert gates == ["admitted", "preflight"]

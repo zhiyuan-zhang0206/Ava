@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,11 +11,11 @@ from typing import Any
 import pytest
 from pydantic import JsonValue, ValidationError
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, native, root_macos, root_service, stage
 from cli.release_transition.journal import Journal, Operation, Phase
 from cli.release_transition.launchd_custody import Birth, RootCustody
 from cli.release_transition.local import LocalTransition
-from cli.release_transition.request import Request
 from shared.native_process import ownership
 from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import EXECUTOR_BIRTH, Harness
@@ -117,7 +118,7 @@ def test_new_helper_or_direction_replaces_an_unreceipted_intent(harness: Harness
     assert _root(harness) == RootCustody.model_validate(_custody(helper=OTHER_HELPER))
     with journal.exclusive(harness.path) as current:
         current.root_started(_custody(helper=OTHER_HELPER, root=ROOT))
-        current.recover("candidate failed")
+        current.recover("candidate failed", at=datetime.now(UTC))
         advance_to(current, "starting")
         # The recovery direction starts over; the candidate receipt is history.
         current.root_intent(_custody(direction="previous"))
@@ -156,11 +157,11 @@ def _transition(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> LocalTrans
     from shared import maintenance
 
     request = journal.read_operation(harness.path).request
-    assert isinstance(request, Request)
+    assert isinstance(request, FleetRequest)
     transition = object.__new__(LocalTransition)
     transition.request, transition.home = request, Path(request.home)
     transition.previous = transition.candidate = SimpleNamespace(name="image")  # type: ignore[assignment]
-    monkeypatch.setattr(Request, "require_configuration", lambda _self: None)
+    monkeypatch.setattr(FleetRequest, "require_configuration", lambda _self: None)
     monkeypatch.setattr(transition, "preflight", lambda: None)
     hold = SimpleNamespace(phase="stopped")
     monkeypatch.setattr(

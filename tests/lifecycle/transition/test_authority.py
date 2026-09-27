@@ -1,7 +1,8 @@
 """The release's write-generation records and their orchestration around the ledger.
 
 Real journal, real ledger (`shared.cluster.authority.ledger`) and the real
-`authority.fence` / `authority.authorize` driven by `execute.drive`; only the
+`authority.fence` / `authority.authorize` driven by the fleet coordinator
+(a fleet of one, `tests/lifecycle/release_fleet/fakes.py`); only the
 catalog and pooler effects are replaced by the ledger transitions they perform
 (they run on real PostgreSQL and PgBouncer in
 tests/lifecycle/db_authority/test_release_fence.py). A process death is
@@ -23,6 +24,7 @@ import pytest
 from pydantic import ValidationError
 
 from cli.commands import maintenance_data_plane
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import authority
 from cli.release_transition.authority_evidence import (
     Fence,
@@ -31,10 +33,8 @@ from cli.release_transition.authority_evidence import (
     Issue,
     require_coherent,
 )
-from cli.release_transition.execute import drive
 from cli.release_transition.journal import Journal, Operation, create, exclusive, read_operation
-from cli.release_transition.local import LocalTransition
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared.cluster.authority import (
     AuthorityRefusedError,
     ClosureEvidence,
@@ -45,6 +45,7 @@ from shared.cluster.authority import (
 )
 from shared.cluster.authority.ledger import begin_mint, begin_revoke, mark_closed, record_drops
 from shared.runtime_release import current_pointer
+from tests.lifecycle.release_fleet.fakes import OffDutyGateway, drive
 from tests.lifecycle.transition.phases import (
     advance_to,
     at_phase,
@@ -71,7 +72,7 @@ def _point(home: Path, reference: ReleaseRef) -> None:
 
 
 @pytest.fixture
-def request_record(tmp_path: Path) -> Request:
+def request_record(tmp_path: Path) -> FleetRequest:
     home = tmp_path.resolve() / "home"
     home.mkdir(mode=0o700)
     previous = ReleaseRef(
@@ -80,11 +81,11 @@ def request_record(tmp_path: Path) -> Request:
         schema_digest="c" * 64,
         source_commit="d" * 40,
     )
-    candidate = previous.model_copy(update={"artifact_digest": "e" * 64})
+    candidate = previous.model_copy(update={"artifact_digest": "e" * 64, "source_commit": "9" * 40})
     (home / "releases").mkdir()
     _point(home, previous)
     seed_active(home, 0)
-    return Request(
+    return FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(home.parent / "registry.json"),
@@ -147,63 +148,37 @@ class DataPlane:
         return require_ledger(self.home).active
 
 
-class Transition(LocalTransition):
+class Transition(OffDutyGateway):
     """Real fence/authorize; every other phase is a no-op except the selector."""
 
-    def __init__(self, request: Request, *, fail_start: bool = False) -> None:
-        self.request = request
-        self.home = Path(request.home)
+    def __init__(self, request: FleetRequest, *, fail_start: bool = False) -> None:
+        super().__init__(request)
         self.fail_start = fail_start
-
-    def preflight(self) -> None:
-        return
-
-    def preflight_authority(self) -> None:
-        return
-
-    def quiesce(self) -> None:
-        return
-
-    def stop(self, operation: Operation) -> None:
-        return
 
     def fence(self, journal: Journal) -> None:
         authority.fence(journal)
 
     def select(self, operation: Operation) -> None:
-        target = (
-            self.request.candidate if operation.direction == "candidate" else self.request.previous
-        )
-        _point(self.home, target)
+        _point(self.home, operation.reference)
 
     def authorize(self, journal: Journal) -> None:
-        operation = journal.operation
-        target = (
-            self.request.candidate if operation.direction == "candidate" else self.request.previous
-        )
-        authority.authorize(journal, target)
+        authority.authorize(journal, journal.operation.reference)
 
     def start(self, journal: Journal) -> None:
         authority.require_issued(journal.operation)
         if self.fail_start and journal.operation.direction == "candidate":
             raise RuntimeError("candidate readiness failed")
 
-    def observe(self, operation: Operation) -> None:
-        return
-
-    def resume(self, operation: Operation) -> None:
-        return
-
 
 @pytest.fixture
-def plane(request_record: Request, monkeypatch: pytest.MonkeyPatch) -> Iterator[DataPlane]:
+def plane(request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[DataPlane]:
     fake = DataPlane(Path(request_record.home))
     monkeypatch.setattr(maintenance_data_plane, "fence_write_generation", fake.fence)
     monkeypatch.setattr(maintenance_data_plane, "admit_write_generation", fake.admit)
     yield fake
 
 
-def _drive(request: Request, **kwargs: bool) -> Operation:
+def _drive(request: FleetRequest, **kwargs: bool) -> Operation:
     with exclusive(request.path) as journal:
         drive(journal, Transition(request, **kwargs))
     return read_operation(request.path)
@@ -219,7 +194,7 @@ def _summary(operation: Operation) -> tuple[list[tuple[str, int, str]], list[tup
 
 
 def test_fencing_and_authorizing_sit_between_stop_select_and_start(
-    request_record: Request,
+    request_record: FleetRequest,
 ) -> None:
     create(request_record)
     with exclusive(request_record.path) as journal:
@@ -275,7 +250,7 @@ def test_issue_names_its_generation_exactly_when_authorized() -> None:
 
 
 def test_recovery_fences_exactly_the_candidates_issue_with_a_newer_number(
-    request_record: Request,
+    request_record: FleetRequest,
 ) -> None:
     recovered = at_phase("complete", request=request_record, direction="previous")
     assert _summary(recovered) == (
@@ -294,7 +269,7 @@ def test_recovery_fences_exactly_the_candidates_issue_with_a_newer_number(
         Operation.model_validate(candidate | {"db_fences": dump["db_fences"]})
 
 
-def test_pitr_operations_carry_no_write_generation_records(request_record: Request) -> None:
+def test_pitr_operations_carry_no_write_generation_records(request_record: FleetRequest) -> None:
     completed = at_phase("complete", request=request_record)
     require_coherent("complete", None, (), ())
     with pytest.raises(ValueError, match="reuses the active write generation"):
@@ -302,7 +277,7 @@ def test_pitr_operations_carry_no_write_generation_records(request_record: Reque
 
 
 def test_receipts_are_journaled_only_in_their_phase_and_never_replaced(
-    request_record: Request,
+    request_record: FleetRequest,
 ) -> None:
     create(request_record)
     intent = closed("candidate", generation(0)).model_copy(
@@ -343,7 +318,7 @@ def test_receipts_are_journaled_only_in_their_phase_and_never_replaced(
 
 
 def test_release_fences_generation_zero_and_admits_one(
-    request_record: Request, plane: DataPlane
+    request_record: FleetRequest, plane: DataPlane
 ) -> None:
     create(request_record)
     final = _drive(request_record)
@@ -364,7 +339,7 @@ def test_release_fences_generation_zero_and_admits_one(
 
 
 def test_failed_candidate_is_fenced_before_its_predecessor_gets_a_new_generation(
-    request_record: Request, plane: DataPlane
+    request_record: FleetRequest, plane: DataPlane
 ) -> None:
     create(request_record)
     final = _drive(request_record, fail_start=True)
@@ -388,7 +363,7 @@ _ISSUE_BOUNDARIES = ["admit-effect", "pending", "active"]
 
 @pytest.mark.parametrize("boundary", [*_FENCE_BOUNDARIES, *_ISSUE_BOUNDARIES])
 def test_process_death_at_each_ledger_boundary_continues_the_recorded_generation(
-    request_record: Request, plane: DataPlane, boundary: str
+    request_record: FleetRequest, plane: DataPlane, boundary: str
 ) -> None:
     create(request_record)
     plane.crash_after = boundary
@@ -415,7 +390,7 @@ def test_process_death_at_each_ledger_boundary_continues_the_recorded_generation
 
 @pytest.mark.parametrize("receipt", ["fence", "issue"])
 def test_death_after_a_receipt_does_not_repeat_the_effect(
-    request_record: Request,
+    request_record: FleetRequest,
     plane: DataPlane,
     monkeypatch: pytest.MonkeyPatch,
     receipt: str,
@@ -445,7 +420,7 @@ def test_death_after_a_receipt_does_not_repeat_the_effect(
 
 
 def test_an_uncertain_fence_holds_and_never_selects(
-    request_record: Request, plane: DataPlane, monkeypatch: pytest.MonkeyPatch
+    request_record: FleetRequest, plane: DataPlane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     create(request_record)
 
@@ -468,13 +443,11 @@ def test_an_uncertain_fence_holds_and_never_selects(
 
 
 def test_authorizing_requires_the_selected_target(
-    request_record: Request, plane: DataPlane
+    request_record: FleetRequest, plane: DataPlane
 ) -> None:
     create(request_record)
     with exclusive(request_record.path) as journal:
-        journal.advance("quiescing")
-        journal.advance("stopping")
-        journal.advance("fencing")
+        advance_to(journal, "fencing")
         authority.fence(journal)
         journal.advance("selecting")
         journal.advance("authorizing")  # the selector still names the predecessor
@@ -486,7 +459,7 @@ def test_authorizing_requires_the_selected_target(
 
 
 def test_a_continuation_holds_when_the_ledger_allocates_another_number(
-    request_record: Request, plane: DataPlane
+    request_record: FleetRequest, plane: DataPlane
 ) -> None:
     create(request_record)
     home = Path(request_record.home)
@@ -511,7 +484,7 @@ def test_a_continuation_holds_when_the_ledger_allocates_another_number(
 
 
 def test_a_foreign_pending_generation_is_never_adopted(
-    request_record: Request, plane: DataPlane
+    request_record: FleetRequest, plane: DataPlane
 ) -> None:
     create(request_record)
     home = Path(request_record.home)
@@ -530,7 +503,7 @@ def test_a_foreign_pending_generation_is_never_adopted(
 
 
 def test_fencing_refuses_without_exactly_one_admitted_generation(
-    request_record: Request, plane: DataPlane
+    request_record: FleetRequest, plane: DataPlane
 ) -> None:
     create(request_record)
     home = Path(request_record.home)
@@ -544,7 +517,7 @@ def test_fencing_refuses_without_exactly_one_admitted_generation(
 
 
 def test_a_recorded_fence_target_that_is_no_longer_admitted_holds(
-    request_record: Request, plane: DataPlane
+    request_record: FleetRequest, plane: DataPlane
 ) -> None:
     create(request_record)
     with exclusive(request_record.path) as journal:
@@ -559,7 +532,7 @@ def test_a_recorded_fence_target_that_is_no_longer_admitted_holds(
 
 
 def test_a_closed_receipt_the_ledger_contradicts_holds(
-    request_record: Request, plane: DataPlane
+    request_record: FleetRequest, plane: DataPlane
 ) -> None:
     create(request_record)
     with exclusive(request_record.path) as journal:
@@ -580,7 +553,7 @@ def test_a_closed_receipt_the_ledger_contradicts_holds(
 
 
 def test_start_requires_the_ledger_to_hold_exactly_the_issued_generation(
-    request_record: Request,
+    request_record: FleetRequest,
 ) -> None:
     create(request_record)
     home = Path(request_record.home)
@@ -599,7 +572,7 @@ def test_start_refuses_without_an_authorized_issue() -> None:
 
 
 def test_executor_dials_the_owner_socket_as_the_gateway_group(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -633,7 +606,7 @@ def test_executor_dials_the_owner_socket_as_the_gateway_group(
 
 
 def test_the_executor_adopts_its_administrator_authority_before_any_phase(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from types import SimpleNamespace
 
@@ -653,14 +626,16 @@ def test_the_executor_adopts_its_administrator_authority_before_any_phase(
     monkeypatch.setattr(
         authority, "adopt_executor_authority", lambda home: events.append(f"adopt {home}")
     )
-    monkeypatch.setattr(execute, "LocalTransition", lambda _request: "driver")
-    monkeypatch.setattr(execute, "drive", lambda _journal, driver: events.append(f"drive {driver}"))
+    monkeypatch.setattr(
+        "cli.release_fleet.coordinator.run_coordinator",
+        lambda journal: events.append(f"coordinate {journal.operation.phase}"),
+    )
     execute.execute(request_record.path)
-    assert events == [f"adopt {request_record.home}", "drive driver"]
+    assert events == [f"adopt {request_record.home}", "coordinate prepared"]
 
 
 def test_stage_start_refuses_a_generation_other_than_the_issued_one(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cli.release_transition import stage
 

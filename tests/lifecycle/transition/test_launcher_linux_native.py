@@ -22,8 +22,9 @@ import psutil
 import pytest
 from pydantic import JsonValue
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, launcher_linux
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared.native_process.ownership import OwnedProcess
 from shared.os_boot_unit import unit_name
 from shared.runtime_abi import current_abi
@@ -133,7 +134,7 @@ def _wait_exit(unit: str) -> None:
 
 
 def _finish_executor(
-    request: Request,
+    request: FleetRequest,
     plan: dict[str, JsonValue],
     sibling: OwnedProcess,
     executor: OwnedProcess,
@@ -165,10 +166,11 @@ def _finish_executor(
 
 
 def _interrupt_and_resume(
-    request: Request, plan: dict[str, JsonValue], old: launcher_linux.LinuxJob
+    request: FleetRequest, plan: dict[str, JsonValue], old: launcher_linux.LinuxJob
 ) -> tuple[dict[str, JsonValue], launcher_linux.LinuxJob]:
     assert old.owner is not None and old.owner.live()
     with journal.exclusive(request.path) as current:
+        current.advance("dispatching")
         current.advance("quiescing")
         current.advance("stopping")
     _native(["sudo", "-n", "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", old.unit])
@@ -190,13 +192,13 @@ def _interrupt_and_resume(
     return current.launch, resumed
 
 
-def _operation(tmp_path: Path) -> Request:
+def _operation(tmp_path: Path) -> FleetRequest:
     home = tmp_path.resolve() / "home"
     home.mkdir(mode=0o700)
     registry = tmp_path.resolve() / "clusters.json"
     registry.write_text("{}")
     image = _image(home)
-    request = Request(
+    request = FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(registry),
@@ -220,7 +222,7 @@ def _operation(tmp_path: Path) -> Request:
     return request
 
 
-def _retire_fixture(request: Request, sibling: str, births: list[OwnedProcess | None]) -> None:
+def _retire_fixture(request: FleetRequest, sibling: str, births: list[OwnedProcess | None]) -> None:
     current = journal.read_operation(request.path)
     plans = [retired["launch"] for retired in current.retired_executors]
     if current.launch is not None:

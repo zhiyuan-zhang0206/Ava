@@ -12,14 +12,26 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field, JsonValue, TypeAdapter, model_validator
 
+from cli.release_fleet.progress import (
+    FLEET_PHASES,
+    UNIT_PHASES,
+    Decision,
+    FleetProgress,
+    Outcome,
+    UnitProgress,
+    decision_target,
+    initial_progress,
+    next_phase,
+)
+from cli.release_fleet.request import FleetRequest, UnitRequest
 from cli.release_transition.authority_evidence import Fence, Issue, require_coherent
 from cli.release_transition.native import DARWIN, LINUX
 from cli.release_transition.pitr.evidence import PitrProgress, PitrSeal
-from cli.release_transition.request import AnyRequest, PitrRequest, Record, ReleaseRef, Request
+from cli.release_transition.request import PitrRequest, Record, ReleaseRef
 from shared.atomic_io import write_text_atomic
 from shared.native_process.ownership import OwnedProcess
 from shared.platform import file_lock
@@ -43,23 +55,18 @@ Phase = Literal[
     "stopping_apps",
     "stopping_data",
     "proving",
+    "dispatching",
+    "starting_units",
+    "watching",
+    "restoring",
 ]
 Direction = Literal["candidate", "previous"]
+AnyRequest = Annotated[FleetRequest | UnitRequest | PitrRequest, Field(discriminator="kind")]
+_REQUEST: TypeAdapter[FleetRequest | UnitRequest | PitrRequest] = TypeAdapter(AnyRequest)
 _MAX_JOURNAL_BYTES = 256 * 1024
 # Terminal evidence when launchd holds no facts: the recorded boot or login
 # domain ended (see cli/release_transition/launcher_macos.py::_current).
 _DARWIN_ENDED = frozenset({"boot-changed", "domain-lost"})
-_NEXT: dict[str, str] = {
-    "prepared": "quiescing",
-    "quiescing": "stopping",
-    "stopping": "fencing",
-    "fencing": "selecting",
-    "selecting": "authorizing",
-    "authorizing": "starting",
-    "starting": "observing",
-    "observing": "resuming",
-    "resuming": "complete",
-}
 _PITR_NEXT: dict[str, str] = {
     "prepared": "provisioning",
     "provisioning": "quiescing",
@@ -71,6 +78,10 @@ _PITR_NEXT: dict[str, str] = {
     "resuming": "proving",
     "proving": "complete",
 }
+
+
+def read_request(encoded: bytes) -> FleetRequest | UnitRequest | PitrRequest:
+    return _REQUEST.validate_json(encoded)
 
 
 def _kind(launch: dict[str, JsonValue]) -> str:
@@ -109,22 +120,40 @@ class Operation(Record):
     # Write-generation fence and issue per direction (authority_evidence.py).
     db_fences: tuple[Fence, ...] = ()
     db_issues: tuple[Issue, ...] = ()
+    # Fleet progress: the coordinator's (kind fleet) or a remote unit's (kind unit).
+    fleet: FleetProgress | None = None
+    unit: UnitProgress | None = None
     error: str | None = Field(default=None, max_length=2048)
 
     @model_validator(mode="after")
     def coherent_kind(self) -> Self:
         if isinstance(self.request, PitrRequest):
-            if self.direction is not None or self.pitr is None:
-                raise ValueError("PITR requires its own action progress, never release direction")
-            if self.phase not in {*_PITR_NEXT, "complete"}:
-                raise ValueError("PITR cannot enter a release-only phase")
-        elif (
+            self._require_pitr_progress()
+        else:
+            self._require_release_progress(fleet=isinstance(self.request, FleetRequest))
+        return self
+
+    def _require_pitr_progress(self) -> None:
+        if self.direction is not None or self.pitr is None:
+            raise ValueError("PITR requires its own action progress, never release direction")
+        if self.fleet is not None or self.unit is not None:
+            raise ValueError("PITR carries no fleet progress")
+        if self.phase not in {*_PITR_NEXT, "complete"}:
+            raise ValueError("PITR cannot enter a release-only phase")
+
+    def _require_release_progress(self, *, fleet: bool) -> None:
+        """A fleet (coordinator) or unit operation carries exactly its own progress."""
+        progress, other = (self.fleet, self.unit) if fleet else (self.unit, self.fleet)
+        if (
             self.pitr is not None
             or self.direction is None
-            or self.phase not in {*_NEXT, "complete"}
+            or progress is None
+            or other is not None
+            or self.phase not in (FLEET_PHASES if fleet else UNIT_PHASES)
         ):
-            raise ValueError("release requires only release progress")
-        return self
+            raise ValueError(f"a {self.request.kind} operation requires only its own progress")
+        if (self.phase == "complete") != (progress.outcome is not None):
+            raise ValueError("an outcome is recorded exactly when the operation completes")
 
     @model_validator(mode="after")
     def coherent_attempts(self) -> Self:
@@ -157,7 +186,11 @@ class Operation(Record):
 
     @model_validator(mode="after")
     def coherent_authority(self) -> Self:
-        direction = None if self.pitr is not None else self.direction
+        # Only the fleet coordinator fences and issues; PITR, an abort and a
+        # remote unit reuse or receive a generation.
+        fleet = self.fleet
+        aborted = fleet is not None and any(d.kind == "abort" for d in fleet.decisions)
+        direction = self.direction if fleet is not None and not aborted else None
         require_coherent(self.phase, direction, self.db_fences, self.db_issues)
         return self
 
@@ -173,13 +206,19 @@ class Operation(Record):
 
     @property
     def reference(self) -> ReleaseRef:
+        """The image this phase runs: an abort restores the unchanged previous one."""
         if isinstance(self.request, PitrRequest):
             return self.request.image
-        return self.request.candidate if self.direction == "candidate" else self.request.previous
+        if self.direction == "previous" or self.phase == "restoring":
+            return self.request.previous
+        return self.request.candidate
 
     @property
     def maintenance_at(self) -> datetime:
-        return self.request.created_at if self.pitr is None else self.pitr.maintenance_at
+        for progress in (self.pitr, self.fleet, self.unit):
+            if progress is not None:
+                return progress.maintenance_at
+        raise ValueError("an operation always carries its maintenance hold timestamp")
 
     def require_configuration(self) -> None:
         if self.pitr is None or self.pitr.seal is None:
@@ -217,7 +256,7 @@ def _lock(home: Path) -> Path:
     return path
 
 
-def _initial_operation(request: Request | PitrRequest) -> Operation:
+def _initial_operation(request: FleetRequest | UnitRequest | PitrRequest) -> Operation:
     """Publish a new intent only while create holds the home operation lock."""
     # Initial admission and every executor share this home lock. A predecessor
     # checked by the caller can change before lock entry.
@@ -247,12 +286,12 @@ def _initial_operation(request: Request | PitrRequest) -> Operation:
             ),
         )
     else:
-        operation = Operation(request=request)
+        operation = Operation.model_validate({"request": request, **initial_progress(request)})
     _write(operation)
     return operation
 
 
-def create(request: Request | PitrRequest) -> Operation:
+def create(request: FleetRequest | UnitRequest | PitrRequest) -> Operation:
     """Allocate once; exact retries recover the same journal without resetting it."""
     home = Path(request.home)
     if home.resolve(strict=True) != home:
@@ -417,10 +456,35 @@ class Journal:
         return self._replace(launch=record)
 
     def advance(self, phase: Phase) -> Operation:
-        next_phases = _PITR_NEXT if self.operation.pitr is not None else _NEXT
-        if next_phases.get(self.operation.phase) != phase:
-            raise ValueError(f"invalid release transition {self.operation.phase} -> {phase}")
+        current = self.operation
+        if current.pitr is not None or current.direction is None:
+            expected = _PITR_NEXT.get(current.phase)
+        else:
+            expected = next_phase(_field(current), current.phase, current.direction)
+        if expected != phase:
+            raise ValueError(f"invalid release transition {current.phase} -> {phase}")
         return self._replace(phase=phase, error=None)
+
+    def record_fleet(self, progress: FleetProgress | UnitProgress) -> Operation:
+        """Journal fleet or unit progress before acting on it (or sending it)."""
+        current = self.operation.fleet or self.operation.unit
+        if current is None or self.operation.terminal or type(progress) is not type(current):
+            raise ValueError("fleet progress belongs to an incomplete fleet or unit operation")
+        if progress == current:
+            return self.operation
+        current.require_successor(progress)  # pyright: ignore[reportArgumentType] — same type, checked above
+        return self._replace(**{_field(self.operation): progress})
+
+    def complete(self, outcome: Outcome) -> Operation:
+        """The last phase transition, with the outcome it completes on."""
+        current = self.operation
+        progress = current.fleet or current.unit
+        if progress is None or current.direction is None:
+            raise ValueError("only a fleet or unit operation completes with an outcome")
+        if next_phase(_field(current), current.phase, current.direction) != "complete":
+            raise ValueError(f"invalid release transition {current.phase} -> complete")
+        updated = progress.model_copy(update={"outcome": outcome})
+        return self._replace(phase="complete", error=None, **{_field(current): updated})
 
     def record_fence(self, fence: Fence) -> Operation:
         """Retain a fence's intent before revocation, then its closure receipt.
@@ -577,7 +641,7 @@ class Journal:
         current = self.operation
         if (
             current.pitr is not None
-            or current.phase != "starting"
+            or current.phase not in {"starting", "restoring"}
             or current.launch is None
             or not current.launch_attempted
             or not _darwin(current.launch)
@@ -676,20 +740,53 @@ class Journal:
             retirement=None,
         )
 
-    def recover(self, reason: str) -> Operation:
-        if self.operation.pitr is not None:
+    def _decide(
+        self,
+        kind: Literal["abort", "recover"],
+        reason: str,
+        at: datetime,
+        maintenance_at: datetime | None,
+    ) -> Operation:
+        current = self.operation
+        progress = current.fleet or current.unit
+        if progress is None:
             raise ValueError("PITR has no automatic release-image rollback")
-        if self.operation.terminal or self.operation.direction == "previous":
-            raise ValueError("a recovery cannot recover again or reverse a completed decision")
-        if self.operation.phase not in {"starting", "observing"}:
-            raise ValueError("only candidate startup or observation can choose recovery")
-        return self._replace(direction="previous", phase="stopping", error=reason)
+        if current.terminal or current.direction != "candidate" or progress.decisions:
+            raise ValueError("a release decides one abort or one recovery, never reverses it")
+        target = decision_target(
+            _field(current), current.phase, kind, renewed=maintenance_at is not None
+        )
+        decision = Decision(kind=kind, phase=current.phase, reason=reason[:2048], at=at)
+        updated = progress.decided(decision, maintenance_at)
+        direction = "previous" if kind == "recover" else "candidate"
+        return self._replace(
+            phase=target, direction=direction, error=reason[:2048], **{_field(current): updated}
+        )
+
+    def recover(
+        self, reason: str, *, at: datetime, maintenance_at: datetime | None = None
+    ) -> Operation:
+        """Choose the captured predecessor once, after the fence.
+
+        Before admission reopened the same maintenance hold stops the candidate;
+        a recovery from `watching` (or a resumed unit) drains again under the
+        new `maintenance_at`.
+        """
+        return self._decide("recover", reason, at, maintenance_at)
+
+    def abort(self, reason: str, *, at: datetime) -> Operation:
+        """Before the fence: restore the unchanged previous image on generation n."""
+        return self._decide("abort", reason, at, None)
 
     def fail(self, detail: str) -> Operation:
         """Retain the uncertain phase; an exception is never a closure receipt."""
         if self.operation.terminal:
             raise ValueError("a completed release operation cannot become failed")
         return self._replace(error=detail)
+
+
+def _field(operation: Operation) -> Literal["fleet", "unit"]:
+    return "fleet" if operation.fleet is not None else "unit"
 
 
 @contextmanager

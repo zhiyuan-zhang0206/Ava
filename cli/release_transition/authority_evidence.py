@@ -22,9 +22,21 @@ from shared.cluster.authority.model import Direction, Generation, RoleName
 _DIRECTIONS: tuple[Direction, ...] = ("candidate", "previous")
 # Release phases, in order, at which a direction's closed fence (and, from
 # `starting`, its authorized issue) must already exist.
-_FENCED = frozenset({"selecting", "authorizing", "starting", "observing", "resuming", "complete"})
-_ISSUED = frozenset({"starting", "observing", "resuming", "complete"})
-_UNFENCED = frozenset({"prepared", "quiescing", "stopping"})
+_FENCED = frozenset(
+    {
+        "selecting",
+        "authorizing",
+        "starting",
+        "observing",
+        "starting_units",
+        "resuming",
+        "watching",
+        "complete",
+    }
+)
+_ISSUED = frozenset({"starting", "observing", "starting_units", "resuming", "watching", "complete"})
+# An abort (`restoring`) never fenced: it restores on the unchanged generation.
+_UNFENCED = frozenset({"prepared", "dispatching", "quiescing", "stopping", "restoring"})
 
 
 class GenerationRef(Record):
@@ -156,14 +168,15 @@ def require_coherent(
 ) -> None:
     """The records a journal state requires, and nothing it cannot have yet.
 
-    A PITR operation (no direction) carries none: it reuses the active
-    generation. A recovery (direction `previous`) first fences the candidate's
+    An operation without a fencing direction carries none: PITR and an
+    aborted release reuse the active generation, a remote unit receives it.
+    A recovery (direction `previous`) first fences the candidate's
     authorized generation; issue numbers strictly increase, so a return to the
     previous image is always a new generation.
     """
     if direction is None:
         if fences or issues:
-            raise ValueError("a PITR operation reuses the active write generation")
+            raise ValueError("this operation reuses the active write generation; it never fences")
         return
     _one_per_direction(fences, "fence")
     _one_per_direction(issues, "issue")

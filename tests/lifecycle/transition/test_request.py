@@ -13,8 +13,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import request as request_module
-from cli.release_transition.request import ReleaseRef, Request, verify_pair
+from cli.release_transition.request import ReleaseRef, verify_pair
 from shared.runtime_abi import AbiTag, current_abi
 from shared.runtime_release import MANIFEST_VERSION, ReleaseRejectedError, VerifiedRelease
 
@@ -91,8 +92,8 @@ def _image(
     )
 
 
-def _request(home: Path, previous: ReleaseRef, candidate: ReleaseRef) -> Request:
-    return Request(
+def _request(home: Path, previous: ReleaseRef, candidate: ReleaseRef) -> FleetRequest:
+    return FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(home.parent / "clusters.json"),
@@ -130,7 +131,7 @@ def test_exact_pair_admission_is_read_only_and_replayable(home: Path) -> None:
     request = _request(home, previous, candidate)
     before = _files(home)
     pair = verify_pair(request)
-    assert pair == verify_pair(Request.model_validate_json(request.model_dump_json()))
+    assert pair == verify_pair(FleetRequest.model_validate_json(request.model_dump_json()))
     assert (pair[0].digest, pair[1].digest) == (previous.artifact_digest, candidate.artifact_digest)
     assert _files(home) == before
     assert not request.path.parent.exists()
@@ -257,7 +258,7 @@ def test_source_commit_is_bound_to_each_actual_image(home: Path, which: str) -> 
     updates = {which: changed}
     if which == "candidate":
         updates["executor"] = changed
-    request = Request.model_validate(request.model_dump() | updates)
+    request = FleetRequest.model_validate(request.model_dump() | updates)
     with pytest.raises(ReleaseRejectedError, match="target commit or schema"):
         verify_pair(request)
 
@@ -276,7 +277,7 @@ def test_moving_home_alias_cannot_admit_the_captured_pair(home: Path) -> None:
     request = _request(home, _image(home, "previous"), _image(home, "candidate"))
     alias = home.parent / "home-alias"
     alias.symlink_to(home, target_is_directory=True)
-    request = Request.model_validate(request.model_dump() | {"home": str(alias)})
+    request = FleetRequest.model_validate(request.model_dump() | {"home": str(alias)})
     with pytest.raises(ReleaseRejectedError, match="canonical"):
         verify_pair(request)
     assert not (home / "updates").exists()
@@ -296,7 +297,7 @@ def test_request_cannot_substitute_its_executor_or_reactivate_same_image(
         }
     )
     with pytest.raises(ValidationError):
-        Request.model_validate(request.model_dump() | updates)
+        FleetRequest.model_validate(request.model_dump() | updates)
 
 
 @pytest.mark.parametrize("field", ["home", "registry"])
@@ -308,4 +309,4 @@ def test_request_paths_cannot_change_meaning_during_replay(
 ) -> None:
     request = _request(home, _image(home, "previous"), _image(home, "candidate"))
     with pytest.raises(ValidationError, match="release operation paths"):
-        Request.model_validate(request.model_dump() | {field: value})
+        FleetRequest.model_validate(request.model_dump() | {field: value})
