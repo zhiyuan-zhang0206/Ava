@@ -155,6 +155,23 @@ Two separate problems were tangled in the old design:
   code (which no longer reads or writes the table anywhere) has rolled out
   everywhere. Follow-up: a contract migration dropping `agent_watchers` and
   its grant, once no running code predates this change.
+- **Deleting `reap_terminated_owner_watchers` (point 2) means a live watcher
+  outlives its owner's termination and can wake it again.** A watcher's wake
+  is an ordinary chat inbound (`source="watcher:<id>"`); chat delivery
+  auto-resurrects a terminated agent (`gateway/routers/_delivery.py` ->
+  `ops.resurrect_if_terminated`) — a watcher's source is neither `system` nor
+  `system:<subtype>`, so it does not fall under the framework-notice carve-out
+  that skips auto-resurrect, and the delivery path's own reasoning is
+  explicit: "the user's reply (or any peer / watcher message) implies they
+  want the agent alive to handle it." So a terminated agent with a live
+  standing cron is woken again at every fire for as long as that watcher
+  lives (up to its 7-day standing-cron cap, or indefinitely for one with an
+  explicit longer end) — nothing reaps it early any more. This is intended,
+  not an oversight: the LLM decides what a resurrect-by-watcher-wake means
+  each time, exactly as it decides everything else that used to be
+  code-level judgment in the old design (Context, above). An agent that does
+  not want to be woken again kills its watchers (`ava.shell.sessions.kill`)
+  before terminating.
 - A watcher's `notify` completion policy is resolved once at spawn time,
   from the SDK layer straight into the shell-level notification wrapper —
   it was never truly a registry fact (the registry only stored it to hand to
