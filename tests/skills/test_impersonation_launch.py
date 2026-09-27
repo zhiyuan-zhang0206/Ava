@@ -62,6 +62,21 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
         assert "--codex-remote" not in message
 
 
+@pytest.mark.parametrize(
+    ("provider", "host_guide"),
+    [("codex", "codex.md"), ("claude", "claude_code.md"), ("dsh", "deepseek_harness.md")],
+)
+def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide: str) -> None:
+    """The general guide covers every host; relay startup and traps are per host."""
+    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    path = guide.parent / "reference" / host_guide
+    assert path.is_file()
+    message = bootstrap_message(42, "Fix login", provider, "brief", guide)
+    assert f"host guide at {path}." in message
+    others = {"codex.md", "claude_code.md", "deepseek_harness.md"} - {host_guide}
+    assert not any(f"reference/{other}" in message for other in others)
+
+
 def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
     guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, codex_remote=_ENDPOINT)

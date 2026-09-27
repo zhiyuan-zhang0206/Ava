@@ -1,6 +1,6 @@
 ---
 name: impersonator-guide
-description: 'Operating an Ava impersonation lease as the external agent: Ava CLI and Python SDK use under a borrowed identity, push-based message handling with prompt ACKs, reminder-driven lease renewal, and summary handoff. Use when an "Ava control active" hint names your lease or an impersonation session is active for your agent.'
+description: 'Operating an Ava impersonation lease as the external agent: Ava CLI and Python SDK use under a borrowed identity, push-based message handling with prompt ACKs, reminder-driven lease renewal, and summary handoff, with a host guide each for Claude Code, Codex and DeepSeek Harness. Use when an "Ava control active" hint names your lease or an impersonation session is active for your agent.'
 ---
 
 # Acting as an Ava impersonator
@@ -9,8 +9,19 @@ A trusted takeover has reached active status: while the lease is active, you act
 agent on this machine under a borrowed identity, and inbound messages to the
 agent reach you. This skill is the complete operating manual for the lease —
 how to use the Ava CLI and Python SDK, how messages flow, when to renew, and
-how to end. It is self-contained: everything you need is here plus your
-briefing, which arrives inline in your launch message.
+how to end. It is self-contained: everything you need is here, in your host's
+guide below, and in your briefing, which arrives inline in your launch message.
+
+## Your host
+
+The relay reaches each coding tool differently, so the host-specific half of
+this manual — relay startup, how pushes arrive, where your authority comes
+from, and each tool's traps — has one guide per host. Read yours before the
+request:
+
+- Claude Code: [reference/claude_code.md](reference/claude_code.md)
+- Codex: [reference/codex.md](reference/codex.md)
+- DeepSeek Harness (dsh): [reference/deepseek_harness.md](reference/deepseek_harness.md)
 
 ## Operating contract
 
@@ -20,15 +31,9 @@ briefing, which arrives inline in your launch message.
   is file-based: no task file to read, no work file to write. Activation is an
   interruption, not a hand-merge — the Ava agent pauses at its checkpoint, and
   you and it never run at the same time.
-- **Relay startup.** Your request output defines it. Resident-mode takeovers
-  start their relay automatically with the session — do not arm a Monitor
-  watch; watch for the heartbeat it names, and only if none starts follow the
-  manual fallback (`timeout_ms 1800000`, re-armed at each expiry notice) that
-  the request output describes. Executor-armed launches say so and proceed as
-  before. A DeepSeek Harness (dsh) takeover has nothing to arm: run the request
-  from your shell tool and the Ava relay plugin loaded into your session starts
-  the relay itself; if the request refuses because `DSH_AVA_RELAY_STUB` is
-  unset, the plugin is not loaded — stop and report that instead of retrying.
+- **Relay startup.** Your host's guide and your request output define it. A
+  takeover activates only once its relay heartbeats; without one it is
+  rejected, and the Ava agent keeps running.
 - **End.** You end by releasing control with a summary. The release summary is
   your end message: what you did, what you verified, what remains open and
   where to resume from. Release resumes the Ava agent: one system note wakes it
@@ -146,11 +151,6 @@ background renewer once kept a dead session's identity alive for hours —
 renewing every hour for a 24-hour TTL — until control was lost and the agent
 hung. Do not recreate that failure mode.
 
-> If renewal reminders do not yet arrive in your inbox (reminder delivery
-> ships with the impersonation push-delivery batch), decide by the remaining
-> TTL that `ava impersonate status` reports: renew once, when the remaining
-> time no longer covers the work ahead — never on a schedule or in a loop.
-
 The correct model:
 
 1. Roughly **five minutes before the lease expires**, the Ava side delivers a
@@ -231,7 +231,10 @@ attachment without involving any Ava model:
 ava impersonate exec <session_id> --agent <agent_id> --file operation.py
 ```
 
-Omit `--file` to read the program from stdin.
+Omit `--file` to read the program from stdin. The file already runs inside
+this session's attachment: call `ava.*` directly. Calling
+`ava.external.attach()` again in it fails with "this process already has an
+external attachment".
 
 Boundaries: `ava.self.compact`, `ava.self.terminate`, and `ava.self.restart`
 end the *native* agent's execution loop — they are not yours to call. If the
