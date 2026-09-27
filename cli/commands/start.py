@@ -559,7 +559,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # data plane is up and known-current, which is the precondition
     # materialization actually has. Reports and continues on failure — a machine
     # that is behind catches up on the next start.
-    from cli.commands._converge_extensions import (
+    from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
     )

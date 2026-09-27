@@ -134,7 +134,7 @@ does **not** move into these tables: it is already cluster-consistent via
 commit-pinned code rollout, and its trust story is the checkout itself. The
 registry owns what arrives by *install*, not by *release*.
 `extensions.source = 'repo'` is therefore not a blob-backed row; repo sources
-keep converging from the checkout exactly as `cli/commands/_converge_skills.py`
+keep converging from the checkout exactly as `cli/commands/extensions/skills_sync.py`
 does today. What changes for them is only that enablement (today
 `plugins_config.json` / registry `enabled` bits) becomes the cluster
 `default_enabled` column.

@@ -45,7 +45,7 @@ One load directory: `~/.ava/skills/`; converge syncs repo built-ins (`ava_builti
 ## Entry Points
 - `ava/skills.py` — scans `~/.ava/skills/` + provider roots, merges the skill tree; `help()` loads SKILL.md by path
 - `shared/install_registry.py` — per-machine installation/origin/enabled registry
-- `cli/commands/_converge_skills.py` — syncs repo/plugin skills into the load directory
+- `cli/commands/extensions/skills_sync.py` — syncs repo/plugin skills into the load directory
 - `ava/__init__.py` — integrates skill docs in `help()`
 
 ## Notes

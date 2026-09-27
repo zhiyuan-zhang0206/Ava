@@ -26,15 +26,16 @@ out of the once-flat directory, each an independent package door:
 - `agents/` — lifecycle control, notices, timelines, external-agent
   impersonation, the pty/computer-use daemons
 - `management/` — gateway-managed config, presets, schedules
-- `extensions/` — plugins, skills, packages, MCP servers, memory
-- `observability/` — native LGTM, the OTel collector, trace shipping, logs
-- `data_plane/` — per-cluster Postgres/Redis/PgBouncer, their verified maintenance stop, db roles, PITR
+- `extensions/` — plugins, skills, packages, MCP servers, memory; owns its
+  converge steps (`materialize.py`, `skills_sync.py`, `external_skills.py`)
+- `observability/` — native LGTM, the OTel collector, trace shipping, logs;
+  owns its converge steps (`lgtm.py`, `otel_collector.py`)
+- `data_plane/` — per-cluster Postgres/Redis/PgBouncer, their verified
+  maintenance stop, db roles, PITR; owns its converge step (`pgbouncer.py`)
 - `cluster/` — whole-cluster verbs, the health probe, watchdogs, the registry
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
   and host-wiring steps owned by no other domain (source tree, firewall,
-  Redis bridge, gate, OS jobs); a domain that owns its own step keeps it
-  there instead — `data_plane/pgbouncer.py`, `observability/lgtm.py`,
-  `observability/otel_collector.py`.
+  Redis bridge, gate, OS jobs).
 
 Cross-version process entry points — run as `python -m cli.commands.X` by the
 ops server against a possibly different checkout — stay at the root and never

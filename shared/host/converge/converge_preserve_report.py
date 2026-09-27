@@ -3,8 +3,8 @@
 A converge-managed destination whose current content no longer matches the
 recorded render was hand-edited: the renderers warn and preserve it instead of
 overwriting — see cli/commands/_rendered_file.py (LGTM provisioning +
-otel-collector config), cli/commands/_converge_skills.py and
-cli/commands/_converge_extensions.py. Before this
+otel-collector config), cli/commands/extensions/skills_sync.py and
+cli/commands/extensions/materialize.py. Before this
 reporter those warnings lived only in converge output, and a frozen LGTM
 dashboard survived three consecutive rollouts unnoticed (task #3689). Mirrors
 shared/plugin_load_report.py: one `converge_file_preserved` telemetry event per

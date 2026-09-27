@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli.commands._converge_extensions import (
+from cli.commands.extensions.materialize import (
     adopt_local_extensions,
     materialize_cluster_extensions,
 )

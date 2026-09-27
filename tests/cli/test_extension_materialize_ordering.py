@@ -34,7 +34,7 @@ def test_materialization_is_not_a_converge_step() -> None:
     assert not offenders, (
         f"{offenders} is a converge STEP, but converge runs before this cluster's "
         "Postgres is started and before migrations apply. Call it from the start "
-        "sequence after the schema check instead — see cli/commands/_converge_extensions.py:"
+        "sequence after the schema check instead — see cli/commands/extensions/materialize.py:"
         "materialize_cluster_extensions."
     )
 
@@ -76,10 +76,10 @@ def test_standalone_converge_materializes_too() -> None:
 
 
 def test_the_materializer_lives_beside_its_siblings() -> None:
-    """`_converge_extensions.py`, next to `_converge_skills.py` — a subsystem
+    """`extensions/materialize.py`, next to `extensions/skills_sync.py` — a subsystem
     reader, not another entry in `converge/host.py`'s host-state roster. Extracting
     it is also what kept `converge/host.py` under the 800-line ceiling."""
-    from cli.commands import _converge_extensions
+    from cli.commands.extensions import materialize as _converge_extensions
 
     assert hasattr(_converge_extensions, "materialize_cluster_extensions")
 

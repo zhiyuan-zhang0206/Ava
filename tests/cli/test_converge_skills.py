@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
-from cli.commands._converge_skills import converge_skills
 from cli.commands.extensions.skill import cmd_skill_disable, cmd_skill_enable, cmd_skill_register
+from cli.commands.extensions.skills_sync import converge_skills
 from shared import install_registry as reg
 
 
