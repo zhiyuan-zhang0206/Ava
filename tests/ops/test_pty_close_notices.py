@@ -91,6 +91,54 @@ def test_record_close_writes_one_file_per_dedup_key(journal: Path) -> None:
     assert len(list(notices.journal_dir().iterdir())) == 2
 
 
+def test_a_close_that_left_processes_running_names_them_once(
+    db_conn: psycopg.Connection, pool: ConnectionPool, journal: Path
+) -> None:
+    """A shell verified gone whose SIGKILL left processes it may not signal is
+    still a closed session: its notice names those processes (pid and command
+    name). The survivor list is not part of the dedup key, so a stop retry that
+    records the same shell again rewrites the one record, and the owner gets
+    one inbound."""
+    aid = _agent(db_conn, "running")
+    name = f"ava-agent-{aid}-shell-11-report"
+    first = notices.record_close(
+        machine="macmini",
+        name=name,
+        shell_pid=9090,
+        shell_birth="starttime:4242",
+        operation="local-pause:macmini:1:uuid",
+        acquired_at=_WHEN,
+        survivors=[(4242, "sudo")],
+    )
+    again = notices.record_close(
+        machine="macmini",
+        name=name,
+        shell_pid=9090,
+        shell_birth="starttime:4242",
+        operation="local-pause:macmini:1:uuid",
+        acquired_at=_WHEN,
+        survivors=[(4242, "sudo"), (4343, "python3")],
+    )
+    assert first is not None and again == first
+    assert [p.name for p in notices.journal_dir().iterdir()] == [first.name]
+
+    assert notices.flush(pool) == 0
+    rows = _inbounds(db_conn, aid)
+    assert len(rows) == 1
+    content, _source, payload = rows[0]
+    assert "pid 4242 (sudo)" in content and "pid 4343 (python3)" in content
+    assert json.loads(payload)["closure"]["survivors"] == [
+        {"pid": 4242, "name": "sudo"},
+        {"pid": 4343, "name": "python3"},
+    ]
+
+
+def test_a_clean_close_records_no_survivors(journal: Path) -> None:
+    """A session whose every process is gone keeps the record shape it had."""
+    record = json.loads(_record().read_text())
+    assert "survivors" not in record
+
+
 def test_record_close_rejects_non_agent_shell_names(journal: Path) -> None:
     """Sessions that are not agent-owned shells are never recorded."""
     assert (

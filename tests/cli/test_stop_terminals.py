@@ -373,11 +373,11 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
 ) -> None:
-    """One session closes; another keeps its processes through the SIGKILL
-    (this user may not signal them). The stop is incomplete, yet the closed
+    """One session closes; in another the shell itself outlives the stop and
+    keeps its job through the SIGKILL. The stop is incomplete, yet the closed
     session's notice is recorded before it reports — its record is gone, so a
-    retry could never record it. The unclosed session is left to the retry,
-    which records it: each notice exactly once."""
+    retry could never record it. The session whose shell still lives records
+    nothing and is left to the retry, which records it: each notice once."""
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
@@ -409,6 +409,7 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     assert maintenance.held(), "the hold must survive an incomplete stop"
     assert stuck in capsys.readouterr().err
     assert _notice_names(home) == [closed], "the closed session's notice was lost"
+    assert "survivors" not in _notices(home)[0], "nothing of the closed session survived"
 
     def still_drained(_timeout: float, **_kw: object) -> None:
         """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
@@ -447,10 +448,17 @@ def _notice_files(home: Path) -> list[Path]:
     return list(journal.iterdir()) if journal.is_dir() else []
 
 
-def _notice_names(home: Path) -> list[str]:
+def _notices(home: Path) -> list[dict[str, Any]]:
     import json as _json
 
-    return sorted(_json.loads(path.read_text())["name"] for path in _notice_files(home))
+    return sorted(
+        (_json.loads(path.read_text()) for path in _notice_files(home)),
+        key=lambda notice: str(notice["name"]),
+    )
+
+
+def _notice_names(home: Path) -> list[str]:
+    return [notice["name"] for notice in _notices(home)]
 
 
 def test_stop_records_notice_for_verified_closed_busy_session(
@@ -509,39 +517,48 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
 ) -> None:
-    """A process that outlives its SIGKILL (another user's, which this stop may
-    not signal) leaves the stop incomplete: the hold stays, the failure names
-    the phase and the session, and no closure is claimed — only verified exits
-    are recorded (issue #2044 #2)."""
+    """The kill ends the shell, but a job outlives its SIGKILL (another user's,
+    which this stop may not signal). The stop is incomplete — the hold stays
+    and the failure names the phase and the session — yet the session is over
+    for its owner: the shell is verified gone, so its notice is recorded, naming
+    the process left running. A retry no longer sees the session and adds no
+    second notice."""
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 0.5)
-
-    def unkillable(
-        leader: OwnedProcess,
-        *,
-        also: tuple[OwnedProcess, ...] = (),
-        wait_s: float,
-        proven_at: float | None = None,
-    ) -> session_tree.TreeKill:
-        del leader, wait_s, proven_at
-        return session_tree.TreeKill((), tuple(also), tuple(also))
-
-    monkeypatch.setattr(session_tree, "kill_session_tree", unkillable)
+    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2044-stubborn"
     shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
     jobs = _started_jobs(shell, pty_reaper)
     assert jobs, "the stubborn job never started"
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
+    def denied_but_the_shell(leader: OwnedProcess, **kwargs: Any) -> session_tree.TreeKill:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            psutil.Process(leader.pid).kill()
+        assert _wait_exit(leader.pid), "the shell survived its SIGKILL"
+        left = tuple(identity for identity in kwargs["also"] if identity != leader)
+        return session_tree.TreeKill((leader,), left, left)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(session_tree, "kill_session_tree", denied_but_the_shell)
+        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
     assert maintenance.held(), "the hold must survive an incomplete stop"
     assert psutil.pid_exists(jobs[0].pid)
     err = capsys.readouterr().err
     assert "terminals" in err, "the failure must name the phase"
     assert name in err, "the failure must name the owning session"
     assert "nothing was force-killed" not in err, "the survivors outlived a SIGKILL"
-    assert _notice_files(home) == []
+    notices = _notices(home)
+    assert [notice["name"] for notice in notices] == [name]
+    assert notices[0]["survivors"] == [{"pid": jobs[0].pid, "name": jobs[0].name()}]
+
+    def still_drained(_timeout: float, **_kw: object) -> None:
+        """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
+
+    monkeypatch.setattr(command, "pause_agents", still_drained)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert len(_notice_files(home)) == 1, "the retry recorded the closed session again"
 
 
 @pytest.mark.flaky
