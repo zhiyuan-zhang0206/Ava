@@ -17,8 +17,8 @@ this checkout belongs to; `ava cluster ...` can name a different one.
 
 A cluster's identity **is** its home path, so every verb that names one takes
 `--path <home>` — there is no cluster name to pass. Handlers live in
-`cli/commands/cluster.py`, with registry allocation and `ls` / `down` /
-`destroy` in `cli/commands/cluster_lifecycle.py`.
+`cli/commands/cluster/control.py`, with registry allocation and `ls` / `down` /
+`destroy` in `cli/commands/cluster/registry.py`.
 
 ## Verbs
 

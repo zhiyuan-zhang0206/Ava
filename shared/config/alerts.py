@@ -10,7 +10,7 @@ severity pushes (critical/warning/error, no severity gate). The health probe
 and the machine liveness pass write rows directly. This domain is
 gateway-owned: only the gateway process reads it. The provider-guard
 thresholds (``provider_guard_*``) are read by the cluster health probe's
-provider-account checks (``cli/commands/_provider_guard.py``) — same
+provider-account checks (``cli/commands/cluster/_provider_guard.py``) — same
 alert-policy family, same channel.
 """
 
@@ -147,7 +147,7 @@ class AlertsSettings(EnvSettings):
         alias="AVA_PROVIDER_GUARD_BALANCE_ENABLED",
         description=(
             "Run the provider-account balance check in the cluster health probe "
-            "(checks 9-10, cli/commands/_provider_guard.py) — the pre-arrears "
+            "(checks 9-10, cli/commands/cluster/_provider_guard.py) — the pre-arrears "
             "warning for the 2026-09-18 outage class. Skipped cleanly on hosts "
             "without the provider key configured."
         ),

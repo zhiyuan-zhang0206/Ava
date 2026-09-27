@@ -76,7 +76,7 @@ def _baseline_file(name: str) -> list[str] | None:
 
 
 def _baseline_failures() -> tuple[int, str, str, str] | None:
-    from cli.commands._health_alerts import FAILURE_COUNT_FILE
+    from cli.commands.cluster.health_alerts import FAILURE_COUNT_FILE
 
     lines = _baseline_file(FAILURE_COUNT_FILE)
     if lines is None:
@@ -90,7 +90,7 @@ def _baseline_failures() -> tuple[int, str, str, str] | None:
 
 
 def _baseline_pending_lkg() -> tuple[str, int] | None:
-    from cli.commands._cluster_health import PENDING_LKG_PASSES_FILE
+    from cli.commands.cluster.health import PENDING_LKG_PASSES_FILE
 
     lines = _baseline_file(PENDING_LKG_PASSES_FILE)
     if lines is None:
@@ -103,7 +103,7 @@ def _baseline_pending_lkg() -> tuple[str, int] | None:
 
 
 def _baseline_alert() -> str | None:
-    from cli.commands._health_alerts import ALERT_STATE_FILE
+    from cli.commands.cluster.health_alerts import ALERT_STATE_FILE
 
     lines = _baseline_file(ALERT_STATE_FILE)
     return None if lines is None else lines[0]
@@ -175,7 +175,7 @@ def _baseline_absent(result: _BaselineValue[object]) -> str:
 
 def _format_health_baseline(baseline: _HealthBaseline) -> list[str]:
     """Render a snapshot without I/O or changes to health/rollback decisions."""
-    from cli.commands._cluster_health import PENDING_LKG_PASSES
+    from cli.commands.cluster.health import PENDING_LKG_PASSES
     from shared.machine import format_capabilities
 
     target = baseline.target_sha[:7] if baseline.target_sha else "restart-only"

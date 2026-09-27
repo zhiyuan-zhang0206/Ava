@@ -1,6 +1,6 @@
 """Health-probe alert machinery: failure counting, edge alerts, auto-rollback gate.
 
-Split out of ``cli.commands._cluster_health`` (2026-08-07, Task #1025) to keep
+Split out of ``cli.commands.cluster.health`` (2026-08-07, Task #1025) to keep
 that module under the per-file 800-line ceiling once the non-prod-checkout
 guard (PR #1821) and R2-D's deploy-window changes (PR #1824) both landed.
 
@@ -9,7 +9,7 @@ via the IM bridge /send RPC with the alerts ingest), the local fallback ingest
 path, and the auto-rollback trigger at the failure threshold. One state file
 tracks the true start and last-fired severity of each outage episode so normal
 recovery stays quiet and WARNING can escalate in place to ERROR.
-The probe runner itself (`run_health_probe`) stays in ``_cluster_health`` and
+The probe runner itself (`run_health_probe`) stays in ``health`` and
 imports the pieces it needs from here.
 """
 
@@ -39,7 +39,7 @@ FAILURE_COUNT_FILE = "health_probe_failures"
 ALERT_STATE_FILE = "health_probe_alert"
 
 
-def _notify_owner(text: str) -> None:
+def notify_owner(text: str) -> None:
     """Best-effort push to the owner through the im_bridge daemon's `/send` RPC.
 
     The IM Bridge (services/im_bridge) is the only Telegram frontend — the user
@@ -246,7 +246,7 @@ def _ingest_recovery_self_heal(resp: httpx.Response, *, status: str) -> None:
     except Exception:
         return
     if body.get("inserted") == 1 and body.get("notified") == 0:
-        _notify_owner("[health-probe] cluster recovered: all checks passing")
+        notify_owner("[health-probe] cluster recovered: all checks passing")
 
 
 def _ingest_alert_fallback(
@@ -313,7 +313,7 @@ def _ingest_alert_fallback(
             f"  (health alert local ingest failed: {type(e).__name__} — direct IM only)",
             file=sys.stderr,
         )
-        _notify_owner(
+        notify_owner(
             f"[health-probe] cluster {'recovered: all checks passing' if status == 'resolved' else f'unhealthy: {message}'}"
         )
 
@@ -379,7 +379,7 @@ def _alert_recovery(home: Path) -> None:
         # Pre-W16 state file (failure message only, no instance key): no
         # alerts row exists to resolve, and the firing was IM'd directly
         # back then — so the recovery goes directly too.
-        _notify_owner("[health-probe] cluster recovered: all checks passing")
+        notify_owner("[health-probe] cluster recovered: all checks passing")
         return
     if not severity:
         return

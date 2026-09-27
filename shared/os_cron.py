@@ -552,7 +552,7 @@ def _unregister_linux(slug: str) -> int:
 # 1800s, an order of magnitude above the probe's own checks, because the bound has
 # to clear the longest thing an invocation can legitimately DO, not the longest
 # check. With `--auto-rollback` the probe runs `ava cluster rollback --yes` as a
-# child (`cli/commands/_cluster_health.py:_handle_consecutive_failure`), and that
+# child (`cli/commands/cluster/health.py:_handle_consecutive_failure`), and that
 # quiesces every agent, reverses migrations, `git reset --hard`, `uv sync`, `ava
 # start` — plus a recovery path that does a second `uv sync` + start. Task
 # Scheduler ends a task by tearing down its job object, so the child dies with the

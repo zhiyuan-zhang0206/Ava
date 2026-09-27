@@ -86,7 +86,7 @@ def _seams(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], list[dict[str, o
     monkeypatch.setattr(_rb, "_still_converging", lambda _polls: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "_fan_out", lambda *_a, **_kw: order.append("resume"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "_notify_agents_of_rollback", lambda _f, _t: order.append("notify"))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_rb, "_notify_owner", _notify_owner)
+    monkeypatch.setattr(_rb, "notify_owner", _notify_owner)
     monkeypatch.setattr(_rb, "_note_rollback_on_last_update", lambda _f, _t: order.append("note"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_rb, "set_last_known_good_sha", _set_last_known_good)
     monkeypatch.setattr(_rb, "machine_name", lambda: "test-host")
@@ -185,7 +185,7 @@ def test_incomplete_runner_rollback_holds_lease_and_resumes(
 
     monkeypatch.setattr(_rb, "_phase_b_and_poll", _stalled_phase_b)
     monkeypatch.setattr(_rb, "_still_converging", lambda _polls: ["runner-a"])  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_rb, "_notify_owner", owner_messages.append)
+    monkeypatch.setattr(_rb, "notify_owner", owner_messages.append)
 
     assert _rb.cmd_rollback(require_confirmation=False) == 1
 

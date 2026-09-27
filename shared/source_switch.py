@@ -14,7 +14,7 @@ respawn path holds back while the marker is fresh, and the update's own
 everything. The marker is a local file with a TTL — a crashed update leaves it
 to expire, so a stuck marker can never hold respawns back forever (the
 watchdog-probe is additionally exempt by contract: its whole job is dumb
-revival, see `cli/commands/_cluster_watchdog_probe.py`).
+revival, see `cli/commands/cluster/watchdog_probe.py`).
 
 Lifecycle, both update legs:
 - in-process (`_run_agent_runner_self_update_inner`): `mark_switching()` before

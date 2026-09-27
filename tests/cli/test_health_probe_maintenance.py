@@ -7,7 +7,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from cli.commands import _cluster_health, _health_alerts
+from cli.commands.cluster import health as _cluster_health
+from cli.commands.cluster import health_alerts as _health_alerts
 from shared import disabled_services, pause_owner
 
 

@@ -23,7 +23,7 @@ import httpx
 import psycopg
 import pytest
 
-from cli.commands import cluster as _cluster
+from cli.commands.cluster import control as _cluster
 
 # A realistic refusal — the shape `_assert_no_orchestration_in_flight` builds from a
 # `DeployWindow.detail`. The assertions below key on the parts an operator acts on.
@@ -252,7 +252,7 @@ def test_recover_clears_a_dead_holders_lock(
     after it, so a crashed orchestration still blocks every deploy until its TTL
     expires — up to 30 minutes on the strength of a dead process."""
     import ops.ops_cluster as _ops
-    from cli.commands import _cluster_recover
+    from cli.commands.cluster import recover as _cluster_recover
     from shared.cluster_lock import (
         acquire_update_lock,
         update_lock_holder,
@@ -282,7 +282,7 @@ def test_recover_refuses_while_the_holder_is_alive(
     """The override must not become a way to stomp a rollout that is running fine —
     that would reintroduce the collision the deploy window exists to prevent."""
     import ops.ops_cluster as _ops
-    from cli.commands import _cluster_recover
+    from cli.commands.cluster import recover as _cluster_recover
     from shared.cluster_lock import (
         acquire_update_lock,
         update_lock_holder,

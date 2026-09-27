@@ -1,4 +1,4 @@
-"""cli.commands._cluster_watchdog_probe — the revive decision itself.
+"""cli.commands.cluster.watchdog_probe — the revive decision itself.
 
 Pins the contract the OS scheduler depends on: a live watchdog is left strictly
 alone (a probe that respawned a healthy watchdog every minute would be worse
@@ -13,7 +13,7 @@ from typing import NoReturn
 
 import pytest
 
-from cli.commands import _cluster_watchdog_probe as wp
+from cli.commands.cluster import watchdog_probe as wp
 from ops.service_spec import ServiceSpec
 from shared.os_watchdog_probe import HeldStopState
 

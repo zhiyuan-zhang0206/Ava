@@ -23,13 +23,16 @@ from typing import Any
 
 import pytest
 
-from cli.commands import _cluster_health, _health_alerts, _probe, _provider_guard
+from cli.commands import _probe
 from cli.commands import _repo as _repo_mod
+from cli.commands.cluster import _provider_guard
+from cli.commands.cluster import health as _cluster_health
+from cli.commands.cluster import health_alerts as _health_alerts
 
 # Captured at import, before the autouse `_sent_alerts` fixture stubs the module
 # attributes — the handles the unit tests use to reach the real send/ingest
 # paths.
-_REAL_NOTIFY_OWNER = _cluster_health._notify_owner
+_REAL_NOTIFY_OWNER = _cluster_health.notify_owner
 _REAL_INGEST_ALERT = _cluster_health._ingest_alert
 
 
@@ -352,7 +355,7 @@ def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     The probe's edge alerts now flow through `_ingest_alert` (W16); the
     captured value is the stamped summary the ingest payload would carry, so
-    assertions on wording keep working. `_notify_owner` is NOT stubbed here —
+    assertions on wording keep working. `notify_owner` is NOT stubbed here —
     its own unit tests below reach the real send path via `_REAL_NOTIFY_OWNER`,
     and the fallback tests stub it explicitly where they need to."""
     sent: list[str] = []
@@ -879,7 +882,7 @@ def test_notify_owner_stamps_home_label(
     cluster is talking — a preview cluster's alert must not read like a prod
     incident. Stamping in the single send point covers every alert uniformly.
 
-    Calls the real `_notify_owner` (the autouse `_sent_alerts` fixture stubs the
+    Calls the real `notify_owner` (the autouse `_sent_alerts` fixture stubs the
     module attribute, so the captured `_REAL_NOTIFY_OWNER` is used to reach the
     actual send path). It POSTs to the im_bridge daemon's health-port `/send`
     RPC — stub `httpx.post` to capture the request."""
@@ -925,7 +928,7 @@ def test_notify_owner_failed_send_does_not_leak_secret(
 ) -> None:
     """A failed send must not write the cluster secret to the log. The secret
     rides in the Authorization header; httpx embeds the request (but never its
-    headers) in the exception repr, so `_notify_owner` must never format the
+    headers) in the exception repr, so `notify_owner` must never format the
     exception itself."""
 
     import httpx
@@ -1179,7 +1182,7 @@ def test_crash_loop_counts_audit_resurrect_only(monkeypatch: pytest.MonkeyPatch)
 
     import httpx
 
-    from cli.commands._cluster_health import _crash_loop_detection
+    from cli.commands.cluster.health import _crash_loop_detection
 
     def _fake_get(url: str, **kw: Any) -> httpx.Response:
         # The LogQL query filters category=audit server-side; the fake answer
@@ -1538,7 +1541,7 @@ def test_ingest_alert_fallback_direct_im_when_db_down(
 
     monkeypatch.setattr(shared.db, "connect", _boom)
     direct: list[str] = []
-    monkeypatch.setattr(_health_alerts, "_notify_owner", direct.append)
+    monkeypatch.setattr(_health_alerts, "notify_owner", direct.append)
 
     _cluster_health._ingest_alert_fallback(
         status="firing", message="FAIL: x", starts_at=datetime(2026, 8, 5, tzinfo=UTC)
@@ -1813,7 +1816,7 @@ def test_alert_recovery_pre_w16_state_file_goes_direct(
     row exists — the recovery is IM'd directly, like the firing was back then."""
     (_home / _cluster_health.ALERT_STATE_FILE).write_text("FAIL: old-style")
     direct: list[str] = []
-    monkeypatch.setattr(_health_alerts, "_notify_owner", direct.append)
+    monkeypatch.setattr(_health_alerts, "notify_owner", direct.append)
     ingest_calls: list[object] = []
     monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: ingest_calls.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -1863,7 +1866,7 @@ def test_ingest_recovery_self_heals_when_instance_never_persisted(
     monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(_health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
     direct: list[str] = []
-    monkeypatch.setattr(_health_alerts, "_notify_owner", direct.append)
+    monkeypatch.setattr(_health_alerts, "notify_owner", direct.append)
 
     class _Resp:
         def __init__(self, body: dict[str, int]) -> None:
@@ -1969,7 +1972,7 @@ def test_agent_min_defaults_to_settings_when_unset(
         seen.append(minimum)
         return True
 
-    from cli.commands import _cluster_health
+    from cli.commands.cluster import health as _cluster_health
     from shared.config import settings
 
     monkeypatch.setattr(_cluster_health, "_agent_population", _fake_population)
@@ -1989,7 +1992,7 @@ def test_agent_min_explicit_overrides_settings(
         seen.append(minimum)
         return True
 
-    from cli.commands import _cluster_health
+    from cli.commands.cluster import health as _cluster_health
     from shared.config import settings
 
     monkeypatch.setattr(_cluster_health, "_agent_population", _fake_population)

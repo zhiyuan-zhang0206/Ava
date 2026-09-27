@@ -558,7 +558,7 @@ def cmd_cluster_restart() -> int:
     return 0
 
 
-def _fetch_gateway_cluster_status() -> dict[str, object]:
+def fetch_gateway_cluster_status() -> dict[str, object]:
     """GET `/api/cluster/status` and return the decoded ClusterStatus body.
 
     Used by `ava status`'s gateway-view supplement. Presents the cluster-secret

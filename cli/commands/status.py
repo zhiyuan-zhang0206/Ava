@@ -247,7 +247,7 @@ def _print_gateway_cluster_status() -> None:
     """
     import httpx
 
-    from cli.commands.cluster import _fetch_gateway_cluster_status
+    from cli.commands.cluster.control import fetch_gateway_cluster_status
     from ops.cluster import ClusterStatus
     from shared.machine import (
         GatewayApiBaseMissing,
@@ -258,7 +258,7 @@ def _print_gateway_cluster_status() -> None:
 
     print("\ngateway cluster status (GET /api/cluster/status):")
     try:
-        body = _fetch_gateway_cluster_status()
+        body = fetch_gateway_cluster_status()
     except httpx.HTTPError as e:
         print(f"  ✗ gateway unreachable: {e}")
         return

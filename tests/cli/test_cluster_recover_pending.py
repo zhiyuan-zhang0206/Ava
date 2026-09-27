@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 import pytest
 
 import ops.publication_recovery as _pr
-from cli.commands import _cluster_recover_pending as _entry
+from cli.commands.cluster import recover_pending as _entry
 from ops.cluster import ClusterUpdateInProgress
 from ops.publication_recovery import PendingRecoveryState
 from shared.managed_writer_barrier import RolloutIdentity

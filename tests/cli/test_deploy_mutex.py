@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from cli.commands import _cluster_health as health
-from cli.commands import _health_alerts as alerts
+from cli.commands.cluster import health
+from cli.commands.cluster import health_alerts as alerts
 from ops import cluster as cluster_mod
 from ops import cluster_session
 from ops.deploy_window import DeployWindow

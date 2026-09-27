@@ -17,31 +17,27 @@ subcommand builders and `_h_*` handlers); `cli/main.py` composes it and
 dispatches via `set_defaults(func=)` to the module's `cmd_*` handler — there is
 no registry or plugin mechanism, the wiring is the parser.
 
-Most command modules follow these two naming groups:
+`cli/commands/__init__.py` is the command door: it imports the `cmd_*` names
+`cli.parsers` handlers lazy-import from the door (a few parsers instead import
+a domain module directly, e.g. `cli.parsers.agents` reads `cmd_agents_ls` from
+`cli.commands.agents.control`). Six subpackages hold the leaf domains split out
+of the once-flat directory, each an independent package door:
 
-- **public** (`start.py`, `stop.py`, `status.py`, `observability/logs.py`, `update.py`,
-  `cluster.py`, `agents/control.py`, `management/config.py`, `extensions/plugins.py`, `extensions/skill.py`,
-  `extensions/mcp.py`, `data_plane/pitr.py`, `extensions/memory.py`, `management/presets.py`, `agents/pty.py`,
-  `management/schedules.py`, `observability/trace.py`, `migrations.py`,
-  `cluster_lifecycle.py`, `agents/timeline.py`, `agents/impersonation.py`,
-  `agents/impersonation_relay.py`) — reachable from the command line.
-- **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
-  directly. The `_converge*` family backs `ava converge`: step-table
-  aggregation/execution, the step contract, early host/data-plane wiring, OS
-  jobs, skills, firewall wiring, the gate (`_gate_systemd` is the per-home
-  launchd/user-systemd unit), Redis bridge wiring, and a one-shot legacy
-  permission-watcher cleanup. The `_update*`/`_updater_*` family backs
-  `ava update`: git, the pre-stop backup gate, orchestration, the agent-runner
-  self-update, bootstrap, the normal-release path, uv sync, the cmd.exe
-  ladder's lease/stage telemetry, recovery, and gateway readiness. Also:
-  `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_start_gui_chain` /
-  `_start_gui_handover` (the macOS GUI-chain warning and its handover),
-  `_ownership_preflight`, `_pkg_source`, `_claude_code_plugin`,
-  `_cluster_health` / `_cluster_rollback` / `_cluster_cron` /
-  `_cluster_watchdog_probe` (`data_plane/cluster_instance.py`,
-  `data_plane/pgbouncer.py`, `observability/lgtm.py`,
-  `observability/lgtm_native.py`, and `observability/otel_collector.py` are
-  more, under public names).
+- `agents/` — lifecycle control, notices, timelines, external-agent
+  impersonation, the pty/computer-use daemons
+- `management/` — gateway-managed config, presets, schedules
+- `extensions/` — plugins, skills, packages, MCP servers, memory
+- `observability/` — native LGTM, the OTel collector, trace shipping, logs
+- `data_plane/` — per-cluster Postgres/Redis/PgBouncer, db roles, PITR
+- `cluster/` — whole-cluster verbs, the health probe, watchdogs, the registry
+
+Cross-version process entry points — run as `python -m cli.commands.X` by the
+ops server against a possibly different checkout — stay at the root and never
+move: `_update_agent_runner`, `_updater_stage`, `_updater_lease`,
+`_update_uv_sync`, `_installed_sha`, `_source_switch_marker`, `_hold_recover`,
+`_update_pitr`. The `_converge*` / `_update*` step families, `start.py` /
+`stop.py` / `status.py` / `update.py` / `migrations.py`, and the rest of the
+not-yet-split leaves stay directly under `cli/commands/` for now.
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
 restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`

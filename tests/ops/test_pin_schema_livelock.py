@@ -195,7 +195,7 @@ def test_pin_behind_schema_is_visible_on_status_even_when_local_code_matches(
     assert roster.model_dump(mode="json")["schema_mismatch"]["held_back_services"] == [
         "ava-agent-host"
     ]
-    from cli.commands.cluster import _schema_mismatch_banner
+    from cli.commands.cluster.control import _schema_mismatch_banner
 
     banner = _schema_mismatch_banner([roster])
     assert "company-mini" in banner[0]
