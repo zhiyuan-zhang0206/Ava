@@ -114,6 +114,12 @@ def main() -> int:
         "launches are not registered).",
     )
     action.add_argument(
+        "--resume",
+        metavar="SESSION_ID",
+        type=claude.session_uuid,
+        help="Reopen this recorded Claude Code session (the claude_session a launch printed) instead of starting a new one.",
+    )
+    action.add_argument(
         "--cancel-generation",
         metavar="GENERATION",
         help="Stop and terminalize exactly this canonical generation "
@@ -183,6 +189,7 @@ def main() -> int:
         (args.impersonation_name or workspace.name) if args.impersonate_self else None,
         args.brief,
         reference_dir=_REFERENCE,
+        resume=args.resume,
         relay_resident=relay_resident,
         relay_plugin_dir=relay_plugin_dir,
     )

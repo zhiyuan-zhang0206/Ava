@@ -24,10 +24,14 @@ session_id=<id>
 session_name=<full PTY name>
 supervisor_session_id=<id>
 supervisor_session_name=<full PTY name>
-codex_home=<generation-private path>
 tasks_file=<absolute path>
 work_file=<absolute path>
+codex_session=<uuid>
 ```
+
+`codex_session` is Codex's own session id, read from its `/status` card: the id
+`--resume` takes after an interruption (an adopted record prints none; the
+launch that started it did).
 
 A takeover generation (`--impersonate-self`) prints no `supervisor_*`,
 `tasks_file`, or `work_file` line: it runs file- and supervisor-less, its
@@ -40,12 +44,14 @@ methods; it should use the canonical status/cancel commands or coordinate with
 the recorded owner. Full names are the host identities used by lifecycle
 cleanup.
 
-Every generation receives a private `CODEX_HOME`, seeded only with `auth.json`
-and a configuration snapshot containing the workspace trust row. No SQLite
-database, mutable log, transcript, or resume state crosses generations. A
-fresh supervised worker rebuilds from the task file, work log, collaboration
-contract, and Git tree; a takeover process has none of those files and
-rebuilds from the briefing inlined in its launch message instead.
+Codex runs on the host user's own `~/.codex`, exactly as in a person's own
+terminal, so its conversation outlives the shell. Nothing is written to that
+home's configuration: each launch passes per-session `-c` overrides that trust
+the workspace and turn off the startup update check (an unattended launch must
+never answer "update now"). A fresh generation starts a new Codex session;
+`--resume <codex_session>` reopens a recorded one instead — see [Resume after
+an interruption](resume_after_interruption.md). The generation's private state
+directory holds only a takeover's app-server log.
 
 Every takeover generation also owns the explicit shared app server the relay
 delivers into: the endpoint must belong to the server holding the existing
@@ -85,5 +91,5 @@ Inspect or cancel with the exact printed generation:
 
 A stale cancel token cannot stop a replacement. For a full handoff, let the old
 generation reach `HANDOFF`, launch the same workspace again, and use the newly
-printed owner and handles. Never resume the old Codex SQLite session or reuse
-its numeric PTY id.
+printed owner and handles; never reuse the old numeric PTY id. A handoff starts
+a fresh session on purpose — resume is for an interruption, not a handoff.

@@ -18,7 +18,7 @@ from ava.shell.coding_tools import _claude_checks, _common, claude
 from shared import coding_session_owner
 
 _REFERENCE = (
-    Path(__file__).parents[2] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
+    Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
 )
 
 
@@ -42,9 +42,10 @@ def _launch_takeover(workspace: Path, brief: str) -> int:
 
 
 def _unwrap_paste(text: str) -> str:
+    """The pasted bootstrap body; the operator's own words must follow the paste."""
     assert text.startswith(_claude_checks._PASTE_BEGIN)
-    assert text.endswith(_claude_checks._PASTE_END)
-    return text[len(_claude_checks._PASTE_BEGIN) : -len(_claude_checks._PASTE_END)]
+    assert text.endswith(_claude_checks._PASTE_END + _claude_checks._OWN_WORDS)
+    return text[len(_claude_checks._PASTE_BEGIN) : text.index(_claude_checks._PASTE_END)]
 
 
 def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
@@ -166,6 +167,8 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
         failure_marker: Path,
         relay_stub: Path | None = None,
         relay_plugin_dir: Path | None = None,
+        claude_session: str | None = None,
+        resume: bool = False,
     ) -> str:
         failure_marker.write_text("claude executable not found\n")
         return original_command(
@@ -174,6 +177,8 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
             failure_marker=failure_marker,
             relay_stub=relay_stub,
             relay_plugin_dir=relay_plugin_dir,
+            claude_session=claude_session,
+            resume=resume,
         )
 
     def _publish(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
@@ -184,7 +189,7 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
         terminated.append(generation)
         return True
 
-    def _receipt(_sid: int, _rebuild: Callable[[], str]) -> None:
+    def _receipt(_sid: int, _rebuild: Callable[[], str], _submitted: object) -> None:
         pytest.fail("bootstrap sent")
 
     monkeypatch.setattr(claude, "claim_canonical", _claim)
@@ -206,6 +211,7 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
             3600,
             None,
             _REFERENCE,
+            "11111111-2222-3333-4444-555555555555",
             relay_resident=False,
         )
 
@@ -263,7 +269,9 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     def _ready(_session_id: int, **_kwargs: object) -> None:
         events.append("ready")
 
-    def _receipt(_session_id: int, rebuild_bootstrap: Callable[[], str]) -> None:
+    def _receipt(
+        _session_id: int, rebuild_bootstrap: Callable[[], str], _submitted: object
+    ) -> None:
         rebuilt.append(rebuild_bootstrap())
         events.append("receipt")
 
@@ -326,10 +334,11 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
     def _send(_sid: int, content: str) -> None:
         sent.append(content)
 
-    def _ready(_sid: int, *, failure_marker: Path) -> None:
+    def _ready(_sid: int, *, failure_marker: Path, resumed: bool) -> None:
+        assert not resumed
         assert failure_marker.parent.is_dir()
 
-    def _receipt(_sid: int, _rebuild: Callable[[], str]) -> None:
+    def _receipt(_sid: int, _rebuild: Callable[[], str], _submitted: object) -> None:
         return None
 
     def _publish(
@@ -394,7 +403,7 @@ def test_start_receipt_survives_a_dead_session_at_the_enter_retry(
     capture read), so this is the throw point the contract must cover first.
     """
 
-    def no_receipt(_started: float) -> bool:
+    def no_receipt() -> bool:
         return False
 
     def no_sleep(_seconds: float) -> None:
@@ -406,12 +415,11 @@ def test_start_receipt_survives_a_dead_session_at_the_enter_retry(
     def unexpected_capture(_sid: int, **_kwargs: object) -> str:
         raise AssertionError("capture must not run once the Enter retry refused")
 
-    monkeypatch.setattr(_claude_checks, "_bootstrap_submitted", no_receipt)
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
     monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", dead_keys)
     monkeypatch.setattr(claude.ava.shell.sessions, "capture", unexpected_capture)
 
-    _claude_checks._verify_start_receipt(7, lambda: "bootstrap", timeout=0.01)
+    _claude_checks._verify_start_receipt(7, lambda: "bootstrap", no_receipt, timeout=0.01)
     out = capsys.readouterr().out
     assert "start-receipt=not-submitted" in out
     assert "Enter retry failed" in out
@@ -422,7 +430,7 @@ def test_start_receipt_survives_a_dead_session_at_capture(
 ) -> None:
     """A dead pane's capture refusal stays loud-not-fatal: warn, do not raise."""
 
-    def no_receipt(_started: float) -> bool:
+    def no_receipt() -> bool:
         return False
 
     def no_sleep(_seconds: float) -> None:
@@ -437,13 +445,12 @@ def test_start_receipt_survives_a_dead_session_at_capture(
     def dead_capture(_sid: int, **_kwargs: object) -> str:
         raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
 
-    monkeypatch.setattr(_claude_checks, "_bootstrap_submitted", no_receipt)
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
     monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", no_keys)
     monkeypatch.setattr(claude.ava.shell.sessions, "send", no_send)
     monkeypatch.setattr(claude.ava.shell.sessions, "capture", dead_capture)
 
-    _claude_checks._verify_start_receipt(7, lambda: "bootstrap", timeout=0.01)
+    _claude_checks._verify_start_receipt(7, lambda: "bootstrap", no_receipt, timeout=0.01)
     out = capsys.readouterr().out
     assert "start-receipt=not-submitted" in out
     assert "capture failed" in out
@@ -458,7 +465,7 @@ def test_start_receipt_rebuilds_and_resends_once_after_a_lost_bootstrap(
     resend: list[str] = []
     keys: list[str] = []
 
-    def transcript_evidence(_started: float) -> bool:
+    def transcript_evidence() -> bool:
         return next(evidence)
 
     def no_sleep(_seconds: float) -> None:
@@ -473,7 +480,6 @@ def test_start_receipt_rebuilds_and_resends_once_after_a_lost_bootstrap(
     def unexpected_capture(_sid: int) -> str:
         pytest.fail("capture is unnecessary once the rebuilt message is submitted")
 
-    monkeypatch.setattr(_claude_checks, "_bootstrap_submitted", transcript_evidence)
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
     monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", send_enter)
     monkeypatch.setattr(claude.ava.shell.sessions, "send", resend_bootstrap)
@@ -483,7 +489,7 @@ def test_start_receipt_rebuilds_and_resends_once_after_a_lost_bootstrap(
         rebuilt.append("formal bootstrap")
         return rebuilt[-1]
 
-    _claude_checks._verify_start_receipt(7, rebuild_bootstrap, timeout=0.0)
+    _claude_checks._verify_start_receipt(7, rebuild_bootstrap, transcript_evidence, timeout=0.0)
 
     assert keys == ["Enter"]
     assert rebuilt == ["formal bootstrap"]
@@ -496,7 +502,7 @@ def test_start_receipt_does_not_rebuild_when_the_initial_bootstrap_is_submitted(
 ) -> None:
     """A submitted initial bootstrap never reaches either recovery send path."""
 
-    def transcript_evidence(_started: float) -> bool:
+    def transcript_evidence() -> bool:
         return True
 
     def unexpected_enter(_sid: int, _key: str) -> None:
@@ -505,13 +511,13 @@ def test_start_receipt_does_not_rebuild_when_the_initial_bootstrap_is_submitted(
     def unexpected_resend(_sid: int, _message: str) -> None:
         pytest.fail("submitted bootstrap must not be resent")
 
-    monkeypatch.setattr(_claude_checks, "_bootstrap_submitted", transcript_evidence)
     monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", unexpected_enter)
     monkeypatch.setattr(claude.ava.shell.sessions, "send", unexpected_resend)
 
     _claude_checks._verify_start_receipt(
         7,
         lambda: pytest.fail("submitted bootstrap must not be rebuilt"),
+        transcript_evidence,
     )
 
 
@@ -523,7 +529,7 @@ def test_start_receipt_warns_after_one_unconfirmed_rebuild_resend(
     rebuilt: list[str] = []
     resend: list[str] = []
 
-    def transcript_evidence(_started: float) -> bool:
+    def transcript_evidence() -> bool:
         return next(evidence)
 
     def no_sleep(_seconds: float) -> None:
@@ -538,7 +544,6 @@ def test_start_receipt_warns_after_one_unconfirmed_rebuild_resend(
     def blank_capture(_sid: int) -> str:
         return ""
 
-    monkeypatch.setattr(_claude_checks, "_bootstrap_submitted", transcript_evidence)
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
     monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", no_enter)
     monkeypatch.setattr(claude.ava.shell.sessions, "send", resend_bootstrap)
@@ -548,7 +553,7 @@ def test_start_receipt_warns_after_one_unconfirmed_rebuild_resend(
         rebuilt.append("formal bootstrap")
         return rebuilt[-1]
 
-    _claude_checks._verify_start_receipt(7, rebuild_bootstrap, timeout=0.0)
+    _claude_checks._verify_start_receipt(7, rebuild_bootstrap, transcript_evidence, timeout=0.0)
 
     assert rebuilt == ["formal bootstrap"]
     assert resend == ["formal bootstrap"]
@@ -766,7 +771,7 @@ def test_start_receipt_resend_wraps_a_multi_chunk_rebuilt_bootstrap(
     evidence = iter([False, False, True])
     resend: list[str] = []
 
-    def transcript_evidence(_started: float) -> bool:
+    def transcript_evidence() -> bool:
         return next(evidence)
 
     def no_sleep(_seconds: float) -> None:
@@ -781,14 +786,13 @@ def test_start_receipt_resend_wraps_a_multi_chunk_rebuilt_bootstrap(
     def unexpected_capture(_sid: int) -> str:
         pytest.fail("capture is unnecessary once the rebuilt message is submitted")
 
-    monkeypatch.setattr(_claude_checks, "_bootstrap_submitted", transcript_evidence)
     monkeypatch.setattr(_claude_checks.time, "sleep", no_sleep)
     monkeypatch.setattr(claude.ava.shell.sessions, "send_keys", send_enter)
     monkeypatch.setattr(claude.ava.shell.sessions, "send", resend_bootstrap)
     monkeypatch.setattr(claude.ava.shell.sessions, "capture", unexpected_capture)
 
     rebuilt = "b" * (_claude_checks._PASTE_WRAP_THRESHOLD_CHARS + 1)
-    _claude_checks._verify_start_receipt(7, lambda: rebuilt, timeout=0.0)
+    _claude_checks._verify_start_receipt(7, lambda: rebuilt, transcript_evidence, timeout=0.0)
 
-    assert resend == [f"\x1b[200~{rebuilt}\x1b[201~"]
+    assert resend == [f"\x1b[200~{rebuilt}\x1b[201~{_claude_checks._OWN_WORDS}"]
     assert "start-receipt=submitted after rebuild resend" in capsys.readouterr().out

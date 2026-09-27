@@ -1,8 +1,9 @@
 """Create, adopt, inspect, or stop the canonical Codex workspace generation.
 
 The active identity is ``(cluster, canonical workspace, codex)``. A launch
-publishes one generation-owned record and gives that generation a private
-``CODEX_HOME``. A supervised worker also starts an automatic lifecycle
+publishes one generation-owned record. Codex runs on the user's own
+``~/.codex`` with per-session ``-c`` overrides, so every session stays
+resumable by the id the launch prints. A supervised worker also starts an automatic lifecycle
 supervisor (the skill's ``watch_work.py``); a takeover (``impersonation_name``)
 runs file- and supervisor-less with its briefing inlined in the launch message.
 A concurrent or cross-agent caller adopts the live record instead of stacking
@@ -21,8 +22,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import shlex
-import shutil
 import socket
 import sys
 import time
@@ -33,51 +34,32 @@ import ava
 from shared import coding_session_owner
 
 from ._common import cancel as _cancel_generation
-from ._common import claim_canonical, impersonator_guide, init_file
+from ._common import claim_canonical, impersonator_guide, init_file, worker_bootstrap
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
+from ._common import session_uuid as session_uuid
 from ._common import status as _owner_status
 
 DEFAULT_TTL_SECONDS = 4 * 3600
 _SUPERVISOR_TTL_PADDING_SECONDS = 300
 
 
-def _project_header(workspace: Path) -> str:
-    return f"[projects.{json.dumps(workspace.as_posix())}]"
+_SESSION_ID = re.compile(
+    r"Session:\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+)
 
 
-def _seed_codex_home(
-    codex_home: Path,
-    workspace: Path,
-    *,
-    source_home: Path | None = None,
-) -> None:
-    """Seed only immutable launch inputs, never SQLite, sessions, or logs."""
-    source = source_home or (Path.home() / ".codex")
-    codex_home.mkdir(parents=True, exist_ok=False)
-    codex_home.chmod(0o700)
-    # Symlink auth.json rather than snapshot it: tokens the user adds after
-    # spawn (e.g. a fresh MCP OAuth login) must be visible to this session
-    # immediately. A spawn-time copy silently freezes them (empirical 2026-09-04:
-    # real auth.json updated at 00:13, private-home copy still the 23:34 snapshot).
-    # config.toml stays a copy below because it is rewritten per project.
-    auth_source = source / "auth.json"
-    if auth_source.is_file():
-        auth_target = codex_home / "auth.json"
-        try:
-            auth_target.symlink_to(auth_source)
-        except OSError:
-            shutil.copyfile(auth_source, auth_target)
-        auth_target.chmod(0o600)
+def _config_overrides(workspace: Path) -> str:
+    """Per-session ``-c`` overrides on top of the user's own ``~/.codex``.
 
-    config_source = source / "config.toml"
-    config = config_source.read_text(encoding="utf-8") if config_source.is_file() else ""
-    section = _project_header(workspace)
-    if section not in config:
-        config = config.rstrip("\n") + f'\n\n{section}\ntrust_level = "trusted"\n'
-    config_target = codex_home / "config.toml"
-    config_target.write_text(config.lstrip("\n"), encoding="utf-8")
-    config_target.chmod(0o600)
+    Codex runs on the default home exactly as a person's own terminal would, so
+    its sessions stay resumable with ``codex resume``. The overrides touch no
+    file: the workspace is trusted for this session only (the table replaces
+    the ``projects`` map for this process), and the startup update check is
+    off, since an unattended launch must never answer an "update now" prompt.
+    """
+    trusted = f'projects={{{json.dumps(workspace.as_posix())}={{trust_level="trusted"}}}}'
+    return f"-c {shlex.quote(trusted)} -c check_for_update_on_startup=false"
 
 
 def _wait_for_ready(sid: int, timeout: float = 90.0) -> None:
@@ -123,12 +105,11 @@ def _dead_session_warning(action: str, exc: ValueError) -> None:
     )
 
 
-def _verify_submitted(sid: int, codex_home: Path, timeout: float = 60.0) -> None:
+def _verify_submitted(sid: int, timeout: float = 60.0) -> None:
     """The bootstrap message must actually submit, not park in the composer.
 
-    Submission signal = capture shows "Working" (Codex's busy state line) OR a
-    new sessions jsonl appears under codex_home. If neither within ``timeout``,
-    send one Enter (Enter submits a single-line queued message; the historical
+    Submission signal = capture shows "Working" (Codex's busy state line). If
+    it does not appear within ``timeout``, send one Enter (Enter submits a single-line queued message; the historical
     "Tab submits" note is wrong — 2026-09-03 #5779 re-test) and re-check.
     Kept loud but not fatal: a dead session's capture()/send_keys() refusal
     warns and returns — an escaped ValueError would roll the launch back (the
@@ -145,15 +126,6 @@ def _verify_submitted(sid: int, codex_home: Path, timeout: float = 60.0) -> None
         if "Working" in output:
             print("  -> submitted (Working visible)")
             return
-        sessions_dir = codex_home / "sessions"
-        if sessions_dir.is_dir():
-            now = time.time()
-            recent = any(
-                p.is_file() and now - p.stat().st_mtime < 30 for p in sessions_dir.rglob("*.jsonl")
-            )
-            if recent:
-                print("  -> submitted (fresh session jsonl)")
-                return
         time.sleep(3)
     print("  -> not submitted within window; sending Enter once")
     try:
@@ -175,6 +147,31 @@ def _verify_submitted(sid: int, codex_home: Path, timeout: float = 60.0) -> None
             "parked in the composer ('tab to queue message'). Check the session "
             "and press Enter manually; see codex-tui-first-message trap in memory."
         )
+
+
+def _read_session_id(sid: int, timeout: float = 20.0) -> str:
+    """The Codex session id, read from the ``/status`` card of the ready TUI.
+
+    It is the id ``codex resume <id>`` takes, and it is what a person sees in
+    the same card. Sent before the first message, so the composer is empty; a
+    ``/status`` that parked gets one Enter. No id means the launch cannot be
+    resumed later, so it fails.
+    """
+    ava.shell.sessions.send(sid, "/status")
+    for attempt in range(2):
+        deadline = time.time() + timeout / 2
+        while time.time() < deadline:
+            found = _SESSION_ID.search(ava.shell.sessions.capture(sid, lines=80))
+            if found is not None:
+                print(f"  -> codex session {found.group(1)}")
+                return found.group(1)
+            time.sleep(1)
+        if attempt == 0:
+            ava.shell.sessions.send_keys(sid, "Enter")
+    raise RuntimeError(
+        f"could not read the Codex session id from /status in session {sid}; "
+        "the launch is rolled back because it could not be resumed later"
+    )
 
 
 def _supervisor_code(owner: coding_session_owner.CodingSessionOwner, watcher: Path) -> str:
@@ -263,7 +260,7 @@ def _app_server_command(
     from shared.external_caller import launch_caller_assignment
 
     if owner.state_dir is None:
-        raise RuntimeError("launching owner has no isolated state directory")
+        raise RuntimeError("launching owner has no generation state directory")
     log_path = _app_server_log_path(owner)
     socket_path = endpoint.removeprefix("unix://")
     janitor = (
@@ -280,10 +277,10 @@ def _app_server_command(
     # risk (review N8).
     return (
         f"(cd {shlex.quote(workspace.as_posix())} && "
-        f"CODEX_HOME={shlex.quote(str(owner.state_dir))} "
         f"{launch_caller_assignment('codex', caller_instance)}"
         f"exec codex app-server --listen {shlex.quote(endpoint)}"
         ' -c approval_policy="never" -c sandbox_mode="danger-full-access"'
+        f" {_config_overrides(workspace)}"
         f" > {shlex.quote(str(log_path))} 2>&1) & AP=${{!}}; "
         f"{janitor}"
     )
@@ -336,44 +333,30 @@ def _wait_for_app_server(
 
 
 def _codex_command(
-    owner: coding_session_owner.CodingSessionOwner,
     workspace: Path,
     caller_instance: str | None = None,
     remote: str | None = None,
+    *,
+    resume: str | None = None,
 ) -> str:
     """Build the interactive TUI command; a takeover clears the screen first.
 
     The shared app server line has already filled the screen with its echo,
     which would otherwise pass for a rendered TUI frame and let the launch
-    message park in the composer (the codex-tui-first-message trap).
+    message park in the composer (the codex-tui-first-message trap). With
+    ``resume`` the TUI reopens that recorded session (``codex resume <id>``)
+    instead of starting a new one.
     """
     from shared.external_caller import launch_caller_assignment
 
-    if owner.state_dir is None:
-        raise RuntimeError("launching owner has no isolated state directory")
     prefix = "clear && " if remote is not None else ""
+    subcommand = f"resume {shlex.quote(resume)} " if resume is not None else ""
     remote_flag = f"--remote {shlex.quote(remote)} " if remote is not None else ""
     return (
         f"{prefix}cd {shlex.quote(workspace.as_posix())} && "
-        f"CODEX_HOME={shlex.quote(str(owner.state_dir))} "
         f"{launch_caller_assignment('codex', caller_instance)}"
-        f"exec codex {remote_flag}--dangerously-bypass-approvals-and-sandbox"
-    )
-
-
-def _bootstrap_message(
-    contract: Path,
-    workspace: Path,
-    tasks_file: Path,
-    work_file: Path,
-) -> str:
-    """Build the complete durable-state handoff for a fresh Codex process."""
-    return (
-        f"Read the collaboration contract at {contract} and follow it. "
-        f"Your workspace is {workspace}. "
-        f"Your task file (read-only for you) is {tasks_file}. "
-        f"Your work file (yours to write, STATUS + log) is {work_file}. "
-        "Now read the task file and start working."
+        f"exec codex {subcommand}{remote_flag}--dangerously-bypass-approvals-and-sandbox "
+        f"{_config_overrides(workspace)}"
     )
 
 
@@ -401,8 +384,6 @@ def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: boo
         print(f"supervisor_session_id={owner.supervisor_session_id}")
     if owner.supervisor_session_name is not None:
         print(f"supervisor_session_name={owner.supervisor_session_name}")
-    if owner.state_dir is not None:
-        print(f"codex_home={owner.state_dir}")
     if owner.tasks_file is not None:
         print(f"tasks_file={owner.tasks_file}")
     if owner.work_file is not None:
@@ -439,6 +420,7 @@ class _LaunchRequest:
     takeover_name: str | None
     takeover_brief: str
     reference_dir: Path
+    resume: str | None
 
 
 def _checked_brief(
@@ -463,12 +445,12 @@ def _start_codex(
     generation: str,
     owner_agent_id: int,
     request: _LaunchRequest,
-) -> str | None:
+) -> tuple[str | None, str]:
     """Start Codex in the published PTY and deliver its launch message.
 
-    Returns the shared app-server endpoint of a takeover, else None.
+    Returns the shared app-server endpoint of a takeover (else None) and the
+    Codex session id, which ``codex resume`` takes after an interruption.
     """
-    assert owner.state_dir is not None  # noqa: S101 — the caller checked the launch fields
     remote: str | None = None
     if request.takeover_name is not None:
         remote = _app_server_endpoint(key, generation)
@@ -477,9 +459,17 @@ def _start_codex(
         )
         _wait_for_app_server(remote, log_path=_app_server_log_path(owner))
     ava.shell.sessions.send(
-        sid, _codex_command(owner, request.workspace, request.caller_instance, remote=remote)
+        sid,
+        _codex_command(
+            request.workspace, request.caller_instance, remote=remote, resume=request.resume
+        ),
     )
     _wait_for_ready(sid)
+    codex_session = _read_session_id(sid)
+    if request.resume is not None and codex_session != request.resume:
+        raise RuntimeError(
+            f"codex reopened session {codex_session}, not the requested {request.resume}"
+        )
     if request.takeover_name is not None:
         assert remote is not None  # noqa: S101 — set above for takeovers
         message = _takeover_bootstrap_message(
@@ -491,23 +481,27 @@ def _start_codex(
         )
     else:
         assert request.tasks_file is not None and request.work_file is not None  # noqa: S101
-        message = _bootstrap_message(
+        message = worker_bootstrap(
             request.reference_dir / "collaboration_protocol.md",
             request.workspace,
             request.tasks_file,
             request.work_file,
+            resumed=request.resume is not None,
         )
     ava.shell.sessions.send(sid, message)
-    _verify_submitted(sid, owner.state_dir)
-    return remote
+    _verify_submitted(sid)
+    return remote, codex_session
 
 
 def _start_generation(
     key: coding_session_owner.CodingSessionKey,
     owner: coding_session_owner.CodingSessionOwner,
     request: _LaunchRequest,
-) -> tuple[coding_session_owner.CodingSessionOwner, str | None]:
-    """Seed, supervise, publish and start one fresh generation; roll back on failure."""
+) -> tuple[coding_session_owner.CodingSessionOwner, str | None, str]:
+    """Supervise, publish and start one fresh generation; roll back on failure.
+
+    A takeover's generation state directory holds its app-server log.
+    """
     if (
         owner.generation is None
         or owner.expected_suffix is None
@@ -520,8 +514,9 @@ def _start_generation(
     owner_agent_id = owner.owner_agent_id
     sid: int | None = None
     try:
-        _seed_codex_home(owner.state_dir, request.workspace)
-        if request.takeover_name is None:
+        if request.takeover_name is not None:
+            owner.state_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+        else:
             watcher_id, watcher_name = _launch_supervisor(
                 owner, request.ttl_seconds, request.reference_dir / "watch_work.py"
             )
@@ -539,7 +534,7 @@ def _start_generation(
             session_id=sid,
             session_name=full_name,
         )
-        remote = _start_codex(sid, key, owner, generation, owner_agent_id, request)
+        remote, codex_session = _start_codex(sid, key, owner, generation, owner_agent_id, request)
     except BaseException:
         # A replacement may own the canonical record by now, so its generation
         # CAS cannot reclaim this PTY. The old launcher still owns the numeric id
@@ -554,7 +549,7 @@ def _start_generation(
                 reason="launch-failed",
             )
         raise
-    return active, remote
+    return active, remote, codex_session
 
 
 def launch(
@@ -567,12 +562,15 @@ def launch(
     brief: str | None = None,
     *,
     reference_dir: Path,
+    resume: str | None = None,
 ) -> int:
     """Launch or adopt a supervised worker, or a takeover when ``impersonation_name`` is set.
 
     ``reference_dir`` is the calling skill's reference directory: it holds the
     collaboration contract and the supervisor script, and locates the
-    impersonator guide. Prints one ``key=value`` per line and returns the exit code.
+    impersonator guide. ``resume`` reopens a recorded Codex session (the
+    ``codex_session`` an earlier launch printed) instead of starting a new
+    one. Prints one ``key=value`` per line and returns the exit code.
     """
     from shared.external_caller import launch_caller_assignment
 
@@ -585,6 +583,7 @@ def launch(
         impersonation_name,
         _checked_brief(impersonation_name, brief, tasks_file, work_file),
         reference_dir,
+        resume,
     )
     # Validate before creating files, owner records, or sessions.
     launch_caller_assignment("codex", caller_instance)
@@ -599,16 +598,17 @@ def launch(
         ttl_seconds=ttl_seconds,
     )
     if claim.action == "adopt":
-        if impersonation_name is not None:
+        if impersonation_name is not None or resume is not None:
             raise RuntimeError(
-                "a takeover needs a fresh coding workspace; this workspace already has a live "
-                "generation - cancel it with --cancel-generation first"
+                "a takeover or a resume needs a fresh coding workspace; this workspace already "
+                "has a live generation - cancel it with --cancel-generation first"
             )
         _print_owner(claim.owner, adopted=True)
         return 0
-    active, remote = _start_generation(key, claim.owner, request)
+    active, remote, codex_session = _start_generation(key, claim.owner, request)
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
     if remote is not None:
         print(f"codex_app_server={remote}")
     _print_owner(active, adopted=False)
+    print(f"codex_session={codex_session}")
     return 0
