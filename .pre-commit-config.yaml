@@ -550,7 +550,7 @@ repos:
       # AST, so a body-only fix leaves the snapshot untouched; a signature change,
       # or a new/removed public name, must land its snapshot diff in the same PR.
       # See conventions/python-conventions.md and scripts/structure/contracts.py.
-      - id: contracts-snapshot-fresh
+      - id: lint-contract-snapshots
         name: "core package-door contract snapshots in sync (drift: run .venv/bin/python scripts/structure/contracts.py --write)"
         entry: .venv/bin/python scripts/structure/contracts.py --check
         language: system

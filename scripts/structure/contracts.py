@@ -9,7 +9,7 @@ change (an implementation fix with no signature change) must leave the snapshot
 byte-identical; that property is the whole point.
 
 Run: `.venv/bin/python scripts/structure/contracts.py --write` to regenerate every
-snapshot, `--check` to verify them (also wired as the `contracts-snapshot-fresh`
+snapshot, `--check` to verify them (also wired as the `lint-contract-snapshots`
 pre-commit hook).
 
 **Pure AST — this module never imports a door's own code.** The door modules load
