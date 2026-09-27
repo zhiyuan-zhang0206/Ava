@@ -15,9 +15,9 @@ from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
 from gateway.app import app
-from gateway.routers import _delivery as delivery_router
+from gateway.routers import delivery as delivery_router
 from gateway.routers import work_failed as work_failed_router
-from gateway.routers._delivery import ChatDelivery
+from gateway.routers.delivery import ChatDelivery
 from gateway.schemas.work_failed import WorkFailedIn, WorkFailedResult
 from shared.agents import AgentStatus
 from shared.config import settings

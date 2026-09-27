@@ -538,7 +538,7 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A lost first response heals one pending chat and its terminated owner."""
-    import gateway.routers._delivery as delivery
+    from gateway.routers import delivery
 
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
