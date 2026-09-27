@@ -50,8 +50,8 @@ Native vs installed (mirroring skills), the relative-path `.mcp.json` startup fo
 - `ava/_mcps_daemon.py` — **shared daemon process main loop** (`python -m ava._mcps_daemon`): binds the shared Unix socket (`$AVA_HOME/run/mcp_daemon.sock`) and manages every MCP server's session for every agent connection (per-connection isolation + `"shared"` server buckets)
 - `ava/_mcp_browser.py` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` chrome path; process-less replacement for `services.browser.mcp_wrapper`)
 - `agent/mcp_daemon.py` — **no-op daemon handle** kept for boot-path compatibility (the daemon is now a supervised cluster service, never a per-agent child)
-- `cli/commands/mcp.py` — `ava mcp install/uninstall/upgrade/ls/add/remove/enable/disable`
-- `cli/commands/_pkg_source.py` — install source fetching (git URL / local path), shared with `ava plugins install`
+- `cli/commands/extensions/mcp.py` — `ava mcp install/uninstall/upgrade/ls/add/remove/enable/disable`
+- `cli/commands/extensions/_pkg_source.py` — install source fetching (git URL / local path), shared with `ava plugins install`
 - `shared/install_registry.py` — install registry (`type="mcp"` rows = installed MCPs)
 - `shared/mcp_enabled.py` — enable/disable configuration management
 - `ava_builtins/mcps/chrome/.mcp.json` — chrome server definition (`"shared": "browser"` — the daemon dials the browser-mcp service directly; the `services.browser.mcp_wrapper` stdio bridge is retained only as the declared command for hosts running older daemons); scanned by `ava/mcp_config.py:builtin_mcp_paths()`

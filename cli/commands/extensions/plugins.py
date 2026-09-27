@@ -34,7 +34,8 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from ._manifest_gate import gate_refuses
+from cli.commands._manifest_gate import gate_refuses
+
 from ._pkg_source import cleanup_temp, clone_git
 
 
@@ -115,10 +116,9 @@ def _sync_skills_load_dir() -> None:
     """Run the skills converge pass so a just-(un)installed plugin's skills
     land in / leave `~/.ava/skills/` now, keeping the "active on the next
     skill scan, no restart" promise. Idempotent."""
+    from cli.commands._converge_skills import converge_skills
+    from cli.commands._repo import _repo_root
     from shared.config import settings
-
-    from ._converge_skills import converge_skills
-    from ._repo import _repo_root
 
     result = converge_skills(_repo_root(), Path(settings.general.ava_home).expanduser())
     for warning in result.warnings:
@@ -145,7 +145,7 @@ def _install_bare_skill(
     Shares the copy + registry write — and therefore the security scan — with
     `ava skill install`, so both entry points land a skill on disk the same way.
     """
-    from ._skill_package import SkillPackage, SkillPackageError, SkillScanRefused, install
+    from .skill_package import SkillPackage, SkillPackageError, SkillScanRefused, install
 
     try:
         ((dest, report),) = install(
@@ -183,10 +183,10 @@ def _register_plugin_install(
     """
     from shared.install_registry import tree_hash
 
-    from . import _skill_package
+    from . import skill_package
 
     try:
-        _skill_package.register_installed(
+        skill_package.register_installed(
             name,
             "plugin",
             url,
@@ -240,7 +240,7 @@ def cmd_plugins_install(
     """
     from shared import paths
 
-    from . import _claude_code_plugin, _skill_package
+    from . import _claude_code_plugin, skill_package
 
     try:
         cloned = clone_git(url, ref)
@@ -270,10 +270,10 @@ def cmd_plugins_install(
 
         if _claude_code_plugin.is_claude_code_plugin(pkg_dir):
             try:
-                report, accepted = _skill_package.scan_report(
+                report, accepted = skill_package.scan_report(
                     pkg_dir, pkg_dir.name, accept_risk=accept_risk
                 )
-            except _skill_package.SkillScanRefused as e:
+            except skill_package.SkillScanRefused as e:
                 return _report_refusal(e.report)
             _claude_code_plugin.sweep_plugin_residue(paths.plugins_dir())
             try:

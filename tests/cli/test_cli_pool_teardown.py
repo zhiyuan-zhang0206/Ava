@@ -12,7 +12,7 @@ from cli.commands._converge_extensions import (
     adopt_local_extensions,
     materialize_cluster_extensions,
 )
-from cli.commands._skill_package import _register_in_cluster
+from cli.commands.extensions.skill_package import _register_in_cluster
 from shared import db, extension_adopt, extension_materialize, paths
 
 

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands.skill import cmd_skill_update, cmd_skill_upgrade
+from cli.commands.extensions.skill import cmd_skill_update, cmd_skill_upgrade
 from shared import install_registry as reg
 
 # Every test here installs a package, which records `local:<machine>` provenance
@@ -224,7 +224,7 @@ def _skill_git_repo(tmp_path: Path, name: str = "ext-skill") -> str:
 
 
 def _install_skill(url: str, name: str = "ext-skill") -> None:
-    from cli.commands.skill import cmd_skill_install
+    from cli.commands.extensions.skill import cmd_skill_install
 
     assert cmd_skill_install(url, None, None) == 0
     assert _entry(name).installed_hash is not None

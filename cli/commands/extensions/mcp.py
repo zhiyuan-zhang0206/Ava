@@ -50,7 +50,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, cast
 
-from cli.commands._pkg_source import AcquiredSource, SourcePathNotFoundError
+from cli.commands.extensions._pkg_source import AcquiredSource, SourcePathNotFoundError
 
 
 def _machine_config_file() -> Path:
@@ -622,7 +622,7 @@ def cmd_mcp_install(
             )
             return 1
 
-        from ._manifest_gate import gate_refuses
+        from cli.commands._manifest_gate import gate_refuses
 
         if gate_refuses(pkg_dir, command="mcp install", mirror_pyproject=True):
             return 1
@@ -724,7 +724,7 @@ def cmd_mcp_upgrade(name: str, *, force: bool = False) -> int:
             )
             return 1
 
-        from ._manifest_gate import gate_refuses
+        from cli.commands._manifest_gate import gate_refuses
 
         if gate_refuses(pkg_dir, command="mcp upgrade", mirror_pyproject=True):
             return 1

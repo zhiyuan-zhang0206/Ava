@@ -88,7 +88,7 @@ def _refresh_builtin_skills(repo: Path) -> None:
 
     Runs `ava skill update` in a FRESH subprocess on the just-landed tree, for
     the same reason the boot below is a fresh process: this interpreter's
-    already-imported `cli.commands.skill` is pre-pull code, and the update
+    already-imported `cli.commands.extensions.skill` is pre-pull code, and the update
     table must be the new revision's.
 
     Never fatal: `ava skill update` exits 1 on conflicts (locally edited

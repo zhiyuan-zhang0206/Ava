@@ -6,7 +6,7 @@ install registry tracks as enabled, so a hand-copied dir is invisible until
 registered and a disabled one stays on disk but out of every agent's tree.
 
 - `install <src>`    — install Agent Skills standard skill package(s) from a git
-  URL or a local directory (layout detection in `_skill_package.py`).
+  URL or a local directory (layout detection in `skill_package.py`).
 - `enable <name>` / `disable <name>` — flip the registry toggle (any tracked
   package: converged repo/plugin skills, user installs, plugin namespaces).
 - `register <name>`  — start tracking a dir already under `$AVA_HOME/skills/`
@@ -68,8 +68,8 @@ def cmd_skill_install(
     records which rules were waived.
     """
     from ._pkg_source import SourcePathNotFoundError, acquire_source, cleanup_temp
-    from ._skill_package import SkillPackageError, SkillScanRefused, discover, install
     from .packages_refresh import parse_duration
+    from .skill_package import SkillPackageError, SkillScanRefused, discover, install
 
     try:
         interval = parse_duration(check_every) if check_every else None
@@ -87,7 +87,7 @@ def cmd_skill_install(
         if not root.is_dir():
             print(f"[ava skill install] path '{path}' not found in source.", file=sys.stderr)
             return 1
-        from ._manifest_gate import gate_refuses
+        from cli.commands._manifest_gate import gate_refuses
 
         if gate_refuses(root, command="skill install"):
             return 1
@@ -232,7 +232,7 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
     from shared.packages.skills.skill_index import parse_skill_frontmatter as _parse_frontmatter
     from shared.packages.skills.skill_names import find
 
-    from ._skill_package import SkillScanRefused, scan_report
+    from .skill_package import SkillScanRefused, scan_report
 
     # `name` is both a registry key and a path segment, so it has to become the
     # directory's REAL spelling before either use: the caller may type the
@@ -300,8 +300,8 @@ def _repo_native_sources(repo: Path | None = None) -> list[_Source]:
     reach agents through the project-local mount, not the load dir; issue
     #146). Installed-plugin skills are excluded too (they update via
     `ava plugins upgrade`)."""
-    from ._converge_skills import iter_sources
-    from ._repo import _repo_root
+    from cli.commands._converge_skills import iter_sources
+    from cli.commands._repo import _repo_root
 
     sources, _conflicts = iter_sources(repo or _repo_root())
     return [s for s in sources if s.bootstrap_only]
@@ -318,9 +318,8 @@ def _land_repo_copy(
     """Land / overwrite `skills_root/<name>` from the source and (re)track it
     as repo-native. Returns the package name (the caller files it under the
     outcome it already knows)."""
+    from cli.commands._converge_skills import _copy_tree
     from shared.install_registry import InstalledPackage, tree_hash
-
-    from ._converge_skills import _copy_tree
 
     dest = skills_root / s.name
     if not dest.exists() or overwrite:
@@ -475,11 +474,10 @@ def cmd_skill_update(
     """
     from datetime import UTC, datetime
 
+    from cli.commands._converge_skills import assert_repo_source_bound
+    from cli.commands._repo import _repo_root
     from shared import install_registry as reg
     from shared import paths
-
-    from ._converge_skills import assert_repo_source_bound
-    from ._repo import _repo_root
 
     repo = repo or _repo_root()
     try:

@@ -10,7 +10,7 @@ import pytest
 
 import ava.skills as skills_mod
 from cli.commands._converge_skills import converge_skills
-from cli.commands.skill import cmd_skill_disable, cmd_skill_enable, cmd_skill_register
+from cli.commands.extensions.skill import cmd_skill_disable, cmd_skill_enable, cmd_skill_register
 from shared import install_registry as reg
 
 
@@ -368,7 +368,7 @@ def test_dot_dir_untracked_not_warned(unit_home: Path, fake_repo: Path) -> None:
 def test_contains_skill_md_any_depth(unit_home: Path, tmp_path: Path) -> None:
     """The shared skill-bearing-tree predicate sees nested-only trees (the
     ava_code/ava_fleet plugin shape) and ignores SKILL.md-less dirs (audit #8)."""
-    from cli.commands._skill_package import contains_skill_md
+    from cli.commands.extensions.skill_package import contains_skill_md
 
     nested = tmp_path / "nested"
     (nested / "pr").mkdir(parents=True)

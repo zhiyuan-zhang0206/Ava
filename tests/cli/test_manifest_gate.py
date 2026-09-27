@@ -68,7 +68,7 @@ def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
         py.write_text("#!/bin/sh\n", encoding="utf-8")
         py.chmod(0o755)
 
-    monkeypatch.setattr("cli.commands.mcp._uv_sync", _fake)
+    monkeypatch.setattr("cli.commands.extensions.mcp._uv_sync", _fake)
 
 
 # ─── ava mcp install ───────────────────────────────────────────────────

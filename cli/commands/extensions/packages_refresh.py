@@ -645,7 +645,7 @@ class _Pass:
         return None, False, f"ref {ref!r} not found on {source}"
 
     def _process_git(self, pkg: install_registry.InstalledPackage) -> None:
-        from cli.commands._pkg_source import (
+        from cli.commands.extensions._pkg_source import (
             SourcePathNotFoundError,
             acquire_source,
             cleanup_temp,
