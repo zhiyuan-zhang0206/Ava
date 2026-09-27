@@ -69,9 +69,6 @@ from cli.commands._update_fanout import (
     _dispatch_one_and_wait as _dispatch_one_and_wait,
 )
 from cli.commands._update_fanout import (
-    _fan_out as _fan_out,
-)
-from cli.commands._update_fanout import (
     _fan_out_async as _fan_out_async,
 )
 from cli.commands._update_fanout import (
@@ -129,9 +126,6 @@ from cli.commands._update_local import (
     _run_frontend_only_update as _run_frontend_only_update,
 )
 from cli.commands._update_local import (
-    _run_gateway_local_update as _run_gateway_local_update,
-)
-from cli.commands._update_local import (
     _snapshot_known_good as _snapshot_known_good,
 )
 from cli.commands._update_orchestration import (
@@ -145,9 +139,6 @@ from cli.commands._update_orchestration import (
     _phase_b_targets,
     _record_health_baseline,
     _report_pause_orphans,
-)
-from cli.commands._update_orchestration import (
-    _resolve_fanout_targets as _resolve_fanout_targets,
 )
 from cli.commands._update_pause import (
     _run_phase_a as _run_phase_a,
@@ -484,8 +475,11 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
     (generation-scoped), so a co-located gateway,agent-runner box does not keep
     a `paused` journal after a rollout that finished (2026-08-26 residue).
     """
-    # Dynamic lookup for fan-out helpers + local-update so tests can stub.
-    import cli.commands as _ns
+    # Lazy imports of the modules that own these seams, looked up fresh at each
+    # call so tests can monkeypatch `cli.commands._update_orchestration.
+    # _resolve_fanout_targets` / `cli.commands._update_fanout._fan_out` /
+    # `cli.commands._update_local._run_gateway_local_update`.
+    from cli.commands import _update_fanout, _update_local, _update_orchestration
 
     # 0) Classify + pin: fast paths return their rc now; otherwise the single
     #    rollout target every node checks out. The collector activated here makes
@@ -517,7 +511,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
 
     # A stale stopped marker is reconciled for safety, but never cleared until
     # after a commit decision: prepare itself must not mutate rollout state.
-    agent_runners = _ns._resolve_fanout_targets(clear_stale_markers=False)
+    agent_runners = _update_orchestration._resolve_fanout_targets(clear_stale_markers=False)
     # Report state for the aftermath summary the `finally` prints when the rollout did
     # not finish clean: how it ended (three outcomes, not a bool — see
     # `RolloutOutcome`), and whether the pin advanced (the gateway landed the new
@@ -601,7 +595,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         final_outcome = _finalize_orchestration(
             hosts_to_resume=hosts_to_resume,
             phase_a_started=phase_a_started,
-            fan_out=_ns._fan_out,
+            fan_out=_update_fanout._fan_out,
             phase_a_timeout_s=_PHASE_A_TIMEOUT_S,
             outcome=outcome,
             deploy_capability=deploy_capability,
@@ -697,7 +691,7 @@ def _run_gateway_orchestration_inner(  # noqa: PLR0915 (three-phase orchestratio
         # 2-5) gateway local stop -> pull -> sync -> start (start migrates).
         #      restart_only skips the pull/sync (bounce on current code).
         with _stage_telemetry("local_leg"):
-            rc = _ns._run_gateway_local_update(
+            rc = _update_local._run_gateway_local_update(
                 repo,
                 target_sha=target_sha,
                 pull_recover=pull_recover,

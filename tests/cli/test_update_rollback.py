@@ -27,10 +27,9 @@ from typing import cast
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import _update_git as _git_mod
+from cli.commands import _update_local, _update_uv_sync
 from cli.commands import _update_recover as _rec
-from cli.commands import _update_uv_sync
 from cli.commands import update as _up
 from shared.migrations import MigrationFailed, RollbackBelowFloor
 
@@ -478,7 +477,7 @@ def _patch_local_update(
 def test_local_update_checkout_failure_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
     """git checkout fails -> recovery invoked with the pre-checkout snapshot; recovered -> rc 1."""
     order, recover_calls = _patch_local_update(monkeypatch, checkout_raises=True)
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
     )
     assert rc == 1  # recovered to last-known-good (recover returned 0)
@@ -502,7 +501,7 @@ def test_an_interrupt_mid_start_recovers_like_any_other_failure(
     """
     _order, recover_calls = _patch_local_update(monkeypatch, start_interrupts=True)
 
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
     )
 
@@ -520,7 +519,7 @@ def test_an_interrupt_with_nothing_to_roll_back_to_still_propagates(
     _order, recover_calls = _patch_local_update(monkeypatch, start_interrupts=True)
 
     with pytest.raises(KeyboardInterrupt):
-        _up._run_gateway_local_update(Path("/repo"), pull=False)
+        _update_local._run_gateway_local_update(Path("/repo"), pull=False)
 
     assert recover_calls == []
 
@@ -532,7 +531,7 @@ def test_local_update_stops_after_orchestration_prepared_recovery(
     order, _recover_calls = _patch_local_update(monkeypatch)
     monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop") or 0)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
     )
     assert rc == 0
@@ -547,7 +546,7 @@ def test_local_update_requires_prepared_recovery_before_stopping(
     monkeypatch.setattr(_up, "_do_stop", lambda *_a, **_k: order.append("stop") or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(ValueError, match="requires pull_recover"):
-        _up._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
+        _update_local._run_gateway_local_update(Path("/repo"), target_sha="TARGETSHA", pull=True)
 
     assert "stop" not in order
     assert recover_calls == []
@@ -556,7 +555,7 @@ def test_local_update_requires_prepared_recovery_before_stopping(
 def test_local_update_uv_sync_failure_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
     """uv sync fails after a good checkout -> recovery; recovered ok -> rc 1."""
     _order, recover_calls = _patch_local_update(monkeypatch, sync_rc=1)
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
     )
     assert rc == 1
@@ -567,7 +566,7 @@ def test_local_update_start_failure_recovers(monkeypatch: pytest.MonkeyPatch) ->
     """`ava start` fails (a migration may have applied) -> recovery; recovered ok -> rc 1."""
     dump = Path("/x/pre-update.dump")
     _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1)
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(dump), pull=True
     )
     assert rc == 1
@@ -579,7 +578,7 @@ def test_local_update_recovery_failure_returns_down_rc(monkeypatch: pytest.Monke
     returns non-zero) -> rc 2, the orchestration's 'DOWN, needs a human' signal
     (distinct from rc 1 = recovered, the whole point of propagating the recover rc)."""
     _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1, recover_rc=1)
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
     )
     assert rc == 2
@@ -589,7 +588,7 @@ def test_local_update_recovery_failure_returns_down_rc(monkeypatch: pytest.Monke
 def test_local_update_success_does_not_recover(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clean update -> rc 0, recovery never called (must not re-start on success)."""
     _order, recover_calls = _patch_local_update(monkeypatch)
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         Path("/repo"), target_sha="TARGETSHA", pull_recover=_prepared_recover(), pull=True
     )
     assert rc == 0
@@ -600,14 +599,14 @@ def test_local_update_requires_target_sha_when_pull(monkeypatch: pytest.MonkeyPa
     """pull=True without a pinned target_sha is a contract violation -> raises."""
     _patch_local_update(monkeypatch)
     with pytest.raises(ValueError, match="requires a target_sha"):
-        _up._run_gateway_local_update(Path("/repo"), target_sha=None, pull=True)
+        _update_local._run_gateway_local_update(Path("/repo"), target_sha=None, pull=True)
 
 
 def test_backend_only_recovery_skips_frontend(monkeypatch: pytest.MonkeyPatch) -> None:
     """restart_frontend=False -> the frontend session is forwarded to recovery as a
     skip (recovery must not rebuild a UI that was never stopped)."""
     _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1)
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         Path("/repo"),
         target_sha="TARGETSHA",
         pull_recover=_prepared_recover(),
@@ -622,7 +621,7 @@ def test_restart_only_start_failure_does_not_recover(monkeypatch: pytest.MonkeyP
     """A restart-only bounce (pull=False) changed no code/schema -> nothing to roll
     back; a failed start returns its raw rc with no recovery attempt."""
     _order, recover_calls = _patch_local_update(monkeypatch, start_rc=1)
-    rc = _up._run_gateway_local_update(Path("/repo"), restart_frontend=True, pull=False)
+    rc = _update_local._run_gateway_local_update(Path("/repo"), restart_frontend=True, pull=False)
     assert rc == 1
     assert recover_calls == []
 
@@ -634,15 +633,17 @@ def test_orchestration_resolves_and_threads_target_sha(monkeypatch: pytest.Monke
     """The orchestration resolves ONE target_sha (origin/main) and threads the same
     sha to the gateway local update AND every agent-runner's Phase-B self-update
     — the core of the SHA-pin: no node re-resolves a tip that could move mid-rollout."""
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
+
     captured: dict[str, object] = {}
     monkeypatch.setattr(_up, "git_resolve_origin_main", lambda: "PINNEDSHA")
     # the orchestration vets the target's migrations/ layout (git read) before Phase A;
     # the synthetic PINNEDSHA is not a real object, so pass the vet here.
     monkeypatch.setattr(_up, "_vet_rollout_target", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_fan_out", lambda *_a, **_k: [("a", "ok", "")])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None)])
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", lambda *_a, **_k: [("a", "ok", "")])  # pyright: ignore[reportUnknownArgumentType]
 
     def _local(  # type: ignore[no-untyped-def]
         _repo,
@@ -657,15 +658,17 @@ def test_orchestration_resolves_and_threads_target_sha(monkeypatch: pytest.Monke
         captured["local_target"] = target_sha
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
 
     def _phase_b(_hosts, *, target_sha, restart_only, force_reap=False, host_outcomes=None):  # type: ignore[no-untyped-def]
+        from cli.commands import _update_phase_b
+
         captured["phaseb_target"] = target_sha
-        return {"a": _cli.PollVerdict("ok")}
+        return {"a": _update_phase_b.PollVerdict("ok")}
 
     monkeypatch.setattr(_up, "_phase_b_and_poll", _phase_b)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert captured["local_target"] == "PINNEDSHA"
     assert captured["phaseb_target"] == "PINNEDSHA"
@@ -676,22 +679,26 @@ def test_orchestration_resolve_failure_aborts_before_pausing(
 ) -> None:
     """If origin/main can't be resolved, the rollout aborts BEFORE Phase A — nothing
     paused, no local update."""
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    from cli.commands import _update_fanout, _update_preflight
+
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
 
     def _boom() -> str:
         raise _up.GitPullFailed("network down")
 
     monkeypatch.setattr(_up, "git_resolve_origin_main", _boom)
     monkeypatch.setattr(
-        _cli, "_list_agent_runners", lambda: pytest.fail("must abort before Phase A")
+        _update_fanout, "_list_agent_runners", lambda: pytest.fail("must abort before Phase A")
     )
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
 
 
 def test_phase_b_payload_carries_target_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     """_phase_b_and_poll forwards target_sha in each agent-runner's cluster_update payload
     (so the host force-checks-out the pinned commit, not its own origin/main)."""
+    from cli.commands import _update_fanout, _update_phase_b
+
     captured: dict[str, object] = {}
 
     def _fan_out(hosts, path, timeout, payload=None):  # type: ignore[no-untyped-def]
@@ -699,11 +706,11 @@ def test_phase_b_payload_carries_target_sha(monkeypatch: pytest.MonkeyPatch) -> 
         captured["timeout"] = timeout
         return [(h[0], "ok", "") for h in hosts]
 
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda _hosts, **_unused: {"a": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"a": _update_phase_b.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
     )
     _up._phase_b_and_poll([("a", None)], target_sha="PINNEDSHA", restart_only=False)
     assert captured["payload"] == {"target_sha": "PINNEDSHA"}
@@ -719,6 +726,8 @@ def test_orchestration_aborts_when_update_lock_held(
     refusal the operator reads is the lock module's own `update_lock_refusal_detail`
     sentence (which names a durable pending publication instead when that is the
     real blocker)."""
+    from cli.commands import _update_fanout, _update_preflight
+
     monkeypatch.setattr(_up, "acquire_update_lock", lambda _holder, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _up,
@@ -726,9 +735,13 @@ def test_orchestration_aborts_when_update_lock_held(
         lambda: "another cluster update is in progress (held by cloud:pid999); aborting",
     )
     monkeypatch.setattr(
-        _cli, "_changed_paths_vs_origin", lambda: pytest.fail("must abort before classify")
+        _update_preflight,
+        "_changed_paths_vs_origin",
+        lambda: pytest.fail("must abort before classify"),
     )
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: pytest.fail("must not pause anything"))
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    monkeypatch.setattr(
+        _update_fanout, "_list_agent_runners", lambda: pytest.fail("must not pause anything")
+    )
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
     assert "cloud:pid999" in capsys.readouterr().err

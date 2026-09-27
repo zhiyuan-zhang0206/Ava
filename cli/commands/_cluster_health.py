@@ -404,16 +404,16 @@ def _service_probes() -> list[str]:
     not responding" and "ava-ops is answering, but it is /home/ava/.ava" are the
     same bare session name and completely different incidents — the second one
     means another unit holds this unit's port and no amount of waiting fixes it."""
-    import cli.commands as _ns
+    from cli.commands import _probe, _repo
 
-    roles = _ns._roles_or_none()
+    roles = _repo._roles_or_none()
     if roles is None:
         return []
     failing: list[str] = []
-    for spec, gate_reason in _ns._services_for_roles_annotated(roles):
+    for spec, gate_reason in _repo._services_for_roles_annotated(roles):
         if gate_reason is not None:
             continue
-        probe = _ns._probe_service(spec)
+        probe = _probe._probe_service(spec)
         if probe.alive is False:
             failing.append(f"{spec.session} ({probe.detail})" if probe.detail else spec.session)
     return failing
@@ -437,9 +437,9 @@ def _gate_probe() -> str | None:
     this a false positive is both rare (only a real plist change opens one) and an
     order of magnitude shorter than the probe's interval.
     """
-    import cli.commands as _ns
+    from cli.commands import _repo
 
-    roles = _ns._roles_or_none()
+    roles = _repo._roles_or_none()
     if roles is None or "gateway" not in roles:
         return None
     from cli.commands._converge_gate import probe_gate
@@ -464,9 +464,9 @@ def _redis_bridge_probe() -> str | None:
     endpoint; a loaded launchd label or open TCP port alone cannot certify the
     forwarding path.
     """
-    import cli.commands as _ns
+    from cli.commands import _repo
 
-    roles = _ns._roles_or_none()
+    roles = _repo._roles_or_none()
     if roles is None or "gateway" not in roles:
         return None
     from cli.commands._converge_redis_bridge import probe_redis_bridge

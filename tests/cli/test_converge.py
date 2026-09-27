@@ -743,7 +743,7 @@ def test_converge_host_runs_in_order(home, tmp_path: Path):
 def test_cmd_converge_unconfigured_returns_zero(
     home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    import cli.commands as _ns
+    from cli.commands import _repo as _repo_mod
     from shared import runtime_binaries as rb
     from shared.config import settings
 
@@ -769,8 +769,8 @@ def test_cmd_converge_unconfigured_returns_zero(
     seeded_ext = rb.vendored_pg_dir() / "share/postgresql/extension"
     seeded_ext.mkdir(parents=True)
     (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
-    monkeypatch.setattr(_ns, "_repo_root", lambda: repo)
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: None)
+    monkeypatch.setattr(_repo_mod, "_repo_root", lambda: repo)
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: None)
 
     def import_gate(
         _root: Path,

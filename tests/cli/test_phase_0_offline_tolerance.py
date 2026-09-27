@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import update as _up
 
 # This box's name in every test below — the host that runs the orchestration.
@@ -52,6 +51,14 @@ def _drive(
     `statuses` maps fan-out path -> host -> verdict ("ok" / "unreachable" /
     "fatal") for that phase's dial; a host with no entry answers "ok". An unreachable host aborts before any later phase.
     """
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
+
     set_machine_identity(role="gateway,agent-runner", name=ME)
     calls: list[tuple[str, list[tuple[str, str]]]] = []
 
@@ -69,18 +76,24 @@ def _drive(
         calls.append((path, [(name, verdict) for name, verdict, _ in out]))
         return out
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: list(registered))
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: list(registered))
     monkeypatch.setattr("shared.machines.list_stopped_agent_runners", list)
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: local_update_rc)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
-        "_poll_until_unpaused",
-        lambda hosts, **_unused: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
+        _update_local,
+        "_run_gateway_local_update",
+        lambda _repo, **_kw: local_update_rc,  # pyright: ignore[reportUnknownArgumentType]
     )
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    monkeypatch.setattr(
+        _update_phase_b,
+        "_poll_until_unpaused",
+        lambda hosts, **_unused: {
+            name: _update_phase_b.PollVerdict(_update_phase_b.POLL_OK) for name, _url in hosts
+        },  # pyright: ignore[reportUnknownArgumentType]
+    )
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     return _Rollout(rc, calls)
 
 
@@ -138,10 +151,11 @@ def test_phase_a_partial_failure_resumes_every_participant(
 def test_missing_fetch_or_drain_acknowledgement_cannot_pass(
     monkeypatch: pytest.MonkeyPatch, results: list[tuple[str, str, str]]
 ) -> None:
+    from cli.commands import _update_fanout
     from cli.commands._update_pause import _run_phase_a
     from cli.commands._update_preflight import _run_preflight_fetch
 
-    monkeypatch.setattr(_cli, "_fan_out", lambda *_a, **_kw: results)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", lambda *_a, **_kw: results)  # pyright: ignore[reportUnknownArgumentType]
     runners: list[tuple[str, str | None]] = [("a", None), ("b", None)]
     assert _run_preflight_fetch(runners, restart_only=False)
     assert _run_phase_a(runners, deploy_capability={}) is None

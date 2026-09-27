@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands as _cli
 from cli.commands import _update_agent_runner as _runner
 from cli.commands import _update_local as _local
 from cli.commands import update as _up
@@ -92,6 +91,9 @@ def test_gateway_refresh_helper_never_raises(
 
 
 def test_runner_leg_refreshes_after_checkout(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _start_readiness_preflight, stop
+
     refresh_calls: list[tuple[Path, Path]] = []
 
     class _FakeBackend:
@@ -107,9 +109,13 @@ def test_runner_leg_refreshes_after_checkout(monkeypatch: pytest.MonkeyPatch, re
     monkeypatch.setattr(_runner, "validate_migrations_at_ref", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_runner, "platform_backend", _FakeBackend)
     monkeypatch.setattr(_runner, "_refresh_builtin_skills", _record)
-    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        lambda *_a, **_kw: 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(stop, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _FakeSubprocess:
         def run(self, *_a, **_kw):
@@ -144,6 +150,9 @@ def test_runner_leg_refreshes_after_checkout(monkeypatch: pytest.MonkeyPatch, re
 def test_runner_leg_skips_refresh_on_restart_only(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _start_readiness_preflight, stop
+
     refresh_calls: list[tuple[Path, Path]] = []
 
     class _FakeBackend:
@@ -157,9 +166,13 @@ def test_runner_leg_skips_refresh_on_restart_only(
 
     monkeypatch.setattr(_runner, "platform_backend", _FakeBackend)
     monkeypatch.setattr(_runner, "_refresh_builtin_skills", _record)
-    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        lambda *_a, **_kw: 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(stop, "_do_stop", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     class _FakeSubprocess:
         def run(self, *_a, **_kw):

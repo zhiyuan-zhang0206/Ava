@@ -19,10 +19,10 @@ that bound is not a number of its own:
 - `_phase_b_payload` / `_phase_b_and_poll` / `_phase_b_outcome` /
   `_still_converging` — the fan-out + poll composition and the verdict.
 
-Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
-so `cli.commands(.update)._poll_until_unpaused` / `._probe_one_until_unpaused` /
-`._renew_lease_while_polling` / `._POLL_TIMEOUT_S` / `PollVerdict` /
-`POLL_*` keep resolving for tests and the ops controllers.
+Re-imported by `cli/commands/update.py` for its own use; the patch seam for
+tests and the ops controllers is this module itself —
+`cli.commands._update_phase_b._poll_until_unpaused` / `._probe_one_until_unpaused` /
+`._renew_lease_while_polling` / `._POLL_TIMEOUT_S` / `PollVerdict` / `POLL_*`.
 
 """
 
@@ -191,7 +191,6 @@ def _probe_verdict(
     pre-lease window, a DB read failure) is False, so a restart or a stall resets
     the clock rather than letting stale progress keep counting.
     """
-    import cli.commands as _ns
     from ops.updater_outcome import UpdaterOutcome, updater_outcome_terminal
 
     if not isinstance(result, dict):
@@ -247,7 +246,7 @@ def _probe_verdict(
                 parsed is not None
                 and parsed.current_stage is not None
                 and parsed.current_stage_s is not None
-                and parsed.current_stage_s > _ns._STAGE_NO_PROGRESS_S
+                and parsed.current_stage_s > _STAGE_NO_PROGRESS_S
             ):
                 no_progress += 1
                 if no_progress >= _STALL_CONFIRMATIONS:
@@ -318,7 +317,6 @@ async def _probe_one_until_unpaused(
     already given up is what forced the bound to stay small, which is what made it
     expire under the hosts that genuinely needed it.
     """
-    import cli.commands as _ns
     from ops import cluster_rpc as cr
 
     stalls = 0
@@ -333,7 +331,7 @@ async def _probe_one_until_unpaused(
     started = time.monotonic()
     attempt = 0
     while time.monotonic() < deadline:
-        slice_timeout = min(_ns._POLL_INTERVAL_S, deadline - time.monotonic())
+        slice_timeout = min(_POLL_INTERVAL_S, deadline - time.monotonic())
         if slice_timeout <= 0:
             break
         attempt += 1
@@ -421,7 +419,7 @@ async def _probe_one_until_unpaused(
         if progressing:
             if progressing_since is None:
                 progressing_since = now
-            elif now - progressing_since >= _ns._CONVERGING_TIMEOUT_S:
+            elif now - progressing_since >= _CONVERGING_TIMEOUT_S:
                 print(
                     f"  · {name}: Phase B {POLL_CONVERGING} after {attempt} probe(s) "
                     f"in {now - started:.1f}s (alive and making progress past the "
@@ -436,7 +434,7 @@ async def _probe_one_until_unpaused(
         # otherwise be re-dialled as fast as the event loop allows for the whole
         # bound — a hot loop against a host that is mid-restart, and one that starves
         # the lease-renewal task sharing this event loop of its turn.
-        await asyncio.sleep(min(_ns._POLL_INTERVAL_S, max(0.0, deadline - time.monotonic())))
+        await asyncio.sleep(min(_POLL_INTERVAL_S, max(0.0, deadline - time.monotonic())))
     print(
         f"  · {name}: Phase B {POLL_CONVERGING} after {attempt} probe(s) "
         f"in {time.monotonic() - started:.1f}s",
@@ -511,19 +509,16 @@ def _poll_until_unpaused(
     `acquire_update_lock` that opened the rollout are the same pid, so nothing has
     to be threaded down four frames to keep the protection alive.
     """
-    # Dynamic lookup for the timeout constant + probe helper so tests can
-    # shrink them.
-    import cli.commands as _ns
     from shared.cluster_lock import self_holder
 
-    deadline = time.monotonic() + _ns._POLL_TIMEOUT_S
+    deadline = time.monotonic() + _POLL_TIMEOUT_S
     holder = self_holder()
 
     async def _run() -> dict[str, PollVerdict]:
         renewal = asyncio.ensure_future(_renew_lease_while_polling(holder))
         try:
             tasks = [
-                _ns._probe_one_until_unpaused(
+                _probe_one_until_unpaused(
                     name, deadline, ops_url=url, host_outcomes=host_outcomes, target_sha=target_sha
                 )
                 for name, url in agent_runners
@@ -572,9 +567,9 @@ def _gateway_ready_or_incomplete(
     thing that checks the box came back serving, and a rollout whose gateway never
     rebound must not report CLEAN.
     """
-    import cli.commands as _ns
+    from cli.commands._gateway_ready import await_gateway_serving
 
-    readiness, detail = _ns._await_gateway_serving()
+    readiness, detail = await_gateway_serving()
     if readiness is GatewayReadiness.SERVING:
         return True
     if unconverged is not None:
@@ -641,7 +636,7 @@ def _phase_b_and_poll(
     single box it is empty and Phase B is a no-op — the local leg already did the work
     this phase exists to dispatch.
     """
-    import cli.commands as _ns
+    from cli.commands._update_fanout import _fan_out
 
     if not fanout_targets:
         print(
@@ -651,7 +646,7 @@ def _phase_b_and_poll(
         return {}
     label = "restart" if restart_only else "self-update"
     print(f"\n→ Phase B: trigger {len(fanout_targets)} agent-runner {label}")
-    results = _ns._fan_out(
+    results = _fan_out(
         fanout_targets,
         "/api/cluster/update",
         _PHASE_B_TIMEOUT_S,
@@ -677,7 +672,7 @@ def _phase_b_and_poll(
         f"{_CONVERGING_TIMEOUT_S / 60:.0f}m of continuous progress, C3 — cut short the "
         f"moment a host provably stops)"
     )
-    polls = _ns._poll_until_unpaused(to_poll, host_outcomes=host_outcomes, target_sha=target_sha)
+    polls = _poll_until_unpaused(to_poll, host_outcomes=host_outcomes, target_sha=target_sha)
     for name, status, detail in results:
         if status != "ok":
             polls.setdefault(name, PollVerdict(status, detail=detail))
@@ -780,10 +775,10 @@ def _phase_b_outcome(
 def _print_poll_verdicts(polls: dict[str, PollVerdict]) -> None:
     """One line per polled host: ✓ back up, or ⚠ with the verdict's next-step
     sentence (`_poll_verdict_detail`) on stderr."""
-    import cli.commands as _ns
+    from cli.commands._update_report import _poll_verdict_detail
 
     for name, verdict in polls.items():
         if verdict.status == POLL_OK:
             print(f"  ✓ {name}: back up")
         else:
-            print(f"  ⚠ {name}: {_ns._poll_verdict_detail(verdict)}", file=sys.stderr)
+            print(f"  ⚠ {name}: {_poll_verdict_detail(verdict)}", file=sys.stderr)

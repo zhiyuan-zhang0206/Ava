@@ -1642,8 +1642,8 @@ def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
 def _guard_service_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Autouse safety net: `cli.commands._wait_for_services_ready` reports every
-    service ready without polling anything.
+    """Autouse safety net: `cli.commands._probe._wait_for_services_ready` reports
+    every service ready without polling anything.
 
     The start path's readiness wait is bounded by `SERVICE_READY_TIMEOUT_S` (180 s),
     and a test that reaches it with real probes would sit there for the full bound —
@@ -1656,18 +1656,18 @@ def _guard_service_readiness(
     code it produces is the subject (tests/cli/test_start_readiness_gate.py)."""
     if request.node.get_closest_marker("real_service_readiness_gate"):
         return
-    from cli.commands import ReadinessWait
+    from cli.commands._probe import ReadinessWait
 
     ready = ReadinessWait((), 0.0, sessions_gone=False)
     monkeypatch.setattr(
-        "cli.commands._wait_for_services_ready",
+        "cli.commands._probe._wait_for_services_ready",
         lambda *_a, **_kw: ready,
     )
     # The root-driven path's wait has the same bound and the same reason to be
-    # stubbed for tests that are not about it (the root-driver tests opt out
-    # through their own module fixture).
+    # stubbed for tests that are not about it (tests/cli/test_root_driver.py opts
+    # out with a module-level `real_service_readiness_gate` marker).
     monkeypatch.setattr(
-        "cli.commands._wait_for_root_services_ready",
+        "cli.commands._root_driver._wait_for_root_services_ready",
         lambda *_a, **_kw: ready,
     )
 
@@ -1695,7 +1695,7 @@ def _guard_health_port_gate(
     subject (tests/cli/test_start_health_port_gate.py)."""
     if request.node.get_closest_marker("real_health_port_gate"):
         return
-    monkeypatch.setattr("cli.commands._occupied_health_ports", lambda *_a, **_kw: ())
+    monkeypatch.setattr("cli.commands._probe._occupied_health_ports", lambda *_a, **_kw: ())
 
 
 @pytest.fixture(autouse=True)
@@ -1710,8 +1710,8 @@ def _guard_force_kill_confirmation() -> None:
 def _guard_gateway_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Autouse safety net: `cli.commands._await_gateway_serving` answers SERVING
-    without dialing anything.
+    """Autouse safety net: `cli.commands._gateway_ready.await_gateway_serving`
+    answers SERVING without dialing anything.
 
     Opt out with `@pytest.mark.real_gateway_readiness_gate` when the gate itself is the
     subject."""
@@ -1720,7 +1720,7 @@ def _guard_gateway_readiness(
     from cli.commands._gateway_ready import GatewayReadiness
 
     monkeypatch.setattr(
-        "cli.commands._await_gateway_serving",
+        "cli.commands._gateway_ready.await_gateway_serving",
         lambda **_kw: (GatewayReadiness.SERVING, "stubbed"),
     )
 

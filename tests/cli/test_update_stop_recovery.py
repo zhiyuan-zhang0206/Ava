@@ -360,7 +360,7 @@ def test_a_start_that_leaves_the_host_paused_defers(
 def _install_leg_stubs(
     monkeypatch: pytest.MonkeyPatch, *, stop_rc: int, recovered: bool, events: list[str]
 ) -> None:
-    import cli.commands as _cli
+    from cli.commands import _repo, _start_readiness_preflight, _update_quiesce, stop
 
     class _FakeBackend:
         def venv_launcher(self, _name: str, root: Path) -> Path:
@@ -383,15 +383,15 @@ def _install_leg_stubs(
 
     monkeypatch.setattr(runner_mod, "platform_backend", _FakeBackend)
     monkeypatch.setattr(runner_mod, "subprocess", _FakeSubprocess())
-    monkeypatch.setattr(_cli, "_preflight_probes", _probes)
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", _readiness)
-    monkeypatch.setattr(_cli, "_quiesce_local_agents", _quiesce)
+    monkeypatch.setattr(_repo, "_preflight_probes", _probes)
+    monkeypatch.setattr(_start_readiness_preflight, "preflight_start_readiness", _readiness)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_local_agents", _quiesce)
 
     def _do_stop(*_args: object, **_kwargs: object) -> int:
         events.append("stop")
         return stop_rc
 
-    monkeypatch.setattr(_cli, "_do_stop", _do_stop)
+    monkeypatch.setattr(stop, "_do_stop", _do_stop)
 
     def _capture() -> tuple[str, datetime]:
         events.append("capture")

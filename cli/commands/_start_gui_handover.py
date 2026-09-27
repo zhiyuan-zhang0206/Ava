@@ -166,9 +166,9 @@ def _observe_gui_domain_start(
     the job could not launch therefore reach the operator through the job's own
     log (`$AVA_HOME/logs/autostart.log`).
     """
-    import cli.commands as _ns
+    from cli.commands import _probe
     from cli.commands._probe import _probe_judges_a_fresh_launch
-    from cli.commands._session_lifecycle import _launch_roster
+    from cli.commands._session_lifecycle import _has_session, _launch_roster
     from cli.commands.start import _readiness_waiver
 
     started = _launch_roster(roles, launch_skip)
@@ -176,7 +176,7 @@ def _observe_gui_domain_start(
     print(
         "\n→ waiting for the GUI-domain job's bring-up (its output: $AVA_HOME/logs/autostart.log)"
     )
-    if specs and not all(_ns._has_session(session_name(s.session)) for s in specs):
+    if specs and not all(_has_session(session_name(s.session)) for s in specs):
         # Nothing serving yet: the job must reach its launch step before the
         # readiness wait can read absence as evidence (see `_LAUNCH_SETTLE_S`).
         if _await_launch_step(t0):
@@ -188,7 +188,7 @@ def _observe_gui_domain_start(
                 "judging the probes directly",
                 file=sys.stderr,
             )
-    wait = _ns._wait_for_services_ready(specs, timeout_s=SERVICE_READY_TIMEOUT_S)
+    wait = _probe._wait_for_services_ready(specs, timeout_s=SERVICE_READY_TIMEOUT_S)
 
     print("\n→ status")
     from cli.commands.status import cmd_status
@@ -196,15 +196,15 @@ def _observe_gui_domain_start(
     cmd_status()
 
     if wait.unready:
-        _ns._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
+        _probe._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
     if wait.non_critical_unready:
-        _ns._print_non_critical_unready_services(wait.non_critical_unready)
-        _ns._notify_non_critical_unready_services(
+        _probe._print_non_critical_unready_services(wait.non_critical_unready)
+        _probe._notify_non_critical_unready_services(
             wait.non_critical_unready, im_enabled=readiness_gate
         )
-    recovered = _ns._recovered_non_critical_specs(started, wait.non_critical_unready)
+    recovered = _probe._recovered_non_critical_specs(started, wait.non_critical_unready)
     if recovered:
-        _ns._resolve_recovered_non_critical_alerts(recovered, im_enabled=readiness_gate)
+        _probe._resolve_recovered_non_critical_alerts(recovered, im_enabled=readiness_gate)
     if wait.unready:
         waiver = _readiness_waiver(roles, readiness_gate=readiness_gate)
         if waiver is None:

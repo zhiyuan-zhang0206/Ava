@@ -107,7 +107,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 
     monkeypatch.setattr("shared.os_autostart.ensure_via_gui_domain", _ensure)
 
-    import cli.commands as ns
+    from cli.commands import _probe, _session_lifecycle
 
     monkeypatch.setattr(
         ho,
@@ -115,7 +115,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
         lambda _t0: rec.launch_step,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        ns,
+        _session_lifecycle,
         "_has_session",
         lambda _name: rec.sessions_alive,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -124,14 +124,14 @@ def env(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
         rec.waits.append((tuple(specs), timeout_s))
         return rec.wait_result
 
-    monkeypatch.setattr(ns, "_wait_for_services_ready", _wait)
+    monkeypatch.setattr(_probe, "_wait_for_services_ready", _wait)
 
     def _print_unready(_wait: ReadinessWait, _timeout_s: float) -> None:
         rec.unready_printed += 1
 
-    monkeypatch.setattr(ns, "_print_unready_services", _print_unready)
+    monkeypatch.setattr(_probe, "_print_unready_services", _print_unready)
     monkeypatch.setattr(
-        ns,
+        _probe,
         "_print_non_critical_unready_services",
         lambda _unready: None,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -139,17 +139,17 @@ def env(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     def _notify(unready: tuple[ServiceSpec, ...], *, im_enabled: bool) -> None:
         rec.notified.append((tuple(unready), im_enabled))
 
-    monkeypatch.setattr(ns, "_notify_non_critical_unready_services", _notify)
+    monkeypatch.setattr(_probe, "_notify_non_critical_unready_services", _notify)
 
     def _recovered(_started: object, _non_critical: object) -> tuple[ServiceSpec, ...]:
         return ()
 
-    monkeypatch.setattr(ns, "_recovered_non_critical_specs", _recovered)
+    monkeypatch.setattr(_probe, "_recovered_non_critical_specs", _recovered)
 
     def _resolve(recovered: tuple[object, ...], *, im_enabled: bool) -> None:
         rec.resolved.append((tuple(recovered), im_enabled))
 
-    monkeypatch.setattr(ns, "_resolve_recovered_non_critical_alerts", _resolve)
+    monkeypatch.setattr(_probe, "_resolve_recovered_non_critical_alerts", _resolve)
 
     def _status() -> None:
         rec.status_printed += 1

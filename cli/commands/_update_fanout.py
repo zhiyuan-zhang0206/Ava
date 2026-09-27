@@ -15,9 +15,9 @@ and Phase B's update:
 - `_PHASE_A_TIMEOUT_S` / `_PHASE_B_TIMEOUT_S` / `_PREFLIGHT_FETCH_TIMEOUT_S` —
   the per-op timeouts.
 
-Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
-so `cli.commands(.update)._fan_out` / `._dispatch_one_and_wait` /
-`._list_agent_runners` / `._PHASE_*_TIMEOUT_S` keep resolving for tests.
+Re-imported by `cli/commands/update.py` for its own use; the patch seam for
+tests is this module itself — `cli.commands._update_fanout._fan_out` /
+`._dispatch_one_and_wait` / `._list_agent_runners` / `._PHASE_*_TIMEOUT_S`.
 
 """
 
@@ -129,14 +129,11 @@ async def _fan_out_async(
     op re-queries Postgres — the compensating resume must dial even after the
     data plane has been stopped by a failed local update.
     """
-    # Dynamic lookup so tests can stub `cli.commands._dispatch_one_and_wait`.
-    import cli.commands as _ns
-
     kind = _PATH_TO_KIND.get(path)
     if kind is None:
         raise ValueError(f"unknown fan-out path {path!r} (expected one of {sorted(_PATH_TO_KIND)})")
     tasks = [
-        _ns._dispatch_one_and_wait(name, kind, timeout_s, payload, ops_url=url)
+        _dispatch_one_and_wait(name, kind, timeout_s, payload, ops_url=url)
         for name, url in agent_runners
     ]
     return list(await asyncio.gather(*tasks))

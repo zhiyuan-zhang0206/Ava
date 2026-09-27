@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import _update_finalize as _fin
 from cli.commands import _update_recover as _rec
 from cli.commands import update as _up
@@ -44,9 +43,11 @@ def test_phase_a_fatal_resumes_every_host(monkeypatch: pytest.MonkeyPatch) -> No
     """Phase A 5xx aborts pre-migration. The finally resumes every host the run may
     have paused — resume is idempotent, so a host whose pause-ack was lost (the
     'fatal' one here) must still be covered; rc=1; quiesce never runs."""
+    from cli.commands import _update_fanout, _update_preflight, _update_quiesce
+
     calls: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None), ("b", None)])
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None), ("b", None)])
 
     def _fan_out(hosts, path, _timeout, payload=None):  # type: ignore[no-untyped-def]
         calls.append((path, [h[0] for h in hosts]))  # pyright: ignore[reportUnknownArgumentType]
@@ -54,14 +55,14 @@ def test_phase_a_fatal_resumes_every_host(monkeypatch: pytest.MonkeyPatch) -> No
             return [("a", "ok", ""), ("b", "fatal", "boom")]
         return [(h[0], "ok", "") for h in hosts]
 
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_quiesce,
         "_quiesce_all_agents",
         lambda **_: pytest.fail("must abort before quiesce"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
     assert [c for c in calls if c[0] == "/api/cluster/resume"] == [
         ("/api/cluster/resume", ["a", "b"])
@@ -72,9 +73,11 @@ def test_local_pause_failure_does_not_report_untouched_runners_as_paused(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Local drain fails before remote pause; rejected resume leaves pause state unknown."""
+    from cli.commands import _update_fanout, _update_preflight
+
     calls: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("win", "http://win:8106")])
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("win", "http://win:8106")])
 
     def _fail_local_pause() -> None:
         raise RuntimeError("local drain failed")
@@ -91,9 +94,9 @@ def test_local_pause_failure_does_not_report_untouched_runners_as_paused(
         return [(name, "ok", "") for name, _url in hosts]
 
     monkeypatch.setattr("ops.cluster.pause_local_cluster", _fail_local_pause)
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)
     with pytest.raises(RuntimeError, match="local drain failed"):
-        _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+        _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
 
     assert not any(path == "/api/cluster/stop" for path, _names in calls)
     assert [call for call in calls if call[0] == "/api/cluster/resume"] == [
@@ -109,14 +112,16 @@ def test_local_pause_failure_does_not_report_untouched_runners_as_paused(
 
 def test_local_update_failure_resumes_every_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """Local update fails (the 04:20 scenario) -> every paused host resumed."""
-    calls: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None), ("b", None)])
-    monkeypatch.setattr(_cli, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None), ("b", None)])
+    monkeypatch.setattr(_update_fanout, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
+
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
     assert [c for c in calls if c[0] == "/api/cluster/resume"] == [
         ("/api/cluster/resume", ["a", "b"])
@@ -132,6 +137,13 @@ def test_gateway_local_finally_finalizes_the_pause_journal(
     the rollout reports rc=0 (deploy-pause-owner.json still paused)."""
     from datetime import UTC, datetime
 
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
     from shared import pause_owner
 
     owner_path = tmp_path / "deploy-pause-owner.json"
@@ -155,19 +167,19 @@ def test_gateway_local_finally_finalizes_the_pause_journal(
     )
     pause_owner.mark_paused("macmini:pid65276", acquired)
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None)])
     calls: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(_cli, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda _hosts, **_unused: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"a": _update_phase_b.PollVerdict(_update_phase_b.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     snapshot = pause_owner.read()
     assert snapshot.status == "resumed"
@@ -182,6 +194,7 @@ def test_gateway_local_finally_finalizes_the_journal_on_abort(
     journal after the rollout gave up."""
     from datetime import UTC, datetime
 
+    from cli.commands import _update_fanout, _update_preflight, _update_quiesce
     from shared import pause_owner
 
     owner_path = tmp_path / "deploy-pause-owner.json"
@@ -205,22 +218,22 @@ def test_gateway_local_finally_finalizes_the_journal_on_abort(
     )
     pause_owner.mark_paused("macmini:pid65276", acquired)
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None)])
 
     def _fatal_stop(hosts, path, _timeout, payload=None):  # type: ignore[no-untyped-def]
         if path == "/api/cluster/stop":
             return [(name, "fatal", "boom") for name, _url in hosts]
         return [(name, "ok", "") for name, _url in hosts]
 
-    monkeypatch.setattr(_cli, "_fan_out", _fatal_stop)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fatal_stop)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_quiesce,
         "_quiesce_all_agents",
         lambda **_: pytest.fail("must abort before quiesce"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
     assert pause_owner.read().status == "resumed"
 
@@ -231,46 +244,64 @@ def test_gateway_local_finally_swallows_a_finalize_failure(
     """The finalize runs in a `finally` that may already be unwinding; a journal
     write failure must be swallowed, never allowed to mask the rollout outcome
     (the 2026-07-20 never-raise-in-the-finally contract)."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
     from shared import pause_owner
 
     def _boom() -> bool:
         raise OSError("journal write failed")
 
     monkeypatch.setattr(pause_owner, "finalize_natural_resume", _boom)
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None)])
     calls: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(_cli, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda _hosts, **_unused: {"a": _cli.PollVerdict(_cli.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"a": _update_phase_b.PollVerdict(_update_phase_b.POLL_OK)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     # Must not raise out of finalization, and the unconfirmed local resume
     # cannot leave the rollout with a clean exit code.
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
 
 
 def test_success_path_does_not_resume(monkeypatch: pytest.MonkeyPatch) -> None:
     """All hosts poll back paused=false -> Phase B was the natural resume -> the
     finally sends nothing (must not re-resume a host that self-updated)."""
-    calls: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None), ("b", None)])
-    monkeypatch.setattr(_cli, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(
-        _cli,
-        "_poll_until_unpaused",
-        lambda _hosts, **_unused: {"a": _cli.PollVerdict("ok"), "b": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None), ("b", None)])
+    monkeypatch.setattr(_update_fanout, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _update_phase_b,
+        "_poll_until_unpaused",
+        lambda _hosts, **_unused: {
+            "a": _update_phase_b.PollVerdict("ok"),
+            "b": _update_phase_b.PollVerdict("ok"),
+        },  # pyright: ignore[reportUnknownArgumentType]
+    )
+
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert [c for c in calls if c[0] == "/api/cluster/resume"] == [], calls
 
@@ -279,27 +310,31 @@ def test_success_path_persists_cluster_pin(monkeypatch: pytest.MonkeyPatch) -> N
     """After the gateway local update succeeds, the orchestration persists the
     resolved target_sha as the standing cluster pin (cluster_target_sha). Single-host
     path (no agent-runners) so it returns right after the pin write."""
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", list)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
+
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", list)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     pinned: list[str] = []
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda sha, **_kw: pinned.append(sha))  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert pinned == ["TARGETSHA"]
 
 
 def test_restart_only_does_not_persist_pin(monkeypatch: pytest.MonkeyPatch) -> None:
     """`--restart-only` bounces the current code (target_sha None) — it pins nothing."""
-    monkeypatch.setattr(_cli, "_list_agent_runners", list)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _update_fanout, _update_local, _update_quiesce
+
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", list)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     pinned: list[str] = []
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda sha, **_kw: pinned.append(sha))  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), restart_only=True, origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), restart_only=True, origin="test-origin")
     assert rc == 0
     assert pinned == []
 
@@ -309,22 +344,30 @@ def test_phase_b_unconverged_host_is_resumed(monkeypatch: pytest.MonkeyPatch) ->
     host's watchdog skips its self-heal — so the finally resumes exactly it, not the
     host that came back ok. The rollout itself reports INCOMPLETE (rc=1): the gateway
     landed and this host did not, which is not a clean finish."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
+
     calls: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None), ("b", None)])
-    monkeypatch.setattr(_cli, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None), ("b", None)])
+    monkeypatch.setattr(_update_fanout, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
         lambda _hosts, **_unused: {  # pyright: ignore[reportUnknownArgumentType]
-            "a": _cli.PollVerdict(_cli.POLL_OK),
-            "b": _cli.PollVerdict(_cli.POLL_CONVERGING),
+            "a": _update_phase_b.PollVerdict(_update_phase_b.POLL_OK),
+            "b": _update_phase_b.PollVerdict(_update_phase_b.POLL_CONVERGING),
         },
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
     assert [c for c in calls if c[0] == "/api/cluster/resume"] == [
         ("/api/cluster/resume", ["b"])
@@ -333,17 +376,19 @@ def test_phase_b_unconverged_host_is_resumed(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_unexpected_exception_after_phase_a_resumes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A raise after Phase A (e.g. quiesce blows up) still triggers compensation."""
+    from cli.commands import _update_fanout, _update_preflight, _update_quiesce
+
     calls: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
-    monkeypatch.setattr(_cli, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None)])
+    monkeypatch.setattr(_update_fanout, "_fan_out", _record_fan_out(calls))  # pyright: ignore[reportUnknownArgumentType]
 
     def _boom(**kwargs: object) -> None:
         raise RuntimeError("quiesce blew up")
 
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", _boom)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", _boom)
     with pytest.raises(RuntimeError, match="quiesce blew up"):
-        _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+        _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert [c for c in calls if c[0] == "/api/cluster/resume"] == [
         ("/api/cluster/resume", ["a"])
     ], calls
@@ -369,16 +414,20 @@ def test_compensation_resume_carries_preresolved_ops_urls(
     ops URL (captured from the `machines` read while Postgres was up), so it stays
     Postgres-free when a failed local update took the data plane down — the
     2026-07-20 incident. Assert the resume fan-out receives the URLs, not None."""
-    resume_hosts: list[tuple[str, str | None]] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(
-        _cli, "_list_agent_runners", lambda: [("a", "http://a:8106"), ("b", "http://b:8106")]
-    )
-    monkeypatch.setattr(_cli, "_fan_out", _record_full_fan_out(resume_hosts))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    resume_hosts: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(
+        _update_fanout,
+        "_list_agent_runners",
+        lambda: [("a", "http://a:8106"), ("b", "http://b:8106")],
+    )
+    monkeypatch.setattr(_update_fanout, "_fan_out", _record_full_fan_out(resume_hosts))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
+
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
     assert resume_hosts == [("a", "http://a:8106"), ("b", "http://b:8106")]
 
@@ -387,24 +436,34 @@ def test_phase_b_unconverged_resume_preserves_ops_url(monkeypatch: pytest.Monkey
     """The post-Phase-B narrowing (to still-paused hosts) preserves each host's
     pre-resolved ops URL via the runner_urls map — so even the narrowed resume is
     Postgres-free, not a `(name, None)` that would force a re-lookup."""
-    resume_hosts: list[tuple[str, str | None]] = []
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(
-        _cli, "_list_agent_runners", lambda: [("a", "http://a:8106"), ("b", "http://b:8106")]
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
     )
-    monkeypatch.setattr(_cli, "_fan_out", _record_full_fan_out(resume_hosts))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+
+    resume_hosts: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
     monkeypatch.setattr(
-        _cli,
+        _update_fanout,
+        "_list_agent_runners",
+        lambda: [("a", "http://a:8106"), ("b", "http://b:8106")],
+    )
+    monkeypatch.setattr(_update_fanout, "_fan_out", _record_full_fan_out(resume_hosts))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _update_phase_b,
         "_poll_until_unpaused",
         lambda _hosts, **_unused: {  # pyright: ignore[reportUnknownArgumentType]
-            "a": _cli.PollVerdict(_cli.POLL_OK),
-            "b": _cli.PollVerdict(_cli.POLL_STALLED),
+            "a": _update_phase_b.PollVerdict(_update_phase_b.POLL_OK),
+            "b": _update_phase_b.PollVerdict(_update_phase_b.POLL_STALLED),
         },
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 1
     assert resume_hosts == [("b", "http://b:8106")]
 

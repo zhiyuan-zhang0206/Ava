@@ -90,11 +90,10 @@ def _root_tree_units() -> dict[str, dict[str, object]] | None:
     host returns None and the column keeps its session reading. One snapshot
     per `ava status` — the column is not a per-row root roundtrip.
     """
-    import cli.commands as _ns
-
-    if not _ns._root_driven_enabled():
-        return None
     from cli.commands import _root_driver
+
+    if not _root_driver._root_driven_enabled():
+        return None
 
     status = _root_driver._root_status(_root_driver._root_client())
     if status is None:
@@ -103,11 +102,10 @@ def _root_tree_units() -> dict[str, dict[str, object]] | None:
 
 
 def cmd_status() -> int:
-    # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands as _ns
+    from cli.commands._repo import _roles_or_none
 
     repo = _repo_root()
-    roles = _ns._roles_or_none()
+    roles = _roles_or_none()
     print(f"[ava status] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}\n")
 
     # Show this host's role roster WITH each gated-out service's reason, so a

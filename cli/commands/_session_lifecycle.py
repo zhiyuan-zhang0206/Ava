@@ -147,13 +147,10 @@ def _graceful_kill_session(
     timeout-then-force escalation is the designed remedy there, so the backend
     logs it at INFO instead of WARNING/ERROR.
 
-    Uses dynamic lookup (``import cli.commands as _ns``) so tests can
-    monkeypatch ``_has_session`` / ``_kill_session`` and this
-    function picks up the mocks.
+    Uses this module's own ``_has_session`` / ``_kill_session`` — the seam
+    tests monkeypatch is `cli.commands._session_lifecycle`, not this function.
     """
-    import cli.commands as _ns
-
-    if not _ns._has_session(session):
+    if not _has_session(session):
         return True, "noop"
 
     # Graceful stop via the backend (handles POSIX + Windows internally).
@@ -176,14 +173,12 @@ def _stop_sessions(sessions: list[str]) -> None:
     Persistent terminals have their own backend and full-stop scope. Normal
     pause/stop uses the verified no-escalation boundary in _maintenance_stop.
     """
-    import cli.commands as _ns
-
     print("\n→ kill sessions")
     ordered = [s for s in sessions if _is_stop_controller(s)] + [
         s for s in sessions if not _is_stop_controller(s)
     ]
     for session in ordered:
-        ok = _ns._kill_session(session, expected=True)
+        ok = _kill_session(session, expected=True)
         print(f"  {'✓' if ok else '✗'} {session}")
         if not ok:
             raise RuntimeError(f"force stop did not end session {session}")
@@ -228,11 +223,9 @@ def _relaunch_once(sess: str, cmd: str, cwd: Path, extra: dict[str, str] | None)
     duplicate name, so a first attempt that failed *after* claiming the name
     would make the retry fail for a second, unrelated reason and hide the real one.
     """
-    import cli.commands as _ns
-
     print(f"  ↻ {sess}: retrying the launch once", file=sys.stderr)
-    _ns._kill_session(sess, expected=True)
-    return _ns._new_session(sess, cmd, cwd, extra_env=extra)
+    _kill_session(sess, expected=True)
+    return _new_session(sess, cmd, cwd, extra_env=extra)
 
 
 def _stale_session_code_reason(session: str, spec: ServiceSpec) -> str | None:
@@ -289,10 +282,7 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
     the other — a service can be in `started` and still be unready, and one in
     `failed` never got far enough to be probed at all.
     """
-    # Dynamic lookup so tests can monkeypatch `cli.commands._has_session`
-    # / `cli.commands._new_session`. The sub-module's own
-    # `_has_session` binding is otherwise frozen at import time.
-    import cli.commands as _ns
+    from cli.commands import _probe
 
     print("\n→ sessions")
     # Surface config/capability-gated services + WHY (e.g. ava-browser dropped for
@@ -306,8 +296,8 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
     failed: list[str] = []
     for spec in services_to_start:
         sess = session_name(spec.session)
-        if _ns._has_session(sess):
-            husk = _ns._husk_session_reason(spec)
+        if _has_session(sess):
+            husk = _probe._husk_session_reason(spec)
             if husk is None:
                 stale_code = _stale_session_code_reason(sess, spec)
                 if stale_code is None:
@@ -321,7 +311,7 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
                 # `new-session -d -s <name>` refuses a duplicate name, so skipping the
                 # kill would turn the husk into a launch failure instead of a launch.
                 print(f"  ⚠ {sess} session is alive but the service is not ({husk}) — relaunching")
-            if not _ns._kill_session(sess, expected=True):
+            if not _kill_session(sess, expected=True):
                 # NOT a launch failure: the session is still there, and the husk
                 # verdict came from a single probe that a merely-slow service can
                 # fail. The readiness gate polls it properly and is the right judge
@@ -348,8 +338,8 @@ def _launch_sessions(roles: MachineRoles, skip: set[str], repo: Path) -> LaunchO
         # removes agent-runner cluster keys (LLM provider keys) from os.environ,
         # which is exactly why the labeler opts out (it builds chat models).
         extra = _service_extra_env(spec)
-        if not _ns._new_session(
-            sess, spec.cmd, repo, extra_env=extra or None
-        ) and not _relaunch_once(sess, spec.cmd, repo, extra or None):
+        if not _new_session(sess, spec.cmd, repo, extra_env=extra or None) and not _relaunch_once(
+            sess, spec.cmd, repo, extra or None
+        ):
             failed.append(sess)
     return LaunchOutcome(services_to_start, tuple(failed))

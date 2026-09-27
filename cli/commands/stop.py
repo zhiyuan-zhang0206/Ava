@@ -86,18 +86,18 @@ def _compute_stop_scope(
     (keep_infra — the `ava cluster update` / internal-restart path) leaves the instance
     running so the following migrate/start still has DB.
     """
-    # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands as _ns
+    from cli.commands import _repo, _session_lifecycle
 
     if keep_browser:
         preserve_sessions = preserve_sessions | {_BROWSER_SESSION}
 
-    roles = _ns._roles_or_none()
+    roles = _repo._roles_or_none()
     runner_only = roles is not None and "agent-runner" in roles and "gateway" not in roles
     service_sessions = [
         session_name(spec.session)
         for spec in build_services()
-        if spec.session not in preserve_sessions and _ns._has_session(session_name(spec.session))
+        if spec.session not in preserve_sessions
+        and _session_lifecycle._has_session(session_name(spec.session))
     ]
     return service_sessions, runner_only, keep_infra or runner_only
 
@@ -111,14 +111,13 @@ def _print_stop_plan(
     keep_infra: bool,
 ) -> None:
     """The "The following will be stopped" block shown before the confirm gate."""
-    # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands as _ns
+    from cli.commands._session_lifecycle import _has_session
 
     print("\nThe following will be stopped:")
     print(f"  service sessions: {', '.join(service_sessions) if service_sessions else '(none)'}")
     if reap_agents:
         print("  persistent terminals: closed")
-    if keep_browser and _ns._has_session(session_name(_BROWSER_SESSION)):
+    if keep_browser and _has_session(session_name(_BROWSER_SESSION)):
         print(f"  browser: kept up ({session_name(_BROWSER_SESSION)}, login session preserved)")
     if runner_only:
         print("  infra (pg/redis): skipped (agent-runner uses the central node)")
@@ -180,8 +179,7 @@ def _force_stop(
     # must not inherit it — the "cannot become ambient" boundary (F-s4-7).
     os.environ.pop("AVA_HOME_OVERRIDE", None)
 
-    # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands as _ns
+    from cli.commands import _root_driver
 
     service_sessions, runner_only, skip_infra = _compute_stop_scope(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
@@ -190,13 +188,15 @@ def _force_stop(
     # per-service sessions; the plan names the units that will actually stop
     # (preserved ones excluded), plus any legacy session a pre-switch start
     # left behind.
-    root_driven = _ns._root_driven_enabled()
+    root_driven = _root_driver._root_driven_enabled()
     root_preserve = preserve_sessions | (
         frozenset({_BROWSER_SESSION}) if keep_browser else frozenset[str]()
     )
     plan_sessions = service_sessions
     if root_driven:
-        plan_sessions = sorted(set(service_sessions) | set(_ns._root_tree_plan(root_preserve)))
+        plan_sessions = sorted(
+            set(service_sessions) | set(_root_driver._root_tree_plan(root_preserve))
+        )
     _print_stop_plan(
         plan_sessions,
         reap_agents=reap_agents,
@@ -222,7 +222,7 @@ def _force_stop(
     if root_driven:
         # The tree stop carries the whole roster; any legacy session from a
         # pre-switch start is still swept by the session leg below.
-        _ns._stop_root_service_tree(preserve=root_preserve)
+        _root_driver._stop_root_service_tree(preserve=root_preserve)
         if service_sessions:
             print(
                 f"  (also stopping {len(service_sessions)} service session(s) left by a "
@@ -240,7 +240,7 @@ def _force_stop(
     # after step 1 on purpose: the watchdog is dead by now, so nothing relaunches
     # Chrome onto the port we just cleared.
     if not keep_browser:
-        _ns._reap_cluster_chrome()
+        _reap_cluster_chrome()
 
     # Persistent terminals are separate from the hosted service process.
     if reap_agents:
@@ -468,9 +468,13 @@ def _cmd_restart_body(
     official updater; explicit force authorizes interrupting resource shutdown.
     """
     del quiesce  # Every restart now drains, including an ordinary operator restart.
-    # Lazy + namespace lookup so tests can monkeypatch
-    # `cli.commands._do_stop` / `cli.commands._cmd_start_body`.
-    import cli.commands as _ns
+    # Lazy imports so tests can monkeypatch each seam at the module that owns it:
+    # `cli.commands._repo._preflight_probes`,
+    # `cli.commands._start_readiness_preflight.preflight_start_readiness`,
+    # `cli.commands.stop._do_stop`, `cli.commands.start._cmd_start_body`.
+    from cli.commands import _repo
+    from cli.commands._start_readiness_preflight import preflight_start_readiness
+    from cli.commands.start import _cmd_start_body
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
     from shared.proc import hosting_exec_domain, hosting_supervised_session
 
@@ -539,7 +543,7 @@ def _cmd_restart_body(
     # On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
     with updater_stage("preflight"), lifecycle_status.phase("preflight"):
-        rc = _ns._preflight_probes()
+        rc = _repo._preflight_probes()
     if rc != 0:
         print("  ✗ refusing restart: preflight probes failed — host still serving", file=sys.stderr)
         _release_self_heal_pause()
@@ -558,7 +562,7 @@ def _cmd_restart_body(
     # session launches actually use.
     print("\n→ start readiness preflight (validate-before-kill, local state)")
     with updater_stage("readiness"), lifecycle_status.phase("preflight"):
-        rc = _ns._preflight_start_readiness(repo, check_launcher=False)
+        rc = preflight_start_readiness(repo, check_launcher=False)
     if rc != 0:
         print(
             "  ✗ refusing restart: start-readiness preflight failed — host still serving; "
@@ -580,7 +584,7 @@ def _cmd_restart_body(
     # kills the gateway orchestrator's own DB polling (same failure mode as
     # the self-update leg; see _run_agent_runner_self_update).
     with updater_stage("stop"), lifecycle_status.phase("stop"):
-        rc = _ns._do_stop(
+        rc = _do_stop(
             repo,
             graceful=True,
             require_confirmation=False,
@@ -599,7 +603,7 @@ def _cmd_restart_body(
     # Internal restart: preserve the operator's durable --disable-service marker
     # (a no-flag operator start would rewrite it to empty and re-enable everything).
     with updater_stage("start"), lifecycle_status.phase("start"):
-        rc = _ns._cmd_start_body(persist_services=False, updater_telemetry=True)
+        rc = _cmd_start_body(persist_services=False, updater_telemetry=True)
     if owns_journal:
         lifecycle_status.finish(rc, error=None if rc == 0 else f"start leg failed with rc={rc}")
     return rc
