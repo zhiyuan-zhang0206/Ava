@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import cast
 from zoneinfo import ZoneInfo
 
-from services._pidfile import acquire_pidfile, remove_pidfile
+from services.pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.activation_state import load_record as load_activation_record
 from services.pitr.activation_state import lock_path as activation_lock_path
 from services.pitr.base_candidate import (

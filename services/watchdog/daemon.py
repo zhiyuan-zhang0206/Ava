@@ -71,7 +71,6 @@ from pathlib import Path
 
 from ops.controllers.base import BlockScope
 from ops.manager import ControllerManager
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 # The statically imported healthchecks are the ones with NO ServiceSpec in
 # build_services(): brew-pin/prod-venv assert host package health, redis/pgbouncer are
@@ -88,6 +87,7 @@ from services.healthchecks.permissions_helper import main as permissions_helper_
 from services.healthchecks.pgbouncer import main as pgbouncer_healthcheck
 from services.healthchecks.prod_venv import main as prod_venv_healthcheck
 from services.healthchecks.redis_acl import main as redis_acl_healthcheck
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server

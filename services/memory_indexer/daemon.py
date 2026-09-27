@@ -57,7 +57,6 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.memory_indexer.backends.factory import get_backend
 from services.memory_indexer.backends.probe import probe_backend
@@ -77,6 +76,7 @@ from services.memory_indexer.chunking import (
 from services.memory_indexer.embeddings import factory
 from services.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.memory_indexer.embeddings.factory import get_provider
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown

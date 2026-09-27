@@ -78,7 +78,6 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 import shared.db
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.delivery_watchdog import (
     dispatch_guard,
     resurrect_guard,
@@ -97,6 +96,7 @@ from services.delivery_watchdog.dead_letter import (
 from services.delivery_watchdog.dead_letter import (
     dead_letter_stale_pending_terminated as dead_letter_stale_pending_terminated,
 )
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared import telemetry
 from shared.agents import AgentStatus
 from shared.config import settings
