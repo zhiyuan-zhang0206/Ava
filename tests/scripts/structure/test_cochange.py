@@ -38,7 +38,9 @@ def _git(root: pathlib.Path, *args: str) -> None:
 
 
 def _init_repo(root: pathlib.Path) -> None:
-    _git(root, "init", "--quiet")
+    # Pin the branch: the tool reads `main` by default, and a CI runner's git
+    # defaults the initial branch to `master`.
+    _git(root, "init", "--quiet", "--initial-branch=main")
 
 
 def _commit(root: pathlib.Path, message: str, files: dict[str, str]) -> None:
@@ -371,8 +373,11 @@ def test_markdown_report_has_a_header_and_both_metric_sections(tmp_path: pathlib
 
 
 def test_smoke_against_the_real_repo() -> None:
-    """No synthetic repo: run against this checkout's real first-parent history."""
-    code, output = _run_capture(None, "--commits", "50")
+    """No synthetic repo: run against this checkout's real first-parent history.
+
+    Reads `HEAD`, not `main`: a CI checkout has no local `main` branch.
+    """
+    code, output = _run_capture(None, "--commits", "50", "--branch", "HEAD")
 
     assert code == 0
     assert "# Locality co-change report" in output
