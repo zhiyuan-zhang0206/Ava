@@ -89,6 +89,7 @@ def public_session(lease: dict[str, Any]) -> dict[str, Any]:
         "reason",
         "summary",
         "handoff_path",
+        "handoff_applied_at",
         "rejection_reason",
         "relay_provider",
         "relay_heartbeat_at",
