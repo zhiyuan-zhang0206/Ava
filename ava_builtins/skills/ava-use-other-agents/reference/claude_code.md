@@ -16,6 +16,13 @@ desktop app's; run `claude auth login` once as the host user
 .venv/bin/python reference/spawn_claude.py <workspace-dir>
 ```
 
+Every launch chooses the Claude session id up front (`--session-id`) and prints
+it as `claude_session=<uuid>`; the conversation lives in
+`~/.claude/projects/<workspace slug>/<uuid>.jsonl` and outlives the shell.
+`spawn_claude.py <workspace-dir> --resume <uuid>` (same mode and files) reopens
+it with `claude --resume` after a stop or crash closed the shell — see [Resume
+after an interruption](resume_after_interruption.md).
+
 For a takeover (`--impersonate-self --impersonation-name '…' --brief '<text>'`)
 the script is file-less: no task/work files, nothing to watch, and the session
 relay starts automatically via the bundled `ava-relay` plugin (resident mode;

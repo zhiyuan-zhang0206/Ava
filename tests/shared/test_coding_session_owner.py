@@ -1,4 +1,4 @@
-"""Generation and cleanup contracts for canonical coding-session ownership."""
+"""Generation and cleanup contracts for per-launch coding-session ownership."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import cast
 import pytest
 
 from shared import coding_session_owner as owner
+from shared import coding_session_owner_record as record_codec
 from shared.config import settings
 
 NOW = dt.datetime(2026, 9, 2, 0, 0, tzinfo=dt.UTC)
@@ -27,18 +28,19 @@ def _key(tmp_path: Path, workspace: str = "workspace") -> owner.CodingSessionKey
     return owner.canonical_key(path, tool="codex", cluster=tmp_path / "cluster")
 
 
-def _claim(
+def _launch(
     key: owner.CodingSessionKey,
     *,
     agent_id: int,
     now: dt.datetime = NOW,
     live: set[str] | None = None,
-    terminated_generation: str | None = None,
+    terminated: set[int] | None = None,
     stopped: list[str] | None = None,
     takeover: bool = False,
-) -> owner.CodingSessionClaim:
+) -> owner.CodingSessionOwner:
     live_names: set[str] = live if live is not None else set()
     stopped_names = stopped if stopped is not None else []
+    terminated_agents = terminated if terminated is not None else set()
 
     def _list_sessions() -> list[str]:
         return sorted(live_names)
@@ -52,7 +54,7 @@ def _claim(
         return True
 
     workspace = Path(key.workspace)
-    return owner.claim(
+    return owner.launch_generation(
         key,
         owner_agent_id=agent_id,
         tasks_file=None if takeover else workspace / "tasks.md",
@@ -62,17 +64,16 @@ def _claim(
         list_sessions=_list_sessions,
         session_live=_is_live,
         terminate_session=_stop,
-        terminated_generation=terminated_generation,
+        owner_terminated=lambda agent: agent in terminated_agents,
     )
 
 
 def _publish(
-    claim: owner.CodingSessionClaim,
+    record: owner.CodingSessionOwner,
     session_id: int,
     *,
     supervised: bool = True,
 ) -> owner.CodingSessionOwner:
-    record = claim.owner
     assert record.generation is not None and record.expected_suffix is not None
     assert record.owner_agent_id is not None
     generation = record.generation
@@ -98,165 +99,154 @@ def _publish(
     )
 
 
-def test_concurrent_claims_never_lose_the_winner(tmp_path: Path) -> None:
-    for round_number in range(5):
-        key = _key(tmp_path, f"workspace-{round_number}")
-
-        def _attempt(
-            agent_id: int,
-            claim_key: owner.CodingSessionKey = key,
-        ) -> owner.CodingSessionClaim:
-            return _claim(claim_key, agent_id=agent_id)
-
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            results = list(pool.map(_attempt, range(41, 49)))
-
-        launched = [result for result in results if result.action == "launch"]
-        assert len(launched) == 1
-        assert all(result.action in {"launch", "busy", "adopt"} for result in results)
-        current = owner.read(key)
-        assert current.status in {"launching", "active"}
-        assert current.generation == launched[0].owner.generation
+def _generation(record: owner.CodingSessionOwner) -> str:
+    assert record.generation is not None
+    return record.generation
 
 
-def test_stale_launching_with_live_session_is_busy_not_replaced(tmp_path: Path) -> None:
+def _live(record: owner.CodingSessionOwner) -> set[str]:
+    """The live PTY names of a published generation (its supervisor included)."""
+    names = {record.session_name, record.supervisor_session_name}
+    return {name for name in names if name is not None}
+
+
+def _rewrite(record: owner.CodingSessionOwner, **fields: object) -> None:
+    path = owner.state_path(record.key, _generation(record))
+    payload = cast("dict[str, object]", json.loads(path.read_text()))
+    payload.update(fields)
+    path.write_text(json.dumps(payload))
+
+
+def test_concurrent_launches_each_get_a_generation_of_their_own(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    first = _claim(key, agent_id=41)
-    record = first.owner
-    assert record.expected_suffix is not None and record.state_dir is not None
-    partial_name = owner.full_session_name(41, 3, record.expected_suffix)
-    record.state_dir.mkdir(parents=True)
-    (record.state_dir / "state_5.sqlite").write_text("partial")
-    live = {partial_name}
+
+    def _attempt(agent_id: int) -> owner.CodingSessionOwner:
+        return _launch(key, agent_id=agent_id)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        launched = list(pool.map(_attempt, range(41, 49)))
+
+    assert len({_generation(record) for record in launched}) == 8
+    recorded = owner.list_generations(key)
+    assert sorted(map(_generation, recorded)) == sorted(map(_generation, launched))
+    assert {record.status for record in recorded} == {"launching"}
+
+
+def test_a_live_generation_coexists_with_a_new_launch(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    active = _publish(_launch(key, agent_id=41), 3)
     stopped: list[str] = []
 
-    second = _claim(
-        key,
-        agent_id=42,
-        now=NOW + dt.timedelta(seconds=61),
-        live=live,
-        stopped=stopped,
-    )
+    second = _launch(key, agent_id=99, live=_live(active), stopped=stopped)
 
-    assert second.action == "busy"
-    assert second.owner == record
-    assert owner.read(key) == record
+    assert _generation(second) != _generation(active)
+    assert owner.read(key, _generation(active)) == active
     assert stopped == []
-    assert live == {partial_name}
-    assert record.state_dir.exists()
+    assert len(owner.list_generations(key)) == 2
 
 
-def test_stale_launching_without_live_session_is_replaced(tmp_path: Path) -> None:
+def test_stale_launching_with_live_session_is_left_alone(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    first = _claim(key, agent_id=41)
-    record = first.owner
-    assert record.state_dir is not None
-    record.state_dir.mkdir(parents=True)
-    (record.state_dir / "state_5.sqlite").write_text("partial")
+    first = _launch(key, agent_id=41)
+    assert first.expected_suffix is not None and first.state_dir is not None
+    partial_name = owner.full_session_name(41, 3, first.expected_suffix)
+    first.state_dir.mkdir(parents=True)
     stopped: list[str] = []
 
-    replacement = _claim(
-        key,
-        agent_id=42,
-        now=NOW + dt.timedelta(seconds=61),
-        stopped=stopped,
+    _launch(
+        key, agent_id=42, now=NOW + dt.timedelta(seconds=61), live={partial_name}, stopped=stopped
     )
 
-    assert replacement.action == "launch"
-    assert replacement.owner.generation != record.generation
-    assert owner.read(key) == replacement.owner
+    assert owner.read(key, _generation(first)) == first
     assert stopped == []
-    assert not record.state_dir.exists()
+    assert first.state_dir.exists()
+
+
+def test_stale_launching_without_live_session_is_reclaimed(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    first = _launch(key, agent_id=41)
+    assert first.state_dir is not None
+    first.state_dir.mkdir(parents=True)
+    stopped: list[str] = []
+
+    second = _launch(key, agent_id=42, now=NOW + dt.timedelta(seconds=61), stopped=stopped)
+
+    assert owner.read(key, _generation(first)).status == "inactive"
+    assert [record.generation for record in owner.list_generations(key)] == [second.generation]
+    assert stopped == []
+    assert not first.state_dir.exists()
 
 
 def test_publish_active_from_live_stale_generation_succeeds(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    first = _claim(key, agent_id=41)
-    record = first.owner
-    assert record.expected_suffix is not None
-    partial_name = owner.full_session_name(41, 3, record.expected_suffix)
+    first = _launch(key, agent_id=41)
+    assert first.expected_suffix is not None
+    partial_name = owner.full_session_name(41, 3, first.expected_suffix)
 
-    second = _claim(
-        key,
-        agent_id=42,
-        now=NOW + dt.timedelta(seconds=61),
-        live={partial_name},
-    )
+    _launch(key, agent_id=42, now=NOW + dt.timedelta(seconds=61), live={partial_name})
     active = _publish(first, 3)
 
-    assert second.action == "busy"
     assert active.status == "active"
-    assert active.generation == record.generation
-    assert owner.read(key) == active
-
-
-def test_live_generation_is_adopted_across_agents(tmp_path: Path) -> None:
-    key = _key(tmp_path)
-    first = _claim(key, agent_id=41)
-    active = _publish(first, 3)
-    assert active.session_name is not None and active.supervisor_session_name is not None
-    live = {active.session_name, active.supervisor_session_name}
-
-    adopted = _claim(key, agent_id=99, live=live)
-
-    assert adopted.action == "adopt"
-    assert adopted.owner.generation == active.generation
-    assert adopted.owner.owner_agent_id == 41
-    assert adopted.owner.session_id == 3
+    assert owner.read(key, _generation(first)) == active
 
 
 def test_takeover_generation_publishes_without_supervisor(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    claim = _claim(key, agent_id=41, takeover=True)
 
-    active = _publish(claim, 3, supervised=False)
+    active = _publish(_launch(key, agent_id=41, takeover=True), 3, supervised=False)
 
     assert active.status == "active"
     assert active.tasks_file is None and active.work_file is None
     assert active.supervisor_session_id is None and active.supervisor_session_name is None
-    assert owner.read(key) == active
+    assert owner.read(key, _generation(active)) == active
 
 
-def test_live_takeover_generation_is_adopted_not_reclaimed(tmp_path: Path) -> None:
+def test_a_live_takeover_generation_is_left_alone(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    active = _publish(_claim(key, agent_id=41, takeover=True), 3, supervised=False)
-    assert active.session_name is not None
-    live = {active.session_name}
+    active = _publish(_launch(key, agent_id=41, takeover=True), 3, supervised=False)
     stopped: list[str] = []
 
-    second = _claim(key, agent_id=42, live=live, stopped=stopped, takeover=True)
+    _launch(key, agent_id=42, live=_live(active), stopped=stopped, takeover=True)
 
-    assert second.action == "adopt"
-    assert second.owner == active
     assert stopped == []
-    assert owner.read(key) == active
+    assert owner.read(key, _generation(active)) == active
 
 
-def test_dead_takeover_generation_is_reclaimed_before_rebuild(tmp_path: Path) -> None:
+def test_dead_takeover_generation_is_reclaimed_before_the_next_launch(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    active = _publish(_claim(key, agent_id=41, takeover=True), 3, supervised=False)
+    active = _publish(_launch(key, agent_id=41, takeover=True), 3, supervised=False)
     assert active.state_dir is not None
     active.state_dir.mkdir(parents=True)
-    (active.state_dir / "history.jsonl").write_text("stale")
+    (active.state_dir / "relay.log").write_text("stale")
 
-    replacement = _claim(key, agent_id=42, takeover=True)
+    replacement = _launch(key, agent_id=42, takeover=True)
 
-    assert replacement.action == "launch"
-    assert replacement.owner.generation != active.generation
-    assert replacement.owner.tasks_file is None and replacement.owner.work_file is None
+    assert replacement.tasks_file is None and replacement.work_file is None
+    assert owner.read(key, _generation(active)).status == "inactive"
     assert not active.state_dir.exists()
+
+
+def test_a_supervised_generation_without_its_supervisor_is_reclaimed(tmp_path: Path) -> None:
+    """An unsupervised worker would never be closed on DONE, so the next launch closes it."""
+    key = _key(tmp_path)
+    active = _publish(_launch(key, agent_id=41), 3)
+    assert active.session_name is not None
+    stopped: list[str] = []
+
+    _launch(key, agent_id=42, live={active.session_name}, stopped=stopped)
+
+    assert stopped == [active.session_name]
+    assert owner.read(key, _generation(active)).status == "inactive"
 
 
 def test_takeover_never_attaches_a_supervisor(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    claim = _claim(key, agent_id=41, takeover=True)
-    record = claim.owner
-    assert record.generation is not None
+    record = _launch(key, agent_id=41, takeover=True)
 
     with pytest.raises(RuntimeError, match="takeover"):
         owner.attach_supervisor(
             key,
-            record.generation,
+            _generation(record),
             session_id=99,
             session_name="ava-agent-41-shell-99-ignored",
         )
@@ -264,157 +254,134 @@ def test_takeover_never_attaches_a_supervisor(tmp_path: Path) -> None:
 
 def test_supervised_active_record_still_requires_its_supervisor(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    _publish(_claim(key, agent_id=41), 3)
-    path = owner.state_path(key)
-    payload = cast("dict[str, object]", json.loads(path.read_text()))
-    payload["supervisor_session_id"] = None
-    payload["supervisor_session_name"] = None
-    path.write_text(json.dumps(payload))
+    active = _publish(_launch(key, agent_id=41), 3)
+    _rewrite(active, supervisor_session_id=None, supervisor_session_name=None)
 
-    invalid = owner.read(key)
+    invalid = owner.read(key, _generation(active))
     assert invalid.status == "invalid"
     assert "supervisor" in (invalid.error or "")
 
 
 def test_takeover_record_with_a_supervisor_fails_closed(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    _publish(_claim(key, agent_id=41, takeover=True), 3, supervised=False)
-    path = owner.state_path(key)
-    payload = cast("dict[str, object]", json.loads(path.read_text()))
-    payload["supervisor_session_id"] = 9
-    payload["supervisor_session_name"] = "ava-agent-41-shell-9-ignored"
-    path.write_text(json.dumps(payload))
+    active = _publish(_launch(key, agent_id=41, takeover=True), 3, supervised=False)
+    _rewrite(active, supervisor_session_id=9, supervisor_session_name="ava-agent-41-shell-9-x")
 
-    invalid = owner.read(key)
+    invalid = owner.read(key, _generation(active))
     assert invalid.status == "invalid"
     assert "takeover" in (invalid.error or "")
 
 
 def test_mixed_file_publication_fails_closed(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    _publish(_claim(key, agent_id=41), 3)
-    path = owner.state_path(key)
-    payload = cast("dict[str, object]", json.loads(path.read_text()))
-    payload["work_file"] = None
-    path.write_text(json.dumps(payload))
+    active = _publish(_launch(key, agent_id=41), 3)
+    _rewrite(active, work_file=None)
 
-    invalid = owner.read(key)
+    invalid = owner.read(key, _generation(active))
     assert invalid.status == "invalid"
     assert "published together" in (invalid.error or "")
 
 
-def test_terminated_owner_transfers_after_exact_cleanup(tmp_path: Path) -> None:
+def test_terminated_owner_is_reclaimed_after_exact_cleanup(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    first = _claim(key, agent_id=41)
-    active = _publish(first, 3)
-    assert active.session_name is not None
-    assert active.supervisor_session_name is not None
-    assert active.state_dir is not None
+    active = _publish(_launch(key, agent_id=41), 3)
+    assert active.session_name is not None and active.state_dir is not None
     active.state_dir.mkdir(parents=True)
-    stale_sqlite = active.state_dir / "state_5.sqlite"
-    stale_sqlite.write_text("old")
-    live = {active.session_name, active.supervisor_session_name}
+    (active.state_dir / "app-server.log").write_text("old")
     stopped: list[str] = []
 
-    replacement = _claim(
-        key,
-        agent_id=99,
-        live=live,
-        stopped=stopped,
-        terminated_generation=active.generation,
-    )
+    replacement = _launch(key, agent_id=99, live=_live(active), stopped=stopped, terminated={41})
 
-    assert replacement.action == "launch"
-    assert replacement.owner.generation != active.generation
-    assert replacement.owner.owner_agent_id == 99
+    assert replacement.owner_agent_id == 99
     assert stopped == [active.session_name]
-    assert not stale_sqlite.exists()
+    assert not active.state_dir.exists()
+    assert owner.read(key, _generation(active)).status == "inactive"
 
 
-def test_expired_generation_is_reclaimed_before_rebuild(tmp_path: Path) -> None:
+def test_expired_generation_is_reclaimed_before_the_next_launch(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    first = _claim(key, agent_id=41)
-    active = _publish(first, 0)
+    active = _publish(_launch(key, agent_id=41), 0)
     assert active.session_name is not None and active.state_dir is not None
     assert active.supervisor_session_name is not None
     active.state_dir.mkdir(parents=True)
-    (active.state_dir / "history.jsonl").write_text("mutable")
-    live = {active.session_name, active.supervisor_session_name}
+    live = _live(active)
 
-    replacement = _claim(
-        key,
-        agent_id=42,
-        now=NOW + dt.timedelta(hours=2),
-        live=live,
-    )
+    _launch(key, agent_id=42, now=NOW + dt.timedelta(hours=2), live=live)
 
-    assert replacement.action == "launch"
-    assert replacement.owner.generation != active.generation
     assert not active.state_dir.exists()
     assert live == {active.supervisor_session_name}
 
 
 def test_terminal_cleanup_is_generation_scoped_and_removes_state(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    first = _claim(key, agent_id=41)
-    active = _publish(first, 0)
-    assert active.generation is not None
+    active = _publish(_launch(key, agent_id=41), 0)
     assert active.session_name is not None and active.state_dir is not None
-    assert active.supervisor_session_name is not None
     active.state_dir.mkdir(parents=True)
-    (active.state_dir / "state_5.sqlite").write_text("mutable")
-    live = {active.session_name, active.supervisor_session_name}
+    live = _live(active)
     stopped: list[str] = []
-
-    def _list_sessions() -> list[str]:
-        return sorted(live)
-
-    def _is_live(name: str) -> bool:
-        return name in live
-
-    def _unexpected_stop(_name: str) -> bool:
-        raise AssertionError("stale generation must not stop a session")
 
     def _stop(name: str) -> bool:
         stopped.append(name)
         live.discard(name)
         return True
 
+    def _unexpected_stop(_name: str) -> bool:
+        raise AssertionError("an unrecorded generation must not stop a session")
+
     assert not owner.terminate_generation(
         key,
-        "stale-generation",
+        "7b1f6a0e-0000-4000-8000-000000000000",
         reason="explicit-cancel",
-        list_sessions=_list_sessions,
-        session_live=_is_live,
+        list_sessions=lambda: sorted(live),
+        session_live=live.__contains__,
         terminate_session=_unexpected_stop,
     )
     assert owner.terminate_generation(
         key,
-        active.generation,
+        _generation(active),
         reason="explicit-cancel",
         now=NOW + dt.timedelta(minutes=1),
-        list_sessions=_list_sessions,
-        session_live=_is_live,
+        list_sessions=lambda: sorted(live),
+        session_live=live.__contains__,
         terminate_session=_stop,
     )
 
-    terminal = owner.read(key)
+    terminal = owner.read(key, _generation(active))
     assert terminal.status == "terminal"
     assert terminal.terminal_reason == "explicit-cancel"
     assert stopped == [active.session_name]
     assert not active.state_dir.exists()
 
 
-def test_different_workspaces_have_distinct_records_and_state(tmp_path: Path) -> None:
-    first = _claim(_key(tmp_path, "same-name-a/work"), agent_id=41)
-    second = _claim(_key(tmp_path, "same-name-b/work"), agent_id=42)
+def test_a_terminal_generation_is_dropped_by_the_next_launch(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    first = _publish(_launch(key, agent_id=41), 0)
+    live = _live(first)
+    assert owner.terminate_generation(
+        key,
+        _generation(first),
+        reason="collaboration-handoff",
+        list_sessions=lambda: sorted(live),
+        session_live=live.__contains__,
+        terminate_session=lambda name: live.discard(name) is None,
+    )
 
-    assert first.owner.key.workspace != second.owner.key.workspace
-    assert owner.state_path(first.owner.key) != owner.state_path(second.owner.key)
-    assert first.owner.state_dir != second.owner.state_dir
-    assert first.owner.state_dir is not None and second.owner.state_dir is not None
-    assert first.owner.state_dir / "state_5.sqlite" != second.owner.state_dir / "state_5.sqlite"
-    assert first.owner.state_dir / "log" != second.owner.state_dir / "log"
+    second = _publish(_launch(key, agent_id=42, now=NOW + dt.timedelta(minutes=1)), 7)
+
+    assert owner.read(key, _generation(first)).status == "inactive"
+    assert owner.list_generations(key) == [second]
+
+
+def test_different_workspaces_have_distinct_records_and_state(tmp_path: Path) -> None:
+    first = _launch(_key(tmp_path, "same-name-a/work"), agent_id=41)
+    second = _launch(_key(tmp_path, "same-name-b/work"), agent_id=42)
+
+    assert first.key.workspace != second.key.workspace
+    assert (
+        owner.state_path(first.key, _generation(first)).parent
+        != owner.state_path(second.key, _generation(second)).parent
+    )
+    assert first.state_dir != second.state_dir
 
 
 def test_same_workspace_in_another_cluster_is_invisible(tmp_path: Path) -> None:
@@ -423,70 +390,51 @@ def test_same_workspace_in_another_cluster_is_invisible(tmp_path: Path) -> None:
     first_key = owner.canonical_key(workspace, tool="codex", cluster=tmp_path / "cluster-a")
     second_key = owner.canonical_key(workspace, tool="codex", cluster=tmp_path / "cluster-b")
 
-    _claim(first_key, agent_id=41)
+    _launch(first_key, agent_id=41)
 
-    assert owner.state_path(first_key) != owner.state_path(second_key)
-    assert owner.read(second_key).status == "inactive"
+    assert owner.list_generations(second_key) == []
 
 
-def test_terminal_rebuild_publishes_new_generation_and_handle(tmp_path: Path) -> None:
+def test_a_corrupt_record_fails_closed_without_blocking_other_launches(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    first_claim = _claim(key, agent_id=41)
-    first = _publish(first_claim, 0)
-    assert first.generation is not None and first.session_name is not None
-    assert first.supervisor_session_name is not None
-    live = {first.session_name, first.supervisor_session_name}
+    corrupt = _launch(key, agent_id=41)
+    owner.state_path(key, _generation(corrupt)).write_text("{broken")
 
-    def _list_sessions() -> list[str]:
-        return sorted(live)
+    second = _launch(key, agent_id=42, now=NOW + dt.timedelta(hours=2))
 
-    def _is_live(name: str) -> bool:
-        return name in live
-
-    def _stop(name: str) -> bool:
-        live.discard(name)
-        return True
-
-    assert owner.terminate_generation(
-        key,
-        first.generation,
-        reason="collaboration-handoff",
-        list_sessions=_list_sessions,
-        session_live=_is_live,
-        terminate_session=_stop,
-    )
-    second_claim = _claim(key, agent_id=42, now=NOW + dt.timedelta(minutes=1))
-    second = _publish(second_claim, 7)
-
-    assert second.generation != first.generation
-    assert second.session_id == 7
-    assert second.session_name != first.session_name
-    assert owner.read(key) == second
-
-
-def test_corrupt_owner_fails_closed(tmp_path: Path) -> None:
-    key = _key(tmp_path)
-    path = owner.state_path(key)
-    path.write_text("{broken")
-
+    assert owner.read(key, _generation(corrupt)).status == "invalid"
+    assert owner.read(key, _generation(second)).status == "launching"
     with pytest.raises(owner.InvalidCodingSessionOwnerError):
-        _claim(key, agent_id=41)
+        owner.terminate_generation(key, _generation(corrupt), reason="explicit-cancel")
 
 
-def test_misdirected_full_handle_fails_closed(tmp_path: Path) -> None:
+def test_misdirected_full_handle_fails_closed_and_is_never_stopped(tmp_path: Path) -> None:
     key = _key(tmp_path)
-    active = _publish(_claim(key, agent_id=41), 3)
+    active = _publish(_launch(key, agent_id=41), 3)
     assert active.session_name is not None
-    path = owner.state_path(key)
-    payload = cast("dict[str, object]", json.loads(path.read_text()))
-    payload["session_name"] = "ava-gateway"
-    path.write_text(json.dumps(payload))
+    _rewrite(active, session_name="ava-gateway")
+    stopped: list[str] = []
 
-    invalid = owner.read(key)
+    invalid = owner.read(key, _generation(active))
+    _launch(key, agent_id=99, live={"ava-gateway"}, stopped=stopped)
+
     assert invalid.status == "invalid"
     assert "session_name does not match" in (invalid.error or "")
-    with pytest.raises(owner.InvalidCodingSessionOwnerError):
-        _claim(key, agent_id=99, live={active.session_name})
+    assert stopped == []
+
+
+@pytest.mark.parametrize("alive", [False, True])
+def test_a_legacy_single_slot_record_is_reclaimed_only_once_dead(
+    alive: bool, tmp_path: Path
+) -> None:
+    key = _key(tmp_path)
+    old = _publish(_launch(key, agent_id=41), 3)
+    legacy = record_codec.legacy_state_path(key)
+    owner.state_path(key, _generation(old)).rename(legacy)
+
+    _launch(key, agent_id=42, live=_live(old) if alive else set())
+
+    assert legacy.exists() is alive
 
 
 def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) -> None:
