@@ -223,6 +223,19 @@ def _read(path: Path) -> ClosureNotice | None:
     return notice
 
 
+# How much of a survivor's command name a notice shows. The name can come from
+# the process itself (psutil extends Linux's 15-byte comm with argv[0]'s
+# basename), and the notice is a system message.
+_SHOWN_NAME_CHARS = 64
+
+
+def _shown(name: str) -> str:
+    """A process-chosen command name as inert text: quoted, escaped and capped."""
+    if len(name) <= _SHOWN_NAME_CHARS:
+        return repr(name)
+    return f"{name[:_SHOWN_NAME_CHARS]!r}..."
+
+
 def _content(notice: ClosureNotice) -> str:
     text = (
         f"Shell session {notice.name!r} (id {notice.session_id}, agent {notice.agent_id}) "
@@ -230,7 +243,7 @@ def _content(notice: ClosureNotice) -> str:
         f"Recreate the session if its work is still needed (operation {notice.operation})."
     )
     if notice.survivors:
-        left = ", ".join(f"pid {pid} ({name})" for pid, name in notice.survivors)
+        left = ", ".join(f"pid {pid} ({_shown(name)})" for pid, name in notice.survivors)
         text += (
             f" Processes of the session the stop could not end are still running: {left}. "
             "Such a process usually belongs to another user (a root sudo), which you may "

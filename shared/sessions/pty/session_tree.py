@@ -65,6 +65,7 @@ import time
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
+from typing import NamedTuple
 
 import psutil
 
@@ -122,9 +123,14 @@ class _Pin:
 
 @dataclass
 class _Proof:
-    """When the session id was last proven to name the shell's session (monotonic)."""
+    """When the session id was last proven to name the shell's session (monotonic).
+
+    `reported` holds the pids already logged as unproven, so a process the
+    proof cannot cover is logged once per kill or per stop, not every pass.
+    """
 
     at: float | None = None
+    reported: set[int] = field(default_factory=set[int])
 
     def fresh(self) -> bool:
         return self.at is not None and time.monotonic() - self.at <= _PROOF_FRESH_S
@@ -151,17 +157,50 @@ class TreeKill:
         return tuple(identity for identity in self.survivors if identity not in self.denied)
 
 
-def _scan() -> tuple[dict[int, int], dict[int, int]]:
-    """One pass over the process table: parent pid and session id per pid."""
-    parents: dict[int, int] = {}
+class _Table(NamedTuple):
+    """One pass over the process table, and when it began (monotonic)."""
+
+    parents: dict[int, int]
+    sessions: dict[int, int]
+    started: float
+
+
+def _scan() -> _Table:
+    """Session id per pid, then parent pid per pid.
+
+    The session ids come first, from a bare getsid(2) per pid, newest pids
+    first: a fork-and-exit chain's current hop is the newest process and lives
+    a few milliseconds, so it is read while it exists far more often than
+    behind a full psutil pass over hundreds of processes.
+    """
+    started = time.monotonic()
     sessions: dict[int, int] = {}
+    for pid in sorted(psutil.pids(), reverse=True):
+        with contextlib.suppress(OSError):
+            sessions[pid] = os.getsid(pid)
+    parents: dict[int, int] = {}
     for proc in psutil.process_iter(["ppid"]):
         ppid = proc.info["ppid"]
         if isinstance(ppid, int):
             parents[proc.pid] = ppid
-        with contextlib.suppress(OSError):
-            sessions[proc.pid] = os.getsid(proc.pid)
-    return parents, sessions
+    return _Table(parents, sessions, started)
+
+
+def _occupied(sessions: dict[int, int], sid: int) -> bool:
+    """Whether the scan read a process in session `sid` that was not a zombie.
+
+    One gone since the read still counts: it existed, and may have forked on
+    its way out.
+    """
+    for pid, session in sessions.items():
+        if session != sid:
+            continue
+        try:
+            if psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
+                return True
+        except psutil.Error:
+            return True
+    return False
 
 
 def _children_of(parents: dict[int, int]) -> dict[int, list[int]]:
@@ -340,17 +379,47 @@ def _proven(members: dict[int, _Member], leader: OwnedProcess, proof: _Proof) ->
     return proof.fresh()
 
 
-def _unproven(fresh: dict[int, _Pin], leader: OwnedProcess) -> dict[int, _Pin]:
+def _command(process: psutil.Process) -> str:
+    try:
+        return repr(process.name())
+    except psutil.Error:
+        return "<unreadable>"
+
+
+def _unproven(fresh: dict[int, _Pin], leader: OwnedProcess, proof: _Proof) -> dict[int, _Pin]:
     """The pins that do not rest on the session id; the others are logged, never taken."""
-    dropped = sorted(pid for pid, pin in fresh.items() if pin.by_session)
-    if dropped:
+    dropped = {pid: pin for pid, pin in fresh.items() if pin.by_session}
+    new = sorted(set(dropped) - proof.reported)
+    if new:
+        proof.reported.update(new)
         logger.warning(
-            "pty session {leader}: {pids} carry its session id, but nothing proves the "
+            "pty session {leader}: {processes} carry its session id, but nothing proves the "
             "id still names that session; left running",
             leader=leader.pid,
-            pids=dropped,
+            processes=", ".join(f"{pid} {_command(dropped[pid].member.process)}" for pid in new),
         )
     return {pid: pin for pid, pin in fresh.items() if not pin.by_session}
+
+
+def _keep(
+    fresh: dict[int, _Pin],
+    members: dict[int, _Member],
+    leader: OwnedProcess,
+    proof: _Proof,
+    table: _Table,
+) -> dict[int, _Pin]:
+    """The pins a pass keeps: all of them when the session id is proven.
+
+    A proven pass that read any process in the session shows the session
+    alive at that read, after the scan began, which renews the proof: a chain
+    of short-lived processes keeps it current as long as passes keep reading
+    one of them.
+    """
+    if not _proven(members, leader, proof):
+        return _unproven(fresh, leader, proof)
+    if proof.at is not None and leader.pid in table.sessions.values():
+        proof.at = max(proof.at, table.started)
+    return fresh
 
 
 def _capture_pass(
@@ -359,7 +428,7 @@ def _capture_pass(
     proof: _Proof,
     *,
     freeze: bool,
-    table: tuple[dict[int, int], dict[int, int]] | None = None,
+    table: _Table | None = None,
 ) -> bool:
     """Add every member the process table shows; True when one was new.
 
@@ -370,13 +439,11 @@ def _capture_pass(
     parents-first whatever order the roots were pinned in.
     """
     sid = leader.pid
-    parents, sessions = table if table is not None else _scan()
+    table = table if table is not None else _scan()
     live = {pid for pid, member in members.items() if member.process.is_running()}
-    rows = {pid for pid, session in sessions.items() if session == sid}
-    order = _top_down(live | rows, parents, sid)
-    fresh = _pin_candidates(order, live, members, sid)
-    if not _proven(members, leader, proof):
-        fresh = _unproven(fresh, leader)
+    rows = {pid for pid, session in table.sessions.items() if session == sid}
+    order = _top_down(live | rows, table.parents, sid)
+    fresh = _keep(_pin_candidates(order, live, members, sid), members, leader, proof, table)
     _place(order, live, fresh, members, freeze=freeze)
     return bool(fresh)
 
@@ -553,12 +620,14 @@ class SessionCapture:
     last proven to name this session (monotonic): within `_PROOF_FRESH_S` of
     it a pass may still take a process by that id after the last captured
     member is gone — a job that forked a helper on TERM and exited leaves the
-    helper as the session's only process.
+    helper as the session's only process. `reported` holds the pids already
+    logged as unproven.
     """
 
     leader: OwnedProcess
     members: list[OwnedProcess]
     proven_at: float | None
+    reported: set[int] = field(default_factory=set[int])
 
     @property
     def active(self) -> bool:
@@ -566,20 +635,23 @@ class SessionCapture:
         return any(_live(identity) for identity in self.members) or _Proof(self.proven_at).fresh()
 
 
-def _absorb(
-    capture: SessionCapture,
-    members: dict[int, _Member],
-    table: tuple[dict[int, int], dict[int, int]],
-) -> bool:
-    """Fold one scan into `capture`; True while a captured process lives."""
-    proof = _Proof(capture.proven_at)
+def _absorb(capture: SessionCapture, members: dict[int, _Member], table: _Table) -> bool:
+    """Fold one scan into `capture`; True while its session still holds a process.
+
+    That is a captured process still alive, or any process the scan read in
+    the session, pinned or not, even one gone since: a quiet poll must not
+    come from a scan that raced a process out of the session.
+    """
+    proof = _Proof(capture.proven_at, capture.reported)
     _capture_pass(members, capture.leader, proof, freeze=False, table=table)
     capture.proven_at = proof.at
     known = set(capture.members)
     capture.members += [
         member.identity for member in members.values() if member.identity not in known
     ]
-    return any(_live(member.identity) for member in members.values())
+    if any(_live(member.identity) for member in members.values()):
+        return True
+    return _occupied(table.sessions, capture.leader.pid)
 
 
 def capture_session(leader: OwnedProcess) -> SessionCapture:
@@ -596,17 +668,17 @@ def capture_session(leader: OwnedProcess) -> SessionCapture:
 
 
 def refresh(captures: Iterable[SessionCapture]) -> bool:
-    """Fold every session's newcomers into its capture; True while any captured process lives.
+    """Fold every session's newcomers into its capture; True while any session holds a process.
 
-    One scan serves every capture. A capture with no live process and no fresh
-    proof can take nothing more, and is skipped.
+    One scan serves every capture — also one with no live process and no
+    fresh proof, which can take nothing more: a process still in its session
+    is logged (pid and command name) and keeps it busy, never signalled.
     """
     pinned: list[tuple[SessionCapture, dict[int, _Member]]] = []
     for capture in captures:
         members: dict[int, _Member] = {}
         _pin_roots(capture.leader, capture.members, members, freeze=False)
-        if members or _Proof(capture.proven_at).fresh():
-            pinned.append((capture, members))
+        pinned.append((capture, members))
     if not pinned:
         return False
     table = _scan()

@@ -94,6 +94,30 @@ _FORK_ON_TERM_JOB = (
 )
 
 
+# A job whose TERM handler starts a fork chain: each hop lives `{hop_ms}` ms,
+# forks the next and exits; the last of `{hops}` hops stays. Each hop is gone
+# long before a full process-table pass reaches it.
+_FORK_CHAIN_JOB = (
+    "import os,signal,sys,time\n"
+    "def on_term(*_):\n"
+    "    if os.fork() == 0:\n"
+    "        signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "        signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+    "        for _ in range({hops}):\n"
+    "            time.sleep({hop_ms} / 1000.0)\n"
+    "            if os.fork() != 0:\n"
+    "                os._exit(0)\n"
+    "        open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+    "        os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+    "        while True: time.sleep(0.1)\n"
+    "    os._exit(0)\n"
+    "signal.signal(signal.SIGTERM, on_term)\n"
+    "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+    "open(sys.argv[1] + '.ready', 'w').close()\n"
+    "while True: time.sleep(0.1)\n"
+)
+
+
 def _has_exited(process: psutil.Process) -> bool:
     """True once the process is a zombie or no longer exists.
 
@@ -363,6 +387,48 @@ def test_stop_kills_a_helper_its_job_forks_on_term_and_orphans(
     with contextlib.suppress(psutil.NoSuchProcess):
         pty_reaper.track(psutil.Process(helper))
     assert _wait_exit(helper, timeout=5), "the helper outlived a stop that succeeded"
+    assert len(_notice_files(home)) == 1
+
+
+@pytest.mark.flaky
+@pytest.mark.parametrize(("hop_ms", "hops"), [(3, 60), (8, 40), (10, 150)])
+def test_stop_kills_the_last_hop_of_a_fork_chain_started_on_term(
+    hop_ms: int, hops: int, home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """A TERM handler starts a chain of processes that each fork the next and
+    exit within a few ms — too short for a full process-table pass to read one
+    alive. While the session still holds a process the grace keeps polling, a
+    proven pass that reads a hop keeps the proof current, and the chain's last
+    hop dies with the stop (10 ms x 150 runs past the proof's first second)."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 2.0)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-2048-chain"
+    pidfile = home / "last.pid"
+    script = home / f"{name}.job.py"
+    script.write_text(_FORK_CHAIN_JOB.format(hop_ms=hop_ms, hops=hops), encoding="utf-8")
+    assert terminal.new_session(
+        name, f"python3 -u {script} {pidfile}", home, env={"AVA_HOME": str(home)}
+    )
+    shell = pty_reaper.track_session(name)
+    assert _started_jobs(shell, pty_reaper), "the job never started"
+    ready = Path(f"{pidfile}.ready")
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and not ready.exists():
+        time.sleep(0.05)
+    assert ready.exists(), "the job never installed its TERM handler"
+
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not pidfile.exists():
+        time.sleep(0.05)
+    assert pidfile.exists(), "the chain never reached its last hop"
+    last = int(pidfile.read_text(encoding="utf-8"))
+    with contextlib.suppress(psutil.NoSuchProcess):
+        pty_reaper.track(psutil.Process(last))
+    assert _wait_exit(last, timeout=5), "the chain's last hop outlived a stop that succeeded"
     assert len(_notice_files(home)) == 1
 
 

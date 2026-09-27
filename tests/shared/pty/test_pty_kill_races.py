@@ -546,11 +546,11 @@ def test_a_dead_members_recycled_pid_vouches_for_nothing(
     victim = _pid(other, "child", pty_reaper)
     real_scan, real_ppid = session_tree._scan, psutil.Process.ppid
 
-    def recycled_scan() -> tuple[dict[int, int], dict[int, int]]:
-        parents, sessions = real_scan()
+    def recycled_scan() -> session_tree._Table:
+        table = real_scan()
         if not gone.is_running():
-            parents[victim] = orphan
-        return parents, sessions
+            table.parents[victim] = orphan
+        return table
 
     @functools.wraps(real_ppid)  # keeps psutil's oneshot cache hooks
     def ppid(self: psutil.Process) -> int:
@@ -596,3 +596,30 @@ def test_orphan_reap_passes_when_only_unsignallable_processes_survive(
     assert orphan_reaper._reap_orphaned_hosts("ava-test-race-3") == 1
     with pytest.raises(RuntimeError, match="survived force-reap: pids=\\[4343\\]"):
         orphan_reaper._reap_orphaned_hosts("ava-test-race-3")
+
+
+def test_a_session_nothing_proves_is_still_looked_at_and_logged(
+    tmp_path: Path, pty_reaper: PtyReaper, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A stop's capture with no captured process left and no fresh proof can
+    take nothing more, but its session may still hold a process (the stop
+    stalled past the proof). The shared scan still reads it: the capture stays
+    busy, and the process is logged once with its pid and command name — never
+    signalled."""
+    shell, member, orphan = _dead_leader(tmp_path, pty_reaper)
+    os.kill(member.pid, signal.SIGKILL)
+    assert _wait(lambda: _exited(member.pid))
+    capture = session_tree.SessionCapture(shell, [shell, member], None)
+
+    assert session_tree.refresh([capture]) is True, "the session still holds a process"
+    assert session_tree.refresh([capture]) is True
+
+    assert orphan not in {identity.pid for identity in capture.members}
+    assert not _exited(orphan), "an unproven process was signalled"
+    warnings = [
+        record["message"]
+        for record in loguru_records
+        if str(orphan) in record["message"] and "prove" in record["message"]
+    ]
+    assert len(warnings) == 1, f"logged once, with its command name: {warnings}"
+    assert repr(psutil.Process(orphan).name()) in warnings[0]

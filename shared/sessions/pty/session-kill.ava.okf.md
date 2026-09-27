@@ -56,8 +56,12 @@ any signal:
   assumes pid reuse cannot land inside a couple of seconds
   (`shared/proc_tree.py`). This reaches a helper that a job forks on TERM and
   orphans: it is then the session's only process, with no captured witness.
+  A proven pass that read any process in the session renews the proof, so a
+  fork-and-exit chain keeps it current while scans keep reading its hops.
 
-Anything else is logged and left running. A parent vouches for a child only
+Anything else is logged once, with pid and command name, and left running.
+The scan reads session ids first with a bare getsid, newest pids first, so a
+short-lived hop is read while it exists. A parent vouches for a child only
 while it still is the captured process, so a member's recycled pid adds
 nobody.
 
@@ -113,8 +117,11 @@ session backend.
 A normal `ava stop` (`cli/commands/_temporary_stop.py`) captures each shell's
 session with `capture_session` before any signal, HUPs the shells and TERMs
 the rest. Each grace poll `refresh`es every capture with one scan, keeping its
-proof current; a quiet poll counts only once a second, immediate one is quiet
-too, since a member can fork while the first scan runs. What is left after
+proof current. A poll is quiet only when no captured process lives and the
+scan read nothing in the session, pinned or not; it counts only once a second,
+immediate poll is quiet too, since a member can fork while the first scan
+runs. A capture nothing can prove any more is still scanned and its
+session's processes logged. What is left after
 the grace dies by `kill_session_tree(also=<capture>, proven_at=<its proof>)`
 (decisions/2026-09-28-stop-escalates-to-sigkill.md,
 decisions/2026-09-28-session-id-proven-by-a-live-member.md). `ava pause`
