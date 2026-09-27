@@ -186,10 +186,17 @@ def _is_type_expr(node: ast.expr) -> bool:
     if isinstance(node, ast.Subscript):
         return _subscript_base_name(node.value) in _TYPE_GENERIC_BASES
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return all(
-            isinstance(side, ast.Name) or _is_type_expr(side) for side in (node.left, node.right)
-        )
+        return all(_is_union_operand(side) for side in (node.left, node.right))
     return False
+
+
+def _is_union_operand(node: ast.expr) -> bool:
+    """A `|` side of a type union: a name (`Foo`, `mod.Foo`), `None`, or a type expression."""
+    if isinstance(node, ast.Name | ast.Attribute):
+        return True
+    if isinstance(node, ast.Constant) and node.value is None:
+        return True
+    return _is_type_expr(node)
 
 
 def _is_type_alias_annotation(annotation: ast.expr | None) -> bool:
