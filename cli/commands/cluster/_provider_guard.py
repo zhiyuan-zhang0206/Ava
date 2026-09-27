@@ -26,7 +26,7 @@ dependency on anything the outage kills — in particular not on the LLM call
 chain, which is dead the moment the account is.
 
 Alert hygiene: the episode key is the exact failure message
-(`_health_alerts._alert_failure`), so the messages here are deliberately
+(`cluster.health_alerts._alert_failure`), so the messages here are deliberately
 *stable* across runs — they name the configured threshold, never a live
 value. A balance ticking down (or a growing halted count) inside the message
 would reset the episode on every probe tick and the alert would crawl back to
@@ -57,7 +57,7 @@ def run_provider_guard(home: Path, *, alert_failure: Callable[[Path, str], None]
     """Run checks 9-10 for the health probe; return 1 on failure, None on pass.
 
     `alert_failure` is the probe's edge-alert entry point
-    (`_health_alerts._alert_failure`), passed in rather than imported so the
+    (`cluster.health_alerts._alert_failure`), passed in rather than imported so the
     caller's module attribute stays the single test seam.
     """
     failure = provider_guard_failure()

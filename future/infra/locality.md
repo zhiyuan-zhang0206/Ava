@@ -49,7 +49,7 @@ boundaries, already carried by codegen, and not debt.
    public module names (`cluster_instance`, `maintenance`, `packages_refresh`,
    `pgbouncer`, `observatory_urls`, `release_inventory`, `release_selector`,
    `release_services` — each still defines no `cmd_*` of its own), plus 4
-   `cluster_lifecycle` test-seam wrappers and 8 `services.pitr` names promoted
+   `cluster/registry` test-seam wrappers and 8 `services.pitr` names promoted
    (`activation_runtime`'s env-field table, archive/desired-archive settings,
    file evidence, settings digest, shadow-pg gate and service-enable, plus
    `base_manifest.lsn`).

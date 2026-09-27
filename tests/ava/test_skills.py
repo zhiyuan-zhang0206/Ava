@@ -2,7 +2,7 @@
 
 Uses monkeypatch to point `_skills_dir` at tmpdir, leaving the real directory
 untouched. Repo / plugin skills are synced into the load dir by converge (see
-tests/cli/test_converge_skills.py); here we only test the scan itself.
+tests/cli/test_skills_sync.py); here we only test the scan itself.
 """
 
 from collections.abc import Iterator
