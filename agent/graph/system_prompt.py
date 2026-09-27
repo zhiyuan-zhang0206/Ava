@@ -21,14 +21,14 @@ from shared.config.turn_view import turn_settings
 from shared.paths import workspace_dir
 from shared.plugin_context import current_plugin_name
 
-from ._capabilities import (
+from ._codeact import _codeact_section
+from .capabilities import (
     _CAPABILITY_SURFACES,
     _disabled_by_sdk_config,
     _is_capability_surface_member,
     capabilities_section,
     capability_index_is_empty,
 )
-from ._codeact import _codeact_section
 
 
 def _resolved(setting: str) -> Any:
@@ -711,13 +711,13 @@ def _workspace_section() -> str:
     )
 
 
-# Capabilities lives in `_capabilities.py` (line budget) and is registered here so
+# Capabilities lives in `capabilities.py` (line budget) and is registered here so
 # the section order stays the reading order this module lays out.
 register_system_prompt_section(capabilities_section)
 
 
 # Sections registered above this line are framework-owned (registered at module
-# import). Everything appended later comes from a plugin via _load_extensions;
+# import). Everything appended later comes from a plugin via load_extensions;
 # clear_plugin_system_prompt_sections() truncates back to this count so a reload
 # drops only the plugin tail — framework sections are never re-registered.
 _FRAMEWORK_SECTION_COUNT = len(_SYSTEM_PROMPT_SECTIONS)
@@ -741,7 +741,7 @@ def build_system_prompt() -> str:
     — this function runs only once in an agent's lifetime. So the SDK
     overview is captured on-site via `_get_ava_overview()`, not cached.
 
-    Call timing guarantees `_load_extensions()` has run (per `build_graph()`
+    Call timing guarantees `load_extensions()` has run (per `build_graph()`
     flow order), so plugin namespaces (`ava.cwd` etc.) make it into the
     `help(ava)` output.
     """

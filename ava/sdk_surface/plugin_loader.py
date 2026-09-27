@@ -2,7 +2,7 @@
 `plugins/` directory scan.
 
 This is framework API for the agent kernel, not the agent SDK: it carries a
-public name — reached across the `ava` package boundary by `agent/_extensions.py`
+public name — reached across the `ava` package boundary by `agent/extensions.py`
 and `agent/_process_boot.py` — but stays out of the agent's `ava.help()` view
 because it is absent from `ava.__all_for_ava__`.
 
@@ -11,7 +11,7 @@ Every production load path shares the primitives here — `load_plugin_module`
 `sys.modules` registration before execution, reload-in-place) and
 `safe_load_plugin_module` (the fail-soft wrapper). `scan_and_load` is the
 external-only loader `agent/_process_boot.py` calls at host boot;
-`agent/graph/_build.py:_load_extensions` drives the same primitives, so a
+`agent/graph/_build.py:load_extensions` drives the same primitives, so a
 plugin sees the same module name, `__package__`, and `sys.modules` identity
 whichever production path imports it. Both wrap the import in
 `with PluginContext(name):`, so a wrap registered at plugin import time is
@@ -72,12 +72,12 @@ def load_plugin_module(
     """Import one plugin's ``plugin.py`` by path under its production dotted name.
 
     THE by-path loader both production load paths share (`scan_and_load` at
-    host boot, `agent/_extensions.load_extensions` per graph build), so
+    host boot, `agent.extensions.load_extensions` per graph build), so
     one plugin sees one module name, one ``__package__``, and one
     ``sys.modules`` identity whichever path imported it. The dotted name is
     ``plugins.<name>.<module>`` for an external plugin and
     ``ava_builtins.plugins.<name>.<module>`` for a built-in (`module` defaults
-    to the entry ``plugin``; `agent._extensions` passes ``agent_runtime`` for
+    to the entry ``plugin``; `agent.extensions` passes ``agent_runtime`` for
     the runtime face) — importlib sets
     ``__package__`` from it, which is what makes ``from . import sibling``
     inside plugin.py resolve; the external ``plugins`` parent packages are
@@ -180,7 +180,7 @@ def scan_and_load(
     level — side-effect driven registration; importing here triggers it. Every
     import goes through `safe_load_plugin_module` inside
     `with PluginContext(name):`, the exact contract
-    `agent/graph/_build.py:_load_extensions` uses for the same file — same
+    `agent/graph/_build.py:load_extensions` uses for the same file — same
     dotted module name, same `sys.modules` identity, same fail-soft
     containment — so the two production load paths cannot disagree about what
     a plugin import does.

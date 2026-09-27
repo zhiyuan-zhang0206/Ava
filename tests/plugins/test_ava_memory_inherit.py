@@ -351,7 +351,7 @@ def test_fork_notes_graft_the_new_agent_s_own_chain(chain: _FakeChain, memory_pl
     (the claim node strips the source's copy; see test_fork_notes.py)."""
     _write_entry(600401, "rules", _wrap("fork chain block"))
     chain.rows = [_local_row(600401, label="Fork parent")]
-    from agent.graph._context_notes import fork_notes
+    from agent.graph.context_notes import fork_notes
 
     notes = fork_notes()
     inherited = [n for n in notes if _note_tag(n) == "inherited_memory"]

@@ -364,7 +364,7 @@ def test_validate_stop_reason_unexpected_carries_stop_reason_and_output_tokens()
     Truncated subclass path — the unexpected parent class path is uncovered.
     """
     from agent.graph._llm_chunk import _validate_stop_reason
-    from agent.graph._llm_errors import LLMStreamUnexpectedStopReasonError
+    from agent.graph.llm_errors import LLMStreamUnexpectedStopReasonError
 
     msg = AIMessage(
         content="",
@@ -477,7 +477,7 @@ def test_record_consecutive_error_tracks_and_clears() -> None:
     - same type recorded again → count=2
     - after reset the entry disappears
     """
-    from agent.graph._llm_errors import (
+    from agent.graph.llm_errors import (
         LLMStreamSilentIdleError,
         _clear_consecutive_errors,
         _consecutive_errors,
@@ -508,7 +508,7 @@ def test_check_consecutive_error_cap_raises_fatal_on_exhaustion() -> None:
     Pre-fill _consecutive_errors to the cap value (default 3),
     `_check_consecutive_error_cap` should raise FatalLLMStreamError and pop the entry.
     """
-    from agent.graph._llm_errors import (
+    from agent.graph.llm_errors import (
         FatalLLMStreamError,
         _check_consecutive_error_cap,
         _consecutive_errors,
@@ -528,7 +528,7 @@ def test_check_consecutive_error_cap_raises_fatal_on_exhaustion() -> None:
 
 def test_check_consecutive_error_cap_below_threshold_passes() -> None:
     """Below cap, `_check_consecutive_error_cap` returns normally without raising."""
-    from agent.graph._llm_errors import _check_consecutive_error_cap, _consecutive_errors
+    from agent.graph.llm_errors import _check_consecutive_error_cap, _consecutive_errors
 
     tid = "test-thread-3"
     _consecutive_errors[tid] = ("LLMStreamSilentIdleError", 2)  # < cap(3)
@@ -644,7 +644,7 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     `llm_provider_error` log lands error_class=permanent / status=400 / fatal=True.
     The RetryPolicy excludes FatalProviderError, so the agent idles instead of
     burning the ~16-min backoff budget and dying."""
-    from agent.graph._llm_errors import FatalProviderError, _consecutive_errors
+    from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
     from shared.config import settings
 
     _consecutive_errors.pop("7", None)
@@ -671,7 +671,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     loguru_records, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Provider 402 logs the billing flag, vendor, and model for alert routing."""
-    from agent.graph._llm_errors import FatalProviderError, _consecutive_errors
+    from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
     from shared.config import settings
     from shared.lm.context_budget import ContextBudget
 
@@ -707,7 +707,7 @@ async def test_llm_node_transient_provider_error_propagates_for_retry() -> None:
     """A TRANSIENT provider error (HTTP 500) is re-raised as-is — NOT wrapped in
     FatalProviderError — so the LangGraph RetryPolicy retries it. Fail-fast is
     reserved for permanent classes; a transient blip must keep retrying."""
-    from agent.graph._llm_errors import FatalProviderError, _consecutive_errors
+    from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
 
     _consecutive_errors.pop("7", None)
     fake_llm = MagicMock()
@@ -724,7 +724,7 @@ async def test_llm_node_configured_fatal_error_type_fails_fast() -> None:
     a transient-nature status (429) still fails fast: retrying an overloaded engine
     in-turn is futile, so it becomes a FatalProviderError (error_class records the
     transient nature; fatal=True records the fail-fast action)."""
-    from agent.graph._llm_errors import FatalProviderError, _consecutive_errors
+    from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
     from shared.config import settings
 
     _consecutive_errors.pop("7", None)
@@ -905,7 +905,7 @@ class _FakeAnthropicError(Exception):
 
 def test_parse_provider_error_type_openai_shape() -> None:
     """OpenAI SDK errors carry body.error.type — extract it."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     exc = _FakeOpenAIError(
         {
@@ -920,7 +920,7 @@ def test_parse_provider_error_type_openai_shape() -> None:
 
 def test_parse_provider_error_type_anthropic_shape() -> None:
     """Anthropic SDK errors use the same body.error.type shape."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     exc = _FakeAnthropicError(
         {
@@ -935,14 +935,14 @@ def test_parse_provider_error_type_anthropic_shape() -> None:
 
 def test_parse_provider_error_type_no_body() -> None:
     """Exception without a body attribute returns None."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     assert _parse_provider_error_type(ConnectionError("net")) is None
 
 
 def test_parse_provider_error_type_body_none() -> None:
     """Exception with body=None returns None."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     exc = _FakeOpenAIError(None)
     assert _parse_provider_error_type(exc) is None
@@ -950,7 +950,7 @@ def test_parse_provider_error_type_body_none() -> None:
 
 def test_parse_provider_error_type_body_not_dict() -> None:
     """Exception with body as a non-dict (string, list) returns None."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     exc = _FakeOpenAIError("not a dict")  # type: ignore[arg-type]
     assert _parse_provider_error_type(exc) is None
@@ -958,7 +958,7 @@ def test_parse_provider_error_type_body_not_dict() -> None:
 
 def test_parse_provider_error_type_no_error_key() -> None:
     """body without 'error' key returns None."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     exc = _FakeOpenAIError({"status": "error"})
     assert _parse_provider_error_type(exc) is None
@@ -966,7 +966,7 @@ def test_parse_provider_error_type_no_error_key() -> None:
 
 def test_parse_provider_error_type_error_not_dict() -> None:
     """body.error not a dict returns None."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     exc = _FakeOpenAIError({"error": "server_error"})
     assert _parse_provider_error_type(exc) is None
@@ -974,7 +974,7 @@ def test_parse_provider_error_type_error_not_dict() -> None:
 
 def test_parse_provider_error_type_no_type_key() -> None:
     """body.error without 'type' key returns None."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     exc = _FakeOpenAIError({"error": {"message": "oops"}})
     assert _parse_provider_error_type(exc) is None
@@ -982,7 +982,7 @@ def test_parse_provider_error_type_no_type_key() -> None:
 
 def test_parse_provider_error_type_empty_string() -> None:
     """body.error.type is an empty string — returns None (not a meaningful type)."""
-    from agent.graph._llm_errors import _parse_provider_error_type
+    from agent.graph.llm_errors import _parse_provider_error_type
 
     exc = _FakeOpenAIError({"error": {"type": ""}})
     assert _parse_provider_error_type(exc) is None
@@ -990,7 +990,7 @@ def test_parse_provider_error_type_empty_string() -> None:
 
 def test_is_fatal_provider_error_type_matches_configured() -> None:
     """When the error type is in the configured fatal set, returns True."""
-    from agent.graph._llm_errors import _is_fatal_provider_error_type
+    from agent.graph.llm_errors import _is_fatal_provider_error_type
     from shared.config import settings
 
     original = settings.lm.llm_fatal_provider_error_types
@@ -1006,7 +1006,7 @@ def test_is_fatal_provider_error_type_matches_configured() -> None:
 
 def test_is_fatal_provider_error_type_not_in_set() -> None:
     """Error type not in the configured set returns False."""
-    from agent.graph._llm_errors import _is_fatal_provider_error_type
+    from agent.graph.llm_errors import _is_fatal_provider_error_type
     from shared.config import settings
 
     original = settings.lm.llm_fatal_provider_error_types
@@ -1020,7 +1020,7 @@ def test_is_fatal_provider_error_type_not_in_set() -> None:
 
 def test_is_fatal_provider_error_type_empty_config() -> None:
     """Empty configured set is a fast no-op (always returns False)."""
-    from agent.graph._llm_errors import _is_fatal_provider_error_type
+    from agent.graph.llm_errors import _is_fatal_provider_error_type
     from shared.config import settings
 
     original = settings.lm.llm_fatal_provider_error_types
@@ -1036,7 +1036,7 @@ def test_is_fatal_provider_error_type_empty_config() -> None:
 
 def test_is_fatal_provider_error_type_no_body() -> None:
     """Exception without body (generic exception) returns False."""
-    from agent.graph._llm_errors import _is_fatal_provider_error_type
+    from agent.graph.llm_errors import _is_fatal_provider_error_type
 
     assert _is_fatal_provider_error_type(ConnectionError("net")) is False
 
@@ -1050,7 +1050,7 @@ async def test_llm_usage_event_carries_latency_ms(loguru_records) -> None:
     source. A real stream (one chunk with usage_metadata) must produce an
     llm_usage record with a positive latency_ms in its payload extras.
     """
-    from agent.graph._llm_errors import _consecutive_errors
+    from agent.graph.llm_errors import _consecutive_errors
 
     _consecutive_errors.pop("7", None)
 

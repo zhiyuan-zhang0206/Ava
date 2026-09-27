@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.graph._context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE, timezone_note
+from agent.graph.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE, timezone_note
 from shared.config import settings
 from shared.message_kwargs import NoteTag
 

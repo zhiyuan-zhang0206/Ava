@@ -5,12 +5,12 @@ build_graph does not take them; the caller passes them via
 `graph.ainvoke(..., context=AvaContext(...))`. Node functions access them via
 `runtime.context.X`.
 
-At startup, `_load_extensions()` reads `$AVA_HOME/plugins_config.json` and
+At startup, `load_extensions()` reads `$AVA_HOME/plugins_config.json` and
 imports the `plugin.py` of every enabled plugin, by path — builtin and external
 alike, one loop — followed by each plugin's `agent_runtime.py` face (state
-fields, hooks, prompt sections). The loader lives in `agent._extensions` (task
+fields, hooks, prompt sections). The loader lives in `agent.extensions` (task
 #3633 moved it off this module so surface-only processes never need the graph
-kernel); it is re-exported here as `_load_extensions` for the graph build. The
+kernel); this module calls it directly for the graph build. The
 import mechanics and the fail-soft contract live in `ava.sdk_surface.plugin_loader`
 (`load_plugin_module` / `safe_load_plugin_module`), the same primitives
 `ava.sdk_surface.plugin_loader.scan_and_load` uses at host boot, so both
@@ -32,7 +32,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
-from agent._extensions import load_extensions as _load_extensions
+from agent.extensions import load_extensions
 from agent.hooks import make_hook_runner
 from agent.impersonation import protect_native_hooks
 from agent.nodes import (
@@ -110,7 +110,7 @@ _retry_budget_state = threading.local()
 def _retry_thread_id() -> str:
     """The per-thread stall-pair streak key (bound turn identity, else `?`).
 
-    `agent.graph._llm_errors` keys its streaks by the llm node's
+    `agent.graph.llm_errors` keys its streaks by the llm node's
     ``str(agent_id_from_config(config))``; the retry machinery runs in the same
     turn, so the bound identity resolves to the same string. `?` keeps tests
     and non-agent entry points from crashing on an unbound identity.
@@ -323,7 +323,7 @@ def _build_llm_retry() -> RetryPolicy:
     Returns a `_TurnScopedRetryPolicy`: the two per-agent fields resolve per read
     so one shared graph still retries each hosted agent on its own schedule.
     """
-    from agent.graph._llm_errors import (
+    from agent.graph.llm_errors import (
         FatalLLMStreamError,
         FatalProviderError,
         LLMStreamStallPairError,
@@ -439,7 +439,7 @@ def build_graph(
 
     Frontend timeline sync: each node **enter** renders a timeline snapshot
     from the in-memory `state.messages` and publishes it via
-    `_node_log.node_lifecycle` before yield (includes msg_count =
+    `node_log.node_lifecycle` before yield (includes msg_count =
     `len(state.messages)`); the gateway forwards it to the frontend. Rendering
     from in-memory state (not a checkpoint re-read) is race-free: LangGraph
     commits checkpoints asynchronously, so a re-read could miss the
@@ -461,10 +461,10 @@ def build_graph(
     single-arg StateNode protocol, but runtime accepts the (state, runtime,
     config) multi-arg signature. Functionally correct, just stub doesn't narrow.
     """
-    _load_extensions()
+    load_extensions()
 
-    # Register built-in hooks. Must run after _load_extensions() because
-    # clear_plugin_registrations() (called at the top of _load_extensions)
+    # Register built-in hooks. Must run after load_extensions() because
+    # clear_plugin_registrations() (called at the top of load_extensions)
     # clears all hooks including built-in ones. Repair registers first:
     # it guards the message history every hook after it (compact's
     # force-compact summarization) may feed to an LLM.

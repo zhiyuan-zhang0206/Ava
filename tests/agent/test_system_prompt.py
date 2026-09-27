@@ -15,7 +15,7 @@ that the rendered section reflects the wildcard, and that the field default is
 import pytest
 
 import ava
-from agent.graph._system_prompt import (
+from agent.graph.system_prompt import (
     _CAPABILITY_SURFACES,
     _discover_all_namespaces,
     _sdk_expand_section,
@@ -214,7 +214,7 @@ def test_missing_unregistered_expand_path_warns(
     monkeypatch.setattr(settings.agent, "sdk_disable", [])
     monkeypatch.setattr(sdk_disable, "applied_disable_entries", set[str]())
 
-    with caplog.at_level("WARNING", logger="agent.graph._system_prompt"):
+    with caplog.at_level("WARNING", logger="agent.graph.system_prompt"):
         text = _sdk_expand_section()
 
     assert text == ""

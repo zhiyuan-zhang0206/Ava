@@ -52,8 +52,8 @@ from agent._runloop import PendingTurnFailure, _emit_error_event, _graph_config,
 from agent._trace_checkpoint import attach_trace_checkpoint_ref
 from agent._turn_progress import reset_turn_progress
 from agent.corpse_reap import reap_crash_corpses
-from agent.graph._llm_errors import FatalLLMStreamError, FatalProviderError
-from agent.graph._node_log import flush_node_exit_aggregate
+from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
+from agent.graph.node_log import flush_node_exit_aggregate
 from agent.hooks.compact import CompactionFailedError
 from agent.hosted_ownership import (
     admit_hosted_runtime,

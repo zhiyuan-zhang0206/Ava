@@ -1,8 +1,8 @@
 """The `# Capabilities` index — the system prompt's one listing of what this
 agent already has (skills + live MCP tool servers).
 
-Split out of `_system_prompt.py` so the prompt-assembly module stays inside the
-per-file line budget. The section function is registered by `_system_prompt`
+Split out of `system_prompt.py` so the prompt-assembly module stays inside the
+per-file line budget. The section function is registered by `system_prompt`
 (rather than decorated here) so the render order stays where the reading order
 puts it — Capabilities last among the framework-owned sections — without this
 module having to import back into its own importer.
@@ -361,7 +361,7 @@ def capabilities_section() -> str:
     is what makes an agent actually read it. No skills configured and no MCP
     servers -> no section.
 
-    Registered by `_system_prompt` rather than decorated here — see the module
+    Registered by `system_prompt` rather than decorated here — see the module
     docstring."""
     skill_lines = _skill_index_lines()
     mcp_lines = _mcp_index_lines()

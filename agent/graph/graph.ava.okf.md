@@ -37,7 +37,7 @@ after_init → init_context → claim → before_llm → llm → before_exec →
 Both are **durable inbound rows**, not a Redis control channel. `POST
 /api/cancel` INSERTs `kind='cancel'`; terminate shares the same machinery.
 An in-flight llm/exec node notices it via a short-cadence **DB poll of
-`inbound_messages`** (`agent/graph/_interrupt.py`, `_INTERRUPT_POLL_S` = 2s —
+`inbound_messages`** (`agent/graph/interrupt.py`, `_INTERRUPT_POLL_S` = 2s —
 deliberately not sharing the claim node's Redis pub/sub listener: that sharing
 was the 2026-08-02 lost-wake root cause), sets `halted=True`, and routes to
 claim. The two differ only in claim's routing:

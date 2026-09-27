@@ -1,4 +1,4 @@
-"""agent/graph/_exec_output.py's wrap_code_output pure function test.
+"""agent/graph/exec_output.py's wrap_code_output pure function test.
 
 `wrap_code_output` is the envelope fed to LLM — agent relies on "Code execution output" prefix to identify subprocess feedback. Anchor format; changing one side will red the other side test.
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.graph._exec_output import wrap_code_output
+from agent.graph.exec_output import wrap_code_output
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
@@ -23,7 +23,7 @@ _TS = _TIMESTAMP  # shorthand
 @pytest.fixture(autouse=True)
 def _freeze_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock now_timestamp for all tests to fixed value."""
-    monkeypatch.setattr("agent.graph._exec_output.now_timestamp", lambda: _TIMESTAMP)
+    monkeypatch.setattr("agent.graph.exec_output.now_timestamp", lambda: _TIMESTAMP)
 
 
 def test_wrap_code_output_structured():
@@ -91,10 +91,10 @@ def test_wrap_code_output_truncates_keeps_both_ends_and_writes_file(
     """Exceeds exec_output_max_chars → keep head + tail, cut middle, full output written to tmp file and path reported.
     Head carries help() overview / overview, tail carries error / result, both ends must survive."""
     import ava
-    from agent.graph import _exec_output
+    from agent.graph import exec_output
 
     monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
-    monkeypatch.setattr(_exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
+    monkeypatch.setattr(exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
 
     limit = 1000
     head_marker = "HEAD_START"
@@ -121,11 +121,11 @@ def test_wrap_code_output_overflow_files_pruned_to_keep_limit(
 ):
     """Same agent repeatedly overflows keeps only recent N, prevents workspace infinite pile-up."""
     import ava
-    from agent.graph import _exec_output
+    from agent.graph import exec_output
 
     monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
-    monkeypatch.setattr(_exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
-    monkeypatch.setattr(_exec_output, "_OVERFLOW_KEEP", 3)
+    monkeypatch.setattr(exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
+    monkeypatch.setattr(exec_output, "_OVERFLOW_KEEP", 3)
 
     for _ in range(5):
         wrap_code_output("Z" * 2000, max_chars=100)
@@ -290,8 +290,8 @@ def test_dispatch_boot_crash_alerts_the_operator(monkeypatch: pytest.MonkeyPatch
 
 
 def test_crashed_no_output_body_forms() -> None:
-    from agent.graph._exec_output import crashed_no_output_body
     from agent.graph._exec_result import ExecChildError
+    from agent.graph.exec_output import crashed_no_output_body
 
     body = crashed_no_output_body(ExecChildError("X", "y", None), code_reached=False)
     assert "NOT executed" in body

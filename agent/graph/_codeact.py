@@ -1,7 +1,7 @@
 """CodeAct batching section — opt-in system-prompt guidance.
 
-Owned as its own module (like `_capabilities.py`) because the section list in
-`_system_prompt.py` is at its line ceiling; `_system_prompt` imports and
+Owned as its own module (like `capabilities.py`) because the section list in
+`system_prompt.py` is at its line ceiling; `system_prompt` imports and
 registers the section explicitly so the render order stays its reading order.
 """
 

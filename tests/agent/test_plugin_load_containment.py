@@ -12,7 +12,7 @@ These lock the contract that came out of it (user ruling 2026-09-11):
 - disabled = never imported, on every production load path;
 - a broken plugin is contained (skipped, loud report), the rest still load;
 - both production loaders — host boot (`load_process_extensions`) and graph
-  build (`_load_extensions`) — agree on the plugin's module identity
+  build (`load_extensions`) — agree on the plugin's module identity
   (`plugins.<name>.plugin`) and on package-relative sibling imports;
 - the incident's restart loop cannot reproduce.
 """
@@ -91,7 +91,7 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
 
     from agent.graph import _build
 
-    _build._load_extensions()  # graph build agrees on the same set
+    _build.load_extensions()  # graph build agrees on the same set
 
     assert "plugins.codex_usage.plugin" not in sys.modules
     assert "plugins.good.plugin" in sys.modules
@@ -152,7 +152,7 @@ def test_both_loaders_agree_on_module_identity_and_relative_imports() -> None:
 
     from agent.graph import _build
 
-    _build._load_extensions()
+    _build.load_extensions()
 
     assert sys.modules["plugins.codex_usage.plugin"] is boot_module
 

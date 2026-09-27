@@ -28,7 +28,7 @@ sdk_reminder_after_exec = _SdkReminderAfterExecHook()
 register_after_exec(sdk_reminder_after_exec)
 ```
 
-Code is taken from `last_msg.tool_calls`, read via the shared `first_tool_call_code` (`agent/graph/_tool_calls.py`,
+Code is taken from `last_msg.tool_calls`, read via the shared `first_tool_call_code` (`agent/graph/tool_calls.py`,
 a strongly-typed extractor on the langchain `ToolCall` TypedDict). Detects four categories of native Python usage and injects reminders:
 
 | Category | Detection pattern | Suggested SDK primitive |

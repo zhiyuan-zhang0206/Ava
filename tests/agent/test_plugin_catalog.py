@@ -1,7 +1,7 @@
 """The `ava plugins inspect` catalog — attribution ledger, per-machine view, diff.
 
 The plugins here are written to disk and loaded through the real
-`_load_extensions`, so what the ledger reports is what an actual plugin import
+`load_extensions`, so what the ledger reports is what an actual plugin import
 produced: attribution comes from the `PluginContext` the loader opens, not from
 anything the test hands the registry.
 """
@@ -37,7 +37,7 @@ __description__ = "registers one of nearly everything"
 from pydantic import BaseModel
 
 import ava
-from agent.graph._system_prompt import register_system_prompt_section
+from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_before_llm
 from agent.state import register_plugin_state
 
@@ -177,7 +177,7 @@ _DECLARED_PLUGIN = """
 __description__ = "declares more than it registers"
 
 import ava
-from agent.graph._system_prompt import register_system_prompt_section
+from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_before_llm
 
 

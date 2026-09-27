@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Plugin System
-description: Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `load_extensions()` (`agent/_extensions.py`); a plugin may add an `agent_runtime.py` face. A plugin may use every injection surface at once; `agent/plugin_catalog.py:SURFACES` is the enumeration, and `ava plugins inspect` renders it.
+description: Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `load_extensions()` (`agent/extensions.py`); a plugin may add an `agent_runtime.py` face. A plugin may use every injection surface at once; `agent/plugin_catalog.py:SURFACES` is the enumeration, and `ava plugins inspect` renders it.
 tags: []
 ---
 
 # Plugin System
 
 ## What It Is
-Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `_load_extensions()`. A plugin may use every injection surface at once; `agent/plugin_catalog.py:SURFACES` is the enumeration, and `ava plugins inspect` renders it.
+Plugins are Ava's primary extension mechanism—inserting custom behavior into the agent runtime through multiple injection points. Each plugin is a directory containing a `plugin.py` entry point, loaded at agent process startup by `load_extensions()`. A plugin may use every injection surface at once; `agent/plugin_catalog.py:SURFACES` is the enumeration, and `ava plugins inspect` renders it.
 
 ## Core Responsibilities
 
@@ -20,7 +20,7 @@ The four hook container nodes (after_init / before_llm / before_exec / after_exe
 
 **Core-key contract (writable = private fields + `messages` only).** A plugin's own `BaseModel` fields are always private and plugin-writable. Among the framework core keys (`BaseAgentState` fields: messages / halted / update_initiated / compact / memory / context_reset / capabilities), only **`messages`** may be declared and written — with the exact base annotation (`Annotated[list[AnyMessage], add_messages]`); the exec node merges the plugin's messages delta with its own ToolMessage delta, so both reach the checkpoint. Declaring any other core key raises at registration; writing one via `ava.state_update` raises at turn end. Plugins that want to surface notes do it through the after-exec hook — `ava_code`'s AGENTS.md / security-findings injection (`system_note_message`, `NoteTag`) is the model use case — never by touching core lifecycle keys.
 
-### 3. System Prompt Injection (`agent/graph/_system_prompt.py`)
+### 3. System Prompt Injection (`agent/graph/system_prompt.py`)
 `register_system_prompt_section(fn)` — register a `() -> str` contributor function as a **decorator**; `build_system_prompt()` calls them in registration order at boot time to compose the system prompt. Returning an empty string means no contribution.
 
 ### 4. SDK Namespace Registration
@@ -44,7 +44,7 @@ recorded, so the ledger holds plugin contributions alone and
 
 `agent/plugin_catalog.py:SURFACES` is the enumeration of the injection surfaces —
 the ones above, plus SDK wraps (`ava.extend.wrap`, [[extensions.ava.okf.md]]),
-context notes (`agent/graph/_context_notes.py:register_context_note`) and skill
+context notes (`agent/graph/context_notes.py:register_context_note`) and skill
 sources (`ava/skills.py:register_skill_source`) — each carrying the live
 signature of its entry point rather than a transcribed one. `ava plugins inspect`
 renders both halves, and `declared_vs_registered` is the read-only form of the
@@ -62,7 +62,7 @@ keyed by the same triple: [[activation-telemetry.ava.okf.md]].
 
 ## Entry Points
 - `shared/plugins_config.py:_discover_plugins()` — filesystem scan for `ava_builtins/plugins/<name>/plugin.py` (built-in) and `~/.ava/plugins/<name>/plugin.py` (external)
-- `agent/_extensions.py:load_extensions()` — imports plugins according to the enabled set (each `plugin.py` import wrapped with `with PluginContext(name):`), after which `bind_from_disk()` uniformly instantiates configs. A plugin's optional `agent_runtime.py` face loads on the full form only ([[okf/plugins/module-loading/two-faces.ava.okf.md]]); `agent/graph/_build.py` re-exports the loader as `_load_extensions`. Import mechanics, load order and reload semantics: [[okf/plugins/module-loading/module-loading.ava.okf.md]].
+- `agent/extensions.py:load_extensions()` — imports plugins according to the enabled set (each `plugin.py` import wrapped with `with PluginContext(name):`), after which `bind_from_disk()` uniformly instantiates configs. A plugin's optional `agent_runtime.py` face loads on the full form only ([[okf/plugins/module-loading/two-faces.ava.okf.md]]); `agent/graph/_build.py` calls it directly at graph-build time. Import mechanics, load order and reload semantics: [[okf/plugins/module-loading/module-loading.ava.okf.md]].
 - `agent/graph/_build.py:build_graph()` — at build time calls `make_hook_runner` to snapshot hook lists
 - `agent/state.py:build_agent_state()` — at build time merges all plugins' state fields
 - `agent/plugin_catalog.py:build_catalog()` — loads this machine's enabled plugins and reads back what they registered (`ava plugins inspect`)

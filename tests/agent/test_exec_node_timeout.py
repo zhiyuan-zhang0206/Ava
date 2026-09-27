@@ -97,7 +97,7 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
     monkeypatch.setattr("shared.config.settings.sandbox.exec_timeout_seconds", 30.0)
 
     from agent.graph._exec import _ExecDone, _ExecResult
-    from agent.graph._exec_protocol import ResultPayload
+    from agent.graph.exec_protocol import ResultPayload
 
     async def _fast_return(*args, **kwargs) -> tuple[_ExecResult, ResultPayload | None]:
         return (_ExecDone(output="hello"), None)

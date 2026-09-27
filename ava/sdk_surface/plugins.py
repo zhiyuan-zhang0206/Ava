@@ -92,7 +92,7 @@ class MemberConflictError(NamespaceConflictError):
 
 
 # name → name-holding plugin (read from
-# `agent.state.PluginContext.current_plugin_name()` — `_load_extensions`
+# `agent.state.PluginContext.current_plugin_name()` — `load_extensions`
 # calls plugin.py's `import` triggering register_namespace inside
 # `with PluginContext(name):`, where ContextVar is alive). Calls outside
 # a plugin (tests, dev) get `<unknown>`.
@@ -359,7 +359,7 @@ def register_namespace_member(namespace: str, name: str, fn: Any) -> None:
 def clear_registered_namespaces() -> None:
     """Called by `agent.state.clear_plugin_registrations` — tears down all
     SDK namespaces added by plugins on reload, so the next
-    `_load_extensions()` re-registers from empty state, avoiding
+    `load_extensions()` re-registers from empty state, avoiding
     reload-induced ghost namespace collisions.
 
     Cross-module public (same semantics as `agent.state.PluginContext`:

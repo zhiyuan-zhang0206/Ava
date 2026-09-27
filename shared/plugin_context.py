@@ -2,7 +2,7 @@
 registries (state fields + config classes) read to auto-attribute a
 registration to its plugin.
 
-`_load_extensions` wraps each plugin.py import in `with PluginContext(name):`
+`load_extensions` wraps each plugin.py import in `with PluginContext(name):`
 so `register_plugin_state()` / `register_plugin_config()` can attribute the
 registration without the plugin author passing their own name. Lives in
 `shared/` (contextvars-only leaf) so both the state registry (agent side) and
@@ -26,7 +26,7 @@ class PluginContext:
     """Mark _CURRENT_PLUGIN during plugin.py import so register_plugin_state()
     auto-prefixes.
 
-    Cross-module public (used by `agent/graph/_build.py:_load_extensions`) —
+    Cross-module public (used by `agent/graph/_build.py:load_extensions`) —
     so no underscore prefix; plugin authors may also explicitly wrap to
     achieve "my register belongs to which plugin namespace".
     """

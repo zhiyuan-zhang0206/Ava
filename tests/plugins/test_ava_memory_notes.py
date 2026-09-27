@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from agent.graph._context_notes import _CONTEXT_NOTES, _FRAMEWORK_NOTE_COUNT, context_notes
+from agent.graph.context_notes import _CONTEXT_NOTES, _FRAMEWORK_NOTE_COUNT, context_notes
 from agent.state import clear_plugin_registrations
 
 
@@ -24,7 +24,7 @@ def memory_plugin() -> Any:
     registries that `clear_plugin_registrations` truncates, and a second import
     hits the sys.modules cache without re-running plugin.py. Dropping the module
     first is what makes the load — and therefore the registration — actually
-    happen, exactly as the full plugin load (`agent._extensions`) does it.
+    happen, exactly as the full plugin load (`agent.extensions`) does it.
     """
     from shared.plugin_config_registry import bind_from_disk
     from shared.plugin_context import PluginContext

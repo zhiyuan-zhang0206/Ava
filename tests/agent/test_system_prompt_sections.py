@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.graph._system_prompt import (
+from agent.graph.system_prompt import (
     _INVEST_IN_THE_FUTURE_SECTION,
     _communication_style_section,
     _invest_in_the_future_section,
@@ -124,7 +124,7 @@ def test_temporal_awareness_section_gating(
 ):
     monkeypatch.setattr(settings.agent, "prompt_temporal_awareness_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
 
-    from agent.graph._system_prompt import _temporal_awareness_section
+    from agent.graph.system_prompt import _temporal_awareness_section
 
     rendered = _temporal_awareness_section()
 
@@ -144,7 +144,7 @@ def test_temporal_awareness_section_gating(
 def test_keep_it_simple_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
     monkeypatch.setattr(settings.agent, "prompt_keep_it_simple_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
 
-    from agent.graph._system_prompt import _keep_it_simple_section
+    from agent.graph.system_prompt import _keep_it_simple_section
 
     rendered = _keep_it_simple_section()
 
@@ -157,7 +157,7 @@ def test_keep_it_simple_section_gating(monkeypatch: pytest.MonkeyPatch, enabled,
 def test_keep_it_simple_section_carries_meta_principle(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings.agent, "prompt_keep_it_simple_enabled", True)
 
-    from agent.graph._system_prompt import _keep_it_simple_section
+    from agent.graph.system_prompt import _keep_it_simple_section
 
     rendered = _keep_it_simple_section()
 
@@ -220,7 +220,7 @@ def test_codeact_section_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch)
     system prompt."""
     monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", True)
 
-    from agent.graph._system_prompt import build_system_prompt
+    from agent.graph.system_prompt import build_system_prompt
 
     prompt = build_system_prompt()
 
@@ -232,7 +232,7 @@ def test_codeact_section_absent_from_full_prompt_when_off(monkeypatch: pytest.Mo
     the assembled prompt entirely."""
     monkeypatch.setattr(settings.agent, "prompt_codeact_enabled", False)
 
-    from agent.graph._system_prompt import build_system_prompt
+    from agent.graph.system_prompt import build_system_prompt
 
     prompt = build_system_prompt()
 
@@ -244,7 +244,7 @@ def test_temporal_awareness_invokes_ai_capability_timescale(
 ):
     monkeypatch.setattr(settings.agent, "prompt_temporal_awareness_enabled", True)
 
-    from agent.graph._system_prompt import _temporal_awareness_section
+    from agent.graph.system_prompt import _temporal_awareness_section
 
     rendered = _temporal_awareness_section()
 
@@ -262,7 +262,7 @@ def test_temporal_awareness_invokes_ai_capability_timescale(
 def test_ui_delivery_section_gating(monkeypatch: pytest.MonkeyPatch, enabled, expect_section):
     monkeypatch.setattr(settings.agent, "prompt_ui_delivery_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
 
-    from agent.graph._system_prompt import _ui_delivery_section
+    from agent.graph.system_prompt import _ui_delivery_section
 
     rendered = _ui_delivery_section()
 
@@ -280,7 +280,7 @@ def test_ui_delivery_section_prefers_ui_over_file_paths(monkeypatch: pytest.Monk
     part, function signatures are not, so the section must stay example-free."""
     monkeypatch.setattr(settings.agent, "prompt_ui_delivery_enabled", True)
 
-    from agent.graph._system_prompt import _ui_delivery_section
+    from agent.graph.system_prompt import _ui_delivery_section
 
     rendered = _ui_delivery_section()
 
@@ -354,7 +354,7 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
     KeyError at render time rather than silently fall back."""
     from typing import get_args
 
-    from agent.graph._system_prompt import _COMMUNICATION_STYLE_SECTIONS
+    from agent.graph.system_prompt import _COMMUNICATION_STYLE_SECTIONS
     from shared.config.agent import AgentSettings
 
     annotation = AgentSettings.model_fields["agent_communication_style"].annotation
@@ -381,7 +381,7 @@ def test_off_style_is_absent_from_the_full_system_prompt(monkeypatch: pytest.Mon
     """End-to-end: build_system_prompt() carries no trace of the communication
     style section when the style is 'off' — not just the leaf function."""
     monkeypatch.setattr(settings.agent, "agent_communication_style", "off")
-    from agent.graph._system_prompt import build_system_prompt
+    from agent.graph.system_prompt import build_system_prompt
 
     prompt = build_system_prompt()
 
@@ -405,7 +405,7 @@ def test_user_tone_section_gating(
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", enabled)
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
 
-    from agent.graph._system_prompt import _user_tone_section
+    from agent.graph.system_prompt import _user_tone_section
 
     rendered = _user_tone_section()
 
@@ -419,7 +419,7 @@ def test_user_tone_defaults_on_for_non_claude(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
 
-    from agent.graph._system_prompt import _user_tone_section
+    from agent.graph.system_prompt import _user_tone_section
 
     assert _user_tone_section().startswith("# Communicating with the user\n\n")
 
@@ -437,7 +437,7 @@ def test_user_tone_uses_strong_gemini_variant(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
     monkeypatch.setattr(settings.lm, "llm_model", gemini_id)
 
-    from agent.graph._system_prompt import _user_tone_section
+    from agent.graph.system_prompt import _user_tone_section
 
     rendered = _user_tone_section()
 
@@ -450,7 +450,7 @@ def test_user_tone_defaults_off_for_claude(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", None)
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
 
-    from agent.graph._system_prompt import _user_tone_section
+    from agent.graph.system_prompt import _user_tone_section
 
     assert _user_tone_section() == ""
 
@@ -461,7 +461,7 @@ def test_user_tone_claude_variant_requires_explicit_enablement(
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
 
-    from agent.graph._system_prompt import _user_tone_section
+    from agent.graph.system_prompt import _user_tone_section
 
     rendered = _user_tone_section()
 
@@ -474,7 +474,7 @@ def test_user_tone_unknown_model_uses_light_variant(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
     monkeypatch.setattr(settings.lm, "llm_model", "unknown-model-v1")
 
-    from agent.graph._system_prompt import _user_tone_section
+    from agent.graph.system_prompt import _user_tone_section
 
     assert "State conclusions and judgments directly" in _user_tone_section()
 
@@ -485,7 +485,7 @@ def test_user_tone_section_stays_semantic_not_api_specific(
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", True)
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
 
-    from agent.graph._system_prompt import _user_tone_section
+    from agent.graph.system_prompt import _user_tone_section
 
     rendered = _user_tone_section()
 
@@ -518,7 +518,7 @@ def test_knowledge_cutoff_appears_for_known_model(monkeypatch: pytest.MonkeyPatc
     """When the current model has an entry in MODEL_KNOWLEDGE_CUTOFF,
     build_system_prompt() appends a 'Knowledge cutoff: YYYY-MM' line."""
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
-    from agent.graph._system_prompt import build_system_prompt
+    from agent.graph.system_prompt import build_system_prompt
 
     prompt = build_system_prompt()
     assert "Knowledge cutoff: 2026-01" in prompt
@@ -528,7 +528,7 @@ def test_knowledge_cutoff_absent_for_unknown_model(monkeypatch: pytest.MonkeyPat
     """When the model is not in MODEL_KNOWLEDGE_CUTOFF, no cutoff line is
     appended — the prompt just omits it rather than crashing."""
     monkeypatch.setattr(settings.lm, "llm_model", "unknown-model-v1")
-    from agent.graph._system_prompt import build_system_prompt
+    from agent.graph.system_prompt import build_system_prompt
 
     prompt = build_system_prompt()
     assert "Knowledge cutoff:" not in prompt
@@ -578,7 +578,7 @@ def test_cross_machine_delegation_section_gating(
 ):
     monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", enabled)  # pyright: ignore[reportUnknownArgumentType]
 
-    from agent.graph._system_prompt import _cross_machine_delegation_section
+    from agent.graph.system_prompt import _cross_machine_delegation_section
 
     rendered = _cross_machine_delegation_section()
 
@@ -593,7 +593,7 @@ def test_cross_machine_delegation_section_is_verbatim(monkeypatch: pytest.Monkey
     change anywhere in the sentence fails this test on purpose."""
     monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", True)
 
-    from agent.graph._system_prompt import _cross_machine_delegation_section
+    from agent.graph.system_prompt import _cross_machine_delegation_section
 
     rendered = _cross_machine_delegation_section()
 
@@ -608,7 +608,7 @@ def test_cross_machine_delegation_section_names_no_api_detail(monkeypatch: pytes
     prompt sections describe semantics, not call syntax)."""
     monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", True)
 
-    from agent.graph._system_prompt import _cross_machine_delegation_section
+    from agent.graph.system_prompt import _cross_machine_delegation_section
 
     rendered = _cross_machine_delegation_section()
 
@@ -621,7 +621,7 @@ def test_cross_machine_delegation_hint_in_full_prompt_when_on(monkeypatch: pytes
     the assembled system prompt, rendered after the delegation check."""
     monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", True)
 
-    from agent.graph._system_prompt import build_system_prompt
+    from agent.graph.system_prompt import build_system_prompt
 
     prompt = build_system_prompt()
 
@@ -636,7 +636,7 @@ def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off(
     assembled prompt entirely."""
     monkeypatch.setattr(settings.agent, "prompt_cross_machine_delegation_enabled", False)
 
-    from agent.graph._system_prompt import build_system_prompt
+    from agent.graph.system_prompt import build_system_prompt
 
     prompt = build_system_prompt()
 
@@ -657,7 +657,7 @@ def test_workspace_section_names_the_history_dump(
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", True)
     monkeypatch.setattr(settings.agent, "history_dump_enabled", True)
 
-    from agent.graph._system_prompt import _workspace_section
+    from agent.graph.system_prompt import _workspace_section
 
     rendered = _workspace_section()
     assert "message-history/" in rendered
@@ -675,7 +675,7 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
     spending — recorded with its length + digest, so which variant landed is
     identifiable without storing the text. A section returning "" contributed
     nothing and records nothing."""
-    from agent.graph import _system_prompt
+    from agent.graph import system_prompt
     from shared import plugin_activation
     from shared.plugin_context import PluginContext
 
@@ -693,20 +693,20 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
     def silent_section() -> str:
         return ""
 
-    saved = list(_system_prompt._SYSTEM_PROMPT_SECTIONS)
+    saved = list(system_prompt._SYSTEM_PROMPT_SECTIONS)
     try:
         # Isolate the build: touching the `ava` namespace earlier in the process
         # (any test that hits an `ava.*` miss) loads the builtin plugins, whose
         # sections are registered WITH plugin identity — their records would
         # land in `recorded` and this exact-list assertion would fail depending
         # on what ran before. Build with only the two sections under test.
-        _system_prompt._SYSTEM_PROMPT_SECTIONS[:] = []
+        system_prompt._SYSTEM_PROMPT_SECTIONS[:] = []
         with PluginContext("myplugin"):
-            _system_prompt.register_system_prompt_section(loud_section)
-            _system_prompt.register_system_prompt_section(silent_section)
-        _system_prompt.build_system_prompt()
+            system_prompt.register_system_prompt_section(loud_section)
+            system_prompt.register_system_prompt_section(silent_section)
+        system_prompt.build_system_prompt()
     finally:
-        _system_prompt._SYSTEM_PROMPT_SECTIONS[:] = saved
+        system_prompt._SYSTEM_PROMPT_SECTIONS[:] = saved
 
     assert [(p, s, i) for p, s, i, _d in recorded] == [
         ("myplugin", "systemPromptSections", "loud_section")

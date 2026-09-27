@@ -1,7 +1,7 @@
 """Agent-runtime face of the ava_fleet plugin — the fleet + reduce-context-switch
 prompt sections.
 
-Loaded only in the agent process: `agent._extensions` imports this module after
+Loaded only in the agent process: `agent.extensions` imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin's SDK
 **surface** — `ava.self.set_label`, the `ava.ui` notice members,
 the `ava.tasks` registry namespace, and the `agents.spawn` label wrap — lives
@@ -10,7 +10,7 @@ in `plugin.py` and loads in agent-launched children too (task #3633).
 
 from __future__ import annotations
 
-from agent.graph._system_prompt import register_system_prompt_section
+from agent.graph.system_prompt import register_system_prompt_section
 from shared.config import settings
 
 
