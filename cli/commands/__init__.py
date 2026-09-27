@@ -43,12 +43,6 @@ from cli.commands._firewall import (
     cmd_firewall_status,
     cmd_firewall_sync,
 )
-from cli.commands._grafana_render import cmd_grafana_render
-from cli.commands._lgtm import (
-    cmd_lgtm_off,
-    cmd_lgtm_on,
-    cmd_lgtm_status,
-)
 from cli.commands._pitr_activation import (
     cmd_pitr_activate,
     cmd_pitr_rollback,
@@ -108,10 +102,17 @@ from cli.commands.extensions.skill import (
     cmd_skill_update,
     cmd_skill_upgrade,
 )
-from cli.commands.logs import (
+from cli.commands.observability.grafana_render import cmd_grafana_render
+from cli.commands.observability.lgtm import (
+    cmd_lgtm_off,
+    cmd_lgtm_on,
+    cmd_lgtm_status,
+)
+from cli.commands.observability.logs import (
     cmd_logs_retention,
     cmd_logs_rotate,
 )
+from cli.commands.observability.trace import cmd_trace_ship
 from cli.commands.pitr import (
     cmd_pitr_drill,
     cmd_pitr_multipart_abort,
@@ -131,7 +132,6 @@ from cli.commands.stop import (
     cmd_restart,
     cmd_stop,
 )
-from cli.commands.trace import cmd_trace_ship
 
 __all__ = [
     "cmd_boot_unit_install",

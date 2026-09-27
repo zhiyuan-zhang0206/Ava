@@ -18,7 +18,8 @@ import pytest
 from dotenv import dotenv_values
 from psycopg.conninfo import conninfo_to_dict
 
-from cli.commands import _lgtm_native, observatory_urls
+from cli.commands.observability import lgtm_native as _lgtm_native
+from cli.commands.observability import observatory_urls
 from shared import cluster
 from shared.config import settings
 

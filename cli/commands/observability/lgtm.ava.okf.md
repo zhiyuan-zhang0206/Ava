@@ -10,8 +10,8 @@ tags:
 
 # Native LGTM lifecycle
 
-`_lgtm.py` gates converge on the home marker or `observability-station`
-capability. `_lgtm_native.py` downloads and verifies the pinned archives,
+`lgtm.py` gates converge on the home marker or `observability-station`
+capability. `lgtm_native.py` downloads and verifies the pinned archives,
 renders native configs, and registers launchd jobs on Darwin arm64 or user
 systemd units on Linux amd64. `_lgtm_assets.py` holds the common command specs
 and selects platform-specific URLs, checksums, and archive members from
@@ -54,6 +54,6 @@ Grafana. Data directories remain intact. Tempo remains a remote service and
 is outside this lifecycle.
 
 Operator prerequisites, defaults, and storage paths are documented in
-[the deployment guide](../../deploy/lgtm/README.md). User lingering and WSL
+[the deployment guide](../../../deploy/lgtm/README.md). User lingering and WSL
 startup policy are explicit host preparation; native LGTM does not configure
 them as a side effect.

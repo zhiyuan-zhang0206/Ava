@@ -15,8 +15,9 @@ import sys
 from pathlib import Path
 
 from cli.commands._rendered_file import write_rendered_guarded
-from cli.commands.observatory_urls import _atomic_write
 from shared import telemetry
+
+from .observatory_urls import _atomic_write
 
 # The one provisioning file converge generates instead of copying verbatim
 # (task #3697 S3): rendered from the metric registries, so plugin

@@ -22,7 +22,7 @@ on:
       - 'scripts/prove_runtime_prepare.py'
       - 'scripts/prepare_otel_release.py'
       - 'scripts/prove_runtime_otel.py'
-      - 'cli/commands/_otel_collector.py'
+      - 'cli/commands/observability/otel_collector.py'
       - 'shared/paths.py'
       - 'shared/runtime_plugins.py'
       - 'cli/commands/_release_plugin_probe.py'
@@ -158,7 +158,7 @@ jobs:
           PY
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py scripts/prove_normal_release.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/_otel_collector.py cli/commands/release_inventory.py cli/commands/_update_bootstrap cli/commands/_update_agent_runner.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py scripts/prove_updater_bootstrap.py scripts/prove_normal_release.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/observability/otel_collector.py cli/commands/release_inventory.py cli/commands/_update_bootstrap cli/commands/_update_agent_runner.py
       - name: Type-check publication input reader
         run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/prove_runtime_publication_input.py
       - name: Type-check managed-writer activation chain proof

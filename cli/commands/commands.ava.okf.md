@@ -19,10 +19,10 @@ no registry or plugin mechanism, the wiring is the parser.
 
 Most command modules follow these two naming groups:
 
-- **public** (`start.py`, `stop.py`, `status.py`, `logs.py`, `update.py`,
+- **public** (`start.py`, `stop.py`, `status.py`, `observability/logs.py`, `update.py`,
   `cluster.py`, `agents/control.py`, `management/config.py`, `extensions/plugins.py`, `extensions/skill.py`,
   `extensions/mcp.py`, `pitr.py`, `extensions/memory.py`, `management/presets.py`, `agents/pty.py`,
-  `management/schedules.py`, `trace.py`, `migrations.py`,
+  `management/schedules.py`, `observability/trace.py`, `migrations.py`,
   `cluster_lifecycle.py`, `agents/timeline.py`, `agents/impersonation.py`,
   `agents/impersonation_relay.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
@@ -36,10 +36,11 @@ Most command modules follow these two naming groups:
   ladder's lease/stage telemetry, recovery, and gateway readiness. Also:
   `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_start_gui_chain` /
   `_start_gui_handover` (the macOS GUI-chain warning and its handover),
-  `_ownership_preflight`, `_pkg_source`, `_lgtm`, `_claude_code_plugin`,
+  `_ownership_preflight`, `_pkg_source`, `_claude_code_plugin`,
   `_cluster_health` / `_cluster_rollback` / `_cluster_cron` /
-  `_cluster_watchdog_probe` (`cluster_instance.py` and `pgbouncer.py` are two
-  more, under public names).
+  `_cluster_watchdog_probe` (`cluster_instance.py`, `pgbouncer.py`,
+  `observability/lgtm.py`, `observability/lgtm_native.py`, and
+  `observability/otel_collector.py` are more, under public names).
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
 restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`

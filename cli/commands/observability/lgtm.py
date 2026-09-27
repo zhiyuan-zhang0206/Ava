@@ -91,8 +91,10 @@ def cmd_lgtm_on() -> int:
     stack up. Writes the `$AVA_HOME/lgtm-host` marker (so converge and the
     gateway watchdog keep the stack alive from now on), installs current native
     backends, and runs the idempotent deploy/lgtm/start.sh. Safe to re-run."""
-    from cli.commands import _lgtm_native, _repo
+    from cli.commands import _repo
     from shared.paths import ava_home
+
+    from . import lgtm_native as _lgtm_native
 
     marker = lgtm_host_marker()
     if not marker.exists():
@@ -118,8 +120,9 @@ def cmd_lgtm_off() -> int:
     endpoint once at process start, so already-running services keep paying
     export-retry cost until restarted, and services started while OFF stay
     export-disabled until restarted after ON."""
-    from cli.commands._lgtm_native import bootout_native_jobs
     from shared.paths import ava_home
+
+    from .lgtm_native import bootout_native_jobs
 
     marker = lgtm_host_marker()
     if marker.exists():
@@ -150,8 +153,9 @@ def print_lgtm_status() -> None:
 
     Caller gates on `is_lgtm_host()` — this home owns the configured backend listeners.
     """
-    from cli.commands._lgtm_native import backend_pids
     from shared.paths import ava_home
+
+    from .lgtm_native import backend_pids
 
     for name, pid in backend_pids(ava_home() / "lgtm/native").items():
         print(f"  com.ava.{name:<9} {pid or 'not-running'}")

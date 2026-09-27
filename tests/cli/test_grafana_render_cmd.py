@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _grafana_render
+from cli.commands.observability import grafana_render as _grafana_render
 from cli.parsers import build_parser
 
 

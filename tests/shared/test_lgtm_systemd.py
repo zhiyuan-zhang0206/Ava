@@ -17,7 +17,7 @@ from typing import cast
 import pytest
 import yaml
 
-from cli.commands import _lgtm_native
+from cli.commands.observability import lgtm_native as _lgtm_native
 from shared import lgtm_systemd
 from shared.config import settings
 from shared.lgtm_local import BACKENDS, HEALTH_PATHS, backend_urls, binary_path

@@ -78,8 +78,9 @@ def _require_ship_config() -> _ShipTarget:
             "mirror to Tempo."
         )
     if machine_role() == frozenset({"agent-runner"}):
-        from cli.commands._otel_collector import gateway_otel_ingress_endpoint
         from shared.cluster_auth import bearer_header
+
+        from .otel_collector import gateway_otel_ingress_endpoint
 
         secret = settings.data_plane.cluster_secret
         if not secret:
