@@ -6,6 +6,7 @@ The effective-model lookup's resolution order is pinned here too (task #4674).
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -101,6 +102,40 @@ def test_notice_body_cannot_expand_roster_card(db_conn: psycopg.Connection) -> N
     assert card.highest_notice_priority == "P0"
     assert "notices_awaiting_response" not in AgentCard.model_fields
     assert len(card.model_dump_json()) < 1500
+
+
+def test_open_impersonation_status_reflects_lease_phase(db_conn: psycopg.Connection) -> None:
+    """Only an `active` lease means the agent is actually taken over — a
+    `requested` lease still carries an open session number (so the UI can gate
+    the force-expire action) but the native agent keeps running until
+    activation reaches its next safe boundary."""
+    seed(db_conn, [(1, "user", "idling")])
+    lease_id = str(uuid4())
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_impersonations"
+            "(id, agent_id, source, machine, status, ttl_seconds, expires_at) "
+            "VALUES (%s, 1, 'external_agent:codex', 'test-machine', 'requested', "
+            "3600, clock_timestamp() + interval '1 hour')",
+            (lease_id,),
+        )
+    db_conn.commit()
+
+    requested_card = select_roster(db_conn).agents[0]
+    assert requested_card.open_impersonation_session_id is not None
+    assert requested_card.open_impersonation_status == "requested"
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_impersonations SET status = 'active', "
+            "activated_at = clock_timestamp() WHERE id = %s",
+            (lease_id,),
+        )
+    db_conn.commit()
+
+    active_card = select_roster(db_conn).agents[0]
+    assert active_card.open_impersonation_session_id == requested_card.open_impersonation_session_id
+    assert active_card.open_impersonation_status == "active"
 
 
 @pytest.mark.parametrize("limit", [0, 201])

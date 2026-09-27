@@ -1,23 +1,21 @@
-import { Loader2, PowerOff, RotateCw } from "lucide-react";
+import { Loader2, RotateCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { FLEX } from "@/lib/layout";
 import type { AgentRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { PendingAction } from "../agent-row";
 
-// On-row feedback and direct actions. A takeover can be ended without the
-// context menu; the button stays visible on touch screens.
+// On-row feedback for in-flight actions (resurrect / restart / terminate /
+// compact / force-expire). Ending a takeover is a context-menu-only action
+// (agent-row.tsx's "End external takeover session" item) — no on-row button.
 export function RowActions({
   agent,
   pending,
   onResurrect,
-  onForceExpire,
 }: {
   agent: AgentRow;
   pending: PendingAction | undefined;
   onResurrect: () => void;
-  onForceExpire: () => void;
 }) {
   const t = useTranslations("agentRow");
   // Leave room for the ScrollArea vertical scrollbar (10px).
@@ -62,22 +60,6 @@ export function RowActions({
     return (
       <div className={wrapperCls}>
         <Spinner color="text-amber-500" />
-      </div>
-    );
-  }
-
-  if (agent.open_impersonation_session_id != null && pending === undefined) {
-    return (
-      <div className={wrapperCls}>
-        <button
-          type="button"
-          onClick={onForceExpire}
-          className={cn(FLEX, "items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-destructive hover:bg-destructive/10")}
-          aria-label={t("forceExpire")}
-          title={t("forceExpire")}
-        >
-          <PowerOff className="size-3" /> {t("endTakeover")}
-        </button>
       </div>
     );
   }
