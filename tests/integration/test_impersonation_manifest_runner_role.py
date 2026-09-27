@@ -348,7 +348,7 @@ def test_runner_expiry_replay_cannot_freeze_failed_receipt(
 
 
 @pytest.mark.parametrize("ending", ["abort", "terminate"])
-def test_runner_replay_after_non_expiry_end_never_raises(
+def test_runner_replay_after_abort_or_termination_certifies(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     v1_lease: dict[str, Any],
@@ -356,9 +356,8 @@ def test_runner_replay_after_non_expiry_end_never_raises(
     monkeypatch: pytest.MonkeyPatch,
     ending: str,
 ) -> None:
-    """A supervisor abort closes admission like expiry, so replay certifies it;
-    the terminate trigger ends in SQL with admission open, so replay stays
-    pending instead of hitting the freeze gate's refusal."""
+    """A supervisor abort and the agent-termination trigger both close
+    admission like expiry, so replay freezes the sealed receipts and certifies."""
     participant = restricted_receipt
     _restore_receipt_door(db_conn)
     seal_local_participant(participant)
@@ -380,13 +379,8 @@ def test_runner_replay_after_non_expiry_end_never_raises(
         db_conn.commit()
     ended = history.resolve(participant.agent_id, 0)
     assert ended["ended_at"] is not None
+    assert ended["manifest_admission_closed_at"] is not None
     reader.consume_recorded_events(ended)
     after = history.resolve(participant.agent_id, 0)
-    if ending == "abort":
-        assert after["manifest_admission_closed_at"] is not None
-        assert after["manifest_frozen_at"] is not None
-        assert after["events_completed_at"] is not None
-    else:
-        assert after["manifest_admission_closed_at"] is None
-        assert after["manifest_frozen_at"] is None
-        assert after["events_completed_at"] is None
+    assert after["manifest_frozen_at"] is not None
+    assert after["events_completed_at"] is not None
