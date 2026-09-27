@@ -231,7 +231,7 @@ after pinning the logical-backup passphrase — and `remote-units`;
 The unit enrollment secret (minted at a unit's first bundle: its join or the
 cutover) has operator rotation and revocation and keys the coordinator
 channel's request authentication and sealing
-([enrollment](../../shared/cluster/authority/wiring.ava.okf.md#unit-enrollment)).
+([enrollment](../../shared/cluster/authority/unit-enrollment.ava.okf.md)).
 The only cross-release contract, the frozen v1 image-exec handoff (CLI and the
 `release_image_exec` ops kind), and the port block's reserved `coordinator`
 slot exist ([handoff](../../cli/release_handoff/release_handoff.ava.okf.md)).
