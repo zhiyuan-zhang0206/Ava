@@ -152,7 +152,7 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
 def _connect_redis() -> "redis.Redis":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     import redis as _redis_lib
 
-    from shared.redis_client import _RESILIENCE_KWARGS
+    from shared.redis_client import RESILIENCE_KWARGS
 
     if not settings.data_plane.redis_url:
         raise RuntimeError(
@@ -171,7 +171,7 @@ def _connect_redis() -> "redis.Redis":  # noqa: F821  # pyright: ignore[reportUn
         decode_responses=True,
         # Merge so the explicit 10s read bound overrides the shared None
         # instead of colliding with it as a duplicate keyword.
-        **{**_RESILIENCE_KWARGS, "socket_timeout": 10.0},
+        **{**RESILIENCE_KWARGS, "socket_timeout": 10.0},
     )
 
 
