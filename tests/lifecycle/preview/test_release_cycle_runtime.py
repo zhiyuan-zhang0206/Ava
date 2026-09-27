@@ -18,6 +18,7 @@ from scripts.preview import release_cycle_state as state
 from shared.native_process.ownership import OwnedProcess
 from shared.os_boot_unit import BootStartAction, BootUnitContext
 from shared.runtime_release import VerifiedRelease
+from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_journal import request_record as request_record
 
 
@@ -40,9 +41,9 @@ def _native(*, live: bool = False, failed: bool = False) -> LinuxJob:
 def test_only_closed_successful_requested_transition_counts_as_complete(
     request_record: Request, change: str | None
 ) -> None:
-    operation = Operation(
+    operation = at_phase(
+        "observing" if change == "incomplete" else "complete",
         request=request_record,
-        phase="observing" if change == "incomplete" else "complete",
         direction="previous" if change == "rollback" else "candidate",
         error="retained error" if change == "error" else None,
     )
@@ -58,9 +59,9 @@ def test_already_retired_previous_operation_never_reacquires_mutation_authority(
     request_record: Request, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     native = _native()
-    operation = Operation(
+    operation = at_phase(
+        "complete",
         request=request_record,
-        phase="complete",
         launch={"kind": LINUX, "inert": True},
         launch_attempted=True,
         retirement=Retirement(terminal=native.model_dump(mode="json"), state="absent"),
@@ -333,9 +334,9 @@ def test_fixture_runs_isolated_before_trusting_its_installed_origin(
 def test_executor_finishing_between_journal_and_native_reads_uses_final_same_attempt(
     request_record: Request, monkeypatch: pytest.MonkeyPatch, *, changed_attempt: bool
 ) -> None:
-    before = Operation(
+    before = at_phase(
+        "resuming",
         request=request_record,
-        phase="resuming",
         launch={"kind": LINUX, "unit": "same"},
         launch_attempted=True,
     )

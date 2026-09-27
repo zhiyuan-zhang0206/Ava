@@ -42,7 +42,8 @@ Most command modules follow these two naming groups:
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
 its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
 own prepare/drain and runtime capability checks; `maintenance_stop` and
-`maintenance_data_plane` verify resource exits. `_pooler_stop.OwnedPooler` owns
+`maintenance_data_plane` verify resource exits, and `maintenance_data_plane`
+performs a release's write-generation fence and admission. `_pooler_stop.OwnedPooler` owns
 ordinary pooler stop admission for maintenance and startup recovery: exact native
 birth and listener proof precede a durable stop intent and the first SIGINT
 (`WAIT_FOR_SERVERS`). Retries and already-closed listeners only wait; PgBouncer

@@ -117,4 +117,11 @@ payload for exactly one unit in one operation.
   (`cli/commands/_otel_collector.py`) dials the owner-only socket as
   `ava_monitor` by `peer`, so its rendered config names no credential and a
   rollout leaves it working.
-- The release transition's fence/authorize phases are not wired yet.
+- **Release** (`cli/release_transition/authority.py`, under the home operation
+  lock, with `OperationAuthority(operation, direction)`): preflight
+  `check_invariant` -> `fencing`: `revoke` -> owned pooler stopped (escalating;
+  no listener left) -> `close_revoked` -> `prune` -> `authorizing`:
+  `mint_generation` -> pooler serving the pending pair -> a pooled `SELECT 1`
+  as each login -> `activate`; observation re-checks the invariant and that
+  `stale_sessions` is empty. The journal records each step's intent and
+  receipt ([[cli/release_transition/execution.ava.okf.md|release execution]]).

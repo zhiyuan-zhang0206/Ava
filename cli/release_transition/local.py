@@ -101,6 +101,34 @@ class LocalTransition:
             # the selected image's explicit seed.
             root_macos.require_stopped(operation)
 
+    def preflight_authority(self) -> None:
+        """Read-only: exactly one admitted write generation exists to fence."""
+        from cli.release_transition import authority
+
+        authority.preflight()
+
+    def fence(self, journal: Journal) -> None:
+        """Revoke the direction's write generation once its root is gone."""
+        from cli.commands.root_driver import require_root_absent
+        from cli.release_transition import authority
+
+        self.request.require_configuration()
+        require_root_absent()
+        authority.fence(journal)
+
+    def authorize(self, journal: Journal) -> None:
+        """Admit a new write generation for the selected image before it starts."""
+        from cli.commands.root_driver import require_root_absent
+        from cli.release_transition import authority
+
+        self.request.require_configuration()
+        require_root_absent()
+        operation = journal.operation
+        target = (
+            self.request.candidate if operation.direction == "candidate" else self.request.previous
+        )
+        authority.authorize(journal, target)
+
     def image(self, operation: Operation) -> VerifiedRelease:
         return self.candidate if operation.direction == "candidate" else self.previous
 

@@ -19,6 +19,7 @@ from shared.native_process import ownership
 from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import EXECUTOR_BIRTH, Harness
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness
+from tests.lifecycle.transition.phases import advance_to
 
 HELPER = Birth(pid=700, birth=7.5, starttime=None)
 OTHER_HELPER = Birth(pid=702, birth=12.5, starttime=None)
@@ -33,7 +34,7 @@ def _custody(**changes: Any) -> dict[str, JsonValue]:
 def _advance(harness: Harness, *phases: Phase) -> None:
     with journal.exclusive(harness.path) as current:
         for phase in phases:
-            current.advance(phase)
+            advance_to(current, phase)
 
 
 def _starting(harness: Harness) -> None:
@@ -117,8 +118,7 @@ def test_new_helper_or_direction_replaces_an_unreceipted_intent(harness: Harness
     with journal.exclusive(harness.path) as current:
         current.root_started(_custody(helper=OTHER_HELPER, root=ROOT))
         current.recover("candidate failed")
-        for phase in ("selecting", "starting"):
-            current.advance(phase)
+        advance_to(current, "starting")
         # The recovery direction starts over; the candidate receipt is history.
         current.root_intent(_custody(direction="previous"))
     assert _root(harness) == RootCustody.model_validate(_custody(direction="previous"))

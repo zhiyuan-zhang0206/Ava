@@ -19,6 +19,7 @@ from cli.release_transition import launcher_linux as linux
 from cli.release_transition.request import ReleaseRef, Request
 from shared.native_process.ownership import OwnedProcess
 from shared.runtime_release import VerifiedRelease
+from tests.lifecycle.transition.phases import advance_to
 
 
 def _constant[T](value: T) -> Callable[..., T]:
@@ -501,15 +502,7 @@ def test_resume_completed_operation_never_observes_or_dispatches_native_job(
     _closed_attempt(planned, monkeypatch)
     path = Path(str(planned["operation"]))
     with journal.exclusive(path) as current:
-        remaining: tuple[journal.Phase, ...] = (
-            "selecting",
-            "starting",
-            "observing",
-            "resuming",
-            "complete",
-        )
-        for phase in remaining:
-            current.advance(phase)
+        advance_to(current, "complete")
     before = path.read_bytes()
     monkeypatch.setattr(linux, "_command", _unexpected)
     monkeypatch.setattr(linux, "_properties", _unexpected)
@@ -587,15 +580,7 @@ def test_reboot_never_reopens_unresolved_custody_or_signals_reappeared_executor(
     terminal = linux.readback(planned)
     with journal.exclusive(path) as current:
         if complete:
-            phases: tuple[journal.Phase, ...] = (
-                "selecting",
-                "starting",
-                "observing",
-                "resuming",
-                "complete",
-            )
-            for phase in phases:
-                current.advance(phase)
+            advance_to(current, "complete")
         current.request_retirement(terminal.model_dump(mode="json"))
         if absent:
             current.record_retired()

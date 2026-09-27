@@ -20,6 +20,7 @@ from cli.release_transition.journal import (
 )
 from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import ReleaseRef, Request
+from tests.lifecycle.transition.phases import advance_to, journal_fence, journal_issue
 
 
 @pytest.fixture
@@ -82,11 +83,23 @@ class Effects(LocalTransition):
     def preflight(self) -> None:
         self._effect("prepared")
 
+    def preflight_authority(self) -> None:
+        assert read_operation(self.request.path).phase == "prepared"
+        self.events.append(("authority-preflight", "candidate"))
+
     def quiesce(self) -> None:
         self._effect("quiescing")
 
     def stop(self, operation: Operation) -> None:
         assert operation == self._effect("stopping")
+
+    def fence(self, journal: Journal) -> None:
+        assert journal.operation == self._effect("fencing")
+        journal_fence(journal)
+
+    def authorize(self, journal: Journal) -> None:
+        assert journal.operation == self._effect("authorizing")
+        journal_issue(journal)
 
     def select(self, operation: Operation) -> None:
         if self.selector != operation.direction:
@@ -113,12 +126,17 @@ def test_candidate_start_failure_closes_candidate_before_selecting_previous(
         drive(journal, effects)
     assert effects.events == [
         ("prepared", "candidate"),
+        ("authority-preflight", "candidate"),
         ("quiescing", "candidate"),
         ("stopping", "candidate"),
+        ("fencing", "candidate"),
         ("selecting", "candidate"),
+        ("authorizing", "candidate"),
         ("starting", "candidate"),
         ("stopping", "previous"),
+        ("fencing", "previous"),
         ("selecting", "previous"),
+        ("authorizing", "previous"),
         ("starting", "previous"),
         ("observing", "previous"),
         ("resuming", "previous"),
@@ -126,9 +144,16 @@ def test_candidate_start_failure_closes_candidate_before_selecting_previous(
     final = read_operation(request_record.path)
     assert final.terminal and final.direction == "previous"
     assert effects.selector == "previous"
+    # The failed candidate's generation 1 is fenced; the predecessor runs on 2.
+    fenced = [(fence.direction, fence.generation.number) for fence in final.db_fences]
+    issued = [(issue.direction, issue.number) for issue in final.db_issues]
+    assert fenced == [("candidate", 0), ("previous", 1)]
+    assert issued == [("candidate", 1), ("previous", 2)]
 
 
-@pytest.mark.parametrize("phase", ["quiescing", "stopping", "selecting", "resuming"])
+@pytest.mark.parametrize(
+    "phase", ["quiescing", "stopping", "fencing", "selecting", "authorizing", "resuming"]
+)
 def test_uncertain_effect_keeps_phase_and_never_invents_rollback(
     request_record: Request, phase: str
 ) -> None:
@@ -149,7 +174,10 @@ def test_uncertain_effect_keeps_phase_and_never_invents_rollback(
     assert effects.selector_writes == 1
 
 
-@pytest.mark.parametrize("phase", ["stopping", "selecting", "starting", "observing", "resuming"])
+@pytest.mark.parametrize(
+    "phase",
+    ["stopping", "fencing", "selecting", "authorizing", "starting", "observing", "resuming"],
+)
 def test_process_death_retains_exact_decision_for_reconciliation(
     request_record: Request, phase: str
 ) -> None:
@@ -171,10 +199,7 @@ def test_failed_recovery_remains_held_instead_of_looping_between_releases(
     create(request_record)
     effects = Effects(request_record, fail="starting")
     with exclusive(request_record.path) as journal:
-        journal.advance("quiescing")
-        journal.advance("stopping")
-        journal.advance("selecting")
-        journal.advance("starting")
+        advance_to(journal, "starting")
         journal.recover("candidate failed")
         with pytest.raises(RuntimeError, match="native failure"):
             drive(journal, effects)
@@ -184,14 +209,10 @@ def test_failed_recovery_remains_held_instead_of_looping_between_releases(
 
 
 def _reach_resuming(journal: Journal, direction: Direction) -> None:
-    for phase in ("quiescing", "stopping", "selecting", "starting"):
-        journal.advance(phase)
+    advance_to(journal, "starting")
     if direction == "previous":
         journal.recover("candidate failed")
-        journal.advance("selecting")
-        journal.advance("starting")
-    journal.advance("observing")
-    journal.advance("resuming")
+    advance_to(journal, "resuming")
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -236,6 +257,7 @@ def test_quiescing_rechecks_predecessor_after_readonly_preflights_before_any_dis
         raise RuntimeError("positive control reached stop")
 
     monkeypatch.setattr(transition, "preflight", lambda: None)
+    monkeypatch.setattr(transition, "preflight_authority", lambda: None)
     monkeypatch.setattr(root_service, "preflight", preflight)
     monkeypatch.setattr(agent_pause, "prepare", effect("prepare"))
     monkeypatch.setattr(agent_pause, "drain", effect("drain"))

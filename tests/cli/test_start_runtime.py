@@ -8,6 +8,7 @@ import os
 import platform
 import shlex
 from argparse import Namespace
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -452,6 +453,13 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
 
 
+def _observing_generation(observed: list[str]) -> Callable[[object], None]:
+    def verified(_operation: object) -> None:
+        observed.append("write-generation")
+
+    return verified
+
+
 @pytest.mark.parametrize("failed", [None, "gateway", "delivery-watchdog", "configuration"])
 def test_operation_observation_requires_every_selected_service_ready(
     image: VerifiedRelease,
@@ -459,7 +467,7 @@ def test_operation_observation_requires_every_selected_service_ready(
     failed: str | None,
 ) -> None:
     from cli.commands import _repo
-    from cli.release_transition import stage
+    from cli.release_transition import authority, stage
     from ops import spec as ops_spec
     from shared import machine, os_boot_unit
     from shared.machine import MachineRole
@@ -529,6 +537,9 @@ def test_operation_observation_requires_every_selected_service_ready(
     monkeypatch.setattr(client, "root_process", lambda: root)
     monkeypatch.setattr(os_boot_unit, "manager_properties", native_properties)
     monkeypatch.setattr(os_boot_unit, "process_cgroup", process_group)
+    # The write-generation check runs on real PostgreSQL in
+    # tests/lifecycle/db_authority/test_release_fence.py; here only its place.
+    monkeypatch.setattr(authority, "verify_active", _observing_generation(observed))
     if failed is None:
         assert stage.observe_operation(home / "operation.json") == 0
     elif failed == "configuration":
@@ -537,7 +548,9 @@ def test_operation_observation_requires_every_selected_service_ready(
     else:
         with pytest.raises(RuntimeError, match="incomplete service readiness"):
             stage.observe_operation(home / "operation.json")
-    assert observed == ["admitted", "full-roster-readiness"]
+    assert observed == ["admitted", "full-roster-readiness"] + (
+        ["write-generation"] if failed is None else []
+    )
 
 
 @pytest.mark.parametrize("change_at", ["before-identity", "before-settings"])

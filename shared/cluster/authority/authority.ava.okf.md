@@ -86,7 +86,7 @@ A generation backend that authenticated just before its role lost LOGIN may
 appear after the census; its only capability, membership, was revoked in the
 same transaction. A legacy owner racing the cutover is excluded by the
 cutover's precondition (application root absent). The caller stops the owned
-pooler first.
+pooler first. `stale_sessions` is the same census without termination.
 
 ## Invariant
 

@@ -7,13 +7,14 @@ tags: [cluster-lifecycle, release]
 
 # Release transition execution
 
-`execute.py` advances prepared, quiescing, stopping, selecting, starting,
-observing, resuming, and complete. Each phase reconciles actual state. Candidate
-start/observation failure chooses the captured predecessor once, closes the
-candidate, then uses the same select/start/observe path. Recovery never chooses
-another target or loops between releases. A failure while resuming retains
-that phase: admission may already have opened, so it is not an automatic
-rollback boundary.
+`execute.py` advances prepared, quiescing, stopping, fencing, selecting,
+authorizing, starting, observing, resuming, and complete. Each phase reconciles
+actual state. Candidate start/observation failure chooses the captured
+predecessor once, closes the candidate, then uses the same
+fence/select/authorize/start/observe path. Recovery never chooses another
+target or loops between releases. A failure while fencing, authorizing or
+resuming retains that phase: the first two hold for continuation, and resuming
+may already have opened admission, so none is an automatic rollback boundary.
 
 The stop phase closes this unit's writers. Persistent terminals — agent
 shells, coding sessions, watchers, page and schedule runners — do not survive
@@ -48,3 +49,43 @@ steady pinned-image boot action on Linux; on macOS the keeper's pinned seed is. 
 ordinary startup while an operation remains incomplete. Only the exact current
 starting journal revision grants the in-process start capability; child
 processes do not inherit it.
+
+## Write generations
+
+Every direction runs on a fresh database write generation
+([[shared/cluster/authority/authority.ava.okf.md|write-generation authority]]);
+`authority.py` orchestrates it and `cli/commands/maintenance_data_plane.py`
+performs the data-plane effects. The home ledger is the authority; the journal
+(`authority_evidence.py`) carries one `Fence` and one `Issue` per direction:
+intent before each ledger transition, a non-secret receipt after it.
+
+- **prepared** also checks, read-only, that exactly one admitted generation
+  exists: ledger active with nothing pending or unclosed, the catalog
+  invariant for it, no prepared transaction, and a pooler userlist serving
+  exactly it.
+- **fencing** (root absent): `Fence(revoking)` names the ledger's active
+  generation (for a recovery, exactly the candidate's issue), then revoke and
+  the NOLOGIN sweep, the owned pooler stopped (escalated to a kill when the
+  safe shutdown cannot finish; no listener may remain), termination and census
+  until no stale session or prepared transaction survives (ledger `closed`,
+  secret deleted), and a prune without CASCADE; `Fence(closed)` records the
+  census, the pooler outcome and the ledger's drop outcome. A census failure
+  holds, never closes.
+- **authorizing** (target selected, root absent): `Issue(minting)` records the
+  number the ledger will allocate, then mint (secret, `pending`, the two
+  LOGIN roles), a fresh pooler serving exactly the pair, a pooled `SELECT 1` as
+  each login, ledger `active`, and `Issue(authorized)` with its credential
+  digest. A retry reconciles the recorded number exactly or holds; a foreign
+  pending generation or another allocation refuses before any effect.
+- **starting**: the stage refuses unless the ledger's active generation is
+  this direction's authorized issue, so the launch delivers and binds only it.
+- **observing / resuming**: after readiness the stage proves the issued
+  generation is active, the invariant holds, no fenced session survives, the
+  pooler serves only that pair, and both logins answer.
+
+The finite executor itself runs the candidate image, which the boot pass never
+admits to a generation. It adopts, in-process, the OS-user administrator over
+the owner-only socket acting as `ava_gateway` (`peer`, startup
+`-c role=ava_gateway`, which `RESET ALL` keeps): no fence census includes its
+session. PITR operations carry neither record and reuse the active generation.
+Networked homes still refuse before quiescing (`identity.py`).

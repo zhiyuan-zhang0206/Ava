@@ -32,7 +32,12 @@ def start_operation(path: Path) -> int:
     os.environ["AVA_HOME"] = request.home
     os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
     _require_native_root_owner(operation, home)
+    from cli.release_transition.authority import require_issued
     from shared.release_operation import authorized_start
+
+    # The launch delivers the ledger's active generation and binds it into the
+    # launch digest: it must be exactly this direction's authorized issue.
+    require_issued(operation)
 
     release = operation.reference
     with authorized_start(path):
@@ -182,6 +187,10 @@ def observe_operation(path: Path) -> int:
         from cli.release_transition.pitr.transition import observe_postgres
 
         observe_postgres(operation)
+    else:
+        from cli.release_transition.authority import verify_active
+
+        verify_active(operation)
     return 0
 
 

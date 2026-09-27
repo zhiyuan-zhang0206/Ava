@@ -17,12 +17,13 @@ from tests.lifecycle.transition.macos.launchd_fake import (
     Harness,
 )
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness
+from tests.lifecycle.transition.phases import advance_to
 
 
 def _advance(harness: Harness, *phases: journal.Phase) -> None:
     with journal.exclusive(harness.path) as current:
         for phase in phases:
-            current.advance(phase)
+            advance_to(current, phase)
 
 
 def test_retirement_records_intent_before_exact_bootout_and_requires_absence(

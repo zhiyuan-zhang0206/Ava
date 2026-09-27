@@ -16,6 +16,7 @@ from typing import Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
 
+from cli.release_transition.authority_evidence import Fence, Issue, require_coherent
 from cli.release_transition.native import DARWIN, LINUX
 from cli.release_transition.pitr.evidence import PitrProgress, PitrSeal
 from cli.release_transition.request import AnyRequest, PitrRequest, Record, ReleaseRef, Request
@@ -31,7 +32,9 @@ Phase = Literal[
     "prepared",
     "quiescing",
     "stopping",
+    "fencing",
     "selecting",
+    "authorizing",
     "starting",
     "observing",
     "resuming",
@@ -49,8 +52,10 @@ _DARWIN_ENDED = frozenset({"boot-changed", "domain-lost"})
 _NEXT: dict[str, str] = {
     "prepared": "quiescing",
     "quiescing": "stopping",
-    "stopping": "selecting",
-    "selecting": "starting",
+    "stopping": "fencing",
+    "fencing": "selecting",
+    "selecting": "authorizing",
+    "authorizing": "starting",
     "starting": "observing",
     "observing": "resuming",
     "resuming": "complete",
@@ -101,6 +106,9 @@ class Operation(Record):
     # (cli/release_transition/launchd_custody.py::RootCustody). It survives
     # executor attempts; a new direction or helper birth replaces it.
     root: dict[str, JsonValue] | None = None
+    # Write-generation fence and issue per direction (authority_evidence.py).
+    db_fences: tuple[Fence, ...] = ()
+    db_issues: tuple[Issue, ...] = ()
     error: str | None = Field(default=None, max_length=2048)
 
     @model_validator(mode="after")
@@ -146,6 +154,18 @@ class Operation(Record):
         if self.pitr is not None or (self.launch is not None and not _darwin(self.launch)):
             raise ValueError("helper root custody belongs only to a macOS release")
         return self
+
+    @model_validator(mode="after")
+    def coherent_authority(self) -> Self:
+        direction = None if self.pitr is not None else self.direction
+        require_coherent(self.phase, direction, self.db_fences, self.db_issues)
+        return self
+
+    def fence(self, direction: Direction) -> Fence | None:
+        return next((item for item in self.db_fences if item.direction == direction), None)
+
+    def issue(self, direction: Direction) -> Issue | None:
+        return next((item for item in self.db_issues if item.direction == direction), None)
 
     @property
     def terminal(self) -> bool:
@@ -401,6 +421,47 @@ class Journal:
         if next_phases.get(self.operation.phase) != phase:
             raise ValueError(f"invalid release transition {self.operation.phase} -> {phase}")
         return self._replace(phase=phase, error=None)
+
+    def record_fence(self, fence: Fence) -> Operation:
+        """Retain a fence's intent before revocation, then its closure receipt.
+
+        A fence belongs to the fencing direction; its generation never changes
+        and a closure receipt is never replaced.
+        """
+        current = self.operation
+        if current.phase != "fencing" or fence.direction != current.direction:
+            raise ValueError("a write-generation fence is journaled only while fencing")
+        prior = current.fence(fence.direction)
+        if prior == fence:
+            return current
+        if prior is None:
+            if fence.state != "revoking":
+                raise ValueError("a fence records its intent before any closure receipt")
+            return self._replace(db_fences=(*current.db_fences, fence))
+        if prior.state != "revoking" or prior.generation != fence.generation:
+            raise ValueError("a fence cannot change its generation or replace its receipt")
+        fences = tuple(fence if item == prior else item for item in current.db_fences)
+        return self._replace(db_fences=fences)
+
+    def record_issue(self, issue: Issue) -> Operation:
+        """Retain a mint's number before its secret exists, then its admitted generation."""
+        current = self.operation
+        if current.phase != "authorizing" or issue.direction != current.direction:
+            raise ValueError("a write-generation issue is journaled only while authorizing")
+        prior = current.issue(issue.direction)
+        if prior == issue:
+            return current
+        if prior is None:
+            if issue.state != "minting":
+                raise ValueError("an issue records its intent before its authorization")
+            return self._replace(db_issues=(*current.db_issues, issue))
+        if prior.state != "minting" or (prior.number, prior.selector) != (
+            issue.number,
+            issue.selector,
+        ):
+            raise ValueError("an issue cannot change its number or selector, or be replaced")
+        issues = tuple(issue if item == prior else item for item in current.db_issues)
+        return self._replace(db_issues=issues)
 
     def record_pitr(self, progress: PitrProgress) -> Operation:
         if self.operation.pitr is None or self.operation.terminal:

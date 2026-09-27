@@ -27,6 +27,7 @@ from shared.root_control import client as root_client
 from shared.runtime_release import VerifiedRelease
 from tests.lifecycle.transition.macos.launchd_fake import HELPER, Harness
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness
+from tests.lifecycle.transition.phases import advance_to
 
 HOME_HELPER = OwnedProcess(700, 7.5, None)
 RESTARTED_HELPER = OwnedProcess(702, 12.5, None)
@@ -190,8 +191,7 @@ class World:
 def _starting(harness: Harness) -> None:
     harness.launched()
     with journal.exclusive(harness.path) as current:
-        for phase in ("quiescing", "stopping", "selecting", "starting"):
-            current.advance(phase)
+        advance_to(current, "starting")
 
 
 @pytest.fixture

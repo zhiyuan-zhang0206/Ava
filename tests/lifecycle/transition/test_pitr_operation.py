@@ -26,6 +26,7 @@ from shared.release_operation import (
     require_start_authorized,
 )
 from shared.start_inputs import configuration_files, files_digest
+from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_launcher_linux import _constant
 
 
@@ -385,7 +386,7 @@ def test_new_rollback_after_release_uses_selected_image_and_same_activation(
         candidate=image_b,
         executor=image_b,
     )
-    completed = journal.Operation(request=release, phase="complete")
+    completed = at_phase("complete", request=release)
     (home / "releases/current-release").write_text(
         json.dumps(
             {

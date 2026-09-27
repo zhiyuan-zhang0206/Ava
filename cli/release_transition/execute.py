@@ -21,15 +21,22 @@ def drive(journal: Journal, driver: LocalTransition) -> None:
             match operation.phase:
                 case "prepared":
                     driver.preflight()
+                    driver.preflight_authority()
                     journal.advance("quiescing")
                 case "quiescing":
                     driver.quiesce()
                     journal.advance("stopping")
                 case "stopping":
                     driver.stop(operation)
+                    journal.advance("fencing")
+                case "fencing":
+                    driver.fence(journal)
                     journal.advance("selecting")
                 case "selecting":
                     driver.select(operation)
+                    journal.advance("authorizing")
+                case "authorizing":
+                    driver.authorize(journal)
                     journal.advance("starting")
                 case "starting":
                     driver.start(journal)
@@ -81,6 +88,9 @@ def execute(path: Path) -> None:
             with authorized_pitr(path, journal.pitr_record_write):
                 drive_pitr(journal)
         else:
+            from cli.release_transition.authority import adopt_executor_authority
+
+            adopt_executor_authority(Path(request.home))
             drive(journal, LocalTransition(request))
 
 

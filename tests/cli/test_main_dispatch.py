@@ -146,7 +146,10 @@ request = Request(id=uuid4(), home=str(home),
     previous=reference.model_copy(update={"artifact_digest":"e"*64}),
     candidate=reference, executor=reference,
     configuration_digest=configuration_digest(home))
-operation = Operation(request=request, phase="starting", direction=sys.argv[2])
+# The start delivers the ledger's active generation: it is this direction's issue.
+from tests.lifecycle.transition.phases import at_phase, seed_active
+issued = seed_active(home, 1 if sys.argv[2] == "candidate" else 2)
+operation = at_phase("starting", issued=issued, request=request, direction=sys.argv[2])
 request.path.parent.mkdir(parents=True)
 request.path.write_text(operation.model_dump_json())
 (home / "updates/active").write_text(str(request.path))

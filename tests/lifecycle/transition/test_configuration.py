@@ -14,9 +14,11 @@ from uuid import uuid4
 import pytest
 
 from cli.release_transition import local, stage
+from cli.release_transition.journal import Phase
 from cli.release_transition.request import ReleaseRef, Request
 from shared.runtime_release import ReleaseRejectedError
 from shared.start_inputs import configuration_digest
+from tests.lifecycle.transition.phases import at_phase
 
 
 @pytest.fixture
@@ -74,14 +76,12 @@ def test_stage_refuses_changed_inputs_before_settings_or_effects(
     request_fixture: Request,
     monkeypatch: pytest.MonkeyPatch,
     member: str,
-    phase: str,
+    phase: Phase,
 ) -> None:
     request = request_fixture
     from cli.release_transition.journal import Operation
 
-    operation = Operation.model_validate(
-        {"phase": phase, "request": request, "direction": "candidate"}
-    )
+    operation = at_phase(phase, request=request)
 
     def read(_path: Path) -> Operation:
         return operation

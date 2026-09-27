@@ -15,6 +15,7 @@ from pydantic import JsonValue
 
 from cli.release_transition import journal
 from cli.release_transition.request import ReleaseRef, Request
+from tests.lifecycle.transition.phases import advance_to, step
 
 
 @pytest.fixture
@@ -114,23 +115,12 @@ def _file_state(path: Path) -> tuple[bytes, int, int]:
 
 
 def _advance(handle: journal.Journal, target: journal.Phase) -> None:
-    sequence: tuple[journal.Phase, ...] = (
-        "quiescing",
-        "stopping",
-        "selecting",
-        "starting",
-        "observing",
-        "resuming",
-        "complete",
-    )
-    for phase in sequence:
-        handle.advance(phase)
-        if phase == target:
-            return
-    raise AssertionError(f"unknown test target: {target}")
+    advance_to(handle, target)
 
 
-@pytest.mark.parametrize("phase", ["stopping", "selecting", "starting", "resuming"])
+@pytest.mark.parametrize(
+    "phase", ["stopping", "fencing", "selecting", "authorizing", "starting", "resuming"]
+)
 def test_interrupted_intent_is_retained_and_exact_replay_is_read_only(
     request_record: Request, phase: journal.Phase
 ) -> None:
@@ -321,14 +311,16 @@ def test_recovery_direction_is_durable_and_cannot_reverse_again(
     assert journal.create(request_record) == recovered
     with journal.exclusive(request_record.path) as handle:
         phases: tuple[journal.Phase, ...] = (
+            "fencing",
             "selecting",
+            "authorizing",
             "starting",
             "observing",
             "resuming",
             "complete",
         )
         for next_phase in phases:
-            handle.advance(next_phase)
+            step(handle, next_phase)
             before = _file_state(request_record.path)
             with pytest.raises(ValueError):
                 handle.recover("reverse the recovery")
@@ -338,7 +330,10 @@ def test_recovery_direction_is_durable_and_cannot_reverse_again(
     assert journal.read_operation(request_record.path).direction == "previous"
 
 
-@pytest.mark.parametrize("phase", ["prepared", "quiescing", "stopping", "selecting", "resuming"])
+@pytest.mark.parametrize(
+    "phase",
+    ["prepared", "quiescing", "stopping", "fencing", "selecting", "authorizing", "resuming"],
+)
 def test_recovery_requires_a_failed_candidate_start(
     request_record: Request, phase: journal.Phase
 ) -> None:

@@ -17,6 +17,7 @@ from cli.release_transition import journal, submit
 from cli.release_transition import launcher_linux as linux
 from cli.release_transition.request import Request
 from shared import os_boot_unit, paths
+from tests.lifecycle.transition.phases import advance_to
 from tests.lifecycle.transition.test_launcher_linux import (
     _closed_attempt,
     _readback_seams,
@@ -66,17 +67,7 @@ def test_public_submission_loses_predecessor_while_waiting_for_home_lock_without
             # Deterministically complete the earlier updater immediately before
             # the new request acquires mutation authority. No sleeps or threads.
             handle = journal.Journal(journal.read_operation(old_path))
-            remaining: tuple[journal.Phase, ...] = (
-                "quiescing",
-                "stopping",
-                "selecting",
-                "starting",
-                "observing",
-                "resuming",
-                "complete",
-            )
-            for phase in remaining:
-                handle.advance(phase)
+            advance_to(handle, "complete")
             (store / "current-release").write_text(
                 json.dumps(
                     {
@@ -112,8 +103,7 @@ def test_public_submit_continues_closed_attempt_and_interrupted_relaunch(
     terminal = linux.readback(planned)
     with journal.exclusive(path) as current:
         if rollback:
-            current.advance("selecting")
-            current.advance("starting")
+            advance_to(current, "starting")
             current.recover("candidate readiness failed")
         if crash != "finished":
             current.request_retirement(terminal.model_dump(mode="json"))
@@ -176,15 +166,7 @@ def test_completed_public_submit_retires_once_and_replays_terminal_evidence(
     request_file = _request_file(planned, monkeypatch)
     path = Path(str(planned["operation"]))
     with journal.exclusive(path) as current:
-        remaining: tuple[journal.Phase, ...] = (
-            "selecting",
-            "starting",
-            "observing",
-            "resuming",
-            "complete",
-        )
-        for phase in remaining:
-            current.advance(phase)
+        advance_to(current, "complete")
     retire = _retiring_manager(planned, monkeypatch)
 
     def command(argv: list[str], *, privileged: bool = False) -> subprocess.CompletedProcess[str]:
@@ -245,15 +227,7 @@ def test_new_public_request_retires_previous_before_replacing_active_pointer(
     request_file = _request_file(planned, monkeypatch)
     old_path = Path(str(planned["operation"]))
     with journal.exclusive(old_path) as current:
-        remaining: tuple[journal.Phase, ...] = (
-            "selecting",
-            "starting",
-            "observing",
-            "resuming",
-            "complete",
-        )
-        for phase in remaining:
-            current.advance(phase)
+        advance_to(current, "complete")
     if reboot:
         terminal = linux.readback(planned)
         with journal.exclusive(old_path) as current:

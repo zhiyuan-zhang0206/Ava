@@ -228,11 +228,19 @@ The only cross-release contract, the frozen v1 image-exec handoff (CLI and the
 `release_image_exec` ops kind), and the port block's reserved `coordinator`
 slot exist ([handoff](../../cli/release_handoff/release_handoff.ava.okf.md)).
 
-Remaining: the release transition's `fencing` / `authorizing` phases (revoke,
-pooler stop, closure proof, mint the next generation, restart the pooler) and
-its executor's admin DSN — until they land, the finite executor running a
-candidate image receives no database authority from the boot pass; the
-coordinator listener on the reserved port, the handoff's `receipt` and
+The single-box release transition fences and admits generations: `fencing`
+revokes the active generation, stops the owned pooler and proves closure by
+census; `authorizing` mints the next number for the selected image behind a
+fresh pooler; start and observation bind exactly that generation; the finite
+executor dials the owner-only socket as the administrator acting as the
+gateway group
+([release execution](../../cli/release_transition/execution.ava.okf.md#write-generations)).
+A recovery fences the failed candidate's generation before the predecessor
+gets a new one.
+
+Remaining: a release A/B/A on real images in the disposable Linux preview
+recording the generation sequence, old-login refusal and a stale-writer probe;
+the coordinator listener on the reserved port, the handoff's `receipt` and
 `preflight` entries, and the automated per-operation capability exchange,
 without which networked rollouts keep refusing; per-generation API machine
 tokens and runners that stop holding the human bearer.

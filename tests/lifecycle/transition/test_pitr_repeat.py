@@ -16,6 +16,7 @@ from cli.release_transition.pitr.inputs import require_inputs
 from cli.release_transition.request import PitrRequest, Request
 from services.pitr.activation_state import mark_pre_mutation_rolled_back, record_path, write_record
 from shared.release_operation import authorized_pitr
+from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_launcher_linux import _constant
 from tests.lifecycle.transition.test_pitr_operation import (  # noqa: F401 — fixture
     _record,
@@ -56,7 +57,7 @@ def _release(request: PitrRequest) -> journal.Operation:
         candidate=image,
         executor=image,
     )
-    return journal.Operation(request=release, phase="complete")
+    return at_phase("complete", request=release)
 
 
 @pytest.mark.parametrize("later_release", [False, True])

@@ -52,6 +52,7 @@ from shared.native_process.ownership import OwnedProcess
 from shared.runtime_abi import current_abi
 from shared.runtime_release import MANIFEST_VERSION, VerifiedRelease, file_sha256
 from tests.lifecycle.transition.macos import native_fixture
+from tests.lifecycle.transition.phases import journal_fence, journal_issue
 
 pytestmark = [
     pytest.mark.skipif(
@@ -349,8 +350,10 @@ class NativeHome:
 class NativeTransition(LocalTransition):
     """Real helper-root effects; only the application-level gates are absent.
 
-    Quiescing and the single-home writer gate need the application database;
-    ordinary stop's maintenance bookkeeping is replaced by its native root stop.
+    Quiescing, the single-home writer gate and the write-generation fence need
+    the application database (the fence journals synthetic receipts here; it is
+    proven on real PostgreSQL in tests/lifecycle/db_authority/); ordinary
+    stop's maintenance bookkeeping is replaced by its native root stop.
     """
 
     def __init__(self, request: Request) -> None:
@@ -362,8 +365,17 @@ class NativeTransition(LocalTransition):
     def preflight(self) -> None:
         return
 
+    def preflight_authority(self) -> None:
+        return
+
     def quiesce(self) -> None:
         return
+
+    def fence(self, journal: Journal) -> None:
+        journal_fence(journal)
+
+    def authorize(self, journal: Journal) -> None:
+        journal_issue(journal)
 
     def stop(self, operation: Operation) -> None:
         root_macos.verified_helper(operation)
