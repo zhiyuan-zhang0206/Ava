@@ -10,6 +10,7 @@
 // string + bool, so no custom areEqual is needed.
 
 import { memo, useEffect, useState } from "react";
+import type * as PrismReactRenderer from "prism-react-renderer";
 import type { Highlight as HighlightComponentType, PrismTheme } from "prism-react-renderer";
 
 import { CopyButton } from "@/components/copy-button";
@@ -34,11 +35,29 @@ import { CopyButton } from "@/components/copy-button";
 let highlightPromise: Promise<typeof HighlightComponentType> | null = null;
 let resolvedHighlight: typeof HighlightComponentType | null = null;
 
+// Indirection so tests can substitute a rejecting/resolving stub without
+// depending on how a bundler's dynamic-import chunk cache behaves on
+// failure (see __setHighlighterImportForTests below).
+let importHighlighterModule: () => Promise<typeof PrismReactRenderer> = () =>
+  import("prism-react-renderer");
+
 function loadHighlight(): Promise<typeof HighlightComponentType> {
-  highlightPromise ??= import("prism-react-renderer").then((mod) => {
-    resolvedHighlight = mod.Highlight;
-    return mod.Highlight;
-  });
+  highlightPromise ??= importHighlighterModule()
+    .then((mod) => {
+      resolvedHighlight = mod.Highlight;
+      return mod.Highlight;
+    })
+    .catch((err: unknown) => {
+      // A rejected chunk load (CDN hiccup, offline, ad-blocker, transient
+      // network blip during the idle/intent prefetch) must not be cached
+      // forever: `??=` only assigns once, so without this reset every later
+      // call (idle prefetch, pointer/focus intent, a fresh mount) would
+      // replay the same dead promise and permanently pin every code block on
+      // the plain-text fallback for the rest of the session. Clearing the
+      // cache here lets the next call retry the import from scratch.
+      highlightPromise = null;
+      throw err;
+    });
   return highlightPromise;
 }
 
@@ -48,9 +67,19 @@ function loadHighlight(): Promise<typeof HighlightComponentType> {
  * prefetch, pointer/focus intent, the component's own mount) — the
  * underlying dynamic import is cached after the first call, so a later call
  * is a no-op that resolves to the same (possibly already-resolved) module.
+ *
+ * Callers are fire-and-forget (an idle callback, a pointer-enter/focus
+ * handler) that never attach their own `.catch` — this swallows a rejection
+ * rather than letting it surface as an unhandled promise rejection. A
+ * chunk-load failure still only ever shows up as the PlainCode fallback;
+ * loadHighlight() has already cleared its cache on rejection, so a later
+ * call (another prefetch, or the eventual mount) still retries.
  */
-export function preloadPythonCodeHighlighter(): Promise<typeof HighlightComponentType> {
-  return loadHighlight();
+export function preloadPythonCodeHighlighter(): Promise<void> {
+  return loadHighlight().then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 /**
@@ -64,6 +93,20 @@ export function preloadPythonCodeHighlighter(): Promise<typeof HighlightComponen
 export function __resetHighlighterCacheForTests(): void {
   highlightPromise = null;
   resolvedHighlight = null;
+}
+
+/**
+ * Test-only: substitutes the dynamic import itself, so a test can simulate a
+ * rejected chunk load deterministically. A real bundler retries a dynamic
+ * import after a prior failure (a failed webpack chunk is dropped from its
+ * install cache), but that isn't something a plain `vi.mock` of the module
+ * can be relied on to reproduce for a *subsequent* call within one test —
+ * this seam sidesteps that entirely. Pass `null` to restore the real import.
+ */
+export function __setHighlighterImportForTests(
+  fn: (() => Promise<typeof PrismReactRenderer>) | null,
+): void {
+  importHighlighterModule = fn ?? (() => import("prism-react-renderer"));
 }
 
 // The theme references CSS variables — actual colors live in globals.css
@@ -111,13 +154,21 @@ export const PythonCode = memo(function PythonCode({ code, streaming = false }: 
   useEffect(() => {
     if (Highlight !== null) return;
     let active = true;
-    void loadHighlight().then((Comp) => {
-      // setHighlight(Comp) would be misread by React as a functional
-      // updater (any function passed to a state setter is called with the
-      // previous state instead of stored) — the () => Comp wrapper stores
-      // the component itself.
-      if (active) setHighlight(() => Comp);
-    });
+    void loadHighlight().then(
+      (Comp) => {
+        // setHighlight(Comp) would be misread by React as a functional
+        // updater (any function passed to a state setter is called with the
+        // previous state instead of stored) — the () => Comp wrapper stores
+        // the component itself.
+        if (active) setHighlight(() => Comp);
+      },
+      () => {
+        // A rejected chunk load: stay on PlainCode (Highlight remains
+        // null — no state change needed) rather than let this surface as an
+        // unhandled promise rejection. loadHighlight() already cleared its
+        // cache, so the next mount or prefetch call retries the import.
+      },
+    );
     return () => {
       active = false;
     };
