@@ -1,8 +1,6 @@
 """Claude Code first-run presets — an unattended spawn must never park on a dialog.
 
-Split out of ``spawn_claude.py`` (2026-09-24, task #4612) so the launcher
-stays under the 800-line hard ceiling: it imports ``_preset_claude_first_run``
-and runs it before any session starts.
+The Claude launcher runs ``_preset_claude_first_run`` before any session starts.
 """
 
 from __future__ import annotations

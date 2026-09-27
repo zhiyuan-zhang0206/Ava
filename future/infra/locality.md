@@ -79,3 +79,7 @@ boundaries, already carried by codegen, and not debt.
    natural owner is `ava/agent_identity.py`, now a public module) is the
    next candidate; `shared/config` as a registration hub needs a design pass
    first.
+7. **Path-import burn-down** (`path_imports`, 20 sites in 20 files under
+   `ava_builtins/`: 15 `sys.path` guards, 5 `spec_from_file_location`
+   loads). Each skill's shared code moves into a governed package, as the
+   Claude/Codex launchers did (`ava/shell/coding_tools/`).

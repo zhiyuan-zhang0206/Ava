@@ -62,6 +62,7 @@ def _freeze(tmp_path: pathlib.Path, path: str, *, cc: int = 16) -> None:
             "nesting": {},
             "private_imports": {},
             "owner_bypasses": {},
+            "path_imports": {},
         },
     )
     _git(tmp_path, "init", "--quiet")
@@ -175,6 +176,7 @@ def test_files_budget_move_inherits(tmp_path: pathlib.Path) -> None:
             "nesting": {},
             "private_imports": {},
             "owner_bypasses": {},
+            "path_imports": {},
         },
     )
     _git(tmp_path, "init", "--quiet")
