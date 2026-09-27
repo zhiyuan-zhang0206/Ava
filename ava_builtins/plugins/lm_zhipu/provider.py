@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.lm._effort import _clamp_effort
+from shared.lm.effort import clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -35,7 +35,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     their endpoint rejects thinking.type=disabled with a 400 (error code
     1210), so sending the body would fail the call rather than honor the
     intent."""
-    from shared.lm._reasoning_compat import ReasoningContentChatModel
+    from shared.lm.reasoning_compat import ReasoningContentChatModel
 
     # Zhipu GLM API is OpenAI-compatible (https://open.bigmodel.cn/api/paas/v4),
     # standard `Authorization: Bearer` auth. GLM 5.2 streams thinking in the
@@ -63,7 +63,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         else:
             glm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     elif ctx.resolved_effort:
-        glm_kwargs["reasoning_effort"] = _clamp_effort(
+        glm_kwargs["reasoning_effort"] = clamp_effort(
             ctx.resolved_effort,
             ctx.effort_levels if ctx.effort_levels is not None else _GLM_EFFORT_LEVELS,
             target="glm",

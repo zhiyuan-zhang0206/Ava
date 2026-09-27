@@ -2,7 +2,7 @@
 
 Split out of ``shared/metrics/core/core_metrics_observability.py`` when that module hit
 the 800-line code-structure ceiling (task #2174): the two panels unwrap the
-``exec_envelope`` event (agent/graph/_exec_protocol.py::_log_envelope_transfer)
+``exec_envelope`` event (agent/graph/exec_protocol.py::_log_envelope_transfer)
 and group by envelope/op — the transfer-cost display split out of the Exec
 outcomes other bucket (PM ruling 2026-08-31).
 """
@@ -26,7 +26,7 @@ core_metrics.register_core_metric(
             "Exec envelope transfer size — serialized request/result envelope "
             "bytes moved between the agent and its exec child, unwrapped from "
             "the exec_envelope event's size_bytes attribute "
-            "(agent/graph/_exec_protocol.py::_log_envelope_transfer). p50/p95 "
+            "(agent/graph/exec_protocol.py::_log_envelope_transfer). p50/p95 "
             "percentiles plus max, grouped by envelope/op; a rising request "
             "band is state/payload inflation. The event is excluded from the "
             "Exec outcomes other bucket (PM ruling 2026-08-31) and displays "

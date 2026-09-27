@@ -1,4 +1,4 @@
-"""`shared/lm/_concurrency.py` unit tests — per-provider LLM concurrency.
+"""`shared/lm/concurrency.py` unit tests — per-provider LLM concurrency.
 
 Caps are disabled by default (empty `AVA_LLM_MAX_CONCURRENT`, task #3590); an
 explicit `provider:limit` configuration enables them. These tests pin both the
@@ -13,12 +13,12 @@ import threading
 
 import pytest
 
-from shared.lm._concurrency import (
+from shared.lm.concurrency import (
     LLMConcurrencyLimiter,
     known_provider_keys,
     parse_limits,
 )
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 
 @pytest.fixture(scope="module", autouse=True)

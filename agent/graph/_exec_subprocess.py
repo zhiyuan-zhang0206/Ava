@@ -27,14 +27,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from agent.graph._exec_protocol import (
-    KILL_GRACE_S,
-    ResultPayload,
-    make_request_path,
-    make_result_path,
-    read_result,
-    write_request,
-)
 from agent.graph._exec_result import (
     ExecChildError,
     _construct_exec_result,
@@ -43,6 +35,14 @@ from agent.graph._exec_result import (
     lifecycle_exception_from_name,
 )
 from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
+from agent.graph.exec_protocol import (
+    KILL_GRACE_S,
+    ResultPayload,
+    make_request_path,
+    make_result_path,
+    read_result,
+    write_request,
+)
 from shared import editable_install
 from shared.env_registry import (
     AGENT_BIRTH_CONFIG_ENV,

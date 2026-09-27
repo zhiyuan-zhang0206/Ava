@@ -1,6 +1,6 @@
 """The system prompt carries exactly ONE skill index.
 
-`# Capabilities` (`_capabilities.capabilities_section`) is it: every loaded skill, name +
+`# Capabilities` (`capabilities.capabilities_section`) is it: every loaded skill, name +
 one-line description + `ava.skills.<path>`, bodies on demand. `# Expanded SDK
 reference` must not carry a second one — `"*"` skips the capability surfaces,
 which is pinned in tests/agent/test_system_prompt.py.
@@ -26,8 +26,8 @@ import pytest
 
 import ava
 import ava.skills as skills_mod
-from agent.graph._capabilities import _disabled_by_sdk_config, capabilities_section
-from agent.graph._system_prompt import _delegation_check_section, build_system_prompt
+from agent.graph.capabilities import _disabled_by_sdk_config, capabilities_section
+from agent.graph.system_prompt import _delegation_check_section, build_system_prompt
 from ava.sdk_surface import sdk_disable
 from shared.config import FIELD_INFOS, settings
 

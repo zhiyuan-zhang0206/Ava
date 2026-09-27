@@ -276,7 +276,7 @@ def _report_dangling(exc: DanglingPlugin) -> None:
     """Report dangling config entries through the one canonical fail-soft reporter.
 
     Both dangling-handling load sites — the runtime wrapper below and the
-    agent-boot loader (`agent/_extensions.py`) — drop the entries (treated as
+    agent-boot loader (`agent/extensions.py`) — drop the entries (treated as
     disabled) and report each name through `shared.plugin_load_report`, so a
     plugin that is enabled in the machine config but absent from disk is as
     visible as every other contained plugin failure: loguru ERROR plus the
@@ -303,7 +303,7 @@ def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
     model-provider factory, gateway request paths, ops inventory — a config
     entry whose plugin directory is gone (interrupted upgrade, manual rm)
     must not block a service from starting or answering. This is the same
-    fail-soft contract `_load_extensions` follows (2026-08-28 ava_ledger
+    fail-soft contract `load_extensions` follows (2026-08-28 ava_ledger
     incident); interactive CLI paths (`set_local_enabled`) keep the strict
     `load()` and its DanglingPlugin error. Each dangling name is reported once
     per process through `_report_dangling`.

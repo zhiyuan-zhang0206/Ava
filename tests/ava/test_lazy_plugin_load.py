@@ -6,9 +6,9 @@ on the first unknown `ava.X`; gateway / cli / the agent process itself keep the
 fail-fast AttributeError.
 
 These lock the gating matrix + the once-latch so a future edit can't silently
-(a) start loading plugins in the gateway / cli, (b) re-run _load_extensions in
+(a) start loading plugins in the gateway / cli, (b) re-run load_extensions in
 the agent process (which would clear the built-in repair/compact hooks that
-build_graph — not _load_extensions — re-registers), or (c) turn a dunder probe
+build_graph — not load_extensions — re-registers), or (c) turn a dunder probe
 into a plugin load.
 """
 
@@ -54,10 +54,10 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
-    """Replace agent._extensions.load_extensions (reached by ensure_plugins_loaded
+    """Replace agent.extensions.load_extensions (reached by ensure_plugins_loaded
     via importlib) with a spy that records calls and optionally registers a namespace.
     Avoids the heavy, DB-touching real load in a unit test."""
-    import agent._extensions as extensions
+    from agent import extensions
 
     calls: list[int] = []
 
@@ -113,7 +113,7 @@ def test_no_lazy_load_without_agent_id(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_no_lazy_load_in_agent_process(monkeypatch: pytest.MonkeyPatch) -> None:
     # owns_loop=True + established id = the agent process. A typo must fail fast,
-    # not re-run _load_extensions — which clears all hooks and would drop the
+    # not re-run load_extensions — which clears all hooks and would drop the
     # built-in ones build_graph registers after it.
     monkeypatch.setenv("AVA_AGENT_ID", "7")
     agent_identity.establish(7, owns_loop=True)
@@ -167,7 +167,7 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
     is contained, reported loudly, and the process continues without plugin
     namespaces; the stderr line is the always-visible channel because a
     launched child usually has no loguru sink configured."""
-    import agent._extensions as extensions
+    from agent import extensions
     from shared.plugins_config import DuplicatePlugin
 
     def boom(*, surface: bool = False) -> None:
@@ -192,13 +192,13 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     """A re-entrant import is not a failure (task #3234).
 
     A process that imports an `agent.*` module before `ava` reaches the eager
-    load hits the loader while `agent._extensions` is still its own partial
+    load hits the loader while `agent.extensions` is still its own partial
     `sys.modules` entry: the attribute does not exist YET. That call must defer
     (no latch, no loud report) — and once the module is complete, the next call
     loads normally instead of being blocked by a latch for a load that never
     ran.
     """
-    import agent._extensions as extensions
+    from agent import extensions
 
     calls: list[int] = []
 
@@ -238,7 +238,7 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
     loader module is complete loads the plugin surface.
     """
     _as_launched_child(monkeypatch)
-    import agent._extensions as extensions
+    from agent import extensions
 
     calls: list[int] = []
 
@@ -268,7 +268,7 @@ def _spy_member_loader(
 ) -> list[int]:
     """Loader spy that registers a plugin MEMBER on an existing framework
     namespace (ava.self / ava.ui) — the shape ava_fleet uses for log/notify."""
-    import agent._extensions as extensions
+    from agent import extensions
 
     calls: list[int] = []
 

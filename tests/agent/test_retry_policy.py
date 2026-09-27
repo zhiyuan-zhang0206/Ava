@@ -11,7 +11,7 @@ from collections.abc import Iterator
 import pytest
 
 from agent.graph._build import _build_llm_retry
-from agent.graph._llm_errors import (
+from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
     LLMStreamStallPairError,
@@ -149,7 +149,7 @@ def test_retry_policy_phase_jitter_deterministic_per_agent(monkeypatch: pytest.M
 @pytest.fixture
 def bound_thread() -> Iterator[str]:
     """Bind a turn identity so the streak keys on it, and clean it up after."""
-    from agent.graph._llm_errors import _reset_stall_pair_streak
+    from agent.graph.llm_errors import _reset_stall_pair_streak
 
     with bind_turn_identity(6363):
         yield "6363"
@@ -178,7 +178,7 @@ def _read_policy_fields_in_langgraph_order(policy: object) -> tuple[int, float, 
 def test_stall_pair_grants_the_delayed_schedule(bound_thread: str) -> None:
     """A pair error is retried under the delayed schedule: minutes-scale
     jittered wait, no compounding backoff, its own attempts headroom."""
-    from agent.graph._llm_errors import _stall_pair_streak
+    from agent.graph.llm_errors import _stall_pair_streak
     from shared.config.turn_view import turn_settings
     from shared.lm.registry import resolve_setting
 
@@ -219,7 +219,7 @@ def test_stall_pair_wait_doubles_and_caps(bound_thread: str) -> None:
 def test_stall_pair_refuses_past_the_cap_and_resets(bound_thread: str) -> None:
     """Past `llm_stall_retry_max_consecutive` the retry is refused and the
     streak resets (the next turn starts with a fresh budget)."""
-    from agent.graph._llm_errors import _record_stall_pair_streak, _stall_pair_streak
+    from agent.graph.llm_errors import _record_stall_pair_streak, _stall_pair_streak
 
     policy = _build_llm_retry()
     _record_stall_pair_streak(bound_thread, settings.lm.llm_stall_retry_max_consecutive)
@@ -230,7 +230,7 @@ def test_stall_pair_refuses_past_the_cap_and_resets(bound_thread: str) -> None:
 def test_stall_pair_entry_cap_raises_fatal_and_resets(bound_thread: str) -> None:
     """A spent streak fails the turn at node entry as a FatalLLMStreamError
     (the established alive-and-idle settlement), and resets."""
-    from agent.graph._llm_errors import (
+    from agent.graph.llm_errors import (
         _check_stall_pair_cap,
         _record_stall_pair_streak,
         _stall_pair_streak,
@@ -247,7 +247,7 @@ def test_stall_pair_entry_cap_raises_fatal_and_resets(bound_thread: str) -> None
 def test_stall_pair_errors_skip_the_consecutive_tracker(bound_thread: str) -> None:
     """The tracker's cap (3) must not pre-empt the delayed schedule's 4th
     grant, so pair errors never enter it; plain stalls still do."""
-    from agent.graph._llm_errors import (
+    from agent.graph.llm_errors import (
         _clear_consecutive_errors,
         _consecutive_errors,
         _record_consecutive_error,
@@ -267,7 +267,7 @@ def test_delayed_schedule_disabled_falls_back_to_transient(
     """`llm_stall_retry_max_consecutive=0` disables the delayed regime: pair
     errors retry (or stop) exactly like any transient error, with no streak."""
     from agent.graph._build import _RETRY_JITTER_SPAN_S, _RETRY_REMAINING_ATTR
-    from agent.graph._llm_errors import _stall_pair_streak
+    from agent.graph.llm_errors import _stall_pair_streak
 
     monkeypatch.setattr(settings.lm, "llm_stall_retry_max_consecutive", 0)
     policy = _build_llm_retry()

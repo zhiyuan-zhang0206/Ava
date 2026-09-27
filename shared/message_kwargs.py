@@ -9,7 +9,7 @@ a message's kwargs the typed view.
 
 Writers live in `agent/messages.py` (+ `agent/graph/_claim.py`, `_llm.py`);
 readers in `shared/agents/history/timeline.py`, `gateway/context_breakdown.py`,
-`agent/graph/_memory_recall.py`. It sits in `shared/` (leaf) so both the agent
+`agent/graph/memory_recall.py`. It sits in `shared/` (leaf) so both the agent
 and the gateway import it without an agent <-> gateway package cycle.
 
 Not exhaustive of `additional_kwargs`: third-party keys ride there too — e.g.

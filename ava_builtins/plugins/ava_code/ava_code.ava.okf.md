@@ -33,7 +33,7 @@ def _engineering_workflow_section() -> str:
     # (env AVA_SYSTEM_PROMPT_EXTRA), **default empty = not injected by default**
 ```
 
-These two are registered via `agent/graph/_system_prompt.py`'s `register_system_prompt_section`,
+These two are registered via `agent/graph/system_prompt.py`'s `register_system_prompt_section`,
 and appended at runtime to the agent's system prompt (the `_engineering_workflow_section` is off by default, not injected).
 
 ### Context file auto-injection (in-memory, inside the exec turn)

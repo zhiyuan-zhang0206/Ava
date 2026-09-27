@@ -29,8 +29,10 @@ default home `~/.ava` belongs to the prod source alone — resolving there made 
 ad-hoc `import shared.config` on a production agent-runner load that unit's
 `.env`, dial its gateway with its cluster bearer and rewrite its bootstrap
 snapshot (2026-09-27). So case 4 resolves to a per-process scratch path under
-the system temp dir (`_unanchored_home`, created only if something writes to
-it) and boots BARE, exactly like a CI checkout: no `.env` / `mirror.env` is
+the system temp dir (`_unanchored_home`; not created there, but
+`shared.paths.ava_home()` creates it on first access — including a read-only
+command, not only one that writes — so most CLI verbs leave it behind) and
+boots BARE, exactly like a CI checkout: no `.env` / `mirror.env` is
 read, the config source decision never fetches and the bootstrap transport
 refuses to dial (shared/config/_lite.py, shared/bootstrap.py), and
 `load_ava_env` plants `UNANCHORED_DB_SENTINEL` as AVA_DB_URL (the same sentinel
@@ -60,11 +62,11 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
 
-# Planted as AVA_DB_URL when home resolution falls back to an unanchored dev
+# Planted as AVA_DB_URL when home resolution lands on an unanchored dev
 # checkout. A syntactically valid URL that can never reach a real database (port
 # 1 on loopback), so a stray connection fails loudly instead of silently hitting
 # the prod database the host .env points at. shared/db.connect() detects it and
-# raises an actionable error directing the operator to `ava start`.
+# raises an actionable error directing the operator to `install.sh --worktree`.
 UNANCHORED_DB_SENTINEL = "postgresql://unanchored-dev-checkout@127.0.0.1:1/run-ava-start-first"
 
 # The launcher's process profile, recorded by the CLI entry point before it
@@ -157,10 +159,13 @@ def _unanchored_home() -> Path:
 
     A path under the system temp dir with an unguessable suffix, never under
     `~/.ava` and never a registered cluster, so nothing another unit wrote can
-    be read from it. Not created here: a tool that never writes leaves nothing
-    behind. The boot pins it as AVA_HOME, and its name marks it
-    (`_is_unanchored_scratch`), so a re-resolution in this process and every
-    child that inherits it stay unanchored instead of reading an explicit claim.
+    be read from it. Not created here — this function only names the path. But
+    `shared.paths.ava_home()` creates it via `ensure_private_dir` the first time
+    anything resolves `$AVA_HOME`, which most CLI verbs do even on a read-only
+    run, so a purely read-only command still leaves this directory behind. The
+    boot pins it as AVA_HOME, and its name marks it (`_is_unanchored_scratch`),
+    so a re-resolution in this process and every child that inherits it stay
+    unanchored instead of reading an explicit claim.
     """
     return Path(tempfile.gettempdir()) / f"{_UNANCHORED_PREFIX}{secrets.token_hex(8)}"
 
@@ -308,7 +313,16 @@ def load_ava_env() -> None:
     (rule 4) loads NO file: its home is the process scratch, it boots bare like a
     CI checkout, and UNANCHORED_DB_SENTINEL stands in as AVA_DB_URL so a stray
     connection fails loudly. The authority pass still runs for it, so a cluster
-    value inherited from the parent shell is dropped rather than trusted.
+    value inherited from the parent shell that this unit's (nonexistent) `.env`
+    does not declare is dropped rather than trusted — EXCEPT the never-drop
+    identity exemptions (`_force_also`: AVA_CLUSTER_SECRET, AVA_GATEWAY_URL, the
+    health ports, ...), which the deliberate "explicit env wins" rule keeps.
+    This authority pass never gates `/api/bootstrap` itself either way — that
+    is `checkout_anchored()` / `fetch_bootstrap_config`'s separate job. So an
+    unanchored checkout's inherited AVA_CLUSTER_SECRET / AVA_GATEWAY_URL never
+    reaches the bootstrap fetch (blocked there), but still reaches an ordinary
+    CLI client's own gateway call (`cli/commands/management/config.py:
+    _gateway_base`), which reads explicit env by design.
 
     mirror.env loads last and, like .env, never overrides an already-set key, so
     precedence is: real environment > .env > mirror.env. It is a no-op when the
@@ -495,84 +509,71 @@ def watcher_runner_env() -> dict[str, str]:
 
 
 def _enforce_cluster_env_authority() -> None:
-    """Force this unit's derived env keys from its own `.env`, overriding a
-    polluted parent environment.
+    """Force this unit's derived env keys from its own `.env`, overriding a polluted parent
+    environment.
 
-    `load_dotenv(override=False)` leaves an already-set key untouched, which is
-    right for most config (a real env var should win). But for the
-    cluster-isolation keys (health ports, db/redis URLs, channels, gateway
-    port/URL, secrets) it is a footgun: if the shell — or a watchdog whose own
-    env was inherited from a sibling cluster's context — already carries another
-    cluster's value, `.env` cannot correct it, so the session-env allowlist
-    (`child_env`, shared/env_registry.py) copies the wrong value into
-    the service's session and it binds another cluster's port.
-    Re-read the file values and set them authoritatively. On a pure
-    agent-runner this runs BEFORE the gateway config fetch
-    (`shared.bootstrap.inject_config_from_gateway`, at Settings build), so a
-    stale cluster fact a pre-cutover `.env` still materializes is pushed here
-    and then overridden by the fetched value — migration-tolerant by
-    construction.
+    `load_dotenv(override=False)` leaves an already-set key untouched, which is right for most
+    config (a real env var should win). But for the cluster-isolation keys (health ports,
+    db/redis URLs, channels, gateway port/URL, secrets) it is a footgun: if the shell — or a
+    watchdog whose own env was inherited from a sibling cluster's context — already carries
+    another cluster's value, `.env` cannot correct it, so the session-env allowlist
+    (`child_env`, shared/env_registry.py) copies the wrong value into the service's session and
+    it binds another cluster's port. Re-read the file values and set them authoritatively. On a
+    pure agent-runner this runs BEFORE the gateway config fetch
+    (`shared.bootstrap.inject_config_from_gateway`, at Settings build), so a stale cluster fact
+    a pre-cutover `.env` still materializes is pushed here and then overridden by the fetched
+    value — migration-tolerant by construction.
 
-        The complementary treatment is general:
-    a cluster-scope alias this unit's own `.env` does NOT declare is DROPPED
-    from the environment. The drop covers every cluster-scope alias key
-    (shared/env_registry.py — the field registry's cluster-pinned AND
-    cluster-default aliases, 163 keys): a pure agent-runner's `.env` carries no
-    cluster data-plane keys (AVA_DB_URL / AVA_REDIS_URL / AVA_APP_PORT / ... —
-    they come from the gateway's /api/bootstrap at Settings build), so an
-    inherited value — a sibling cluster's .env sourced into the shell, e.g.
-    prod's AVA_APP_PORT=3001 — would otherwise stand and leak into every child
-    process (pytest, agent shells, scripts) and could be dialed by mistake.
-    Dropping it lets bootstrap inject the real value (runner) or the field
-    default apply (a gateway whose .env deliberately omits a key).
+    The complementary treatment is general: a cluster-scope alias this unit's own `.env` does
+    NOT declare is DROPPED from the environment. The drop covers every cluster-scope alias key
+    (shared/env_registry.py — the field registry's cluster-pinned AND cluster-default aliases,
+    163 keys): a pure agent-runner's `.env` carries no cluster data-plane keys (AVA_DB_URL /
+    AVA_REDIS_URL / AVA_APP_PORT / ... — they come from the gateway's /api/bootstrap at
+    Settings build), so an inherited value — a sibling cluster's .env sourced into the shell,
+    e.g. prod's AVA_APP_PORT=3001 — would otherwise stand and leak into every child process
+    (pytest, agent shells, scripts) and could be dialed by mistake. Dropping it lets bootstrap
+    inject the real value (runner) or the field default apply (a gateway whose .env
+    deliberately omits a key).
 
-        One pair of undeclared keys is NOT dropped, in one context: the
-    launcher-injected data-plane projections an agent-launched tree carries —
-    the runner DB projection (`ava_runner`-shaped URL) and the Redis URL
-    (`urlsplit`-parseable with a host) — on an anchored checkout. The context
-    is the live `AVA_PROCESS_PROFILE=agent` marker or the value a CLI entry
-    point recorded before popping it (cli/main.py `_normalize_process_profile`
-    → `_launcher_context`); with only the live marker consulted, the CLI pop
-    made the exemption unreachable and a probe run from an agent child on a
-    pure agent-runner fell back to the sentinel (#4334). The force loop above
-    already refuses to let the unit's `.env` owner URL replace the DB
-    projection; the drop loop must not revoke either projection — on a unit
-    whose `.env` does not declare them (a pure agent-runner), the pop left
-    settings-lite and CLI paths with no DB or Redis source at all
-    (`UnanchoredHomeError`; #4036). Every other inherited value — owner-shaped
-    DB URLs, plain-shell values, the unanchored checkout's sentinel discipline
-    — keeps the original drop behavior.
+    One pair of undeclared keys is NOT dropped, in one context: the launcher-injected
+    data-plane projections an agent-launched tree carries — the runner DB projection
+    (`ava_runner`-shaped URL) and the Redis URL (`urlsplit`-parseable with a host) — on an
+    anchored checkout. The context is the live `AVA_PROCESS_PROFILE=agent` marker or the value
+    a CLI entry point recorded before popping it (cli/main.py `_normalize_process_profile` →
+    `_launcher_context`); with only the live marker consulted, the CLI pop made the exemption
+    unreachable and a probe run from an agent child on a pure agent-runner fell back to the
+    sentinel (#4334). The force loop above already refuses to let the unit's `.env` owner URL
+    replace the DB projection; the drop loop must not revoke either projection — on a unit
+    whose `.env` does not declare them (a pure agent-runner), the pop left settings-lite and
+    CLI paths with no DB or Redis source at all (`UnanchoredHomeError`; #4036). Every other
+    inherited value — owner-shaped DB URLs, plain-shell values, the unanchored checkout's
+    sentinel discipline — keeps the original drop behavior.
 
-        Host-scope keys are never in the cluster set (their scope=host fields
-    are per-box facts with no bootstrap source: a not-yet-enrolled runner or
-    the test suites supply them from the environment alone — AVA_GATEWAY_URL /
-    AVA_CLUSTER_SECRET etc. — and popping them would silently un-configure the
-    fetch). The per-unit health ports and the unanchored sentinel are likewise
-    outside the cluster set: a co-located second unit (or the e2e suite)
-    states its dynamic block via env only, and a fresh dev checkout plants the
-    sentinel deliberately before the load, so popping it would silently
-    un-anchor the checkout (Settings would then fail on the no-default field
-    instead of failing with the named sentinel).
+    Host-scope keys are never in the cluster set (their scope=host fields are per-box facts
+    with no bootstrap source: a not-yet-enrolled runner or the test suites supply them from the
+    environment alone — AVA_GATEWAY_URL / AVA_CLUSTER_SECRET etc. — and popping them would
+    silently un-configure the fetch). The per-unit health ports and the unanchored sentinel are
+    likewise outside the cluster set: a co-located second unit (or the e2e suite) states its
+    dynamic block via env only, and a fresh dev checkout plants the sentinel deliberately
+    before the load, so popping it would silently un-anchor the checkout (Settings would then
+    fail on the no-default field instead of failing with the named sentinel).
 
-        The MACHINE-IDENTITY keys (`env_identity_keys()`: the serve-capability
-    flags, machine name/description, memory remote) get the same treatment, with
-    one exemption: a value the unit's own `.env` declares is forced in, an
-    inherited one is DROPPED. A unit's machine identity is a per-unit fact — it
-    belongs in its own `.env` (`ava start` writes it there) or its
-    `$AVA_HOME/machine_*` files, never in whatever a parent process happened to
-    inherit. The leak that motivated this was real: the gateway host's login shell
-    carries prod's `~/.ava/.env` (AVA_MACHINE_SERVE_GATEWAY=true among it), so a
-    watcher child booting an isolated $AVA_HOME with no `.env` resolved as a
-    gateway-capable unit — `config_source_is_local()` went True, the
-    settings-lite placeholders were skipped, and the authority drop then left
-    AVA_DB_URL / AVA_REDIS_URL missing (Settings: Field required). Dropping the
-    undeclared flag makes the child fall through to its own files / False, the
-    config source stays local-bare, and the leaked flag can never reach an agent
-    runner or agent process again. The host-scoped gateway URL key
-    (AVA_GATEWAY_URL) stays exempt for the same reason as the host-scope keys
-    above: enroll writes it to `.env`, but a not-yet-enrolled runner and the
-    test suites supply it from the environment alone, and dropping that would
-    silently un-configure the fetch.
+    The MACHINE-IDENTITY keys (`env_identity_keys()`: the serve-capability flags, machine
+    name/description, memory remote) get the same treatment, with one exemption: a value the
+    unit's own `.env` declares is forced in, an inherited one is DROPPED. A unit's machine
+    identity is a per-unit fact — it belongs in its own `.env` (`ava start` writes it there) or
+    its `$AVA_HOME/machine_*` files, never in whatever a parent process happened to inherit.
+    The leak that motivated this was real: the gateway host's login shell carries prod's
+    `~/.ava/.env` (AVA_MACHINE_SERVE_GATEWAY=true among it), so a watcher child booting an
+    isolated $AVA_HOME with no `.env` resolved as a gateway-capable unit —
+    `config_source_is_local()` went True, the settings-lite placeholders were skipped, and the
+    authority drop then left AVA_DB_URL / AVA_REDIS_URL missing (Settings: Field required).
+    Dropping the undeclared flag makes the child fall through to its own files / False, the
+    config source stays local-bare, and the leaked flag can never reach an agent runner or
+    agent process again. The host-scoped gateway URL key (AVA_GATEWAY_URL) stays exempt for the
+    same reason as the host-scope keys above: enroll writes it to `.env`, but a
+    not-yet-enrolled runner and the test suites supply it from the environment alone, and
+    dropping that would silently un-configure the fetch.
     """
     # The force/drop families come from the env registry's projections
     # (shared/env_registry.py): cluster-scope and machine-identity aliases

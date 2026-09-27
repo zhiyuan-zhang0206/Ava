@@ -37,7 +37,7 @@ tags:
 - `thinking: ThinkingConfig | None` — `TypedDict` for Anthropic extended-thinking (`{"type":"disabled"}`/`{"type":"enabled","budget_tokens":N}`); gemini-*/gpt-* read only `type`, mirroring on/off to reasoning toggles.
 
 ### content block shapes (`content.py`)
-LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str, Any]]`. `ContentBlock` (`TypedDict, total=False`) names the shape once, fields implied by `type` (text→`text`; thinking→`thinking`; signature_delta→`signature`; openai reasoning→`summary`; tool_use→`id`/`name`/`input` or `partial_json`; `index`=offset aligning streaming tool-call chunks with snapshots). `content_blocks(content)` runtime-relabels the list branch to `list[str | ContentBlock]`; `reasoning.py` / `_reasoning_compat.py` already use them.
+LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str, Any]]`. `ContentBlock` (`TypedDict, total=False`) names the shape once, fields implied by `type` (text→`text`; thinking→`thinking`; signature_delta→`signature`; openai reasoning→`summary`; tool_use→`id`/`name`/`input` or `partial_json`; `index`=offset aligning streaming tool-call chunks with snapshots). `content_blocks(content)` runtime-relabels the list branch to `list[str | ContentBlock]`; `reasoning.py` / `reasoning_compat.py` already use them.
 
 ### reasoning normalization (`reasoning.py`)
 - `to_canonical_reasoning()` — folds OpenAI Responses `{type:reasoning, summary:[…]}` → canonical `{type:thinking}` (claude/gemini native). DISPLAY-only: stored AIMessages keep provider-native form (OpenAI requires verbatim echo).

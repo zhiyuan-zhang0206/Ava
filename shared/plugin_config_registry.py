@@ -15,7 +15,7 @@ Two-phase design:
 
 1. `register_plugin_config(Cls)` — called at the top of plugin's `default_config.py`,
    only adds cls to `_PLUGIN_CONFIG_CLASSES[plugin]`, does not read disk.
-2. `bind_from_disk()` — framework `_load_extensions` calls once after all
+2. `bind_from_disk()` — framework `load_extensions` calls once after all
    plugin default_config.py imports complete; for each registered cls reads
    `~/.ava/configs/<plugin>/config.json`, validates against cls schema, then
    instantiates and stores into `_PLUGIN_CONFIGS[plugin]`.
@@ -59,7 +59,7 @@ class PluginConfigError(Exception):
 
 class NoPluginContext(PluginConfigError):  # noqa: N818 — parallel to PluginContext naming on the state side (NoPluginContext / DuplicateRegistration / InvalidConfigData), subclass names are short and readable + parent already has Error suffix
     """`register_plugin_config` called outside PluginContext — framework
-    `_load_extensions` wraps imports with `with PluginContext(name):`,
+    `load_extensions` wraps imports with `with PluginContext(name):`,
     plugin authors just call it at the top of default_config.py."""
 
 
@@ -96,11 +96,11 @@ _PLUGIN_CONFIGS: dict[str, BaseModel] = {}
 def register_plugin_config(cls: type[BaseModel]) -> None:
     """Whole-class register plugin config — only adds cls to registry, does not read disk.
 
-    Must be called inside PluginContext (framework `_load_extensions` wraps
+    Must be called inside PluginContext (framework `load_extensions` wraps
     imports with `with PluginContext(name):`). Plugin author does not pass
     plugin name; framework reads it from ContextVar.
 
-    Instantiation happens in `bind_from_disk()` phase (`_load_extensions` calls
+    Instantiation happens in `bind_from_disk()` phase (`load_extensions` calls
     once after all plugin default_config.py imports are done).
 
     Args:
@@ -125,7 +125,7 @@ def register_plugin_config(cls: type[BaseModel]) -> None:
     if plugin is None:
         raise NoPluginContext(
             f"register_plugin_config({cls.__name__}) must be called inside PluginContext — "
-            f"framework `_load_extensions` already wraps, just call at the top of "
+            f"framework `load_extensions` already wraps, just call at the top of "
             f"default_config.py."
         )
 
@@ -144,7 +144,7 @@ def register_plugin_config(cls: type[BaseModel]) -> None:
 def bind_from_disk() -> None:
     """For all registered plugin Configs: read disk image, validate schema, instantiate.
 
-    Framework `_load_extensions` calls once after all plugin imports complete.
+    Framework `load_extensions` calls once after all plugin imports complete.
     `ava plugins update` command does **not** call this (it goes through
     `merge_disk_image_schema`).
 
@@ -159,7 +159,7 @@ def bind_from_disk() -> None:
     """
     for plugin, cls in _PLUGIN_CONFIG_CLASSES.items():
         if plugin in _PLUGIN_CONFIGS:
-            continue  # Already bound (test fixture / _load_extensions called multiple times)
+            continue  # Already bound (test fixture / load_extensions called multiple times)
         _PLUGIN_CONFIGS[plugin] = _instantiate_from_disk(plugin, cls)
 
 
@@ -415,7 +415,7 @@ def _validate_model_membership(value: object) -> str | None:
     MODELS, plugin-registered models included). An unregistered id would pass
     the Pydantic str type check, persist, and crash the next boot at model
     build (Task #1704 — the deepseek-v4-flash-vision incident)."""
-    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
     from shared.lm.registry import MODELS
 
     # Registry-consulting check: make it self-sufficient. MODELS starts empty
@@ -430,13 +430,13 @@ def _validate_model_membership(value: object) -> str | None:
 
 
 def _validate_reasoning_effort_range(value: object) -> str | None:
-    from shared.lm._effort import _EFFORT_VOCAB
+    from shared.lm.effort import EFFORT_VOCAB
 
     # None = unset (the field is `str | None` and a None overlay is a no-op) —
     # accepted, matching the pre-PR behavior.
     if value is None:
         return None
-    valid_values = ("", *_EFFORT_VOCAB)
+    valid_values = ("", *EFFORT_VOCAB)
     if isinstance(value, str) and value in valid_values:
         return None
     rendered_values = ", ".join(repr(candidate) for candidate in valid_values)
@@ -718,7 +718,7 @@ def clear_plugin_configs() -> None:
     """Reset the registry — called by `agent.state.clear_plugin_registrations` (single
     cross-module cleanup point, same semantics as state / hook / system_prompt_section).
 
-    Tests fixture call this in setup/teardown; framework `_load_extensions` also
+    Tests fixture call this in setup/teardown; framework `load_extensions` also
     calls on each entry to avoid accumulating ghost entries across multiple reloads.
     """
     _PLUGIN_CONFIG_CLASSES.clear()

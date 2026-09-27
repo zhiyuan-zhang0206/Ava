@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from shared import plugins_config
 from shared.lm import pricing, provider_api, stop
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.factory import SUPPORTED_MODELS
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
 
 

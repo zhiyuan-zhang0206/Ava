@@ -39,10 +39,6 @@ def _relay_ready(*_args: object) -> bool:
     return True
 
 
-def _no_events(_session: dict[str, Any]) -> None:
-    pass
-
-
 def _add(left: int, right: int) -> int:
     return left + right
 
@@ -382,7 +378,6 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls  # No native model acceptance turn.
@@ -478,7 +473,6 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
@@ -507,15 +501,20 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is not None
 
 
-async def test_control_db_hiccup_still_lands_handoff_and_runner_replay_completes(
+async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Save-first ordering: a control-DB hiccup degrades to pending, the runner certifies later."""
+    """The handoff never replays inline; the runner's reconcile pass completes it.
+
+    Incident 2026-09-27 (second fix): replay used to run (and be awaited) in the
+    handoff foreground for every delivery. It is now owned solely by the runner's
+    background reconcile loop, so delivery leaves `events_completed_at` NULL with
+    the documented pending semantics and `reconcile_one` certifies it later.
+    """
     import httpx
-    from psycopg_pool import PoolTimeout
 
     from agent.impersonation_handoff import deliver_handoff
     from ava import impersonation_replay as recorded
@@ -539,18 +538,14 @@ async def test_control_db_hiccup_still_lands_handoff_and_runner_replay_completes
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
     real_consume = recorded.consume_recorded_events
-    monkeypatch.setattr(recorded, "consume_recorded_events", _no_events)
+    replay_spy = Mock(side_effect=AssertionError("the handoff must not replay in the foreground"))
+    monkeypatch.setattr(recorded, "consume_recorded_events", replay_spy)
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
         assert await settle_checkpoint(graph, owner.agent_id)
         leases.release(requested["id"], attested_caller(requested), "Done; please continue")
         lease = history.resolve(owner.agent_id, 0)
-
-        def hiccup(_session: dict[str, Any]) -> None:
-            raise PoolTimeout("control DB pool exhausted")
-
-        monkeypatch.setattr(recorded, "consume_recorded_events", hiccup)
         await deliver_handoff(graph, lease, owner)
 
         landed = history.resolve(owner.agent_id, 0)
@@ -559,6 +554,7 @@ async def test_control_db_hiccup_still_lands_handoff_and_runner_replay_completes
         assert landed["events_completed_at"] is None
         assert landed["handoff_document"]["statistics"]["event_delivery"]["state"] == "pending"
         assert (tmp_path / "impersonation" / "0.json").exists()
+        assert replay_spy.call_count == 0
 
     # The runner's reconcile pass completes the accounting once the DB is healthy.
     monkeypatch.setattr(recorded, "consume_recorded_events", real_consume)
@@ -616,7 +612,6 @@ async def test_end_note_resumes_an_empty_queue(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     wakes: list[tuple[int, str]] = []
 
     def record_wake(agent_id: int, payload: str) -> bool:
@@ -669,7 +664,6 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     wakes: list[tuple[int, str]] = []
 
     def record_wake(agent_id: int, payload: str) -> bool:

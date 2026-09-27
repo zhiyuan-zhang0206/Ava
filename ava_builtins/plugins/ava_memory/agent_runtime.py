@@ -1,6 +1,6 @@
 """Agent-runtime face of the ava_memory plugin — context notes, prompt section, recall hook.
 
-Loaded only in the agent process: `agent._extensions` imports this module after
+Loaded only in the agent process: `agent.extensions` imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin's SDK
 **surface** — the `ava.memory` namespace (PATH / search / write) — lives in
 `plugin.py` and loads in agent-launched children too (task #3633): exec code
@@ -15,14 +15,14 @@ import asyncio
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._context_notes import (
+from agent.graph.context_notes import (
     RANK_CLUSTER_MEMORY,
     RANK_INHERITED_MEMORY,
     RANK_PER_AGENT_MEMORY,
     register_context_note,
 )
-from agent.graph._memory_recall import passive_memory_recall
-from agent.graph._system_prompt import register_system_prompt_section
+from agent.graph.memory_recall import passive_memory_recall
+from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_before_llm
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
@@ -38,7 +38,7 @@ from .notes import memory_index_note, per_agent_memory_note
 # The two memory indexes join the framework's ordered context-note registry, so
 # `init_context` lays them down whenever a window is established. The ranks pin
 # them into the reading order the framework documents (see the rank scale in
-# `_context_notes.py`): the shared index right after the exec-timeout note, the
+# `context_notes.py`): the shared index right after the exec-timeout note, the
 # per-agent index right after the agent-id note. Registered here rather than by
 # a decorator in notes.py: this module is re-executed on every plugin (re)load,
 # while importing notes.py hits the sys.modules cache — so decorators there

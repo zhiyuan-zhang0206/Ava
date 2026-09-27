@@ -117,6 +117,13 @@ def _serve_flag(env_key: str, file_name: str) -> bool:
     malformed value resolves False here; the real resolver raises on it loudly
     later, so the config-source decision can never silently disagree with the
     machine role.
+
+    `$AVA_HOME` here is `dotenv_boot.resolve_ava_home()[0]`, not an independent
+    `AVA_HOME env > ~/.ava` guess: at this point in boot the env var may not be
+    pinned yet (see above), and a bare guess read (and, on a fresh HOME,
+    created) `~/.ava` for an unanchored checkout, the prod source's own home
+    (#3520 P2-1). `resolve_ava_home()` still honors an explicit `AVA_HOME` env
+    var; it only replaces the bare fallback for when that is unset.
     """
     raw = os.environ.get(env_key)
     if raw is not None and raw.strip():
@@ -126,7 +133,9 @@ def _serve_flag(env_key: str, file_name: str) -> bool:
     raw = runtime_config.read_env_aliases().get(env_key)
     if raw is not None and raw.strip():
         return raw.strip().lower() in _TRUTHY
-    path = Path(os.environ.get("AVA_HOME") or Path.home() / ".ava").expanduser() / file_name
+    from shared.dotenv_boot import resolve_ava_home
+
+    path = resolve_ava_home()[0] / file_name
     if path.exists():
         return path.read_text().strip().lower() in _TRUTHY
     return False

@@ -19,7 +19,7 @@ Two output surfaces (user-approved design, 2026-08-04, event-system W13):
 
 Registration mirrors the plugin state/config pattern: the plugin calls
 ``register_metric(MetricSpec(...))`` at import time inside ``PluginContext``
-(the framework ``_load_extensions`` wrap) and the plugin name is auto-filled.
+(the framework ``load_extensions`` wrap) and the plugin name is auto-filled.
 The registry is process-local.
 
 SQL safety (enforced at register time, task #180 PR C): a metric query must
@@ -383,7 +383,7 @@ def register_metric(spec: MetricSpec) -> MetricSpec:
     if plugin is None:
         raise NoPluginContext(
             "register_metric() must be called inside PluginContext — the "
-            "framework `_load_extensions` already wraps plugin imports; the "
+            "framework `load_extensions` already wraps plugin imports; the "
             "generator wraps metrics-module imports with the plugin name."
         )
     if spec.name in _REGISTRY:

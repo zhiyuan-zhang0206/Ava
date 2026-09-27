@@ -34,7 +34,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from shared import bootstrap, dotenv_boot, paths
+from shared import bootstrap, dotenv_boot, paths, runtime_config
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL, resolve_ava_home
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -326,6 +326,56 @@ def test_prod_service_guard_refuses_an_unanchored_checkout(
     err = paths.prod_service_checkout_error(tmp_path / "worktree")
     assert err is not None
     assert "ava start --worktree" in err
+
+
+def test_settings_free_env_helpers_never_read_the_default_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#3520 P2-1: `runtime_config._ava_home()` (behind `ava config get/set
+    --local`) and `bootstrap._serve_flag`'s file fallback (behind
+    `config_source_is_local`) used to guess `AVA_HOME env > ~/.ava` on their
+    own, independent of the resolved home. The Settings-lite maintenance verbs
+    defer `load_ava_env`, so on an unanchored checkout `AVA_HOME` is not yet
+    pinned when these run — the guess fell through to a planted runner's
+    `~/.ava/.env` (`ava config get --local AVA_MACHINE_NAME` printed its
+    machine name) and its `~/.ava/machine_serve_gateway` file."""
+    fake_home = tmp_path / "home"
+    default = fake_home / ".ava"
+    default.mkdir(parents=True)
+    (default / ".env").write_text("AVA_MACHINE_NAME=planted-prod-runner\n")
+    (default / "machine_serve_gateway").write_text("true\n")
+    before = _tree(default)
+
+    monkeypatch.setitem(os.environ, "HOME", str(fake_home))
+    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
+    monkeypatch.delitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", raising=False)
+    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: tmp_path / "worktree")
+
+    home = runtime_config._ava_home()
+
+    assert not home.is_relative_to(default), "must resolve away from ~/.ava, not into it"
+    assert runtime_config.read_env_aliases() == {}
+    assert bootstrap.config_source_is_local() is False
+    assert _tree(default) == before, "nothing may be read from or written under ~/.ava"
+
+
+def test_settings_free_env_helpers_never_create_the_default_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Same hazard, from a fake HOME with no `~/.ava` at all: the old fallback's
+    `root.mkdir(parents=True, exist_ok=True)` created it (mode 0755) on a bare
+    read, even though nothing was ever written to it."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    default = fake_home / ".ava"
+    monkeypatch.setitem(os.environ, "HOME", str(fake_home))
+    monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
+    monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: tmp_path / "worktree")
+
+    home = runtime_config._ava_home()
+
+    assert not home.is_relative_to(default)
+    assert not default.exists(), "must never create ~/.ava for an unanchored checkout"
 
 
 def test_first_start_refuses_an_unanchored_checkout_before_fetch_or_write(

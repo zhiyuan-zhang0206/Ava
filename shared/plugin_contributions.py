@@ -16,7 +16,7 @@ registers its own hooks and prompt sections through the same entry points, and a
 test may wrap an `ava` target with no plugin in scope; neither is a plugin
 contribution, and recording them would make the ledger's content depend on
 whether a reload had happened yet (framework registrations happen once at module
-import, plugin ones on every `_load_extensions`). Gating on the ContextVar makes
+import, plugin ones on every `load_extensions`). Gating on the ContextVar makes
 the ledger exactly parallel to the plugin tails of the registries it shadows:
 `agent.state.clear_plugin_registrations` clears it, and the plugin imports that
 follow rebuild it.

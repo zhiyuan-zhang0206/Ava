@@ -91,7 +91,7 @@ state_update: dict[str, Any] | None = None
 # surfaces; `_plugin_faces_loaded` = the agent-runtime faces (state fields /
 # hooks / prompt sections), loaded only on the full path — a stateful child,
 # via `ensure_plugins_loaded(surface=False)`. The agent process does NOT go
-# through this path (it calls `agent._extensions.load_extensions` directly from
+# through this path (it calls `agent.extensions.load_extensions` directly from
 # build_graph / host boot and re-registers built-in hooks after), so both
 # latches stay False there and a genuinely-unknown `ava.X` keeps failing fast in
 # `__getattr__`.
@@ -102,7 +102,7 @@ _plugin_faces_loaded = False
 # very bottom). The lazy plugin load in `__getattr__` MUST stay dormant during
 # `import ava`: a `from . import agents` here triggers `__getattr__('agents')`
 # via importlib's fromlist probe, and in a launched child (AVA_AGENT_ID already
-# in the env) that would run `_load_extensions()` against a half-initialized
+# in the env) that would run `load_extensions()` against a half-initialized
 # `ava` singleton — the reverse `ava -> agent` import on an incomplete module
 # the history doc rejected. Gating on this flag keeps `import ava` byte-identical
 # to before; the lazy path only arms once the module is whole.
@@ -130,7 +130,7 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
     launched subprocess still self-loads its plugins.
 
     Containment: the loader's own plugin-import loop is fail-soft (see
-    `agent/_extensions.py`); anything still escaping it is an inventory/config
+    `agent/extensions.py`); anything still escaping it is an inventory/config
     failure — a duplicate plugin name, a malformed `plugins_config.json`, a
     plugin-config schema drift. None of those may kill an agent-launched
     process at `import ava` the way the 2026-08-28 ava_ledger crash did (every
@@ -151,7 +151,7 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
         # would re-execute the surfaces; the latch keeps it to once per process.
         _plugin_faces_loaded = True
         try:
-            importlib.import_module("agent._extensions").load_agent_faces()
+            importlib.import_module("agent.extensions").load_agent_faces()
         except Exception as exc:
             _contain_plugin_load_failure(exc)
         return
@@ -160,12 +160,12 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
     # re-entry fail fast (as it does in the agent process) instead of recursing.
     _plugins_loaded = True
     try:
-        importlib.import_module("agent._extensions").load_extensions(surface=surface)
+        importlib.import_module("agent.extensions").load_extensions(surface=surface)
         if not surface:
             _plugin_faces_loaded = True
     except Exception as exc:
         if isinstance(exc, AttributeError) and (
-            "partially initialized module 'agent._extensions'" in str(exc)
+            "partially initialized module 'agent.extensions'" in str(exc)
         ):
             # Not a failure — too early. A process that imports an `agent.*`
             # module before `ava` reaches this call while the loader module is
@@ -270,7 +270,7 @@ def __getattr__(name: str) -> Any:
 # `ava.sdk_surface.wraps` and `ava.sdk_surface.plugin_loader` are public names
 # (agent visibility is the `__all_for_ava__` whitelist below, not the
 # underscore) reached across the `ava` package boundary by the agent kernel
-# (`agent/state.py`, `agent/_process_boot.py`, `agent/_extensions.py`).
+# (`agent/state.py`, `agent/_process_boot.py`, `agent/extensions.py`).
 # `wraps`' curated plugin-author surface is assembled as `ava.extend` further
 # down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection

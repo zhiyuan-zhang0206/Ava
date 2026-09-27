@@ -130,7 +130,7 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     """Regression: ava.self.MACHINE_SPEC / SELF_MACHINE_NAME are served via module
     __getattr__ that computes machine identity and raises MachineNameMissing when unset
     (CI / isolated $AVA_HOME / schedule runner). The walk resolves members statically, so
-    it never force-evaluates them — otherwise install() crashes _load_extensions in the
+    it never force-evaluates them — otherwise install() crashes load_extensions in the
     child (rc=1)."""
     import shared.machine
 
@@ -234,7 +234,7 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     calls are metered, and restore it on teardown."""
     import ava.mcps
 
-    # `ava` is a process-global singleton and `_load_extensions` installs the
+    # `ava` is a process-global singleton and `load_extensions` installs the
     # recorders as a side effect, so any earlier test in this xdist worker that
     # loaded plugins leaves the funnel already wrapped — install() then correctly
     # no-ops and the wrap assertion below reads as a failure. Which tests share a
@@ -251,14 +251,14 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
 
 
 def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.FixtureRequest) -> None:
-    """Issue #83: `_load_extensions()` meters the process-global `ava` singleton as a
+    """Issue #83: `load_extensions()` meters the process-global `ava` singleton as a
     side effect and nothing used to put it back, so one plugin-loading test silently
     rewrote the callables every later test in that xdist worker saw.
 
     The autouse `_restore_sdk_metering` in `tests/conftest.py` is what closes that.
     It runs after this test body, where a self-test cannot observe it, so the two
     halves are pinned separately: the fixture is wired onto every test, and its one
-    action reverses a *real* `_load_extensions()` — not just the hand-built
+    action reverses a *real* `load_extensions()` — not just the hand-built
     `install()` the test above covers.
     """
     import ava.mcps
@@ -270,7 +270,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     sdk_metering.uninstall()
     bare_funnel = ava.mcps._call_raw
 
-    _build._load_extensions()
+    _build.load_extensions()
     metered = {fq for p, a, fq in sdk_metering._instrument_targets() if getattr(p, a) in _RECORDERS}
     assert metered, "the leak this guards is gone"
     assert ava.mcps._call_raw in _RECORDERS
@@ -294,11 +294,11 @@ def test_a_plugin_load_leaves_no_section_behind_its_namespace(
 
     The autouse `_restore_plugin_registrations` (`tests/fixtures/plugin_registrations.py`)
     closes that. Same split as above: the guard is wired onto every test, it sees
-    a real `_load_extensions()`, and its reset leaves sections, namespaces and
+    a real `load_extensions()`, and its reset leaves sections, namespaces and
     state fields empty together.
     """
     from agent.graph import _build
-    from agent.graph._system_prompt import _FRAMEWORK_SECTION_COUNT, _SYSTEM_PROMPT_SECTIONS
+    from agent.graph.system_prompt import _FRAMEWORK_SECTION_COUNT, _SYSTEM_PROMPT_SECTIONS
     from agent.state import _EXTRA_FIELDS
     from ava.sdk_surface.plugins import _REGISTERED_MEMBERS, _REGISTERED_NAMESPACES
     from tests.fixtures.plugin_registrations import (
@@ -309,7 +309,7 @@ def test_a_plugin_load_leaves_no_section_behind_its_namespace(
     assert "_restore_plugin_registrations" in request.fixturenames
     assert not plugin_registrations_present()
 
-    _build._load_extensions()
+    _build.load_extensions()
     assert plugin_registrations_present()
     assert "cwd" in _REGISTERED_NAMESPACES, "the leak this guards is gone"
 

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Tool Calls & Code Execution
-description: Ava agent's tool invocation and fault-isolated code execution layer—including normalization of LLM-output tool calls (`_tool_calls.py`) and disposable child execution (`_exec.py`).
+description: Ava agent's tool invocation and fault-isolated code execution layer—including normalization of LLM-output tool calls (`tool_calls.py`) and disposable child execution (`_exec.py`).
 tags: []
 ---
 
@@ -9,11 +9,11 @@ tags: []
 
 ## What it is
 
-Ava agent's tool invocation and code execution layer—including normalization of LLM-output tool calls (`_tool_calls.py`) and disposable child execution (`_exec.py`). The child is a fault-isolation boundary, not a security sandbox. The layer follows the single-tool architecture: all tool calls ultimately normalize to `execute_code`.
+Ava agent's tool invocation and code execution layer—including normalization of LLM-output tool calls (`tool_calls.py`) and disposable child execution (`_exec.py`). The child is a fault-isolation boundary, not a security sandbox. The layer follows the single-tool architecture: all tool calls ultimately normalize to `execute_code`.
 
 ## Core Responsibilities
 
-### Tool Call Normalization (`_tool_calls.py`)
+### Tool Call Normalization (`tool_calls.py`)
 - Tool calls come from LangChain's native `AIMessage.tool_calls` (result of `bind_tools`, type `langchain_core.messages.ToolCall`), **not** from parsing XML/`<invoke>` tags in text
 - **Multiple tool_use merging**: Sometimes the model emits multiple `tool_use` blocks in a single AIMessage—`merge_multiple_execute_code_tool_calls()` concatenates each code segment in the LLM's original order with `\n\n` into a single snippet, keeping only the first tool_call_id (and syncing the tool_use blocks in content)
 - Prevents the next round from having the provider reject the whole history due to a missing tool_result
@@ -33,7 +33,7 @@ Ava agent's tool invocation and code execution layer—including normalization o
 
 ## Entry Points
 
-- `agent/graph/_tool_calls.py:merge_multiple_execute_code_tool_calls()` — Multiple tool_call normalization
+- `agent/graph/tool_calls.py:merge_multiple_execute_code_tool_calls()` — Multiple tool_call normalization
 - `agent/graph/_exec.py:exec_node()` — Execution node
 - `agent/graph/_exec.py:_run_agent_code()` — Exec run (one disposable child)
 

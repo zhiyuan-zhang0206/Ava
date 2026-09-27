@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-from agent.graph._build import _load_extensions
+from agent.extensions import load_extensions
 from ops.spec import _plugin_services
 from shared import paths, plugins_config
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.runtime_plugins import declared_plugins
 from shared.runtime_release import ReleaseRejectedError
 
@@ -56,7 +56,7 @@ def prove_plugin_registration(root: Path, required: tuple[str, ...]) -> None:
             side_effect=ReleaseRejectedError("candidate plugin import failed"),
         ),
     ):
-        _load_extensions()
+        load_extensions()
         services = _plugin_services()
         ensure_provider_plugins_loaded()
     for name in required:

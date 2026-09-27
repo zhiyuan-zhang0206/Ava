@@ -37,7 +37,7 @@ class RecallFilter(TypedDict, total=False):
 
 
 class PassiveRecall(TypedDict, total=False):
-    """`passive_recall` payload — _memory_recall.py / ava_memory plugin.
+    """`passive_recall` payload — memory_recall.py / ava_memory plugin.
 
     The recall pass leg timings in milliseconds (the success path); the
     defer / deadline-skip emissions carry no timing keys.

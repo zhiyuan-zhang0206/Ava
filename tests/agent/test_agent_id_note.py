@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.graph._context_notes import _own_label, agent_id_note
+from agent.graph.context_notes import _own_label, agent_id_note
 from shared.config import settings
 from shared.message_kwargs import NoteTag
 from shared.turn_identity import bind_turn_identity
@@ -42,8 +42,8 @@ def _no_optional_clauses(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default the label / machine clauses to absent; tests opt them back in.
     The workspace clause stays real but its section gate is off by default here,
     so a test that does not exercise it never touches the filesystem."""
-    monkeypatch.setattr("agent.graph._context_notes._own_label", _no_label)
-    monkeypatch.setattr("agent.graph._context_notes._machine_clause", _no_machine)
+    monkeypatch.setattr("agent.graph.context_notes._own_label", _no_label)
+    monkeypatch.setattr("agent.graph.context_notes._machine_clause", _no_machine)
     monkeypatch.setattr(settings.agent, "workspace_in_system_prompt", False)
 
 
@@ -68,8 +68,8 @@ def _content() -> str:
 
 def test_states_the_id_label_and_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     """The identity line carries id + label + machine."""
-    monkeypatch.setattr("agent.graph._context_notes._own_label", _steward_label)
-    monkeypatch.setattr("agent.graph._context_notes._machine_clause", _wsl_machine)
+    monkeypatch.setattr("agent.graph.context_notes._own_label", _steward_label)
+    monkeypatch.setattr("agent.graph.context_notes._machine_clause", _wsl_machine)
 
     assert _content().startswith("Your Agent ID is 29 (label: memory steward, machine: wsl).")
 
@@ -80,11 +80,11 @@ def test_id_only_when_no_optional_clauses() -> None:
 
 
 def test_partial_clauses_render_alone(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agent.graph._context_notes._own_label", _steward_label)
+    monkeypatch.setattr("agent.graph.context_notes._own_label", _steward_label)
     assert _content() == "Your Agent ID is 29 (label: memory steward)."
 
-    monkeypatch.setattr("agent.graph._context_notes._own_label", _no_label)
-    monkeypatch.setattr("agent.graph._context_notes._machine_clause", _wsl_machine)
+    monkeypatch.setattr("agent.graph.context_notes._own_label", _no_label)
+    monkeypatch.setattr("agent.graph.context_notes._machine_clause", _wsl_machine)
     assert _content() == "Your Agent ID is 29 (machine: wsl)."
 
 
@@ -99,7 +99,7 @@ def test_workspace_clause_carries_the_concrete_path(
     def _fake_workspace_dir(_agent_id: int) -> Path:
         return ws
 
-    monkeypatch.setattr("agent.graph._context_notes.workspace_dir", _fake_workspace_dir)
+    monkeypatch.setattr("agent.graph.context_notes.workspace_dir", _fake_workspace_dir)
     assert _content().endswith(f" Your workspace is {ws}.")
 
 
@@ -113,7 +113,7 @@ def test_workspace_clause_respects_the_section_gate(
     def _fake_workspace_dir(_agent_id: int) -> Path:
         return tmp_path / "workspaces" / "29"
 
-    monkeypatch.setattr("agent.graph._context_notes.workspace_dir", _fake_workspace_dir)
+    monkeypatch.setattr("agent.graph.context_notes.workspace_dir", _fake_workspace_dir)
     assert _content() == "Your Agent ID is 29."
 
 

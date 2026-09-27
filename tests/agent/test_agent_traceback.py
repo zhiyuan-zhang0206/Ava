@@ -1,4 +1,4 @@
-"""Tests for agent/graph/_agent_traceback.py.
+"""Tests for agent/graph/agent_traceback.py.
 
 The agent-facing render must keep only the agent's own ``<agent_code>`` frames and
 never leak the exec harness, SDK, plugin, or stdlib frames. The full render is the
@@ -14,7 +14,7 @@ import linecache
 
 import pytest
 
-from agent.graph._agent_traceback import (
+from agent.graph.agent_traceback import (
     AGENT_CODE_FILENAME,
     format_agent_traceback,
     format_full_traceback,

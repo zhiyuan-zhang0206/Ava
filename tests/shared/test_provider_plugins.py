@@ -3,7 +3,7 @@
 A fixture plugin directory is written into the session's tmp AVA_HOME
 (tests/conftest.py redirects AVA_HOME), so these tests exercise the real
 discovery path (shared/plugins_config._discover_plugins) and the real loader
-(shared/lm/_plugin_providers). Every test restores the module-level
+(shared/lm/plugin_providers). Every test restores the module-level
 registration state it mutated: MODELS + derived views, provider_api bindings,
 plugin prices, stop vocabulary, the loader's once-flag, and the concurrency
 key cache.
@@ -23,10 +23,9 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
 from shared import paths, plugins_config
-from shared.lm import _plugin_providers as plugin_loader
+from shared.lm import plugin_providers as plugin_loader
 from shared.lm import pricing, provider_api, stop
-from shared.lm._concurrency import _invalidate_known_provider_keys_cache, known_provider_keys
-from shared.lm._plugin_providers import _reset_loaded_for_tests, ensure_provider_plugins_loaded
+from shared.lm.concurrency import _invalidate_known_provider_keys_cache, known_provider_keys
 from shared.lm.factory import (
     MODEL_CONTEXT_WINDOW,
     MODEL_KNOWLEDGE_CUTOFF,
@@ -36,6 +35,7 @@ from shared.lm.factory import (
     provider_key_of_model,
     validate_model_config,
 )
+from shared.lm.plugin_providers import _reset_loaded_for_tests, ensure_provider_plugins_loaded
 from shared.lm.registry import (
     MODELS,
     ModelSpec,

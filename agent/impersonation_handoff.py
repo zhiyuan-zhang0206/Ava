@@ -7,7 +7,6 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent.messages import system_note_message
-from shared.agents import GatewayUnavailable
 from shared.agents.impersonation.impersonation_history import export_handoff, metadata
 from shared.db import publish_inbound_wake
 from shared.db_transaction import write_transaction
@@ -120,36 +119,18 @@ async def deliver_handoff(
     even when nothing else is queued (claim also resumes on the trailing note, so
     an empty queue is not an idle verdict).
 
-    Event accounting runs after the save: a control-DB hiccup degrades to the
-    pending semantics the note documents — the runner's reconcile loop completes
-    it later — instead of blocking the resume.
+    Event accounting is handled only by the runner's background reconcile loop.
+    The handoff keeps its documented pending semantics until that loop finishes;
+    replay never delays the native checkpoint or its receipt.
 
     ``reason`` is the death cause of a supervisor-aborted session (task #3998);
     when present, the note names it right after the session-end sentence.
     """
-    import httpx
-    import psycopg
-    from psycopg_pool import PoolTimeout
-
     from agent.impersonation import flush_checkpoint
-    from ava.impersonation_replay import consume_recorded_events
-    from shared.log import logger
 
-    # Save (and hand off) the record before replaying events: a control-DB
-    # hiccup during accounting must not block the old agent's resume. The
-    # accounting stays pending — the note below states its semantics — and the
-    # runner's reconcile loop completes it later. PoolTimeout/OperationalError
-    # are the control-DB classes the host already treats as crash-equivalent
-    # (services/agent_host/maintenance.py).
+    # Replay is owned by services.agent_host.impersonation_events.reconcile_forever.
+    # Keep the truthful pending record while the durable native handoff proceeds.
     summary, path = await asyncio.to_thread(_save_document, session, incarnation)
-    try:
-        await asyncio.to_thread(consume_recorded_events, session)
-    except (httpx.HTTPError, GatewayUnavailable, psycopg.OperationalError, PoolTimeout) as exc:
-        logger.warning(
-            "Impersonation event accounting pending; runner reconciliation will retry",
-            agent_id=session["agent_id"],
-            error_type=type(exc).__name__,
-        )
     config = {"configurable": {"thread_id": str(incarnation.agent_id)}}
     snapshot = await graph.aget_state(config)
     receipt = f"{session['agent_id']}:{session['session_id']}"

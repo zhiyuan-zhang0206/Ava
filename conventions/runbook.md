@@ -247,17 +247,22 @@ identical no matter where a bare script is launched. Precedence:
 1. `AVA_HOME` env var — explicit; what a gateway-launched subprocess and the prod
    service sessions set.
 2. checkout == `~/.ava/source` (the prod source) → `~/.ava`.
-3. `<checkout>/.ava_home` pointer file → the home it names. `ava start`
-   writes this into a dev cluster's worktree (gitignored), so every later bare
-   invocation from that worktree resolves to the cluster's own home.
+3. `<checkout>/.ava_home` pointer file → the home it names. `scripts/install.sh
+   --worktree` writes this into a dev cluster's worktree (gitignored), so every
+   later bare invocation from that worktree resolves to the cluster's own home.
 4. otherwise → **unanchored**: a checkout that claims no cluster (a dev worktree
    that never ran `ava start --worktree`, a fresh clone, CI) and carries no
    explicit `AVA_HOME`. It never resolves to `~/.ava` — that home belongs to the
    prod source alone. Its home is a private per-process scratch path under the
    system temp dir, and it boots **bare**: no `.env` / `mirror.env` is read, the
-   config source never fetches from a gateway (so no bearer leaves the box and no
-   bootstrap snapshot is written), and `load_ava_env` plants a sentinel
-   `AVA_DB_URL` (`UNANCHORED_DB_SENTINEL`, an unreachable loopback URL) so a DB
+   config source decision never fetches from a gateway and the bootstrap
+   transport itself refuses to dial (`checkout_anchored()` gates
+   `fetch_bootstrap_config`, so no bootstrap snapshot is written) — but this is
+   scoped to the bootstrap fetch alone: an `AVA_CLUSTER_SECRET` / `AVA_GATEWAY_URL`
+   the process inherited from its parent shell still reaches an ordinary CLI
+   client (`ava agents ls`, ...) under the deliberate "explicit env wins" rule.
+   `load_ava_env` plants a sentinel `AVA_DB_URL`
+   (`UNANCHORED_DB_SENTINEL`, an unreachable loopback URL) so a DB
    connection fails loud — `shared/db.connect`/`pool` raise `UnanchoredHomeError`.
    Lint scripts, codegen hooks and ad-hoc `python -c` imports keep working from
    any checkout; every verb that acts on "this checkout's cluster" (`start`,

@@ -1,6 +1,6 @@
 """Agent-runtime face of the ava_sdk_reminder plugin — state fields and hooks.
 
-Loaded only in the agent process: `agent._extensions` imports this module after
+Loaded only in the agent process: `agent.extensions` imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin has no
 SDK-visible surface — everything it does is agent-runtime behavior — so the
 surface module carries only the description (task #3633).
@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMes
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph._tool_calls import first_tool_call_code
+from agent.graph.tool_calls import first_tool_call_code
 from agent.hooks import Hook, register_after_exec, register_before_llm
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound

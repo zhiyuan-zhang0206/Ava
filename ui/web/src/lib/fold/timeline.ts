@@ -493,7 +493,7 @@ export function applySystemEvent(
 /** Merge a server snapshot into the current items (incremental design).
  *
  * Each graph node enter the agent publishes a timeline_snapshot carrying
- * ONLY the messages committed since its last snapshot (`_node_log.py`,
+ * ONLY the messages committed since its last snapshot (`node_log.py`,
  * rendered from in-memory state.messages — race-free, checkpoint commits
  * are async). Full-window snapshots (process start / after compact / turn
  * end) carry the tail window; the frontend cannot and need not tell the

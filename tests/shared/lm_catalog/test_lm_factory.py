@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 
 from shared.config import settings
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.factory import model_supports_vision, provider_key_map, validate_model_config
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 
 @pytest.fixture

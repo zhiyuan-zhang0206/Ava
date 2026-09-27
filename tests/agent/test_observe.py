@@ -13,7 +13,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.observe import log_llm_usage
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 
 @pytest.fixture(scope="module", autouse=True)

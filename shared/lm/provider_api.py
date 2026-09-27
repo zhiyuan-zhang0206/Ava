@@ -5,7 +5,7 @@ which model an agent runs on — no routing, no fallback, no per-turn hook
 (``shared/lm/model-providers-as-plugins.md``,
 ``decisions/2026-07-29-no-runtime-model-routing.md``). Registration happens
 once per process, before the first build / spawn validation / model list
-(``shared/lm/_plugin_providers.py`` loads every enabled plugin's
+(``shared/lm/plugin_providers.py`` loads every enabled plugin's
 ``provider.py``); the prefix map is flat — a duplicate prefix, or one that
 nests inside another (``foo-`` vs ``foo-bar-``), fails fast at registration.
 Core registers no providers; enabled plugins are the sole source of bindings,
@@ -33,7 +33,7 @@ Builder contract (plain Python, documented rather than schema'd — see
   clear build-time error, not a server 401 mid-turn.
 - ``ctx.resolved_effort`` keeps the provider's established wire semantics.
   Builders with a constrained vocabulary clamp with
-  ``shared.lm._effort._clamp_effort``; the GPT builder preserves the resolved
+  ``shared.lm.effort.clamp_effort``; the GPT builder preserves the resolved
   cross-provider value verbatim.
 - ``thinking={"type": "disabled"}`` is honored per provider capability
   (mirror onto the local switch, or log-and-ignore like the Moonshot plugin)
@@ -193,7 +193,7 @@ class _ProviderRegistry:
         """Register a callback run after every successful plugin registration.
 
         Consumers that cache a view derived from the registration state (e.g.
-        ``shared/lm/_concurrency.known_provider_keys``) hook their cache clear
+        ``shared/lm/concurrency.known_provider_keys``) hook their cache clear
         here so a plugin provider becomes visible without a second mechanism.
         """
         self._invalidators.append(fn)

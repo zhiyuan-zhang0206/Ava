@@ -1,7 +1,7 @@
 """Tests for `skills_to_expand_at_start` — the preloaded-skills note.
 
 Two surfaces:
-- `resolve_prompt_skills` (agent/graph/_capabilities.py): the resolver shared
+- `resolve_prompt_skills` (agent/graph/capabilities.py): the resolver shared
   with the capabilities index — wildcard, identifier-then-name, warn-and-skip.
 - `preloaded_skills_note` (agent/graph/_memory_inject.py): the full-SKILL.md
   system note injected at cold start + after every compact (same carrier as the
@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
-from agent.graph._capabilities import resolve_prompt_skills
-from agent.graph._context_notes import preloaded_skills_note
+from agent.graph.capabilities import resolve_prompt_skills
+from agent.graph.context_notes import preloaded_skills_note
 from shared.config import FIELD_INFOS, AgentSettings, per_agent_field_names, settings
 from shared.message_kwargs import NoteTag
 

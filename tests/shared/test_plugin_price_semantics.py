@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from shared.lm import pricing
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.pricing import CostQuote, Rates, _parse_catalog, quote, rates_at
 
 _ARCHIVE_PATH = Path(__file__).resolve().parents[2] / "shared/lm/pricing_catalog_archive.json"

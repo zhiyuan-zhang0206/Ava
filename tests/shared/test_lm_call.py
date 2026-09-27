@@ -1,4 +1,4 @@
-"""`shared/lm/_call.py` unit tests — the shared model-call tail.
+"""`shared/lm/call.py` unit tests — the shared model-call tail.
 
 `extract_text` / `invoke_text` / `answer_text` are the one copy of the
 "invoke -> flatten -> empty-check, wrapped in the caller's error type" tail
@@ -13,8 +13,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from shared.lm._call import answer_text, extract_text, invoke_text
-from shared.lm._effort import ReasoningEffort
+from shared.lm.call import answer_text, extract_text, invoke_text
+from shared.lm.effort import ReasoningEffort
 
 
 class _FakeResponse:

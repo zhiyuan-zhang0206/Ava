@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
-from shared.lm._effort import ReasoningEffort
+from shared.lm.effort import ReasoningEffort
 from shared.resilience import extract_retry_after, jittered
 
 
@@ -25,7 +25,7 @@ def _limiter_sync(provider: str | None) -> Any:
     """The concurrency-limiter context for one sync invoke (no-op when
     disabled or provider unknown). Imported lazily so hot paths that never
     enable the limiter pay nothing at import time."""
-    from shared.lm._concurrency import get_limiter
+    from shared.lm.concurrency import get_limiter
 
     return get_limiter().sync(provider)
 
@@ -101,7 +101,7 @@ def invoke_response(
 
     `provider` is the `shared/lm/factory.py` provider key (`deepseek` /
     `claude` / …) for the outbound concurrency limiter
-    (`shared/lm/_concurrency.py`, no cap unless configured); `None` skips
+    (`shared/lm/concurrency.py`, no cap unless configured); `None` skips
     the limiter. A successful invoke logs its
     `llm_usage` row (with `usage_source` as the discriminator) before
     returning; a failed one raises `error_type` with the reason. Empty-response

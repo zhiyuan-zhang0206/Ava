@@ -26,13 +26,13 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.graph._llm_chunk import _validate_stop_reason
-from agent.graph._llm_errors import (
+from agent.graph.llm_errors import (
     LLMStreamCorruptedError,
     LLMStreamError,
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 ensure_provider_plugins_loaded()
 

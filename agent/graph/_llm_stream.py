@@ -32,7 +32,7 @@ from shared.config.turn_view import turn_settings
 from shared.log import logger
 
 from ._callbacks import RedisStreamHandler
-from ._llm_errors import (
+from .llm_errors import (
     LLMStreamStallPairError,
     LLMStreamStallTimeoutError,
     _is_fatal_provider_error_type,
@@ -428,7 +428,7 @@ async def _stream_with_cache_retry(
             (last_ts - first_ts) * 1000.0 if first_ts is not None and last_ts is not None else None
         )
 
-    from shared.lm._concurrency import get_limiter
+    from shared.lm.concurrency import get_limiter
     from shared.lm.factory import provider_key_of_model
 
     provider = provider_key_of_model(getattr(llm, "model_name", "") or "")

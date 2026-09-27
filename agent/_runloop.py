@@ -16,7 +16,7 @@ from shared.context import AvaContext
 from shared.live_events import Error
 from shared.log import logger
 
-from .graph._llm_errors import FatalLLMStreamError, FatalProviderError
+from .graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from .state_channels import (
     CIRCUIT_REASON_AUTH,
     CIRCUIT_REASON_BAD_REQUEST,
@@ -111,7 +111,7 @@ def _model_vendor() -> str | None:
     """Vendor key of this turn's model — the account a failure bills to.
 
     The classifier stamps the same read onto the ``llm_provider_error`` log's
-    ``vendor`` field (`agent/graph/_llm_errors.py`), so the human-facing
+    ``vendor`` field (`agent/graph/llm_errors.py`), so the human-facing
     reports and the machine event name the same account: a DeepSeek balance
     rejection stays ``vendor=deepseek`` even when it surfaced through the
     anthropic-compat path (``provider=anthropic`` — the 2026-09-18 billing

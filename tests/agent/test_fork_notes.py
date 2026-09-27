@@ -32,7 +32,7 @@ from langchain_core.messages import (
 )
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import _context_notes
+from agent.graph import context_notes
 from agent.graph._claim import claim_node
 from agent.graph._claim_dispatch import (
     _STRIP_ON_FORK_TAGS,
@@ -71,10 +71,10 @@ def memory_plugin() -> Any:
             del sys.modules[name]
 
 
-def _last_entry_by_name(name: str) -> _context_notes.ContextNote:
+def _last_entry_by_name(name: str) -> context_notes.ContextNote:
     """The last-registered entry whose builder is `name` (registration order
     wins; a plugin reload appends, never replaces)."""
-    entries = [e for e in _context_notes._CONTEXT_NOTES if e.build.__name__ == name]
+    entries = [e for e in context_notes._CONTEXT_NOTES if e.build.__name__ == name]
     assert entries, f"no context note registered as {name}"
     return entries[-1]
 

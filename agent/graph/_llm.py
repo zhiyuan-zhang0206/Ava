@@ -16,7 +16,7 @@ RunnableConfig (LangGraph checkpointer standard).
 
 Interrupt uses `subscribe_interrupt` RAII: on node entry it watches for a
 durable interrupt inbound (kind cancel/terminate) for this agent by polling
-`inbound_messages` on a short cadence (`_INTERRUPT_POLL_S` = 2s, `agent/graph/_interrupt.py`),
+`inbound_messages` on a short cadence (`_INTERRUPT_POLL_S` = 2s, `agent/graph/interrupt.py`),
 deliberately NOT sharing the claim node's Redis pub/sub listener — sharing it
 was the root cause of the 2026-08-02 lost-wake incident (agent 2476, 30.06s
 pickup). The watcher sets an asyncio.Event the moment one is queued; inside the
@@ -33,7 +33,7 @@ picks up the dynamic class rebound by build_agent_state.
 Module layout (Task #1004 >800-line split): streaming consumption, the cancel
 race, chunk assembly + final-message validation, and the error taxonomy /
 consecutive-error tracking live in the sibling modules ``_llm_stream.py`` /
-``_llm_cancel.py`` / ``_llm_chunk.py`` / ``_llm_errors.py``; this module keeps
+``_llm_cancel.py`` / ``_llm_chunk.py`` / ``llm_errors.py``; this module keeps
 the node entry + turn dispatch (``llm_node``, ``_llm_node_impl``). ``_llm_cancel``
 imports ``LlmGoto`` from here, so ``_race_stream_vs_cancel`` is imported lazily
 inside ``_llm_node_impl`` rather than at module top (keeps the import graph
@@ -75,7 +75,8 @@ from shared.message_kwargs import read_ava_kwargs
 
 from ._callbacks import RedisStreamHandler
 from ._llm_chunk import _assemble_final_message
-from ._llm_errors import (
+from ._llm_stream import _stream_with_cache_retry
+from .llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
     LLMRetryBudgetExceededError,
@@ -86,9 +87,8 @@ from ._llm_errors import (
     _reset_stall_pair_streak,
     _stall_pair_streak_active,
 )
-from ._llm_stream import _stream_with_cache_retry
-from ._node_log import node_lifecycle
-from ._tool_calls import code_from_args
+from .node_log import node_lifecycle
+from .tool_calls import code_from_args
 
 
 def _capture_ava_overview() -> str:
@@ -123,7 +123,7 @@ def _capture_ava_overview() -> str:
 
 
 # At module top-level execution time, ava plugins are not yet loaded (order: import
-# _llm → module top → main() → build_graph() → _load_extensions()). So capture is
+# _llm → module top → main() → build_graph() → load_extensions()). So capture is
 # deferred to the build_system_prompt() call site — by then plugins are loaded
 # and each plugin's `register_system_prompt_section` has already registered.
 #
@@ -137,7 +137,7 @@ def _get_ava_overview() -> str:
 
 # _BASE_SYSTEM_PROMPT is the immutable core of the system prompt.
 # The {_AVA_OVERVIEW} placeholder is filled by _get_ava_overview() lazy capture
-# the first time build_system_prompt() is called — by then _load_extensions() has
+# the first time build_system_prompt() is called — by then load_extensions() has
 # run and all plugin namespaces are visible.
 # Plugins inject extension content via register_system_prompt_section().
 _BASE_SYSTEM_PROMPT = """\

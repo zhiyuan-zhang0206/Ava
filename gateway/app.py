@@ -231,7 +231,7 @@ from shared.agents import AvaAgentError
 from shared.cluster_auth import cookie_name
 from shared.config import settings
 from shared.context import AvaContext
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.os_cron import register_os_cron
 
 _log = logging.getLogger(__name__)

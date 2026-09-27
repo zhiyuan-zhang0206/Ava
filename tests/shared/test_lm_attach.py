@@ -11,7 +11,6 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from PIL import Image
 
 from shared.lm import provider_api
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.attach import (
     AttachEntry,
     pack_attachments,
@@ -22,6 +21,7 @@ from shared.lm.attach_constants import (
     ATTACH_MAX_TOTAL_BYTES,
 )
 from shared.lm.factory import media_types_for_model
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.provider_api import AttachPolicy, ProviderBinding
 from shared.lm.registry import MODELS
 

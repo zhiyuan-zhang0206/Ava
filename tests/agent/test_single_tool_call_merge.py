@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph import exec_node
-from agent.graph._tool_calls import merge_multiple_execute_code_tool_calls
+from agent.graph.tool_calls import merge_multiple_execute_code_tool_calls
 from agent.state import AgentState
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from shared.context import AvaContext

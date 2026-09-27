@@ -29,9 +29,9 @@ Core owns only the extension and normalization mechanisms:
 
 - `provider_api.py` defines `ProviderBinding`, `BuildContext`, `AttachPolicy`,
   `PriceRates`, and the fail-fast registration contract.
-- `_plugin_providers.py` discovers enabled plugins and imports their
+- `plugin_providers.py` discovers enabled plugins and imports their
   `provider.py` modules under a process-wide lock.
-- `registry.py`, `factory.py`, `_effort.py`, and `stop.py` assemble plugin data
+- `registry.py`, `factory.py`, `effort.py`, and `stop.py` assemble plugin data
   into provider-agnostic views and behavior. Their provider-owned tables start
   empty.
 - `pricing.py` selects plugin runtime prices or catalog-only archive prices and
