@@ -4739,11 +4739,13 @@ describe("TimelineView sticky work block (task #2601)", () => {
       expect(toggle.getAttribute("data-stuck")).toBe("true");
       expect(toggle.className).toContain("backdrop-blur-md");
       // The stuck variant's paint-only edge treatment (tasks #3224/#3308,
-      // retuned by #3536): the gutter seal rides on box-shadow, the
-      // child-slit mask is a ::after band with the separator line at its bottom.
+      // retuned by #3536, and again by the continuous frosted pane): the
+      // gutter seal rides on box-shadow, and the pane's own ::after is now
+      // a 1px inset separator rather than the earlier bordered band.
       expect(toggle.className).toContain("shadow-[");
       expect(toggle.className).toContain("16px_0_0_0_var(--background)");
-      expect(toggle.className).toContain("after:border-b");
+      expect(toggle.className).toContain("after:h-px");
+      expect(toggle.className).toContain("after:bg-border");
       expect(toggle.className).not.toContain("0_2px_0_0_var(--background)");
     });
   });
