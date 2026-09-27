@@ -106,11 +106,11 @@ _BIND_WAIT_TIMEOUT_S = 60.0
 _BIND_WAIT_INTERVAL_S = 2.0
 
 
-def pg_data_dir() -> Path:
+def _pg_data_dir() -> Path:
     return ava_home() / "pg"
 
 
-def redis_data_dir() -> Path:
+def _redis_data_dir() -> Path:
     return ava_home() / "redis"
 
 
@@ -142,7 +142,7 @@ def _redis_cli_bin() -> str:
     return _redis_bin("redis-cli")
 
 
-def pg_bin(name: str) -> str:
+def _pg_bin(name: str) -> str:
     return str(pg_tool(name)) if is_macos() else str(PG_BIN_LINUX / name)
 
 
@@ -245,7 +245,7 @@ def _initdb(target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
-            pg_bin("initdb"),
+            _pg_bin("initdb"),
             "-D",
             str(target),
             "-U",
@@ -263,7 +263,7 @@ def _initdb(target: Path) -> None:
 def _ensure_pg_data() -> Path:
     """Ensure this cluster's pg data dir exists and is initialized, via the cached
     template (initdb once host-wide, then copy). Returns the data dir."""
-    data = pg_data_dir()
+    data = _pg_data_dir()
     if (data / "PG_VERSION").exists():
         return data
     template = _pg_template_dir()
@@ -297,7 +297,7 @@ def pg_admin_url(pg_port: int) -> str:
 
 def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
     out = subprocess.run(
-        [pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
+        [_pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
         capture_output=True,
         check=False,
     )
@@ -320,7 +320,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
         # first-start migration failed `fe_sendauth: no password supplied`).
         # pg_ctl reload is a SIGHUP — a no-op when the content is unchanged.
         result = subprocess.run(
-            [pg_bin("pg_ctl"), "-D", str(data), "reload"],
+            [_pg_bin("pg_ctl"), "-D", str(data), "reload"],
             check=False,
             capture_output=True,
             text=True,
@@ -351,7 +351,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
     listen = ",".join(_bind_addrs(cluster_secret))
     result = subprocess.run(
         [
-            pg_bin("pg_ctl"),
+            _pg_bin("pg_ctl"),
             "-D",
             str(data),
             "-l",
@@ -445,7 +445,7 @@ def start_redis(
     dial_host = _redis_dial_host()
     if _redis_running(redis_port, redis_admin_password, dial_host):
         print(f"  ✓ redis already running ({dial_host}:{redis_port})")
-        _write_redis_conf(redis_data_dir(), redis_admin_password)
+        _write_redis_conf(_redis_data_dir(), redis_admin_password)
         # Re-affirm the ACL user on every start (survives a restart that drops
         # the in-memory ACL) — including no-secret clusters, whose identity
         # user is created with `nopass` (see _ensure_redis_acl).
@@ -455,7 +455,7 @@ def start_redis(
     bind_addrs = ["127.0.0.1"] if is_macos() else _bind_addrs(cluster_secret)
     if not is_macos() and cluster_secret and not _wait_for_reachable_bind():
         return 1
-    data = redis_data_dir()
+    data = _redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
         _redis_server_bin(),
@@ -743,7 +743,7 @@ def print_data_plane_status() -> None:
             print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
 
 
-def redis_endpoint() -> tuple[int, str | None] | None:
+def _redis_endpoint() -> tuple[int, str | None] | None:
     """(port, password) of this cluster's redis from settings.data_plane.redis_url, or None
     if not resolvable (no instance to stop). The password is None on a no-secret
     cluster (redis has no requirepass then)."""
@@ -771,7 +771,7 @@ def stop_cluster_instance() -> int:
         print(f"\n→ data plane remote-managed ({remote_plane_host()}) — nothing to stop locally")
         warn_orphaned_local_instance()
         return 0
-    data = pg_data_dir()
+    data = _pg_data_dir()
     print("\n→ stopping per-cluster data plane")
     # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
     # are disconnected before Postgres goes down.
@@ -780,12 +780,12 @@ def stop_cluster_instance() -> int:
     stop_pgbouncer()
     if (data / "PG_VERSION").exists():
         subprocess.run(
-            [pg_bin("pg_ctl"), "-D", str(data), "-m", "fast", "stop"],
+            [_pg_bin("pg_ctl"), "-D", str(data), "-m", "fast", "stop"],
             check=False,
             capture_output=True,
         )
         print("  ✓ postgres stopped")
-    endpoint = redis_endpoint()
+    endpoint = _redis_endpoint()
     if endpoint is not None:
         port, password = endpoint
         subprocess.run(

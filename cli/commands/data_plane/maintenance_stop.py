@@ -62,7 +62,7 @@ def _process(pid: int) -> OwnedProcess | None:
 
 
 def _capture_postgres() -> OwnedProcess | None:
-    data = instance.pg_data_dir().resolve()
+    data = instance._pg_data_dir().resolve()
     pidfile = data / "postmaster.pid"
     pid = _pidfile(pidfile)
     if pid is None:
@@ -88,13 +88,13 @@ def _capture_postgres() -> OwnedProcess | None:
 
 
 def _capture_pooler() -> OwnedProcess | None:
-    pid = _pidfile(pooler.pidfile_path())
+    pid = _pidfile(pooler._pidfile_path())
     if pid is None:
         return None
     identity = _process(pid)
     if identity is None:
         return None
-    if not pooler.pid_is_our_pooler(pid) or not identity.live():
+    if not pooler._pid_is_our_pooler(pid) or not identity.live():
         raise RuntimeError("cannot verify this home's PgBouncer process")
     return identity
 
@@ -102,8 +102,8 @@ def _capture_pooler() -> OwnedProcess | None:
 def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
     """A missing pidfile or refused port is not evidence of no local process."""
     directories = {
-        "postgres": instance.pg_data_dir().resolve(),
-        "redis-server": instance.redis_data_dir().resolve(),
+        "postgres": instance._pg_data_dir().resolve(),
+        "redis-server": instance._redis_data_dir().resolve(),
     }
     for process in psutil.process_iter(["pid", "name"]):
         name = process.info["name"]
@@ -115,7 +115,7 @@ def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
             if process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
                 continue
             if name == "pgbouncer":
-                belongs = pooler.pid_is_our_pooler(process.pid)
+                belongs = pooler._pid_is_our_pooler(process.pid)
                 key = "pgbouncer"
             else:
                 key = "redis" if name == "redis-server" else "postgres"
@@ -170,7 +170,7 @@ async def _capture_redis(client: Redis, deadline: float) -> OwnedProcess:
     identity = _process(int(info["process_id"]))
     if (
         identity is None
-        or Path(directory).resolve() != instance.redis_data_dir().resolve()
+        or Path(directory).resolve() != instance._redis_data_dir().resolve()
         or psutil.Process(identity.pid).name() != "redis-server"
     ):
         raise RuntimeError("cannot verify this home's Redis process")
@@ -180,7 +180,7 @@ async def _capture_redis(client: Redis, deadline: float) -> OwnedProcess:
 async def _stop(deadline: float, *, save: bool = True) -> list[str]:
     pg = _capture_postgres()
     pgb = _capture_pooler()
-    endpoint = instance.redis_endpoint()
+    endpoint = instance._redis_endpoint()
     if endpoint is None:
         raise RuntimeError("maintenance requires this home's explicit Redis endpoint")
     port, _runtime_password = endpoint
@@ -232,9 +232,9 @@ async def _stop(deadline: float, *, save: bool = True) -> list[str]:
                 # termination (issue #2307).
                 result = subprocess.run(
                     [
-                        instance.pg_bin("pg_ctl"),
+                        instance._pg_bin("pg_ctl"),
                         "-D",
-                        str(instance.pg_data_dir()),
+                        str(instance._pg_data_dir()),
                         "-m",
                         "fast",
                         "-W",
