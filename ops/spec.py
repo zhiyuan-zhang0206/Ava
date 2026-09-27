@@ -24,7 +24,7 @@ share one roster.
 
 **Deliberately outside the roster** (each documented at its own site): the
 ``gate`` entry-port service (launchd KeepAlive / pidfile job, no session row —
-``ops/controllers/_converge_gate.py``, probed via ``probe_gate``, not the
+``cli/commands/converge/gate.py``, probed via ``probe_gate``, not the
 watchdog), the OS-level watchdog-probe jobs (``shared/os_watchdog_probe.py``),
 and the watchdog's hand-prepended ``redis-acl`` healthcheck
 (``services/watchdog/daemon.py``). These are not sessions, so

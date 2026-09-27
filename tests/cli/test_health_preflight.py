@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands import _health_preflight as _hp
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 
 
 class _FakeDataPlane:

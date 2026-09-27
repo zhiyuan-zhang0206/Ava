@@ -10,7 +10,7 @@ the ABSENCE half — the roster, the stop scope, and the converge migration.
 from __future__ import annotations
 
 import ops.roster as spec_mod
-from cli.commands._converge import _RENAMED_AWAY_SERVICES
+from cli.commands.converge.host import _RENAMED_AWAY_SERVICES
 
 
 def test_roster_carries_no_pty_service() -> None:

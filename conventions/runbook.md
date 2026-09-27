@@ -143,7 +143,7 @@ in the repository do not establish a cluster runtime dependency.
 **Migration note (session rename)**: this naming dropped the machine segment and
 added the `ava-` prefix (old convention was `<cluster>-<machine>-<service>`). After
 the upgrade lands, the old-named sessions become orphans. The converge step
-`_reap_legacy_sessions` (`cli/commands/_converge.py`, run on every `ava start` /
+`_reap_legacy_sessions` (`cli/commands/converge/host.py`, run on every `ava start` /
 `ava cluster update`) does a one-shot kill of any session matching the old
 `<cluster>-<machine>-*` prefix on this host. This boundary has **NOT been tested**
 in a live prod upgrade; manually killing the old-named session (its record lives
@@ -446,7 +446,7 @@ the converge phase re-ensures it — and applies the rest of the host wiring —
 `ava start` / `ava cluster update`. That global `ava` always means prod. For dev, run
 `.venv/bin/ava` inside the worktree (which resolves the worktree's own `ava`).
 
-The converge phase (`cli/commands/_converge.py:converge_host`) is idempotent — run
+The converge phase (`cli/commands/converge/host.py:converge_host`) is idempotent — run
 by `cmd_start`, so `ava cluster update` re-applies it on every upgrade. One gateway
 `ava cluster update` converges the whole fleet through the Phase B fan-out. Run it standalone
 with `ava converge`. It covers the `ava` symlink (re-ensuring install.sh's bootstrap),
@@ -477,7 +477,7 @@ carry-over (below). Converge never runs plugin scaffolds or touches the memory p
 explicit `ava memory init` brings up the memory checkouts and seeds `MEMORY.md` plus the
 commit-cap hook. The unit-state plugin-image step needs a configured unit, so on a
 brand-new host it first runs at `ava start`, not during `install.sh`.
-On a gateway host it also registers the **fleet UI gate** (`cli/commands/_converge_gate.py`)
+On a gateway host it also registers the **fleet UI gate** (`cli/commands/converge/gate.py`)
 — a launchd KeepAlive job on macOS or user-systemd unit on Linux that owns the entry port (:3000) and proxies the Next.js app
 on :3001. That step **replaces the running job only when the desired supervisor definition actually
 changed** — checkout path, ports, or **the gate's own code and static assets**, which the

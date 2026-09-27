@@ -100,7 +100,7 @@ Which cluster an `ava` acts on is fixed by **which checkout it belongs to**
 --role gateway` symlinks the prod checkout's `ava` onto PATH at
 `~/.local/bin`, so a bare `ava` always means prod; dev work runs
 `.venv/bin/ava` inside the worktree. Host wiring + each plugin's `scaffold()`
-are applied by the converge phase (`cli/commands/_converge.py`) on every
+are applied by the converge phase (`cli/commands/converge/host.py`) on every
 `ava start` / `ava cluster update` (standalone: `ava converge`). Prod upgrades
 go through `ava cluster update` (the CLI — the only update entry point),
 never directly `git checkout` on the prod path.

@@ -39,8 +39,8 @@ from pathlib import Path
 from string import Template
 from urllib.parse import unquote, urlsplit
 
-from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._rendered_file import write_rendered_guarded
+from cli.commands.converge.spec import ConvergeCtx
 from shared.atomic_io import write_text_atomic
 from shared.machine import MachineRoles
 from shared.observability import collector_allowed_for_home

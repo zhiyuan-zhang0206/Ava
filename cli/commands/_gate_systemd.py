@@ -155,7 +155,7 @@ def _write_unit(path: Path, content: str) -> None:
 
 def _stop_legacy(home: Path, repo: Path) -> None:
     """Do not replace a live detached listener until its ownership is proved."""
-    from cli.commands._converge_gate import gate_pid_is_ours
+    from cli.commands.converge.gate import gate_pid_is_ours
     from cli.commands.data_plane.pgbouncer import terminate_verified
     from shared.proc import process_alive
 

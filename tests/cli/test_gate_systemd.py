@@ -241,7 +241,7 @@ def test_legacy_pid_must_be_owned_and_gone_before_start(
     pidfile = tmp_path / "run/gate.pid"
     pidfile.write_text("123")
     monkeypatch.setattr("shared.proc.process_alive", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands._converge_gate.gate_pid_is_ours", lambda *_: owned)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands.converge.gate.gate_pid_is_ours", lambda *_: owned)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "cli.commands.data_plane.pgbouncer.terminate_verified",
         lambda *_, **__: stopped,  # pyright: ignore[reportUnknownArgumentType]
@@ -261,9 +261,9 @@ def test_legacy_pid_must_be_owned_and_gone_before_start(
 def test_linux_lifecycle_routes_to_the_same_home_unit(
     tmp_path: Path, manager: Manager, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import _converge_gate as cg
-    from cli.commands._converge_spec import ConvergeCtx
     from cli.commands._stop_extras import stop_gate_service
+    from cli.commands.converge import gate as cg
+    from cli.commands.converge.spec import ConvergeCtx
 
     monkeypatch.setattr(cg.sys, "platform", "linux")
     monkeypatch.setattr("shared.platform.IS_MACOS", False)

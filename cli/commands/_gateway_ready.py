@@ -82,7 +82,7 @@ nothing, because every failure a further wait cannot fix ends the gate at once:
   app-firewall rule orphaned by a `uv python` bump, issue #949). Waiting cannot fix a
   firewall rule, and it is worth saying which of the two broke. The verdict does not
   stop at naming the two candidate causes either: `_firewall_attribution` asks
-  `cli.commands._converge_firewall` — the same unprivileged audit `ava converge`
+  `cli.commands.converge.firewall` — the same unprivileged audit `ava converge`
   reports from — which of them it actually is, and prints the exact privileged repair
   when it is the firewall.
 - `REFUSED` — it answers with a non-200, non-5xx status (401/403/404): a credential or
@@ -325,7 +325,7 @@ def _firewall_attribution() -> str:
     diagnosis with a stack trace.
     """
     try:
-        from cli.commands._converge_firewall import audit_this_host
+        from cli.commands.converge.firewall import audit_this_host
         from shared.machine import machine_role
 
         audit = audit_this_host(frozenset(machine_role()))

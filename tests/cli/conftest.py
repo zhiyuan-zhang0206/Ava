@@ -62,8 +62,8 @@ def _gate_probe_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     The default answers are "nothing on the port, no such job", which is what a
     hermetic host looks like. Tests that assert a particular gate state (including
     `_ensure_launchd`'s own) install their own `_launchctl` on top."""
-    import cli.commands._converge_gate as cg
     import cli.commands._gate_systemd as gs
+    import cli.commands.converge.gate as cg
 
     monkeypatch.setattr(
         gs,

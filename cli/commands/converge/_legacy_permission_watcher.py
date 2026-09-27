@@ -12,8 +12,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cli.commands._converge_gate import _bootout_and_wait, _job_loaded
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.gate import _bootout_and_wait, _job_loaded
+from cli.commands.converge.spec import ConvergeCtx
 from shared.platform import IS_MACOS
 
 LABEL = "com.ava.permission-watcher"

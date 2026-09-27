@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from services.healthchecks.lgtm import (
     is_lgtm_host,
     lgtm_deploy_dir,

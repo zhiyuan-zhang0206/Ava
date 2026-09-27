@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._converge as cv
-import cli.commands._converge_brew_pin as cbp
-import cli.commands._converge_steps as csteps
+import cli.commands.converge._brew_pin as cbp
+import cli.commands.converge._steps as csteps
+import cli.commands.converge.host as cv
 
 
 def _ctx(tmp_path: Path) -> cv.ConvergeCtx:

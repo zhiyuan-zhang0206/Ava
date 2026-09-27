@@ -15,11 +15,6 @@ this package namespace.
 from __future__ import annotations
 
 from cli.commands._cluster_rollback import cmd_rollback
-from cli.commands._converge import cmd_converge
-from cli.commands._firewall import (
-    cmd_firewall_status,
-    cmd_firewall_sync,
-)
 from cli.commands._update_dispatch import cmd_update
 from cli.commands.agents.pty import (
     cmd_pty_freeze,
@@ -61,6 +56,11 @@ from cli.commands.cluster.watchdog_probe import (
     cmd_watchdog_probe_register,
     cmd_watchdog_probe_unregister,
 )
+from cli.commands.converge.firewall_command import (
+    cmd_firewall_status,
+    cmd_firewall_sync,
+)
+from cli.commands.converge.host import cmd_converge
 from cli.commands.data_plane.ensure_db_role import cmd_ensure_db_role
 from cli.commands.data_plane.pitr import (
     cmd_pitr_drill,

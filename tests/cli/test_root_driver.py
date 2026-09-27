@@ -537,10 +537,11 @@ def _stub_start_preconditions(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess
 
     import shared.session_backend as _sb
-    from cli.commands import _converge, _setup
     from cli.commands import _repo as _repo_mod
     from cli.commands import _session_lifecycle as _session_mod
+    from cli.commands import _setup
     from cli.commands import start as _start_mod
+    from cli.commands.converge import host as _converge
 
     monkeypatch.setattr(
         _setup,

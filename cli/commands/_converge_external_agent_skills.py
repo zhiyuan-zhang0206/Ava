@@ -13,7 +13,6 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
-from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._external_agent_skill_cleanup import (
     _cleanup_garbage_impl,
     _queue_garbage,
@@ -42,6 +41,7 @@ from cli.commands._external_agent_skill_ledger import (
     _stage_manifest,
     _write_ledger,
 )
+from cli.commands.converge.spec import ConvergeCtx
 from shared.platform import LockTimeoutError, file_lock
 from shared.private_storage import ensure_private_dir
 

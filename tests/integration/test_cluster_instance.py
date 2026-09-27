@@ -24,8 +24,8 @@ import psycopg
 import pytest
 import redis
 
-from cli.commands._converge_spec import ConvergeCtx
-from cli.commands._converge_steps import _ensure_redis_url_identity_step
+from cli.commands.converge._steps import _ensure_redis_url_identity_step
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.admin_secrets import ensure_data_plane_admin_secrets
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane

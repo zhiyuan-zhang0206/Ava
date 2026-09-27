@@ -1056,7 +1056,7 @@ def test_notify_owner_honours_im_bridge_health_url_override(
 
 
 def _gate(**kw: object) -> object:
-    import cli.commands._converge_gate as cg
+    import cli.commands.converge.gate as cg
 
     fields: dict[str, object] = {
         "entry_port": 3000,
@@ -1077,7 +1077,7 @@ def test_gate_probe_is_silent_on_a_runner(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_gate_probe_reports_a_dark_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    import cli.commands._converge_gate as cg
+    import cli.commands.converge.gate as cg
 
     monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(cg, "probe_gate", lambda *_a: _gate(serving=False))  # pyright: ignore[reportUnknownArgumentType]
@@ -1091,7 +1091,7 @@ def test_gate_probe_reports_a_serving_but_unsupervised_gate(
 ) -> None:
     """Serving now, but nothing left to restart it — invisible to a user and to
     every other probe, which is why it is worth a line of its own."""
-    import cli.commands._converge_gate as cg
+    import cli.commands.converge.gate as cg
 
     monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(cg, "probe_gate", lambda *_a: _gate(supervised=False))  # pyright: ignore[reportUnknownArgumentType]
@@ -1124,7 +1124,7 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
 
 
 def _redis_bridge(**kw: object) -> object:
-    import cli.commands._converge_redis_bridge as bridge
+    import cli.commands.converge.redis_bridge as bridge
 
     fields: dict[str, object] = {
         "required": True,
@@ -1141,7 +1141,7 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A loaded launchd job cannot hide a relay whose PING path is dead."""
-    import cli.commands._converge_redis_bridge as bridge
+    import cli.commands.converge.redis_bridge as bridge
 
     monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
