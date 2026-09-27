@@ -182,7 +182,8 @@ def run_background(
     Args:
         cmd: must be a single line — join steps with `;` or `&&`, or point at
             a script file.
-        name: a lowercase slug like `"build"`.
+        name: a lowercase slug like `"build"`; names starting with `page-` are
+            reserved for pages opened with `ava.ui.serve`.
         cwd: defaults to your workspace.
         notify: omit to use the agent policy; `"always"` sends a completion
             message for every exit and `"failure"` sends only non-zero exits.
