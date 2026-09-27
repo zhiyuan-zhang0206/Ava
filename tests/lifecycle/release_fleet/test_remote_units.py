@@ -87,6 +87,24 @@ def test_a_gateway_failure_before_the_fence_restores_the_unit_too(tmp_path: Path
     ]
 
 
+def test_a_unit_failing_its_drain_aborts_the_whole_release_before_the_fence(
+    tmp_path: Path,
+) -> None:
+    request = fleet_request(tmp_path.resolve())
+    effects = UnitEffects(fail="quiescing")
+    unit = Unit(Path(request.home), effects, Exchange())
+    gateway = Gateway(request)
+    final = run(request, gateway, unit)
+    unit_final = unit.join()
+    assert final.fleet is not None and final.fleet.outcome == "aborted"
+    decision = final.fleet.decisions[0]
+    assert decision.phase == "quiescing" and "failed or did not answer" in decision.reason
+    assert final.db_fences == ()
+    assert [phase for phase, _ in gateway.events] == ["quiescing", "restoring"]
+    assert _unit_outcome(unit_final) == "aborted"
+    assert effects.events[-1] == ("restoring", "candidate")
+
+
 def test_a_gateway_start_failure_recovers_the_unit_on_the_new_generation(tmp_path: Path) -> None:
     request = fleet_request(tmp_path.resolve())
     effects, exchange = UnitEffects(), Exchange()
