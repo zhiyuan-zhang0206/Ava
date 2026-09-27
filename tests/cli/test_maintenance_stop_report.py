@@ -1,7 +1,8 @@
-"""A terminal closure's survivors keep their native identity and operator diagnostics.
+"""What a terminal closure leaves: survivors keep their native identity and diagnostics.
 
 A normal stop SIGKILLs what outlives its grace, so a survivor here is a process
-the stop may not signal (another user's); `_unkillable` stands in for one.
+the stop may not signal (another user's); `_unkillable` stands in for one. A
+PTY host its closed session left running is SIGKILLed rather than reported.
 """
 
 from __future__ import annotations
@@ -119,6 +120,37 @@ def test_report_keeps_owned_job_after_shell_exits(
         assert str(armed) in str(survivor["cmdline"])
     finally:
         child.send_signal(signal.SIGKILL)
+
+
+def test_closure_sigkills_a_pty_host_its_closed_session_left_running(
+    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host ends on its own once its shell is gone; one still running after
+    the closure's bound is wedged and gets SIGKILL to its captured birth, so the
+    closure completes instead of reporting a live terminal."""
+    shell = launch("private-terminal", "import time; print('ready',flush=True); time.sleep(60)")
+    wedged = launch(
+        "private-host",
+        "import signal,time; signal.signal(signal.SIGHUP,signal.SIG_IGN); "
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)",
+    )
+    identity = _terminal(home, shell, monkeypatch)
+    host = OwnedProcess.capture(psutil.Process(wedged.pid))
+    path = home / "run/pty/private-terminal.json"
+    record = json.loads(path.read_text())
+    record |= {
+        "host_pid": host.pid,
+        "host_create_time": host.birth,
+        "host_starttime": host.starttime,
+    }
+    path.write_text(json.dumps(record))
+    listed = SimpleNamespace(list_sessions=lambda: ["private-terminal"] if identity.live() else [])
+    monkeypatch.setattr(stop, "get_shell_backend", lambda: listed)
+    monkeypatch.setattr(stop, "_TERMINAL_KILL_WAIT_S", 0.3)
+
+    stop.close_terminals(time.monotonic() + 5, "private-stop", WHEN)
+    assert shell.wait(timeout=5) == -signal.SIGHUP
+    assert wedged.wait(timeout=5) == -signal.SIGKILL
 
 
 def test_report_reuses_the_native_birth_rule(monkeypatch: pytest.MonkeyPatch) -> None:
