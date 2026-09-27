@@ -717,9 +717,9 @@ Activation is Ava-owned: use `ava cluster pitr status`, then
 `ava cluster pitr activate --origin operator:<name>`. The command validates the
 disabled shadow posture, creates the mandatory verified logical recovery floor,
 persists every side-effect intent, applies archive settings with `ALTER SYSTEM`,
-and dispatches the existing whole-cluster restart orchestration. Its typed,
-non-secret continuation automatically resumes the exact operation after restart
-readiness, executes `pg_switch_wal()`, and requires
+and restarts the home's applications and data plane through its finite PITR
+operation executor ([release transition](../cli/release_transition/release_transition.ava.okf.md)).
+After restart readiness the same operation executes `pg_switch_wal()`, and requires
 `pg_stat_archiver`, the fsynced local ACK, and viewer-only exact
 generation/size/CRC metadata to agree within the persisted five-minute deadline.
 It then forces one operation-scoped base candidate and exact isolated restore
@@ -733,8 +733,8 @@ viewer proves object-list/read access without requiring bucket-metadata access; 
 objectCreator + objectViewer uploader is identity-checked without creating or deleting a probe. Never edit PostgreSQL or `.env` manually
 during this sequence. Resume a pending restart through the command; do not call
 `pg_ctl` or introduce another restart mechanism. `ava cluster pitr rollback`
-persists rollback intent, restores the frozen settings, and uses the same
-durable whole-cluster restart continuation. The four PITR gate keys are
+persists rollback intent, restores the frozen settings, and restarts through
+the same finite PITR operation. The four PITR gate keys are
 config-owned and are never reverted or stripped by a rollback; a fresh
 activation after a rollback needs them absent — unset them with `ava config unset
 pitr_enabled pitr_base_backup_enabled pitr_restore_proof_enabled

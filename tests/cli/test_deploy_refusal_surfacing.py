@@ -1,19 +1,9 @@
-"""Legacy rollout refusals and generic abandoned-maintenance recovery."""
+"""`ava cluster recover` clears only an abandoned maintenance lock."""
 
 from __future__ import annotations
 
-import httpx
 import psycopg
 import pytest
-
-# A realistic refusal — the shape `_assert_no_orchestration_in_flight` builds from a
-# `DeployWindow.detail`. The assertions below key on the parts an operator acts on.
-_REFUSAL = (
-    "a deploy is already in flight: machine 'wsl' is running a cluster update "
-    "(its orchestration session is alive). Two concurrent deploys defeat the "
-    "rollout's own safety. Wait for `ava cluster status` to show every host on the "
-    "pin, or re-run with --force if you are certain that deploy is dead."
-)
 
 
 def _clear_update_lock(db_conn: psycopg.Connection) -> None:
@@ -25,15 +15,6 @@ def _clear_update_lock(db_conn: psycopg.Connection) -> None:
             "phase='stable', kind=NULL WHERE id=1"
         )
     db_conn.commit()
-
-
-# ─── `ava cluster restart` — the same refusal, over HTTP ─────────────────────
-
-
-def _stub_post(monkeypatch: pytest.MonkeyPatch, resp: httpx.Response) -> None:
-    monkeypatch.setattr("shared.http_dial.post", lambda *_a, **_k: resp)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8100")
-    monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
 
 
 # ─── `ava cluster recover` — the override --force cannot provide ─────────────

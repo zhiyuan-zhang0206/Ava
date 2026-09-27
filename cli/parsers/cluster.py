@@ -170,8 +170,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     pitr_activate_p = pitr_sub.add_parser(
         "activate",
         help=(
-            "journal env + ALTER SYSTEM archive settings, restart the cluster, prove WAL, "
-            "then force and restore one exact base chain (default off)"
+            "journal env + ALTER SYSTEM archive settings, restart through a finite PITR "
+            "operation, prove WAL, then force and restore one exact base chain (default off)"
         ),
     )
     pitr_activate_p.add_argument(
@@ -181,7 +181,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     pitr_rollback_p = pitr_sub.add_parser(
         "rollback",
         help=(
-            "restore Ava-owned env/ALTER SYSTEM settings through the same cluster restart; "
+            "restore Ava-owned ALTER SYSTEM settings through the same finite PITR operation; "
             "never delete backup objects"
         ),
     )

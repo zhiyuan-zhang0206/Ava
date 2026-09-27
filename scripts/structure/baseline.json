@@ -8,7 +8,7 @@
     "gateway": 44,
     "gateway/routers": 62,
     "gateway/schemas": 27,
-    "ops": 38,
+    "ops": 37,
     "scripts": 115,
     "services": 26,
     "services/healthchecks": 31,

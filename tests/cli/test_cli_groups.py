@@ -48,7 +48,10 @@ def test_core_verbs_exist() -> None:
 
 
 def test_cluster_group_has_ls_down_and_destroy() -> None:
-    assert {"status", "restart", "update", "ls", "down", "destroy"} <= _cluster_choices()
+    choices = _cluster_choices()
+    assert {"status", "update", "ls", "down", "destroy"} <= choices
+    # The whole-cluster bounce left with the retired updater; `ava restart` is per unit.
+    assert "restart" not in choices
 
 
 def test_start_rejects_retired_identity_flags(tmp_path: Path) -> None:
