@@ -65,14 +65,12 @@ the same file-driven discipline as Mode A (task file + work file +
 `watch_work.py` to wake you), and keep to one live Codex per workspace so a
 second launch cannot race the first.
 
-To isolate configuration and session state from the default home, give the
-session a private home: create the directory with mode `0700`, symlink
-`auth.json` in from `~/.codex/`, copy `config.toml` and append the workspace
-trust row (`[projects."<workspace-dir>"]` / `trust_level = "trusted"`), then
-run with `CODEX_HOME=<dir>`. The symlink points at the shared `auth.json`,
-but Codex's credential storage mode (file, keyring, or automatic) is
-build-dependent — the private home isolates configuration and session state,
-not necessarily the login.
+A hand launch runs on the default `~/.codex`, as `spawn_codex.py` does, so the
+session stays resumable. Pass the launcher's per-session overrides instead of
+editing `~/.codex/config.toml`: `-c 'projects={"<workspace-dir>"={trust_level="trusted"}}'`
+trusts the workspace for this session only, and `-c check_for_update_on_startup=false`
+keeps the TUI from opening on an "update now" prompt that an unattended
+keystroke could accept.
 
 Before a large session, check the account's remaining quota at zero token
 cost — the app-server `account/rateLimits/read` request, or `/status` where
@@ -80,3 +78,12 @@ the TUI surfaces it. This is a ChatGPT-account surface: a plain
 `OPENAI_API_KEY` session has no plan quota to read. If the quota is nearly
 exhausted and no reset is imminent, report that before launching instead of
 parking a session that will die mid-task.
+
+## Session id and resume
+
+`/status` shows the session id (`Session: <uuid>`); `spawn_codex.py` reads it
+there and prints `codex_session=<uuid>`. `codex resume <uuid>` (same flags and
+overrides, from the workspace directory) reopens that conversation after its
+shell was closed; `codex resume` alone opens a picker scoped to the directory,
+and `--last` takes the most recent session there. When and how to use it:
+[Resume after an interruption](resume_after_interruption.md).

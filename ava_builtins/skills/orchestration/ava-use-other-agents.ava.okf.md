@@ -28,11 +28,11 @@ the current owner and full Persistent Shell handle across Ava-agent callers;
 workspace basename appears only in display suffixes. Launching is serialized by
 [[shared/coding-session-owner.ava.okf.md|the host-local owner journal]].
 
-Every fresh generation receives a private `CODEX_HOME` seeded only with the
-authentication file and a configuration snapshot. Codex always starts fresh
-(supervised workers from task/work/Git state, takeovers from the briefing
-inlined in their launch message); shared SQLite, logs, and resume state are not
-copied. The launcher starts a quiet supervisor before Codex only in the
+Codex runs on the host user's own `~/.codex` with per-session `-c` overrides
+(workspace trust, no startup update check), so its conversation outlives the
+shell: each launch prints the Codex session id (`codex_session`, from
+`/status`) and `--resume` reopens it after an interruption (Claude alike, with
+`claude_session`); a handoff still starts fresh. The launcher starts a quiet supervisor before Codex only in the
 supervised mode; it terminalizes the exact generation and reclaims its
 PTY/private state on current-generation `DONE` or `HANDOFF`, explicit cancel,
 owner termination, Codex death, or absolute expiry. A takeover starts no

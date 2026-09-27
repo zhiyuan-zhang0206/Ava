@@ -19,12 +19,14 @@ import contextlib
 import shlex
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 import ava
 from shared import coding_session_owner
 
 from ._claude_checks import (
+    _bootstrap_count,
     _generation_relay_stub,
     _login_marker,
     _pretrust,
@@ -34,9 +36,10 @@ from ._claude_checks import (
     _wait_for_ready,
 )
 from ._common import cancel as _cancel_generation
-from ._common import claim_canonical, impersonator_guide, init_file
+from ._common import claim_canonical, impersonator_guide, init_file, worker_bootstrap
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
+from ._common import session_uuid as session_uuid
 from ._common import status as _owner_status
 from ._first_run import _preset_claude_first_run
 
@@ -50,7 +53,15 @@ def _claude_command(
     failure_marker: Path | None = None,
     relay_stub: Path | None = None,
     relay_plugin_dir: Path | None = None,
+    claude_session: str | None = None,
+    resume: bool = False,
 ) -> str:
+    """The launch line: checks for the executable and login, then execs Claude Code.
+
+    ``claude_session`` pins the session id up front (``--session-id``) so the
+    launch can print it; with ``resume`` the same id reopens that recorded
+    session (``--resume``) instead.
+    """
     from shared.external_caller import launch_caller_assignment
 
     resident = ""
@@ -64,6 +75,10 @@ def _claude_command(
             f"AVA_IMPERSONATION_RELAY_PY={shlex.quote(sys.executable)} && "
         )
         plugin_flag = f" --plugin-dir {shlex.quote(relay_plugin_dir.as_posix())}"
+    session_flag = ""
+    if claude_session is not None:
+        option = "--resume" if resume else "--session-id"
+        session_flag = f" {option} {shlex.quote(claude_session)}"
     mark_failure = (
         f"printf '%s\\n' 'claude executable not found' > {shlex.quote(failure_marker.as_posix())}; "
         if failure_marker is not None
@@ -90,7 +105,7 @@ def _claude_command(
         f"{mark_logout}"
         "printf '%s\\n' 'error: claude is not logged in; run claude auth login' >&2; exit 126; fi; "
         f"{launch_caller_assignment('claude_code', caller_instance)}"
-        f'exec "$claude_bin" --dangerously-skip-permissions{plugin_flag} || exit $?'
+        f'exec "$claude_bin" --dangerously-skip-permissions{plugin_flag}{session_flag} || exit $?'
     )
 
 
@@ -146,6 +161,9 @@ def _run_supervised_launch(
     ttl_seconds: float,
     caller_instance: str | None,
     contract: Path,
+    claude_session: str,
+    *,
+    resume: bool,
 ) -> int:
     init_file(tasks_file, "")
     init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
@@ -160,26 +178,28 @@ def _run_supervised_launch(
 
     # Create a persistent shell session visible in the Inspect panel. TTL is
     # mandatory (2026-08-27 ruling); the default 24h is a generous cap for a
-    # coding session — the supervisor re-spawns the script if a session is ever
-    # reclaimed.
+    # coding session. A session reclaimed before its work is done is reopened
+    # with --resume and the claude_session printed below.
     sid = ava.shell.sessions.new(name=session_name, ttl=ttl_seconds)
     try:
         with tempfile.TemporaryDirectory(prefix="ava-claude-launch-") as marker_dir:
             marker = Path(marker_dir) / "missing-claude"
             ava.shell.sessions.send(
-                sid, _claude_command(workspace, caller_instance, failure_marker=marker)
+                sid,
+                _claude_command(
+                    workspace,
+                    caller_instance,
+                    failure_marker=marker,
+                    claude_session=claude_session,
+                    resume=resume,
+                ),
             )
             print(f"+ persistent shell session: {sid} ({session_name})")
-            _wait_for_ready(sid, failure_marker=marker)
+            _wait_for_ready(sid, failure_marker=marker, resumed=resume)
 
-        msg = (
-            f"Read the collaboration contract at {contract} and follow it. "
-            f"Your workspace is {workspace}. "
-            f"Your task file (read-only for you) is {tasks_file}. "
-            f"Your work file (yours to write, STATUS + log) is {work_file}. "
-            "Now read the task file and start working."
+        ava.shell.sessions.send(
+            sid, worker_bootstrap(contract, workspace, tasks_file, work_file, resumed=resume)
         )
-        ava.shell.sessions.send(sid, msg)
     except BaseException:
         with contextlib.suppress(Exception):
             ava.shell.sessions.kill(sid)
@@ -189,6 +209,7 @@ def _run_supervised_launch(
     print(f"session_id={sid}")
     print(f"tasks_file={tasks_file}")
     print(f"work_file={work_file}")
+    print(f"claude_session={claude_session}")
     print(
         "NOTE: for xhigh effort on >10 files, consider STALL_SECONDS=1200+ "
         "in watch_work.py to avoid false stall alerts."
@@ -203,7 +224,9 @@ def _run_takeover_launch(
     ttl_seconds: float,
     caller_instance: str | None,
     reference_dir: Path,
+    claude_session: str,
     *,
+    resume: bool = False,
     relay_resident: bool = True,
     relay_plugin_dir: Path | None = None,
 ) -> int:
@@ -256,9 +279,11 @@ def _run_takeover_launch(
                     failure_marker=marker,
                     relay_stub=relay_stub,
                     relay_plugin_dir=plugin_dir,
+                    claude_session=claude_session,
+                    resume=resume,
                 ),
             )
-            _wait_for_ready(sid, failure_marker=marker)
+            _wait_for_ready(sid, failure_marker=marker, resumed=resume)
         guide = impersonator_guide(reference_dir)
         message = _takeover_bootstrap_message(
             owner_agent_id,
@@ -267,6 +292,7 @@ def _run_takeover_launch(
             guide,
             relay_resident=plugin_dir is not None,
         )
+        baseline = _bootstrap_count(claude_session)
         _send_bootstrap(sid, message)
         _verify_start_receipt(
             sid,
@@ -277,6 +303,7 @@ def _run_takeover_launch(
                 guide,
                 relay_resident=plugin_dir is not None,
             ),
+            lambda: _bootstrap_count(claude_session) > baseline,
         )
     except BaseException:
         # A replacement may own the canonical record by now, so its generation
@@ -295,6 +322,7 @@ def _run_takeover_launch(
 
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
     _print_owner(active, adopted=False)
+    print(f"claude_session={claude_session}")
     return 0
 
 
@@ -308,6 +336,7 @@ def launch(
     brief: str | None = None,
     *,
     reference_dir: Path,
+    resume: str | None = None,
     relay_resident: bool = True,
     relay_plugin_dir: Path | None = None,
 ) -> int:
@@ -315,7 +344,9 @@ def launch(
 
     ``reference_dir`` is the calling skill's reference directory: it holds the
     collaboration contract and the resident relay plugin, and locates the
-    impersonator guide. Prints one ``key=value`` per line and returns the exit code.
+    impersonator guide. The Claude session id is chosen here and printed as
+    ``claude_session``; ``resume`` reopens that recorded session instead of
+    starting a new one. Prints one ``key=value`` per line and returns the exit code.
     """
     from shared.external_caller import launch_caller_assignment
 
@@ -332,6 +363,7 @@ def launch(
 
     # Validate before creating files, owner records, or sessions.
     launch_caller_assignment("claude_code", caller_instance)
+    claude_session = resume or str(uuid.uuid4())
     _preset_claude_first_run()
     if takeover_name is None:
         assert tasks_file is not None and work_file is not None  # noqa: S101 — checked above
@@ -342,6 +374,8 @@ def launch(
             ttl_seconds,
             caller_instance,
             reference_dir / "collaboration_protocol.md",
+            claude_session,
+            resume=resume is not None,
         )
     return _run_takeover_launch(
         workspace,
@@ -350,6 +384,8 @@ def launch(
         ttl_seconds,
         caller_instance,
         reference_dir,
+        claude_session,
+        resume=resume is not None,
         relay_resident=relay_resident,
         relay_plugin_dir=relay_plugin_dir,
     )

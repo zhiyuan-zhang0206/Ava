@@ -13,7 +13,7 @@ import pytest
 from ava.shell.coding_tools import _claude_checks, _first_run, claude
 
 _REFERENCE = (
-    Path(__file__).parents[2] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
+    Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
 )
 
 
@@ -255,10 +255,21 @@ def test_supervised_launch_does_not_send_contract_to_a_shell(
     original_command = claude._claude_command
 
     def _missing_command(
-        workspace: Path, caller_instance: str | None = None, *, failure_marker: Path
+        workspace: Path,
+        caller_instance: str | None = None,
+        *,
+        failure_marker: Path,
+        claude_session: str | None = None,
+        resume: bool = False,
     ) -> str:
         failure_marker.write_text("claude executable not found\n")
-        return original_command(workspace, caller_instance, failure_marker=failure_marker)
+        return original_command(
+            workspace,
+            caller_instance,
+            failure_marker=failure_marker,
+            claude_session=claude_session,
+            resume=resume,
+        )
 
     def _kill(sid: int) -> None:
         killed.append(sid)
@@ -279,6 +290,8 @@ def test_supervised_launch_does_not_send_contract_to_a_shell(
             3600,
             None,
             _REFERENCE / "collaboration_protocol.md",
+            "11111111-2222-3333-4444-555555555555",
+            resume=False,
         )
 
     assert len(sent) == 1
