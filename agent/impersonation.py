@@ -354,12 +354,12 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
     a transition — someone else already ended it.
     """
     from shared.agents.impersonation import (
+        SESSION_RELAY_PROVIDERS,
         ImpersonationError,
         fail_acceptance,
         provision_relay,
         relay_get,
     )
-    from shared.agents.impersonation._impersonation_store import SESSION_RELAY_PROVIDERS
 
     provider = session["relay_provider"]
     if provider in SESSION_RELAY_PROVIDERS:
@@ -455,7 +455,7 @@ def _roll_back_relay_failure(
 
 def _provider_anchor_states(process_metadata: object) -> list[str]:
     """The lease's recorded provider anchors classified against the live table."""
-    from shared.agents.impersonation._impersonation_store import provider_anchor_states
+    from shared.agents.impersonation import provider_anchor_states
 
     return provider_anchor_states(process_metadata)
 

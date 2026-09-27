@@ -28,6 +28,9 @@ from shared.agents.impersonation._impersonation_store import (
 from shared.agents.impersonation._impersonation_store import (
     ImpersonationError as ImpersonationError,
 )
+from shared.agents.impersonation._impersonation_store import (
+    provider_anchor_states as provider_anchor_states,
+)
 from shared.agents.impersonation.impersonation_history import append, capture_pending, set_actor
 from shared.caller_identity import CallerIdentity
 from shared.config import settings
