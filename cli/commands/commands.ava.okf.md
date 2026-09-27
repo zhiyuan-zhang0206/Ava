@@ -20,30 +20,25 @@ no registry or plugin mechanism, the wiring is the parser.
 Most command modules follow these two naming groups:
 
 - **public** (`start.py`, `stop.py`, `status.py`, `logs.py`, `update.py`,
-  `cluster.py`, `agents/control.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
-  `memory.py`, `presets.py`, `agents/pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
+  `cluster.py`, `agents/control.py`, `management/config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
+  `memory.py`, `management/presets.py`, `agents/pty.py`, `management/schedules.py`, `trace.py`, `migrations.py`,
   `cluster_lifecycle.py`, `agents/timeline.py`, `agents/impersonation.py`,
   `agents/impersonation_relay.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
-  directly: `_converge`
-  (step-table aggregation and execution) / `_converge_spec` (the step contract) /
-  `_converge_steps` (early host and data-plane wiring) / `_converge_os_jobs`
-  (the OS-scheduled jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
-  `_converge_gate` / `_gate_systemd` (per-home launchd or Linux user-systemd gate),
-  `_converge_redis_bridge` (idempotent host wiring) /
-  `_converge_legacy_permission_watcher` (one-shot cleanup of the removed
-  permission-prompt watcher),
-  `_update_git` / `_update_backup_gate` (the pre-stop backup gate) /
-  `_update_orchestration` / `_update_agent_runner` / `_update_bootstrap` /
-  `_update_normal_release` / `_update_uv_sync` /
-  `_updater_lease` / `_updater_stage` (the cmd.exe ladder's per-step telemetry marker) / `_update_recover` /
-  `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`,
-  `_start_gui_chain` (the macOS GUI-chain warning) / `_start_gui_handover` (the
-  GUI-domain handover it guards), `_ownership_preflight`,
-  `_pkg_source`, `_lgtm`,
-  `_claude_code_plugin`, `_cluster_health` /
-  `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`
-  (`cluster_instance.py` and `pgbouncer.py` are two more, under public names).
+  directly. The `_converge*` family backs `ava converge`: step-table
+  aggregation/execution, the step contract, early host/data-plane wiring, OS
+  jobs, skills, firewall wiring, the gate (`_gate_systemd` is the per-home
+  launchd/user-systemd unit), Redis bridge wiring, and a one-shot legacy
+  permission-watcher cleanup. The `_update*`/`_updater_*` family backs
+  `ava update`: git, the pre-stop backup gate, orchestration, the agent-runner
+  self-update, bootstrap, the normal-release path, uv sync, the cmd.exe
+  ladder's lease/stage telemetry, recovery, and gateway readiness. Also:
+  `_probe`, `_setup`, `_session_lifecycle`, `_repo`, `_start_gui_chain` /
+  `_start_gui_handover` (the macOS GUI-chain warning and its handover),
+  `_ownership_preflight`, `_pkg_source`, `_lgtm`, `_claude_code_plugin`,
+  `_cluster_health` / `_cluster_rollback` / `_cluster_cron` /
+  `_cluster_watchdog_probe` (`cluster_instance.py` and `pgbouncer.py` are two
+  more, under public names).
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
 restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`

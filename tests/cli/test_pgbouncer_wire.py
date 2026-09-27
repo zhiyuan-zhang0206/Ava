@@ -279,7 +279,7 @@ def test_schedule_provision_repairs_connect_write_on_poisoned_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """R3 Rule A schedule provisioning declares direct writes read-write."""
-    from cli.commands.schedules import cmd_schedules_provision
+    from cli.commands.management.schedules import cmd_schedules_provision
     from shared import config
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
