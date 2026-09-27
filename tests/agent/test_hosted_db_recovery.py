@@ -26,7 +26,7 @@ from agent.startup import _wrap_saver_writes_with_nstep_interval
 from ops.agent_spawn import create_agent_row
 from services.agent_host import db_recovery
 from services.agent_host.host import AgentHost
-from shared import maintenance, maintenance_cohort, pause_owner
+from shared import hosted_db_wait, maintenance, maintenance_cohort, pause_owner
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.config import settings
 from shared.context import AvaContext
@@ -762,3 +762,20 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
     assert walks == (2 if write_before_retry else 1)
     await saver.aget_tuple(config)
     assert walks == (3 if write_before_retry else 2)
+
+
+def test_database_phase_bound_fits_checkpoint_recovery_band() -> None:
+    """INC-927 (task #4781): observed checkpoint reads ran 25-45s under load.
+
+    The bound must fit a full settle pass (read + write + flush + receipt) and
+    every recovery stage, while staying finite as the one-stage fence (#1972).
+    """
+    assert db_recovery._DATABASE_PHASE_TIMEOUT_SECONDS == 120.0
+
+
+def test_db_wait_proof_ttl_covers_widened_recovery_stages() -> None:
+    """The wait proof must outlive two bounded stages plus the documented slack."""
+    slack_seconds = 10 + 3 + 15 + 12  # heartbeat, publication, sleep, scheduling
+    assert (
+        2 * db_recovery._DATABASE_PHASE_TIMEOUT_SECONDS + slack_seconds
+    ) <= hosted_db_wait.DB_WAIT_PROOF_TTL_SECONDS

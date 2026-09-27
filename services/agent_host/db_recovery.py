@@ -30,7 +30,12 @@ from shared.log import logger
 from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 _PROBE_TIMEOUT_SECONDS = 5.0
-_DATABASE_PHASE_TIMEOUT_SECONDS = 30.0
+# The observed checkpoint read/recovery band reaches 25-45s under load, and a
+# settle/deliver chain walking the delta history more than once was measured at
+# 48.6-55.9s with worst-case estimates of 75-100s (INC-927 / task #4781): one
+# settle pass or recovery stage must fit its read, write, flush and receipt.
+# 120s keeps the finite one-stage fence (#1972) with that headroom.
+_DATABASE_PHASE_TIMEOUT_SECONDS = 120.0
 _INITIAL_BACKOFF_SECONDS = 1.0
 _MAX_BACKOFF_SECONDS = 30.0
 
@@ -102,7 +107,7 @@ async def _run_bounded_stage(
     attempt: int,
 ) -> None:
     """Renew the database-wait evidence for one real bounded stage, then run it
-    under the shared 30s `database_phase()` bound.
+    under the shared 120s `database_phase()` bound.
 
     Renewal happens only when this original task/incarnation actually enters a
     stage — heartbeat snapshot reads (`database_wait_snapshot`) never renew —
@@ -236,7 +241,7 @@ async def recover_database(
             attempt += 1
             phase = "owner_probe"
             try:
-                # Each DB-only stage carries its own 30s `database_phase()`
+                # Each DB-only stage carries its own 120s `database_phase()`
                 # bound (issue #1972): one slow stage times out alone instead
                 # of eating the budget every following stage needs. The
                 # exact-owner probe keeps its independent 5s bound.
