@@ -156,11 +156,13 @@ change):
   `tests/gateway`, wire -> `tests/agent` + `tests/gateway`, agent core ->
   `tests/agent`, frontend -> `cd ui/web && npm test`).
 - **A bare DB poke / SDK script** (`.venv/bin/python -c "...shared.db.connect()..."`)
-  needs the worktree to have been `ava start`'d (born). Before that the worktree is
-  *unanchored*: home falls back to `~/.ava` but `AVA_DB_URL` is the unanchored
-  sentinel, so a connection fails fast with `UnanchoredHomeError` (telling you to
-  run `ava start`) instead of silently hitting the prod DB the host `~/.ava/.env`
-  points at.
+  needs the worktree to have its own cluster (`scripts/install.sh --worktree`,
+  then `ava start`). Before the install the worktree is *unanchored*: it boots bare
+  on a private scratch home — it never reads `~/.ava/.env`, never fetches from a
+  gateway and never writes under `~/.ava` — and `AVA_DB_URL` is the unanchored
+  sentinel, so a connection fails fast with `UnanchoredHomeError` instead of
+  reaching any real database. Imports, lint scripts and codegen hooks work there
+  as they do in CI.
 - **The full running stack** (gateway + agents + frontend, exercising spawn /
   inbound / SSE end to end) needs `ava start` (single-box gateway,agent-runner).
   This is the "full deployment" tier.

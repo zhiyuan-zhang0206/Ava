@@ -12,8 +12,8 @@ anything. Precedence (see `resolve_ava_home`):
 
     1. AVA_HOME env var          - explicit; gateway-launched + prod sessions set it
     2. checkout == ~/.ava/source - the prod source -> ~/.ava
-    3. <checkout>/.ava_home      - a dev cluster's home pointer (`ava start`)
-    4. else                      - ~/.ava, but UNANCHORED
+    3. <checkout>/.ava_home      - a dev cluster's home pointer (`install.sh --worktree`)
+    4. else                      - UNANCHORED: a private scratch home, never ~/.ava
 
 Rule 1 beating rules 2-3 is only safe while they agree. When they disagree the
 process has two different clusters' facts in hand — the env var's `.env`
@@ -23,12 +23,21 @@ side wins, the other half of the process's world comes from the loser. So a
 contradiction raises `AvaHomeContradictionError` instead of resolving (see
 `resolve_ava_home`); `AVA_HOME_OVERRIDE` opts out for callers that mean it.
 
-Case 4 is a dev checkout that was never `ava start`'d and carries no
-explicit AVA_HOME. Loading the host `.env` would silently point the process at
-the prod database; instead `load_ava_env` plants `UNANCHORED_DB_SENTINEL` as
-AVA_DB_URL so any DB connection fails loudly (shared/db.connect raises an
-actionable error) rather than writing to prod. This mirrors the same sentinel
-tests/conftest.py plants for unprovisioned test runs.
+Case 4 is a checkout that claims no cluster: a dev worktree that never ran
+`install.sh --worktree`, a fresh clone, a CI checkout. It owns no home, and the
+default home `~/.ava` belongs to the prod source alone — resolving there made an
+ad-hoc `import shared.config` on a production agent-runner load that unit's
+`.env`, dial its gateway with its cluster bearer and rewrite its bootstrap
+snapshot (2026-09-27). So case 4 resolves to a per-process scratch path under
+the system temp dir (`_unanchored_home`, created only if something writes to
+it) and boots BARE, exactly like a CI checkout: no `.env` / `mirror.env` is
+read, the config source decision never fetches (shared/config/_lite.py,
+shared/bootstrap.py:should_fetch_from_gateway), and `load_ava_env` plants
+`UNANCHORED_DB_SENTINEL` as AVA_DB_URL so a DB connection fails loudly
+(shared/db.connect raises an actionable error). Lint scripts, codegen hooks and
+dev tools keep working from any checkout; every verb that would act on "this
+checkout's cluster" refuses (`checkout_anchored()`, cli/preflight.py). This
+mirrors the same sentinel tests/conftest.py plants for unprovisioned test runs.
 
 Callers:
     shared/config.py            - before importing Settings
@@ -40,8 +49,12 @@ os.environ keys; repeated calls have no side effects.
 
 from __future__ import annotations
 
+import functools
 import os
+import re
+import secrets
 import sys
+import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -79,6 +92,9 @@ _UNANCHORED_PLACEHOLDERS = frozenset({UNANCHORED_DB_SENTINEL, BOOT_REDIS_PLACEHO
 LAUNCHER_PROFILE_ENV_KEY = "AVA_LAUNCHER_PROFILE"
 
 _HOME_POINTER = ".ava_home"
+
+# Name prefix of a case-4 scratch home (`_unanchored_home`).
+_UNANCHORED_PREFIX = "ava-unanchored-"
 
 # Opt out of the AVA_HOME-vs-checkout contradiction check (`resolve_ava_home`).
 # For callers that redirect a checkout to a home it does not own ON PURPOSE and
@@ -138,6 +154,25 @@ def _checkout_claim() -> tuple[Path, str] | None:
     return None
 
 
+@functools.cache
+def _unanchored_home() -> Path:
+    """The scratch home of an unanchored checkout (case 4) — one per process.
+
+    A path under the system temp dir with an unguessable suffix, never under
+    `~/.ava` and never a registered cluster, so nothing another unit wrote can
+    be read from it. Not created here: a tool that never writes leaves nothing
+    behind. The boot pins it as AVA_HOME, and its name marks it
+    (`_is_unanchored_scratch`), so a re-resolution in this process and every
+    child that inherits it stay unanchored instead of reading an explicit claim.
+    """
+    return Path(tempfile.gettempdir()) / f"{_UNANCHORED_PREFIX}{secrets.token_hex(8)}"
+
+
+def _is_unanchored_scratch(home: Path) -> bool:
+    """Whether `home` is a case-4 scratch home (this process's or a parent's)."""
+    return re.fullmatch(rf"{_UNANCHORED_PREFIX}[0-9a-f]{{16}}", home.name) is not None
+
+
 def checkout_anchored_home() -> tuple[Path, bool]:
     """Resolve the home **this checkout owns**, ignoring the AVA_HOME env var.
 
@@ -150,13 +185,13 @@ def checkout_anchored_home() -> tuple[Path, bool]:
     the worktree's code. `shared.migrations` compares this against the identity
     the DB carries and refuses to migrate on a mismatch.
 
-    `anchored` is False for case 4 (a dev checkout with no pointer), where the
-    ~/.ava return value is a fallback rather than a claim of ownership — callers
-    proving ownership must treat False as "cannot prove it".
+    `anchored` is False for case 4 (a checkout that claims no cluster), whose
+    home is the process scratch (`_unanchored_home`) rather than a claim of
+    ownership — callers proving ownership must treat False as "cannot prove it".
     """
     claim = _checkout_claim()
     if claim is None:
-        return Path.home() / ".ava", False
+        return _unanchored_home(), False
     return claim[0], True
 
 
@@ -202,20 +237,25 @@ def _assert_env_agrees_with_checkout(env_home: Path) -> None:
 def resolve_ava_home() -> tuple[Path, bool]:
     """Resolve this process's data-root home and whether it is *anchored*.
 
-    Returns (home, anchored). `anchored` is False only in case 4 below — a dev
-    checkout with no explicit home — which is the one case that must not silently
-    inherit the prod database URL.
+    Returns (home, anchored). `anchored` is False only in case 4 below — a
+    checkout that claims no cluster and names no home — which boots bare on a
+    private scratch home and must never reach another unit's config or gateway.
 
     Precedence:
         1. AVA_HOME env var -> (that path, True), unless it contradicts the
            checkout's own claim (rule 2 or 3), which raises AvaHomeContradictionError
         2. checkout == ~/.ava/source -> (~/.ava, True)
         3. <checkout>/.ava_home pointer -> (its content, True)
-        4. else -> (~/.ava, False)
+        4. else -> (this process's scratch home, False)
 
     Rule 1 keeps winning where it is unambiguous — AVA_HOME set on a checkout
     that claims no home of its own (an enrolled runner, a gateway-launched
-    daemon, a fresh clone) resolves exactly as before.
+    daemon, a fresh clone) resolves exactly as before. The one AVA_HOME it does
+    not count as a claim is a case-4 scratch home, which `load_ava_env` pins
+    into the environment: re-resolving after the boot (the CLI preflight gates
+    do), and every child process that inherits it, must still answer
+    unanchored. A checkout that claims a home of its own still refuses it as a
+    contradiction first.
     """
     env = os.environ.get("AVA_HOME")
     installed = Path(__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
@@ -224,7 +264,7 @@ def resolve_ava_home() -> tuple[Path, bool]:
     if env:
         home = Path(env).expanduser()
         _assert_env_agrees_with_checkout(home)
-        return home, True
+        return home, not _is_unanchored_scratch(home)
     return checkout_anchored_home()
 
 
@@ -242,13 +282,13 @@ AVA_ENV_PATH = _HOME / ".env"
 
 def checkout_anchored() -> bool:
     """Whether this checkout owns the home it resolves to (resolve_ava_home
-    rules 1-3), rather than falling back to the default home (rule 4).
+    rules 1-3), rather than booting bare on a scratch home (rule 4).
 
     Callers that would write or route through the resolved home gate on this:
     an unanchored checkout (a bare worktree with no `.ava_home` pointer, a
-    fresh clone) must never silently operate the default home's config or
-    gateway — that home belongs to the prod source checkout
-    (shared/paths.py:prod_service_checkout_error).
+    fresh clone) owns no cluster, so it may not enroll, write config, fetch
+    cluster config or launch services — and the default home belongs to the
+    prod source checkout alone (shared/paths.py:prod_service_checkout_error).
     """
     return _ANCHORED
 
@@ -275,10 +315,11 @@ def load_ava_env() -> None:
     """Load this process's `$AVA_HOME/.env` (then `mirror.env`) into os.environ.
 
     Pins AVA_HOME to the resolved home so everything downstream (Settings.ava_home,
-    shared.paths) agrees with the `.env` that was loaded. For an unanchored dev
-    checkout, plants UNANCHORED_DB_SENTINEL as AVA_DB_URL *before* the load — since
-    load_dotenv does not override an already-set key, the prod database URL in the
-    host .env can no longer win.
+    shared.paths) agrees with the `.env` that was loaded. An unanchored checkout
+    (rule 4) loads NO file: its home is the process scratch, it boots bare like a
+    CI checkout, and UNANCHORED_DB_SENTINEL stands in as AVA_DB_URL so a stray
+    connection fails loudly. The authority pass still runs for it, so a cluster
+    value inherited from the parent shell is dropped rather than trusted.
 
     mirror.env loads last and, like .env, never overrides an already-set key, so
     precedence is: real environment > .env > mirror.env. It is a no-op when the
@@ -296,10 +337,11 @@ def load_ava_env() -> None:
     if os.environ.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None) == "1":
         _manifest_finalizer_boot_authorized = True
     os.environ.setdefault("AVA_HOME", str(_HOME))
-    if not _ANCHORED:
+    if _ANCHORED:
+        _load_dotenv_layer(AVA_ENV_PATH)
+        _load_dotenv_layer(AVA_MIRROR_ENV_PATH)
+    else:
         os.environ.setdefault("AVA_DB_URL", UNANCHORED_DB_SENTINEL)
-    _load_dotenv_layer(AVA_ENV_PATH)
-    _load_dotenv_layer(AVA_MIRROR_ENV_PATH)
     _enforce_cluster_env_authority()
     # The unit file is necessary for launcher recovery, but must not become an
     # ambient model-child capability whenever a proof-free child boots config.
@@ -609,14 +651,11 @@ def _enforce_cluster_env_authority() -> None:
             # The injected runner projection is authoritative for an agent
             # process; the drop loop mirrors this exemption (#4334).
             continue
-        # The unanchored sentinel outranks the file. AVA_DB_URL is a cluster-scope
-        # key, and an unanchored checkout resolves AVA_ENV_PATH to the DEFAULT home
-        # — so without this guard the force-assign below reads production's `.env`
-        # and overwrites the sentinel `load_ava_env` had just planted, handing a dev
-        # checkout the prod database URL. The sentinel survived `load_dotenv`
-        # (override=False) and then died here; the drop loop's identical guard could
-        # never see it, because this loop had already replaced it. Same condition,
-        # same reason, one loop earlier.
+        # The unanchored sentinel outranks the file: once a process tree carries
+        # it (planted by an unanchored boot or an install pre-plant), no `.env`
+        # this pass reads may swap a real database URL in behind it. The drop
+        # loop's identical guard keeps it on the undeclared side; this one keeps
+        # it on the declared side.
         if val is not None and os.environ.get(key) != UNANCHORED_DB_SENTINEL:
             os.environ[key] = val
     # The drop family minus the never-drop exemptions: cluster-scope aliases the
