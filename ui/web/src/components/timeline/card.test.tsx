@@ -668,7 +668,7 @@ describe("impersonation provenance", () => {
       source: kind === "inbound_chat" ? "user" : "agent:42",
       impersonation: {
         agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Codex: my helper",
-        provider: "codex", process: { name: "python", pid: 123 }, seq: 2,
+        provider: "codex", seq: 2,
       },
     });
     const { getByTestId, queryByTestId } = renderWithQuery(
