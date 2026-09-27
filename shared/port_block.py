@@ -66,11 +66,14 @@ PORT_OFFSETS: dict[str, int] = {
     # an existing cluster's registry record pins its block base, so renumbering a
     # live offset would move a running daemon's port out from under it.
     "agent_host": 19,
-    # Offset 20 is deliberately VACATED: the idle-shell-reminder daemon held it
-    # until its removal (2026-08-27) and renumbering pg_backup down into the
-    # hole would move a live daemon's port on every existing cluster (records
-    # pin their block base; a missing-key derive must agree with the .env it
-    # predates). BLOCK_SIZE stays 22 so the block still covers pg_backup.
+    # The fleet release coordinator's authenticated listener, bound only while
+    # a release operation runs (units pull instructions from it while the
+    # gateway application is down). It takes offset 20, which the removed
+    # idle-shell-reminder daemon vacated on 2026-08-27: nothing binds it on an
+    # existing cluster, so reusing it moves no live port and keeps every block
+    # (and BLOCK_SIZE) unchanged. Existing records gain the key through the
+    # one-time cutover adoption (scripts/cutover_adopt_home.py).
+    "coordinator": 20,
     # The backup scheduler is a first-class health daemon. Append its slot so
     # existing cluster records retain their assigned ports.
     "pg_backup": 21,
@@ -139,8 +142,8 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     # guard.
     "agent_host": 8114,
     # 8115 was the idle-shell-reminder's fixed port (daemon removed 2026-08-27);
-    # left unused rather than renumbered, for the same record-pinning reason as
-    # the vacated block offset above.
+    # left unused rather than renumbered: a registry record written while the
+    # daemon existed may still carry it.
     "pg_backup": 8116,
     "pitr_uploader": 8117,
     "pitr_base_backup": 8118,
@@ -149,4 +152,6 @@ LEGACY_AVA_PORTS: dict[str, int] = {
     # The memory search service's TCP port (like milvus's 19530, not a health
     # port — its healthcheck probes the real /search endpoint).
     "memory_search": 19531,
+    # The release coordinator listener (not a health port; see PORT_OFFSETS).
+    "coordinator": 8121,
 }

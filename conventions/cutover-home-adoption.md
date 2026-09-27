@@ -65,7 +65,7 @@ acts and `done` after:
 | `selection` | Translates a non-empty `disabled_services` into `service-selection.json` (`except` mode) and moves the legacy file aside. |
 | `env` | Records `AVA_SERVICE_PATH` exactly as supplied (never from the caller's PATH) and removes dead keys. On a remote unit it removes the gateway-only keys (owner, admin and runner passwords, data-plane URLs, `AVA_PITR_*`) and, only with `--retire-bearer`, `AVA_CLUSTER_SECRET`. Other keys, including model API keys, are untouched. |
 | `residue` | Remote unit only: moves former-gateway material aside (`backups/`, `physical-backup/`, `masked-backup-*`, `redis/`, `pgbouncer/`, `pg/`, `secrets/*` except `--keep-secret` names, `run/bootstrap-snapshot.json`). The host-level `pg-template-17` beside the registry and `runtime/` stay. |
-| `record` | Gateway: adds any port key of the current block the record lacks, at the block position (the default home uses its fixed ports), refusing a collision. Remote unit: retires the gateway-shaped record after the data plane was proven absent. |
+| `record` | Gateway: adds any port key of the current block the record lacks (for example the release coordinator's `coordinator` slot), at the block position (the default home uses its fixed ports), refusing a collision. Remote unit: retires the gateway-shaped record after the data plane was proven absent. |
 | `intent` | Writes `start-intent.json` in phase `provisioned`: the existing registry record (gateway) or none, the persisted machine identity and capabilities, `AVA_SERVICE_PATH`, `checkout` = the owning checkout, `worktree=false`. Nothing is re-minted. |
 
 The run ends by passing the adopted home through the same identity preparation

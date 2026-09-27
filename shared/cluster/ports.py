@@ -57,6 +57,7 @@ class ClusterPorts(TypedDict):
     im_bridge: NotRequired[int]
     page_server: NotRequired[int]
     agent_host: NotRequired[int]
+    coordinator: NotRequired[int]  # Fleet release coordinator listener (operation-scoped).
     pg_backup: NotRequired[int]
     pitr_uploader: NotRequired[int]
     pitr_base_backup: NotRequired[int]

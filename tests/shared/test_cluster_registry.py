@@ -202,6 +202,7 @@ def test_expected_cluster_ports_reads_the_full_block_from_record(
                 "im_bridge": 18049,
                 "page_server": 18050,
                 "agent_host": 18051,
+                "coordinator": 18052,
                 "pg_backup": 18053,
                 "pitr_uploader": 18054,
                 "pitr_base_backup": 18055,
@@ -218,6 +219,7 @@ def test_expected_cluster_ports_reads_the_full_block_from_record(
     ports = dict(port_preflight.expected_cluster_ports(home))
     assert ports["gateway"] == 18032 and ports["app"] == 18047
     assert ports["agent_host"] == 18051 and ports["agent_runner_watchdog"] == 18058
+    assert ports["coordinator"] == 18052
 
 
 def test_expected_cluster_ports_missing_key_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

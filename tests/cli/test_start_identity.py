@@ -453,6 +453,21 @@ def test_ready_phase_never_regresses_or_rewrites(inputs: identity.IdentityInput)
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
+def test_reservation_carries_the_release_coordinator_port(inputs: identity.IdentityInput) -> None:
+    """The fleet coordinator listener's port is part of every gateway reservation;
+    an intent recorded without it (a record from before the key) refuses."""
+    identity.prepare_identity(inputs)
+    rec = cluster.load_registry(path=inputs.registry)[str(inputs.home)]
+    ports: dict[str, int] = dict(rec.ports)  # pyright: ignore[reportAssignmentType]
+    assert ports["coordinator"] == ports["gateway"] + 20
+    path = inputs.home / identity.INTENT_NAME
+    data = json.loads(path.read_text())
+    del data["record"]["ports"]["coordinator"]
+    path.write_text(json.dumps(data))
+    with pytest.raises(RuntimeError, match="invalid start port reservation"):
+        identity.read_intent(inputs.home)
+
+
 def test_corrupt_foreign_reservation_never_publishes(inputs: identity.IdentityInput) -> None:
     identity.prepare_identity(inputs)
     path = inputs.home / identity.INTENT_NAME
