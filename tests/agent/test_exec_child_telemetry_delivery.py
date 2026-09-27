@@ -29,7 +29,7 @@ from typing import Any, cast
 
 import pytest
 
-from agent.graph._exec_protocol import (
+from agent.graph.exec_protocol import (
     make_request_path,
     make_result_path,
     read_result,

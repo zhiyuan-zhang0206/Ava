@@ -18,7 +18,7 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage
 from pydantic import PrivateAttr
 
-from agent.graph._llm_errors import FatalProviderError
+from agent.graph.llm_errors import FatalProviderError
 from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}

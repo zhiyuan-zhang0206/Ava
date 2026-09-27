@@ -34,7 +34,7 @@ This module is the plugin's SDK **surface** — the only face an agent-launched
 child loads (task #3633). Its agent-runtime registrations (the `ava_code__cwd`
 state field, the two system-prompt sections, the after_init / after_exec
 hooks) live in `agent_runtime.py`, imported only on the full path (see
-`agent/_extensions.py`); until it loads, `state_handle` below is a stand-in
+`agent/extensions.py`); until it loads, `state_handle` below is a stand-in
 that raises the same `PluginStateOutsideTurnError` the real handle raises
 outside an exec turn.
 """
@@ -186,7 +186,7 @@ def _process_context_file(
     # Agent-runtime half only: reachable when a live state slot exists
     # (a stateful child / the agent process), so these imports stay off the
     # surface boot (task #3633).
-    from agent.graph._exec_output import truncate_both_ends
+    from agent.graph.exec_output import truncate_both_ends
     from agent.messages import NoteTag, system_note_message
     from ava.security import scan_content
 

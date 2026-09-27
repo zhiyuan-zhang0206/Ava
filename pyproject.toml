@@ -231,12 +231,12 @@ ignore_imports = [
     "services.agent_host.* -> agent.graph",
     # The host catches native fatal errors to persist the halted/circuit state
     # and flush its checkpoint before settling the turn. Import only the taxonomy leaf.
-    "services.agent_host.host -> agent.graph._llm_errors",
+    "services.agent_host.host -> agent.graph.llm_errors",
     # Compaction exhaustion is another expected native turn abort, handled by the host.
     "services.agent_host.host -> agent.hooks.compact",
     # The host owns the final durable checkpoint/trace link and the node-log tail.
     "services.agent_host.host -> agent._trace_checkpoint",
-    "services.agent_host.host -> agent.graph._node_log",
+    "services.agent_host.host -> agent.graph.node_log",
     # Database recovery retains and repairs the original fenced continuation.
     "services.agent_host.db_recovery -> agent.impersonation",
     "services.agent_host.db_recovery -> agent.inbound_ownership",

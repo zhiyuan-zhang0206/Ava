@@ -2,7 +2,7 @@
 
 A before_exec hook that auto-fixes common Python syntax errors before the
 subprocess exec.
-Loaded only in the agent process: `agent._extensions` imports this
+Loaded only in the agent process: `agent.extensions` imports this
 module after `plugin.py` on the full path (host boot / graph build); the
 surface module carries only the description (task #3633).
 """
@@ -16,7 +16,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from loguru import logger
 
-from agent.graph._tool_calls import (
+from agent.graph.tool_calls import (
     first_tool_call_code,
     merge_multiple_execute_code_tool_calls,
     replace_single_execute_code,

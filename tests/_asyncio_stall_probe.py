@@ -13,7 +13,7 @@ faulthandler deadline, every event loop created for it (``asyncio.run`` and the
 pytest-asyncio runner fixture both build loops through
 ``asyncio.new_event_loop``) gets a timer due ``DUMP_MARGIN_SECONDS`` before that
 deadline. The timer callback prints the full await chain of every pending task
-— the ``awaiter_chain_lines`` pattern from ``agent/graph/_node_log.py``, copied
+— the ``awaiter_chain_lines`` pattern from ``agent/graph/node_log.py``, copied
 so the test side imports no agent code — a few seconds before the thread dump
 lands, so one grep of the CI log names the stuck test and the leaf it awaits.
 
@@ -69,7 +69,7 @@ def faulthandler_timeout(config: pytest.Config) -> float:
 def awaiter_chain_lines(task: asyncio.Task[Any]) -> list[str]:
     """Render a task's full await chain, outermost coroutine first.
 
-    Pattern-copied from ``agent/graph/_node_log.py::awaiter_chain_lines``: for
+    Pattern-copied from ``agent/graph/node_log.py::awaiter_chain_lines``: for
     a suspended task ``Task.get_stack()`` returns only the outermost suspension
     frame; walking ``cr_await`` / ``ag_await`` descends through every nested
     coroutine / async generator down to the innermost awaited line — the fact

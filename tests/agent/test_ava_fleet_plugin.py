@@ -1,7 +1,7 @@
 """ava_builtins.plugins.ava_fleet integration.
 
 Two layers:
-- plugin load end-to-end (`_load_extensions` real path): registers the
+- plugin load end-to-end (`load_extensions` real path): registers the
   `ava.self.set_label` self member + the `ava.ui.notify` /
   `edit_notice` / `dismiss_notice` push members + a system-prompt section.
 - `set_label()` writes the agent's own label (sticky, so the
@@ -23,7 +23,7 @@ import pytest
 
 import ava
 import ava.agents
-from agent.graph._system_prompt import build_system_prompt
+from agent.graph.system_prompt import build_system_prompt
 from agent.state import clear_plugin_registrations
 from shared.agent_snapshot import select_one
 from shared.plugin_context import PluginContext
@@ -227,7 +227,7 @@ def test_reduce_context_switch_reaches_the_prompt(
 ):
     """End to end: the toggle gates the section's presence in the assembled
     system prompt."""
-    from agent.graph._system_prompt import build_system_prompt
+    from agent.graph.system_prompt import build_system_prompt
     from shared.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)

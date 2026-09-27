@@ -8,9 +8,9 @@ resolves them.
 
 Runs the actual `_build_boot` output through `python <boot>` (no session needed),
 against an isolated $AVA_HOME: every repo builtin is disabled and one minimal
-external plugin registers `ava.probe`, so the real `_load_extensions` runs
+external plugin registers `ava.probe`, so the real `load_extensions` runs
 without dragging in the DB-touching builtins. This exercises the whole path —
-`ensure_plugins_loaded` -> importlib -> `_load_extensions` -> external plugin
+`ensure_plugins_loaded` -> importlib -> `load_extensions` -> external plugin
 import -> `register_namespace` — in a genuinely separate interpreter.
 """
 

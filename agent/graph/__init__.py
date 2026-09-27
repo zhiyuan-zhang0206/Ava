@@ -1,6 +1,9 @@
 """LangGraph definition and node implementations (async).
 
-Submodules split by node (one file per node, `_` prefix marks internal impl):
+Submodules split by node (one file per node); leading underscore marks
+package-private, no underscore marks a module promoted to a real public door
+(other packages import it directly — plugin registration points, the exec
+child's protocol, etc.):
 
   - `_claim.py`        — claim node: pipeline orchestrator (long await + dispatch by inbound kind)
   - `_claim_batch.py`  — claim batch acquisition: idle wait loop, trim, chat deferral
@@ -12,17 +15,17 @@ Submodules split by node (one file per node, `_` prefix marks internal impl):
   - `_llm_stream.py`   — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
   - `_llm_cancel.py`   — llm streaming-vs-cancel race (partial turn discard)
   - `_llm_chunk.py`    — llm chunk assembly + final-message validation
-  - `_llm_errors.py`   — llm stream error taxonomy + consecutive-error tracking
+  - `llm_errors.py`    — llm stream error taxonomy + consecutive-error tracking
   - `_exec.py`         — exec node (one disposable subprocess per execute_code call)
-  - `_exec_output.py`  — code execution output envelope: format / truncate / overflow-to-file
+  - `exec_output.py`   — code execution output envelope: format / truncate / overflow-to-file
   - `_exec_alerts.py`  — best-effort operator alert for boot-phase exec child crashes
   - `_build.py`        — build_graph: assemble 8-Node self-cycling topology
-  - `_node_log.py`     — node enter/exit lifecycle log + publish timeline snapshot
-  - `_system_prompt.py`— system prompt dynamic assembly (base + plugin contributions)
+  - `node_log.py`      — node enter/exit lifecycle log + publish timeline snapshot
+  - `system_prompt.py` — system prompt dynamic assembly (base + plugin contributions)
 
 Public API is lazily re-exported via this __init__.py (PEP 562) — external
 `from agent.graph import X` callers don't need to know the submodule layout,
-and importing a light submodule (`_exec_protocol`, `_agent_traceback`) no
+and importing a light submodule (`exec_protocol`, `agent_traceback`) no
 longer drags the node set into the importer — the exec child imports those
 before user code runs (startup-path laziness, task #3585).
 """
@@ -39,8 +42,8 @@ if TYPE_CHECKING:
     from ._build import build_graph as build_graph
     from ._claim import claim_node as claim_node
     from ._exec import exec_node as exec_node
-    from ._exec_output import EXEC_CANCEL_NOTE as EXEC_CANCEL_NOTE
     from ._llm import llm_node as llm_node
+    from .exec_output import EXEC_CANCEL_NOTE as EXEC_CANCEL_NOTE
 
 # Eager `from ._build import build_graph` used to run on every `agent.graph`
 # import — pulling the full node set (build/claim/llm/exec and their trees)
@@ -49,7 +52,7 @@ _LAZY_EXPORTS = {
     "build_graph": "._build",
     "claim_node": "._claim",
     "exec_node": "._exec",
-    "EXEC_CANCEL_NOTE": "._exec_output",
+    "EXEC_CANCEL_NOTE": ".exec_output",
     "llm_node": "._llm",
 }
 

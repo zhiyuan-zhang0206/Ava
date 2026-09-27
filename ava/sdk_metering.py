@@ -157,7 +157,7 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
             # getattr_static, never getattr: a dynamically-served member (e.g.
             # ava.self.MACHINE_SPEC, computed via module __getattr__) must not be
             # force-evaluated — it can raise (MachineNameMissing when unset) and crash
-            # install() -> _load_extensions. Statically-resolvable functions and
+            # install() -> load_extensions. Statically-resolvable functions and
             # submodules (the only things we wrap / recurse) are all real attributes.
             attr = inspect.getattr_static(container, name, None)
             if attr is None:
@@ -175,7 +175,7 @@ def _instrument_targets() -> list[tuple[Any, str, str]]:
 def install() -> None:
     """Wrap every public ``ava.*`` callable with the recording proxy. Idempotent.
 
-    Called from ``_load_extensions`` after plugins load, so plugin namespaces /
+    Called from ``load_extensions`` after plugins load, so plugin namespaces /
     members / ``ava.extend.wrap`` layers are all present and get metered too (the
     recorder sits outermost of any plugin wrap). Re-running only wraps targets whose
     current top callable is not already a recorder, so it is safe to call on every
@@ -203,7 +203,7 @@ def uninstall() -> None:
 
     The suite calls this after every test (autouse ``_restore_sdk_metering`` in
     ``tests/conftest.py``), because ``install()`` is a side effect of
-    ``_load_extensions()`` and is reached lazily on any ``ava.*`` miss — so merely
+    ``load_extensions()`` and is reached lazily on any ``ava.*`` miss — so merely
     touching the namespace metered it for every later test in the worker (issue #83).
 
     Restores from the ``install()`` record (``_WRAPPED``), never by re-walking the

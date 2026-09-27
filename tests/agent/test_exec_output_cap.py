@@ -1,5 +1,5 @@
 """Accumulation-time byte cap on exec output, and its contract with the
-downstream `_exec_output.py` envelope.
+downstream `exec_output.py` envelope.
 
 Two caps guard one stream. `StreamingTextIO` bounds the buffer WHILE the
 agent's code runs (a runaway `print` loop must not grow the agent process until
@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from agent.graph._exec_output import wrap_code_output
 from agent.graph._exec_stream import StreamCap, StreamingTextIO
+from agent.graph.exec_output import wrap_code_output
 
 # ---------------------------------------------------------------------------
 # The accumulator: head + rolling tail under a fixed budget
@@ -136,10 +136,10 @@ def test_live_stream_is_bounded_and_says_so_exactly_once() -> None:
 def _overflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect the workspace overflow ring into tmp_path."""
     import ava
-    from agent.graph import _exec_output
+    from agent.graph import exec_output
 
     monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
-    monkeypatch.setattr(_exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
+    monkeypatch.setattr(exec_output, "_overflow_dir", lambda: tmp_path / "overflow")
     return tmp_path / "overflow"
 
 
@@ -208,7 +208,7 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
     """`[exec output chars]` is how max_chars gets tuned from a real
     distribution. Fed the capped length it would report the budget forever and
     the runaway execs would be invisible in the data."""
-    from agent.graph import _exec_output
+    from agent.graph import exec_output
 
     logged: list[int] = []
 
@@ -216,7 +216,7 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
         if "n" in kw:
             logged.append(int(kw["n"]))  # pyright: ignore[reportArgumentType]
 
-    monkeypatch.setattr(_exec_output.logger, "info", _capture)
+    monkeypatch.setattr(exec_output.logger, "info", _capture)
 
     stream = StreamingTextIO(max_chars=2000)
     stream.write("X" * 250_000)

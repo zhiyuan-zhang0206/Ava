@@ -21,8 +21,8 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import SystemMessage
 
-from agent.graph import _node_log
-from agent.graph._node_log import node_lifecycle
+from agent.graph import node_log
+from agent.graph.node_log import node_lifecycle
 from shared.config import settings
 
 
@@ -50,7 +50,7 @@ def _wrap(node: str, msg_count: int, pub=None):
 @pytest.fixture(autouse=True)
 def _clear_node_exit_aggregate():
     """Keep the process-global exit buffer isolated across lifecycle tests."""
-    aggregate = getattr(_node_log, "_NODE_EXIT_AGGREGATE", {})
+    aggregate = getattr(node_log, "_NODE_EXIT_AGGREGATE", {})
     aggregate.clear()
     yield
     aggregate.clear()
@@ -69,7 +69,7 @@ async def test_node_lifecycle_aggregates_ok_exit_until_flush(loguru_records) -> 
     assert enters[0]["extra"]["msg_count"] == 5
     assert exits == []
 
-    flush = getattr(_node_log, "flush_node_exit_aggregate", None)
+    flush = getattr(node_log, "flush_node_exit_aggregate", None)
     assert flush is not None, "node exits need a public turn-boundary flush"
     flush(1)
 
@@ -96,7 +96,7 @@ async def test_node_lifecycle_aggregates_cancelled_exit_until_flush(loguru_recor
 
     assert _exit_records(loguru_records) == []  # pyright: ignore[reportUnknownArgumentType]
 
-    flush = getattr(_node_log, "flush_node_exit_aggregate", None)
+    flush = getattr(node_log, "flush_node_exit_aggregate", None)
     assert flush is not None, "node exits need a public turn-boundary flush"
     flush(1)
 
@@ -260,7 +260,7 @@ async def test_dump_async_tasks_names_the_full_await_chain(monkeypatch: pytest.M
     Reads from sys.__stderr__ (the real process stderr the dump targets), not
     the swappable sys.stderr the exec stream redirects — so the dump still lands
     when a leaked redirect has replaced sys.stderr."""
-    from agent.graph._node_log import _dump_async_tasks
+    from agent.graph.node_log import _dump_async_tasks
 
     sink = io.StringIO()
     monkeypatch.setattr(sys, "__stderr__", sink)
@@ -466,7 +466,7 @@ async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_message
     """
     from langchain_core.messages import HumanMessage
 
-    import agent.graph._node_log as nl
+    import agent.graph.node_log as nl
     from shared.message_kwargs import AvaMsgType
 
     queried: list[int] = []
@@ -579,7 +579,7 @@ async def test_node_lifecycle_render_failure_does_not_advance_cursor(
     instead of skipping everything past a phantom cursor."""
     from langchain_core.messages import AIMessage
 
-    from agent.graph import _node_log as nl
+    from agent.graph import node_log as nl
 
     pub = MagicMock()
     msgs = [SystemMessage(content="x"), AIMessage(content="a"), AIMessage(content="b")]

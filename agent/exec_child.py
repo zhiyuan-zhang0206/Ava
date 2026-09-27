@@ -9,7 +9,7 @@ Contract with the parent (`agent/graph/_exec_subprocess.py`), all through
 files + signals:
 
 - Request envelope: `AVA_EXEC_REQUEST_FILE` — the code, the agent id, the
-  timeout, and the typed state snapshot (`agent/graph/_exec_protocol.py`).
+  timeout, and the typed state snapshot (`agent/graph/exec_protocol.py`).
 - Output: fd 1/2, merged into one pipe by the parent (`stderr=STDOUT`). Only
   the agent's own output goes there: framework logs use the file sink
   (`init_subprocess_logger` adds no stderr handler), and stdout/stderr are
@@ -69,7 +69,7 @@ import shared.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side e
 # Envelope types the boot path references: a leaf module (stdlib + small shared
 # helpers, no serde — `loads_typed` stays deferred), so importing it here keeps
 # the child's early-import order intact.
-from agent.graph._exec_protocol import RequestPayload
+from agent.graph.exec_protocol import RequestPayload
 from shared.log import init_subprocess_logger, logger
 from shared.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
 
@@ -134,7 +134,7 @@ def _arm_watchdog(timeout_s: float) -> None:
     """Hard-exit past (timeout + parent kill grace + margin) — the belt to the
     parent's braces. Only fires when the parent itself died (or its signals
     were lost); a parent that is alive SIGKILLs this child first."""
-    from agent.graph._exec_protocol import KILL_GRACE_S
+    from agent.graph.exec_protocol import KILL_GRACE_S
 
     margin = float(os.environ.get("AVA_EXEC_WATCHDOG_MARGIN_S", WATCHDOG_MARGIN_S))
     delay = timeout_s + KILL_GRACE_S + margin
@@ -322,7 +322,7 @@ def _take_result_state_update(payload: Any, *, state_injected: bool) -> None:
 def _run_code(code: str, payload: Any) -> None:
     """Execute the agent's code with stdout/stderr on the pipe; capture
     lifecycle / crash outcomes into the payload."""
-    from agent.graph._agent_traceback import (
+    from agent.graph.agent_traceback import (
         format_agent_traceback,
         format_full_traceback,
         register_agent_source,
@@ -454,7 +454,7 @@ def _run(request_path: str, result_path: str) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
     _import_runtime()
-    from agent.graph._exec_protocol import ResultPayload, read_request, write_result
+    from agent.graph.exec_protocol import ResultPayload, read_request, write_result
     from ava.attachment_transport import media_gated_members, take_attachments
     from ava.sdk_surface.discovery import hidden_surface_members
     from ava.security import take_findings
@@ -586,8 +586,8 @@ def _write_crashed_result(
         "sdk_calls": None,
     }
     try:
-        from agent.graph._exec_protocol import ResultPayload as RuntimeResultPayload
-        from agent.graph._exec_protocol import write_result as runtime_write_result
+        from agent.graph.exec_protocol import ResultPayload as RuntimeResultPayload
+        from agent.graph.exec_protocol import write_result as runtime_write_result
 
         runtime_write_result(
             Path(result_path),

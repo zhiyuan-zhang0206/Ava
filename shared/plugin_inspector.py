@@ -101,7 +101,7 @@ def register_inspect_widget(spec: InspectWidgetSpec) -> InspectWidgetSpec:
     if plugin is None:
         raise NoPluginContext(
             "register_inspect_widget() must be called inside PluginContext — the "
-            "framework `_load_extensions` wraps plugin imports; the gateway's "
+            "framework `load_extensions` wraps plugin imports; the gateway's "
             "inspector loader wraps `inspector.py` imports with the plugin name."
         )
     key = (plugin, spec.id)

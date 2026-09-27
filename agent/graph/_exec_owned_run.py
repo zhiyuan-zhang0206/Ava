@@ -17,9 +17,9 @@ from uuid import uuid4
 
 import psutil
 
-from agent.graph._exec_protocol import KILL_GRACE_S, ResultPayload, write_request
 from agent.graph._exec_result import _ExecCrashed, _ExecResult
 from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamingTextIO
+from agent.graph.exec_protocol import KILL_GRACE_S, ResultPayload, write_request
 from shared.db_transaction import write_transaction
 from shared.exec_owner_protocol import (
     OwnerClosed,

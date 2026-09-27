@@ -381,7 +381,7 @@ def format_timestamp(dt: datetime) -> str:
     suffix was a constant string repeated on every timestamp — and an ambiguous
     one (``%Z`` gives ``PDT``/``PST`` across a DST boundary, and ``CST`` names
     two different zones). The agent is told the timezone once instead, by the
-    standing context note in `agent/graph/_context_notes.py`.
+    standing context note in `agent/graph/context_notes.py`.
 
     This is the single agent-facing timestamp representation: every producer
     goes through here, so a format change can never apply to some of an agent's

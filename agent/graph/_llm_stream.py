@@ -32,7 +32,7 @@ from shared.config.turn_view import turn_settings
 from shared.log import logger
 
 from ._callbacks import RedisStreamHandler
-from ._llm_errors import (
+from .llm_errors import (
     LLMStreamStallPairError,
     LLMStreamStallTimeoutError,
     _is_fatal_provider_error_type,

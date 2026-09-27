@@ -180,7 +180,7 @@ def load_process_extensions() -> None:
     # sections). Faces of plugins whose surface loads later (the built-in set,
     # via build_graph's full `load_extensions`) are picked up there — the face
     # always follows its surface (task #3633).
-    from agent._extensions import load_agent_faces
+    from agent.extensions import load_agent_faces
 
     load_agent_faces()
 

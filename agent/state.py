@@ -566,7 +566,7 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
         # get_type_hints-eval'd strings into real types and stuffed them
         # into model_field (prerequisite: plugin module registered into
         # sys.modules so get_type_hints can find globals; see
-        # `agent/graph/_build.py:_load_extensions`). Reconstructing from
+        # `agent/graph/_build.py:load_extensions`). Reconstructing from
         # model_field avoids forward-ref string residuals and avoids
         # NameErrors during get_type_hints(cls) caused by missing symbols
         # in intermediate base classes' namespaces.
@@ -635,7 +635,7 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
 
 def clear_plugin_registrations() -> None:
     """Reset all plugin-registered state fields — called by
-    `_load_extensions` on entry to ensure that multiple reloads (test
+    `load_extensions` on entry to ensure that multiple reloads (test
     fixture / dev hot-reload) don't accumulate ghost state from previous
     registrations. Also clears system prompt sections, context notes, hook
     registrations, SDK namespaces, plugin configs, plugin flag declarations
@@ -652,16 +652,16 @@ def clear_plugin_registrations() -> None:
     import ava
     import ava.sdk_surface.wraps
     import ava.skill_sources
-    from agent.graph._context_notes import _CONTEXT_NOTES, _FRAMEWORK_NOTE_COUNT
-    from agent.graph._system_prompt import _FRAMEWORK_SECTION_COUNT, _SYSTEM_PROMPT_SECTIONS
+    from agent.graph.context_notes import clear_plugin_context_notes
+    from agent.graph.system_prompt import clear_plugin_system_prompt_sections
     from agent.hooks._registry import HOOKS
     from shared.plugin_config_registry import clear_plugin_configs
     from shared.plugin_flags import clear_plugin_flags
 
     # Keep the framework-owned sections / context notes (registered once at
     # module import); drop only the plugin-contributed tails.
-    del _SYSTEM_PROMPT_SECTIONS[_FRAMEWORK_SECTION_COUNT:]
-    del _CONTEXT_NOTES[_FRAMEWORK_NOTE_COUNT:]
+    clear_plugin_system_prompt_sections()
+    clear_plugin_context_notes()
     for hook_list in HOOKS.values():
         hook_list.clear()
     clear_plugin_configs()

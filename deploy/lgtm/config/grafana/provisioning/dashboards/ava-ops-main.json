@@ -3275,7 +3275,7 @@
     "type": "loki",
     "uid": "loki"
    },
-   "description": "Exec envelope transfer size \u2014 serialized request/result envelope bytes moved between the agent and its exec child, unwrapped from the exec_envelope event's size_bytes attribute (agent/graph/_exec_protocol.py::_log_envelope_transfer). p50/p95 percentiles plus max, grouped by envelope/op; a rising request band is state/payload inflation. The event is excluded from the Exec outcomes other bucket (PM ruling 2026-08-31) and displays here instead. event_name='exec_envelope', category='telemetry'.",
+   "description": "Exec envelope transfer size \u2014 serialized request/result envelope bytes moved between the agent and its exec child, unwrapped from the exec_envelope event's size_bytes attribute (agent/graph/exec_protocol.py::_log_envelope_transfer). p50/p95 percentiles plus max, grouped by envelope/op; a rising request band is state/payload inflation. The event is excluded from the Exec outcomes other bucket (PM ruling 2026-08-31) and displays here instead. event_name='exec_envelope', category='telemetry'.",
    "fieldConfig": {
     "defaults": {
      "color": {

@@ -254,7 +254,7 @@ def test_clear_does_not_touch_framework_namespaces():
 
 
 def test_clear_plugin_registrations_calls_namespace_cleanup():
-    """`agent.state.clear_plugin_registrations` is the _load_extensions entry point; must
+    """`agent.state.clear_plugin_registrations` is the load_extensions entry point; must
     link with `ava.clear_registered_namespaces` so plugin reload cleans namespace to avoid
     next register name collision."""
     ava.register_namespace("code", _make_module("code"))

@@ -311,7 +311,7 @@ def wrappers() -> dict[str, list[tuple[str, Callable[..., Any]]]]:
 def clear_wraps() -> None:
     """Restore every wrapped target to its captured original and empty the
     registry. Called from `agent.state.clear_plugin_registrations` at the top of
-    each `_load_extensions`, so a reload (test fixture / dev hot-reload) re-wraps
+    each `load_extensions`, so a reload (test fixture / dev hot-reload) re-wraps
     from a pristine core instead of stacking onto the previous load's chain."""
     for target, original in _ORIGINALS.items():
         try:

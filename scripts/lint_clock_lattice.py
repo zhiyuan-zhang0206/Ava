@@ -152,7 +152,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "REAP_LIFECYCLE_REASON",
     ): "the lifecycle_result reason value for the update straggler reap, not a clock",
     (
-        "agent/graph/_node_log.py",
+        "agent/graph/node_log.py",
         "_STALL_GUARD_EXEMPT",
     ): "frozenset of exempt node kinds, not a clock",
     (

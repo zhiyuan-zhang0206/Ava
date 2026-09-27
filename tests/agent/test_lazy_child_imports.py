@@ -1,7 +1,7 @@
 """Child start path stays off the agent-side heavy chains — PR-2 of the
 startup-path laziness work (task #3585).
 
-The exec child imports `agent.graph._exec_protocol` (request envelope),
+The exec child imports `agent.graph.exec_protocol` (request envelope),
 `agent._process_boot` (SDK helpers), and the media-gate resolution on
 `shared.lm.registry` before any user code runs. Each probe runs in a clean
 subprocess (isolated interpreter, agent-launch env vars stripped, repo root
@@ -91,7 +91,7 @@ def _run_clean_probe(body: str) -> dict[str, object]:
 _GRAPH_LIGHT = """
 import importlib
 
-importlib.import_module("agent.graph._exec_protocol")
+importlib.import_module("agent.graph.exec_protocol")
 heavy = sorted(
     name
     for name in sys.modules
@@ -118,7 +118,7 @@ _STATELESS_REQUEST = """
 import tempfile
 from pathlib import Path
 
-from agent.graph._exec_protocol import read_request
+from agent.graph.exec_protocol import read_request
 
 req = Path(tempfile.mkdtemp(prefix="lazy-child-")) / "req-x.json"
 req.write_text(
@@ -334,7 +334,7 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
     """A v1 request envelope carrying a typed state snapshot."""
     import base64
 
-    from agent.graph._exec_protocol import dumps_typed
+    from agent.graph.exec_protocol import dumps_typed
 
     tag, blob = dumps_typed({"ava_code__cwd": str(tmp_path)})
     req = tmp_path / "req-state.json"
@@ -357,7 +357,7 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
 _STATEFUL_REQUEST_RAW = """
 from pathlib import Path
 
-from agent.graph._exec_protocol import read_request
+from agent.graph.exec_protocol import read_request
 
 payload = read_request(Path({req!r}))
 heavy = sorted(
@@ -391,7 +391,7 @@ from pathlib import Path
 
 import ava
 from agent import exec_child
-from agent.graph._exec_protocol import read_request
+from agent.graph.exec_protocol import read_request
 
 exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
 
@@ -450,7 +450,7 @@ from pathlib import Path
 
 import ava
 from agent import exec_child
-from agent.graph._exec_protocol import read_request
+from agent.graph.exec_protocol import read_request
 
 exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
 payload = read_request(Path({req!r}))
@@ -504,7 +504,7 @@ from pathlib import Path
 
 import ava
 from agent import exec_child
-from agent.graph._exec_protocol import read_request
+from agent.graph.exec_protocol import read_request
 
 exec_child._import_runtime()
 payload = read_request(Path({req!r}))

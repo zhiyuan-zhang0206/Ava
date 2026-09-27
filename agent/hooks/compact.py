@@ -48,7 +48,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph._interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
+from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
 from agent.history_dump import dump_history, history_dump_note
 from agent.hooks import Hook, register_before_llm
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
