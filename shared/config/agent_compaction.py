@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 
 class AgentCompactionSettings(EnvSettings):

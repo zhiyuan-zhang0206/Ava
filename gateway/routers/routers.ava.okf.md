@@ -7,7 +7,7 @@ tags: []
 
 # Gateway Routers
 
-Gateway's 43 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `_delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
+Gateway's 43 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
 
 ## Router categories
 
@@ -19,7 +19,7 @@ Gateway's 43 route modules, split by business domain under `gateway/routers/<dom
 - **run_timeline_strip** (`/api/agents/{id}/run-timeline/message` + run-timeline's `messages` field) — see [[gateway/routers/run-timeline-strip.ava.okf.md]].
 - **agent_inspect** (`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics` + `/inspect/widgets`) — per-agent LLM cost/token/TPS + neighbor graph; plugin metric and inspector-widget surfaces — see [[gateway/routers/agent-inspect.ava.okf.md]]
 - **system** (`/api/system`, `/api/agents/{id}/system`, `/api/system/all`) — SSE broadcasting (see [[sse.ava.okf.md]])
-- **_delivery** — chat inbound delivery internal helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
+- **delivery** — chat inbound delivery internal helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
 - **ops_monitor** (`/api/ops/monitor`) — time-bucketed ops panel series (SSE backlog / LLM latency+TPS / restart counts), see [[gateway/routers/ops-monitor.ava.okf.md]]
 - **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read, IM fan-out via im_bridge [[gateway/routers/alerts.ava.okf.md]]
 - **work_failed** (`POST /api/work-failed`) — durable, deduplicated CI/QA/merge failure feedback routed to the author, nearest live birth-lineage delegator, or a P1 task alert [[gateway/routers/work-failed.ava.okf.md]]

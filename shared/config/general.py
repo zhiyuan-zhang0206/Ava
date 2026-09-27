@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from loguru import logger
 from pydantic import Field, field_validator, model_validator
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 
 class GeneralSettings(EnvSettings):

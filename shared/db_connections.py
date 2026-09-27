@@ -41,14 +41,14 @@ class NoDatabaseAuthorityError(RuntimeError):
 
 
 # TCP keepalive + connect timeout applied to every cluster Postgres connection —
-# the psycopg/libpq mirror of shared/redis_client.py's `_RESILIENCE_KWARGS`. A
+# the psycopg/libpq mirror of shared/redis_client.py's `RESILIENCE_KWARGS`. A
 # laptop-grade runner that sleeps or changes networks wakes holding dead TCP
 # flows; without these, a query already in flight on a half-dead socket hangs on
 # the OS TCP-retransmit timeout (minutes, no application-level bound). ~30s idle,
 # then a probe every 10s, 3 misses = dead (~60s), plus a 5s cap on establishing a
 # new connection. These are libpq connection parameters (passed through psycopg's
 # `**kwargs` into the conninfo), so they apply to the connect + every borrowed
-# pool conn. Typed `dict[str, Any]` (like redis's `_RESILIENCE_KWARGS`) so
+# pool conn. Typed `dict[str, Any]` (like redis's `RESILIENCE_KWARGS`) so
 # `**`-unpacking into psycopg's typed keyword params doesn't trip the type checker.
 #
 # `connect_timeout` matters most where the connect is the *first* thing a process

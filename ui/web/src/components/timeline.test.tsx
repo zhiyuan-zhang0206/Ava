@@ -37,6 +37,9 @@ vi.mock("./python-code", () => ({
       </pre>
     </div>
   ),
+  // card.tsx's CardHeader calls this on pointer-enter/focus to warm the
+  // highlighter chunk ahead of expand (see python-code.tsx) — a no-op here.
+  preloadPythonCodeHighlighter: () => Promise.resolve(),
 }));
 
 vi.mock("./ui/scroll-area", () => ({

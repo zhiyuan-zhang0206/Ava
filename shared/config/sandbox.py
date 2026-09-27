@@ -10,7 +10,7 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 
 class SandboxSettings(EnvSettings):

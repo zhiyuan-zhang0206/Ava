@@ -28,7 +28,7 @@ def test_connect_redis_applies_resilience_kwargs(monkeypatch: pytest.MonkeyPatch
 
     kw = captured["kwargs"]
     assert kw["decode_responses"] is True
-    # weak-network floor (shared/redis_client.py._RESILIENCE_KWARGS)
+    # weak-network floor (shared/redis_client.py.RESILIENCE_KWARGS)
     assert kw["socket_keepalive"] is True
     assert kw["socket_connect_timeout"] == 5.0
     assert kw["health_check_interval"] == 30

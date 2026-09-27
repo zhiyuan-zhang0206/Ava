@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 
 class FeishuSettings(EnvSettings):

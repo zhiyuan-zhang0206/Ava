@@ -21,6 +21,19 @@ Three layers: `HomePage` (read-only toast) → `HomeShell` (`useAgents`, activeI
 
 `PageDock` removed—open pages now carried by InspectorPanel's `useAgentPages`.
 
+## Code blocks
+
+`PythonCode` keeps its highlighter (`prism-react-renderer`, ~85KB) out of
+the `/` route's initial bundle via a plain dynamic `import()`, but warms
+that chunk proactively: `CodeHighlighterPreloader` mounts on every page
+with code blocks (home timeline, `/control/schedules`) and fetches it once
+idle; a code block's own collapsed toggle (`CardHeader`, the schedules row
+expand button) also fetches it on pointer-enter/focus, ahead of the click
+that expands it. Not yet resolved → plain unhighlighted text (copy control
++ streaming cursor still present, no blank body); already prefetched → the
+first render is already highlighted, no flash. Tokenization still only
+runs when a code block renders or its source changes.
+
 ## Fleet View
 
 The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) — relationship graph, task graph, task board, unified Inbox queue, shared force controls — has its own node: [[ui/web/src/frontend-components/fleet-view.ava.okf.md|Fleet View]].

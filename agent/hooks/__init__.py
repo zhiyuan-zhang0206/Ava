@@ -10,6 +10,8 @@ Public API (re-exported from `_registry`):
 - `make_hook_runner(name, default_next)` called at graph build time
 - `Hook` (base class) / `HookName` / `HOOKS` + global registry. Plugin authors
   subclass `Hook` and override the typed `__call__`.
+- `clear_hooks()` — clear every hook list (used to reset registrations between
+  plugin reloads).
 
 Hook registration example (in plugin's `plugin.py`):
 
@@ -36,6 +38,7 @@ from ._registry import (
     HOOKS,
     Hook,
     HookName,
+    clear_hooks,
     make_hook_runner,
     register_after_exec,
     register_after_init,
@@ -62,6 +65,7 @@ __all__ = [
     "HOOKS",
     "Hook",
     "HookName",
+    "clear_hooks",
     "make_hook_runner",
     "register_after_exec",
     "register_after_init",

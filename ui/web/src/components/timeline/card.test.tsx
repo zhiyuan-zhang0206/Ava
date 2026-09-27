@@ -14,6 +14,14 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+// The header's expand toggle calls this on pointer-enter/focus to warm the
+// syntax-highlighter chunk ahead of an expand that might reveal a code block
+// (see python-code.tsx) — mocked here so the "intent prefetch wiring" test
+// below can assert it's actually invoked, without depending on the real
+// dynamic import.
+const preloadPythonCodeHighlighter = vi.hoisted(() => vi.fn());
+vi.mock("@/components/python-code", () => ({ preloadPythonCodeHighlighter }));
+
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
 import { resolveTimelineColors } from "@/lib/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/types";
@@ -316,6 +324,24 @@ describe("CardHeader", () => {
     expect(btn.getAttribute("aria-expanded")).toBe("true");
     expect(btn.getAttribute("data-expanded")).toBe("true");
     expect(btn.getAttribute("title")).toBeNull();
+  });
+
+  it("hovering or focusing the toggle warms the code-highlighter chunk (intent prefetch)", () => {
+    // Regression coverage for the P2 adversarial-review finding on Ava #3463:
+    // this wiring had no assertion that pointer-enter/focus actually invokes
+    // the prefetch, only that a mocked no-op didn't blow up.
+    preloadPythonCodeHighlighter.mockClear();
+    const cfg = messageCardConfig(baseItem)!;
+    const { getByTestId } = renderWithQuery(
+      <CardHeader item={baseItem} config={cfg} expanded={false} onToggle={noop} />,
+    );
+    const btn = getByTestId("card-toggle");
+
+    fireEvent.pointerEnter(btn);
+    expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(1);
+
+    fireEvent.focus(btn);
+    expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(2);
   });
 
   it("renders rich summary for system_prompt kind", () => {

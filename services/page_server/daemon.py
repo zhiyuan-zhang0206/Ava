@@ -33,7 +33,7 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 import shared.sessions.pty.cli
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
 from shared.daemon_health import Liveness, start_health_server, stop_health_server
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown

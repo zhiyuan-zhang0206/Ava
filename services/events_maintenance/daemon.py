@@ -66,7 +66,6 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 import shared.db
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
     run_blob_vacuum,
@@ -76,6 +75,7 @@ from services.events_maintenance.jsonl_replay import replay_gap_days
 from services.events_maintenance.observed_metrics import recover_observations
 from services.events_maintenance.resolution import run_resolution_slice
 from services.events_maintenance.rollup import compute_rollup
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
 from shared.daemon_health import (
     LivenessGroup,

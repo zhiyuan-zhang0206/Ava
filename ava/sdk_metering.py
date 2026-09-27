@@ -78,11 +78,11 @@ def _caller() -> Generator[None, None, None]:
             "agent_id": agent_id,
             "source": source,
         }
-    token = sdk_telemetry._identity.set(identity)
+    token = sdk_telemetry.set_identity(identity)
     try:
         yield
     finally:
-        sdk_telemetry._identity.reset(token)
+        sdk_telemetry.reset_identity(token)
 
 
 def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:

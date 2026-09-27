@@ -16,6 +16,7 @@ from agent.hooks import (
     HOOKS,
     Hook,
     HookName,
+    clear_hooks,
     make_hook_runner,
     register_before_exec,
     register_before_llm,
@@ -32,8 +33,7 @@ def _isolate_hooks():
     """Before each test clear HOOKS, restore after — avoid cross-test contamination + not lose production
     registration (if import chain has register side effects)."""
     saved = {k: list(v) for k, v in HOOKS.items()}
-    for v in HOOKS.values():
-        v.clear()
+    clear_hooks()
     yield
     for k, v in saved.items():
         # cast is because dict.items() degrades key to str

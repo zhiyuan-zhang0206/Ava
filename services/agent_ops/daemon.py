@@ -73,7 +73,6 @@ from ops.rpc_schemas import (
     OpEnvelope,
     is_op_kind,
 )
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_ops import close_notices, health, outbox_flusher
 from services.agent_ops import maintenance as maintenance_activity
 from services.agent_ops._boot import (
@@ -83,6 +82,7 @@ from services.agent_ops._boot import (
     _register_boot,
 )
 from services.agent_ops.dispatch_sync import dispatch_sync
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.agents import AvaAgentError, ResurrectRefused
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server

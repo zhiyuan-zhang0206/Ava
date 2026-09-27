@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 UpdateModeSetting = Literal["auto", "notify", "off"]
 

@@ -11,7 +11,7 @@ from typing import Annotated
 from pydantic import Field, HttpUrl, JsonValue, field_validator
 from pydantic_settings import NoDecode
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
     "restart_required": "schedule",

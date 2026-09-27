@@ -35,7 +35,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
 from gateway.inbound_provenance import request_inbound_provenance
-from gateway.routers._delivery import deliver_chat_inbound
+from gateway.routers.delivery import deliver_chat_inbound
 from gateway.schemas import (
     AgentMessageEnqueued,
     EscalationNoticeItem,

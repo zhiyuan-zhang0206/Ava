@@ -20,7 +20,7 @@ import sys
 from contextlib import suppress
 from typing import Any
 
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.cluster.authority.api import token_digest
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server

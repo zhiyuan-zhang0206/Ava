@@ -97,7 +97,7 @@ sys.argv = ['services.agent_ops.daemon', *sys.argv[2:]]
 class DenyEffects(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
         if fullname.startswith(('shared.config', 'services.agent_ops._boot',
-                                'services._pidfile', 'ops')):
+                                'services.pidfile', 'ops')):
             raise AssertionError('ordinary startup imported before argv refusal: ' + fullname)
 sys.meta_path.insert(0, DenyEffects())
 runpy.run_module('services.agent_ops.daemon', run_name='__main__')

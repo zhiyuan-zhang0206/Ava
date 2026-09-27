@@ -12,10 +12,17 @@ import { api } from "@/lib/api";
 import type { ScheduleSummary, ScheduleView } from "@/lib/types";
 
 // Mock PythonCode — avoid running Prism syntax highlighting in tests
+//
+// The row's expand button calls preloadPythonCodeHighlighter on
+// pointer-enter/focus to warm the highlighter chunk ahead of expand (see
+// python-code.tsx) — a vi.fn() here (not a plain no-op) so the "intent
+// prefetch wiring" test below can assert it's actually invoked.
+const preloadPythonCodeHighlighter = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 vi.mock("@/components/python-code", () => ({
   PythonCode: ({ code }: { code: string }) => (
     <pre data-testid="python-code">{code}</pre>
   ),
+  preloadPythonCodeHighlighter,
 }));
 
 import SchedulesPage from "./page";
@@ -165,6 +172,24 @@ describe("SchedulesPage", () => {
     await waitFor(() =>
       expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: "my-sched" })),
     );
+  });
+
+  it("hovering or focusing the expand button warms the code-highlighter chunk (intent prefetch)", async () => {
+    // Regression coverage for the P2 adversarial-review finding on Ava #3463:
+    // this wiring had no assertion that pointer-enter/focus actually invokes
+    // the prefetch, only that a mocked no-op didn't blow up.
+    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
+    wrap(<SchedulesPage />);
+    await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
+
+    preloadPythonCodeHighlighter.mockClear();
+    const expandButton = screen.getByRole("button", { name: "Expand" });
+
+    fireEvent.pointerEnter(expandButton);
+    expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(1);
+
+    fireEvent.focus(expandButton);
+    expect(preloadPythonCodeHighlighter).toHaveBeenCalledTimes(2);
   });
 
   it("expand: shows script, last_error, logs, and run history", async () => {

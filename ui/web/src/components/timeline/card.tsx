@@ -42,6 +42,7 @@ import {
   summarizeOutput,
   type SdkCall,
 } from "@/lib/item-summary";
+import { preloadPythonCodeHighlighter } from "@/components/python-code";
 import { DEFAULT_TIMELINE_COLORS, type TimelineColors } from "@/lib/timeline-colors";
 import type { BackendTimelineItem } from "@/lib/types";
 import { useUserSettings } from "@/lib/use-user-settings";
@@ -479,6 +480,13 @@ export const CardHeader = memo(function CardHeader({
     <button
       type="button"
       onClick={onToggle}
+      // Expand "intent" signal (task: keep the highlighter lazy but warm it
+      // ahead of need — python-code.tsx): a collapsed card's body may hold a
+      // python code block, so hovering/focusing its toggle starts the same
+      // dynamic import the eventual expand would trigger anyway, ahead of
+      // the click. Idempotent — a no-op once the chunk is loading/loaded.
+      onPointerEnter={preloadPythonCodeHighlighter}
+      onFocus={preloadPythonCodeHighlighter}
       className={cn(
         HEADER_CLS,
         sticky && stickyCls,

@@ -22,10 +22,10 @@ import sys
 
 import uvicorn
 
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.memory_indexer.embeddings.factory import get_provider
 from services.memory_search.app import build_app
 from services.memory_search.store import MemoryStore
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
 from shared.daemon_shutdown import hard_exit as _hard_exit

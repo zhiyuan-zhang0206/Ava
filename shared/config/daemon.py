@@ -10,7 +10,7 @@ import json
 
 from pydantic import Field, field_validator, model_validator
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 from shared.config.billing_recovery_fields import BillingRecoveryFields
 from shared.config.delivery_outbox_fields import DeliveryOutboxFields
 from shared.config.delivery_watchdog_fields import DeliveryWatchdogFields
