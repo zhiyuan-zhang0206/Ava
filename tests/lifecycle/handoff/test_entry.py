@@ -2,8 +2,8 @@
 
 The entry runs only as the image its request names as executor, reads the
 exact request (a path, or stdin for the ops kind), and dispatches `submit` to
-the home release journal; the reserved `receipt` and `preflight` names refuse
-in this image.
+the home release journal and `receipt` / `preflight` to the fleet release's
+unit answers (their behavior: tests/lifecycle/release_fleet/test_entries.py).
 """
 
 from __future__ import annotations
@@ -81,17 +81,19 @@ def test_the_entry_runs_only_as_the_named_executor(
 
 
 @pytest.mark.parametrize("name", ["receipt", "preflight"])
-def test_reserved_entries_refuse_in_this_image(
+def test_the_unit_answers_refuse_a_document_they_cannot_answer(
     store: Store,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     submitted: list[bytes],
     name: str,
 ) -> None:
+    """A fleet request is no unit's preflight, and this fixture image carries no
+    migration inventory for a receipt: each refuses, and nothing is submitted."""
     _as_image(monkeypatch, store)
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(store.request())))
     assert entry.main([name, "-"]) == 2
-    assert f"does not provide the {name} entry" in capsys.readouterr().err
+    assert f"release {name} refused" in capsys.readouterr().err
     assert submitted == []
 
 

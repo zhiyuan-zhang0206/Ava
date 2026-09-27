@@ -98,6 +98,54 @@ class UnitSpec(Record):
         return self
 
 
+class UnitReceipt(Record):
+    """What a unit's candidate image reports about the unit (the handoff's
+    `receipt` entry): everything a coordinator needs to include it.
+
+    `platform` is provenance only; the ABI tag is the compatibility contract.
+    """
+
+    machine: str = Field(min_length=1, max_length=128)
+    home: str = Field(min_length=1, max_length=4096)
+    registry: str = Field(min_length=1, max_length=4096)
+    roles: tuple[str, ...]
+    abi: dict[str, str | None]
+    platform: str = Field(max_length=256)
+    adapter: AdapterKind
+    previous: ReleaseRef | None
+    candidate: ReleaseRef
+    sql_inventory_digest: Digest
+    configuration_digest: Digest
+    enrollment_id: Hex32 | None
+
+    @property
+    def digest(self) -> str:
+        encoded = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+    def spec(self) -> UnitSpec:
+        """This unit's place in a fleet request; refused before its first
+        adoption (no selected release) or enrollment."""
+        if self.previous is None:
+            raise ValueError(f"unit {self.machine}:{self.home} has no selected release to leave")
+        if self.enrollment_id is None:
+            raise ValueError(f"unit {self.machine}:{self.home} holds no enrollment")
+        return UnitSpec.model_validate(
+            {
+                "unit": UnitKey(machine=self.machine, home=self.home),
+                "registry": self.registry,
+                "roles": tuple(sorted(self.roles)),
+                "adapter": self.adapter,
+                "previous": self.previous,
+                "candidate": self.candidate,
+                "configuration_digest": self.configuration_digest,
+                "sql_inventory_digest": self.sql_inventory_digest,
+                "receipt_digest": self.digest,
+                "enrollment_id": self.enrollment_id,
+            }
+        )
+
+
 class Exclusion(Record):
     """A unit the operation leaves out; it stays stale until it converges."""
 
