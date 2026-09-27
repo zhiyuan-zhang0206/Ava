@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 from shared.config.physical_backup_credentials import (
     aliyun_oss_identity,
     reject_shared_delete_identity,

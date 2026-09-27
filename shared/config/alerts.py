@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pydantic import Field, SecretStr
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 
 class AlertsSettings(EnvSettings):

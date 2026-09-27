@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import AliasChoices, Field
 
-from shared.config._base import EnvSettings, _unit_home
+from shared.config.base import EnvSettings, _unit_home
 
 __all__ = [
     "_ServiceRuntimeSettings",
