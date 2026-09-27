@@ -48,9 +48,9 @@ remains the authority for whether a unit's `.env` owns cluster configuration or
 a pure runner must fetch it from the gateway. An unanchored checkout (no
 `AVA_HOME`, not the prod source, no `.ava_home` pointer) is neither: the lite
 source decision asks `checkout_anchored()` first and boots it bare on its
-scratch home, and `should_fetch_from_gateway()` answers no for it whatever its
-environment carries — its imports never read another unit's `.env` or dial a
-gateway.
+scratch home, `should_fetch_from_gateway()` answers no for it whatever its
+environment carries, and `fetch_bootstrap_config()` refuses to dial for it — its
+imports never read another unit's `.env` or present a gateway bearer.
 
 Bootstrap serves `AVA_HOST_MAX_CONCURRENT_TURNS` verbatim, including zero for
 unlimited admission. Runner requests select only the credential role. Snapshot

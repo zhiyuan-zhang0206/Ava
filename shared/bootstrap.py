@@ -246,10 +246,22 @@ def fetch_bootstrap_config(
     Settings import.
 
     Raises:
+        BootstrapFetchError: this checkout is unanchored — it owns no cluster,
+            so it never dials a gateway or presents a bearer (the one transport
+            gate behind `should_fetch_from_gateway`'s decision).
         httpx.HTTPError: every attempt failed (gateway unreachable / non-2xx, e.g.
             401 when the cluster secret is missing or wrong).
         TypeError: the response body is not a flat ``{str: str}`` map.
     """
+    from shared.dotenv_boot import checkout_anchored
+
+    if not checkout_anchored():
+        raise BootstrapFetchError(
+            f"refusing GET {base_url.rstrip('/')}/api/bootstrap: this checkout claims "
+            "no cluster (no AVA_HOME, not the prod source, no .ava_home pointer), so "
+            "no gateway's config or bearer is its to use. Birth its own cluster first: "
+            "scripts/install.sh --worktree"
+        )
     import httpx
 
     from shared.cluster_auth import bearer_header
