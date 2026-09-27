@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import cast
@@ -13,6 +15,7 @@ import pytest
 from shared import coding_session_owner as owner
 from shared import coding_session_owner_record as record_codec
 from shared.config import settings
+from shared.platform import IS_WINDOWS
 
 NOW = dt.datetime(2026, 9, 2, 0, 0, tzinfo=dt.UTC)
 
@@ -437,11 +440,16 @@ def test_a_legacy_single_slot_record_is_reclaimed_only_once_dead(
     assert legacy.exists() is alive
 
 
+_POSIX_ONLY = pytest.mark.skipif(IS_WINDOWS, reason="the app-server socket is a POSIX unix socket")
+_SOCKET_GENERATION = "be6a5e0a-f271-4301-ad6b-521673bf262f"
+
+
+@_POSIX_ONLY
 def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) -> None:
     key = _key(tmp_path)
     generation = "be6a5e0a-f271-4301-ad6b-521673bf262f"
     first = owner.codex_app_server_socket(key, generation)
-    assert first.parent == Path(key.cluster) / "run"
+    assert first.parent == owner._SOCKET_BASE / f"ava-{os.getuid()}"
     assert first.name.startswith("codex-app-server.")
     assert first.name.endswith("-be6a5e0a.sock")
     assert len(first.name) == len("codex-app-server.") + 12 + 1 + 8 + len(".sock")
@@ -449,3 +457,46 @@ def test_codex_app_server_socket_is_short_and_generation_scoped(tmp_path: Path) 
     assert owner.codex_app_server_socket(key, "ffffffff-1111-2222-3333-444444444444") != first
     other = owner.codex_app_server_socket(_key(tmp_path, "workspace2"), generation)
     assert other != first
+
+
+@_POSIX_ONLY
+def test_a_long_cluster_home_still_gets_a_socket_under_the_kernel_limit(tmp_path: Path) -> None:
+    """A preview home (~/.ava-previews/<run>/home) pushed <home>/run past sun_path."""
+    long_home = tmp_path / ("preview-run-with-a-long-name-" * 4) / "home"
+    long_home.mkdir(parents=True)
+    workspace = long_home / "workspaces" / "2"
+    workspace.mkdir(parents=True)
+    key = owner.canonical_key(workspace, tool="codex", cluster=long_home)
+
+    socket = owner.codex_app_server_socket(key, _SOCKET_GENERATION)
+
+    assert len(os.fsencode(socket)) < owner._SUN_PATH_BYTES
+    assert len(os.fsencode(Path(key.cluster) / "run" / socket.name)) >= owner._SUN_PATH_BYTES
+    info = socket.parent.lstat()
+    assert stat.S_ISDIR(info.st_mode) and not socket.parent.is_symlink()
+    assert info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700
+
+
+@_POSIX_ONLY
+def test_a_socket_dir_that_is_not_our_real_directory_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (tmp_path / f"ava-{os.getuid()}").symlink_to(elsewhere)
+    monkeypatch.setattr(owner, "_SOCKET_BASE", tmp_path)
+
+    with pytest.raises(owner.CodingSessionSocketError, match="not a directory owned by"):
+        owner.codex_app_server_socket(_key(tmp_path), _SOCKET_GENERATION)
+
+
+@_POSIX_ONLY
+def test_a_socket_path_that_cannot_fit_fails_before_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    long_base = tmp_path / ("x" * 90)
+    long_base.mkdir()
+    monkeypatch.setattr(owner, "_SOCKET_BASE", long_base)
+
+    with pytest.raises(owner.CodingSessionSocketError, match="bytes; unix sockets"):
+        owner.codex_app_server_socket(_key(tmp_path), _SOCKET_GENERATION)

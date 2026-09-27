@@ -229,8 +229,9 @@ def _launch_supervisor(
 def _app_server_endpoint(key: coding_session_owner.CodingSessionKey, generation: str) -> str:
     """The single endpoint both the TUI and the codex relay connect to.
 
-    Prepares the socket's private run directory; the app server binds the
-    socket itself.
+    The socket lives in a short per-user directory that
+    ``codex_app_server_socket`` creates and verifies (the mkdir below is then a
+    no-op); the app server binds the socket itself.
     """
     socket_path = coding_session_owner.codex_app_server_socket(key, generation)
     socket_path.parent.mkdir(parents=True, exist_ok=True)
