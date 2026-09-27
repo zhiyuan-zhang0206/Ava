@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import io
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,13 @@ _CAP_ARGS = {
 _FIELDS = ("machine_name", "machine_host", "machine_description", "memory_remote", "gateway_url")
 
 
+# An unanchored process pins its private scratch home as AVA_HOME
+# (shared/dotenv_boot.py rule 4: `ava-unanchored-<16 hex>` under the temp dir);
+# a child inheriting it claims no home either. Mirrored here because this entry
+# must not import shared.dotenv_boot, which resolves the home at import.
+_UNANCHORED_SCRATCH = re.compile(r"ava-unanchored-[0-9a-f]{16}")
+
+
 def _checkout() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -48,6 +56,8 @@ def _home(*, worktree: bool, runtime: StartRuntime | None = None) -> Path:
     pointer = checkout / ".ava_home"
     explicit = os.environ.get("AVA_HOME")
     target = Path(explicit).expanduser() if explicit else None
+    if target is not None and _UNANCHORED_SCRATCH.fullmatch(target.name):
+        target = None
     claimed = Path(pointer.read_text().strip()).expanduser() if pointer.exists() else None
     default = Path.home() / ".ava"
     if target is None:
@@ -150,6 +160,10 @@ def _join(values: dict[str, str], home: Path, capability: str | None) -> None:
     if remote and (not host or is_loopback_host(host)):
         raise ValueError("joining a remote gateway requires a reachable --machine-host")
     bundle, token = _join_credential(home, capability, remote=remote)
+    # The join runs before this start publishes its home. Name it now: the
+    # bootstrap transport refuses an unanchored checkout (shared.dotenv_boot,
+    # resolved at its first import), and this start's home is the claim.
+    os.environ["AVA_HOME"] = str(home)
     payload = fetch_bootstrap_config(gateway, bearer=token)
     if remote and any(
         is_loopback_host(urlsplit(payload[key]).hostname or "")

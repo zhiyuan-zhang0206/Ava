@@ -521,10 +521,9 @@ def test_settings_load_failure_prints_env_template(
 # -- anchored-home gate on the destructive verbs -------------------------------
 
 
-def _unanchored(monkeypatch: pytest.MonkeyPatch, home: str = "/Users/x/.ava") -> None:
+def _unanchored(monkeypatch: pytest.MonkeyPatch, home: str = "/scratch/ava-unanchored-0f") -> None:
     """Make this process read as a checkout that claims no cluster — the shape
-    `resolve_ava_home` resolves to the DEFAULT home (production) with
-    anchored=False."""
+    `resolve_ava_home` resolves to a private scratch home with anchored=False."""
 
     import shared.dotenv_boot as _boot
 
@@ -551,8 +550,8 @@ def _anchored(monkeypatch: pytest.MonkeyPatch, home: str = "/Users/x/.ava-worktr
 def test_unanchored_checkout_is_refused_before_dispatch(
     argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A dev worktree that never ran the install resolves to the DEFAULT home, so
-    these verbs would act on production. They must refuse instead of dispatching."""
+    """A dev worktree that never ran the install owns no cluster, so these verbs
+    have nothing to act on. They must refuse instead of dispatching."""
     _unanchored(monkeypatch)
     dispatched: list[str] = []
     monkeypatch.setattr(_main, "_build_parser", lambda: _noop_parser_recording(argv[0], dispatched))
@@ -562,7 +561,7 @@ def test_unanchored_checkout_is_refused_before_dispatch(
     assert rc == 1
     assert dispatched == [], "the handler must never run"
     err = capsys.readouterr().err
-    assert "/Users/x/.ava" in err, "the message must name the home it would have hit"
+    assert "/scratch/ava-unanchored-0f" in err, "the message must name the home it resolved"
     assert "ava start --worktree" in err
 
 
@@ -704,6 +703,13 @@ assert "shared.config" not in sys.modules
 
 @pytest.mark.parametrize("entry", ["package", "parser", "config"])
 def test_command_import_boundary_is_settings_free(entry: str, tmp_path: Path) -> None:
+    """`cli.commands` is an empty package door: importing it does no import work
+    of its own, so it must load no `cli.commands.*` submodule and pull in no
+    `shared.config` — Settings stays out of the boundary. The `parser` case
+    additionally builds the real argparse tree and parses a real subcommand's
+    args (without dispatching to its handler), since `cli.parsers` must stay
+    just as settings-free while doing that. The `config` case imports the
+    `ava config` module, whose local repair path must also run without Settings."""
     code = """
 import importlib.abc
 import sys

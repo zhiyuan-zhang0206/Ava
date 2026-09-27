@@ -11,6 +11,7 @@ the same variable, no manual passing required.
 from pathlib import Path
 
 from shared.config import settings
+from shared.dotenv_boot import checkout_anchored
 from shared.private_storage import ensure_private_dir
 
 
@@ -66,18 +67,24 @@ def prod_service_checkout_error(repo: Path) -> str | None:
     """Why `repo` must not launch services for this unit, or None when it may.
 
     The 01:13 worktree accident (Task #966): `repo_root()` is "whoever imported
-    shared/paths.py", and a dev clone or worktree with no `.ava_home` pointer
-    resolves as an UNANCHORED checkout (dotenv_boot rule 4) to the prod
-    default home `~/.ava`. `ava start` from such a checkout then binds every
-    prod daemon to that checkout's code, and deleting the checkout — routine
-    worktree cleanup — removes the floor under the running fleet. The prod
-    home's services may only be launched from its own anchored checkout
-    (`~/.ava/source`); every other checkout is refused.
+    shared/paths.py", and a prod daemon bound to a dev clone's or worktree's
+    code loses its floor when that checkout is deleted — routine worktree
+    cleanup. The prod home's services may only be launched from its own
+    anchored checkout (`~/.ava/source`); every other checkout is refused.
 
-    A non-prod unit (any home other than the default `~/.ava`) always passes:
-    a dev cluster's own home is anchored to its own checkout, and running that
-    checkout's code is exactly what its home is for.
+    An UNANCHORED process (dotenv_boot rule 4: no AVA_HOME, not the prod
+    source, no `.ava_home` pointer) is refused outright: it runs on a private
+    scratch home that no cluster lives in, so there is nothing to launch.
+    Otherwise a non-prod unit (any home other than the default `~/.ava`)
+    passes: a dev cluster's own home is anchored to its own checkout, and
+    running that checkout's code is exactly what its home is for.
     """
+    if not checkout_anchored():
+        return (
+            f"this checkout ({repo}) claims no cluster — no AVA_HOME, not the prod "
+            "source, no .ava_home pointer — so it may launch no services. Birth its "
+            "own cluster first: ava start --worktree"
+        )
     # Both sides resolved: a non-canonical AVA_HOME spelling that resolves to the
     # prod home (`$HOME/../.ava`, a symlinked path) must not bypass the refusal —
     # the filesystem would land the writes in the same directory either way

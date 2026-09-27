@@ -154,8 +154,8 @@ def test_native_scope_excludes_grafana_archives_symlinks_and_nested_files(
 def test_logs_path_flag_reaches_the_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands.observability.logs as _logs_commands
     from cli import main as cli_main
+    from cli.commands.observability import logs as commands
 
     seen: list[dict[str, object]] = []
 
@@ -163,7 +163,7 @@ def test_logs_path_flag_reaches_the_command(
         seen.append(kwargs)
         return 0
 
-    monkeypatch.setattr(_logs_commands, "cmd_logs_rotate", rotate)
+    monkeypatch.setattr(commands, "cmd_logs_rotate", rotate)
 
     rc = cli_main.main(
         ["logs", "rotate", "--dry-run", "--size-mib", "8", "--logs-path", str(tmp_path)]

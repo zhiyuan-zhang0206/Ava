@@ -86,13 +86,13 @@ installed by its start, and never holds the human secret. Older homes convert on
 | `~/Ava/` (this checkout) | **dev clone** — worktree dev under `.worktrees/<task>/` (branch from `main`, PR into `main`) (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool); each worktree gets its own cluster via `ava start --worktree` (home `~/.ava-<worktree-dir>` by default), isolated db/redis/ports/sessions |
 
 `ava start` is the single idempotent initialization and startup entry. Before
-runtime Settings or native effects, it persists `start-intent.json`: the home,
-capabilities, checkout, reserved ports and credentials. Repeated start retains
-that identity and the desired service selection; interrupted initialization
-resumes it. An ambiguous existing home or contradictory checkout pointer refuses
-instead of creating a second identity. The home is checkout-anchored: explicit
-`AVA_HOME`, the production source path, or the checkout's `.ava_home` pointer.
-`--worktree` supplies a deterministic development home when none is explicit.
+runtime Settings or native effects, it persists `start-intent.json` (home,
+capabilities, checkout, ports, credentials); repeats retain that identity and
+service selection, an interrupted one resumes, and an ambiguous home or
+contradictory pointer refuses. The home is checkout-anchored: explicit `AVA_HOME`,
+the production source path, or the checkout's `.ava_home` pointer (`--worktree`
+supplies a development home); a checkout with none owns no cluster and boots
+bare on a scratch home — no `.env`, no gateway fetch, never `~/.ava`.
 
 First start takes the machine name, capability flags and reachable host. A
 remote agent-runner joins through the same entry with `--gateway-url` and its

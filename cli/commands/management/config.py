@@ -41,8 +41,8 @@ def _anchored_gateway_base() -> str | None:
     file first (machine identity, written at first start / enroll), then the
     home `.env` aliases. None when the home carries no identity yet (fresh
     install before first start) or when the checkout is unanchored — an
-    unanchored checkout has NO home of its own, and the rule-4 fallback to the
-    default home must never be treated as its identity."""
+    unanchored checkout has NO home of its own; its rule-4 scratch home carries
+    no identity to read."""
     from shared import runtime_config
     from shared.dotenv_boot import AVA_ENV_PATH, checkout_anchored
 
@@ -562,8 +562,8 @@ def _edit_local_config(
     if not checkout_anchored():
         print(
             "[ava config] refusing to write local config: this checkout is not "
-            "anchored to a cluster home (no `.ava_home` pointer) — the fallback "
-            "home is the prod home's, and a worktree must not mutate it. Run "
+            "anchored to a cluster home (no `.ava_home` pointer) — it boots on a "
+            "throwaway scratch home, so a write would configure nothing. Run "
             "`.venv/bin/ava start --worktree` for a dev cluster.",
             file=sys.stderr,
         )

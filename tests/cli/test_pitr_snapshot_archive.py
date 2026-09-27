@@ -44,7 +44,6 @@ def test_pitr_snapshot_actions_bind_their_dedicated_handlers(
 def test_pitr_snapshot_handler_forwards_its_table(
     handler: Callable[[argparse.Namespace], int], command: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-
     tables: list[str] = []
 
     def fake(table: str) -> int:

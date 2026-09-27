@@ -66,9 +66,11 @@ crosses one admission boundary for the shared kernel PTY pool.
 - The home is resolved **checkout-anchored** by
   `shared/dotenv_boot.py:resolve_ava_home`, never from cwd and never from a
   flag: `AVA_HOME` env > the prod source checkout → `~/.ava` > the checkout's
-  `.ava_home` pointer > `~/.ava` flagged *unanchored* (which plants an
-  unreachable DB sentinel so a never-`ava start`ed dev checkout fails loud
-  instead of writing to prod). An `AVA_HOME` that **contradicts** the checkout's
+  `.ava_home` pointer > *unanchored*: a checkout claiming no cluster boots bare
+  on a private per-process scratch home under the system temp dir — never
+  `~/.ava` — reading no `.env`, fetching nothing, and planting an unreachable
+  DB sentinel so a DB connection fails loud; `prod_service_checkout_error`
+  refuses it outright. An `AVA_HOME` that **contradicts** the checkout's
   own claim raises `AvaHomeContradictionError` instead of resolving; the callers
   for which that mixing is deliberate (the install, `ava cluster down/destroy`,
   the test suite) set `AVA_HOME_OVERRIDE=1`. Cluster identity **is** this path —

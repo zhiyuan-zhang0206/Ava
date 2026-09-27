@@ -105,7 +105,12 @@ checkout editing is development work; it is not a production update mechanism.
   Postgres/Redis and isolated configuration. Never use a real cluster home for
   test imports or a production endpoint as a test fixture.
 - A DB/SDK script requires the intended home to be initialized and explicitly
-  bound. An unanchored checkout is not permission to load production Settings.
+  bound (`ava start --worktree` for a worktree). Until then the checkout is
+  *unanchored* and boots bare on a private scratch home: it never reads
+  `~/.ava/.env`, never fetches from a gateway and never writes under `~/.ava`,
+  and its `AVA_DB_URL` is the unanchored sentinel, so a connection fails fast
+  with `UnanchoredHomeError`. Imports, lint scripts and codegen hooks work there
+  as they do in CI.
 - End-to-end agent/frontend behavior needs a private running cluster and actual
   gateway scheduling. Start services first, then request agents through the
   gateway.

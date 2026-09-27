@@ -77,7 +77,7 @@ from shared.config_lite_table import (
     REQUIRED_FIELDS,
 )
 from shared.config_registry import _DOMAIN_ATTRS
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL, load_ava_env
+from shared.dotenv_boot import UNANCHORED_DB_SENTINEL, checkout_anchored, load_ava_env
 
 # `AVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
 BOOT_MODE_ENV = "AVA_CONFIG_BOOT"
@@ -511,8 +511,12 @@ def _apply_source_decision() -> None:
 
     `_plant_placeholders` keeps the eager boot's env side effect (the
     never-dialed URLs) so a later `Settings()` construction finds the same
-    environment it would have found eagerly."""
-    if config_source_is_local():
+    environment it would have found eagerly. An unanchored checkout (no
+    cluster of its own, `shared.dotenv_boot` rule 4) is asked first and is
+    never a config source nor a fetcher: it boots bare, like a CI checkout."""
+    if not checkout_anchored():
+        _plant_placeholders()
+    elif config_source_is_local():
         _require_local_fields()
     elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
         _plant_placeholders()
