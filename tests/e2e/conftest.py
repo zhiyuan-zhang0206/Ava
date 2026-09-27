@@ -51,8 +51,8 @@ from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_
 from psycopg import sql
 
 from shared.agents import AgentStatus
-from shared.cluster.derive import runner_db_url_projection
 from shared.config import settings
+from tests._containers import runner_projection
 from tests.e2e._env import E2EEnv
 from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_SOCKET, GATEWAY_URL
 from tests.e2e._proc import (
@@ -602,9 +602,10 @@ def agent_host_proc(gateway_proc: str) -> Iterator[None]:
     cmd = [sys.executable, "-m", "tests.e2e._proc", gateway_proc, "services.agent_host.daemon"]
     env = os.environ.copy()
     # Prod-shaped launch: the `agent` profile (marker-less construction masked a
-    # `runner`-profile soak crash, 2026-08-30) with the launcher's runner DB URL.
+    # `runner`-profile soak crash, 2026-08-30) dialing as a write generation's
+    # runner login, the class login the root launcher delivers to agent hosts.
     env["AVA_PROCESS_PROFILE"] = "agent"
-    env["AVA_DB_URL"] = runner_db_url_projection()
+    env["AVA_DB_URL"] = runner_projection()
     # pidfile placed in e2e tmp dir, avoids conflict with dev daemon / cross-test residue
     env["AVA_AGENT_HOST_PIDFILE"] = str(_AVA_HOME / "agent_host.pid")
     # Kernel-assigned per worker, avoiding a shared health port across tests.
