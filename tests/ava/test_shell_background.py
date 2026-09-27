@@ -290,8 +290,10 @@ def test_failed_cmd_closes_session_even_when_notice_fails(
 ) -> None:
     """Bug B regression (Task #1115): a failed command must close the session
     even when the completion notice cannot be delivered. A shell that outlives
-    its command is what the watcher boot reconcile reads as "alive", so a dead
-    watcher (crash / reaped python) is never rebuilt.
+    its command is a live session nobody intended to keep — for a watcher
+    specifically, one that is never rebuilt regardless
+    (decisions/2026-09-27-watchers-are-never-restarted.md), so leaving it up
+    would just be a leaked session.
 
     The CLI is faked with a script that exits 1: under the old `&& exit` the
     close was gated on delivery and a failed notice left the session up; with

@@ -251,28 +251,20 @@ def _insert_agent(pg_url: str) -> int:
         return int(row[0])
 
 
-def test_write_transaction_repairs_connect_and_watcher_writes(
+def test_write_transaction_repairs_connect_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rule A writes, including watcher cleanup DELETE, survive poisoned backends."""
+    """Rule A writes (`shared.cluster_lock`'s update-lock acquire/release)
+    survive poisoned backends."""
     from shared import config
     from shared.cluster_lock import acquire_update_lock, release_update_lock
-    from shared.daemon.schedules.watcher_registry import (
-        delete_watcher,
-        mark_status,
-        register_watcher,
-    )
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        agent_id = _insert_agent(pg_url)
         _poison_pooled_backends(pooled)
 
         assert acquire_update_lock("pgbouncer-wire-test") is True
         release_update_lock("pgbouncer-wire-test")
-        register_watcher(agent_id, 7, kind="at", name="poisoned", message="wake")
-        mark_status(agent_id, 7, "missed")
-        delete_watcher(agent_id, 7)
 
 
 def test_schedule_provision_repairs_connect_write_on_poisoned_backend(

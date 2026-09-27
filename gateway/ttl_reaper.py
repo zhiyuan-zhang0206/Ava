@@ -23,14 +23,12 @@ This loop is the enforcer, scanning
   owner's ``ava.shell.sessions.renew()`` extends a live session's deadline
   before it passes; each kill dispatch re-checks the row is still expired
   first (renewal's own ``expires_at > clock_timestamp()`` guard makes the pair airtight),
-  so a renewed session is never killed. **Watcher sessions follow this same
-  path** (user ruling 2026-09-14, task #3411: one lifecycle system — a
-  watcher session's recorded deadline IS its target: launch = created +
-  timeout, cron = end, at = moment + grace). An expired watcher session is
-  reclaimed, and its still-``running`` registry row is marked ``reaped`` —
-  past the deadline a watcher is never rebuilt (the boot reconcile shares
-  the rule). A running watcher with incomplete deadline data is left with
-  a warning: its intended lifetime cannot be verified safely.
+  so a renewed session is never killed. **A watcher session (``ava.watcher.at
+  /cron/launch``) is just a shell session with this same TTL row** — there is
+  no separate watcher registry or deadline (decisions/2026-09-27-watchers-are-
+  never-restarted.md) — so it is reclaimed through this exact path, with no
+  special case: notified when the reclaim interrupted a running job, same as
+  any other shell (a watcher always has one, so this fires every time).
 - **Browser sessions** — expired rows are deleted in the gateway's periodic
   pass, so cleanup does not depend on the next login.
 - **Work failures** — a gateway crash after recording an event but before
@@ -39,28 +37,15 @@ This loop is the enforcer, scanning
 - **Schedule fire log** — ``schedule_fire_log`` claims older than the configured
   retention window (30 days by default) are deleted once per day, keeping the
   newest claim per schedule so the catch-up baseline never regresses.
-- **Terminated owners' watchers** — a watcher whose owning agent is
-  terminated for good (never auto-resurrect-eligible) has its session killed
-  and its registry row marked ``reaped``. The TTL pass above may reclaim
-  such a session first; this pass stays the reclamation path for owners
-  that never come back to reconcile (task #2617).
-  Each definitive reap queues a reclamation notice for the owner (delivered
-  on its next resurrect, never resurrecting it itself) — the #2060 ruling:
-  reaped is terminal and never auto-restored, so the agent must be told it
-  was reclaimed to re-register if it still needs the schedule.
 
 Owners are notified (inbound, source ``"system"``) only when the agent is
 running or idling — a terminated agent's page expiring is exactly the cleanup
-the TTL exists for, and must not resurrect it. The one exception is the
-reaped-watcher notice above, which is queued for the TERMINATED owner
-precisely because the agent must learn of the reap when it comes back; the
-Redis wake publish reaches no listener of a terminated agent and the pending
-row is claimed on its next resurrect, so the notice never resurrects it.
-Shell reclamations notify
-only when the reap interrupted a running job (the runner reports whether the
-session carried live processes at kill time); an empty shell's reaping is
-silent, and an already-absent session never notifies. An interruption notice
-states when the TTL expired and how long it was.
+the TTL exists for, and must not resurrect it. Shell reclamations (watcher
+sessions included) notify only when the reap interrupted a running job (the
+runner reports whether the session carried live processes at kill time); an
+empty shell's reaping is silent, and an already-absent session never
+notifies. An interruption notice states when the TTL expired and how long it
+was.
 
 The pass is fail-open by design (never raises out of the loop): a DB or
 dispatch failure logs and retries next interval, and every reclaim is a CAS
@@ -88,11 +73,6 @@ from gateway.lifecycle_fences import (
     settle_absent_machine_fences,
 )
 from gateway.routers import work_failed as work_failed_router
-from gateway.watcher_ttl import (
-    mark_reaped_owner_appropriate,
-    reap_terminated_owner_watchers,
-    watcher_deadline_of,
-)
 from ops import cluster_rpc, ops_lifecycle
 from shared import telemetry
 from shared.agents.impersonation.impersonation_maintenance import (
@@ -298,33 +278,22 @@ def _reap_expired_web_sessions_blocking(pool: ConnectionPool) -> int:
 def _expired_shell_rows_blocking(pool: ConnectionPool) -> list[dict[str, Any]]:
     """TTL-expired shell tracking rows, oldest deadline first.
 
-    Each row carries its watcher facts when the (agent, session) pair is a
-    watcher session (LEFT JOIN — the pair is unique per the registry PK): the
-    kind / status plus the deadline payload. The caller applies the one
-    watcher rule: a session whose TRUE deadline has not passed is never
-    reclaimed (only a legacy row whose recorded TTL predates the unified
-    write path can land in that state) — user ruling 2026-09-14, task #3411
-    removed the blanket registry skip this query used to carry, so no
-    watcher status shields a session from reclamation any more. Schedule
-    sessions never carry rows at all (they have no agent id; the
-    ScheduleManager reaps them — see ``gateway/schedule_manager._launch``).
+    Every persistent session (a plain shell or a watcher — a watcher is just
+    a shell session running a generated script, with no separate registry or
+    deadline of its own) carries exactly one row here, and every row is
+    reclaimed the same way. Schedule sessions never carry rows at all (they
+    have no agent id; the ScheduleManager reaps them — see
+    ``gateway/schedule_manager._launch``).
 
     Each row carries ``expires_at`` and ``created_at`` so the interruption
     notice can state when the TTL expired and how long it was (the duration
     is ``expires_at - created_at``; no extra column needed)."""
     with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, "
-            "w.kind AS watcher_kind, w.status AS watcher_status, "
-            "w.created_at AS watcher_created_at, "
-            "w.timeout_secs AS watcher_timeout_secs, "
-            "w.fires_at AS watcher_fires_at, "
-            "w.cron_end_at AS watcher_cron_end_at "
-            "FROM agent_shell_ttls t "
-            "LEFT JOIN agent_watchers w "
-            "ON w.agent_id = t.agent_id AND w.session_id = t.session_id "
-            "WHERE t.expires_at <= clock_timestamp() "
-            "ORDER BY t.agent_id, t.session_id LIMIT %s",
+            "SELECT agent_id, session_id, expires_at, created_at "
+            "FROM agent_shell_ttls "
+            "WHERE expires_at <= clock_timestamp() "
+            "ORDER BY agent_id, session_id LIMIT %s",
             (_PASS_BATCH,),
         )
         return [dict(row) for row in cur.fetchall()]
@@ -396,7 +365,6 @@ def _delete_shell_row_blocking(
     session_id: int,
     *,
     interrupted: bool,
-    notify: bool = True,
     name: str | None = None,
     expires_at: datetime | None = None,
     created_at: datetime | None = None,
@@ -406,17 +374,16 @@ def _delete_shell_row_blocking(
     silent — user ruling 2026-08-27). The notice states when the TTL expired
     and how long it was (``expires_at`` / ``created_at`` from the row).
 
-    Watcher sessions pass ``notify=False``: their reclaim ends a scheduled
-    window at its own deadline, not a user task — the watcher's record
-    (``reaped`` registry status + telemetry) is its report, and the
-    shell-shaped "interrupted a running task" notice would misstate it."""
+    A watcher session (just a shell session running a generated script) gets
+    this exact same notice — it always carries a running job, so the reclaim
+    always interrupts one."""
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
                 (agent_id, session_id),
             )
-        if interrupted and notify:
+        if interrupted:
             label = (
                 f"Shell session {name!r} (id {session_id}, agent {agent_id})"
                 if name
@@ -480,14 +447,11 @@ async def _reap_expired_shells(
 ) -> list[tuple[int, int]]:
     """Kill TTL-expired shell sessions on their home machines.
 
-    One lifecycle for every session, watcher sessions included (user ruling
-    2026-09-14, task #3411): a watcher session's recorded TTL IS its target
-    deadline, so an expired one is reclaimed like any other, and its
-    still-``running`` registry row is marked ``reaped`` on the definitive
-    verdict — past the deadline a watcher is never rebuilt, and the boot
-    reconcile's deadline check shares that rule. Running watchers with
-    incomplete deadline data are left with a warning, without rewriting
-    their TTL or killing a session whose intended lifetime is unknown.
+    One lifecycle for every session — a watcher session (``ava.watcher.at/
+    cron/launch``) is just a shell session with the same TTL row and no
+    separate registry or deadline of its own
+    (decisions/2026-09-27-watchers-are-never-restarted.md), so an expired one
+    is reclaimed exactly like any other, with the same interruption notice.
 
     The row is deleted only on a definitive verdict (killed / absent /
     machine_absent); an unreachable machine or a version-skewed runner leaves
@@ -506,17 +470,6 @@ async def _reap_expired_shells(
             break
         agent_id = row["agent_id"]
         session_id = row["session_id"]
-        deadline = watcher_deadline_of(row)
-        if row["watcher_status"] == "running" and deadline is None:
-            # Incomplete watcher data violates the unified write contract.
-            # Keep this integrity guard: do not kill a running watcher whose
-            # intended lifetime cannot be verified, or mutate its TTL row.
-            _log.warning(
-                "[ttl-reaper] watcher %s of agent %s has no derivation deadline — leaving its session",
-                session_id,
-                agent_id,
-            )
-            continue
         if not await asyncio.to_thread(_claim_shell_row_still_expired, pool, agent_id, session_id):
             # Renewed between the select and this pass — the deadline moved
             # forward, so the session is no longer reaper business.
@@ -550,29 +503,19 @@ async def _reap_expired_shells(
         # `interrupted` field means a pre-policy runner — default True so a
         # version-skewed fleet keeps the old notify-always behavior instead of
         # silently swallowing a legit interruption notice. Absent sessions
-        # never notify (nothing was interrupted). Watcher sessions suppress
-        # the shell-shaped notice — their reclaim is the deadline's own
-        # scheduled end, recorded by the registry status below.
+        # never notify (nothing was interrupted). A watcher session always
+        # carries a running job, so this fires every time one is reclaimed.
         interrupted = mode == "killed" and bool(result.get("interrupted", True))
-        is_watcher = row["watcher_kind"] is not None
         await asyncio.to_thread(
             _delete_shell_row_blocking,
             pool,
             agent_id,
             session_id,
             interrupted=interrupted,
-            notify=not is_watcher,
             name=result.get("name"),
             expires_at=row["expires_at"],
             created_at=row["created_at"],
         )
-        if is_watcher and row["watcher_status"] == "running":
-            # The reclaim is the watcher's deadline verdict: terminalize the
-            # desired-state record so no later boot rebuilds it (task #3411) —
-            # the owner-state ladder lives in the helper. Fail-soft: the
-            # reconcile's deadline check reaches the same verdict if a write
-            # is lost.
-            await mark_reaped_owner_appropriate(pool, agent_id, session_id, mode=mode)
         telemetry.emit(
             "log",
             "shell_ttl_expired",
@@ -648,9 +591,6 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool)
             shells = await _reap_expired_shells(pool, stop)
             sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
-            terminated_watchers = await reap_terminated_owner_watchers(
-                pool, timeout_s=_SHELL_KILL_TIMEOUT_S, batch=_PASS_BATCH, stop=stop
-            )
             notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool)
             for agent_id, nid in notices:
                 with suppress(Exception):
@@ -673,7 +613,6 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
                 pages
                 or shells
                 or sessions
-                or terminated_watchers
                 or impersonations
                 or notices
                 or failures
@@ -684,14 +623,13 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             ):
                 _log.info(
                     "[ttl-reaper] reclaimed %d page(s), %d shell(s), %d web session(s), "
-                    "%d terminated-owner watcher(s), %d impersonation(s), %d notice(s); "
+                    "%d impersonation(s), %d notice(s); "
                     "completed %d stale work failure(s); reminded %d impersonation lease(s); "
                     "pruned %d schedule fire-log row(s); found %d torn lifecycle pointer(s); "
                     "settled %d absent-machine lifecycle fence(s)",
                     len(pages),
                     len(shells),
                     sessions,
-                    len(terminated_watchers),
                     impersonations,
                     len(notices),
                     failures,

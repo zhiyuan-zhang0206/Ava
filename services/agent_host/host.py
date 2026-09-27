@@ -14,9 +14,10 @@ by the stored birth/overlay configuration fingerprint. Shared graph retry policy
 still uses cluster-level settings (issue #174).
 
 Cold admission repairs claimed inbound/checkpoint disagreements and dangling tool
-pairs, establishes the workspace, and reconciles persistent watchers. Boot watcher
-work also joins the existing durable scan, so a missed Redis wake cannot strand
-an idle agent's recurring work. No per-agent process or global identity is created.
+pairs, and establishes the workspace. A watcher (`ava.watcher.at/cron/launch`) is
+just a shell session running a generated script — nothing here tracks or restarts
+one (decisions/2026-09-27-watchers-are-never-restarted.md). No per-agent process
+or global identity is created.
 
 Native restart/terminate flushes the final checkpoint and applies its exact-owner
 command before releasing single-flight. Normal maintenance waits for continuation
@@ -46,7 +47,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent._process_boot import boot_agent_scope, reconcile_agent_watchers
+from agent._process_boot import boot_agent_scope
 from agent._runloop import PendingTurnFailure, _emit_error_event, _graph_config, settle_turn_failure
 from agent._trace_checkpoint import attach_trace_checkpoint_ref
 from agent._turn_progress import reset_turn_progress
@@ -147,7 +148,6 @@ class AgentHost:
         # — it would just throw the work away and make that agent's NEXT turn
         # pay a cold build, which is the opposite of what a cache is for.
         self._in_flight: set[int] = set()
-        self._watcher_recovery_pending: set[int] = set()
         self._settled_reap_pending: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
@@ -254,7 +254,6 @@ class AgentHost:
         reset_turn_progress(agent_id)
         stored = await self._read_stored_config(agent_id)
         if stored is None or not self._is_runnable(agent_id, stored):
-            self._watcher_recovery_pending.discard(agent_id)
             self.stats.wakes_skipped += 1
             return
         _active_turn_config_fingerprint.set(stored.fingerprint)
@@ -461,15 +460,12 @@ class AgentHost:
             cached.last_used = time.monotonic()
             self._runtimes.move_to_end(agent_id)
             self.stats.cache_hits += 1
-            if agent_id in self._watcher_recovery_pending:
-                await self._restore_watchers(agent_id)
             return cached
 
         reason = "cold" if cached is None else "config_changed"
         self.stats.cache_misses += 1
         started = time.monotonic()
         runtime = await self._build_runtime(agent_id, fingerprint)
-        await self._restore_watchers(agent_id)
         self._runtimes[agent_id] = runtime
         self._runtimes.move_to_end(agent_id)
         logger.info(
@@ -481,12 +477,6 @@ class AgentHost:
         )
         self._evict()
         return runtime
-
-    async def _restore_watchers(self, agent_id: int) -> None:
-        if await reconcile_agent_watchers(agent_id):
-            self._watcher_recovery_pending.discard(agent_id)
-        else:
-            self._watcher_recovery_pending.add(agent_id)
 
     async def _build_runtime(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
         """Repair checkpoint/inbound state, then prepare the model."""
@@ -540,20 +530,6 @@ class AgentHost:
             ).fetchone()
         return None if row is None else row[0]
 
-    async def watcher_boot_wakes(self) -> list[int]:
-        """Keep boot recovery in the existing scan until watchers are reconciled."""
-        async with self._control_pool.connection() as conn:
-            rows = await (
-                await conn.execute(
-                    "SELECT DISTINCT m.id FROM agents_meta m JOIN agent_watchers w ON w.agent_id=m.id "
-                    "WHERE m.machine=%s AND m.status IN ('running','idling') AND w.status='running'",
-                    (self._machine,),
-                )
-            ).fetchall()
-        agents = [row[0] for row in rows]
-        self._watcher_recovery_pending.update(agents)
-        return agents
-
     def arm_settled_reaps(self, agents: list[int]) -> None:
         """Deliver each boot-settled reap once through the paced scan."""
         self._settled_reap_pending.update(agents)
@@ -580,7 +556,7 @@ class AgentHost:
         pending = {wake.agent_id for wake in wakes}
         wakes.extend(
             PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
-            for agent_id in (self._watcher_recovery_pending | self._settled_reap_pending) - pending
+            for agent_id in self._settled_reap_pending - pending
         )
         return wakes
 

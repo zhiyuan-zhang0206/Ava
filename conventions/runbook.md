@@ -367,8 +367,9 @@ runner surface: SELECT on every table (plus sequence USAGE), SELECT/UPDATE on
 — `ava start` / `ava stop`), INSERT/UPDATE on `host_deploy_state`
 (set_posture), INSERT/UPDATE/DELETE on `api_idempotency` (the runner's ops
 server dedupes /ops calls), INSERT/UPDATE on `agent_tasks` (`ava.tasks`),
-INSERT/UPDATE/DELETE on `agent_watchers` (`ava.watcher`; DELETE is the
-runner-side row removal — clean-exit / kill / reconcile drops), UPDATE on
+INSERT/UPDATE/DELETE on `agent_watchers` (unused since 2026-09-27 — a watcher
+is now a plain shell session with no registry row; the grant and the table
+itself are follow-up debt for a later contract-migration PR), UPDATE on
 `agent_pages` (page close at
 exit), INSERT on `agent_shell_ttls` (TTL deadline rows; the gateway
 reaper reads, re-aligns, and deletes them), and full CRUD on the LangGraph checkpoint
@@ -1058,13 +1059,15 @@ The boundary has a deliberate reconciliation effect at **freeze**, not at
 resume. The allocation command does not directly kill an existing PTY, but the
 next ScheduleManager tick (about five seconds) reaps every schedule PTY from
 the preceding generation, interrupts any open schedule run, and leaves the
-enabled schedule as the current desired state for a later replacement. The
-next agent boot reaps every preceding-generation watcher row and retains it as
-`reaped` history; its prior watcher cron declaration is not automatically
-restored and must be declared again. A reaped `at` or `launch` one-shot sends
-the owner a missed notification. This applies to an inspection-only freeze too:
-it is not safe to assume that existing desired-state sessions keep running after
-the freeze acknowledgement.
+enabled schedule as the current desired state for a later replacement. A
+watcher session (`ava.watcher.at/cron/launch`) is NOT part of this
+reconciliation at all — it has no desired-state record and nothing rebuilds or
+reaps it by generation (decisions/2026-09-27-watchers-are-never-restarted.md);
+a preceding-generation watcher session simply keeps running (or not) exactly
+as it would without the freeze, subject only to its own TTL deadline, an
+explicit kill, or `ava stop`. This applies to an inspection-only freeze too:
+it is not safe to assume that existing desired-state sessions (schedules)
+keep running after the freeze acknowledgement.
 
 Resume with the exact token printed by the freeze that this operator owns:
 
@@ -1077,12 +1080,13 @@ local host operations and remain usable while the gateway, Postgres, or Redis
 is unavailable. A malformed marker fails closed; inspect the marker path shown
 by `ava pty status` and perform an audited manual repair rather than treating
 corruption as an implicit resume. Do **not** delete the marker: that changes the
-current generation to `None` and can make the next watcher reconcile reap every
-generation-bound declaration. Recover the original generation UUID from any
-known-live PTY session record, rebuild a valid marker with that exact UUID, and
-only then allow reconciliation to resume. If no record establishes the UUID,
-leave the marker fail-closed and restore desired state only after an operator
-has made the boundary explicit.
+current generation to `None` and can make the next ScheduleManager tick reap
+every generation-bound schedule declaration (watchers are unaffected — they
+have no generation-bound declaration to reap). Recover the original generation
+UUID from any known-live PTY session record, rebuild a valid marker with that
+exact UUID, and only then allow reconciliation to resume. If no record
+establishes the UUID, leave the marker fail-closed and restore desired state
+only after an operator has made the boundary explicit.
 
 For a bounded host cleanup, keep the order explicit:
 

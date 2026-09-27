@@ -577,8 +577,9 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # added one DELETE surface, not a blanket delete on writable tables.
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM agent_tasks WHERE title = 't1'")
-        # ava.watcher (INSERT + UPDATE + DELETE — the full watcher-child
-        # lifecycle; see the helper)
+        # agent_watchers (INSERT + UPDATE + DELETE) — unused since 2026-09-27
+        # (a watcher is now a plain shell session); grant + table are
+        # follow-up debt for a later contract-migration PR; see the helper.
         _exercise_watcher_grants(conn, agent_id)
         # ... and the show-page close at exit (agent_pages UPDATE; the row
         # itself was seeded by the gateway side above)
@@ -788,11 +789,10 @@ def _exercise_hierarchy_job_grants(conn: psycopg.Connection, agent_id: int) -> N
 
 
 def _exercise_watcher_grants(conn: psycopg.Connection, agent_id: int) -> None:
-    """The watcher surface the runner process writes directly: INSERT (spawn),
-    UPDATE (mark_status), and DELETE — the watcher child's clean-exit finally
-    removes its own registry row (shared/watcher_registry.delete_watcher).
-    The DELETE grant landed 2026-08-28 (prod finding): without it the row
-    survived and the next boot reconcile false-marked 'missed'.
+    """`agent_watchers` INSERT/UPDATE/DELETE — a grant no code exercises any
+    more (2026-09-27: a watcher carries no registry row at all), kept
+    verified here only because the grant and the table itself are follow-up
+    debt for a later contract-migration PR rather than dropped in this one.
     """
     conn.execute(
         "INSERT INTO agent_watchers (session_id, agent_id, kind, name) VALUES (1, %s, 'at', 'w1')",

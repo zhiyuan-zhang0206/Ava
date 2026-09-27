@@ -363,7 +363,6 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         return _Model(turn_settings.lm.llm_model)
 
     monkeypatch.setattr(host_mod, "boot_agent_scope", _fake_boot_agent_scope)
-    monkeypatch.setattr(host_mod, "reconcile_agent_watchers", AsyncMock(return_value=True))
 
     def _allow_model_config(*, model: str | None = None) -> None:
         """Keep fake host tests independent of installed provider credentials."""
