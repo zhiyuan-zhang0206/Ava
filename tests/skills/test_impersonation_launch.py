@@ -352,7 +352,7 @@ def test_dsh_launcher_boots_headless_with_the_relay_plugin_as_its_runner(tmp_pat
 
 def test_dsh_relay_emits_one_json_string_per_line(capsys: pytest.CaptureFixture[str]) -> None:
     """The plugin splits relay stdout by line: a multi-line envelope must stay one line."""
-    from cli.commands.impersonation_relay import host_emitter
+    from cli.commands.agents.impersonation_relay import host_emitter
 
     host_emitter("dsh", None)("Ava message agent=42\n[id=7] kind=chat\nhi")
     assert capsys.readouterr().out == '"Ava message agent=42\\n[id=7] kind=chat\\nhi"\n'
@@ -431,7 +431,7 @@ def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) ->
         f'printf "%s\\n" "$@" > {tmp_path}/argv.txt\n'
         f'printf "%s" "$AVA_IMPERSONATION_RELAY_TOKEN" > {tmp_path}/token.txt\n'
         f"exec {sys.executable} -c 'import json, sys; "
-        "from cli.commands.impersonation_relay import plugin_dsh; "
+        "from cli.commands.agents.impersonation_relay import plugin_dsh; "
         f"[plugin_dsh(text) for text in json.load(open(sys.argv[1]))]' {texts}\n",
         encoding="utf-8",
     )

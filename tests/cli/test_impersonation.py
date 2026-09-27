@@ -14,8 +14,8 @@ from typing import Any
 import httpx
 import pytest
 
-from cli.commands import impersonation as cli
-from cli.commands.agent_timeline import cmd_agents_timeline
+from cli.commands.agents import impersonation as cli
+from cli.commands.agents.timeline import cmd_agents_timeline
 from cli.parsers import build_parser
 from shared.agents import impersonation as control
 from shared.agents.impersonation import impersonation_sessions as sessions
@@ -41,7 +41,7 @@ def test_timeline_and_context_are_one_command(monkeypatch: pytest.MonkeyPatch) -
         calls.append((agent_id, limit, before))
         return 0
 
-    monkeypatch.setattr("cli.commands.agent_timeline.cmd_agents_timeline", timeline)
+    monkeypatch.setattr("cli.commands.agents.timeline.cmd_agents_timeline", timeline)
     for name in ("timeline", "context"):
         args = build_parser().parse_args(
             ["agents", name, "405", "--limit", "100", "--before", "12.0"]
@@ -88,7 +88,7 @@ def test_request_uses_external_identity_without_delivering_a_credential(
         }
 
     monkeypatch.setattr(
-        "cli.commands.codex_app_server.default_control_endpoint",
+        "cli.commands.agents.codex_app_server.default_control_endpoint",
         lambda: "unix:///tmp/codex.sock",
     )
     monkeypatch.setattr(sessions, "request", request)
@@ -133,7 +133,7 @@ def test_request_without_steer_endpoint_does_not_acquire_a_lease(
 ) -> None:
     from unittest.mock import Mock
 
-    from cli.commands import codex_app_server
+    from cli.commands.agents import codex_app_server
 
     request = Mock(return_value={})
     monkeypatch.setattr(sessions, "request", request)
@@ -528,7 +528,7 @@ def test_send_delivers_as_the_borrowed_agent(
 
     monkeypatch.setattr(sessions, "private_id", _private_id)
     monkeypatch.setattr(control, "require_active", require_active)
-    monkeypatch.setattr("cli.commands.agents.send_agent_message", deliver)
+    monkeypatch.setattr("cli.commands.agents.control.send_agent_message", deliver)
     args = _args("send", "0", "--agent", "405", "--to", "42", "--content", "hi")
     assert args.func(args) == 0
     assert seen == [(42, "hi", "agent:405")]

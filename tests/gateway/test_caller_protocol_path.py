@@ -20,7 +20,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.graph._chat_inbound import build_chat_inbound
 from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
-from cli.commands.agents import cmd_agents_send
+from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
 from shared.config import settings
 from shared.db import create_agent

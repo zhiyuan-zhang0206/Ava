@@ -11,7 +11,7 @@ import argparse
 
 
 def _h_computer_release(args: argparse.Namespace) -> int:
-    from cli.commands.computer import h_computer_release
+    from cli.commands.agents.computer import h_computer_release
 
     return h_computer_release(args)
 

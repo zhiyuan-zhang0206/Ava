@@ -55,6 +55,11 @@ from cli.commands._pitr_activation import (
     cmd_pitr_status,
 )
 from cli.commands._update_dispatch import cmd_update
+from cli.commands.agents.pty import (
+    cmd_pty_freeze,
+    cmd_pty_resume,
+    cmd_pty_status,
+)
 from cli.commands.cluster import (
     cmd_cluster_mark_staging,
     cmd_cluster_pause,
@@ -109,11 +114,6 @@ from cli.commands.plugins import (
     cmd_plugins_uninstall,
     cmd_plugins_update,
     cmd_plugins_upgrade,
-)
-from cli.commands.pty import (
-    cmd_pty_freeze,
-    cmd_pty_resume,
-    cmd_pty_status,
 )
 from cli.commands.skill import (
     cmd_skill_disable,
