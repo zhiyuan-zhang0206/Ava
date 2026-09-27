@@ -97,9 +97,12 @@ only when the cohort was non-empty. Failed, unknown and excluded units stay
 stale until converged. `require_admissible` refuses a rejected candidate
 unless `acknowledged_rejection` names the latest operation that rejected it.
 
-## Choices awaiting a ruling
+## Ruled choices
 
-Conservative choices where the plan was open:
+The plan left these open. Each conservative choice below was ruled accepted
+as recorded on 2026-09-27
+([decision](../../decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md)
+item 3):
 
 1. Integer `threshold_percent` replaces the plan's `threshold=0.20`.
 2. Degraded also covers affected agents below the threshold, not only failed
