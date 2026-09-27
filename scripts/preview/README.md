@@ -226,10 +226,10 @@ or treated as a production model provider.
 The scenario closes only its completed smoke agents through the normal graceful
 final-terminate API, waits for durable termination and native terminal closure,
 and retains identity/configuration/checkpoint digests. Source stop keeps the
-private data plane alive. The initial selector CAS requires no existing image;
-A starts through the same home's ordinary systemd boot unit and pinned boot
-entry. Public `ava cluster update --prepared` performs A→B, then a separately
-captured B→A request. Each transition must finish in the requested candidate
+private data plane alive. Public `ava cluster release adopt` selects A (the
+CAS requires no existing image) and starts it through the same home's ordinary
+systemd boot unit and pinned boot entry. Public `ava cluster update --prepared`
+then performs A→B, followed by a separately captured B→A request. Each transition must finish in the requested candidate
 direction with a successful, closed finite executor; public resubmission then
 retires that exact executor. A live, failed, recovered or retried operation
 cannot count as a passing transition.

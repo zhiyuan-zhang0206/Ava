@@ -119,6 +119,62 @@ def test_steady_boot_uses_verified_pinned_image_in_existing_home_unit(
         assert "PYTHONPATH" not in dict(action.environment)
 
 
+def test_initial_selects_through_the_release_adopt_operator_verb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`initial()` used to call `activate_release`/`install_steady` inline; it
+    now invokes `ava cluster release adopt` — the operator verb that performs
+    the exact same sequence (see `cli/release_operator/adopt.py`) — as the
+    real public CLI, in the selected image's own interpreter. Mirrors
+    `test_dispatch_reverifies_image_and_invokes_only_public_cli_with_clean_environment`
+    below for the same reason: only the public CLI surface is trusted for
+    effects, never a private in-process call."""
+    import subprocess
+
+    run = tmp_path.resolve()
+    (run / "home").mkdir()
+    receipt = run / "previous-receipt.json"
+    receipt.write_text("{}")
+    (run / "release-inputs.json").write_text(
+        json.dumps({"images": {"a": {"receipt": str(receipt)}}})
+    )
+    image = VerifiedRelease(
+        "a" * 64, "b" * 64, run / "image", run / "image/venv/bin/python", run / "image/site"
+    )
+    events: list[str] = []
+
+    def verified(_run: Path, name: str) -> tuple[ReleaseRef, VerifiedRelease]:
+        assert name == "a"
+        events.append("verify")
+        return (
+            ReleaseRef(
+                artifact_digest="a" * 64,
+                manifest_digest="b" * 64,
+                schema_digest="c" * 64,
+                source_commit="d" * 40,
+            ),
+            image,
+        )
+
+    def command(argv: tuple[str, ...], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        events.append("adopt")
+        assert argv == image.module_argv(
+            "cli.main", "cluster", "release", "adopt", "--receipt", str(receipt)
+        )
+        assert kwargs["cwd"] == image.cwd and kwargs["check"]
+        assert kwargs["env"]["AVA_HOME"] == str(run / "home")
+        assert kwargs["env"]["AVA_CLUSTER_REGISTRY"] == str(run / "clusters.json")
+        assert not {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}.intersection(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(runtime, "image_input", verified)
+    monkeypatch.setattr(runtime.subprocess, "run", command)
+
+    runtime.initial(run)
+
+    assert events == ["verify", "adopt"]
+
+
 def test_retained_agent_checkpoint_change_cannot_be_hidden_by_same_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

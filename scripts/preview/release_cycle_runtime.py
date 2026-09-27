@@ -25,8 +25,7 @@ from cli.release_transition.request import ReleaseRef, Request, verify_pair
 from scripts.preview import local
 from scripts.preview.linux_observer import _require_context
 from scripts.preview.linux_runtime import bound_runtime
-from shared.runtime_abi import current_abi
-from shared.runtime_release import VerifiedRelease, activate_release, current_pointer
+from shared.runtime_release import VerifiedRelease, current_pointer
 from shared.verified_file import regular_bytes
 
 _FIXTURE = """import hashlib, json, sys
@@ -167,20 +166,25 @@ def image_input(run: Path, name: str) -> tuple[ReleaseRef, VerifiedRelease]:
 
 
 def initial(run: Path) -> None:
-    from cli.commands.root_driver import require_root_absent
-    from cli.release_transition.root_service import install_steady
+    """First image selection through the operator verb, not a private effect.
 
-    reference, image = image_input(run, "a")
-    require_root_absent()
-    activate_release(
-        run / "home/releases",
-        reference.artifact_digest,
-        expected_current=None,
-        manifest_digest=reference.manifest_digest,
-        host_abi=current_abi(),
-        schema_digest=reference.schema_digest,
+    `ava cluster release adopt` performs the exact same
+    `activate_release(expected_current=None)` + steady-boot-action sequence
+    this adapter used to run inline (see `cli/release_operator/adopt.py`);
+    invoking it as the real CLI, in the selected image's own interpreter,
+    means the preview exercises the same command an operator would run.
+    """
+    _, image = image_input(run, "a")
+    inputs = json.loads(regular_bytes(run / "release-inputs.json"))
+    receipt = Path(inputs["images"]["a"]["receipt"])
+    subprocess.run(  # noqa: S603 — fixed argv, verified image interpreter, no shell.
+        image.module_argv("cli.main", "cluster", "release", "adopt", "--receipt", str(receipt)),
+        cwd=image.cwd,
+        env=local.clean_env()
+        | {"AVA_HOME": str(run / "home"), "AVA_CLUSTER_REGISTRY": str(run / "clusters.json")},
+        timeout=180,
+        check=True,
     )
-    install_steady(run / "home", run / "clusters.json", reference, image)
 
 
 def _operation(run: Path, label: str) -> Request:
