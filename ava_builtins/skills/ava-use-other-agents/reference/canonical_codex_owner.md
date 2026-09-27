@@ -53,16 +53,23 @@ directory holds only a takeover's app-server log.
 
 Every takeover generation also owns the explicit shared app server the relay
 delivers into: the endpoint must belong to the server holding the existing
-conversation; Pending queue acceptance does not establish Steer delivery. The launcher starts `codex app-server --listen unix://<socket>`
-on a private per-generation socket under the cluster's `run/` directory (with
-`approval_policy="never"` and `sandbox_mode="danger-full-access"` configured on
-the server itself), starts a janitor that ends the server when the coding
-session dies, connects the TUI with `--remote` to that exact endpoint, and
-carries the endpoint into the launch message so the request records it
-(`--codex-remote`). This needs a codex release with `app-server --listen`, TUI
-`--remote`, and app-server start-or-steer support (verified on 0.155.1).
-Missing host capabilities fail visibly, and a takeover additionally prints
-`codex_app_server=<endpoint>`.
+conversation; Pending queue acceptance does not establish Steer delivery. The
+launcher starts `codex app-server --listen unix://<socket>` on a private
+per-generation socket (with `approval_policy="never"` and
+`sandbox_mode="danger-full-access"` configured on the server itself), starts a
+janitor that ends the server when the coding session dies, connects the TUI with
+`--remote` to that exact endpoint, and carries the endpoint into the launch
+message so the request records it (`--codex-remote`). This needs a codex release
+with `app-server --listen`, TUI `--remote`, and app-server start-or-steer
+support (verified on 0.155.1). Missing host capabilities fail visibly, and a
+takeover additionally prints `codex_app_server=<endpoint>`.
+
+The socket sits in a short per-user directory, not under the cluster home:
+`/private/tmp/ava-<uid>` on macOS and `/tmp/ava-<uid>` elsewhere. The directory
+is created 0700 and refused unless it is this user's real directory. A long
+cluster home, such as a preview's `~/.ava-previews/<run>/home`, therefore cannot
+push the path past the unix-socket limit (`sun_path`); a path that still would
+not fit fails before launch instead of timing out.
 
 Cleanup boundary: the janitor is the only cleanup owner — if it never starts,
 or is itself killed (for example with the whole session tree), an orphan app

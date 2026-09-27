@@ -64,10 +64,17 @@ Cleanup validates that exact derived path before removal.
 
 The shared Codex app-server socket for a takeover is
 `codex_app_server_socket(key, generation)` →
-`<cluster home>/run/codex-app-server.<key-digest12>-<generation8>.sock`: host-local
-and short by construction because the generation state dir can exceed the
-kernel's unix-socket path limit, and scoped to one generation so a dying
-predecessor can never unlink a successor's socket.
+`<socket dir>/codex-app-server.<key-digest12>-<generation8>.sock`. The socket
+directory is a short per-user one: `/private/tmp/ava-<uid>` on macOS (codex
+refuses a socket directory reached through the `/tmp` symlink) and
+`/tmp/ava-<uid>` elsewhere. It is created 0700 and refused unless it is this
+user's real directory. That keeps the path within the kernel's unix-socket
+limit (`sun_path`: 104 bytes on macOS, 108 on Linux) however long the cluster
+home is; a preview home under `~/.ava-previews/<run>/home` pushed a
+`<home>/run` socket past it. The key digest keeps clusters apart, and the
+generation keeps a dying predecessor from unlinking a successor's socket. A path
+that would still not fit fails fast with `CodingSessionSocketError` before
+anything is launched.
 
 ## Key dependencies
 
