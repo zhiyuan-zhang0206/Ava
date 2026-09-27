@@ -10,8 +10,13 @@ no-op. These tests lock the two parts of the fix:
 - the pty child resets the dispositions before exec (TERM/HUP reach the shell
   and its jobs again),
 - `_stop_terminals` HUPs the shells first (stopping restart loops from
-  spawning new jobs), then TERMs the captured jobs, and a survivor leaves the
-  maintenance hold in place with a per-phase diagnostic — never a force.
+  spawning new jobs), then TERMs the rest of each session's captured
+  membership.
+
+What outlives a bounded grace is SIGKILLed with its whole session — a
+double-forked orphan included (decisions/2026-09-28-stop-escalates-to-sigkill.md);
+only a process that outlives its SIGKILL leaves the maintenance hold in place
+with a per-phase diagnostic.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from cli.commands import stop as entry
 from cli.commands._maintenance_stop import OwnedProcess
 from shared import maintenance
 from shared.session_backend import PtySessionBackend
+from shared.sessions.pty import session_tree
 from tests.cli.conftest import PtyReaper
 from tests.cli.test_pause_stop import dependencies
 from tests.cli.test_pause_stop import home as home
@@ -48,6 +54,21 @@ _STUBBORN_JOB = (
 )
 
 _LOOP_SHELL = "bash -c 'while true; do sleep 1; done'"
+
+# Double fork out of the shell's tree: the grandchild is reparented to init but
+# stays in the shell's POSIX session, and it ignores the stop's HUP and TERM.
+_DOUBLE_FORK_JOB = (
+    "import os,signal,sys,time\n"
+    "if os.fork() == 0:\n"
+    "    if os.fork() == 0:\n"
+    "        signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "        signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+    "        open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+    "        os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+    "        while True: time.sleep(0.1)\n"
+    "    os._exit(0)\n"
+    "os.wait()\n"
+)
 
 
 def _has_exited(process: psutil.Process) -> bool:
@@ -226,29 +247,62 @@ def test_stop_terminates_restart_loop_shell(
 
 
 @pytest.mark.flaky
-def test_stop_keeps_hold_when_job_ignores_termination(
-    home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    pty_reaper: PtyReaper,
+def test_stop_kills_a_job_that_ignores_termination_after_its_grace(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
 ) -> None:
-    """A job that ignores TERM and HUP: bounded timeout, hold kept, no force."""
+    """A job that ignores TERM and HUP is SIGKILLed once the bounded grace ends:
+    the stop completes well inside its deadline, and the owner still gets the
+    closure notice for the work the kill cut short."""
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
+    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 1.0)
+    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2045-stubborn"
     shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
     jobs = _started_jobs(shell, pty_reaper)
     assert jobs, "the stubborn job never started"
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=1) == 1
-    assert maintenance.held(), "the hold must survive an incomplete stop"
-    # The shell got a normal HUP (not a force) and may have exited,
-    # dropping its record; the signal-ignoring job must still be alive.
-    assert psutil.pid_exists(jobs[0].pid), "no kill escalation: the job is still there"
-    err = capsys.readouterr().err
-    assert "terminals" in err, "the failure must name the phase that ran out"
-    assert name in err, "the failure must name the owning session"
+    started = time.monotonic()
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert time.monotonic() - started < 8, "the grace bounds the wait, not the stop deadline"
+    assert _wait_exit(jobs[0].pid, timeout=5), "the job outlived the stop"
+    assert not terminal.has_session(name)
+    assert len(_notice_files(home)) == 1, "a killed busy session still leaves its notice"
+
+
+@pytest.mark.flaky
+def test_stop_kills_a_double_forked_orphan_of_the_session(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """A process that double-forked out of the shell's tree stays in its POSIX
+    session: the stop captures it before the hangup, and it dies with the rest
+    instead of outliving a stop that reported success."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 1.0)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-2046-orphan"
+    pidfile = home / "orphan.pid"
+    script = home / f"{name}.job.py"
+    script.write_text(_DOUBLE_FORK_JOB, encoding="utf-8")
+    assert terminal.new_session(
+        name, f"python3 -u {script} {pidfile}", home, env={"AVA_HOME": str(home)}
+    )
+    shell = pty_reaper.track_session(name)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and not pidfile.exists():
+        time.sleep(0.1)
+    assert pidfile.exists(), "the orphan never started"
+    orphan = psutil.Process(int(pidfile.read_text(encoding="utf-8")))
+    pty_reaper.track(orphan)
+    assert orphan.pid not in {child.pid for child in _shell_children(shell)}
+    assert os.getsid(orphan.pid) == shell.pid, "precondition: it is in the shell's session"
+
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert _wait_exit(orphan.pid, timeout=5), "the orphan outlived a stop that succeeded"
+    assert len(_notice_files(home)) == 1, "the orphan was running work: the session was busy"
 
 
 def _notice_files(home: Path) -> list[Path]:
@@ -308,23 +362,39 @@ def test_stop_records_nothing_for_idle_shell(
     assert _notice_files(home) == []
 
 
-def test_stop_records_nothing_on_timeout(
+def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
 ) -> None:
-    """A stop that timed out never claims a closure — only verified exits are
-    recorded, partial success records nothing (issue #2044 #2)."""
+    """A process that outlives its SIGKILL (another user's, which this stop may
+    not signal) leaves the stop incomplete: the hold stays, the failure names
+    the phase and the session, and no closure is claimed — only verified exits
+    are recorded (issue #2044 #2)."""
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
+    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 0.5)
+
+    def unkillable(
+        leader: OwnedProcess, *, also: tuple[OwnedProcess, ...] = (), wait_s: float
+    ) -> session_tree.TreeKill:
+        del leader, wait_s
+        return session_tree.TreeKill((), tuple(also), tuple(also))
+
+    monkeypatch.setattr(session_tree, "kill_session_tree", unkillable)
     name = "ava-agent-987-shell-2044-stubborn"
     shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
-    assert _started_jobs(shell, pty_reaper), "the stubborn job never started"
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the stubborn job never started"
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=1) == 1
-    assert "terminals" in capsys.readouterr().err
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
+    assert maintenance.held(), "the hold must survive an incomplete stop"
+    assert psutil.pid_exists(jobs[0].pid)
+    err = capsys.readouterr().err
+    assert "terminals" in err, "the failure must name the phase"
+    assert name in err, "the failure must name the owning session"
     assert _notice_files(home) == []
 
 
