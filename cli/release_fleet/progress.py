@@ -159,8 +159,9 @@ class Instruction(Record):
 
     A unit refuses an instruction for another operation or unit, and answers
     each by its digest. `generation` names the write generation a `start`
-    runs on (`restore`: the unchanged one); `image` is the selector of the
-    direction's image on that unit.
+    runs on (a `restore` runs on the unit's unchanged one); `image` is the selector of the
+    direction's image on that unit; `deadline` is the coordinator's barrier
+    bound for the answer; a `complete` names the operation's outcome.
     """
 
     operation: UUID
@@ -172,6 +173,20 @@ class Instruction(Record):
     maintenance_at: AwareDatetime
     generation: int | None = Field(default=None, ge=0)
     deadline: AwareDatetime | None = None
+    outcome: Outcome | None = None
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        if (self.outcome is not None) != (self.action == "complete"):
+            raise ValueError("a complete instruction names its outcome, and only it does")
+        if (self.generation is not None) != (self.action == "start"):
+            raise ValueError("a start instruction names its generation, and only it does")
+        return self
+
+    def same_order(self, other: Instruction) -> bool:
+        """The same order ignoring its sequence and deadline: a continuation reissues nothing."""
+        mask = {"sequence", "deadline"}
+        return self.model_dump(exclude=mask) == other.model_dump(exclude=mask)
 
     @property
     def digest(self) -> str:

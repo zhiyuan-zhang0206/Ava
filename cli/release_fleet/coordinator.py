@@ -194,10 +194,11 @@ class Coordinator:
         self.journal.advance("quiescing")
 
     def _quiescing(self, operation: Operation) -> None:
-        self.units.instruct(self.journal, "quiesce")
+        policy = self.request.policy
+        self.units.instruct(self.journal, "quiesce", bound_s=policy.drain_s)
         hold = self.gateway.quiesce(operation)
-        deadline = self.clock() + timedelta(seconds=self.request.policy.drain_s)
-        reports = self.units.collect(self.journal, deadline)
+        # Before the fence a failed or silent unit aborts; a recovery goes on without it.
+        reports = self.units.barrier(self.journal, strict=operation.direction == "candidate")
         if self.progress.cohort is None:
             gateway = self.request.gateway
             cohorts: list[UnitCohort] = [drain_report(gateway, hold)]
@@ -208,15 +209,15 @@ class Coordinator:
 
     def _stopping(self, operation: Operation) -> None:
         policy = self.request.policy
-        self.units.instruct(self.journal, "close")
         bound = policy.close_s + policy.cancel_grace_s + policy.drain_s
-        self.units.collect(self.journal, self.clock() + timedelta(seconds=bound))
+        self.units.instruct(self.journal, "close", bound_s=bound)
+        self.units.barrier(self.journal, strict=operation.direction == "candidate")
         # The gateway closes last: runners' drains and closure still need its API.
         self.gateway.stop(operation)
         self.journal.advance("fencing")
 
     def _fencing(self, _operation: Operation) -> None:
-        self.units.instruct(self.journal, "wait")
+        self.units.instruct(self.journal, "wait", bound_s=self.request.policy.start_s)
         self.gateway.fence(self.journal)
         self.journal.advance("selecting")
 
@@ -225,8 +226,9 @@ class Coordinator:
         self.journal.advance("authorizing")
 
     def _authorizing(self, _operation: Operation) -> None:
+        # Each unit exchanges this generation's capability over the channel
+        # when it starts (slice dbgen-8).
         self.gateway.authorize(self.journal)
-        self.units.open_issuance(self.journal)
         self.journal.advance("starting")
 
     def _starting(self, _operation: Operation) -> None:
@@ -242,20 +244,21 @@ class Coordinator:
     def _starting_units(self, operation: Operation) -> None:
         verdict = self._journaled_verdict("start")
         if verdict is None:
-            direction = operation.direction
-            issue = None if direction is None else operation.issue(direction)
-            deadline = self.clock() + timedelta(seconds=self.request.policy.start_s)
-            generation = None if issue is None else issue.number
-            self.units.instruct(self.journal, "start", generation=generation, deadline=deadline)
-            unit_reports = self.units.collect_start(self.journal, deadline)
-            verdict = self._judge("start", unit_reports)
+            issue = None if operation.direction is None else operation.issue(operation.direction)
+            if issue is None:
+                raise RuntimeError("units start only on this direction's authorized generation")
+            policy = self.request.policy
+            self.units.instruct(
+                self.journal, "start", bound_s=policy.start_s, generation=issue.number
+            )
+            self.units.barrier(self.journal, strict=False)
+            verdict = self._judge("start", self.units.unit_reports(self.journal))
         self._act(verdict, on_proceed="resuming")
 
     def _resuming(self, operation: Operation) -> None:
         self.gateway.resume(operation)
-        self.units.instruct(self.journal, "resume")
-        deadline = self.clock() + timedelta(seconds=self.request.policy.drain_s)
-        self.units.collect(self.journal, deadline)
+        self.units.instruct(self.journal, "resume", bound_s=self.request.policy.drain_s)
+        self.units.barrier(self.journal, strict=False)
         if self.progress.resumed_at is None:
             self._record(resumed_at=self.clock())
         if operation.direction == "candidate":
@@ -267,13 +270,20 @@ class Coordinator:
 
     def _watching(self, _operation: Operation) -> None:
         verdict = self._journaled_verdict("watch")
-        self.units.instruct(self.journal, "watch")
+        self.units.instruct(self.journal, "watch", bound_s=self.request.policy.watch_s)
         while verdict is None:
             resumed = self.progress.resumed_at
             if resumed is None:
                 raise RuntimeError("the watch window has no recorded resume")
             end = resumed + timedelta(seconds=self.request.policy.watch_s)
-            candidate = self._judge("watch", self.units.collect_watch(self.journal))
+            # At the window's end every unit must report again (unknown is not healthy).
+            closing = self.clock() >= end
+            reports = self.units.unit_reports(
+                self.journal,
+                fresh_from=end if closing else None,
+                wait_s=self.request.policy.drain_s if closing else 0.0,
+            )
+            candidate = self._judge("watch", reports)
             if candidate.action != "watch":
                 verdict = candidate
                 break
@@ -287,9 +297,8 @@ class Coordinator:
 
     def _restoring(self, _operation: Operation) -> None:
         self.gateway.restore(self.journal)
-        self.units.instruct(self.journal, "restore")
-        deadline = self.clock() + timedelta(seconds=self.request.policy.start_s)
-        self.units.collect(self.journal, deadline)
+        self.units.instruct(self.journal, "restore", bound_s=self.request.policy.start_s)
+        self.units.barrier(self.journal, strict=False)
         now = self.clock()
         self._complete(Completion.model_validate(self._completion("aborted", now)))
 

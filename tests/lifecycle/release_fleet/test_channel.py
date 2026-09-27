@@ -1,0 +1,210 @@
+"""The coordinator channel over a real loopback listener: authentication, replay and routing.
+
+The listener and the unit client are real (stdlib HTTP on 127.0.0.1); the
+enrollment is the gateway store's own record (`ensure_enrollment`), rotated
+or revoked through the real operator functions.
+"""
+
+from __future__ import annotations
+
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+from cli.release_fleet.client import (
+    CapabilityDeferredError,
+    CoordinatorAwayError,
+    CoordinatorClient,
+    StaleReportError,
+)
+from cli.release_fleet.listener import CoordinatorListener, proof_headers, route
+from cli.release_fleet.policy import UnitKey
+from cli.release_fleet.progress import Instruction, Report
+from cli.release_fleet.request import CoordinatorEndpoint
+from shared.cluster.authority.channel import ChannelRefusedError, sign_request
+from shared.cluster.authority.unit import (
+    Enrollment,
+    UnitIdentity,
+    ensure_enrollment,
+    revoke_enrollment,
+    rotate_enrollment,
+)
+
+_RUNNER = UnitKey(machine="macbook-air", home="/Users/zzy/.ava")
+_OTHER = UnitKey(machine="company-mini", home="/Users/zhiyuan-output/.ava")
+_WHEN = datetime(2026, 9, 27, 12, 0, tzinfo=UTC)
+
+
+class Channel:
+    def __init__(self, home: Path) -> None:
+        self.home = home
+        self.operation = uuid4()
+        self.listener = CoordinatorListener(self.operation, home, (_RUNNER, _OTHER))
+        host, port = self.listener.start("127.0.0.1", 0)
+        self.endpoint = CoordinatorEndpoint(host=host, port=port)
+        self.enrollment = ensure_enrollment(home, _identity(_RUNNER))
+
+    def client(self, enrollment: Enrollment | None = None, **changes: object) -> CoordinatorClient:
+        fields: dict[str, object] = {
+            "endpoint": self.endpoint,
+            "operation": self.operation,
+            "unit": _RUNNER,
+            "enrollment": enrollment or self.enrollment,
+        } | changes
+        return CoordinatorClient(**fields)  # type: ignore[arg-type]
+
+    def instruction(self, **changes: object) -> Instruction:
+        fields: dict[str, object] = {
+            "operation": self.operation,
+            "unit": _RUNNER,
+            "sequence": 1,
+            "action": "quiesce",
+            "direction": "candidate",
+            "image": ("a" * 64, "b" * 64),
+            "maintenance_at": _WHEN,
+        } | changes
+        return Instruction.model_validate(fields)
+
+    def report(self, instruction: Instruction, **changes: object) -> Report:
+        fields: dict[str, object] = {
+            "operation": self.operation,
+            "unit": _RUNNER,
+            "instruction": instruction.digest,
+            "state": "closed",
+            "at": _WHEN,
+        } | changes
+        return Report.model_validate(fields)
+
+
+def _identity(unit: UnitKey) -> UnitIdentity:
+    return UnitIdentity(machine=unit.machine, home=unit.home)
+
+
+@pytest.fixture
+def channel(tmp_path: Path) -> Iterator[Channel]:
+    home = tmp_path.resolve() / "gateway"
+    home.mkdir(mode=0o700)
+    served = Channel(home)
+    try:
+        yield served
+    finally:
+        served.listener.close()
+
+
+def test_a_unit_pulls_its_journaled_instruction_and_its_answer_is_queued(
+    channel: Channel,
+) -> None:
+    client = channel.client()
+    assert client.instruction() is None  # nothing issued yet
+    instruction = channel.instruction(action="close")
+    channel.listener.publish([instruction])
+    assert client.instruction() == instruction
+    report = channel.report(instruction)
+    client.report(report)
+    assert channel.listener.reports.get_nowait() == report
+
+
+def test_an_answer_to_a_replaced_instruction_is_stale(channel: Channel) -> None:
+    first = channel.instruction()
+    channel.listener.publish([first.model_copy(update={"sequence": 2})])
+    with pytest.raises(StaleReportError, match="answers no current instruction"):
+        channel.client().report(channel.report(first))
+    assert channel.listener.reports.empty()
+
+
+def test_a_report_naming_another_unit_is_refused(channel: Channel) -> None:
+    instruction = channel.instruction()
+    channel.listener.publish([instruction])
+    foreign = channel.report(instruction).model_copy(update={"unit": _OTHER})
+    with pytest.raises(ChannelRefusedError, match="another operation or unit"):
+        channel.client().report(foreign)
+    assert channel.listener.reports.empty()
+
+
+def test_a_rotated_or_revoked_enrollment_stops_authenticating_at_once(channel: Channel) -> None:
+    captured = channel.client()
+    rotate_enrollment(channel.home, _identity(_RUNNER))
+    with pytest.raises(ChannelRefusedError, match="rotated or revoked"):
+        captured.instruction()
+    rotated = channel.client(enrollment=ensure_enrollment(channel.home, _identity(_RUNNER)))
+    assert rotated.instruction() is None
+    revoke_enrollment(channel.home, _identity(_RUNNER))
+    with pytest.raises(ChannelRefusedError, match="holds no enrollment"):
+        rotated.instruction()
+
+
+def test_a_forged_signature_never_burns_the_nonce(channel: Channel) -> None:
+    path = route(channel.operation, _RUNNER)
+    proof = sign_request(
+        channel.enrollment, operation=str(channel.operation), method="GET", path=path, body=b""
+    )
+    forged = proof_headers(proof) | {"X-Ava-Signature": "0" * 64}
+    assert _status(channel, path, forged) == 401
+    assert _status(channel, path, proof_headers(proof)) == 204
+    # The admitted nonce is spent: the exact same request replayed is refused.
+    assert _status(channel, path, proof_headers(proof)) == 401
+
+
+def test_a_request_outside_the_clock_skew_is_refused(channel: Channel) -> None:
+    path = route(channel.operation, _RUNNER)
+    stale = sign_request(
+        channel.enrollment,
+        operation=str(channel.operation),
+        method="GET",
+        path=path,
+        body=b"",
+        now=time.time() - 3600,
+    )
+    assert _status(channel, path, proof_headers(stale)) == 401
+
+
+def test_another_operation_or_unit_is_not_served(channel: Channel) -> None:
+    with pytest.raises(ChannelRefusedError, match="another operation"):
+        channel.client(operation=uuid4()).instruction()
+    stranger = UnitKey(machine="win", home="C:\\Users\\zzy\\.ava")
+    enrolled = ensure_enrollment(channel.home, _identity(stranger))
+    with pytest.raises(ChannelRefusedError, match="no part in this operation"):
+        channel.client(enrollment=enrolled, unit=stranger).instruction()
+    with pytest.raises(ChannelRefusedError, match="another unit"):
+        channel.client(unit=_OTHER)
+
+
+def test_the_capability_exchange_is_deferred_to_dbgen8(channel: Channel) -> None:
+    with pytest.raises(CapabilityDeferredError, match="dbgen-8"):
+        channel.client().capability()
+
+
+def test_an_oversized_body_is_refused_before_it_is_read(channel: Channel) -> None:
+    path = route(channel.operation, _RUNNER, "/report")
+    body = b"x" * (64 * 1024 + 1)
+    proof = sign_request(
+        channel.enrollment, operation=str(channel.operation), method="POST", path=path, body=body
+    )
+    assert _status(channel, path, proof_headers(proof), body=body) == 413
+
+
+def test_a_closed_listener_is_away_not_refusing(channel: Channel) -> None:
+    client = channel.client(timeout_s=2.0)
+    channel.listener.close()
+    with pytest.raises(CoordinatorAwayError):
+        client.instruction()
+
+
+def _status(channel: Channel, path: str, headers: dict[str, str], body: bytes | None = None) -> int:
+    request = urllib.request.Request(  # noqa: S310 — the test's own loopback listener
+        channel.endpoint.url + path,
+        data=body,
+        headers=headers,
+        method="POST" if body is not None else "GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as answer:  # noqa: S310 — same URL
+            return answer.status
+    except urllib.error.HTTPError as refused:
+        return refused.code
