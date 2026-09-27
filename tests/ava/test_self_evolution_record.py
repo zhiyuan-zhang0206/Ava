@@ -1,34 +1,19 @@
-"""Unit tests for the self-evolution record builder (reference/record.py).
-
-Same import pattern as test_self_evolution_daily_scan.py: the reference dir is
-a script dir, not a package, so the module is imported via importlib.
+"""Unit tests for the self-evolution record builder
+(ava_builtins.skill_support.self_evolution.record).
 """
 
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-REF_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "ava_builtins"
-    / "skills"
-    / "ava-self-evolution"
-    / "reference"
-)
+from ava_builtins.skill_support.self_evolution import record as record_module
 
 
 @pytest.fixture()
 def record() -> Any:
-    sys.path.insert(0, str(REF_DIR))
-    try:
-        return cast(Any, importlib.import_module("record"))
-    finally:
-        sys.path.remove(str(REF_DIR))
+    return cast(Any, record_module)
 
 
 @pytest.mark.parametrize(
