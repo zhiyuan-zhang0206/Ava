@@ -38,7 +38,7 @@ def cmd_memory_init() -> int:
     Memory repository branch validation belongs to this operator-requested
     provisioning path, never to converge or service startup.
     """
-    from cli.commands._converge_plugins import run_plugin_scaffolds
+    from cli.commands.extensions._plugin_scaffold import run_plugin_scaffolds
 
     print("initializing memory resources...")
     try:

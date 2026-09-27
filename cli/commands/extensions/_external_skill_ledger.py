@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
-from cli.commands._external_agent_skill_fs import (
+from cli.commands.extensions._external_skill_fs import (
     _ClientConflictError,
     _exists,
     _manifest_digest,

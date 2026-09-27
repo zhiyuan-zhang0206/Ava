@@ -201,7 +201,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
 ) -> None:
     """Converge owns the builtin stamp for content out of the checkout; a
     human's `reviewed` promotion on a third-party package survives it."""
-    from cli.commands._converge_skills import converge_skills
+    from cli.commands.extensions.skills_sync import converge_skills
 
     repo = tmp_path / "repo"
     _write(repo / "ava_builtins" / "skills" / "ava-goal", "ava-goal", _BENIGN)
@@ -218,7 +218,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
 def test_trust_refuses_to_hand_edit_a_builtin_tier(unit_home: Path, tmp_path: Path) -> None:
     """Builtin means "this came out of the checkout" — a fact converge owns, not
     an opinion a user holds."""
-    from cli.commands._converge_skills import converge_skills
+    from cli.commands.extensions.skills_sync import converge_skills
 
     repo = tmp_path / "repo"
     _write(repo / "ava_builtins" / "skills" / "ava-goal", "ava-goal", _BENIGN)

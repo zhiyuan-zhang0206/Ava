@@ -9,7 +9,7 @@ the agent runtime (hooks, graph, the SDK namespace), none of which exists in a
 CLI process. Keeping the scaffold in a separate module is what lets the explicit
 CLI command call it at all — and it means a scaffold may depend on `shared` only.
 
-It lives beside `_converge_skills.py` because both load plugin-owned host setup
+It lives beside `skills_sync.py` because both load plugin-owned host setup
 without importing the agent runtime.
 """
 

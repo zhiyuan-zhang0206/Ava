@@ -96,7 +96,7 @@ def init_process_scope() -> None:
 def land_cluster_extensions() -> None:
     """Process-scope boot: land the cluster's installed skills onto this machine.
 
-    The boot-side sibling of `cli/commands/_converge_extensions.py`
+    The boot-side sibling of `cli/commands/extensions/materialize.py`
     (`materialize_cluster_extensions`), over the same
     `shared.extension_materialize.materialize_skills`. Converge covers the
     operator path — `ava start`, `ava converge`; this covers the one that needs

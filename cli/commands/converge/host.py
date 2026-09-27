@@ -15,7 +15,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cli.commands._converge_external_agent_skills import converge_external_agent_skill
 from cli.commands._converge_pitr import converge_pitr_foundation
 from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
 from cli.commands._ownership_preflight import (
@@ -65,6 +64,7 @@ from cli.commands.converge.source_tree import ensure_source_tree_integrity
 # test reaches for `cli.commands.converge.host.ConvergeCtx` / `ALL_ROLES`.
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
+from cli.commands.extensions.external_skills import converge_external_agent_skill
 from cli.commands.observability.lgtm import ensure_lgtm_stack_step
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
 from cli.commands.observability.otel_collector import ensure_otel_collector_step
@@ -103,8 +103,8 @@ def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:  # noqa: ARG001
 
 def _converge_skills_step(ctx: ConvergeCtx) -> None:
     """Sync repo + plugin skills into `$AVA_HOME/skills/` — the single dir the
-    skill scanner loads (see `cli/commands/_converge_skills.py`)."""
-    from cli.commands._converge_skills import converge_skills
+    skill scanner loads (see `cli/commands/extensions/skills_sync.py`)."""
+    from cli.commands.extensions.skills_sync import converge_skills
 
     result = converge_skills(ctx.repo, ctx.ava_home)
     for kind, names in (
@@ -738,7 +738,7 @@ def cmd_converge() -> int:
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
     # a CONVERGE_STEPS entry would not have on the `ava start` path.
-    from cli.commands._converge_extensions import (
+    from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
     )

@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands._converge_plugins import ScaffoldResult, run_plugin_scaffolds
 from cli.commands.converge import host as _converge
 from cli.commands.extensions import memory
+from cli.commands.extensions._plugin_scaffold import ScaffoldResult, run_plugin_scaffolds
 from shared import memory_repo, paths, proc
 from shared.config import settings
 from shared.machine import set_identity
@@ -245,7 +245,7 @@ def test_memory_init_returns_a_clean_error_for_the_wrong_branch_guard(
             raise
 
     monkeypatch.setattr(
-        "cli.commands._converge_plugins.run_plugin_scaffolds", _record_branch_mismatch
+        "cli.commands.extensions._plugin_scaffold.run_plugin_scaffolds", _record_branch_mismatch
     )
 
     assert memory.cmd_memory_init() == 1
@@ -283,7 +283,7 @@ def test_memory_init_reports_scaffolded_plugins(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
-        "cli.commands._converge_plugins.run_plugin_scaffolds",
+        "cli.commands.extensions._plugin_scaffold.run_plugin_scaffolds",
         lambda: ScaffoldResult(ran=["example"]),
     )
 

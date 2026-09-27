@@ -24,11 +24,11 @@ def home(tmp_path: Path) -> Path:
 
 
 def _bridge_module():
-    return importlib.import_module("cli.commands._converge_external_agent_skills")
+    return importlib.import_module("cli.commands.extensions.external_skills")
 
 
 def _filesystem_module():
-    return importlib.import_module("cli.commands._external_agent_skill_fs")
+    return importlib.import_module("cli.commands.extensions._external_skill_fs")
 
 
 def _ntfs_lstat(

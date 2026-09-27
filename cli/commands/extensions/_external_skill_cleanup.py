@@ -9,14 +9,14 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from cli.commands._external_agent_skill_fs import (
+from cli.commands.extensions._external_skill_fs import (
     _ClientConflictError,
     _exists,
     _tree_manifest,
     _validate_manifest_subset,
     _verify_cleanup_file,
 )
-from cli.commands._external_agent_skill_ledger import _write_ledger
+from cli.commands.extensions._external_skill_ledger import _write_ledger
 
 _SKILL_NAME = "operating-ava-cluster"
 

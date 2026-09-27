@@ -10,7 +10,7 @@ tags:
 # Skill sources (load-directory sync)
 
 One load directory: `~/.ava/skills/` (gated by the install registry's enabled
-flag). Converge (`cli/commands/_converge_skills.py`, on `ava start` /
+flag). Converge (`cli/commands/extensions/skills_sync.py`, on `ava start` /
 `ava cluster update` / `ava converge`) syncs two source types into it:
 
 1. **Repo built-in** (origin=repo): `<repo>/ava_builtins/skills/` →

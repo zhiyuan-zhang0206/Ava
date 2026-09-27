@@ -51,10 +51,10 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 
 | Piece | What exists | Where |
 |---|---|---|
-| Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/_converge_skills.py`, `okf/skills/load-directory-sync.ava.okf.md` |
+| Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/extensions/skills_sync.py`, `okf/skills/load-directory-sync.ava.okf.md` |
 | Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit guards), `enabled`, schema `version` field as a migration anchor | `shared/install_registry.py` |
 | Explicit update verbs | `ava skill update [name...] [--force]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name> [--force]`, `ava mcp upgrade` — all with the R5 conflict contract and staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
-| Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `_converge_skills.py`, `plugins.py`, `shared/plugins_config.py` |
+| Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `cli/commands/extensions/skills_sync.py`, `plugins.py`, `shared/plugins_config.py` |
 | Supply-chain gate | `shared/packages/skills/skill_scan.py` on every ingest (critical → refuse, `--accept-risk` recorded, trust never auto-promoted) | `shared/packages/skills/skill_scan.py`, `shared/install_registry.py` |
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `shared/plugin_manifest.py`, `conventions/plugin-spec-v2.md` |
 | Per-machine OS jobs | launchd / crontab / schtasks registrars, idempotent, converge-registered (health probe, watchdog, autostart, logs), test switch `AVA_OS_JOBS_ENABLED=false` | `shared/os_*.py`, `cli/commands/converge/_os_jobs.py` |
@@ -395,7 +395,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 
 ## Appendix A — current-state evidence (for reviewers)
 
-- Load dir sync + R5 bootstrap-only: `cli/commands/_converge_skills.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
+- Load dir sync + R5 bootstrap-only: `cli/commands/extensions/skills_sync.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
 - Explicit update verbs + conflicts: `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
 - Rollout skill refresh legs: `cli/commands/_update_local.py:85` (`_refresh_builtin_skills`), `cli/commands/_update_agent_runner.py:250`.
 - Registry model: `shared/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).

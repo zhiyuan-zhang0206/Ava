@@ -13,12 +13,13 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
-from cli.commands._external_agent_skill_cleanup import (
+from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.extensions._external_skill_cleanup import (
     _cleanup_garbage_impl,
     _queue_garbage,
     _transaction_path,
 )
-from cli.commands._external_agent_skill_fs import (
+from cli.commands.extensions._external_skill_fs import (
     _ClientConflictError,
     _exists,
     _lstat,
@@ -33,7 +34,7 @@ from cli.commands._external_agent_skill_fs import (
     _tree_manifest,
     _write_new,
 )
-from cli.commands._external_agent_skill_ledger import (
+from cli.commands.extensions._external_skill_ledger import (
     _FORMAT,
     _load_ledger,
     _ownership_marker,
@@ -41,7 +42,6 @@ from cli.commands._external_agent_skill_ledger import (
     _stage_manifest,
     _write_ledger,
 )
-from cli.commands.converge.spec import ConvergeCtx
 from shared.platform import LockTimeoutError, file_lock
 from shared.private_storage import ensure_private_dir
 

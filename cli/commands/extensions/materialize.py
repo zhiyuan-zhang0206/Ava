@@ -1,7 +1,7 @@
 """Land the cluster's extensions on this machine — the converge-side reader.
 
-A sibling of `_converge_skills.py` (repo/plugin skills from the checkout) and
-`_converge_plugins.py`, for the content the CLUSTER owns: whatever arrived by
+A sibling of `skills_sync.py` (repo/plugin skills from the checkout) and
+`_plugin_scaffold.py`, for the content the CLUSTER owns: whatever arrived by
 `ava skill install` on any machine (`future/infra/extension-ownership.md` S2,
 model in `decisions/2026-08-21-extension-ownership-three-tiers.md`).
 
