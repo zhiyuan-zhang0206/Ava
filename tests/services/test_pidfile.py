@@ -1,4 +1,4 @@
-"""`services._pidfile` — shared daemon pidfile discipline (audit round 2, P1).
+"""`services.pidfile` — shared daemon pidfile discipline (audit round 2, P1).
 
 The two historical failure modes under test: pid reuse (a stale pidfile
 whose pid was recycled makes every start misjudge "already running") and
@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 
 @pytest.mark.parametrize(

@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -39,6 +39,16 @@ class _CallFrame:
 _frames: ContextVar[tuple[_CallFrame, ...]] = ContextVar("sdk_frames", default=())
 _tally: ContextVar[dict[str, int] | None] = ContextVar("sdk_tally", default=None)
 _identity: ContextVar[dict[str, Any] | None] = ContextVar("sdk_identity", default=None)
+
+
+def set_identity(identity: dict[str, Any] | None) -> Token[dict[str, Any] | None]:
+    """Set the current caller identity, returning a token for `reset_identity`."""
+    return _identity.set(identity)
+
+
+def reset_identity(token: Token[dict[str, Any] | None]) -> None:
+    """Restore the caller identity ContextVar to its state before the paired `set_identity`."""
+    _identity.reset(token)
 
 
 @contextlib.contextmanager

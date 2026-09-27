@@ -13,7 +13,7 @@ import pytest
 from pydantic import Field
 
 import shared.config as shared_config
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 
 def _registry_with(model: type[EnvSettings]) -> None:

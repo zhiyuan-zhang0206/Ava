@@ -10,7 +10,7 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 # The standard OTLP/HTTP ingress port. Single source for every hardcoded 4318
 # in the telemetry path: the sidecar receiver endpoint, the gateway's

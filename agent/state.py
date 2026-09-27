@@ -654,7 +654,7 @@ def clear_plugin_registrations() -> None:
     import ava.skill_sources
     from agent.graph.context_notes import clear_plugin_context_notes
     from agent.graph.system_prompt import clear_plugin_system_prompt_sections
-    from agent.hooks._registry import HOOKS
+    from agent.hooks import clear_hooks
     from shared.plugin_config_registry import clear_plugin_configs
     from shared.plugin_flags import clear_plugin_flags
 
@@ -662,8 +662,7 @@ def clear_plugin_registrations() -> None:
     # module import); drop only the plugin-contributed tails.
     clear_plugin_system_prompt_sections()
     clear_plugin_context_notes()
-    for hook_list in HOOKS.values():
-        hook_list.clear()
+    clear_hooks()
     clear_plugin_configs()
     clear_plugin_flags()
     plugin_contributions.clear()

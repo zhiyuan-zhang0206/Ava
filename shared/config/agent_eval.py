@@ -10,7 +10,7 @@ from typing import Annotated
 from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 
 class AgentEvalSettings(EnvSettings):

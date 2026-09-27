@@ -16,10 +16,10 @@ from ava.shell import background
 from ava.shell import sessions as _sessions
 from shared.daemon.schedules.watcher import (
     DEFAULT_STANDING_CRON_MAX_SECONDS,
-    _parse_timeout,
     build_at_script,
     build_cron_script,
     normalize_when,
+    parse_timeout,
     session_deadline,
     validate_cron,
     validate_timezone,
@@ -419,10 +419,10 @@ def launch(code: str, timeout: WatcherTimeout, *, name: str, notify: str | None 
     name = coerce_str(name, "name")
     return _spawn(
         code,
-        _parse_timeout(timeout),
+        parse_timeout(timeout),
         name,
         kind="launch",
-        timeout_secs=_parse_timeout(timeout),
+        timeout_secs=parse_timeout(timeout),
         notify=coerce_str(notify, "notify", allow_none=True),
     )
 

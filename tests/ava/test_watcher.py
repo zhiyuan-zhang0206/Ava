@@ -61,20 +61,20 @@ def test_validate_message_rejects_empty() -> None:
 def test_parse_timeout_accepts_forms(
     value: int | datetime.timedelta | str, expected: float
 ) -> None:
-    assert watcher._parse_timeout(value) == expected
+    assert watcher.parse_timeout(value) == expected
 
 
 @pytest.mark.parametrize("bad", ["", "5x", "later", "-3"])
 def test_parse_timeout_rejects_bad_strings(bad: str) -> None:
     with pytest.raises(ValueError):
-        watcher._parse_timeout(bad)
+        watcher.parse_timeout(bad)
 
 
 def test_parse_timeout_rejects_nonpositive_and_bool() -> None:
     with pytest.raises(ValueError, match="positive"):
-        watcher._parse_timeout(0)
+        watcher.parse_timeout(0)
     with pytest.raises(TypeError):
-        watcher._parse_timeout(True)
+        watcher.parse_timeout(True)
 
 
 def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:

@@ -45,8 +45,8 @@ from gateway import mcp_clients
 from gateway.error_envelope import error_response
 from gateway.request_principal import AuthPrincipal, PrincipalScopeError, principal_key
 from gateway.routers import agents as _agents_router
-from gateway.routers._delivery import deliver_chat_inbound
 from gateway.routers.agents_lifecycle import terminate_agent_with_open_tasks
+from gateway.routers.delivery import deliver_chat_inbound
 from gateway.schemas import AgentRow
 from ops.agents import get_agent_status
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest

@@ -180,7 +180,7 @@ def _build_registry() -> dict[str, _FieldRef]:
     """
     from importlib import import_module
 
-    from shared.config._base import EnvSettings
+    from shared.config.base import EnvSettings
 
     reg: dict[str, _FieldRef] = {}
     for attr, label, model_name, default_capability in _DOMAIN_MODELS:

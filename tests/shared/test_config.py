@@ -1625,7 +1625,7 @@ def test_build_registry_rejects_unknown_restart_required(monkeypatch: pytest.Mon
     from pydantic import Field
 
     from shared import config_registry
-    from shared.config._base import EnvSettings
+    from shared.config.base import EnvSettings
 
     class Bad(EnvSettings):
         synthetic_knob: int = Field(
@@ -1658,7 +1658,7 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind(
     from pydantic import Field
 
     from shared import config_registry
-    from shared.config._base import EnvSettings
+    from shared.config.base import EnvSettings
 
     class WrongKind(EnvSettings):
         synthetic_knob: int = Field(

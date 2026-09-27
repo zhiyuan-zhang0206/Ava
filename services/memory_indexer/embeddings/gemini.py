@@ -48,7 +48,7 @@ import numpy as np
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from shared.config import settings
 from shared.resilience import (
-    _MAX_RETRY_AFTER_RESPECT_S,
+    MAX_RETRY_AFTER_RESPECT_S,
     ExponentialBackoff,
     Policy,
     aretry,
@@ -115,7 +115,7 @@ def worst_case_batch_seconds() -> float:
     if attempts < 2:
         return request_seconds
     last_backoff = _EMBED_POLICY.backoff(attempts - 2)
-    per_sleep = max(_MAX_RETRY_AFTER_RESPECT_S, last_backoff) + 2 * _EMBED_POLICY.jitter_span
+    per_sleep = max(MAX_RETRY_AFTER_RESPECT_S, last_backoff) + 2 * _EMBED_POLICY.jitter_span
     return request_seconds + (attempts - 1) * per_sleep
 
 

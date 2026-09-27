@@ -33,10 +33,10 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 import shared.db
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
 from services.heartbeat.stranded_holds import grade_stranded_holds
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server

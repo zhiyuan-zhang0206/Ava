@@ -697,6 +697,11 @@ def effective_config_snapshot() -> dict[str, object]:
     return out
 
 
+def registered_plugin_config_names() -> tuple[str, ...]:
+    """Sorted names of plugins with a bound config instance."""
+    return tuple(sorted(_PLUGIN_CONFIGS))
+
+
 def is_per_agent_field(plugin: str, field: str) -> bool:
     """Whether the field is marked `json_schema_extra={"per_agent": True}` — used for
     PR-E CLI overlay validation (per_agent=False fields do not allow per-agent

@@ -63,7 +63,7 @@ _TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 # Longest Retry-After honored at this layer (mirrors the provider-SDK cap);
 # a longer header is treated as absent rather than blindly slept.
-_MAX_RETRY_AFTER_RESPECT_S = 120.0
+MAX_RETRY_AFTER_RESPECT_S = 120.0
 
 # Module-level aliases so tests can pin retry sleeps without patching
 # time/asyncio globally (same seam as cli/commands/_probe.py's _poll_sleep).
@@ -146,7 +146,7 @@ def extract_retry_after(exc: Exception) -> float | None:
 
     Duck-typed over any exception shape carrying ``response.headers``
     (provider SDKs, httpx) or a bare ``headers`` attribute (urllib's
-    HTTPError). Values above ``_MAX_RETRY_AFTER_RESPECT_S`` are ignored
+    HTTPError). Values above ``MAX_RETRY_AFTER_RESPECT_S`` are ignored
     (treated as absent) rather than blindly slept.
     """
     response = getattr(exc, "response", None)
@@ -160,7 +160,7 @@ def extract_retry_after(exc: Exception) -> float | None:
         raw_ms = headers.get("retry-after-ms")
         if raw_ms:
             seconds = float(raw_ms) / 1000.0
-            if 0 < seconds <= _MAX_RETRY_AFTER_RESPECT_S:
+            if 0 < seconds <= MAX_RETRY_AFTER_RESPECT_S:
                 return seconds
     except (TypeError, ValueError):
         pass  # fail-fast-ok: unparseable header = absent; try the next form
@@ -168,7 +168,7 @@ def extract_retry_after(exc: Exception) -> float | None:
         raw = headers.get("retry-after")
         if raw:
             seconds = float(raw)
-            if 0 < seconds <= _MAX_RETRY_AFTER_RESPECT_S:
+            if 0 < seconds <= MAX_RETRY_AFTER_RESPECT_S:
                 return seconds
     except (TypeError, ValueError):
         pass  # fail-fast-ok: unparseable header = absent (SDK parse semantics)

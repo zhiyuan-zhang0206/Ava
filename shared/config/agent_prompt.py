@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import NoDecode
 
-from shared.config._base import EnvSettings
+from shared.config.base import EnvSettings
 
 
 class AgentPromptSettings(EnvSettings):

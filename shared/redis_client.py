@@ -56,7 +56,7 @@ from shared.redis_resilience import (
 # periodically cuts pubsub.listen()'s long blocking read (the hosted
 # agent-host dispatcher reconnect-looped every 5s of idle — 2026-08-30 soak
 # startup). Keepalive + health_check detect dead links without that side effect.
-_RESILIENCE_KWARGS: dict[str, Any] = {
+RESILIENCE_KWARGS: dict[str, Any] = {
     "socket_timeout": None,
     "socket_keepalive": True,
     "socket_keepalive_options": keepalive_options(),
@@ -297,7 +297,7 @@ def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> _AuthR
             redis_url,
             decode_responses=decode_responses,
             connection_class=_TransportAwareAsyncConnection,
-            **_RESILIENCE_KWARGS,
+            **RESILIENCE_KWARGS,
         ),
     )
 
@@ -440,6 +440,6 @@ def sync_redis(*, decode_responses: bool = False) -> _AuthRetrySyncRedis:
             settings.data_plane.redis_url,
             decode_responses=decode_responses,
             connection_class=_PinnedIPv4Connection,
-            **_RESILIENCE_KWARGS,
+            **RESILIENCE_KWARGS,
         ),
     )
