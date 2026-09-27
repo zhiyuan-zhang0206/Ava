@@ -727,7 +727,7 @@ async def reconcile_all_open_pages(
     Each pass runs under `bind_turn_identity(agent_id)`: the daemon process
     has no agent identity of its own (no turn context, no AVA_AGENT_ID), and
     the re-serve arm calls ava.ui.serve, whose registration reads
-    ava._boot.agent_id() — without the bind it would POST to /agents/None
+    ava.agent_identity.agent_id() — without the bind it would POST to /agents/None
     and the re-serve would fail silently (P1, #1312 adversarial review).
     asyncio.to_thread copies contextvars, so the probe/serve threads see
     the bind too. Best-effort like the per-agent pass: failures are logged

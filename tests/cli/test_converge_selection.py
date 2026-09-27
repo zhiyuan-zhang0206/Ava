@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _converge, _lgtm_native
+from cli.commands import _lgtm_native, converge
 from cli.commands._converge_spec import ConvergeCtx, ConvergeStep
 
 
@@ -26,7 +26,7 @@ def test_preparation_filters_service_consumers_but_keeps_shared_host_steps(tmp_p
         ConvergeStep("backend", backend, services=frozenset({"loki", "grafana"})),
         ConvergeStep("collector", unrelated, services=frozenset({"otel-collector"})),
     )
-    _converge.converge_host(
+    converge.converge_host(
         tmp_path,
         frozenset({"gateway"}),
         ava_home=tmp_path / "home",

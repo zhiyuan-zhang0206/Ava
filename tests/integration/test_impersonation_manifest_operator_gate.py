@@ -12,7 +12,7 @@ import httpx
 import psycopg
 import pytest
 
-from ava import _impersonation_events as reader
+from ava import impersonation_replay as reader
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation_manifest import (
@@ -449,7 +449,7 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A real SDK metering wrapper retains its pre-close admission through ``finally``."""
-    from ava import _boot, _sdk_metering
+    from ava import agent_identity, sdk_metering
     from ava.external import Attachment
 
     participant = LocalParticipant(str(v1_lease["id"]), owner.agent_id, 0, "held-sdk-finally")
@@ -458,7 +458,7 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
     )
     bind_local_participant(participant)
     monkeypatch.setattr(settings.general, "impersonation_event_manifest_seal_wait_seconds", 0.01)
-    monkeypatch.setattr(_boot, "_external_agent_id", owner.agent_id)
+    monkeypatch.setattr(agent_identity, "_external_agent_id", owner.agent_id)
     entered, finish = ThreadEvent(), ThreadEvent()
 
     def held_send() -> None:
@@ -467,7 +467,7 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
 
     # This is the production SDK recorder shape for ava.agents.send_message,
     # not a direct hand-built telemetry event.
-    recorded_send = _sdk_metering._make_recorder(held_send, "agents.send_message")
+    recorded_send = sdk_metering._make_recorder(held_send, "agents.send_message")
     worker = Thread(target=recorded_send)
     worker.start()
     assert entered.wait(timeout=2)
@@ -665,7 +665,7 @@ def test_final_envelope_reader_splits_before_the_gateway_offset_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A permitted manifest never asks the public reader for offset 11,000."""
-    from ava import _impersonation_events as reader
+    from ava import impersonation_replay as reader
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "No emitted events")
     lease = history.resolve(owner.agent_id, 0)

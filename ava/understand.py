@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from ava import files as _files
 from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
-from ava._sdk_validation import coerce_str
+from ava.sdk_validation import coerce_str
 from shared.config import settings
 from shared.lm._effort import (
     ReasoningEffort,
@@ -59,11 +59,11 @@ def _save_understand_output(prompt: str, result: str, *, source: str) -> Path | 
     is established (outside an agent process). Prunes old files to a ring of
     `_OVERFLOW_KEEP`."""
     try:
-        from ava import _boot
+        from ava import agent_identity
     except ImportError:
         return None
     try:
-        agent_id = _boot.require_agent_id()
+        agent_id = agent_identity.require_agent_id()
     except RuntimeError:
         return None
     from shared.paths import workspace_dir
@@ -266,7 +266,7 @@ def _understand_paths(paths: list[str | Path], prompt: str, effort: str | Reason
     parts: list[Any] = []
     mimes: list[str] = []
     for path in paths:
-        p = _files._resolve(path)
+        p = _files.resolve(path)
         if not p.is_file():
             raise FileNotFoundError(f"path {str(path)!r} does not name an existing file ({p})")
         mime = _MEDIA_MIME.get(p.suffix.lower())

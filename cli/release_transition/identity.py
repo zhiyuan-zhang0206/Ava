@@ -31,7 +31,7 @@ def require_local_writers(request: HomeRequest) -> None:
     """Current one-host writer boundary; native resource/fleet fencing extends it."""
     import os
 
-    from cli.commands._maintenance_stop import require_no_terminals
+    from cli.commands.maintenance_stop import require_no_terminals
     from shared.cluster import registry_path
     from shared.config import settings
     from shared.db import connect

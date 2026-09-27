@@ -12,8 +12,8 @@ import tempfile
 from typing import Any
 
 import ava._watcher_reconcile as _reconcile
-from ava._sdk_validation import coerce_str
-from ava.shell import _background
+from ava.sdk_validation import coerce_str
+from ava.shell import background
 from ava.shell import sessions as _sessions
 from shared.daemon.schedules.watcher import (
     DEFAULT_STANDING_CRON_MAX_SECONDS,
@@ -86,9 +86,9 @@ def _watchers_dir() -> _pl.Path:
 
 
 def _agent_id() -> int:
-    import ava._boot
+    import ava.agent_identity
 
-    return int(ava._boot.agent_id())
+    return ava.agent_identity.require_agent_id()
 
 
 _SCRIPT_FILE_RE = _re.compile(r"^watcher_(\d+)\.py$")
@@ -151,10 +151,10 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     generated code and the id is the agent's own, so nothing sensitive leaks.
     Overwrite, not setdefault: the watcher belongs to the spawning agent, so
     a stale env value (e.g. a parent-shell id accidentally forwarded) must
-    not win. ``ava._boot`` then lazily establishes identity from the env var
+    not win. ``ava.agent_identity`` then lazily establishes identity from the env var
     on first use (``owns_loop=False``).
 
-    Plugin namespaces are loaded explicitly (``ava._ensure_plugins_loaded()``)
+    Plugin namespaces are loaded explicitly (``ava.ensure_plugins_loaded()``)
     before the script runs: a fresh child's ``import ava`` is the factory module
     with none of the agent process's plugin setattrs, so without this step
     ``ava.tasks`` (and every other plugin-registered namespace) would raise
@@ -270,7 +270,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         # module with none of the agent process's plugin setattrs. Identity is
         # set explicitly above; this is the symmetric step for plugin
         # namespaces.
-        "ava._ensure_plugins_loaded()\n"
+        "ava.ensure_plugins_loaded()\n"
         "try:\n"
         f"    runpy.run_path({str(script_path)!r}, run_name='__main__', init_globals={{'ava': ava}})\n"
         "finally:\n"
@@ -413,7 +413,7 @@ def _spawn(
     import shlex
     import sys
 
-    notify = _background.validate_notify(notify)
+    notify = background.validate_notify(notify)
     agent_id = _agent_id()
     # The session's shell TTL IS this watcher's target deadline (user ruling
     # 2026-09-14, task #3411): launch = created + timeout, cron = cron_end_at,
@@ -441,7 +441,7 @@ def _spawn(
             f"watcher {kind!r} target deadline is not in the future "
             f"({deadline!r}) — refusing to spawn its session"
         )
-    session_id, session_name = _sessions._create_session(
+    session_id, session_name = _sessions.create_session(
         name, ttl=(deadline - now).total_seconds(), system=True, env_overrides=watcher_runner_env()
     )
     # The registry is desired state, so it must remember the generation of
@@ -463,12 +463,12 @@ def _spawn(
     script_path.write_text(code)
     boot_path = _watchers_dir() / f"watcher_{session_id}_boot.py"
     boot_path.write_text(_build_boot(script_path, watchdog_secs, agent_id))
-    output_path = _background.allocate_output_path(session_id, name)
+    output_path = background.allocate_output_path(session_id, name)
     cmd = (
         f"{_SESSION_ID_ENV}={session_id} "
         f"{shlex.quote(sys.executable)} {shlex.quote(str(boot_path))}"
     )
-    line = _background.notified_line(
+    line = background.notified_line(
         cmd,
         agent_id=agent_id,
         label=f"Watcher '{name}'",

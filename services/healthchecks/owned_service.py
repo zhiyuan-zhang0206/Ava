@@ -68,7 +68,7 @@ def absent_listener(port: int) -> DaemonProbe:
         return DaemonProbe.unavailable(f"cannot establish port {port} absence: {exc}")
 
 
-def _owned_tcp(
+def owned_tcp(
     owner: OwnedProcess, port: int, protocol: Callable[[], bool | DaemonProbe]
 ) -> DaemonProbe:
     members = {identity.pid: identity for identity in capture_tree(owner)}
@@ -108,7 +108,7 @@ def probe_endpoint(
         owner = owned_process(service)
         if owner is None:
             return DaemonProbe.port_taken(f"port {port} has no root-owned generation")
-        return _owned_tcp(owner, port, protocol)
+        return owned_tcp(owner, port, protocol)
     except (RootClientError, psutil.Error, RuntimeError) as exc:
         return DaemonProbe.unavailable(f"cannot establish service ownership: {exc}")
 

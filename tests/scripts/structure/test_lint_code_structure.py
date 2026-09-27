@@ -39,6 +39,8 @@ def _baseline(
                 "files": files or {},
                 "complexity": complexity or {},
                 "nesting": nesting or {},
+                "private_imports": {},
+                "owner_bypasses": {},
             },
             indent=2,
             sort_keys=True,
@@ -108,7 +110,7 @@ def test_directory_cap_counts_py_pyi_and_subdirectories(
 ) -> None:
     directory = _entries(tmp_path, "tests/package", 18)
     _write(directory, "types.pyi", 1)
-    (directory / "child").mkdir()
+    _write(directory / "child", "module.py", 1)
     _write(directory, "README.md", 1)
     _write(directory, "config.json", 1)
     assert lcs.main([]) == 0

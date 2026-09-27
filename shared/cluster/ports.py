@@ -77,7 +77,7 @@ def _record_port(rec: cluster.ClusterRecord, key: str) -> int:
     return port
 
 
-def _port_free(port: int) -> bool:
+def port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -102,7 +102,7 @@ def allocate_ports(existing_bases: set[int]) -> ClusterPorts:
         # start. Overlap is the honest test.
         if any(base - (BLOCK_SIZE - 1) <= eb <= base + (BLOCK_SIZE - 1) for eb in existing_bases):
             continue
-        if all(cluster._port_free(base + off) for off in PORT_OFFSETS.values()):
+        if all(cluster.port_free(base + off) for off in PORT_OFFSETS.values()):
             # PORT_OFFSETS' keys ARE the ClusterPorts service names; the dynamic
             # comprehension is the runtime source of that closed set.
             return cast("ClusterPorts", {svc: base + off for svc, off in PORT_OFFSETS.items()})

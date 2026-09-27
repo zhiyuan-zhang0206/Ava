@@ -426,7 +426,7 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
                 runtime=runtime,
             )
             if result == 0:
-                from cli.commands._root_driver import complete_boot_start
+                from cli.commands.root_driver import complete_boot_start
                 from shared.start_serving import clear_serving
 
                 try:

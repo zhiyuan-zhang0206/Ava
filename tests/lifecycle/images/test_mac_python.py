@@ -11,7 +11,7 @@ from pathlib import Path
 from shared.runtime_prepare import (
     _copy_verified_python,
     _create_private_venv,
-    _python_input_inventory,
+    python_input_inventory,
 )
 
 
@@ -26,7 +26,7 @@ class RetainedMacPythonTests(unittest.TestCase):
             self.skipTest("this is not a standalone managed Python layout")
         with tempfile.TemporaryDirectory(prefix="ava-mac-python-") as directory:
             root = Path(directory).resolve()
-            inventory = _python_input_inventory(source)
+            inventory = python_input_inventory(source)
             _copy_verified_python(source, root / "python", inventory)
             env = {"PATH": "/usr/bin:/bin", "HOME": str(root)}
             interpreter = _create_private_venv(root, inventory)

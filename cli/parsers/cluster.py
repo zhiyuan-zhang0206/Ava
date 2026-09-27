@@ -43,25 +43,25 @@ def _h_cluster_resume(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_recover(_args: argparse.Namespace) -> int:
-    from cli.commands._cluster_recover import cmd_cluster_recover
+    from cli.commands.cluster_recover import cmd_cluster_recover
 
     return cmd_cluster_recover()
 
 
 def _h_cluster_pitr_activate(args: argparse.Namespace) -> int:
-    from cli.commands._pitr_activation import cmd_pitr_activate
+    from cli.commands.pitr_activation import cmd_pitr_activate
 
     return cmd_pitr_activate(origin=args.origin)
 
 
 def _h_cluster_pitr_status(_args: argparse.Namespace) -> int:
-    from cli.commands._pitr_activation import cmd_pitr_status
+    from cli.commands.pitr_activation import cmd_pitr_status
 
     return cmd_pitr_status()
 
 
 def _h_cluster_pitr_rollback(_args: argparse.Namespace) -> int:
-    from cli.commands._pitr_activation import cmd_pitr_rollback
+    from cli.commands.pitr_activation import cmd_pitr_rollback
 
     return cmd_pitr_rollback()
 
@@ -85,7 +85,7 @@ def _h_cluster_destroy(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:
-    from cli.commands._cluster_health import cmd_health_probe
+    from cli.commands.cluster_health import cmd_health_probe
 
     return cmd_health_probe(
         agent_min=args.agent_min,
@@ -97,7 +97,7 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
-    from cli.commands._cluster_cron import cmd_cron_register
+    from cli.commands.cluster_cron import cmd_cron_register
 
     return cmd_cron_register(
         interval_s=args.interval,
@@ -105,7 +105,7 @@ def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
-    from cli.commands._cluster_cron import cmd_cron_unregister
+    from cli.commands.cluster_cron import cmd_cron_unregister
 
     return cmd_cron_unregister()
 
@@ -121,8 +121,6 @@ def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
 def _add_db_authority_parser(
     cluster_sub: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    from cli.main import _h_cluster_db_authority_issue_unit
-
     db_authority_p = cluster_sub.add_parser(
         "db-authority",
         help="[cluster] database write-generation authority for remote agent-runner units",
@@ -148,23 +146,6 @@ def _add_db_authority_parser(
 
 
 def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import (
-        _h_cluster_destroy,
-        _h_cluster_down,
-        _h_cluster_health_probe,
-        _h_cluster_health_probe_register,
-        _h_cluster_health_probe_unregister,
-        _h_cluster_ls,
-        _h_cluster_pause,
-        _h_cluster_pitr_activate,
-        _h_cluster_pitr_rollback,
-        _h_cluster_pitr_status,
-        _h_cluster_recover,
-        _h_cluster_resume,
-        _h_cluster_status,
-        _h_cluster_update,
-    )
-
     # `ava cluster status` — list machines table + per-agent-runner status_probe op
     cluster_p = sub.add_parser(
         "cluster",

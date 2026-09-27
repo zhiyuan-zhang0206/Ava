@@ -255,7 +255,7 @@ def test_browser_canary_runs_only_inside_owned_endpoint_probe(
         return DaemonProbe.port_taken("foreign")
 
     canary = Mock(side_effect=AssertionError("foreign browser must not be used"))
-    monkeypatch.setattr(browser_reach, "_canary", canary)
+    monkeypatch.setattr(browser_reach, "canary", canary)
     monkeypatch.setattr(owned_service, "probe_endpoint", foreign_listener)
     monkeypatch.setattr(
         probes,
@@ -272,7 +272,7 @@ def test_browser_canary_runs_only_inside_owned_endpoint_probe(
 
 
 def test_pooler_requires_native_custody_before_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import _pgbouncer
+    from cli.commands import pgbouncer
     from shared.cluster import ownership
 
     def registered(_home: object) -> object:
@@ -281,7 +281,7 @@ def test_pooler_requires_native_custody_before_protocol(monkeypatch: pytest.Monk
     listener = Mock(side_effect=AssertionError("unknown pooler must not be accepted"))
     monkeypatch.setattr("shared.cluster.get_record", registered)
     monkeypatch.setattr(ownership, "pooler", Mock(return_value=None))
-    monkeypatch.setattr(_pgbouncer, "pgbouncer_listener_reachable", listener)
+    monkeypatch.setattr(pgbouncer, "pgbouncer_listener_reachable", listener)
     assert probes.pgbouncer().verdict.value == "down"
     listener.assert_not_called()
 

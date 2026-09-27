@@ -27,7 +27,7 @@ import pytest
 
 from cli.commands import _temporary_stop as command
 from cli.commands import stop as entry
-from cli.commands._maintenance_stop import OwnedProcess
+from cli.commands.maintenance_stop import OwnedProcess
 from shared import maintenance
 from shared.paths import run_dir
 from shared.session_backend import PtySessionBackend
@@ -89,7 +89,7 @@ def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionB
     monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(command, "get_shell_backend", lambda: terminal)
-    from cli.commands import _maintenance_stop as strict
+    from cli.commands import maintenance_stop as strict
 
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
     for name in ("stop_permissions_helper",):

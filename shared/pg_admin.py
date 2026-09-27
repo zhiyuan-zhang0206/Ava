@@ -13,7 +13,7 @@ bootstrap superuser (the initdb user):
   the owner's rights, but the owner itself never logs in, so it can later lose
   LOGIN without breaking these paths.
 
-Moved down from `cli.commands._cluster_instance` (tech audit 2026-08-31, QA
+Moved down from `cli.commands.cluster_instance` (tech audit 2026-08-31, QA
 #1133 P2 observation): the PITR services reach for the admin URL but must not
 import up into `cli`. Everything here is `shared`-level (paths / cluster /
 private-storage), so the admin dial lives beside the identity it serves.
@@ -50,7 +50,7 @@ def pg_socket_dir(socket_root: Path | None = None, *, home: Path | None = None) 
     collector's monitoring role (the runtime connects over TCP); 0700 keeps it
     owner-only. `home` defaults to `ava_home()` resolved in THIS module;
     the cli thin shell passes its own resolution so cli-layer steering (tests
-    patch `cli.commands._cluster_instance.ava_home`) keeps flowing."""
+    patch `cli.commands.cluster_instance.ava_home`) keeps flowing."""
     if home is None:
         from shared.paths import ava_home
 

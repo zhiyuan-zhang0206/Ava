@@ -47,7 +47,7 @@ import psutil
 import psycopg
 from psycopg import sql
 
-from services.pitr.base_manifest import CandidateManifest, WalRange, _lsn
+from services.pitr.base_manifest import CandidateManifest, WalRange, lsn
 from services.pitr.base_restore_crypto import (
     authenticate_base_ciphertext,
     extract_authenticated_base,
@@ -339,7 +339,7 @@ def _wait_for_promotion(
                 row = cur.fetchone()
                 if row is not None and row[0] is False and row[1] is not None:
                     achieved = str(row[1])
-                    if _lsn(achieved) >= _lsn(request.target_lsn):
+                    if lsn(achieved) >= lsn(request.target_lsn):
                         evidence.note(
                             "promoted", {"replay_lsn": achieved, "target": request.target_lsn}
                         )
@@ -587,10 +587,10 @@ def _require_fresh_scratch(scratch: Path) -> None:
 
 def _require_target_lsn(candidate: CandidateManifest, target_lsn: str) -> None:
     try:
-        position = _lsn(target_lsn)
+        position = lsn(target_lsn)
     except ValueError as exc:
         raise DrillError(str(exc)) from exc
-    if position < _lsn(candidate.start_lsn):
+    if position < lsn(candidate.start_lsn):
         raise DrillError(f"target LSN {target_lsn} precedes the chain start {candidate.start_lsn}")
 
 

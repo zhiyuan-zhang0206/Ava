@@ -19,6 +19,7 @@ pytestmark = pytest.mark.real_service_readiness_gate
 def test_start_measures_real_health_then_resumes_without_early_business_admission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+
     _roster(monkeypatch, (("gateway", None),))
     measurements: list[int] = []
     with TestClient(app) as client:

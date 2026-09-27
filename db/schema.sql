@@ -1755,12 +1755,12 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
         AND manifest_envelope_floor_at IS NOT NULL
     )),
     CHECK ((relay_minted_generation IS NULL) = (relay_minted_owner IS NULL)),
-    CHECK (
+    CONSTRAINT agent_impersonations_relay_spec CHECK (
         (relay_provider IS NULL
             AND relay_thread_id IS NULL
             AND relay_codex_remote IS NULL)
         OR (relay_provider = 'codex' AND relay_thread_id IS NOT NULL)
-        OR (relay_provider = 'claude'
+        OR (relay_provider IN ('claude', 'dsh')
             AND relay_thread_id IS NULL
             AND relay_codex_remote IS NULL)
     )
@@ -1794,10 +1794,18 @@ CREATE INDEX agent_impersonation_messages_unacknowledged_delivery
 
 -- Every termination writer (including force/reaper) revokes in its own atomic
 -- status transaction. Restart uses 'restarting' and preserves the active lease.
+-- Protocol-v1 manifest admission closes with the lease, like every other end.
 CREATE OR REPLACE FUNCTION revoke_terminated_impersonation() RETURNS trigger AS $$
+DECLARE
+    ended_lease UUID;
 BEGIN
-    UPDATE agent_impersonations SET status='expired', ended_at=clock_timestamp()
-    WHERE agent_id=NEW.id AND status IN ('requested','accepted','active');
+    FOR ended_lease IN
+        UPDATE agent_impersonations SET status='expired', ended_at=clock_timestamp()
+        WHERE agent_id=NEW.id AND status IN ('requested','accepted','active')
+        RETURNING id
+    LOOP
+        PERFORM close_impersonation_event_manifest_admission(ended_lease);
+    END LOOP;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -2492,3 +2500,4 @@ INSERT INTO schema_migrations (name) VALUES ('20260923T205208_impersonation-even
 INSERT INTO schema_migrations (name) VALUES ('20260924T070003_hierarchy-worker-breaker');
 INSERT INTO schema_migrations (name) VALUES ('20260924T150840_impersonation-receipt-lock-door');
 INSERT INTO schema_migrations (name) VALUES ('20260924T193804_task-escalation-marker');
+INSERT INTO schema_migrations (name) VALUES ('20260926T135638_impersonation-dsh-relay');

@@ -73,7 +73,7 @@ def _emit_lifecycle_wait(waited: float, outcome: str, agents: tuple[int, ...]) -
     )
 
 
-def _prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> None:
+def prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> None:
     """Publish the hold and enqueue restarts.
 
     `driver` is the shepherding identity of an operator-side entry (task
@@ -319,7 +319,7 @@ def _reap_agents(
     return bool(marked)
 
 
-def _drain(holder: str, at: datetime, timeout: float, *, reap: bool = False) -> None:
+def drain(holder: str, at: datetime, timeout: float, *, reap: bool = False) -> None:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("drain timeout must be finite and positive")
     deadline = time.monotonic() + timeout
@@ -502,10 +502,10 @@ def pause_agents(
         or current.maintenance is None
         or current.maintenance.phase == "preparing"
     ):
-        _prepare(holder, at, driver=driver)
+        prepare(holder, at, driver=driver)
     hold = _hold(holder, at)
     if hold.phase in ("preparing", "draining", "drained"):
-        _drain(holder, at, timeout, reap=reap)
+        drain(holder, at, timeout, reap=reap)
 
 
 def resume_agents() -> None:

@@ -150,7 +150,7 @@ def bound_checkout(home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     def port_free(_port: int) -> bool:
         return True
 
-    monkeypatch.setattr(cluster, "_port_free", port_free)
+    monkeypatch.setattr(cluster, "port_free", port_free)
     prepare_identity(
         IdentityInput(home, cluster.registry_path(), checkout, True, frozenset({"gateway"}), {})
     )

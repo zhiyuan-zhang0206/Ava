@@ -237,8 +237,8 @@ def test_quiescing_rechecks_predecessor_after_readonly_preflights_before_any_dis
 
     monkeypatch.setattr(transition, "preflight", lambda: None)
     monkeypatch.setattr(root_service, "preflight", preflight)
-    monkeypatch.setattr(agent_pause, "_prepare", effect("prepare"))
-    monkeypatch.setattr(agent_pause, "_drain", effect("drain"))
+    monkeypatch.setattr(agent_pause, "prepare", effect("prepare"))
+    monkeypatch.setattr(agent_pause, "drain", effect("drain"))
     monkeypatch.setattr(transition, "stop", stop)
     message = "predecessor is not the selected" if changed else "positive control reached stop"
     with (
@@ -263,7 +263,7 @@ def test_resuming_reobserves_selected_root_before_admission_or_completion(
     pause_status: str,
     healthy: bool,
 ) -> None:
-    from cli.commands import _maintenance
+    from cli.commands import maintenance as maintenance_commands
     from cli.release_transition import root_service
     from shared import maintenance, pause_owner, start_serving
     from shared.runtime_release import VerifiedRelease
@@ -304,7 +304,7 @@ def test_resuming_reobserves_selected_root_before_admission_or_completion(
     monkeypatch.setattr(root_service, "observe", observe)
     monkeypatch.setattr(pause_owner, "read", read_pause)
     monkeypatch.setattr(maintenance, "require_operation", require_holder)
-    monkeypatch.setattr(_maintenance, "_resume", resume)
+    monkeypatch.setattr(maintenance_commands, "resume", resume)
     # Deliberately leave a stale marker: it cannot substitute for observation.
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     with exclusive(request.path) as journal:

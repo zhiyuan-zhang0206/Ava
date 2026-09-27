@@ -12,8 +12,8 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from cli.commands import _pitr_activation as activation
 from cli.commands import _pitr_activation_config as config
+from cli.commands import pitr_activation as activation
 from services.pitr.activation_state import ActivationRecord, load_record, record_path, write_record
 from shared.config import settings
 from tests.cli.test_pitr_activation import _env_apply_fixture
@@ -213,9 +213,9 @@ def test_real_pg_explicit_rollback_continues_after_unjournaled_apply(
     durable = load_record(home)
     assert durable is not None and durable.pre_activation_pg_settings is not None
     monkeypatch.setattr(
-        activation, "_read_pg_state", lambda: dict(record.pre_activation_pg_settings or {})
+        activation, "read_pg_state", lambda: dict(record.pre_activation_pg_settings or {})
     )
-    result = activation._rollback_record(home, durable)
+    result = activation.rollback_record(home, durable)
     assert result.phase == "rollback_restart_pending"
     assert result.rollback_setting_intent is None
     assert config._persistent_archive_settings(home) == record.pre_activation_pg_auto_conf

@@ -28,10 +28,10 @@ import pytest
 from dotenv import dotenv_values
 
 from cli import start_intent
-from cli.commands import _cluster_instance as ci
 from cli.commands import _data_plane as data_plane
-from cli.commands import _pgbouncer as pooler
-from cli.commands._start_generation import _write_generation
+from cli.commands import cluster_instance as ci
+from cli.commands import pgbouncer as pooler
+from cli.commands.start_generation import _write_generation
 from scripts import cutover_db_authority as cutover
 from shared import bootstrap, config, dotenv_boot
 from shared.cluster import authority
@@ -540,7 +540,7 @@ def _assert_redis_admin_rotated(born: Born, old_admin: str) -> str:
     assert new_admin and new_admin != old_admin
     assert not cutover._authenticates(redis_port, old_admin)
     assert cutover._authenticates(redis_port, new_admin)
-    assert f'requirepass "{new_admin}"' in (ci._redis_data_dir() / "redis.conf").read_text()
+    assert f'requirepass "{new_admin}"' in (ci.redis_data_dir() / "redis.conf").read_text()
     assert not (born.home / "db-authority" / "redis-admin.pending").exists()
     return new_admin
 

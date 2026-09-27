@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._converge as cv
 import cli.commands._converge_brew_pin as cbp
+import cli.commands.converge as cv
 from shared import brew_pin
 
 EXPECTED_PINNED_FORMULAE = frozenset(

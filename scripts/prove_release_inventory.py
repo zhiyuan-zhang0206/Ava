@@ -21,7 +21,7 @@ from uuid import uuid4
 import psutil
 import psycopg
 
-from cli.commands import _release_inventory as inventory
+from cli.commands import release_inventory as inventory
 from shared.managed_writer_observation import (
     ExpectedUnitWriters,
     ObservationChallenge,

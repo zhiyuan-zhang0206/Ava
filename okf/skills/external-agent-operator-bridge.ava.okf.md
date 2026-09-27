@@ -75,4 +75,4 @@ fleet-wide runtime source again.
 
 - [[okf/skills/project-local.ava.okf.md]] — the normal visibility path for the repo skill family
 - [[okf/skills/load-directory-sync.ava.okf.md]] — Ava's distinct runtime load-directory contract
-- `cli/commands/_converge.py` — prod/default-home and worktree gate
+- `cli/commands/converge.py` — prod/default-home and worktree gate

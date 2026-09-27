@@ -28,12 +28,12 @@ from shared.config import settings
 def fake_config(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point ava_home() to tmpdir, drop mcp.json in it, do not touch user's real ~/.ava/mcp.json.
 
-    Patches _builtin_mcp_paths to list so tests that expect empty-or-known
+    Patches builtin_mcp_paths to list so tests that expect empty-or-known
     configs are not surprised by the repo's mcps/chrome/.mcp.json built-in.
     """
-    import ava._mcp_config as _cfg
+    import ava.mcp_config as _cfg
 
-    monkeypatch.setattr(_cfg, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(_cfg, "builtin_mcp_paths", list)
     return unit_home / "mcp.json"
 
 
@@ -562,7 +562,7 @@ def test_read_cache_fills_defaults_for_missing_fields(fake_config: Path, tmp_pat
 
 
 def test_daemon_socket_path_none_when_identity_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ava._boot, "_agent_id", None)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", None)
     assert mcps_mod._daemon_socket_path() is None
 
 
@@ -1347,7 +1347,7 @@ def test_unknown_tool_keeps_kwargs_signature(mock_session: MagicMock) -> None:
 def test_help_renderer_shows_real_params_for_mcp_tool(mock_session: MagicMock) -> None:
     """ava.help's signature renderer (_format_signature) displays real parameter names for MCP tools,
     no longer (**kwargs: Any)."""
-    from ava import _format_signature
+    from ava.sdk_surface.help import _format_signature
 
     mock_session.list_tools.return_value = MagicMock(
         tools=[

@@ -201,7 +201,8 @@ def test_start_observe_and_steady_state_dispatch_by_recorded_kind(
 def test_stop_authenticates_the_helper_before_and_proves_its_stop_intent_after(
     harness: Harness, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
-    from cli.commands import _maintenance, _root_driver
+    from cli.commands import maintenance as maintenance_commands
+    from cli.commands import root_driver
     from shared import maintenance
 
     transition = _transition(harness, monkeypatch)
@@ -211,8 +212,10 @@ def test_stop_authenticates_the_helper_before_and_proves_its_stop_intent_after(
     )
     events: list[str] = []
     monkeypatch.setattr(root_macos, "verified_helper", lambda _op: events.append("authenticate"))
-    monkeypatch.setattr(_maintenance, "_stop", lambda *_args, **_kwargs: events.append("stop"))
-    monkeypatch.setattr(_root_driver, "_require_root_absent", lambda: events.append("absent"))
+    monkeypatch.setattr(
+        maintenance_commands, "stop", lambda *_args, **_kwargs: events.append("stop")
+    )
+    monkeypatch.setattr(root_driver, "require_root_absent", lambda: events.append("absent"))
     monkeypatch.setattr(root_macos, "require_stopped", lambda _op: events.append("stop-intent"))
     operation = journal.read_operation(harness.path).model_copy(update={"launch": {"kind": kind}})
     transition.stop(operation)
@@ -278,7 +281,7 @@ def test_macos_observation_has_no_boot_unit_but_must_run_on_macos(
     from shared import os_boot_unit
 
     operation = _darwin_operation(harness)
-    monkeypatch.setattr(os_boot_unit, "_manager_properties", lambda _home: pytest.fail("systemd"))
+    monkeypatch.setattr(os_boot_unit, "manager_properties", lambda _home: pytest.fail("systemd"))
     monkeypatch.setattr(stage, "sys", SimpleNamespace(platform="darwin"))
     stage._require_root_owned(operation, Path(operation.request.home))
     monkeypatch.setattr(stage, "sys", SimpleNamespace(platform="linux"))

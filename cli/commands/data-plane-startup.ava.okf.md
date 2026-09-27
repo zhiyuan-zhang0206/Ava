@@ -14,7 +14,7 @@ PgBouncer and Redis before any application service.
 
 ## Identity
 
-`_cluster_instance` takes separate URL identities: the Postgres database/owner
+`cluster_instance` takes separate URL identities: the Postgres database/owner
 comes from `db_identity()` (the URL's database), the Redis ACL user from
 `redis_identity()`. First-start identity persists the Redis credentials before
 effects, and the identity owner writes each URL before storage comes up; no

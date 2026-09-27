@@ -27,9 +27,9 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from cli.commands import _cluster_instance as ci
 from cli.commands import _data_plane as data_plane
-from cli.commands import _pgbouncer as pooler
+from cli.commands import cluster_instance as ci
+from cli.commands import pgbouncer as pooler
 from cli.commands.migrations import cmd_migrations_apply
 from shared import cluster
 from shared.cluster import authority, ownership
@@ -278,7 +278,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(born: Born) -
     name, password = born.login("gateway")
     with psycopg.connect(born.dsn("gateway"), prepare_threshold=None) as conn:
         conn.execute("SELECT 1")
-    owner_before = ownership.pooler(pooler._ini_path(), pooler._pidfile_path())
+    owner_before = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     assert owner_before is not None
     admin = authority.read_pooler_admin(born.home)
     userlist = authority.render_userlist(born.home, authority.active_generation(born.home))
@@ -296,15 +296,15 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(born: Born) -
         admin_password=admin.password,
     )
     assert rc == 0
-    owner_after = ownership.pooler(pooler._ini_path(), pooler._pidfile_path())
+    owner_after = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     assert owner_after is not None and owner_after.pid != owner_before.pid
     _refused(host="127.0.0.1", port=born.pooler_port, user=name, password=password, dbname="ava")
 
 
 def test_unchanged_userlist_reloads_without_restart(born: Born) -> None:
-    before = ownership.pooler(pooler._ini_path(), pooler._pidfile_path())
+    before = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     data_plane.complete_gateway_data_plane()
-    after = ownership.pooler(pooler._ini_path(), pooler._pidfile_path())
+    after = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     assert before is not None and after is not None and before.pid == after.pid
 
 
@@ -371,7 +371,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
 def test_launched_services_receive_their_class_login_only(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands._root_driver import _root_child_env, _service_extra_env
+    from cli.commands.root_driver import _service_extra_env, root_child_env
     from ops.service_spec import ServiceSpec
 
     # The launcher's settings-free serve-gateway read (a born single box).
@@ -390,7 +390,7 @@ def test_launched_services_receive_their_class_login_only(
     assert _service_extra_env(runner)["AVA_DB_URL"] == born.dsn("runner")
     assert _service_extra_env(runner)[authority.GENERATION_ENV] == "0"
     assert "AVA_DB_URL" not in _service_extra_env(frontend)
-    root = _root_child_env()
+    root = root_child_env()
     assert "AVA_DB_URL" not in root and authority.GENERATION_ENV not in root
 
 

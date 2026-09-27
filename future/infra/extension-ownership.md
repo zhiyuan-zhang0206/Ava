@@ -171,7 +171,7 @@ matcher. Candidate initial set:
   a TCC-granted helper): modeled as a capability, never as an install
 
 A machine's capability set = **probed** (os/arch/display/unix-socket/docker are
-computed at `ava start`, the way `ava/_mcp_config.py` probes `display` today) ∪
+computed at `ava start`, the way `ava/mcp_config.py` probes `display` today) ∪
 **declared** (`login-session:*` and anything unprobeable, set by an operator
 verb and persisted beside the machine's identity files). `register_self`
 publishes the union to a `machine_capabilities` column/table beside
@@ -185,7 +185,7 @@ currently mixes:
 - **host requirements** (`display: required`, `unixSocket: required`, os/arch
   constraints, `login-session:<app>`) — matched against the machine capability
   set by the one matcher. The MCP per-entry `requires` check
-  (`ava/_mcp_config.py`) becomes a consumer of the same vocabulary and matcher.
+  (`ava/mcp_config.py`) becomes a consumer of the same vocabulary and matcher.
 - **resource access declarations** (`db: none|ro|rw`, `network`, `shell`) —
   these are context-model gates on what the extension may *touch*, not on
   where it can run; they stay in S5's context model unchanged.
@@ -254,7 +254,7 @@ this cluster's Postgres up as step 2 and applies migrations as step 2.5, so a
 `CONVERGE_STEPS` entry would read the registry before the database is up on a
 single box, and before the `extensions` table exists on the rollout that creates
 it (this doc originally described it as a step; #201 shipped it that way and the
-correction is `cli/commands/_converge.py:materialize_cluster_extensions`, called
+correction is `cli/commands/converge.py:materialize_cluster_extensions`, called
 from `ava start` after the schema-current check and from the end of standalone
 `ava converge`). The materializer itself pulls the enabled rows for this machine,
 lands missing/stale trees from blobs (verified against `content_hash`), and

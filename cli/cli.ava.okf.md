@@ -95,7 +95,7 @@ the rest of the `_`-prefixed steps are enumerated in
 
 - `cli/main.py:main()` — argparse entrypoint; `cli/parsers/` — the settings-free command tree.
 - `cli/start_intent.py:run_start()` — first-start inputs and full home lifecycle lock; `cli/start_identity.py` — durable initialization journal.
-- `cli/commands/cluster_lifecycle.py` — `ls/down/destroy` (`--path` addressed), exact cleanup before registry release; `start.py` / `status.py` / `_cluster_instance.py` — runtime operations.
+- `cli/commands/cluster_lifecycle.py` — `ls/down/destroy` (`--path` addressed), exact cleanup before registry release; `start.py` / `status.py` / `cluster_instance.py` — runtime operations.
 
 ## Notes
 

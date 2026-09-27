@@ -19,7 +19,7 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-from cli.commands import _pgbouncer as pgb
+from cli.commands import pgbouncer as pgb
 from shared.config import settings
 
 _SECRET = "pgbouncerstopisolationtestsecret"  # noqa: S105 — test fixture, not a real credential

@@ -213,7 +213,7 @@ def test_profile_survives_bare_start_without_controller_environment(
     def port_free(_port: int) -> bool:
         return True
 
-    monkeypatch.setattr(cluster, "_port_free", port_free)
+    monkeypatch.setattr(cluster, "port_free", port_free)
 
     class PreparedError(Exception):
         pass

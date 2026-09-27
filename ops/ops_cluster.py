@@ -367,7 +367,7 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]
     from ava import skills
     from shared.packages.skills.skill_names import match_key
 
-    loaded = skills._names()
+    loaded = skills.names()
     by_ident = {match_key(skills.identifier(skill)): skill for skill in loaded}
     by_name = {match_key(skill["name"]): skill for skill in loaded}
     selected_targets = {
@@ -392,8 +392,8 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     result also carries this runner's enabled MCP names as phase-2 groundwork.
     """
     from ava import skills
-    from ava._commands import discover_commands
-    from ava._mcp_config import load_mcp_config
+    from ava.composer_commands import discover_commands
+    from ava.mcp_config import load_mcp_config
     from shared.mcp_enabled import read_enabled
 
     cwd, wanted = _agent_skill_view_inputs(pool, agent_id)

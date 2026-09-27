@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _root_driver
+from cli.commands import root_driver
 from ops.service_spec import _AGENT_RUNNER, ServiceSpec
 from services.ava_root.manifest import load_manifests
 from services.ava_root_glue.manifests import generate
@@ -41,8 +41,8 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
 
     monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
-    monkeypatch.setattr(_root_driver, "runner_db_url_projection", _fake_projection)
-    environments = {spec.session: _root_driver._service_extra_env(spec) for spec in (agent, ops)}
+    monkeypatch.setattr(root_driver, "runner_db_url_projection", _fake_projection)
+    environments = {spec.session: root_driver._service_extra_env(spec) for spec in (agent, ops)}
     path = generate(
         tmp_path / "manifest.json",
         capabilities=["agent-runner"],

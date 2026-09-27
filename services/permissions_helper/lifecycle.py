@@ -671,9 +671,9 @@ def _domain() -> str:
 
 
 def _is_loaded() -> bool:
-    from services.permissions_helper.launchd_job import _retirement_query
+    from services.permissions_helper.launchd_job import retirement_query
 
-    return _retirement_query(f"{_domain()}/{_label()}", time.monotonic() + 30.0) is not None
+    return retirement_query(f"{_domain()}/{_label()}", time.monotonic() + 30.0) is not None
 
 
 def _stale_plists() -> list[Path]:

@@ -19,14 +19,14 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
-import ava._boot as boot
+from ava import agent_identity
 from gateway.schedule_runner import _script_filename, run
 
 
 @pytest.fixture(autouse=True)
 def _restore_actor(monkeypatch: pytest.MonkeyPatch) -> None:
     # run() calls establish_actor + sets AVA_SCHEDULE_ID; keep both out of other tests.
-    monkeypatch.setattr(boot, "_actor", boot._actor)
+    monkeypatch.setattr(agent_identity, "_actor", agent_identity._actor)
     monkeypatch.delenv("AVA_SCHEDULE_ID", raising=False)
 
 
@@ -64,7 +64,7 @@ def test_run_materializes_and_executes_and_binds_actor(
     marker = unit_home / "ran.txt"
     # The script records the actor it runs under — proving establish_actor fired
     # before the script executed.
-    script = f"import ava._boot, pathlib\npathlib.Path({str(marker)!r}).write_text(ava._boot.require_actor())\n"
+    script = f"import ava.agent_identity, pathlib\npathlib.Path({str(marker)!r}).write_text(ava.agent_identity.require_actor())\n"
     sid = _insert_schedule(db_conn, script=script)
 
     rc = run(sid)
@@ -282,7 +282,7 @@ def test_run_loads_plugins_for_py_script(
     import ava
 
     calls: list[int] = []
-    monkeypatch.setattr(ava, "_ensure_plugins_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: calls.append(1))
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
     assert run(sid) == 0
@@ -321,7 +321,7 @@ def test_run_skips_plugin_load_for_non_py_command(
     import ava
 
     calls: list[int] = []
-    monkeypatch.setattr(ava, "_ensure_plugins_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", lambda: calls.append(1))
     sid = _insert_schedule(db_conn, script="exit 0\n", command="bash run.sh")
 
     assert run(sid) == 0

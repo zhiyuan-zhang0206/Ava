@@ -59,6 +59,11 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
             from ops.cluster_pause import unpause_local_cluster
 
             unpause_local_cluster()
+            # start()'s status snapshot was taken under the hold, so it read paused.
+            print(
+                "\n→ maintenance hold released: admission reopened, the cluster is serving "
+                "(the status above predates the release)"
+            )
         return result
 
     @wraps(start)

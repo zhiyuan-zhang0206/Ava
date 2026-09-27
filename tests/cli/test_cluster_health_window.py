@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from cli.commands import _cluster_health
+from cli.commands import cluster_health
 from tests.cli.test_cluster_health import (
     _all_checks_pass as _all_checks_pass,
 )
@@ -52,20 +52,20 @@ def test_repeated_observations_never_mutate_release_state(
 
     monkeypatch.setattr(subprocess, "run", forbidden)
     if health == "gateway":
-        monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-        monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: False)
+        monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+        monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
     elif health == "population":
-        monkeypatch.setattr(_cluster_health, "_agent_population", no_agents)
-        monkeypatch.setattr(_cluster_health, "_agent_population_failure_class", population_failure)
+        monkeypatch.setattr(cluster_health, "_agent_population", no_agents)
+        monkeypatch.setattr(cluster_health, "_agent_population_failure_class", population_failure)
     elif health == "service":
-        monkeypatch.setattr(_cluster_health, "_service_probes", lambda: ["frontend (unknown)"])
+        monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["frontend (unknown)"])
     elif health == "disk":
-        monkeypatch.setattr(_cluster_health, "_disk_usage_failure", lambda: "disk full")
+        monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: "disk full")
     elif health == "provider":
-        monkeypatch.setattr(_cluster_health, "run_provider_guard", provider_failure)
+        monkeypatch.setattr(cluster_health, "run_provider_guard", provider_failure)
 
     for _round in range(5):
-        assert _cluster_health.run_health_probe() == (0 if health == "healthy" else 1)
+        assert cluster_health.run_health_probe() == (0 if health == "healthy" else 1)
     assert {name: (_home / name).read_text() for name in legacy_state} == legacy_state
 
 
@@ -88,7 +88,7 @@ def test_parser_rejects_removed_release_policy_flags(arguments: list[str]) -> No
 def test_health_probe_dispatch_preserves_observation_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import cli.commands._cluster_health as _cluster_health_commands
+    import cli.commands.cluster_health as _cluster_health_commands
     from cli.main import _build_parser
 
     received: list[dict[str, object]] = []

@@ -118,7 +118,7 @@ def _custody(home: Path) -> DataStop:
 def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_drain(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import _maintenance_data_plane, _root_driver
+    from cli.commands import maintenance_data_plane, root_driver
     from shared import maintenance
 
     receipt = _custody(Path(pitr_request.home))
@@ -137,21 +137,19 @@ def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_dra
         "require_operation",
         _constant(SimpleNamespace(maintenance=SimpleNamespace(phase="stopped"))),
     )
-    monkeypatch.setattr(
-        _root_driver, "_require_root_absent", lambda: observed.append("root absent")
-    )
+    monkeypatch.setattr(root_driver, "require_root_absent", lambda: observed.append("root absent"))
 
     def close_custody(value: DataStop, _timeout: float) -> None:
         observed.append(value)
 
-    monkeypatch.setattr(_maintenance_data_plane, "stop_captured", close_custody)
+    monkeypatch.setattr(maintenance_data_plane, "stop_captured", close_custody)
 
     def no_database(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("offline continuation attempted database access")
 
     monkeypatch.setattr("shared.db.connect", no_database)
     monkeypatch.setattr("shared.db.pool", no_database)
-    monkeypatch.setattr("ops.agent_pause._drain", no_database)
+    monkeypatch.setattr("ops.agent_pause.drain", no_database)
     driver.stop_data(operation)
     assert observed == ["root absent", receipt]
 
@@ -282,7 +280,8 @@ def test_failed_online_lease_keeps_business_diagnostics_and_operation_authority(
 def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import _maintenance, _maintenance_data_plane, _root_driver
+    from cli.commands import maintenance as maintenance_commands
+    from cli.commands import maintenance_data_plane, root_driver
     from shared import maintenance
 
     journal.create(pitr_request)
@@ -301,9 +300,9 @@ def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
         "require_operation",
         _constant(SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))),
     )
-    monkeypatch.setattr(_maintenance, "_stop", _constant(None))
-    monkeypatch.setattr(_root_driver, "_require_root_absent", _constant(None))
-    monkeypatch.setattr(_maintenance_data_plane, "capture_custody", _constant(receipt))
+    monkeypatch.setattr(maintenance_commands, "stop", _constant(None))
+    monkeypatch.setattr(root_driver, "require_root_absent", _constant(None))
+    monkeypatch.setattr(maintenance_data_plane, "capture_custody", _constant(receipt))
     with journal.exclusive(pitr_request.path) as handle:
         handle.advance("provisioning")
         handle.provisioned(_seal(pitr_request, "f" * 64))

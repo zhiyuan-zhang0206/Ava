@@ -115,7 +115,7 @@ checkout it belongs to**, not by the current directory. Production start converg
 symlinks its checkout's `ava` onto PATH at
 `~/.local/bin`, so a bare `ava` always means prod; dev work runs
 `.venv/bin/ava` inside the worktree. Host wiring + each plugin's `scaffold()`
-are applied by the source-start converge phase (`cli/commands/_converge.py`;
+are applied by the source-start converge phase (`cli/commands/converge.py`;
 standalone: `ava converge`). Retained-image startup verifies its captured home
 and prepared artifacts; it does not install packages, migrate or scaffold plugins.
 
@@ -230,7 +230,7 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 ## Python conventions (quick reference)
 
 - No `if TYPE_CHECKING:` (lint-enforced). Exceptions in `_TYPE_CHECKING_ALLOWED`.
-- Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline.
+- Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline. Locality: no `_`-private import from outside its owning package; single-owner decisions (Postgres dial → `shared/db_connections.py`) — both frozen in the same baseline.
 - No `print()` in framework code (use `shared.log.logger`).
 - No decorative emoji in core Python.
 - Import layering: `shared < ava < agent < gateway < cli`.

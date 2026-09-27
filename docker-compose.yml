@@ -1,6 +1,6 @@
 # The runtime data plane (pg/redis) is NO LONGER here — it runs natively on the
 # host, under the cluster's own $AVA_HOME (driven by pg_ctl / redis-server),
-# brought up by `ava start`. See `cli/commands/_cluster_instance.py`.
+# brought up by `ava start`. See `cli/commands/cluster_instance.py`.
 #
 # This file now holds only `postgres-test`: a dedicated, profile-gated PG for
 # `pytest` / eval runs on agent-runner machines whose `AVA_DB_URL` points at the

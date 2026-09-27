@@ -14,7 +14,11 @@ tags:
 Each agent allocates increasing integers starting at zero, through a database
 counter and allocation trigger, including when an older client inserts a row.
 The session `name` and free `executor_name` are separate from the CLI's observed
-process metadata (PID, name, executable, birth time and ancestors). `relay_provider`
+process metadata (PID, name, executable, birth time and ancestors). New CLI
+requests also record `invoked_python`, preserving the virtualenv path used to
+invoke the CLI; a request rejects a non-string or empty value. Renewal
+reminders use that path rather than assuming source is
+under the unit home; older sessions retain the machine-home fallback. `relay_provider`
 selects transport; no name or process observation proves a provider's identity.
 The former UUID remains a private compatibility reference for existing leases,
 checkpoint receipts and plugin journals. Public commands and file paths
@@ -32,7 +36,10 @@ native return, renewal, and operator closure.
 `shared/agents/impersonation/relay.py` owns relay credential provisioning and
 re-provisioning, relay reads, heartbeats, failure stamps, and aborting a lease
 when a component dies. The package door exposes this surface to callers through
-`shared.agents.impersonation`.
+`shared.agents.impersonation`. Providers: `codex` relays are spawned by the
+accepting runtime into the owning app server; `claude` and `dsh` relays run
+inside the controller session (`SESSION_RELAY_PROVIDERS`), so the request mints
+their credential and the activation gate only waits for a heartbeat.
 
 ## Bounded delivery
 
@@ -62,7 +69,8 @@ while active. Idempotent chat retries produce one history entry. Inbox reads lea
 messages pending; explicit ACK records processing without removing their bodies.
 `ava impersonate say` commits an outbound message with
 a stable retry key, then publishes `impersonation_changed`. Logical identity
-remains the Ava agent; `impersonation` metadata names the session and executor.
+remains the Ava agent; `impersonation` metadata names the session and executor. Process facts
+stay on the session, not on each message.
 Incoming user messages remain incoming messages.
 
 The existing timeline endpoint hydrates the checkpoint's session anchor with
@@ -76,7 +84,8 @@ the impersonation metadata stays on the timeline item.
 
 One session produces `<workspace>/impersonation/<session_id>.json` containing
 session/process metadata, all input/output bodies and inbound ACK state,
-lifecycle facts, original consumed SDK/API events and statistics. Normal release
+lifecycle facts, original consumed SDK/API events (in call order, by their own
+timestamps, not replay order) and statistics. Normal release
 requires the impersonator's own summary. Expiry/rejection states their reason and
 absence of an external summary. The first new system note contains that summary
 and the JSON path, before ordinary queued input; it is the resumed input — while

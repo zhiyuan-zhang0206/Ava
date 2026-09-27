@@ -29,11 +29,11 @@ from __future__ import annotations
 import pytest
 
 import cli.commands._probe as _probe_commands
-import cli.commands._root_driver as _root_driver_commands
+import cli.commands.root_driver as _root_driver_commands
 import cli.commands.start as _start_commands
 from cli.commands import start as start_mod
 from cli.commands._probe import ReadinessWait
-from cli.commands._root_driver import LaunchOutcome
+from cli.commands.root_driver import LaunchOutcome
 from ops.service_spec import _AGENT_RUNNER, _GATEWAY, ServiceSpec
 from shared.daemon_health import DaemonProbe
 from tests.cli.test_start_readiness_gate import (
@@ -95,6 +95,7 @@ def _verdicts(monkeypatch: pytest.MonkeyPatch, by_session: dict[str, DaemonProbe
 def test_a_foreign_units_daemon_on_a_health_port_is_a_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+
     restarter = _healthz_spec("restarter", 8102)
     _verdicts(monkeypatch, {"restarter": DaemonProbe.port_taken(_FOREIGN)})
 
@@ -108,6 +109,7 @@ def test_our_own_running_daemon_is_not_a_conflict(monkeypatch: pytest.MonkeyPatc
     """The idempotent case. `ava start` over a healthy host re-probes every port
     it is about to use and finds its own daemons — a start that refused here
     would make restart impossible on exactly the hosts that are working."""
+
     restarter = _healthz_spec("restarter", 8102)
     _verdicts(monkeypatch, {"restarter": DaemonProbe.up("pid 4242")})
 
@@ -119,6 +121,7 @@ def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) 
     (`probe_daemon` reaches the pid arm only after name and home matched). Both
     are cleared by the launch that follows — the kill-session a respawn does
     first is exactly the fix — so neither may stop the start."""
+
     restarter = _healthz_spec("restarter", 8102)
     ops = _healthz_spec("ops", 8106)
     _verdicts(
@@ -141,6 +144,7 @@ def test_only_the_ports_a_health_port_base_can_move_are_gated(
     refused would leave a headed box unable to come up at all. Neither is a port
     `--health-port-base` moves either, so the remedy this gate prints would be
     wrong advice."""
+
     gateway = _other_endpoint_spec("gateway", "http://localhost:8000/api/health")
     browser = _other_endpoint_spec("browser", "http://localhost:9222/json/version")
     restarter = _healthz_spec("restarter", 8102)
@@ -162,6 +166,7 @@ def test_every_conflicting_port_is_reported_not_just_the_first(
     """An operator moving a unit needs the whole overlap in one pass: reporting
     only the first port turns one fix into a sequence of restarts, each revealing
     the next collision."""
+
     specs = (_healthz_spec("restarter", 8102), _healthz_spec("ops", 8106))
     _verdicts(
         monkeypatch,
@@ -186,7 +191,7 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequ
     monkeypatch.setattr(start_mod, "_refuse_occupied_health_ports", _REAL_GATE)
     monkeypatch.setattr(
         _root_driver_commands,
-        "_wait_for_service_tree",
+        "wait_for_service_tree",
         lambda *_a, **_kw: ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType] — variadic readiness test double
     )
 
@@ -199,7 +204,7 @@ def _roster(monkeypatch: pytest.MonkeyPatch, specs: tuple[ServiceSpec, ...]) -> 
     )
     monkeypatch.setattr(
         _root_driver_commands,
-        "_start_roster",
+        "start_roster",
         lambda _roles, skip: tuple(s for s in specs if s.session not in skip),  # pyright: ignore[reportUnknownArgumentType] — roster test double
     )
 

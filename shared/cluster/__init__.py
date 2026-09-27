@@ -100,10 +100,10 @@ from shared.cluster.ports import (
     ClusterPorts as ClusterPorts,
 )
 from shared.cluster.ports import (
-    _port_free as _port_free,
+    allocate_ports as allocate_ports,
 )
 from shared.cluster.ports import (
-    allocate_ports as allocate_ports,
+    port_free as port_free,
 )
 from shared.cluster.ports import (
     record_app_port as record_app_port,

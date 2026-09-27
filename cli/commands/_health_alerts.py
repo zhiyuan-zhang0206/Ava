@@ -1,6 +1,6 @@
 """Health-probe outage episodes, alert grading, and owner notifications.
 
-Split out of ``cli.commands._cluster_health`` (2026-08-07, Task #1025) to keep
+Split out of ``cli.commands.cluster_health`` (2026-08-07, Task #1025) to keep
 that module under the per-file 800-line ceiling once the non-prod-checkout
 guard (PR #1821) and R2-D's deploy-window changes (PR #1824) both landed.
 
@@ -8,7 +8,7 @@ Owns the time-graded owner alert, the IM bridge /send RPC with the alerts
 ingest, and the local fallback ingest path. One state file
 tracks the true start and last-fired severity of each outage episode so normal
 recovery stays quiet and WARNING can escalate in place to ERROR.
-The probe runner itself (`run_health_probe`) stays in ``_cluster_health`` and
+The probe runner itself (`run_health_probe`) stays in ``cluster_health`` and
 imports the pieces it needs from here.
 """
 

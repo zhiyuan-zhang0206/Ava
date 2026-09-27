@@ -21,8 +21,8 @@ import psutil
 import psycopg
 import pytest
 
-from cli.commands import _maintenance_data_plane as maintenance
-from cli.commands import _pgbouncer as pooler
+from cli.commands import maintenance_data_plane as maintenance
+from cli.commands import pgbouncer as pooler
 from cli.commands._pooler_stop import OwnedPooler, _native_birth
 from shared.cluster import ownership
 from shared.config import settings

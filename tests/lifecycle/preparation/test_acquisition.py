@@ -19,7 +19,7 @@ from cli.release_prepare.acquisition_dependencies import file_input, tree_input
 from cli.release_prepare.acquisition_models import Acquisition, AcquisitionReceipt, FrontendTools
 from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.models import TreeInput
-from shared.runtime_prepare import _python_input_inventory, inventory_digest
+from shared.runtime_prepare import inventory_digest, python_input_inventory
 from shared.runtime_release import ReleaseRejectedError
 
 # ruff: noqa: S603 -- real Git and isolated import checks use only generated fixture inputs.
@@ -150,7 +150,7 @@ def tools(monkeypatch: pytest.MonkeyPatch) -> None:
         executable = root / "bin/python3"
         executable.write_bytes(b"managed interpreter fixture")
         return (
-            TreeInput(root=root, digest=inventory_digest(_python_input_inventory(root))),
+            TreeInput(root=root, digest=inventory_digest(python_input_inventory(root))),
             executable,
             "3.12.12",
         )

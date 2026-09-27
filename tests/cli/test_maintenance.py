@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from cli.commands import _maintenance as command
+from cli.commands import maintenance as command
 from cli.commands._maintenance_probe import HostIdentity
 from ops.agent_pause_probe import host_identity_or_none as real_host_identity_or_none
 from shared import hold_driver, maintenance, pause_owner, start_serving
@@ -52,12 +52,12 @@ def test_stop_failure_retains_generation_and_retry_is_explicit(
 
     monkeypatch.setattr(command, "stop_services", timeout)
     with pytest.raises(TimeoutError, match="still alive"):
-        command._stop("local", WHEN, 2, gateway_last=False)
+        command.stop("local", WHEN, 2, gateway_last=False)
     assert command._hold("local", WHEN).phase == "stopping"
     with pytest.raises(RuntimeError, match="cannot release"):
         maintenance.require_start_allowed()
     monkeypatch.setattr(command, "stop_services", MagicMock(return_value=[]))
-    command._stop("local", WHEN, 2, gateway_last=False)
+    command.stop("local", WHEN, 2, gateway_last=False)
     assert command._hold("local", WHEN).phase == "stopped"
 
 
@@ -67,7 +67,7 @@ def test_gateway_last_is_required_before_any_stop(monkeypatch: pytest.MonkeyPatc
     stop = MagicMock()
     monkeypatch.setattr(command, "stop_services", stop)
     with pytest.raises(RuntimeError, match="gateway-last"):
-        command._stop("local", WHEN, 2, gateway_last=False)
+        command.stop("local", WHEN, 2, gateway_last=False)
     stop.assert_not_called()
     assert command._hold("local", WHEN).phase == "drained"
 
@@ -99,7 +99,7 @@ def test_start_keeps_hold_until_explicit_resume(
     assert command._hold("local", WHEN).phase == "ready"
     with pytest.raises(RuntimeError, match="cannot release"):
         maintenance.require_start_allowed()
-    command._resume("local", WHEN, cancel=False)
+    command.resume("local", WHEN, cancel=False)
     assert not maintenance.held()
     assert pause_owner.read().status == "resumed"
 
@@ -112,7 +112,7 @@ def test_failed_dependency_resume_never_releases_hold(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(command, "connect", unavailable)
     with pytest.raises(ConnectionError):
-        command._resume("local", WHEN, cancel=True)
+        command.resume("local", WHEN, cancel=True)
     assert command._hold("local", WHEN).phase == "preparing"
 
 
@@ -128,7 +128,7 @@ def test_resume_proceeds_with_absent_agent_host(
     monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
     monkeypatch.setattr("ops.agent_pause_probe.host_identity", _refused_probe)
 
-    command._resume("local", WHEN, cancel=True)
+    command.resume("local", WHEN, cancel=True)
 
     unpause.assert_called_once()
     assert "provably absent" in capsys.readouterr().err
@@ -148,7 +148,7 @@ def test_resume_still_refuses_an_unreadable_host_probe(
     monkeypatch.setattr("ops.agent_pause_probe.host_identity", _wedged)
 
     with pytest.raises(URLError):
-        command._resume("local", WHEN, cancel=True)
+        command.resume("local", WHEN, cancel=True)
     assert pause_owner.read().status == "paused"
 
 
@@ -159,7 +159,7 @@ def test_failed_start_remains_retryable_under_hold(monkeypatch: pytest.MonkeyPat
     assert command._hold("local", WHEN).phase == "starting"
 
     with pytest.raises(RuntimeError, match="requires maintenance start"):
-        command._resume("local", WHEN, cancel=False)
+        command.resume("local", WHEN, cancel=False)
 
 
 @pytest.mark.parametrize("value", ["stopping", "stopped", "starting", "ready"])
@@ -170,7 +170,7 @@ def test_cancel_cannot_bypass_stop_or_start_readiness(
     unpause = MagicMock()
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
     with pytest.raises(RuntimeError, match="cancel cannot bypass"):
-        command._resume("local", WHEN, cancel=True)
+        command.resume("local", WHEN, cancel=True)
     unpause.assert_not_called()
     assert command._hold("local", WHEN).phase == value
 
@@ -184,7 +184,7 @@ def test_cancel_can_abandon_drain_before_service_stop(
 
     unpause = MagicMock(side_effect=resume_agents)
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
-    command._resume("local", WHEN, cancel=True)
+    command.resume("local", WHEN, cancel=True)
     unpause.assert_called_once()
     assert not maintenance.held()
 
@@ -218,7 +218,7 @@ def test_keep_terminals_is_explicit_at_both_stop_entrypoints(
     from cli.parsers import build_parser
 
     action = MagicMock()
-    monkeypatch.setattr(command, "_stop" if verb == "stop" else "_stop_data", action)
+    monkeypatch.setattr(command, "stop" if verb == "stop" else "_stop_data", action)
     args = build_parser().parse_args(
         ["maintenance", verb, "--operation", "local", "--acquired-at", WHEN.isoformat()]
         + (["--keep-terminals"] if keep else [])
@@ -234,12 +234,12 @@ def test_keep_terminals_does_not_skip_drain_or_ops_checks(monkeypatch: pytest.Mo
     verify = MagicMock(side_effect=RuntimeError("drain incomplete"))
     monkeypatch.setattr(command.maintenance_cohort, "verify_drained", verify)
     with pytest.raises(RuntimeError, match="drain incomplete"):
-        command._stop("local", WHEN, 2, gateway_last=False, keep_terminals=True)
+        command.stop("local", WHEN, 2, gateway_last=False, keep_terminals=True)
     stop.assert_not_called()
     verify.side_effect = None
     monkeypatch.setattr(command, "ops_quiescent", MagicMock(side_effect=TimeoutError("busy ops")))
     with pytest.raises(TimeoutError, match="busy ops"):
-        command._stop("local", WHEN, 2, gateway_last=False, keep_terminals=True)
+        command.stop("local", WHEN, 2, gateway_last=False, keep_terminals=True)
     stop.assert_not_called()
     assert command._hold("local", WHEN).phase == "stopping"
 
@@ -364,7 +364,7 @@ def test_repair_partial_release_is_completed_by_cancel(monkeypatch: pytest.Monke
     # The repaired journal no longer blocks the ordinary cancel path.
     unpause = MagicMock()
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
-    command._resume("local", WHEN, cancel=True)
+    command.resume("local", WHEN, cancel=True)
     unpause.assert_called_once()
 
 
@@ -423,7 +423,7 @@ def test_stop_proceeds_with_absent_agent_host(
     stop = MagicMock(return_value=[])
     monkeypatch.setattr(command, "stop_services", stop)
 
-    command._stop("local", WHEN, 2, gateway_last=False)
+    command.stop("local", WHEN, 2, gateway_last=False)
 
     stop.assert_called_once()
     assert command._hold("local", WHEN).phase == "stopped"
@@ -448,7 +448,7 @@ def test_refused_health_listener_cannot_prove_host_quiescence(
 
     with pytest.raises(URLError):
         if verb == "stop":
-            command._stop("local", WHEN, 2, gateway_last=False)
+            command.stop("local", WHEN, 2, gateway_last=False)
         else:
             command._repair("local", WHEN, operator=None)
 
@@ -466,7 +466,7 @@ def test_stop_still_refuses_live_continuations(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(command, "stop_services", stop)
 
     with pytest.raises(RuntimeError, match="still has active continuations"):
-        command._stop("local", WHEN, 2, gateway_last=False)
+        command.stop("local", WHEN, 2, gateway_last=False)
 
     stop.assert_not_called()
 

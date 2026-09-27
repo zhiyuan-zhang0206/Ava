@@ -34,7 +34,7 @@ def _isolate_start_environment() -> Iterator[None]:
 def inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> identity.IdentityInput:
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    monkeypatch.setattr(cluster, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
+    monkeypatch.setattr(cluster, "port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     return identity.IdentityInput(
         tmp_path / "home",
         tmp_path / "registry.json",
@@ -583,7 +583,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, result: int
 ) -> None:
 
-    from cli.commands import _root_driver
+    from cli.commands import root_driver
 
     calls: list[str] = []
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -595,7 +595,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
         return result
 
     monkeypatch.setattr("cli.commands.start.cmd_start", runtime)
-    monkeypatch.setattr(_root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
+    monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
     assert start_intent.run_start(_args("--worktree")) == result
     assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
 
@@ -604,7 +604,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    from cli.commands import _root_driver
+    from cli.commands import root_driver
     from shared import start_serving
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -621,6 +621,6 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     def fail() -> None:
         raise RuntimeError("manager refused native custody")
 
-    monkeypatch.setattr(_root_driver, "complete_boot_start", fail)
+    monkeypatch.setattr(root_driver, "complete_boot_start", fail)
     assert start_intent.run_start(_args("--worktree")) == 1
     assert calls == ["cleared"]

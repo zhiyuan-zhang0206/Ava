@@ -17,7 +17,7 @@ from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.inputs import require_directory
 from cli.release_prepare.models import FileInput, TreeInput
 from cli.release_prepare.source_distributions import validate_distributions
-from shared.runtime_prepare import _python_input_inventory, inventory_digest, tree_inventory
+from shared.runtime_prepare import inventory_digest, python_input_inventory, tree_inventory
 from shared.runtime_release import ReleaseRejectedError, file_sha256
 
 
@@ -55,7 +55,7 @@ def managed_python(commands: Commands, source: Path) -> tuple[TreeInput, Path, s
     root = Path(facts[0]).resolve(strict=True)
     if facts[1] != version or not root.is_relative_to(commands.work / "python"):
         raise ReleaseRejectedError("acquired Python differs from the captured source pin")
-    bundle = TreeInput(root=root, digest=inventory_digest(_python_input_inventory(root)))
+    bundle = TreeInput(root=root, digest=inventory_digest(python_input_inventory(root)))
     return bundle, executable, version
 
 

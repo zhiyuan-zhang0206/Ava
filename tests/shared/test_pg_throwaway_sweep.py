@@ -78,7 +78,7 @@ def throwaway_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
     Deliberately NOT `tmp_path`: the Postgres socket path (`<dir>/.s.PGSQL.<port>`)
     is capped at 103 bytes and pytest's per-test dir is far too deep for a real
-    cluster to start beneath it — the same cap `_cluster_instance._pg_socket_dir`
+    cluster to start beneath it — the same cap `cluster_instance._pg_socket_dir`
     works around. A short `/tmp/ava-sweep-*` root leaves room. Scratch files that
     are not instance dirs still go in `tmp_path`.
 

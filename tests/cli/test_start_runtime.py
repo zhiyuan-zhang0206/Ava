@@ -17,7 +17,7 @@ from uuid import uuid4
 import pytest
 
 from cli import start_runtime
-from cli.commands import _root_driver, _start_generation
+from cli.commands import root_driver, start_generation
 from ops.service_spec import ServiceSpec
 from services.ava_root_glue import manifests
 from shared import runtime_interpreter
@@ -138,7 +138,7 @@ def test_release_root_and_services_use_captured_isolated_direct_argv(
 ) -> None:
     runtime = _admit(image)
     run = image.root.parent.parent / "run"
-    assert _root_driver._root_argv(run, run / "units.json", runtime)[:7] == [
+    assert root_driver._root_argv(run, run / "units.json", runtime)[:7] == [
         str(image.interpreter),
         "-I",
         "-B",
@@ -237,13 +237,13 @@ def test_release_generation_never_reads_git_and_binds_image_identity(
     def no_git(_repo: Path) -> str:
         raise AssertionError("sealed image must not call Git")
 
-    monkeypatch.setattr(_start_generation, "source_digest", no_git)
-    initial = _start_generation.launch_digest(
+    monkeypatch.setattr(start_generation, "source_digest", no_git)
+    initial = start_generation.launch_digest(
         runtime.code_root, {}, home=runtime.home, runtime=runtime
     )
     other = replace(runtime, release=replace(image, manifest_digest="f" * 64))
     assert (
-        _start_generation.launch_digest(runtime.code_root, {}, home=runtime.home, runtime=other)
+        start_generation.launch_digest(runtime.code_root, {}, home=runtime.home, runtime=other)
         != initial
     )
 
@@ -308,8 +308,8 @@ def test_release_cold_start_uses_same_storage_readiness_without_source_or_schema
 ) -> None:
     import importlib
 
-    import cli.commands._converge as _converge_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.converge as _converge_commands
     from cli.commands import _converge_extensions, _data_plane
 
     start = importlib.import_module("cli.commands.start")
@@ -395,6 +395,7 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
 ) -> None:
     from cli.commands import _repo
     from cli.release_transition import stage
+    from ops import spec as ops_spec
     from shared import machine
 
     home = image.root.parent.parent
@@ -431,9 +432,11 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
 
     monkeypatch.setattr(stage, "read_operation", operation)
     monkeypatch.setattr(machine, "machine_role", roles)
+    # The stage names the roster through ops.spec; root_driver builds it via _repo.
+    monkeypatch.setattr(ops_spec, "services_for_capabilities_annotated", annotated)
     monkeypatch.setattr(_repo, "_services_for_roles_annotated", annotated)
-    monkeypatch.setattr(_root_driver, "_root_child_env", environment)
-    monkeypatch.setattr(_root_driver, "_bring_up_root", forbidden)
+    monkeypatch.setattr(root_driver, "root_child_env", environment)
+    monkeypatch.setattr(root_driver, "_bring_up_root", forbidden)
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     if foreign_executable:
         with pytest.raises((ReleaseRejectedError, FileNotFoundError)):
@@ -451,6 +454,7 @@ def test_operation_observation_requires_every_selected_service_ready(
 ) -> None:
     from cli.commands import _repo
     from cli.release_transition import stage
+    from ops import spec as ops_spec
     from shared import machine, os_boot_unit
     from shared.machine import MachineRole
     from shared.native_process.ownership import OwnedProcess
@@ -511,12 +515,14 @@ def test_operation_observation_requires_every_selected_service_ready(
 
     monkeypatch.setattr(stage, "read_operation", operation)
     monkeypatch.setattr(machine, "machine_role", lambda: roles)
+    # The stage names the roster through ops.spec; root_driver builds it via _repo.
+    monkeypatch.setattr(ops_spec, "services_for_capabilities_annotated", annotated)
     monkeypatch.setattr(_repo, "_services_for_roles_annotated", annotated)
-    monkeypatch.setattr(_root_driver, "admit_live_start", admitted)
-    monkeypatch.setattr(_root_driver, "_wait_for_service_tree", readiness)
+    monkeypatch.setattr(root_driver, "admit_live_start", admitted)
+    monkeypatch.setattr(root_driver, "wait_for_service_tree", readiness)
     monkeypatch.setattr(client, "root_process", lambda: root)
-    monkeypatch.setattr(os_boot_unit, "_manager_properties", native_properties)
-    monkeypatch.setattr(os_boot_unit, "_process_cgroup", process_group)
+    monkeypatch.setattr(os_boot_unit, "manager_properties", native_properties)
+    monkeypatch.setattr(os_boot_unit, "process_cgroup", process_group)
     if failed is None:
         assert stage.observe_operation(home / "operation.json") == 0
     elif failed == "configuration":

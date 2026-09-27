@@ -17,7 +17,7 @@ import psutil
 import psycopg
 from psycopg import sql
 
-from services.pitr.base_manifest import CandidateManifest, _lsn
+from services.pitr.base_manifest import CandidateManifest, lsn
 from services.pitr.operation_custody import NativeProcess
 from services.pitr.restore_proof import (
     DrillResult,
@@ -447,7 +447,7 @@ class IsolatedPostgresRestoreExecutor:
                     row = cur.fetchone()
                     if row is not None and row[0] is False and row[1] is not None:
                         achieved = str(row[1])
-                        if _lsn(achieved) >= _lsn(candidate.end_lsn):
+                        if lsn(achieved) >= lsn(candidate.end_lsn):
                             return achieved
             except psycopg.Error as exc:
                 last_error = exc

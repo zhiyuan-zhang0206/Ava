@@ -23,10 +23,10 @@ from shared.runtime_prepare import (
     PluginInput,
     PrepareInputs,
     _copy_python,
-    _python_input_inventory,
     _verify_plugins,
     inventory_digest,
     prepare_release,
+    python_input_inventory,
     tree_inventory,
     verify_loaded_images,
 )
@@ -286,7 +286,7 @@ def prove_copy_race(
     directory_alias.symlink_to(inputs.python_tree / "bin", target_is_directory=True)
     try:
         try:
-            _python_input_inventory(inputs.python_tree)
+            python_input_inventory(inputs.python_tree)
         except ReleaseRejectedError as exc:
             if str(exc) != "Python input directory symlinks are unsupported":
                 raise AssertionError("directory link failed for the wrong reason") from exc

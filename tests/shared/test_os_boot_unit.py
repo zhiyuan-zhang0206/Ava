@@ -210,7 +210,7 @@ def _install_seams(
             installed["content"] = Path(argv[-2]).read_text()
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(os_boot_unit, "_privileged", fake_privileged)
+    monkeypatch.setattr(os_boot_unit, "privileged", fake_privileged)
     return recorded, installed
 
 
@@ -237,7 +237,7 @@ def test_uninstall_removes_only_this_homes_paths(
         recorded.append(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(os_boot_unit, "_privileged", fake_privileged)
+    monkeypatch.setattr(os_boot_unit, "privileged", fake_privileged)
 
     unit = units / unit_name(ctx.home)
     unit.write_text(render_unit(ctx))
@@ -276,7 +276,7 @@ def test_privileged_translates_a_missing_sudo(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(os_boot_unit.subprocess, "run", run_missing)
 
     with pytest.raises(RuntimeError, match="passwordless sudo"):
-        os_boot_unit._privileged(["true"])
+        os_boot_unit.privileged(["true"])
 
 
 def test_paths_and_names_are_home_scoped(tmp_path: Path) -> None:
@@ -299,8 +299,8 @@ def test_interactive_start_never_publishes(
     def no_manager(_home: Path) -> dict[str, str]:
         pytest.fail("interactive")
 
-    monkeypatch.setattr(os_boot_unit, "_process_cgroup", interactive)
-    monkeypatch.setattr(os_boot_unit, "_manager_properties", no_manager)
+    monkeypatch.setattr(os_boot_unit, "process_cgroup", interactive)
+    monkeypatch.setattr(os_boot_unit, "manager_properties", no_manager)
     os_boot_unit.publish_root_ready(ctx.home, OwnedProcess(123, 1.0, 1))
 
 
@@ -333,9 +333,9 @@ def test_root_publication_binds_native_custody(
         }
 
     monkeypatch.setattr(os_boot_unit, "in_boot_unit", in_unit)
-    monkeypatch.setattr(os_boot_unit, "_process_cgroup", cgroup)
+    monkeypatch.setattr(os_boot_unit, "process_cgroup", cgroup)
     monkeypatch.setattr(OwnedProcess, "live", live)
-    monkeypatch.setattr(os_boot_unit, "_manager_properties", properties)
+    monkeypatch.setattr(os_boot_unit, "manager_properties", properties)
     path = os_boot_unit.root_pid_path(ctx.home)
     if fault == "none":
         path.parent.mkdir(parents=True)
@@ -362,7 +362,7 @@ def test_uninstall_failed_stop_preserves_unit(
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 1, "", "stop failed")
 
-    monkeypatch.setattr(os_boot_unit, "_privileged", fail_stop)
+    monkeypatch.setattr(os_boot_unit, "privileged", fail_stop)
     with pytest.raises(RuntimeError, match="stop failed"):
         uninstall(ctx.home)
     assert target.exists()

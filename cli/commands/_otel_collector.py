@@ -250,10 +250,10 @@ def gateway_otel_ingress_endpoint() -> str:
 
 def station_otel_ingress_endpoint() -> str:
     """The selected station's ingress, independent of this unit's listen port."""
-    from cli.commands._observatory_urls import _validated_observability_base
+    from cli.commands.observatory_urls import validated_observability_base
     from shared.config import settings
 
-    base = _validated_observability_base(settings.observability.observability_url)
+    base = validated_observability_base(settings.observability.observability_url)
     if not base:
         raise RuntimeError(
             "cannot build the remote-station OTLP relay without a valid "
@@ -425,11 +425,11 @@ def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
     (base URL + the service's own port). The runner relay path is unaffected —
     it always relays to the gateway collector.
     """
-    from cli.commands._observatory_urls import _validated_observability_base
+    from cli.commands.observatory_urls import validated_observability_base
     from shared.config import settings
 
     obs = settings.observability
-    base = _validated_observability_base(obs.observability_url)
+    base = validated_observability_base(obs.observability_url)
     if base and remote:
         # Remote observatory: every signal enters the station through ONE
         # bearer-authenticated OTLP ingress (WP4) — the direct

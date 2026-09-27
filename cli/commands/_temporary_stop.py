@@ -13,14 +13,6 @@ from datetime import datetime
 
 import psutil
 
-from cli.commands._maintenance_stop import (
-    OwnedProcess,
-    capture_tree,
-    deadline_after,
-    remaining,
-    stop_data_plane,
-    wait_for_exit,
-)
 from cli.commands._maintenance_stop_report import (
     StopIncompleteError,
     SurvivorInventory,
@@ -28,6 +20,14 @@ from cli.commands._maintenance_stop_report import (
     live_identities,
 )
 from cli.commands._repo import _repo_root, build_services, session_name
+from cli.commands.maintenance_stop import (
+    OwnedProcess,
+    capture_tree,
+    deadline_after,
+    remaining,
+    stop_data_plane,
+    wait_for_exit,
+)
 from ops import pty_close_notices
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause_probe import ops_quiescent
@@ -114,7 +114,7 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
         ) from exc
     # Hosts finish naturally after their child exits. Their protocol deliberately
     # ignores SIGTERM, so sending signals to every host process is not a stop API.
-    from cli.commands._maintenance_stop import require_no_terminals
+    from cli.commands.maintenance_stop import require_no_terminals
 
     while True:
         try:
@@ -401,7 +401,7 @@ def _stop_plan(
 
 def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Callable[[], object]:
     """Stop services through their root owner, preserving explicitly retained units."""
-    import cli.commands._root_driver as _root_driver_commands
+    import cli.commands.root_driver as _root_driver_commands
 
     return lambda: _root_driver_commands._stop_root_service_tree(
         preserve=preserved, timeout_s=remaining(deadline)
@@ -410,8 +410,8 @@ def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Cal
 
 def _require_unstarted_initialization() -> bool:
     """Positive first-start evidence that no application could have admitted work."""
-    from cli.commands._maintenance_stop import require_no_terminals
-    from cli.commands._root_driver import _require_root_absent
+    from cli.commands.maintenance_stop import require_no_terminals
+    from cli.commands.root_driver import require_root_absent
     from cli.start_identity import read_intent
     from shared.paths import ava_home, root_manifests_path
 
@@ -422,7 +422,7 @@ def _require_unstarted_initialization() -> bool:
         return False  # A joined runner may refer to already-existing external work.
     if start_serving.state_path().exists() or root_manifests_path().exists():
         raise RuntimeError("initialization journal conflicts with application launch evidence")
-    _require_root_absent()
+    require_root_absent()
     require_no_terminals()
     return True
 

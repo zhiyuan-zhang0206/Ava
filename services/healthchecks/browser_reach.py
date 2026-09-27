@@ -111,7 +111,7 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
                 await _cdp_call(browser_ws, "Target.closeTarget", {"targetId": target_id}, 2.0)
 
 
-def _canary(port: int, url: str, timeout_s: float) -> _CanaryResult:
+def canary(port: int, url: str, timeout_s: float) -> _CanaryResult:
     """Total wrapper: the canary never raises — an unforeseen failure is a
     ``skip`` (no verdict), never a false reachability claim."""
     try:
@@ -120,7 +120,7 @@ def _canary(port: int, url: str, timeout_s: float) -> _CanaryResult:
         return _CanaryResult("skip", f"canary raised {type(exc).__name__}: {exc}")
 
 
-def _host_probe(url: str, timeout_s: float) -> _HostResult:
+def host_probe(url: str, timeout_s: float) -> _HostResult:
     """The same-machine contrast read: any HTTP answer counts as reachability."""
     started = time.monotonic()
     try:

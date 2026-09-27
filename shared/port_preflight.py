@@ -35,8 +35,8 @@ from shared.cluster import (
     LEGACY_AVA_PORTS,
     ClusterPorts,
     ClusterRecord,
-    _port_free,
     get_record,
+    port_free,
     record_app_port,
     record_health_port,
     record_pgbouncer_port,
@@ -77,7 +77,7 @@ def occupied_ports(
     None = every occupant counts (the install-time allocator's view)."""
     out: list[tuple[str, int]] = []
     for svc, port in ports.items():
-        if _port_free(port):
+        if port_free(port):
             continue
         if is_ours is not None and is_ours(port):
             continue

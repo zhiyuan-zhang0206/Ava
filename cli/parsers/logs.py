@@ -71,8 +71,6 @@ def _h_logs_rotate(args: argparse.Namespace) -> int:
 
 
 def _add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_logs_retention, _h_logs_rotate
-
     logs_p = sub.add_parser("logs", help="manage local log files")
     logs_sub = logs_p.add_subparsers(dest="logs_cmd", required=True)
     retention_p = logs_sub.add_parser(

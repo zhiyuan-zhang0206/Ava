@@ -1873,7 +1873,7 @@ describe("impersonation timeline refresh", () => {
     const anchor = snapshotItem({ item_id: "4.0", kind: "inbound_chat", payload: "Session started" });
     const reply = snapshotItem({ item_id: "4.2", payload: "Fix verified", source: "agent:42",
       impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Codex: helper",
-        provider: "codex", process: {}, anchor_item_id: "4.0", seq: 1 } });
+        provider: "codex", anchor_item_id: "4.0", seq: 1 } });
     vi.mocked(api.getTimeline).mockResolvedValueOnce(tlResp([anchor])).mockResolvedValue(tlResp([anchor, reply]));
     const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
     await waitFor(() => expect(result.current.items).toHaveLength(1));

@@ -121,7 +121,7 @@ def _copy_verified_python(source: Path, target: Path, expected: dict[str, str]) 
         raise ReleaseRejectedError("retained Python bytes differ from trusted input inventory")
 
 
-def _python_input_inventory(source: Path) -> dict[str, str]:
+def python_input_inventory(source: Path) -> dict[str, str]:
     """File links are supported; directory links have no finite tree contract here."""
     for path in source.rglob("*"):
         if path.is_symlink():
@@ -453,7 +453,7 @@ def prepare_release(store: Path, inputs: PrepareInputs) -> VerifiedRelease:
     wheels = inputs.wheelhouse.resolve(strict=True)
     if inventory_digest(tree_inventory(wheels)) != inputs.wheelhouse_digest:
         raise ReleaseRejectedError("wheelhouse hash mismatch")
-    python_files = _python_input_inventory(source)
+    python_files = python_input_inventory(source)
     if inventory_digest(python_files) != inputs.python_digest:
         raise ReleaseRejectedError("Python input hash mismatch")
     if file_sha256(inputs.requirements) != inputs.requirements_digest:

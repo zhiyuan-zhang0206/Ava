@@ -46,19 +46,19 @@ def venv() -> DaemonProbe:
         return DaemonProbe.unavailable("uv unavailable: dependency consistency was not measured")
     # Inspect the checkout actually executing root, never a different cluster's
     # production checkout. The helper's default remains for direct callers.
-    violations = prod_venv._violations(source_root=Path(__file__).resolve().parents[2])
+    violations = prod_venv.venv_violations(source_root=Path(__file__).resolve().parents[2])
     if violations:
         return DaemonProbe.down("; ".join(violations))
     return DaemonProbe.up("root checkout dependency and import checks passed")
 
 
 def redis_acl() -> DaemonProbe:
-    from cli.commands import _cluster_instance as instance
+    from cli.commands import cluster_instance as instance
     from services.healthchecks import owned_service
     from services.healthchecks import redis_acl as check
     from shared.cluster import ownership
 
-    port = instance._redis_port()
+    port = instance.configured_redis_port()
     if port is None:
         return DaemonProbe.unavailable("no explicit local Redis endpoint")
 
@@ -82,7 +82,7 @@ def redis_acl() -> DaemonProbe:
             return await custody.capture(
                 client,
                 port=port,
-                data_dir=instance._redis_data_dir(),
+                data_dir=instance.redis_data_dir(),
                 deadline=time.monotonic() + 5,
             )
         finally:
@@ -96,16 +96,16 @@ def redis_acl() -> DaemonProbe:
         from redis.exceptions import RedisError
 
         try:
-            check._ping(settings.data_plane.redis_url)
+            check.ping(settings.data_plane.redis_url)
         except RedisError as exc:
             return DaemonProbe.down(f"native Redis runtime ACL PING failed: {type(exc).__name__}")
         return DaemonProbe.up("native Redis runtime identity authenticated and answered PING")
 
-    return owned_service._owned_tcp(owner, port, ping)
+    return owned_service.owned_tcp(owner, port, ping)
 
 
 def pgbouncer() -> DaemonProbe:
-    from cli.commands import _pgbouncer as pooler
+    from cli.commands import pgbouncer as pooler
     from services.healthchecks import owned_service
     from shared.cluster import get_record, ownership, record_pgbouncer_port
     from shared.cluster.authority import AuthorityRefusedError, read_pooler_admin
@@ -114,7 +114,7 @@ def pgbouncer() -> DaemonProbe:
     record = get_record(ava_home())
     if record is None:
         return DaemonProbe.unavailable("no registry record for the local pooler")
-    owner = ownership.pooler(pooler._ini_path(), pooler._pidfile_path())
+    owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     if owner is None:
         return DaemonProbe.down("no native PgBouncer generation in this home's PID record")
     port = record_pgbouncer_port(record)
@@ -132,7 +132,7 @@ def pgbouncer() -> DaemonProbe:
             return DaemonProbe.up("native pooler admin console and required listeners answered")
         return DaemonProbe.down(f"pooler listener failure: loopback={loopback}, public={public}")
 
-    return owned_service._owned_tcp(owner, port, protocol)
+    return owned_service.owned_tcp(owner, port, protocol)
 
 
 def browser_reach() -> DaemonProbe:
@@ -149,12 +149,12 @@ def browser_reach() -> DaemonProbe:
         browser = probe_browser()
         if not browser.alive:
             return DaemonProbe.unavailable(f"browser canary prerequisite failed: {browser.detail}")
-        canary = check._canary(port, url, settings.services.browser_reach_timeout_s)
+        canary = check.canary(port, url, settings.services.browser_reach_timeout_s)
         if canary.outcome == "skip":
             return DaemonProbe.unavailable(canary.detail)
         if canary.outcome == "ok":
             return DaemonProbe.up(canary.detail)
-        host = check._host_probe(url, settings.services.browser_reach_timeout_s)
+        host = check.host_probe(url, settings.services.browser_reach_timeout_s)
         detail = f"browser={canary.detail}; host={host.detail}"
         if not host.ok:
             return DaemonProbe.unavailable(f"host baseline also failed: {detail}")

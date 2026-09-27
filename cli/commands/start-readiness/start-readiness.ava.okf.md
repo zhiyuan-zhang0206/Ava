@@ -16,7 +16,7 @@ ports held by another unit before launching application processes. It reads the
 same selected roster that the root will own. A matching HTTP response from an
 unrelated process is insufficient evidence of ownership.
 
-`cli/commands/_root_driver.py` owns admission, launch and observation of the
+`cli/commands/root_driver.py` owns admission, launch and observation of the
 single application root. An idempotent start observes the live root generation;
 a cold start launches one through the platform's native custody boundary.
 macOS places the permission helper above the root. Linux starts the root under

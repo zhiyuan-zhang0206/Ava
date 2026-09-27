@@ -50,7 +50,7 @@ def stage_environment(home: Path, registry: Path, home_dir: Path) -> tuple[tuple
 
 
 def start(operation: Operation, image: VerifiedRelease) -> None:
-    from shared.os_boot_unit import _manager_properties, _privileged
+    from shared.os_boot_unit import manager_properties, privileged
 
     context = _context(Path(operation.request.home), Path(operation.request.registry), image)
     action = BootStartAction(
@@ -62,13 +62,13 @@ def start(operation: Operation, image: VerifiedRelease) -> None:
         restart_on_failure=False,
     )
     install(context=context, action=action)
-    properties = _manager_properties(context.home)
+    properties = manager_properties(context.home)
     if properties["ControlPID"] != "0":
         raise RuntimeError("the root boot unit already has an unresolved start/stop action")
     if properties["MainPID"] != "0":
         observe(operation, image)
         return
-    result = _privileged(
+    result = privileged(
         ["/usr/bin/systemctl", "start", unit_name(context.home)],
         timeout=660,
     )

@@ -55,19 +55,19 @@ def _h_status(_args: argparse.Namespace) -> int:
 
 
 def _h_converge(_args: argparse.Namespace) -> int:
-    from cli.commands._converge import cmd_converge
+    from cli.commands.converge import cmd_converge
 
     return cmd_converge()
 
 
 def _h_firewall_status(_args: argparse.Namespace) -> int:
-    from cli.commands._firewall import cmd_firewall_status
+    from cli.commands.firewall import cmd_firewall_status
 
     return cmd_firewall_status()
 
 
 def _h_firewall_sync(_args: argparse.Namespace) -> int:
-    from cli.commands._firewall import cmd_firewall_sync
+    from cli.commands.firewall import cmd_firewall_sync
 
     return cmd_firewall_sync()
 
@@ -79,8 +79,6 @@ def _h_trace_ship(args: argparse.Namespace) -> int:
 
 
 def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_start
-
     # `ava start` — multi-machine setup args; pass once on first run, CLI persists
     # to file and subsequent calls do not need them. NO TTY prompt — agent-first
     # design, agent has no TTY, missing values fail loud.
@@ -193,8 +191,6 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_stop
-
     stop_p = sub.add_parser(
         "stop",
         help="[host] stop services, terminals and data plane; preserve data and agent identities",
@@ -248,8 +244,6 @@ def _add_stop_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_pause_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_pause
-
     parser = sub.add_parser(
         "pause",
         help="[host] pause for maintenance; retain data plane, browser and persistent terminals",
@@ -259,8 +253,6 @@ def _add_pause_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_restart
-
     restart_p = sub.add_parser(
         "restart",
         help="[host] normal pause then start, retaining persistent terminals",
@@ -282,8 +274,6 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def _add_status_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_status
-
     status_p = sub.add_parser(
         "status",
         help="[host] one-screen view of sessions / pidfile / curl / infra / cron "
@@ -293,8 +283,6 @@ def _add_status_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
 
 
 def _add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_converge
-
     converge_p = sub.add_parser(
         "converge",
         help="[host] re-apply idempotent host wiring (symlink/PATH/dirs/plugin images/memory pool); "
@@ -304,8 +292,6 @@ def _add_converge_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
 
 
 def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_firewall_status, _h_firewall_sync
-
     firewall_p = sub.add_parser(
         "firewall",
         help="macOS Application Firewall allowlist manifest (status / sync)",
@@ -325,14 +311,14 @@ def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
 
 
 def _h_lgtm(args: argparse.Namespace) -> int:
-    from cli.commands._lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
+    from cli.commands.lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
 
     if args.lgtm_cmd == "on":
         return cmd_lgtm_on()
     if args.lgtm_cmd == "off":
         return cmd_lgtm_off()
     if args.lgtm_cmd == "render":
-        from cli.commands._grafana_render import cmd_grafana_render
+        from cli.commands.grafana_render import cmd_grafana_render
 
         return cmd_grafana_render(force=args.force, repo_only=args.repo_only)
     return cmd_lgtm_status()
@@ -377,8 +363,6 @@ def _add_lgtm_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
 
 
 def _add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_trace_ship
-
     # `ava trace ship` — replay the local OTel trace mirror to Tempo over OTLP
     trace_p = sub.add_parser("trace", help="trace mirror subcommands")
     trace_sub = trace_p.add_subparsers(dest="trace_cmd", required=True)

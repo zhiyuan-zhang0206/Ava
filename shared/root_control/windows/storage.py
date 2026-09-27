@@ -16,7 +16,7 @@ from ctypes import wintypes
 from pathlib import Path
 
 from shared.root_control.windows.native import DWORD, private_security
-from shared.winjob import _get_last_error, _kernel32, _last_error
+from shared.winjob import _get_last_error, _kernel32, last_error
 
 
 def acquire_lock(path: Path) -> int:
@@ -43,7 +43,7 @@ def acquire_lock(path: Path) -> int:
             str(path), 0xC0000000, 0, ctypes.byref(security), 4, 0x00200080, None
         )
     if handle == wintypes.HANDLE(-1).value:
-        raise _last_error("open exclusive root lock", _get_last_error())
+        raise last_error("open exclusive root lock", _get_last_error())
     try:
         return msvcrt.open_osfhandle(int(handle), os.O_RDWR | os.O_BINARY)
     except BaseException:
@@ -55,7 +55,7 @@ def _move(source: Path, target: Path, *, replace: bool) -> None:
     kernel = _kernel32()
     kernel.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, DWORD]
     if not kernel.MoveFileExW(str(source), str(target), 8 | int(replace)):
-        raise _last_error("publish custody with MoveFileExW")
+        raise last_error("publish custody with MoveFileExW")
 
 
 def publish(path: Path, text: str, *, exclusive: bool = False) -> None:

@@ -51,8 +51,8 @@ def test_canary_distinguishes_browser_failure_from_unknown(
     )
     monkeypatch.setattr("services.healthchecks.owned_service.probe_endpoint", _fake_probe_endpoint)
     monkeypatch.setattr("services.browser.probe.probe_browser", _fake_probe_browser)
-    monkeypatch.setattr(hc, "_canary", _fake_canary)
-    monkeypatch.setattr(hc, "_host_probe", _fake_host_probe)
+    monkeypatch.setattr(hc, "canary", _fake_canary)
+    monkeypatch.setattr(hc, "host_probe", _fake_host_probe)
     assert probes.browser_reach().verdict.value == expected
 
 
@@ -63,4 +63,4 @@ def test_canary_unexpected_failure_is_not_reachability_success(
         raise RuntimeError("CDP failed")
 
     monkeypatch.setattr(hc, "_canary_async", fail)
-    assert hc._canary(9222, "https://example.invalid/", 1).outcome == "skip"
+    assert hc.canary(9222, "https://example.invalid/", 1).outcome == "skip"

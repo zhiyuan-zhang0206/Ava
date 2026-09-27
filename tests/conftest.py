@@ -561,10 +561,10 @@ _prewarm_full_settings()
 # ids are no longer reset between tests (see `_clean_state` — no RESTART IDENTITY),
 # so the first spawn is NOT guaranteed to be id 1. Any test that exercises
 # `ava.self.*` / `ava.agents.*` re-pins this to the id it actually created via
-# `ava._boot._agent_id = spawn_agent()` (the pattern used across tests/ava/*). Do
+# `ava.agent_identity._agent_id = spawn_agent()` (the pattern used across tests/ava/*). Do
 # not rely on "the first spawn is 1" — capture the returned id.
-ava._boot._agent_id = 1
-ava._boot._owns_loop = True
+ava.agent_identity._agent_id = 1
+ava.agent_identity._owns_loop = True
 # Remove AVA_AGENT_ID propagated from the agent process — any test that
 # temporarily clears _agent_id would re-establish from this env var with
 # owns_loop=False, corrupting subsequent tests.
@@ -919,11 +919,11 @@ def _restore_sdk_metering() -> Iterator[None]:
     """Per-test isolation for the process-global `ava` singleton's metering state:
     whatever a test wrapped, the next test sees the bare callables again.
 
-    `agent._extensions.load_extensions()` calls `ava._sdk_metering.install()` as
+    `agent._extensions.load_extensions()` calls `ava.sdk_metering.install()` as
     a side effect, which replaces every public `ava.*` callable — plus the
     `ava.mcps._call_raw` MCP funnel — with a recording proxy, and nothing ever put
     them back. `_load_extensions()` is reached directly *and* lazily, via
-    `ava/__init__.py:_ensure_plugins_loaded` on an `ava.*` miss, so merely touching
+    `ava/__init__.py:ensure_plugins_loaded` on an `ava.*` miss, so merely touching
     the namespace permanently swapped out the callables every later test in that
     xdist worker would see.
 
@@ -939,7 +939,7 @@ def _restore_sdk_metering() -> Iterator[None]:
     process that never pulled in the agent layer does not pull it in here.
     """
     yield
-    metering = sys.modules.get("ava._sdk_metering")
+    metering = sys.modules.get("ava.sdk_metering")
     if metering is not None:
         metering.uninstall()
 
@@ -1154,14 +1154,14 @@ def workspace(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ava.shell.run / ava.understand path mode), under the per-test unit home.
 
     Pins the agent id explicitly via monkeypatch instead of relying on the
-    session-global `ava._boot._agent_id = 1` staying unmutated across test
+    session-global `ava.agent_identity._agent_id = 1` staying unmutated across test
     ordering (a leak through that global is exactly what the `_isolated_agent`
     monkeypatch fix in tests/ava/conftest.py guards against). The dir is NOT
     pre-created — `workspace_dir` mkdirs on first resolution, and several
     tests assert exactly that; pre-create with `.mkdir(parents=True)` when a
     test seeds files into it.
     """
-    monkeypatch.setattr(ava._boot, "_agent_id", 1)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", 1)
     return unit_home / "workspaces" / "1"
 
 
@@ -1513,7 +1513,7 @@ def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
 def _guard_service_readiness(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Autouse safety net: `cli.commands._root_driver._wait_for_service_tree` reports every
+    """Autouse safety net: `cli.commands.root_driver.wait_for_service_tree` reports every
     service ready without polling anything.
 
     The start path's readiness wait is bounded by `SERVICE_READY_TIMEOUT_S` (180 s),
@@ -1531,14 +1531,14 @@ def _guard_service_readiness(
 
     ready = ReadinessWait((), 0.0, sessions_gone=False)
     monkeypatch.setattr(
-        "cli.commands._root_driver._wait_for_service_tree",
+        "cli.commands.root_driver.wait_for_service_tree",
         lambda *_a, **_kw: ready,
     )
     # The root-driven path's wait has the same bound and the same reason to be
-    # stubbed for tests that are not about it (the root-driver tests opt out
-    # through their own module fixture).
+    # stubbed for tests that are not about it (tests/cli/test_root_driver.py opts
+    # out with a module-level `real_service_readiness_gate` marker).
     monkeypatch.setattr(
-        "cli.commands._root_driver._wait_for_root_services_ready",
+        "cli.commands.root_driver._wait_for_root_services_ready",
         lambda *_a, **_kw: ready,
     )
 

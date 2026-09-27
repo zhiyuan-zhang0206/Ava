@@ -66,7 +66,7 @@ def state(run: Path, agent: int) -> dict[str, Any]:
 
 
 def freeze(run: Path, label: str) -> None:
-    from cli.commands._maintenance_stop import require_no_terminals
+    from cli.commands.maintenance_stop import require_no_terminals
 
     receipt = run / f"release-frozen-{label}.json"
     if receipt.exists():

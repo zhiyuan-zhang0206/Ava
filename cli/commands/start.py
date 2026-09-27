@@ -111,8 +111,8 @@ def _prepare_cold_start(
     runtime: StartRuntime | None = None,
 ) -> int:
     """Prepare storage/configuration only with no prior live application root."""
-    import cli.commands._converge as _converge_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.converge as _converge_commands
 
     # 1) converge host state (symlink / PATH / $AVA_HOME dirs / plugin config
     # images). Memory initialization is explicit (`ava memory init`). A retained
@@ -203,8 +203,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # Resolve the defining modules at the lifecycle operation boundary.
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import cli.commands._root_driver as _root_driver_commands
     import cli.commands._setup as _setup_commands
+    import cli.commands.root_driver as _root_driver_commands
     from shared import maintenance
 
     maintenance.require_start_allowed()
@@ -271,7 +271,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         persist=persist_services,
         publish=False,
     )
-    roster = _root_driver_commands._start_roster(roles, launch_skip)
+    roster = _root_driver_commands.start_roster(roles, launch_skip)
     try:
         live = _root_driver_commands.admit_live_start(
             roster, repo, roles, reconcile=persist_services, runtime=runtime
@@ -331,7 +331,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         all_services=all_services,
         persist=persist_services,
     )
-    roster = _root_driver_commands._start_roster(roles, launch_skip)
+    roster = _root_driver_commands.start_roster(roles, launch_skip)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
     # another unit already answers on — this is the last point at which nothing
@@ -369,7 +369,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")
-    wait = _root_driver_commands._wait_for_service_tree(
+    wait = _root_driver_commands.wait_for_service_tree(
         tuple(started),
         timeout_s=SERVICE_READY_TIMEOUT_S,
     )

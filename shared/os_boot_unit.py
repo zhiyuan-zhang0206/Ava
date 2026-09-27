@@ -216,7 +216,7 @@ def render_unit(ctx: BootUnitContext, *, action: BootStartAction | None = None) 
     )
 
 
-def _process_cgroup(pid: int) -> str:
+def process_cgroup(pid: int) -> str:
     """Read the native systemd/unified cgroup, without process-name inference."""
     rows = (Path("/proc") / str(pid) / "cgroup").read_text().splitlines()
     for row in rows:
@@ -230,10 +230,10 @@ def in_boot_unit(home: Path) -> bool:
     """Interactive start has no systemd readiness tail, even on Linux."""
     if not IS_LINUX:
         return False
-    return _process_cgroup(os.getpid()) == f"/system.slice/{unit_name(home)}"
+    return process_cgroup(os.getpid()) == f"/system.slice/{unit_name(home)}"
 
 
-def _manager_properties(home: Path) -> dict[str, str]:
+def manager_properties(home: Path) -> dict[str, str]:
     result = _systemctl(
         "show", "--property=MainPID,ControlPID,ControlGroup,ActiveState", unit_name(home)
     )
@@ -256,10 +256,10 @@ def publish_root_ready(home: Path, root: OwnedProcess) -> None:
     if not in_boot_unit(home):
         return
     expected = f"/system.slice/{unit_name(home)}"
-    before = _manager_properties(home)
+    before = manager_properties(home)
     if (
         not root.live()
-        or _process_cgroup(root.pid) != expected
+        or process_cgroup(root.pid) != expected
         or before["ControlGroup"] != expected
         or before["ControlPID"] != str(os.getpid())
         or before["MainPID"] != "0"
@@ -269,7 +269,7 @@ def publish_root_ready(home: Path, root: OwnedProcess) -> None:
     path = root_pid_path(home)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     write_text_atomic(path, f"{root.pid}\n", mode=0o600, sync_parent=True)
-    if not root.live() or _process_cgroup(root.pid) != expected:
+    if not root.live() or process_cgroup(root.pid) != expected:
         path.unlink()
         raise RuntimeError("root changed birth or native custody during PID publication")
 
@@ -277,7 +277,7 @@ def publish_root_ready(home: Path, root: OwnedProcess) -> None:
 # --- privileged steps -------------------------------------------------------
 
 
-def _privileged(argv: list[str], *, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
+def privileged(argv: list[str], *, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
     """Run one root step: direct when already root, else `sudo -n` (no prompt).
 
     A missing binary (`sudo` on a minimal host, or the tool itself) becomes the
@@ -305,7 +305,7 @@ def _privileged_failure(what: str, result: subprocess.CompletedProcess[str]) -> 
 
 
 def _privileged_or_raise(argv: list[str], what: str) -> None:
-    result = _privileged(argv)
+    result = privileged(argv)
     if result.returncode != 0:
         raise RuntimeError(_privileged_failure(what, result))
 

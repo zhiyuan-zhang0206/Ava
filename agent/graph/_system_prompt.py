@@ -81,7 +81,7 @@ def _discover_all_namespaces() -> list[str]:
     bare `from . import X` line. The capability surfaces (`_CAPABILITY_SURFACES`)
     are skipped for the same anti-duplication reason: `# Capabilities` is their
     index. Private names (leading underscore, e.g. a stray
-    `_extend`) and any name removed via AVA_SDK_DISABLE are excluded too — a
+    `_settings`) and any name removed via AVA_SDK_DISABLE are excluded too — a
     disabled namespace must never be expanded back into the prompt. Returned
     sorted so the rendered order is deterministic. Discovery is recursive: any
     module with a public `__all_for_ava__` is descended into, so `shell.sessions`
@@ -129,7 +129,7 @@ def effective_sdk_expand() -> list[str]:
     that renders it.
     The literal `"*"` never reaches the returned list — it is resolved here,
     so every downstream consumer sees concrete paths only."""
-    import ava
+    from ava.sdk_surface import plugins
 
     configured: list[str] = []
     for entry in settings.agent.sdk_expand_in_system_prompt:
@@ -138,7 +138,7 @@ def effective_sdk_expand() -> list[str]:
         else:
             configured.append(entry)
 
-    merged = [*ava._REGISTERED_SDK_EXPANSIONS, *configured]
+    merged = [*plugins.REGISTERED_SDK_EXPANSIONS, *configured]
     seen: set[str] = set()
     resolved: list[str] = []
     for path in merged:
@@ -183,17 +183,19 @@ def _sdk_expand_section() -> str:
     if not wanted:
         return ""
     import ava
+    from ava.sdk_surface import discovery
+    from ava.sdk_surface import help as help_render
 
     pieces: list[str] = []
     seen_targets: set[int] = set()
     # Text-only models drop media-gated members (`ava.self.attach`; ruling 2026-08-28).
-    hidden: frozenset[str] = ava._attach.media_gated_members()
-    _hidden_token = ava._hidden_surface_members.set(hidden)
+    hidden: frozenset[str] = ava.attachment_transport.media_gated_members()
+    _hidden_token = discovery.hidden_surface_members.set(hidden)
     # Render classes compactly in the system prompt: show name + docstring +
     # field annotations + enum values, skip methods and nested classes. Fields
     # stay so the agent sees attribute names; the full contract (methods) is one
     # `ava.help(ava.X.ClassName)` away.
-    _compact_token = ava._COMPACT_CLASSES.set(True)
+    _compact_token = help_render.compact_classes.set(True)
     try:
         for path in wanted:
             if _disabled_by_sdk_config(path):
@@ -226,8 +228,8 @@ def _sdk_expand_section() -> str:
                 ava.help(target)
             pieces.append(buf.getvalue().rstrip())
     finally:
-        ava._hidden_surface_members.reset(_hidden_token)
-        ava._COMPACT_CLASSES.reset(_compact_token)
+        discovery.hidden_surface_members.reset(_hidden_token)
+        help_render.compact_classes.reset(_compact_token)
 
     if not pieces:
         return ""
@@ -507,7 +509,7 @@ _STEP_TOOLS = (
     "is about where an agent runs, not what it was given: email → an agent "
     "on a machine with the gmail skill; login-required browser tasks → an "
     "agent on a headed machine with the chrome MCP server; long coding "
-    "tasks → a worker, or claude/codex via the ava-use-claude-code-and-codex "
+    "tasks → a worker, or claude/codex via the ava-use-other-agents "
     "skill. A worker you spawn already indexes every skill this machine has "
     "— the spawn brief must name the skill you expect it to use (a brief that "
     "does not name one is incomplete), rather than trying to hand it skills."
@@ -694,7 +696,7 @@ def _workspace_section() -> str:
     own path."""
     import ava
 
-    aid = ava._boot.agent_id()
+    aid = ava.agent_identity.agent_id()
     if aid is None or not settings.agent.workspace_in_system_prompt:
         return ""
     # Ensure the workspace directory exists (mkdir side effect).

@@ -45,14 +45,17 @@ _CONSUMED_EVENT_KINDS: tuple[str, ...] = ("sdk_call", "api_event")
 
 
 class ImpersonationMetadata(BaseModel):
-    """Declared identity and observed process facts on a rendered message."""
+    """Declared identity on a rendered message.
+
+    The observed process facts are captured once at request time and live on
+    the session record (``process_metadata``), not on every message.
+    """
 
     agent_id: int
     session_id: int
     name: str
     executor_name: str
     provider: str | None
-    process: dict[str, Any]
     anchor_item_id: str | None = None
     seq: int | None = None
 
@@ -64,7 +67,6 @@ def metadata(lease: dict[str, Any]) -> ImpersonationMetadata:
         name=lease["name"],
         executor_name=lease["executor_name"],
         provider=lease["relay_provider"],
-        process=lease["process_metadata"],
     )
 
 
@@ -347,10 +349,16 @@ def _pending_delivery_reason(lease: dict[str, Any]) -> str:
     return result
 
 
+def _by_occurrence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replay appends events in page order (newest first, late arrivals after);
+    the handoff reader needs call order. ``created_at`` is the event's own time."""
+    return sorted(rows, key=lambda row: (row["created_at"], row["seq"]))
+
+
 def build_document(lease: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Derive counts only from recorded facts; preserve the original events too."""
-    sdk = [row for row in rows if row["kind"] == "sdk_call"]
-    api = [row for row in rows if row["kind"] == "api_event"]
+    sdk = _by_occurrence([row for row in rows if row["kind"] == "sdk_call"])
+    api = _by_occurrence([row for row in rows if row["kind"] == "api_event"])
     messages = _messages_with_ack(rows)
     directions = Counter(row["payload"]["direction"] for row in messages)
     started, ended = lease["activated_at"] or lease["created_at"], lease["ended_at"]

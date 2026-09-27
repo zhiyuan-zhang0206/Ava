@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._converge as _converge_commands
 import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
-import cli.commands._root_driver as _root_driver_commands
 import cli.commands._setup as _setup_commands
+import cli.commands.converge as _converge_commands
+import cli.commands.root_driver as _root_driver_commands
 import cli.commands.start as _start_commands
 from cli.commands import start
 from cli.commands._repo import ServiceSpec
-from cli.commands._root_driver import LaunchOutcome
+from cli.commands.root_driver import LaunchOutcome
 from ops.service_spec import _GATEWAY
 from shared import start_serving
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
@@ -56,7 +56,7 @@ def _roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None],
     def selected(_roles: object, skip: set[str]) -> tuple[ServiceSpec, ...]:
         return tuple(spec for spec, reason in specs if reason is None and spec.session not in skip)
 
-    monkeypatch.setattr(_root_driver_commands, "_start_roster", selected)
+    monkeypatch.setattr(_root_driver_commands, "start_roster", selected)
 
 
 @pytest.fixture(autouse=True)
@@ -117,7 +117,7 @@ def _hermetic_start(
             sessions_gone=False,
         )
 
-    monkeypatch.setattr(_root_driver_commands, "_wait_for_service_tree", wait)
+    monkeypatch.setattr(_root_driver_commands, "wait_for_service_tree", wait)
     _roster(monkeypatch, (("gateway", None), ("frontend", None)))
 
 
@@ -241,7 +241,7 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
 
 def test_failed_launch_never_becomes_serving(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "cli.commands._root_driver.complete_boot_start",
+        "cli.commands.root_driver.complete_boot_start",
         lambda: pytest.fail("not ready for boot handoff"),
     )
 
@@ -332,7 +332,7 @@ def test_storage_schema_migration_grants_pooler_precede_application(
 def test_internal_start_leaves_boot_publication_to_public_dispatch(
     monkeypatch: pytest.MonkeyPatch, ready: bool
 ) -> None:
-    from cli.commands import _root_driver
+    from cli.commands import root_driver
 
     _roster(monkeypatch, (("frontend", None),))
     monkeypatch.setattr(
@@ -341,6 +341,6 @@ def test_internal_start_leaves_boot_publication_to_public_dispatch(
         _ignoring_args(lambda: _probe_commands.ServiceProbe(ready, "root", "probe")),
     )
     monkeypatch.setattr(
-        _root_driver, "complete_boot_start", lambda: pytest.fail("public dispatch owns publication")
+        root_driver, "complete_boot_start", lambda: pytest.fail("public dispatch owns publication")
     )
     assert _start_commands.cmd_start() == (0 if ready else SERVICES_NOT_READY_EXIT_CODE)

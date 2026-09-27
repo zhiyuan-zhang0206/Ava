@@ -121,6 +121,7 @@ def test_fetch_gateway_cluster_status_no_bearer_when_secret_unset(
 
 def test_status_runs_without_error(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """status can output normally even when all command mocks return non-0 (empty cluster) (no raise)."""
+
     _ = capsys
     monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -347,12 +348,14 @@ def _init_prod_source(source: Path, *, branch: str = "main") -> None:
 
 def test_detect_prod_source_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No source repo → None (nothing to check)."""
+
     monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
     assert _cluster_drift.prod_source_branch_drift() is None
 
 
 def test_detect_prod_source_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Prod source on `main` → None (no drift)."""
+
     _init_prod_source(tmp_path / "source")
     monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
     assert _cluster_drift.prod_source_branch_drift() is None
@@ -363,6 +366,7 @@ def test_detect_prod_source_drift_feature_branch(
 ) -> None:
     """Prod source on a feature branch → returns the branch (the 2026-06-01
     incident: an agent developing in the prod tree instead of a worktree)."""
+
     _init_prod_source(tmp_path / "source", branch="ava-7/fix")
     monkeypatch.setattr("shared.cluster_drift._prod_source_dir", lambda: tmp_path / "source")
     assert _cluster_drift.prod_source_branch_drift() == "ava-7/fix"
@@ -479,6 +483,7 @@ def test_cmd_status_shows_gateway_snapshot_by_default(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`ava status` (no flag) runs local probes AND prints the gateway snapshot."""
+
     _patch_gateway_http(monkeypatch)
     monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult(returncode=0))  # pyright: ignore[reportUnknownArgumentType]

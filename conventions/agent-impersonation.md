@@ -1,8 +1,9 @@
 # External agent impersonation
 
-A trusted Codex or Claude Code process on an Ava agent's machine can take over
-its identity. Preparation drains native work and saves its checkpoint before
-activation. It does not ask the native model to approve. TTL is an explicit
+A trusted Codex, Claude Code or DeepSeek Harness (dsh) process on an Ava
+agent's machine can take over its identity. Preparation drains native work and
+saves its checkpoint before activation. It does not ask the native model to
+approve. TTL is an explicit
 recovery deadline, for renewal and the initial takeover alike — estimate it
 short: take the smallest window that covers the next slice (about 30 minutes
 when the work ahead looks like about an hour) and extend by renewal. A short
@@ -16,7 +17,7 @@ Use the executable and interpreter belonging to the intended checkout; bare
 
 ```bash
 ava impersonate request --agent 405 --name 'Fix login' --as 'Codex: login helper' \
-  --provider codex --thread-id CODEX_SESSION_UUID --ttl 3600 --batch-window 0 \
+  --provider codex --thread-id CODEX_SESSION_UUID --ttl 1800 --batch-window 0 \
   --reason 'Implement the login fix and return verification results'
 ```
 
@@ -27,7 +28,7 @@ a usage error before anything runs.
 
 `--name` describes this session; `--as` is a free executor display name. The CLI
 also records observed process names, IDs, executable and parent chain, separately
-from the declaration. `--provider` selects `codex` or `claude` relay transport.
+from the declaration. `--provider` selects `codex`, `claude` or `dsh` relay transport.
 Codex's own thread UUID is a provider address, not the Ava session handle.
 Preserve `CODEX_HOME` and optionally supply `--codex-remote` so the native relay
 reaches the owning server. A Claude takeover launched through the launcher starts
@@ -36,19 +37,27 @@ stub the request writes, and the executor arms no Monitor watch — if no relay
 heartbeat starts, fall back to the manual flow. With `--no-relay-resident`, or on
 a host that starts the relay by hand, start the Monitor immediately after the
 request, armed with `timeout_ms: 1800000` and re-armed at each expiry notice.
+A dsh takeover runs from a DeepSeek Harness session that loaded the Ava relay
+plugin: the request writes the relay credential to the stub the plugin exports
+(`DSH_AVA_RELAY_STUB`) instead of printing it, fails before creating a lease
+when the plugin is absent, and the plugin starts the relay by itself.
 See [host setup](agent-impersonation-hosts.md).
 
 The resident Claude wrapper consumes one request per session. A second request
 from that session is rejected before creating a lease when its stub is pending
 or already consumed. Finish or cancel the current takeover, then launch a fresh
-Claude session in a separate workspace for another agent. A new launch clears
-the previous session's stub and consumption marker after claiming the workspace.
+Claude session in a separate workspace for another agent. Each launch keeps its stub in its own
+generation's private state dir (`$AVA_HOME/run/coding-tools/claude/…/<generation>/`),
+never the shared workspace, so a wrapper orphaned by an earlier session there can
+never consume the new credential; cancelling a generation removes that dir. The
+launch also runs `claude auth status` before starting Claude and refuses a
+signed-out CLI immediately.
 
 The response returns a per-agent integer `id` / `session_id`, starting at zero.
 There is no controller credential: control commands are authorized by the
 session id plus caller attestation — each command must run from a process that
 descends from the session's recorded controller tree (the executor process that
-made the request). Claude's relay uses the separate scoped
+made the request). The claude and dsh relays use the separate scoped
 `AVA_IMPERSONATION_RELAY_TOKEN`; that credential belongs to the relay, never to
 the controller. Status/list responses omit credentials.
 
@@ -126,7 +135,7 @@ only the work you actually handled, then acknowledge it:
 ```bash
 ava impersonate ack 0 123 124 --agent 405
 ava impersonate inbox 0 --agent 405 --limit 100
-ava impersonate renew 0 --agent 405 --ttl 3600
+ava impersonate renew 0 --agent 405 --ttl 1800
 ```
 
 Inbox reads do not ACK. Each lease snapshots the configured ACK window and

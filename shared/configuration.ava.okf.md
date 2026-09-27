@@ -57,7 +57,7 @@ fetch applies.
 `redis_bin_dir` is a host-scoped executable selection. The unit's own `.env`
 forces or clears `AVA_REDIS_BIN_DIR` at boot through the env registry's
 home-authority projection, so a parent's selection cannot leak into a sibling
-home. The config view and `_cluster_instance` consume that same Settings field;
+home. The config view and `cluster_instance` consume that same Settings field;
 the path is not distributed in runner bootstrap. A nonempty directory must
 contain both executable Redis tools; an invalid pair fails instead of choosing
 a different version from PATH.

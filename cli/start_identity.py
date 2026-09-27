@@ -191,7 +191,7 @@ def _new_record(
         ports = cast("cluster.ClusterPorts", cluster.LEGACY_AVA_PORTS.copy())
         wanted = set(cast("dict[str, int]", ports).values())
         if any(wanted.intersection(other.ports.values()) for other in records.values()) or not all(
-            cluster._port_free(p) for p in wanted
+            cluster.port_free(p) for p in wanted
         ):
             raise RuntimeError("default home's ports are already reserved or occupied")
     else:

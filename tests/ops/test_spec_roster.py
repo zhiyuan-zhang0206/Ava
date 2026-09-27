@@ -72,7 +72,7 @@ def test_agent_host_spec_launches_under_the_agent_profile() -> None:
     (agent-runner-only -> "runner") would crash it at import (settings.agent
     read — 2026-08-30 soak startup); the spec must carry the explicit override
     so the root launcher's per-service environment
-    (`_root_driver._service_extra_env`) applies the "agent" profile marker to
+    (`root_driver._service_extra_env`) applies the "agent" profile marker to
     this session."""
     agent_host = next(s for s in roster.build_services() if s.session == "agent-host")
     assert agent_host.profile == "agent"

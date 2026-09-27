@@ -14,10 +14,10 @@ from typing import Any
 import psycopg
 from psycopg import sql
 
-from cli.commands._cluster_instance import pg_admin_url
+from cli.commands.cluster_instance import pg_admin_url
 from services.pitr.activation_runtime import (
-    _PITR_ENV_FIELDS,
-    _file_evidence,
+    PITR_ENV_FIELDS,
+    file_evidence,
     pitr_env_absent,
     pitr_env_is_desired,
 )
@@ -98,7 +98,7 @@ def _persistent_archive_settings(home: Path) -> dict[str, str]:
 
 
 def _auto_digest(home: Path) -> str:
-    return _file_evidence(home / "pg/postgresql.auto.conf")[1]
+    return file_evidence(home / "pg/postgresql.auto.conf")[1]
 
 
 def _require_owned_auto(home: Path, record: ActivationRecord) -> str:
@@ -341,7 +341,7 @@ def _apply_env(home: Path, record: ActivationRecord) -> bytes:
 
 
 def gate_unset_command() -> str:
-    return "ava config unset " + " ".join(_PITR_ENV_FIELDS)
+    return "ava config unset " + " ".join(PITR_ENV_FIELDS)
 
 
 def require_inactive_gate_posture(boundary: str) -> None:

@@ -103,7 +103,7 @@ def _extract_settings_reads(source: str) -> list[tuple[str, str]]:
         if _guarded_by_has_domain(tree, node, domain):
             # Sanctioned cross-profile read: the module first checks
             # `settings.has_domain("<domain>")` in an enclosing `if` and only
-            # reads the domain inside that branch (e.g. ava/_commands.py's
+            # reads the domain inside that branch (e.g. ava/composer_commands.py's
             # commands_enabled for the gateway's /api/commands dropdown).
             # The gate proves the author thought about the profile boundary.
             continue
@@ -520,7 +520,7 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     start it with the `agent` profile — a `runner` profile crashed it at import
     (2026-08-30 soak startup), and a marker-less launch (full construction)
     would silently mask any future cross-profile read instead of failing fast."""
-    from cli.commands import _root_driver
+    from cli.commands import root_driver
     from ops.roster import build_services
     from shared.config import PROCESS_PROFILES
 
@@ -531,7 +531,7 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     # is not under test, so keep it independent of this host's home.
     monkeypatch.setattr("cli.commands._data_plane.db_delivery", delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
-    profile = _root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
+    profile = root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
     assert profile == "agent"
 

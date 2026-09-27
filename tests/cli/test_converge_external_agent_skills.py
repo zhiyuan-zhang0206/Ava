@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _converge
+from cli.commands import converge
 
 SKILL_NAME = "operating-ava-cluster"
 MARKER_NAME = ".ava-managed.json"
@@ -56,10 +56,10 @@ def _write_source(repo: Path, *, body: str = "operator v1\n") -> Path:
     return source
 
 
-def _ctx(repo: Path, home: Path) -> _converge.ConvergeCtx:
+def _ctx(repo: Path, home: Path) -> converge.ConvergeCtx:
     ava_home = home / ".ava"
     (ava_home / "configs").mkdir(parents=True, exist_ok=True)
-    return _converge.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
+    return converge.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
 
 
 def _target(client_home: Path) -> Path:
@@ -276,27 +276,27 @@ def test_bridge_step_is_prod_host_global_and_skipped_for_dev_worktrees(
     module = _bridge_module()
     step = next(
         candidate
-        for candidate in _converge.CONVERGE_STEPS
+        for candidate in converge.CONVERGE_STEPS
         if candidate.apply is module.converge_external_agent_skill
     )
     assert step.host_global
     assert not step.requires_unit_config
-    assert step.roles == _converge.ALL_ROLES
+    assert step.roles == converge.ALL_ROLES
     (home / ".codex").mkdir()
 
     def default_home(_path: Path) -> bool:
         return True
 
-    monkeypatch.setattr(_converge, "is_default_home", default_home)
+    monkeypatch.setattr(converge, "is_default_home", default_home)
     monkeypatch.setattr(module.Path, "home", lambda: home)
 
     dev_repo = tmp_path / ".worktrees" / "feature"
     _write_source(dev_repo)
-    _converge.converge_host(dev_repo, None, ava_home=home / ".ava", steps=(step,))
+    converge.converge_host(dev_repo, None, ava_home=home / ".ava", steps=(step,))
     assert not _target(home / ".codex").exists()
 
     prod_repo = tmp_path / "prod" / "source"
     _write_source(prod_repo)
     (home / ".ava" / "configs").mkdir(parents=True)
-    _converge.converge_host(prod_repo, None, ava_home=home / ".ava", steps=(step,))
+    converge.converge_host(prod_repo, None, ava_home=home / ".ava", steps=(step,))
     assert _target(home / ".codex").is_dir()

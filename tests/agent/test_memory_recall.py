@@ -13,7 +13,7 @@ import pytest
 
 import agent.graph._memory_recall as recall
 from agent.messages import inbound_message
-from ava._gateway_client import MemorySearchResult
+from ava.gateway_client import MemorySearchResult
 from shared.agents import IndexerUnavailable
 
 
@@ -40,7 +40,7 @@ def _write_note(root: Path, rel: str, text: str) -> None:
 
 
 def _set_search(monkeypatch: pytest.MonkeyPatch, results: list[MemorySearchResult]) -> None:
-    monkeypatch.setattr(recall._gateway_client, "memory_search", lambda _q, _k: results)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(recall.gateway_client, "memory_search", lambda _q, _k: results)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _conversation() -> list:
@@ -165,7 +165,7 @@ async def test_returns_none_when_all_matches_already_injected(
 # Recall runs in a before_llm hook, so an exception escaping this function does
 # not just lose the recall — it unwinds the graph and ends the agent process.
 # On 2026-08-07 an intermittent 500 from /api/memory/search did exactly that to
-# agent 405: `_raise_from_response` re-raises a status whose body carries no
+# agent 405: `raise_from_response` re-raises a status whose body carries no
 # wire `reason`, and nothing between there and the graph caught it.
 
 
@@ -173,11 +173,11 @@ def _raise_on_search(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
     def _boom(_q: str, _k: int) -> list[MemorySearchResult]:
         raise exc
 
-    monkeypatch.setattr(recall._gateway_client, "memory_search", _boom)
+    monkeypatch.setattr(recall.gateway_client, "memory_search", _boom)
 
 
 def _status_error(status: int) -> httpx.HTTPStatusError:
-    """The exception `_gateway_client.memory_search` raises for a non-2xx whose
+    """The exception `gateway_client.memory_search` raises for a non-2xx whose
     body does not carry the wire contract's `reason` — FastAPI's bare 500."""
     request = httpx.Request("POST", "http://gateway.test/api/memory/search")
     return httpx.HTTPStatusError(
@@ -250,7 +250,7 @@ async def test_returns_none_when_eval_isolated(monkeypatch: pytest.MonkeyPatch) 
         called = True
         return []
 
-    monkeypatch.setattr(recall._gateway_client, "memory_search", _fake)
+    monkeypatch.setattr(recall.gateway_client, "memory_search", _fake)
 
     assert await recall.passive_memory_recall(_conversation()) is None  # pyright: ignore[reportUnknownArgumentType]
     assert called is False
@@ -267,7 +267,7 @@ async def test_returns_none_when_no_query(
         called = True
         return []
 
-    monkeypatch.setattr(recall._gateway_client, "memory_search", _fake)
+    monkeypatch.setattr(recall.gateway_client, "memory_search", _fake)
 
     result = await recall.passive_memory_recall([])
 
@@ -295,7 +295,7 @@ async def test_retrieval_default_is_top_100(
         asked["k"] = k
         return []
 
-    monkeypatch.setattr(recall._gateway_client, "memory_search", _search)
+    monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
 
     await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
 
@@ -315,7 +315,7 @@ async def test_retrieval_is_wider_than_injection(
         asked["k"] = k
         return []
 
-    monkeypatch.setattr(recall._gateway_client, "memory_search", _search)
+    monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
 
     await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
 

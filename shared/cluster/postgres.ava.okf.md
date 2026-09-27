@@ -6,7 +6,7 @@ description: Durable native custody for directly launched home-owned PostgreSQL.
 
 # Owned PostgreSQL birth
 
-`cli.commands._cluster_instance` launches the home's `postgres` directly in
+`cli.commands.cluster_instance` launches the home's `postgres` directly in
 its own POSIX session. The data plane survives application-root replacement.
 It does not use `pg_ctl` to detach, discover, reload or stop the home server.
 Throwaway restore/test PostgreSQL has a separate retained-process boundary.

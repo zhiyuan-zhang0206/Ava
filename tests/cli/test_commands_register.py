@@ -46,6 +46,7 @@ def test_probe_gateway_takes_the_identity_path(monkeypatch: pytest.MonkeyPatch) 
     The gateway declares one (`probe_home` — 2xx AND this unit's `$AVA_HOME`), so
     the operator surface and the watchdog ask the same question of the same port.
     A plain 2xx would still be satisfied by another cluster's gateway."""
+
     spec = _spec_by_service("gateway")
     monkeypatch.setattr(
         _probe_commands,
@@ -64,6 +65,7 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
     """A ✗ carries the reason. "down" and "answering, but it is another cluster's
     home" call for completely different actions, and this row is where an operator
     learns which one they have."""
+
     spec = _spec_by_service("gateway")
     from shared.daemon_health import DaemonProbe
 

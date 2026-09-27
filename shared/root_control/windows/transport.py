@@ -21,7 +21,7 @@ from typing import Any
 
 from shared.root_control.ipc import MAX_MESSAGE_BYTES
 from shared.root_control.windows.native import DWORD, private_security
-from shared.winjob import _get_last_error, _kernel32, _last_error
+from shared.winjob import _get_last_error, _kernel32, last_error
 
 _POLL_S = 0.01
 _EXCHANGE_TIMEOUT_S = 30.0
@@ -88,7 +88,7 @@ def _read(handle: int) -> bytes:
         code = _get_last_error()
         if code == 232:  # ERROR_NO_DATA: nonblocking pipe has no bytes yet.
             return b""
-        raise _last_error("read root pipe", code)
+        raise last_error("read root pipe", code)
     return buffer.raw[: count.value]
 
 
@@ -99,7 +99,7 @@ def _write(handle: int, data: bytes) -> int:
         code = _get_last_error()
         if code == 232:
             return 0
-        raise _last_error("write root pipe", code)
+        raise last_error("write root pipe", code)
     return int(count.value)
 
 
@@ -128,15 +128,15 @@ def roundtrip(path: Path, payload: bytes, timeout: float) -> tuple[bytes, int]:
         if candidate != wintypes.HANDLE(-1).value:
             handle = int(candidate)
         elif _get_last_error() not in {2, 231, 232}:
-            raise _last_error("connect root pipe")
+            raise last_error("connect root pipe")
         else:
             time.sleep(_POLL_S)
     try:
         mode, peer = DWORD(1), DWORD()
         if not api.SetNamedPipeHandleState(wintypes.HANDLE(handle), ctypes.byref(mode), None, None):
-            raise _last_error("make root pipe nonblocking")
+            raise last_error("make root pipe nonblocking")
         if not api.GetNamedPipeServerProcessId(wintypes.HANDLE(handle), ctypes.byref(peer)):
-            raise _last_error("read root pipe server identity")
+            raise last_error("read root pipe server identity")
         remaining = payload
         while remaining:
             _deadline(deadline)
@@ -183,7 +183,7 @@ class PipeServer:
                 ctypes.byref(security),
             )
         if handle == wintypes.HANDLE(-1).value:
-            raise _last_error("create private root pipe")
+            raise last_error("create private root pipe")
         self._handle = int(handle)
         self._task = asyncio.create_task(self._serve())
 
@@ -214,7 +214,7 @@ class PipeServer:
             elif code == 232:
                 _api().DisconnectNamedPipe(wintypes.HANDLE(handle))
             elif code != 536:  # PIPE_LISTENING
-                raise _last_error("accept root pipe", code)
+                raise last_error("accept root pipe", code)
             await asyncio.sleep(_POLL_S)
 
     async def _exchange(self, handle: int) -> None:

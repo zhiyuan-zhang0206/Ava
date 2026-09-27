@@ -242,8 +242,8 @@ async def _shutdown_unauthenticated(port: int, data_dir: Path, deadline: float) 
     from redis.asyncio import Redis as AsyncRedis
     from redis.asyncio.retry import Retry as AsyncRetry
 
-    from cli.commands._maintenance_data_plane import _request_stop
-    from cli.commands._maintenance_stop import remaining, wait_for_exit
+    from cli.commands.maintenance_data_plane import _request_stop
+    from cli.commands.maintenance_stop import remaining, wait_for_exit
     from shared.cluster import ownership
     from shared.native_process.ownership import capture_tree
 
@@ -324,8 +324,8 @@ def _verify(port: int, env: RedisEnv, data_dir: Path) -> None:
 
 def convert_redis(home: Path, port: int, *, execute: bool) -> str:
     """Convert (or verify) this home's Redis; return a one-line outcome."""
-    from cli.commands import _cluster_instance as instance
-    from cli.commands._maintenance_stop import deadline_after
+    from cli.commands import cluster_instance as instance
+    from cli.commands.maintenance_stop import deadline_after
 
     state = read_journal(home).get("redis")
     env = RedisEnv.read(home)
@@ -338,10 +338,10 @@ def convert_redis(home: Path, port: int, *, execute: bool) -> str:
         _record(home, "redis", "converting")
     if action == "mint":
         env = _mint(home, env)
-    data_dir = instance._redis_data_dir()
+    data_dir = instance.redis_data_dir()
     if live == "unauthenticated":
         asyncio.run(_shutdown_unauthenticated(port, data_dir, deadline_after(_STOP_TIMEOUT_S)))
-    if instance._start_redis(port, env.admin, env.runtime, env.cluster_secret, env.identity):
+    if instance.start_redis(port, env.admin, env.runtime, env.cluster_secret, env.identity):
         raise RuntimeError("Redis did not start authenticated; re-run to continue")
     _verify(port, env, data_dir)
     _record(home, "redis", "done")
@@ -423,7 +423,7 @@ def _refuse_superuser_owner(record: ClusterRecord, env: DbEnv) -> None:
     postmaster defers the same refusal to `retire_legacy_logins`."""
     import psycopg
 
-    from cli.commands import _cluster_instance as instance
+    from cli.commands import cluster_instance as instance
     from shared.cluster import record_postgres_port
 
     port = record_postgres_port(record)
@@ -454,15 +454,15 @@ def _convert_db(home: Path, record: ClusterRecord, env: DbEnv) -> int:
     """Every effect of the db step, each idempotent; returns the active number."""
     from functools import partial
 
-    from cli.commands import _cluster_instance as instance
+    from cli.commands import cluster_instance as instance
     from cli.commands._data_plane import (
         READONLY_GRANTEES,
         _ensure_pooler,
         admin_session,
         prove_generation_logins,
     )
-    from cli.commands._pgbouncer import stop_pgbouncer
     from cli.commands.migrations import cmd_migrations_apply
+    from cli.commands.pgbouncer import stop_pgbouncer
     from shared.cluster import authority, record_postgres_port
     from shared.envfile import remove_env
 
@@ -589,7 +589,7 @@ def _pending_admin(home: Path) -> str:
 
 def _rotate_redis_admin(home: Path, port: int) -> None:
     """Replace the Redis admin password every runner home may hold a copy of."""
-    from cli.commands import _cluster_instance as instance
+    from cli.commands import cluster_instance as instance
 
     env = RedisEnv.read(home)
     pending = _pending_admin(home)
@@ -600,11 +600,11 @@ def _rotate_redis_admin(home: Path, port: int) -> None:
             )
         with _probe_client(port, password=env.admin) as client:
             client.config_set("requirepass", pending)
-    instance._write_redis_conf(instance._redis_data_dir(), pending)
+    instance._write_redis_conf(instance.redis_data_dir(), pending)
     upsert_env(home / ".env", {_ADMIN_ENV: pending}, audit_site="cutover_db_authority")
     if env.admin != pending and _authenticates(port, env.admin):
         raise RuntimeError("Redis still accepts the previous admin password")
-    _verify(port, RedisEnv.read(home), instance._redis_data_dir())
+    _verify(port, RedisEnv.read(home), instance.redis_data_dir())
     (home / "db-authority" / "redis-admin.pending").unlink()
 
 
@@ -631,7 +631,7 @@ def convert_remote_units(
     home: Path, record: ClusterRecord, plan: UnitPlan, *, execute: bool
 ) -> str:
     """Classify the remote units, rotate Redis admin and issue their bundles."""
-    from cli.commands import _cluster_instance as instance
+    from cli.commands import cluster_instance as instance
     from shared.cluster import record_postgres_port
 
     state = read_journal(home).get("remote-units")
@@ -668,8 +668,8 @@ def convert_remote_units(
 def admitted_record(home: Path) -> ClusterRecord:
     """`home`'s registry record, only when it is this checkout's quiescent local
     gateway home: no application root, terminals or active release operation."""
-    from cli.commands._maintenance_stop import require_no_terminals
-    from cli.commands._root_driver import _require_root_absent
+    from cli.commands.maintenance_stop import require_no_terminals
+    from cli.commands.root_driver import require_root_absent
     from shared.release_operation import require_configuration_write_authorized
 
     if home != ava_home().resolve():
@@ -683,7 +683,7 @@ def admitted_record(home: Path) -> ClusterRecord:
     if record is None:
         raise CutoverRefusedError(f"{home} has no gateway registry record")
     require_configuration_write_authorized(home)
-    _require_root_absent()
+    require_root_absent()
     require_no_terminals()
     return record
 

@@ -65,7 +65,7 @@ readback, closure/retirement): [[cli/release_transition/launcher_macos.ava.okf.m
 
 ## Key Dependencies
 - [[tool-calls.ava.okf.md]] — skills that drive the desktop call this helper via `services.permissions_helper.client`
-- [[cli/cli.ava.okf.md|CLI/converge]] — the converge phase (`cli/commands/_converge.py:_ensure_permissions_helper`) builds+signs+loads during `ava start`/`ava cluster update`; the following `_ensure_screen_capture` and `_ensure_accessibility` steps probe both helper grants and record unavailable statuses for the next agent startup to report
+- [[cli/cli.ava.okf.md|CLI/converge]] — the converge phase (`cli/commands/converge.py:_ensure_permissions_helper`) builds+signs+loads during `ava start`/`ava cluster update`; the following `_ensure_screen_capture` and `_ensure_accessibility` steps probe both helper grants and record unavailable statuses for the next agent startup to report
 
 ## Entry Points
 - `services/permissions_helper/lifecycle.py` — bring-up called by converge

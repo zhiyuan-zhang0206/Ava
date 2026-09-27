@@ -58,7 +58,7 @@ def _relay_spec_problem(
         if codex_remote is not None and not codex_remote.startswith(("unix://", "ws://")):
             return "codex remote must be a unix:// or ws:// endpoint"
     elif thread_id is not None or codex_remote is not None:
-        return "the claude relay routes to its owner; drop --thread-id/--codex-remote"
+        return f"the {provider} relay routes to its owner; drop --thread-id/--codex-remote"
     return None
 
 
@@ -89,8 +89,6 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
 def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """The attested send verb: one message to another agent as the leased identity
     (task #4102) — the CLI form of the borrow the SDK attachment already stamps."""
-    from cli.main import _h_impersonate
-
     sender = commands.add_parser(
         "send",
         help="send a message to another agent as the leased identity",
@@ -115,8 +113,6 @@ def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
 
 
 def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_impersonate, _h_impersonate_relay
-
     group = sub.add_parser("impersonate", help="start and use named external sessions")
     commands = group.add_subparsers(dest="impersonation_cmd", required=True)
     request = commands.add_parser(
@@ -149,8 +145,8 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
         "--provider",
         dest="relay_provider",
         required=True,
-        choices=("codex", "claude"),
-        help="relay host for automatic inbox wake-up: codex or claude",
+        choices=("codex", "claude", "dsh"),
+        help="relay host for automatic inbox wake-up: codex, claude or dsh (DeepSeek Harness)",
     )
     request.add_argument(
         "--thread-id",
@@ -232,7 +228,7 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
     handle = relay.add_mutually_exclusive_group(required=True)
     handle.add_argument("--lease-id", help=argparse.SUPPRESS)
     handle.add_argument("--session", dest="session_id", type=int)
-    relay.add_argument("--provider", choices=("codex", "claude"), required=True)
+    relay.add_argument("--provider", choices=("codex", "claude", "dsh"), required=True)
     relay.add_argument("--thread-id")
     relay.add_argument(
         "--codex-remote",

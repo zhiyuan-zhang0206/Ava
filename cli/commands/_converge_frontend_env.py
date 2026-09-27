@@ -1,6 +1,6 @@
 """Converge step: block NEXT_PUBLIC_* build-time overrides that poison the bundle.
 
-Split out of ``_converge.py`` (step-module pattern, like ``_converge_firewall``)
+Split out of ``converge.py`` (step-module pattern, like ``_converge_firewall``)
 to keep the aggregator under the file-size ceiling.
 """
 

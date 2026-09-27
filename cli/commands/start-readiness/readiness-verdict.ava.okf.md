@@ -10,7 +10,7 @@ tags:
 
 # Start readiness verdict
 
-`cli/commands/_root_driver.py:_wait_for_service_tree` checks the selected root
+`cli/commands/root_driver.py:wait_for_service_tree` checks the selected root
 roster after launch. A running process is insufficient: every service needs a
 fresh identity-bound protocol verdict. Root generations are observed before and
 after probing, so a replacement or stopped generation invalidates the response.

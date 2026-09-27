@@ -16,7 +16,6 @@ from __future__ import annotations
 from contextlib import suppress
 from pathlib import Path
 
-from cli.commands._cluster_instance import print_data_plane_status
 from cli.commands._converge_redis_bridge import print_redis_bridge_status
 from cli.commands._probe import (
     _detect_prod_source_drift,
@@ -28,6 +27,7 @@ from cli.commands._repo import (
     build_services,
     session_name,
 )
+from cli.commands.cluster_instance import print_data_plane_status
 from ops.service_spec import ServiceSpec
 from shared import service_selection
 from shared.machine import MachineRoles
@@ -45,12 +45,12 @@ def _update_in_flight() -> bool:
 
 def _root_tree_units() -> dict[str, dict[str, object]]:
     """Read one root snapshot; an unreachable root claims no running services."""
-    from cli.commands import _root_driver
+    from cli.commands import root_driver
 
-    status = _root_driver._root_status(_root_driver._root_client())
+    status = root_driver._root_status(root_driver._root_client())
     if status is None:
         return {}
-    return _root_driver._root_units(status)
+    return root_driver._root_units(status)
 
 
 def _status_roster(roles: MachineRoles | None) -> tuple[tuple[ServiceSpec, str | None], ...]:
@@ -109,7 +109,7 @@ def cmd_status() -> int:
     # shown only on the host the operator designated via the $AVA_HOME/lgtm-host
     # marker (a host singleton, not a per-cluster service, so the marker — not
     # the role — decides).
-    from cli.commands._lgtm import is_lgtm_host, print_lgtm_status
+    from cli.commands.lgtm import is_lgtm_host, print_lgtm_status
 
     if is_lgtm_host():
         print("\nlgtm (observability backend):")

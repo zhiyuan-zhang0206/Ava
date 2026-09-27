@@ -135,7 +135,7 @@ def _isolated_agent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     later test in the process (resolving workspaces under the wrong id).
     monkeypatch also restores when teardown kill_all raises.
     """
-    monkeypatch.setattr(ava._boot, "_agent_id", _TEST_AGENT_BASE)
+    monkeypatch.setattr(ava.agent_identity, "_agent_id", _TEST_AGENT_BASE)
     shell.kill_all()  # pure sessions, no DB — session tests that need a meta row ensure it themselves
     # A killed session lingers a beat after kill_all() returns. The fake
     # agent-id is fixed per worker and tests reuse session names (e.g.

@@ -1,4 +1,4 @@
-"""ava.__getattr__ env-gated lazy plugin-namespace load + ava._ensure_plugins_loaded.
+"""ava.__getattr__ env-gated lazy plugin-namespace load + ava.ensure_plugins_loaded.
 
 A process an agent launched (AVA_AGENT_ID forwarded, no bootstrap to hook — a
 bare `python x.py` in a persistent shell session) self-loads plugin namespaces
@@ -21,21 +21,22 @@ from typing import Any
 import pytest
 
 import ava
-import ava._boot as boot
+from ava import agent_identity
+from ava.sdk_surface import plugins
 
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    # Each test drives _plugins_loaded + boot identity explicitly; snapshot-restore
+    # Each test drives _plugins_loaded + agent identity explicitly; snapshot-restore
     # so nothing leaks between tests. Save existing plugin namespace objects before
     # clearing so they can be re-registered — never permanently wipe namespaces
     # registered by other plugins during import ava (ava.memory, ava.tasks, ava.cwd).
     monkeypatch.setattr(ava, "_plugins_loaded", False)
-    monkeypatch.setattr(boot, "_agent_id", boot._agent_id)
-    monkeypatch.setattr(boot, "_owns_loop", boot._owns_loop)
+    monkeypatch.setattr(agent_identity, "_agent_id", agent_identity._agent_id)
+    monkeypatch.setattr(agent_identity, "_owns_loop", agent_identity._owns_loop)
     # Save existing namespace objects before clearing
     _saved_ns: dict[str, Any] = {}
-    for _name in list(ava._REGISTERED_NAMESPACES):
+    for _name in list(plugins._REGISTERED_NAMESPACES):
         _obj = getattr(ava, _name, None)
         if _obj is not None:
             _saved_ns[_name] = _obj
@@ -46,14 +47,14 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # conflict checks since we know these were originally here)
     for _name, _obj in _saved_ns.items():
         setattr(ava, _name, _obj)
-        if _name not in ava._REGISTERED_NAMESPACES:
-            ava._REGISTERED_NAMESPACES[_name] = "<restored>"
+        if _name not in plugins._REGISTERED_NAMESPACES:
+            plugins._REGISTERED_NAMESPACES[_name] = "<restored>"
         if _name not in ava.__all_for_ava__:
             ava.__all_for_ava__.append(_name)
 
 
 def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
-    """Replace agent._extensions.load_extensions (reached by _ensure_plugins_loaded
+    """Replace agent._extensions.load_extensions (reached by ensure_plugins_loaded
     via importlib) with a spy that records calls and optionally registers a namespace.
     Avoids the heavy, DB-touching real load in a unit test."""
     import agent._extensions as extensions
@@ -70,8 +71,8 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
 
 
 def _as_launched_child(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(boot, "_agent_id", None)
-    monkeypatch.setattr(boot, "_owns_loop", True)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
     monkeypatch.setenv("AVA_AGENT_ID", "42")
 
 
@@ -100,8 +101,8 @@ def test_lazy_load_latches_once(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_no_lazy_load_without_agent_id(monkeypatch: pytest.MonkeyPatch) -> None:
     # gateway / cli: no AVA_AGENT_ID -> behavior byte-identical to before the fix
     # (same AttributeError message, loader never touched).
-    monkeypatch.setattr(boot, "_agent_id", None)
-    monkeypatch.setattr(boot, "_owns_loop", True)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     calls = _spy_loader(monkeypatch, register=None)
 
@@ -115,7 +116,7 @@ def test_no_lazy_load_in_agent_process(monkeypatch: pytest.MonkeyPatch) -> None:
     # not re-run _load_extensions — which clears all hooks and would drop the
     # built-in ones build_graph registers after it.
     monkeypatch.setenv("AVA_AGENT_ID", "7")
-    boot.establish(7, owns_loop=True)
+    agent_identity.establish(7, owns_loop=True)
     calls = _spy_loader(monkeypatch, register=None)
 
     with pytest.raises(AttributeError):
@@ -148,8 +149,8 @@ def test_db_url_forward_wins_over_lazy_load(monkeypatch: pytest.MonkeyPatch) -> 
 def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _spy_loader(monkeypatch, register=None)
 
-    ava._ensure_plugins_loaded()
-    ava._ensure_plugins_loaded()
+    ava.ensure_plugins_loaded()
+    ava.ensure_plugins_loaded()
 
     assert calls == [1]  # latched: loads at most once per process
     assert ava._plugins_loaded is True
@@ -174,7 +175,7 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
 
     monkeypatch.setattr(extensions, "load_extensions", boom)
 
-    ava._ensure_plugins_loaded()  # must not raise
+    ava.ensure_plugins_loaded()  # must not raise
 
     assert ava._plugins_loaded is True
     assert any("failed in this launched child" in r["message"] for r in loguru_records)
@@ -209,7 +210,7 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     monkeypatch.delattr(extensions, "load_extensions")
     monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
 
-    ava._ensure_plugins_loaded()  # must not raise
+    ava.ensure_plugins_loaded()  # must not raise
 
     assert ava._plugins_loaded is False  # deferred, not latched
     assert calls == []
@@ -220,7 +221,7 @@ def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
     monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
     monkeypatch.setattr(extensions.__spec__, "_initializing", False)
 
-    ava._ensure_plugins_loaded()
+    ava.ensure_plugins_loaded()
 
     assert calls == [1]
     assert ava._plugins_loaded is True
@@ -301,8 +302,8 @@ def test_member_lazy_load_on_ava_ui(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_member_fail_fast_outside_child(monkeypatch: pytest.MonkeyPatch) -> None:
     # No AVA_AGENT_ID: gateway/cli semantics — missing members on ava.self /
     # ava.ui stay a fail-fast AttributeError and the loader never runs.
-    monkeypatch.setattr(boot, "_agent_id", None)
-    monkeypatch.setattr(boot, "_owns_loop", True)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     calls = _spy_member_loader(monkeypatch, namespace="self", member="lazylog")
 

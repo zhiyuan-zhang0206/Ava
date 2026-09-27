@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 from shared import redis_client
 from shared.agents.impersonation._impersonation_store import (
     OPEN,
+    SESSION_RELAY_PROVIDERS,
     authenticate,
     dismiss_reminders,
     expire,
@@ -26,6 +27,9 @@ from shared.agents.impersonation._impersonation_store import (
 )
 from shared.agents.impersonation._impersonation_store import (
     ImpersonationError as ImpersonationError,
+)
+from shared.agents.impersonation._impersonation_store import (
+    provider_anchor_states as provider_anchor_states,
 )
 from shared.agents.impersonation.impersonation_history import append, capture_pending, set_actor
 from shared.caller_identity import CallerIdentity
@@ -53,6 +57,16 @@ def _wake(agent_id: int, *, roster_changed: bool = False) -> None:
         publish_agent_updated_sync(agent_id)
 
 
+def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
+    """Renewal reminders shell-quote this path; refuse a malformed one at request
+    rather than failing the reminder pass for every lease."""
+    invoked_python = (process_metadata or {}).get("invoked_python")
+    if invoked_python is not None and (
+        not isinstance(invoked_python, str) or not invoked_python.strip()
+    ):
+        raise ValueError("process_metadata.invoked_python must be a nonempty string")
+
+
 def request(
     agent_id: int,
     *,
@@ -74,6 +88,7 @@ def request(
         raise ValueError("Session name and executor name must be nonempty")
     if caller.kind != "external_agent":
         raise ValueError("Impersonation requires an external_agent caller")
+    _validate_invoked_python(process_metadata)
     validate_relay_spec(relay_provider, relay_thread_id, relay_codex_remote)
     if (
         not isinstance(relay_batch_window_seconds, int)
@@ -81,7 +96,7 @@ def request(
         or not 0 <= relay_batch_window_seconds <= 300
     ):
         raise ValueError("relay_batch_window_seconds must be an integer from 0 through 300")
-    relay_token = secrets.token_urlsafe(32) if relay_provider == "claude" else None
+    relay_token = secrets.token_urlsafe(32) if relay_provider in SESSION_RELAY_PROVIDERS else None
     lease_id = uuid4()
     delivery_config = current_field_values()
     event_delivery_protocol_version = _manifest_protocol_version(automatic=automatic)

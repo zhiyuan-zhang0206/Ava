@@ -56,7 +56,7 @@ def _probe(label: str, argv: list[str], env: dict[str, str]) -> str | None:
     return None
 
 
-def _violations(*, source_root: Path | None = None) -> tuple[str, ...]:
+def venv_violations(*, source_root: Path | None = None) -> tuple[str, ...]:
     if source_root is None:
         source_root = cluster_drift.prod_source_dir()
     if source_root is None:

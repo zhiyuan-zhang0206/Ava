@@ -23,22 +23,26 @@ Most command modules follow these two naming groups:
   `cluster.py`, `agents.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
   `memory.py`, `presets.py`, `pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
   `cluster_lifecycle.py`, `agent_timeline.py`, `impersonation.py`,
-  `impersonation_relay.py`) — reachable from the command line.
+  `impersonation_relay.py`, `converge.py`, `firewall.py`, `lgtm.py`, `grafana_render.py`,
+  `cluster_health.py`, `cluster_cron.py`, `cluster_recover.py`, `pitr_activation.py`) —
+  reachable from the command line; `cli/parsers/` imports each `cmd_*` from its
+  defining module, so every module a parser reaches has a public name.
 - **internal** (`_`-prefixed) — steps host commands call, never dispatched
-  directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge`
-  (step-table aggregation and execution) / `_converge_spec` (the step contract) /
+  directly: `_converge_spec` (the step contract) /
   `_converge_steps` (early host and data-plane wiring) / `_converge_os_jobs`
   (the OS-scheduled jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
   `_converge_redis_bridge` (idempotent host wiring),
   `_probe`, `_setup`, `_repo`,
   `_start_gui_chain` (the macOS GUI-chain warning), `_ownership_preflight`,
-  `_pkg_source`, `_pgbouncer`, `_lgtm`,
-  `_claude_code_plugin`, `_cluster_health` / `_cluster_cron`.
+  `_pkg_source`, `_claude_code_plugin`
+  (`cluster_instance.py`, `pgbouncer.py`, `root_driver.py`, `maintenance_stop.py`,
+  `maintenance_data_plane.py` and `start_generation.py` are internal steps under
+  public names because other packages, such as the release transition, reach them).
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
 its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
-own prepare/drain and runtime capability checks; `_maintenance_stop` and
-`_maintenance_data_plane` verify resource exits. `_pooler_stop.OwnedPooler` owns
+own prepare/drain and runtime capability checks; `maintenance_stop` and
+`maintenance_data_plane` verify resource exits. `_pooler_stop.OwnedPooler` owns
 ordinary pooler stop admission for maintenance and startup recovery: exact native
 birth and listener proof precede a durable stop intent and the first SIGINT
 (`WAIT_FOR_SERVERS`). Retries and already-closed listeners only wait; PgBouncer
@@ -55,11 +59,11 @@ native helper exit and removal of its definition. Start recreates that definitio
 Root owns Gate and native LGTM application services. `_pause_resume`
 releases normal startup admission only after readiness.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
-`_maintenance.py` and `_maintenance_probe`.
+`cli/commands/maintenance.py` and `_maintenance_probe`.
 They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
-Gateway data-plane startup (`_cluster_instance`, `_data_plane`, `_pgbouncer`):
+Gateway data-plane startup (`cluster_instance`, `_data_plane`, `pgbouncer`):
 [[cli/commands/data-plane-startup.ava.okf.md|Gateway data-plane startup]].
 
 `cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
@@ -86,8 +90,10 @@ schema change catches the DB up on its own.
 - What `ava start` treats as already-up, what it waits for, and when an unready
   service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].
 - Prepared release transitions are owned by [[cli/release_transition/release_transition.ava.okf.md]].
-  The command package is a docstring-only marker; callers import actual definitions.
-  There are no updater shell chains, bootstrap/continuation commands, or re-export facade.
+  The command package is a docstring-only marker, so importing one command module
+  never loads Settings; callers import actual definitions and tests patch each
+  seam at its defining module. There are no updater shell chains,
+  bootstrap/continuation commands, or re-export facade.
 - Host-level Application Firewall and Redis bridge wiring are one subject:
   [[converge-host-wiring.ava.okf.md]].
 - Explicit editable-install inspection and write-window primitives are described

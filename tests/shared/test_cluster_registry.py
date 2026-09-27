@@ -252,7 +252,7 @@ def test_occupied_ports_reports_bound_and_exempts_ours(monkeypatch: pytest.Monke
     def fake_port_free(port: int) -> bool:
         return port not in taken
 
-    monkeypatch.setattr(port_preflight, "_port_free", fake_port_free)
+    monkeypatch.setattr(port_preflight, "port_free", fake_port_free)
     ports = {"gateway": 8000, "frontend": 3000, "postgres": 5433}
 
     assert port_preflight.occupied_ports(ports) == [("gateway", 8000), ("postgres", 5433)]

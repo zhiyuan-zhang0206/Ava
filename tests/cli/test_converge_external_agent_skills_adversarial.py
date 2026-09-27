@@ -10,9 +10,9 @@ from typing import Any, cast
 
 import pytest
 
-from cli.commands import _converge
 from cli.commands import _converge_external_agent_skills as bridge
 from cli.commands import _external_agent_skill_fs as bridge_fs
+from cli.commands import converge
 
 SKILL = "operating-ava-cluster"
 
@@ -25,10 +25,10 @@ def _source(repo: Path, body: str = "operator v1\n") -> Path:
     return source
 
 
-def _context(repo: Path, tmp_path: Path) -> _converge.ConvergeCtx:
+def _context(repo: Path, tmp_path: Path) -> converge.ConvergeCtx:
     ava_home = tmp_path / "ava-home"
     (ava_home / "configs").mkdir(parents=True)
-    return _converge.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
+    return converge.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
 
 
 def _client_home(tmp_path: Path, name: str = ".codex") -> Path:
@@ -46,7 +46,7 @@ def _target(client: Path, tmp_path: Path) -> Path:
     return target
 
 
-def _ledger(context: _converge.ConvergeCtx) -> dict[str, Any]:
+def _ledger(context: converge.ConvergeCtx) -> dict[str, Any]:
     return cast(
         dict[str, Any],
         json.loads(

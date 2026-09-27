@@ -201,7 +201,7 @@ def per_agent_memory_note() -> HumanMessage | None:
     if not settings.agent.memory_per_agent_inject_enabled:
         logger.debug("[per-agent-memory] disabled by settings")
         return None
-    from ava._boot import agent_id
+    from ava.agent_identity import agent_id
 
     aid = agent_id()
     if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() is None pre-bootstrap.

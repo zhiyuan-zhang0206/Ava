@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._converge as cv
+import cli.commands.converge as cv
 
 
 def _ctx(home: Path) -> cv.ConvergeCtx:

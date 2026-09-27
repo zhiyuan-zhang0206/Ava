@@ -84,7 +84,7 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
     monkeypatch.setattr(agent_pause, "machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     monkeypatch.setattr(
-        ops_cluster, "pause_local_cluster", lambda: agent_pause._prepare("fleet", WHEN)
+        ops_cluster, "pause_local_cluster", lambda: agent_pause.prepare("fleet", WHEN)
     )
     monkeypatch.setattr(ops_cluster, "unpause_local_cluster", agent_pause.resume_agents)
     with TestClient(app) as client:
@@ -158,10 +158,10 @@ async def test_real_ops_status_and_exact_resume_keep_readiness_fence(
 
 @pytest.mark.usefixtures("held")
 def test_maintenance_start_waiver_does_not_publish_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import _maintenance
+    from cli.commands import maintenance as cli_maintenance
 
     monkeypatch.setattr("cli.commands.start.cmd_start", MagicMock(return_value=0))
-    assert _maintenance._start("update", WHEN) != 0
+    assert cli_maintenance._start("update", WHEN) != 0
     current = maintenance.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "starting"

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from ctypes import wintypes
 from typing import Any, cast
 
-from shared.winjob import _kernel32, _last_error
+from shared.winjob import _kernel32, last_error
 
 DWORD = ctypes.c_uint32
 
@@ -47,17 +47,17 @@ def current_user_sid() -> str:
     api = _security_api()
     token = wintypes.HANDLE()
     if not api.OpenProcessToken(kernel.GetCurrentProcess(), 8, ctypes.byref(token)):
-        raise _last_error("OpenProcessToken")
+        raise last_error("OpenProcessToken")
     try:
         size = DWORD()
         api.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
         buffer = ctypes.create_string_buffer(size.value)
         if not api.GetTokenInformation(token, 1, buffer, size, ctypes.byref(size)):
-            raise _last_error("GetTokenInformation")
+            raise last_error("GetTokenInformation")
         sid = ctypes.c_void_p.from_buffer(buffer)
         text = wintypes.LPWSTR()
         if not api.ConvertSidToStringSidW(sid, ctypes.byref(text)):
-            raise _last_error("ConvertSidToStringSidW")
+            raise last_error("ConvertSidToStringSidW")
         try:
             return text.value or ""
         finally:
@@ -76,7 +76,7 @@ def command_argv(command: str) -> list[str]:
     count = ctypes.c_int()
     values = api.CommandLineToArgvW(command.lstrip(), ctypes.byref(count))
     if not values:
-        raise _last_error("CommandLineToArgvW")
+        raise last_error("CommandLineToArgvW")
     try:
         return [str(values[index]) for index in range(count.value)]
     finally:
@@ -96,7 +96,7 @@ def private_security() -> Generator[SecurityAttributes]:
     if not _security_api().ConvertStringSecurityDescriptorToSecurityDescriptorW(
         f"O:{sid}D:P(A;;GA;;;{sid})(A;;GA;;;SY)", 1, ctypes.byref(descriptor), None
     ):
-        raise _last_error("create owner-only security descriptor")
+        raise last_error("create owner-only security descriptor")
     try:
         yield SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor.value, 0)
     finally:

@@ -5,7 +5,7 @@ import redis
 _TIMEOUT_S = 3.0
 
 
-def _ping(cluster_url: str) -> None:
+def ping(cluster_url: str) -> None:
     """PING redis as the cluster identity; raises on auth failure or dead server."""
     # redis-py types from_url()/ping()'s **kwargs as Unknown; both calls are fully typed here.
     with redis.Redis.from_url(  # pyright: ignore[reportUnknownMemberType]

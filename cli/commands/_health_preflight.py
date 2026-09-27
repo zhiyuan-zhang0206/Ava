@@ -39,7 +39,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from cli.commands._converge_spec import ConvergeCtx
-from shared.cluster import _port_free
+from shared.cluster import port_free
 from shared.config import settings
 from shared.deploy.git.gitenv import git_env
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
@@ -155,7 +155,7 @@ def _data_plane_warnings(ctx: ConvergeCtx) -> list[str]:
         ports = expected_cluster_ports(ctx.ava_home)
         pg_port = ports["postgres"]
         redis_port = ports["redis"]
-        plane_up_at_all = not _port_free(pg_port) or not _port_free(redis_port)
+        plane_up_at_all = not port_free(pg_port) or not port_free(redis_port)
         if not plane_up_at_all:
             # Cold start: neither pg nor redis is bound, and the start sequence
             # brings the instance up right after converge. Probing now would

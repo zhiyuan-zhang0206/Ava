@@ -19,7 +19,7 @@ def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Request:
     checkout = root / "source"
     checkout.mkdir()
     home, registry = root / "home", root / "registry.json"
-    monkeypatch.setattr(cluster, "_port_free", lambda _port: True)
+    monkeypatch.setattr(cluster, "port_free", lambda _port: True)
     prepare_identity(
         IdentityInput(
             home,

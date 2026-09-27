@@ -155,22 +155,6 @@ def _add_operations_parser(
 
 
 def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import (
-        _h_pitr_drill,
-        _h_pitr_multipart_abort,
-        _h_pitr_multipart_list,
-        _h_pitr_operations_retire,
-        _h_pitr_operations_status,
-        _h_pitr_retention_arm,
-        _h_pitr_retention_disable,
-        _h_pitr_retention_inspect,
-        _h_pitr_retention_run_once,
-        _h_pitr_retention_status,
-        _h_pitr_snapshot_archive,
-        _h_pitr_snapshot_retire,
-        _h_pitr_snapshot_verify,
-    )
-
     pitr = sub.add_parser("pitr", help="inspect PITR evidence and archive rollback snapshots")
     pitr_sub = pitr.add_subparsers(dest="pitr_cmd", required=True)
     drill = pitr_sub.add_parser(

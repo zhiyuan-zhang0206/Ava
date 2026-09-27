@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from cli.commands._start_generation import launch_digest
+from cli.commands.start_generation import launch_digest
 from shared.runtime_interpreter import source_digest
 from shared.start_inputs import configuration_digest
 
@@ -102,7 +102,7 @@ def test_generation_binds_declared_service_selection_and_refuses_dangling_pointe
 
 
 def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import _root_driver as driver
+    from cli.commands import root_driver as driver
 
     def no_status(_client: object) -> None:
         return None
@@ -113,7 +113,7 @@ def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatc
     def unknown() -> None:
         raise RuntimeError("retained child custody")
 
-    monkeypatch.setattr(driver, "_require_root_absent", unknown)
+    monkeypatch.setattr(driver, "require_root_absent", unknown)
     with pytest.raises(RuntimeError, match="retained child custody"):
         driver.admit_live_start((), Path("/unread-source"), frozenset({"gateway"}), reconcile=True)
 

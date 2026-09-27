@@ -37,7 +37,7 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from cli.commands import _root_driver
+from cli.commands import root_driver
 from cli.release_transition import journal, root_macos, root_service
 from cli.release_transition import launcher_macos as macos
 from cli.release_transition.execute import drive
@@ -367,8 +367,8 @@ class NativeTransition(LocalTransition):
 
     def stop(self, operation: Operation) -> None:
         root_macos.verified_helper(operation)
-        _root_driver._stop_root_service_tree(preserve=frozenset())
-        _root_driver._require_root_absent()
+        root_driver._stop_root_service_tree(preserve=frozenset())
+        root_driver.require_root_absent()
         root_macos.require_stopped(operation)
 
     def start(self, journal: Journal) -> None:

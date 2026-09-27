@@ -19,8 +19,8 @@ import yaml
 import ava as _ava
 import shared.machine
 import shared.paths
-from ava import _gateway_client as _client
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava import gateway_client as _client
+from ava.sdk_validation import coerce_str, coerce_typed
 from shared.agents import IndexerUnavailable as IndexerUnavailable
 from shared.paths import ava_home as _ava_home
 
@@ -593,7 +593,7 @@ def write(
     description = coerce_str(description, "description", allow_none=True)
     tags = coerce_typed(tags, "tags", (list, tuple), allow_none=True)
     store = coerce_str(store, "store")
-    from ava._boot import require_agent_id
+    from ava.agent_identity import require_agent_id
 
     agent_id = require_agent_id()
     entry, is_shared = _entry_path(slug, store, agent_id)

@@ -1,7 +1,7 @@
 """The `# Capabilities` index is a snapshot; the skill catalog under it is not.
 
 `init_context` renders the index into the SystemMessage once per context window,
-while `ava.skills._names()` re-scans the filesystem on every call. These pin the
+while `ava.skills.names()` re-scans the filesystem on every call. These pin the
 mechanism that keeps the two from drifting apart without waiting for a
 compaction: the membership snapshot recorded at build time, the diff against it,
 and the one note that names what appeared.

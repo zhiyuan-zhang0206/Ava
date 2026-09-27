@@ -16,9 +16,9 @@ from typing import cast
 
 import pytest
 
-import cli.commands._cluster_instance as ci
 import cli.commands._data_plane as dp
-import cli.commands._pgbouncer as pgb
+import cli.commands.cluster_instance as ci
+import cli.commands.pgbouncer as pgb
 import shared.cluster as cl
 from shared.config import settings
 

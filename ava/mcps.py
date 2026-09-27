@@ -15,24 +15,10 @@ from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
 
-from ava._sdk_validation import coerce_str
+from ava.sdk_validation import coerce_str
 from ava.security import scan_content
 from shared.config import settings
 
-from ._mcp_config import (
-    MCPCallError,
-    MCPConnectError,
-    MCPError,
-    MCPServerNotFound,
-    MCPToolNotFound,
-    ToolInfo,
-    assert_requirements,
-    is_transport_error,
-    load_mcp_config,
-    resolve_command,
-    server_cwd,
-    server_url,
-)
 from ._mcp_oauth import _OAUTH_FLOW_TIMEOUT_S
 from ._mcp_remote import (
     _current_agent_id as _current_agent_id,
@@ -52,6 +38,20 @@ from ._mcp_remote import (
 )
 from ._mcp_remote import (
     _socket_path_for as _socket_path_for,
+)
+from .mcp_config import (
+    MCPCallError,
+    MCPConnectError,
+    MCPError,
+    MCPServerNotFound,
+    MCPToolNotFound,
+    ToolInfo,
+    assert_requirements,
+    is_transport_error,
+    load_mcp_config,
+    resolve_command,
+    server_cwd,
+    server_url,
 )
 
 # Disk cache TTL
@@ -425,9 +425,9 @@ def _list_tools(server: str) -> list[ToolInfo]:
 
 def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
     """Call tool, return the full result dict ({content, isError, structuredContent})."""
-    from ava import _boot
+    from ava import agent_identity
 
-    _boot.validate_external_identity()
+    agent_identity.validate_external_identity()
     remote = _get_remote_client()
     if remote is not None:
         # Only a transport failure falls back to local; a tool/server-level error
@@ -436,7 +436,7 @@ def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
         with suppress(MCPConnectError, OSError):
             return remote.call_tool(server, tool, args)
         # The daemon attempt may have outlived the borrowed lease.
-        _boot.validate_external_identity()
+        agent_identity.validate_external_identity()
 
     async def _do() -> dict[str, Any]:
         try:

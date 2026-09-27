@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from cli.commands import _cluster_instance as instance
+from cli.commands import cluster_instance as instance
 from shared.config import settings
 
 
@@ -49,7 +49,7 @@ def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, An
     }
     code = """
 import json, subprocess
-from cli.commands import _cluster_instance as instance
+from cli.commands import cluster_instance as instance
 from shared.config import settings
 instance.is_macos = lambda: False
 tools = [instance._redis_server_bin(), instance._redis_cli_bin()]

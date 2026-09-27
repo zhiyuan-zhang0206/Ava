@@ -20,7 +20,7 @@ def _port_always_free(_port: int) -> bool:
 def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(cluster, "_port_free", _port_always_free)
+    monkeypatch.setattr(cluster, "port_free", _port_always_free)
     prepare_identity(
         IdentityInput(
             home,
@@ -31,7 +31,7 @@ def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             {"AVA_MACHINE_NAME": "partial"},
         )
     )
-    monkeypatch.setattr("cli.commands._maintenance_stop.require_no_terminals", lambda: None)
+    monkeypatch.setattr("cli.commands.maintenance_stop.require_no_terminals", lambda: None)
     return home
 
 

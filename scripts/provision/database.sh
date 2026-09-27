@@ -8,7 +8,7 @@
 # (pg17 binaries under /usr/lib/postgresql/17/bin, redis-server, pgbouncer)
 # skips apt entirely — the keyring/apt-sources writes need root, and the
 # runtime provisions its own per-cluster instance under $AVA_HOME/pg from a
-# cached template (cli/commands/_cluster_instance.py:_ensure_pg_data), so there
+# cached template (cli/commands/cluster_instance.py:_ensure_pg_data), so there
 # is no system data dir to bootstrap. The former `--initdb` block that initdb'd
 # /var/lib/postgresql/17/data (a legacy path `ava start` never reads) is
 # removed. An apt failure degrades to a warning; the packages can be installed
@@ -61,7 +61,7 @@ case "$OS" in
   macos)
     # brew runs initdb for postgresql@17 with the current user as the bootstrap
     # superuser; ava start provisions the per-cluster role + db on first boot
-    # (cli/commands/_cluster_instance.py) and drives pg via pg_ctl, not brew
+    # (cli/commands/cluster_instance.py) and drives pg via pg_ctl, not brew
     # services.
     brew install postgresql@17 redis@8.2 pgbouncer pgvector
     ;;

@@ -30,8 +30,8 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.conninfo import conninfo_to_dict
 
-from cli.commands import _cluster_instance as ci
-from cli.commands import _pgbouncer as pooler
+from cli.commands import cluster_instance as ci
+from cli.commands import pgbouncer as pooler
 from services import backup
 from services.pitr import store_factory
 from shared import cluster
@@ -146,10 +146,10 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
 
 
 def test_pre_activation_snapshot_dumps_the_frozen_owner_target(maintenance: Born) -> None:
-    from cli.commands import _pitr_activation as activation
+    from cli.commands import pitr_activation as activation
     from services.gateway_side.backup import snapshot
 
-    state = activation._read_pg_state()
+    state = activation.read_pg_state()
     _assert_owner_dial(state["dump_conninfo"])
     lines: list[str] = []
     artifact = snapshot.create_pre_activation_snapshot(

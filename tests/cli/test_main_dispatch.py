@@ -1,10 +1,11 @@
 """`ava` CLI top-level dispatch routing.
 
 main() builds the argparse parser, parses argv, then calls `args.func(args)`
-where `func` was bound at parser-build time via `set_defaults(func=...)`.
-Each per-command handler `_h_*` in cli.main lazy-imports the cmd_X impl;
-this test patches the handler binding to record routing without invoking
-real cmd_start / cmd_cluster_status / etc.
+where `func` was bound at parser-build time via `set_defaults(func=...)`,
+referring to the `_h_*` handler defined in its own `cli.parsers.<domain>`
+module. Each handler lazy-imports the cmd_X impl; this test patches the
+handler binding (on the module that defines it, before the parser is built)
+to record routing without invoking real cmd_start / cmd_cluster_status / etc.
 """
 
 from __future__ import annotations
@@ -14,10 +15,75 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from cli import main as _main
+from cli.parsers import agents as _agents
+from cli.parsers import build_parser
+from cli.parsers import cluster as _cluster
+from cli.parsers import host as _host
+from cli.parsers import logs as _logs
+from cli.parsers import mcp as _mcp
+from cli.parsers import pitr as _pitr
+from cli.parsers import plugins as _plugins
+from cli.parsers import pty as _pty
+
+
+def _subparser_children(action: argparse.Action) -> dict[str, argparse.ArgumentParser] | None:
+    """The name -> parser map of a subparsers action, or None for an ordinary
+    `--flag choices=(...)` action (whose `.choices` is a plain tuple/list of
+    values, not a dict). Checked structurally (every choice value is itself a
+    parser) rather than by `isinstance(action, argparse._SubParsersAction)` —
+    that private generic narrows to an unparameterized `Unknown`, which makes
+    `tests/cli`'s pyright tier (`reportUnknownMemberType = "error"`) fail on the
+    resulting `.choices` access."""
+    choices = action.choices
+    if not isinstance(choices, dict) or not choices:
+        return None
+    typed = cast("dict[str, object]", choices)
+    if not all(isinstance(v, argparse.ArgumentParser) for v in typed.values()):
+        return None
+    return cast("dict[str, argparse.ArgumentParser]", typed)
+
+
+def _iter_leaf_parsers(
+    parser: argparse.ArgumentParser,
+) -> list[argparse.ArgumentParser]:
+    """Every parser in the tree with no subcommands of its own — the ones a
+    dispatch actually lands on (every `add_subparsers` call in cli/parsers/ is
+    `required=True`, so a group parser itself never carries its own `func`)."""
+    subparsers_actions = [
+        children for action in parser._actions if (children := _subparser_children(action))
+    ]
+    if not subparsers_actions:
+        return [parser]
+    leaves: list[argparse.ArgumentParser] = []
+    seen: set[int] = set()
+    for children in subparsers_actions:
+        for child in children.values():
+            if id(child) in seen:
+                continue
+            seen.add(id(child))
+            leaves.extend(_iter_leaf_parsers(child))
+    return leaves
+
+
+def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
+    """Every leaf subcommand's `func` must be a callable defined in the
+    `cli.parsers.*` module that built it — guards against a builder left
+    pointing at a handler name that was renamed or removed (e.g. a stale
+    `cli.main` re-export)."""
+    leaves = _iter_leaf_parsers(build_parser())
+    assert len(leaves) > 100, "sanity: the walk should reach the whole command surface"
+    for leaf in leaves:
+        func = leaf.get_default("func")
+        assert callable(func), f"{leaf.prog!r} has no callable 'func' bound"
+        module = getattr(func, "__module__", "")
+        assert module.startswith("cli.parsers."), (
+            f"{leaf.prog!r} binds {func!r} from {module!r}, not a cli.parsers module"
+        )
 
 
 def test_import_defers_detached_cli_logging_until_dispatch(tmp_path: Path) -> None:
@@ -69,7 +135,7 @@ home = Path(os.environ["AVA_HOME"])
 checkout = home.parent / "checkout"
 checkout.mkdir()
 start_intent._checkout = lambda: checkout
-cluster._port_free = lambda _port: True
+cluster.port_free = lambda _port: True
 start_intent.prepare_start(build_parser().parse_args(["start", "--worktree"]))
 before = (home / ".env").read_bytes()
 reference = ReleaseRef(artifact_digest="a"*64, manifest_digest="b"*64,
@@ -125,7 +191,7 @@ def effects(**kwargs):
     start_serving.is_serving = lambda: True
     return start()
 commands.cmd_start = effects
-sys.modules["cli.commands._root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
+sys.modules["cli.commands.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
 assert stage.start_operation(request.path) == 0
 assert calls == ["start"]
 assert json.loads(pause.read_text())["state"] == "paused"
@@ -154,40 +220,38 @@ assert (home / ".env").read_bytes() == before
     assert result.returncode == 0, result.stderr
 
 
-# Each top-level (and nested) ava sub-command maps to a _h_* handler in cli.main.
-_HANDLERS: tuple[tuple[list[str], str], ...] = (
-    (["stop"], "_h_stop"),
-    (["restart"], "_h_restart"),
-    (["status"], "_h_status"),
-    (["pty", "freeze", "--holder", "operator", "--reason", "cleanup"], "_h_pty_freeze"),
-    (["pty", "status"], "_h_pty_status"),
-    (["pty", "resume", "generation"], "_h_pty_resume"),
-    (["cluster", "update", "--prepared", "/private/request.json"], "_h_cluster_update"),
-    (["converge"], "_h_converge"),
-    (["firewall", "status"], "_h_firewall_status"),
-    (["firewall", "sync"], "_h_firewall_sync"),
-    (["cluster", "status"], "_h_cluster_status"),
-    # The pre-#217 name stays as an alias — both spellings route to the same
-    # handler (issue #217: the verb provisions the ava_runner POSTGRES role,
-    # not a machine capability).
-    (["plugins", "update"], "_h_plugins_update"),
-    (["agents", "ls"], "_h_agents_ls"),
-    (["agents", "cancel", "1"], "_h_agents_cancel"),
-    (["agents", "restart", "1"], "_h_agents_restart"),
-    (["agents", "terminate", "1"], "_h_agents_terminate"),
-    (["agents", "kill", "1"], "_h_agents_kill"),
-    (["agents", "resurrect", "1"], "_h_agents_resurrect"),
-    (["agents", "send", "1", "hi", "--source", "user"], "_h_agents_send"),
-    (["mcp", "serve"], "_h_mcp_serve"),
-    (["memory", "search", "context"], "_h_memory_search"),
-    (["logs", "retention"], "_h_logs_retention"),
-    (["logs", "rotate"], "_h_logs_rotate"),
+# Each top-level (and nested) ava sub-command maps to a _h_* handler defined
+# in its own cli.parsers.<domain> module.
+_HANDLERS: tuple[tuple[list[str], object, str], ...] = (
+    (["stop"], _host, "_h_stop"),
+    (["restart"], _host, "_h_restart"),
+    (["status"], _host, "_h_status"),
+    (["pty", "freeze", "--holder", "operator", "--reason", "cleanup"], _pty, "_h_pty_freeze"),
+    (["pty", "status"], _pty, "_h_pty_status"),
+    (["pty", "resume", "generation"], _pty, "_h_pty_resume"),
+    (["cluster", "update", "--prepared", "/private/request.json"], _cluster, "_h_cluster_update"),
+    (["converge"], _host, "_h_converge"),
+    (["firewall", "status"], _host, "_h_firewall_status"),
+    (["firewall", "sync"], _host, "_h_firewall_sync"),
+    (["cluster", "status"], _cluster, "_h_cluster_status"),
+    (["plugins", "update"], _plugins, "_h_plugins_update"),
+    (["agents", "ls"], _agents, "_h_agents_ls"),
+    (["agents", "cancel", "1"], _agents, "_h_agents_cancel"),
+    (["agents", "restart", "1"], _agents, "_h_agents_restart"),
+    (["agents", "terminate", "1"], _agents, "_h_agents_terminate"),
+    (["agents", "kill", "1"], _agents, "_h_agents_kill"),
+    (["agents", "resurrect", "1"], _agents, "_h_agents_resurrect"),
+    (["agents", "send", "1", "hi", "--source", "user"], _agents, "_h_agents_send"),
+    (["mcp", "serve"], _mcp, "_h_mcp_serve"),
+    (["memory", "search", "context"], _mcp, "_h_memory_search"),
+    (["logs", "retention"], _logs, "_h_logs_retention"),
+    (["logs", "rotate"], _logs, "_h_logs_rotate"),
 )
 
 
-@pytest.mark.parametrize(("argv", "handler_name"), _HANDLERS)
+@pytest.mark.parametrize(("argv", "module", "handler_name"), _HANDLERS)
 def test_dispatch_invokes_per_subcommand_handler(
-    argv: list[str], handler_name: str, monkeypatch: pytest.MonkeyPatch
+    argv: list[str], module: object, handler_name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Each sub-command routes to its `_h_*` handler with the parsed Namespace."""
     captured: dict[str, argparse.Namespace] = {}
@@ -196,7 +260,7 @@ def test_dispatch_invokes_per_subcommand_handler(
         captured["args"] = args
         return 42
 
-    monkeypatch.setattr(_main, handler_name, _fake)
+    monkeypatch.setattr(module, handler_name, _fake)
     rc = _main.main(argv)
     assert rc == 42
     assert "args" in captured
@@ -210,7 +274,7 @@ def test_cli_discards_an_inherited_process_profile(monkeypatch: pytest.MonkeyPat
     def _fake(_args: argparse.Namespace) -> int:
         return 0
 
-    monkeypatch.setattr(_main, "_h_status", _fake)
+    monkeypatch.setattr(_host, "_h_status", _fake)
 
     assert _main.main(["status"]) == 0
     assert "AVA_PROCESS_PROFILE" not in os.environ
@@ -352,7 +416,7 @@ def test_logs_retention_help_explains_defaults_and_dry_run(
 
 def test_pitr_retention_inspect_parser_binds_read_only_handler() -> None:
     args = _main._build_parser().parse_args(["pitr", "retention", "inspect"])
-    assert args.func is _main._h_pitr_retention_inspect
+    assert args.func is _pitr._h_pitr_retention_inspect
 
 
 def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -364,7 +428,7 @@ def test_start_subcommand_forwards_argparse_flags(monkeypatch: pytest.MonkeyPatc
         captured["args"] = args
         return 7
 
-    monkeypatch.setattr(_main, "_h_start", _fake)
+    monkeypatch.setattr(_host, "_h_start", _fake)
     # `start` is the one verb with a pre-dispatch side effect (the settings-free
     # installed-home gate), which this test neutralizes — it asserts flag
     # forwarding, not bring-up behaviour.
@@ -444,7 +508,7 @@ def test_settings_load_failure_prints_env_template(
     def _boom(_args: argparse.Namespace) -> int:
         raise err
 
-    monkeypatch.setattr(_main, "_h_status", _boom)
+    monkeypatch.setattr(_host, "_h_status", _boom)
     rc = _main.main(["status"])
     captured = capsys.readouterr()
     assert rc == 1
@@ -589,7 +653,7 @@ home = Path(os.environ["AVA_HOME"])
 checkout = home.parent / "checkout"
 checkout.mkdir()
 start_intent._checkout = lambda: checkout
-cluster._port_free = lambda _port: True
+cluster.port_free = lambda _port: True
 calls = []
 def configured():
     assert (home / "start-intent.json").is_file()
@@ -604,7 +668,7 @@ def start(**kwargs):
     calls.append("runtime")
     return 0
 sys.modules["cli.commands.start"] = types.SimpleNamespace(cmd_start=start)
-sys.modules["cli.commands._root_driver"] = types.SimpleNamespace(
+sys.modules["cli.commands.root_driver"] = types.SimpleNamespace(
     complete_boot_start=lambda: calls.append("boot-complete")
 )
 sys.modules["shared.start_serving"] = types.SimpleNamespace(

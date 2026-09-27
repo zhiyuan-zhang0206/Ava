@@ -66,8 +66,8 @@ def test_tcp_owned_listener_requires_application_readiness() -> None:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
         port = listener.getsockname()[1]
-        assert probe._owned_tcp(owner, port, lambda: True).alive
-        result = probe._owned_tcp(owner, port, lambda: DaemonProbe.down("application unready"))
+        assert probe.owned_tcp(owner, port, lambda: True).alive
+        result = probe.owned_tcp(owner, port, lambda: DaemonProbe.down("application unready"))
         assert result.verdict.value == "down"
         assert result.detail == "application unready"
 
@@ -80,7 +80,7 @@ def test_tcp_foreign_listener_never_runs_the_application_probe() -> None:
         def unexpected() -> bool:
             pytest.fail("protocol probe must not accept another generation's listener")
 
-        assert probe._owned_tcp(foreign, listener.getsockname()[1], unexpected).terminal
+        assert probe.owned_tcp(foreign, listener.getsockname()[1], unexpected).terminal
 
 
 def test_unobservable_root_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:

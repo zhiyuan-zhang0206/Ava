@@ -13,7 +13,7 @@ tags:
 
 Settings fields declare metadata at the class declaration (`json_schema_extra`);
 boot-time projections read the generated static index without constructing
-Settings. Passthrough keys (PATH/TMPDIR/VIRTUAL_ENV/DISPLAY/HOME, network proxy
+Settings. Passthrough keys (PATH/TMPDIR/VIRTUAL_ENV/DISPLAY/HOME/USER/LOGNAME, network proxy
 configuration and Windows system keys) are registered rows. Enabled provider
 plugin bindings declare removable provider keys. Two operation families consume
 these declarations:

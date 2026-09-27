@@ -142,7 +142,7 @@ def test_termination_acceptance_never_substitutes_for_native_closure(
 ) -> None:
     import httpx
 
-    from cli.commands import _maintenance_stop
+    from cli.commands import maintenance_stop
 
     (tmp_path / "smoke-release-a.json").write_text('{"agent": 5}')
     (tmp_path / "config.json").write_text(
@@ -167,7 +167,7 @@ def test_termination_acceptance_never_substitutes_for_native_closure(
 
     monkeypatch.setattr(state, "state", closed)
     monkeypatch.setattr(state.time, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(_maintenance_stop, "require_no_terminals", retained)
+    monkeypatch.setattr(maintenance_stop, "require_no_terminals", retained)
     with pytest.raises(TimeoutError, match="native closure"):
         state.freeze(tmp_path, "a")
     assert len(calls) == 1 and calls[0]["json"] == {"force": False, "final": True}

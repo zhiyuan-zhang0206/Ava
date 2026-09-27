@@ -18,11 +18,11 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
-import cli.commands._root_driver as _root_driver_commands
-from cli.commands import _maintenance_data_plane as plane
-from cli.commands import _maintenance_stop as stop
-from cli.commands import _pgbouncer as pb
-from cli.commands import _root_driver as root_driver
+import cli.commands.root_driver as _root_driver_commands
+from cli.commands import maintenance_data_plane as plane
+from cli.commands import maintenance_stop as stop
+from cli.commands import pgbouncer as pb
+from cli.commands import root_driver
 from shared.config import settings
 from shared.native_process import pid_starttime_ticks
 from shared.session_backend import PosixProcSessionBackend, PtySessionBackend
@@ -255,7 +255,7 @@ def test_remote_plane_refuses_without_any_signal(
     local_plane: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://192.0.2.4:6379")
-    monkeypatch.setattr(plane, "_capture_postgres", lambda: pytest.fail("local scan"))
+    monkeypatch.setattr(plane, "capture_postgres", lambda: pytest.fail("local scan"))
     with pytest.raises(RuntimeError, match="remote-managed"):
         stop.stop_data_plane(1)
 
@@ -286,7 +286,7 @@ def test_real_redis_stops_owned_instance_only(
             client.save()  # pyright: ignore[reportUnknownMemberType] — redis stubs
             client.set("owned-test", "latest-unsaved")
         monkeypatch.setattr(settings.data_plane, "redis_url", url)
-        monkeypatch.setattr(plane.instance, "_redis_data_dir", lambda: data)
+        monkeypatch.setattr(plane.instance, "redis_data_dir", lambda: data)
         assert stop.stop_data_plane(3) == ["redis"]
         assert (
             not stop.OwnedProcess.capture(psutil.Process(pid)).live()
@@ -409,7 +409,7 @@ def test_redis_admin_credential_is_independent_of_runtime_url(
             settings.data_plane, "redis_url", url.replace("redis://", "redis://restricted:wrong@")
         )
         monkeypatch.setattr(settings.data_plane, "redis_admin_password", password)
-        monkeypatch.setattr(plane.instance, "_redis_data_dir", lambda: Path(directory))
+        monkeypatch.setattr(plane.instance, "redis_data_dir", lambda: Path(directory))
         assert stop.stop_data_plane(3) == ["redis"]
 
 
@@ -600,7 +600,7 @@ def _launch_incident_shape_pooler(
         userlist=f'"{role}" "{secret}"\n'.encode(),
     )
     subprocess.run(  # noqa: S603 — private config, test-owned process
-        [binary, "-d", str(pb._ini_path())], check=True, capture_output=True, timeout=5
+        [binary, "-d", str(pb.ini_path())], check=True, capture_output=True, timeout=5
     )
     try:
         _wait_port(port, timeout=5)
@@ -619,16 +619,16 @@ def _wait_pidfile(timeout: float = 5.0) -> int:
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if pb._pidfile_path().exists():
+        if pb.pidfile_path().exists():
             with contextlib.suppress(ValueError):
-                return int(pb._pidfile_path().read_text().strip())
+                return int(pb.pidfile_path().read_text().strip())
         time.sleep(0.05)
     raise AssertionError("the pooler never wrote its pidfile")
 
 
 def _pidfile_pid() -> set[int]:
     """The pid recorded in the (test-home) pooler pidfile, when readable."""
-    pidfile = pb._pidfile_path()
+    pidfile = pb.pidfile_path()
     if not pidfile.exists():
         return set()
     with contextlib.suppress(ValueError):
@@ -654,7 +654,7 @@ def test_real_start_retains_pooler_with_held_client(
 
     port, role, secret, pid = _launch_incident_shape_pooler(home, monkeypatch)
     old = stop.OwnedProcess.capture(psutil.Process(pid))
-    config = (pb._ini_path().read_bytes(), pb._userlist_path().read_bytes())
+    config = (pb.ini_path().read_bytes(), pb._userlist_path().read_bytes())
     try:
         with psycopg.connect(
             f"postgresql://{role}:{secret}@127.0.0.1:{port}/pgbouncer", autocommit=True
@@ -680,7 +680,7 @@ def test_real_start_retains_pooler_with_held_client(
                 )
             assert old.live(), "normal start must retain a pooler still draining its client"
             assert pb._running_pid() == pid, "no replacement may be launched"
-            assert (pb._ini_path().read_bytes(), pb._userlist_path().read_bytes()) == config
+            assert (pb.ini_path().read_bytes(), pb._userlist_path().read_bytes()) == config
     finally:
         _kill_test_poolers(pid)
 

@@ -127,7 +127,24 @@ class TestScopeDerivationRules:
     def test_session_forward_carries_the_ambient_passthroughs(self) -> None:
         from shared.env_registry import HOST_PASSTHROUGH_KEYS
 
-        assert frozenset({"DISPLAY", "WAYLAND_DISPLAY", "HOME"}) == HOST_PASSTHROUGH_KEYS
+        assert (
+            frozenset({"DISPLAY", "WAYLAND_DISPLAY", "HOME", "USER", "LOGNAME"})
+            == HOST_PASSTHROUGH_KEYS
+        )
+
+    @pytest.mark.parametrize("role", ["gateway", "runner", "agent"])
+    def test_child_env_carries_the_login_identity(
+        self, monkeypatch: pytest.MonkeyPatch, role: str
+    ) -> None:
+        """A PTY child without USER reads a logged-in macOS Claude Code CLI as
+        "Not logged in" (its keychain lookup keys on the account name)."""
+        from shared.env_registry import child_env
+
+        monkeypatch.setenv("USER", "operator")
+        monkeypatch.setenv("LOGNAME", "operator")
+        env = child_env(role, "posix")  # type: ignore[arg-type] — parametrized ProcessRole
+        assert env["USER"] == "operator"
+        assert env["LOGNAME"] == "operator"
 
     def test_child_env_carries_the_machine_network_proxy_configuration(
         self, monkeypatch: pytest.MonkeyPatch

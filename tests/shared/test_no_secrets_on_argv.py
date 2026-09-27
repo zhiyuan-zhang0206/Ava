@@ -222,14 +222,14 @@ def test_agent_shell_session(
         return None
 
     monkeypatch.setattr(sessions, "_record_ttl", _noop_record_ttl)
-    sessions._create_session("probe", ttl=120)
+    sessions.create_session("probe", ttl=120)
     launches = [
         a for a in captured_argv if a[:3] == [sys.executable, "-m", "shared.sessions.pty.cli"]
     ]
     assert launches, f"no pty CLI launch; saw {captured_argv!r}"
     argv = launches[-1]
     assert argv[3:5] == ["ava-agent-1-shell-3-probe", "new"]  # <name> <op>
-    _assert_clean(argv, label="ava.shell.sessions._create_session")
+    _assert_clean(argv, label="ava.shell.sessions.create_session")
     # the envfile is 0600 and holds only the host-scope forward view — the
     # secrets must not be in it either (they never reach the shell's env)
     envfile = Path(argv[-1])
@@ -246,7 +246,7 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The cluster's own redis: `--requirepass <secret>` and `redis-cli -a <secret>`
     would both publish the cluster secret. It goes through a 0600 conf file and
     `$REDISCLI_AUTH` instead."""
-    from cli.commands import _cluster_instance as ci
+    from cli.commands import cluster_instance as ci
 
     calls: list[list[str]] = []
 
@@ -255,7 +255,7 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         return subprocess.CompletedProcess(args, returncode=0, stdout="PONG", stderr="")
 
     monkeypatch.setattr(ci.subprocess, "run", fake_run)
-    monkeypatch.setattr(ci, "_redis_data_dir", lambda: tmp_path / "redis")
+    monkeypatch.setattr(ci, "redis_data_dir", lambda: tmp_path / "redis")
     monkeypatch.setattr(ci, "_ensure_redis_acl", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "print", lambda *_a, **_k: None, raising=False)  # pyright: ignore[reportUnknownArgumentType]
@@ -273,7 +273,7 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # down on the first probe (so the full start path runs), up on the next
     probes = iter([False, True, True])
     monkeypatch.setattr(ci, "_redis_running", lambda *_a: next(probes))  # pyright: ignore[reportUnknownArgumentType]
-    assert ci._start_redis(46999, _SECRET, _SECRET, _SECRET, "ava") == 0
+    assert ci.start_redis(46999, _SECRET, _SECRET, _SECRET, "ava") == 0
 
     for argv in calls:
         _assert_clean(argv, label="redis bring-up")

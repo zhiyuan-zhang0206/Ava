@@ -349,7 +349,7 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
                     path.write_bytes(b"changed authority")
             return None
 
-        monkeypatch.setattr(jobs, "_retirement_query", query)
+        monkeypatch.setattr(jobs, "retirement_query", query)
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             sock = home / "run/permissions-helper.23456.sock"
             listener.bind(str(sock))
@@ -383,7 +383,7 @@ def test_helper_socket_inspection_error_retains_definition(
     def absent(_target: str, _deadline: float) -> str | None:
         return None
 
-    monkeypatch.setattr(jobs, "_retirement_query", absent)
+    monkeypatch.setattr(jobs, "retirement_query", absent)
     with pytest.raises(RuntimeError, match="socket absence"):
         jobs.unregister_helper(home, helper_port=23456)
     assert path.read_bytes() == original

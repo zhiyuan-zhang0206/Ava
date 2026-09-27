@@ -50,7 +50,7 @@ def _load_ava_code_plugin():
 
     yield
 
-    # clear_plugin_registrations() now also runs ava._extend.clear_wraps(), which
+    # clear_plugin_registrations() now also runs ava.sdk_surface.wraps.clear_wraps(), which
     # restores every wrapped ava.* target (files.*, shell.run, understand) to its
     # captured original — the old reload dance is no longer needed.
     clear_plugin_registrations()
@@ -165,22 +165,22 @@ def test_default_cwd_is_workspace_when_bootstrapped(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """In bootstrapped process, cwd default = own workspace dir (and already created)."""
-    import ava._boot as boot
+    from ava import agent_identity
     from ava_builtins.plugins.ava_code.agent_runtime import _default_cwd
 
-    monkeypatch.setattr(boot, "_agent_id", boot._agent_id)
-    monkeypatch.setattr(boot, "_owns_loop", boot._owns_loop)
-    boot.establish(5, owns_loop=True)
+    monkeypatch.setattr(agent_identity, "_agent_id", agent_identity._agent_id)
+    monkeypatch.setattr(agent_identity, "_owns_loop", agent_identity._owns_loop)
+    agent_identity.establish(5, owns_loop=True)
     assert _default_cwd() == str(unit_home / "workspaces" / "5")
     assert (unit_home / "workspaces" / "5").is_dir()
 
 
 def test_default_cwd_home_without_bootstrap(monkeypatch: pytest.MonkeyPatch):
     """No process identity (test/REPL directly construct state) → keep $HOME placeholder behavior."""
-    import ava._boot as boot
+    from ava import agent_identity
     from ava_builtins.plugins.ava_code.agent_runtime import _default_cwd
 
-    monkeypatch.setattr(boot, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     assert _default_cwd() == str(Path.home())
 
@@ -783,14 +783,14 @@ def test_clear_wraps_restores_original(tmp_path: Path):
     question (`ava.extend.stack`), not a `__module__` sniff. After clear the
     registry is empty and the namespace holds a different object (the original).
     """
-    from ava import _extend
+    from ava.sdk_surface import wraps
 
     # fixture already loaded ava_code -> files.read carries one wrap layer
-    assert _extend.stack("files.read")  # non-empty: wrapped
+    assert wraps.stack("files.read")  # non-empty: wrapped
     wrapped = ava.files.read
 
-    _extend.clear_wraps()
-    assert _extend.stack("files.read") == []  # registry emptied
+    wraps.clear_wraps()
+    assert wraps.stack("files.read") == []  # registry emptied
     assert ava.files.read is not wrapped  # restored to the original object
     assert ava.files.read.__module__ == "ava.files"
 
@@ -974,7 +974,7 @@ def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
         # No print output — cwd_note is set in state for the after-exec hook
         assert ava.state.ava_code__cwd_note is not None  # type: ignore[union-attr]
         assert f"Working directory set to {repo}" in ava.state.ava_code__cwd_note  # type: ignore[union-attr]
-        assert "demo-proj" in {s["name"] for s in ava_skills._names()}
+        assert "demo-proj" in {s["name"] for s in ava_skills.names()}
     finally:
         ava.state = None
         ava.state_update = None
@@ -1008,12 +1008,12 @@ def test_coding_tools_section_skips_framework_expanded_modules(
     child (e.g. `shell.sessions`) does not suppress the parent's stub. `cwd`
     is registered via ava.register_sdk_expand at plugin import, so it is
     always expanded and never promoted here."""
-    import ava
+    from ava.sdk_surface import plugins
     from ava_builtins.plugins.ava_code.agent_runtime import _coding_tools_section
     from shared.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
-    monkeypatch.setattr(ava, "_REGISTERED_SDK_EXPANSIONS", ["cwd"])
+    monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", ["cwd"])
     text = _coding_tools_section()
     assert "## ava.files" not in text  # expanded by the framework -> skipped
     assert "## ava.shell" in text  # only the child is expanded -> parent stays

@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from cli.commands import _pgbouncer as pooler
+from cli.commands import pgbouncer as pooler
 from shared import pg_admin
 
 

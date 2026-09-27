@@ -111,20 +111,20 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
         schema_digest=reference.schema_digest,
         source_commit=reference.source_commit,
     )
-    from cli.commands._repo import _services_for_roles_annotated
-    from cli.commands._root_driver import _root_child_env, _start_roster, _tree_manifest
-    from cli.commands._start_generation import launch_digest
+    from cli.commands.root_driver import root_child_env, start_roster, tree_manifest
+    from cli.commands.start_generation import launch_digest
+    from ops import spec as ops_spec
     from shared.machine import machine_role
     from shared.service_selection import resolve_selection
 
     roles = machine_role()
-    names = {spec.session for spec, _reason in _services_for_roles_annotated(roles)}
+    names = {spec.session for spec, _reason in ops_spec.services_for_capabilities_annotated(roles)}
     disabled = resolve_selection(names, persist=False, publish=False)
-    roster = _start_roster(roles, disabled)
-    _tree_manifest(roster, runtime.code_root, roles=roles, runtime=runtime)
+    roster = start_roster(roles, disabled)
+    tree_manifest(roster, runtime.code_root, roles=roles, runtime=runtime)
     digest = launch_digest(
         runtime.code_root,
-        _root_child_env(),
+        root_child_env(),
         home=Path(request.home),
         runtime=runtime,
     )
@@ -162,19 +162,19 @@ def observe_operation(path: Path) -> int:
         schema_digest=reference.schema_digest,
         source_commit=reference.source_commit,
     )
-    from cli.commands._repo import _services_for_roles_annotated
-    from cli.commands._root_driver import _start_roster, _wait_for_service_tree, admit_live_start
+    from cli.commands.root_driver import admit_live_start, start_roster, wait_for_service_tree
+    from ops import spec as ops_spec
     from shared.machine import machine_role
     from shared.service_selection import resolve_selection
 
     roles = machine_role()
-    names = {spec.session for spec, _reason in _services_for_roles_annotated(roles)}
+    names = {spec.session for spec, _reason in ops_spec.services_for_capabilities_annotated(roles)}
     disabled = resolve_selection(names, persist=False, publish=False)
-    roster = _start_roster(roles, disabled)
+    roster = start_roster(roles, disabled)
     if not admit_live_start(roster, runtime.code_root, roles, reconcile=True, runtime=runtime):
         raise RuntimeError("selected application root is absent")
     _require_root_owned(operation, Path(request.home))
-    wait = _wait_for_service_tree(roster, timeout_s=60)
+    wait = wait_for_service_tree(roster, timeout_s=60)
     if wait.unready or wait.non_critical_unready:
         raise RuntimeError("selected root has incomplete service readiness")
     _require_inputs(operation)
@@ -196,19 +196,19 @@ def _require_root_owned(operation: Operation, home: Path) -> None:
         # (ppid, keeper PID, run dir); the executor then checks the journaled
         # birth, the helper's kernel identity and the pinned seed.
         return
-    from shared.os_boot_unit import _manager_properties, _process_cgroup, unit_name
+    from shared.os_boot_unit import manager_properties, process_cgroup, unit_name
     from shared.root_control.client import root_process
 
     root = root_process()
     expected_group = f"/system.slice/{unit_name(home)}"
-    native = _manager_properties(home)
+    native = manager_properties(home)
     if (
         root is None
         or native["MainPID"] != str(root.pid)
         or native["ControlPID"] != "0"
         or native["ActiveState"] != "active"
         or native["ControlGroup"] != expected_group
-        or _process_cgroup(root.pid) != expected_group
+        or process_cgroup(root.pid) != expected_group
     ):
         raise RuntimeError("selected root is not independently owned by its boot service")
 

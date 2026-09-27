@@ -293,7 +293,7 @@ rebuilt audit line.
 Postgres and Redis run as native processes (no Docker — the binaries come from brew's
 `redis@8.2` keg on macOS / apt on Linux, but Ava drives them directly via `pg_ctl` + `redis-server`,
 not `brew services`/launchd/systemd). Every cluster — including `main` — brings up its
-OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/_cluster_instance.py`):
+OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/cluster_instance.py`):
 `initdb` into `$AVA_HOME/pg` (template-cached through a host-level dir beside the
 registry, so a new cluster / a test spins up by directory copy rather than a fresh
 multi-second init), plus `redis-server` with its data dir under `$AVA_HOME/redis`.
@@ -430,7 +430,7 @@ targets the same cluster no matter where you run it. Invoke the checkout's
 `ava start`. That global `ava` always means prod. For dev, run
 `.venv/bin/ava` inside the worktree (which resolves the worktree's own `ava`).
 
-The converge phase (`cli/commands/_converge.py:converge_host`) is idempotent — run
+The converge phase (`cli/commands/converge.py:converge_host`) is idempotent — run
 by every source `cmd_start`. Run it standalone with `ava converge`. It covers the
 prod `ava` symlink, `~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
 external agents: when `~/.codex` and/or `~/.claude` already exists, it copies only
@@ -954,11 +954,11 @@ For a bounded host cleanup, keep the order explicit:
 
 ### Canonical Codex workspace sessions
 
-The Codex launcher in `ava-use-claude-code-and-codex` owns one canonical
+The Codex launcher in `ava-use-other-agents` owns one canonical
 session per `(cluster, workspace, tool)`. Check it before starting work:
 
 ```bash
-python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.py \
+python ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py \
   /absolute/workspace \
   --tasks-file /absolute/workspace/tasks.md \
   --work-file /absolute/workspace/work.md \
@@ -988,7 +988,7 @@ the normal lifecycle boundary. Cancel only the generation printed by the
 launcher or `--status`:
 
 ```bash
-python ava_builtins/skills/ava-use-claude-code-and-codex/reference/spawn_codex.py \
+python ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py \
   /absolute/workspace \
   --tasks-file /absolute/workspace/tasks.md \
   --work-file /absolute/workspace/work.md \

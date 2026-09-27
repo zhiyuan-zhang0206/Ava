@@ -14,8 +14,8 @@ import pytest
 import redis
 from redis.asyncio import Redis as AsyncRedis
 
-from cli.commands import _cluster_instance as instance
-from cli.commands import _pgbouncer as pooler
+from cli.commands import cluster_instance as instance
+from cli.commands import pgbouncer as pooler
 from shared.cluster import ownership
 from shared.cluster import postgres as pg
 from shared.native_process.ownership import OwnedProcess
@@ -31,7 +31,7 @@ def test_foreign_redis_keeps_acl_and_config(
     native ownership refuses before any ACL or config effect."""
     config = tmp_path / "redis.conf"
     config.write_text("original config\n")
-    monkeypatch.setattr(instance, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(instance, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(instance, "_redis_dial_host", lambda: "127.0.0.1")
     monkeypatch.setattr(instance, "_redis_running", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     with redis_server() as url:
@@ -40,7 +40,7 @@ def test_foreign_redis_keeps_acl_and_config(
         with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             client.config_set("requirepass", "admin")  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             before = client.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
-            assert instance._start_redis(port, "admin", "runtime", "", "unowned") == 1
+            assert instance.start_redis(port, "admin", "runtime", "", "unowned") == 1
             assert client.execute_command("ACL", "LIST") == before  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
     assert config.read_text() == "original config\n"
 
@@ -126,10 +126,10 @@ def test_postmaster_pidfile_cannot_supply_missing_native_receipt(tmp_path: Path)
 def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands import _maintenance_data_plane as plane
+    from cli.commands import maintenance_data_plane as plane
     from shared.config import settings
 
-    monkeypatch.setattr(plane, "_capture_postgres", lambda: None)
+    monkeypatch.setattr(plane, "capture_postgres", lambda: None)
     monkeypatch.setattr(plane, "_capture_pooler", lambda: None)
     monkeypatch.setattr(plane, "_require_no_unrecorded", lambda _captured: None)  # pyright: ignore[reportUnknownArgumentType] — test double
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "")
@@ -153,7 +153,7 @@ def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
         monkeypatch.setattr(settings.data_plane, "redis_url", url)
         with redis.Redis.from_url(url, decode_responses=True) as client:  # pyright: ignore[reportUnknownMemberType] — redis stubs
             directory = Path(str(client.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — redis stubs
-            monkeypatch.setattr(plane.instance, "_redis_data_dir", lambda: directory)
+            monkeypatch.setattr(plane.instance, "redis_data_dir", lambda: directory)
             with pytest.raises(RuntimeError, match="connection changed"):
                 plane.stop(3)
             assert client.ping(), "the server must survive lost connection custody"  # pyright: ignore[reportUnknownMemberType] — redis stubs
@@ -396,7 +396,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
     """The ordinary producer supplies all custody; no test-only receipt adoption."""
     import psycopg
 
-    from cli.commands import _maintenance_data_plane as plane
+    from cli.commands import maintenance_data_plane as plane
 
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     try:
@@ -437,7 +437,7 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
 ) -> None:
     import asyncio
 
-    from cli.commands import _maintenance_data_plane as plane
+    from cli.commands import maintenance_data_plane as plane
     from tests._containers import _free_port
 
     owner = OwnedProcess(123, 100.0, 456)

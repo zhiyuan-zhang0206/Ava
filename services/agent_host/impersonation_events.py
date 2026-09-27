@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from psycopg.rows import dict_row
 
-from ava._impersonation_events import consume_recorded_events, post_completion_integrity_breach
+from ava.impersonation_replay import consume_recorded_events, post_completion_integrity_breach
 from shared import maintenance
 from shared.agents.impersonation_manifest import monitor_manifest_health
 from shared.alerts import upsert_alert

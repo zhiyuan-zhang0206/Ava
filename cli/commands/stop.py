@@ -35,7 +35,7 @@ def _stop_data_plane(*, skip_infra: bool, runner_only: bool) -> None:
     elif skip_infra:
         print("\n→ stop pg/redis: kept up (keep_infra — migrate/start needs DB)")
     else:
-        from cli.commands._cluster_instance import stop_cluster_instance
+        from cli.commands.cluster_instance import stop_cluster_instance
 
         stop_cluster_instance()
 
@@ -84,7 +84,7 @@ def _compute_stop_scope(
     """
     # Dynamic lookup for monkeypatch-aware tests.
     import cli.commands._repo as _repo_commands
-    import cli.commands._root_driver as _root_driver_commands
+    import cli.commands.root_driver as _root_driver_commands
 
     if keep_browser:
         preserve_sessions = preserve_sessions | {_BROWSER_SESSION}
@@ -169,7 +169,7 @@ def _force_stop(
     os.environ.pop("AVA_HOME_OVERRIDE", None)
 
     # Dynamic lookup for monkeypatch-aware tests.
-    import cli.commands._root_driver as _root_driver_commands
+    import cli.commands.root_driver as _root_driver_commands
 
     _service_sessions, runner_only, skip_infra = _compute_stop_scope(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra

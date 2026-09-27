@@ -139,7 +139,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     def decode(delta: dict[str, Any]) -> dict[str, Any]:
         return delta
 
-    monkeypatch.setattr("ava._external_state.decode_plugin_delta", decode)
+    monkeypatch.setattr("ava.external_state.decode_plugin_delta", decode)
     receipt = Mock(side_effect=RuntimeError("receipt commit lost"))
     monkeypatch.setattr("shared.agents.impersonation.mark_plugin_applied", receipt)
     with pytest.raises(RuntimeError, match="receipt commit lost"):
@@ -418,22 +418,21 @@ async def test_settle_checkpoint_activates_only_after_relay_ready(
     activate.assert_called_once()
 
 
-def test_establish_relay_claude_requires_a_fresh_heartbeat(
-    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation
+@pytest.mark.parametrize("provider", ["claude", "dsh"])
+def test_establish_relay_session_relay_requires_a_fresh_heartbeat(
+    monkeypatch: pytest.MonkeyPatch, incarnation: RuntimeIncarnation, provider: str
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
     fail = Mock()
     monkeypatch.setattr("shared.agents.impersonation.fail_acceptance", fail)
     stale = _relay_session(
-        "accepted",
-        provider="claude",
-        relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5),
+        "accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5)
     )
     assert impersonation.establish_relay(stale, incarnation) is False
     fail.assert_called_once()
     fail.reset_mock()
-    fresh = _relay_session("accepted", provider="claude", relay_heartbeat_at=datetime.now(UTC))
+    fresh = _relay_session("accepted", provider=provider, relay_heartbeat_at=datetime.now(UTC))
     assert impersonation.establish_relay(fresh, incarnation) is True
     fail.assert_not_called()
 

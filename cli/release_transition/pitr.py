@@ -44,26 +44,26 @@ def _require_pg_cluster(before: dict[str, str], after: dict[str, str]) -> None:
 
 def observe_postgres(operation: Operation) -> None:
     """Require actual new native birth and owned archive settings after restart."""
-    from cli.commands import _pitr_activation as activation
-    from services.pitr.activation_runtime import _archive_settings, _settings_digest
+    from cli.commands import pitr_activation as activation
+    from services.pitr.activation_runtime import archive_settings, settings_digest
 
     progress = operation.pitr
     if progress is None or progress.seal is None:
         raise RuntimeError("PITR observation has no sealed restart inputs")
     require_inputs(operation)
-    current = activation._read_pg_state()
+    current = activation.read_pg_state()
     _require_pg_cluster(progress.seal.postgres_state, current)
     before, after = progress.seal.postgres, _pg_identity(current)
     if OwnedProcess(before.pid, before.create_time, before.starttime).same_birth(
         OwnedProcess(after.pid, after.create_time, after.starttime)
     ):
         raise RuntimeError("PITR restart did not replace the captured PostgreSQL birth")
-    if _settings_digest(_archive_settings(current)) != progress.seal.archive_settings_digest:
+    if settings_digest(archive_settings(current)) != progress.seal.archive_settings_digest:
         raise RuntimeError("PostgreSQL did not load the sealed PITR archive settings")
     record = read_record(operation)
     if record is None:
         raise RuntimeError("PITR observation lost its activation record")
-    activation._require_same_credentials(record.pre_activation_credential_evidence, "after restart")
+    activation.require_same_credentials(record.pre_activation_credential_evidence, "after restart")
 
 
 def persist_failure(operation: Operation, failure: BaseException) -> None:
@@ -126,7 +126,7 @@ class PitrTransition:
 
     def provision(self, journal: Journal) -> bool:
         """Return true only when a fresh interpreter must enter the sealed phase."""
-        from cli.commands import _pitr_activation as activation
+        from cli.commands import pitr_activation as activation
         from services.pitr.activation_state import lock_path
         from shared.cluster_lock import acquire_update_lock, release_update_lock
         from shared.platform import file_lock
@@ -146,11 +146,11 @@ class PitrTransition:
                 raise RuntimeError("another online writer owns the PostgreSQL mutation lease")
             try:
                 if progress.action == "activate":
-                    record = activation._advance_activation(
+                    record = activation.advance_activation(
                         self.home, record, holder, stop_at_restart=True
                     )
                 else:
-                    record = activation._rollback_record(self.home, record)
+                    record = activation.rollback_record(self.home, record)
             finally:
                 release_update_lock(holder)
             if record.phase in {"protected", "rolled_back"}:
@@ -162,18 +162,18 @@ class PitrTransition:
         return True
 
     def _data_down(self, operation: Operation) -> bool:
-        from cli.commands._maintenance_data_plane import _capture_postgres
+        from cli.commands.maintenance_data_plane import capture_postgres
 
         return (
             operation.pitr is not None
             and operation.pitr.data_stop is not None
-            and _capture_postgres() is None
+            and capture_postgres() is None
         )
 
     def _offline_rollback(self, journal: Journal, record: ActivationRecord) -> ActivationRecord:
-        from cli.commands._maintenance_data_plane import stop_captured
-        from cli.commands._root_driver import _require_root_absent
-        from services.pitr.activation_runtime import _restore_exact_file, _settings_digest
+        from cli.commands.maintenance_data_plane import stop_captured
+        from cli.commands.root_driver import require_root_absent
+        from services.pitr.activation_runtime import restore_exact_file, settings_digest
         from shared import maintenance
 
         progress = journal.operation.pitr
@@ -186,14 +186,14 @@ class PitrTransition:
         current = maintenance.require_operation(str(self.request.id), self.at)
         if current.maintenance is None or current.maintenance.phase not in {"stopped", "starting"}:
             raise RuntimeError("offline rollback requires the exact stopped maintenance generation")
-        _require_root_absent()
+        require_root_absent()
         stop_captured(progress.data_stop, 90)
         if record.phase == "rollback_restart_pending":
             return record
         if record.phase != "rollback_pending":
             record = record.advance(
                 "rollback_pending",
-                wal_config_before_digest=_settings_digest(
+                wal_config_before_digest=settings_digest(
                     {
                         name: record.pre_activation_pg_settings[name]
                         for name in (
@@ -215,7 +215,7 @@ class PitrTransition:
             or record.rollback_expected_auto_conf_digest is None
         ):
             raise RuntimeError("offline rollback lacks exact auto.conf byte ownership")
-        _restore_exact_file(
+        restore_exact_file(
             self.home / "pg/postgresql.auto.conf",
             payload_b64=record.pre_activation_auto_conf_b64,
             target_digest=record.pre_activation_auto_conf_digest,
@@ -238,18 +238,18 @@ class PitrTransition:
         return record
 
     def _seal(self, journal: Journal, record: ActivationRecord, *, data_stopped: bool) -> None:
-        from cli.commands import _pitr_activation as activation
-        from services.pitr.activation_runtime import _archive_settings, _settings_digest
+        from cli.commands import pitr_activation as activation
+        from services.pitr.activation_runtime import archive_settings, settings_digest
         from shared.start_inputs import configuration_digest
 
         require_inputs(journal.operation)
-        state = record.pre_activation_pg_settings if data_stopped else activation._read_pg_state()
+        state = record.pre_activation_pg_settings if data_stopped else activation.read_pg_state()
         if state is None:
             raise RuntimeError("PITR start seal lacks PostgreSQL identity")
         desired = (
             record.wal_config_desired_digest
             if record.home_action == "activate"
-            else _settings_digest(_archive_settings(record.pre_activation_pg_settings or {}))
+            else settings_digest(archive_settings(record.pre_activation_pg_settings or {}))
         )
         if desired is None or record.rollback_expected_auto_conf_digest is None:
             raise RuntimeError("PITR start seal lacks expected archive configuration")
@@ -268,7 +268,7 @@ class PitrTransition:
     def quiesce(self, operation: Operation) -> None:
         from cli.release_transition.identity import require_local_writers
         from cli.release_transition.root_service import preflight
-        from ops.agent_pause import _drain, _prepare
+        from ops import agent_pause
 
         require_inputs(operation)
         require_local_writers(self.request)
@@ -287,13 +287,13 @@ class PitrTransition:
                 "ready",
             }:
                 return
-        _prepare(str(self.request.id), self.at)
-        _drain(str(self.request.id), self.at, 90, reap=True)
+        agent_pause.prepare(str(self.request.id), self.at)
+        agent_pause.drain(str(self.request.id), self.at, 90, reap=True)
 
     def stop_apps(self, journal: Journal) -> None:
-        from cli.commands._maintenance import _stop
-        from cli.commands._maintenance_data_plane import capture_custody
-        from cli.commands._root_driver import _require_root_absent
+        from cli.commands import maintenance as maintenance_commands
+        from cli.commands.maintenance_data_plane import capture_custody
+        from cli.commands.root_driver import require_root_absent
         from shared import maintenance, pause_owner
         from shared.maintenance_state import MaintenanceHold
 
@@ -309,8 +309,8 @@ class PitrTransition:
                 hold,
                 MaintenanceHold.decode(hold.encode() | {"phase": "stopping"}),
             )
-        _stop(str(self.request.id), self.at, 90, gateway_last=True)
-        _require_root_absent()
+        maintenance_commands.stop(str(self.request.id), self.at, 90, gateway_last=True)
+        require_root_absent()
         progress = journal.operation.pitr
         if progress is None:
             raise RuntimeError("PITR stop lost its action")
@@ -326,15 +326,15 @@ class PitrTransition:
             journal.record_pitr(progress.model_copy(update={"data_stop": receipt}))
 
     def stop_data(self, operation: Operation) -> None:
-        from cli.commands._maintenance_data_plane import stop_captured
-        from cli.commands._root_driver import _require_root_absent
+        from cli.commands.maintenance_data_plane import stop_captured
+        from cli.commands.root_driver import require_root_absent
         from shared import maintenance
 
         require_inputs(operation)
         current = maintenance.require_operation(str(self.request.id), self.at)
         if current.maintenance is None or current.maintenance.phase != "stopped":
             raise RuntimeError("PITR data stop requires its stopped maintenance generation")
-        _require_root_absent()
+        require_root_absent()
         if operation.pitr is None or operation.pitr.data_stop is None:
             raise RuntimeError("PITR data stop has no durable native receipt")
         stop_captured(operation.pitr.data_stop, 90)
@@ -362,7 +362,7 @@ class PitrTransition:
         restore_boot(operation, self.image)
 
     def resume(self, operation: Operation) -> None:
-        from cli.commands._maintenance import _resume
+        from cli.commands import maintenance as maintenance_commands
         from cli.release_transition.root_service import observe
         from shared import pause_owner, start_serving
 
@@ -375,10 +375,10 @@ class PitrTransition:
             and start_serving.is_serving()
         ):
             return
-        _resume(str(self.request.id), self.at, cancel=False)
+        maintenance_commands.resume(str(self.request.id), self.at, cancel=False)
 
     def prove(self, journal: Journal) -> None:
-        from cli.commands import _pitr_activation as activation
+        from cli.commands import pitr_activation as activation
         from services.pitr.activation_state import lock_path
         from shared.cluster_lock import acquire_update_lock, release_update_lock
         from shared.platform import file_lock
@@ -391,9 +391,9 @@ class PitrTransition:
             with file_lock(lock_path(self.home), timeout_s=5):
                 record = self._record(journal)
                 if record.home_action == "activate":
-                    record = activation._advance_activation(self.home, record, holder)
+                    record = activation.advance_activation(self.home, record, holder)
                 else:
-                    record = activation._rollback_record(self.home, record)
+                    record = activation.rollback_record(self.home, record)
                 if record.phase not in {"protected", "rolled_back"}:
                     raise RuntimeError("PITR business proof remains incomplete")
         finally:

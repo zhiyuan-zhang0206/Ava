@@ -1,4 +1,4 @@
-"""cli.commands._lgtm — native converge bring-up gating tests.
+"""cli.commands.lgtm — native converge bring-up gating tests.
 
 The local LGTM backends are a host singleton; converge runs on every `ava
 start` of every cluster on the box, so the bring-up must fire ONLY on the home
@@ -16,7 +16,7 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
-from cli.commands import _lgtm_native, _observatory_urls
+from cli.commands import _lgtm_native, observatory_urls
 from cli.commands._converge_spec import ConvergeCtx
 from shared.lgtm_local import service_argv
 
@@ -371,7 +371,7 @@ def test_native_provisioning_pg_stays_on_data_plane_when_db_url_is_loopback(
         "shared.config.settings.data_plane.db_url",
         "postgresql:///ava_main?host=/tmp/ava-pg-ava-test&port=5433",
     )
-    loki, prometheus, pg = _observatory_urls._observability_datasource_urls()
+    loki, prometheus, pg = observatory_urls._observability_datasource_urls()
     assert loki == "http://10.0.0.46:3100"
     assert prometheus == "http://10.0.0.46:9090"
     assert pg == "127.0.0.1:5433"
@@ -387,7 +387,7 @@ def test_observability_url_validation_warns_and_falls_back(
         "shared.config.settings.observability.observability_url",
         "10.0.0.1:1234",  # no scheme — malformed
     )
-    loki, prometheus, pg = _observatory_urls._observability_datasource_urls()
+    loki, prometheus, pg = observatory_urls._observability_datasource_urls()
     assert loki == "http://127.0.0.1:3100"
     assert prometheus == "http://127.0.0.1:9090"
     assert pg == "127.0.0.1:5433"

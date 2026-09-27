@@ -20,7 +20,7 @@ from shared.daemon_health import DaemonProbe
 def test_pooler_protocol_requires_native_custody_and_both_listeners(
     monkeypatch: pytest.MonkeyPatch, loopback: bool, public: bool, expected: str
 ) -> None:
-    from cli.commands import _pgbouncer as pooler
+    from cli.commands import pgbouncer as pooler
     from services.ava_root_glue import diagnostic_probes
     from services.healthchecks import owned_service
     from shared.cluster import ownership
@@ -59,7 +59,7 @@ def test_pooler_protocol_requires_native_custody_and_both_listeners(
     def _fake_public_listener_reachable(*_a: object) -> bool:
         return public
 
-    monkeypatch.setattr(owned_service, "_owned_tcp", inspect)
+    monkeypatch.setattr(owned_service, "owned_tcp", inspect)
     monkeypatch.setattr(pooler, "pgbouncer_listener_reachable", _fake_listener_reachable)
     monkeypatch.setattr(
         pooler, "pgbouncer_public_listener_reachable", _fake_public_listener_reachable

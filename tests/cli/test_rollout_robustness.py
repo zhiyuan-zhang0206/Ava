@@ -50,6 +50,7 @@ def test_declined_restart_reports_its_own_exit_code(monkeypatch: pytest.MonkeyPa
     """A preflight refusal stops nothing, so the host is still serving. It must be
     distinguishable from a failure after the stop — the updater shell branches on
     exactly this code to decide whether to run `ava start`."""
+
     stopped: list[bool] = []
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 1)
     monkeypatch.setattr(_stop_commands, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
@@ -104,6 +105,7 @@ def test_declined_restart_releases_a_pause_no_rollout_owns(
     """A locally spawned self-heal pauses this host before running `ava restart`. If
     that restart declines, nothing else clears the pause — so a healthy host would
     sit with its restarter killed until the 10-minute stranded-pause recovery."""
+
     _paused_posture(monkeypatch)
     monkeypatch.setattr("shared.cluster_lock.update_lock_holder", lambda: None)
     unpaused: list[bool] = []
@@ -118,6 +120,7 @@ def test_declined_restart_leaves_a_rollouts_pause_alone(
 ) -> None:
     """A live update lock means the rollout owns this pause and will resume the host
     itself; unpausing now would let old-code agents respawn mid-migration."""
+
     _paused_posture(monkeypatch)
     monkeypatch.setattr("shared.cluster_lock.update_lock_holder", lambda: "cloud:pid1")
     unpaused: list[bool] = []

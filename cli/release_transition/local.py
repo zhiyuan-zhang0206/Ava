@@ -37,7 +37,7 @@ class LocalTransition:
     def quiesce(self) -> None:
         from cli.release_transition.journal import read_operation
         from cli.release_transition.root_service import preflight
-        from ops.agent_pause import _drain, _prepare
+        from ops import agent_pause
 
         self.preflight()
         operation = read_operation(self.request.path)
@@ -47,12 +47,12 @@ class LocalTransition:
         # Refuse before creating a maintenance hold or draining any workload.
         if current_pointer(self.home / "releases") != self.request.previous.selector:
             raise ValueError("prepared predecessor is not the selected release before quiescing")
-        _prepare(str(self.request.id), self.request.created_at)
-        _drain(str(self.request.id), self.request.created_at, 90, reap=True)
+        agent_pause.prepare(str(self.request.id), self.request.created_at)
+        agent_pause.drain(str(self.request.id), self.request.created_at, 90, reap=True)
 
     def stop(self, operation: Operation) -> None:
-        from cli.commands._maintenance import _stop
-        from cli.commands._root_driver import _require_root_absent
+        from cli.commands import maintenance as maintenance_commands
+        from cli.commands.root_driver import require_root_absent
         from cli.release_transition import root_macos
         from shared import maintenance, pause_owner
         from shared.maintenance_state import MaintenanceHold
@@ -73,8 +73,8 @@ class LocalTransition:
         if darwin:
             # The stop request goes only to the authenticated recorded helper.
             root_macos.verified_helper(operation)
-        _stop(holder, at, 90, gateway_last=True)
-        _require_root_absent()
+        maintenance_commands.stop(holder, at, 90, gateway_last=True)
+        require_root_absent()
         if darwin:
             # Durable keeper stop intent: no restart, not even at login, until
             # the selected image's explicit seed.
@@ -84,10 +84,10 @@ class LocalTransition:
         return self.candidate if operation.direction == "candidate" else self.previous
 
     def select(self, operation: Operation) -> None:
-        from cli.commands._root_driver import _require_root_absent
+        from cli.commands.root_driver import require_root_absent
 
         self.preflight()
-        _require_root_absent()
+        require_root_absent()
         target = (
             self.request.candidate if operation.direction == "candidate" else self.request.previous
         )
@@ -154,7 +154,7 @@ class LocalTransition:
 
     def resume(self, operation: Operation) -> None:
         self.request.require_configuration()
-        from cli.commands._maintenance import _resume
+        from cli.commands import maintenance as maintenance_commands
         from shared import maintenance, pause_owner, start_serving
 
         # An executor may have died after recording this phase. A durable
@@ -170,4 +170,4 @@ class LocalTransition:
         ):
             return
         maintenance.require_operation(str(self.request.id), self.request.created_at)
-        _resume(str(self.request.id), self.request.created_at, cancel=False)
+        maintenance_commands.resume(str(self.request.id), self.request.created_at, cancel=False)

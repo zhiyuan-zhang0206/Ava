@@ -11,11 +11,11 @@ from __future__ import annotations
 import inspect
 import re
 
-from cli.commands import _pgbouncer
+from cli.commands import pgbouncer
 
 
 def test_render_ini_is_transaction_scram_and_socket_server() -> None:
-    ini = _pgbouncer._render_ini(
+    ini = pgbouncer._render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
@@ -25,7 +25,7 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     assert "pool_mode = transaction" in ini
     # Client auth is scram against the userlist of generation verifiers.
     assert "auth_type = scram-sha-256" in ini
-    assert f"auth_file = {_pgbouncer._userlist_path()}" in ini
+    assert f"auth_file = {pgbouncer._userlist_path()}" in ini
     assert "listen_port = 6433" in ini
     # The [databases] entry keys on the cluster db and forwards to the local pg over
     # its owner-only unix socket (host=<socket dir>) with SCRAM pass-through.
@@ -69,14 +69,14 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
 def test_render_ini_authenticates_without_secret_and_binds_loopback_only() -> None:
     """The internal data plane always authenticates: an empty cluster secret
     changes only the bind (loopback alone), never the SCRAM front door."""
-    ini = _pgbouncer._render_ini(pg_port=5433, listen_port=6433, db_name="ava", cluster_secret="")
+    ini = pgbouncer._render_ini(pg_port=5433, listen_port=6433, db_name="ava", cluster_secret="")
     assert "auth_type = scram-sha-256" in ini.splitlines()
     assert "trust" not in ini
     assert "listen_addr = 127.0.0.1" in ini.splitlines()
 
 
 def test_render_ini_binds_loopback_never_all_interfaces() -> None:
-    ini = _pgbouncer._render_ini(
+    ini = pgbouncer._render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",

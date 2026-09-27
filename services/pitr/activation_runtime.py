@@ -62,25 +62,25 @@ def activation_health_component() -> dict[str, object]:
     return health
 
 
-def _archive_settings(pg: dict[str, str]) -> dict[str, str]:
+def archive_settings(pg: dict[str, str]) -> dict[str, str]:
     return {
         name: pg[name]
         for name in ("archive_mode", "archive_command", "archive_timeout", "wal_compression")
     }
 
 
-def _settings_digest(values: dict[str, str]) -> str:
+def settings_digest(values: dict[str, str]) -> str:
     return hashlib.sha256(
         json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
 
-def _file_evidence(path: Path) -> tuple[str, str]:
+def file_evidence(path: Path) -> tuple[str, str]:
     payload = path.read_bytes()
     return base64.b64encode(payload).decode("ascii"), hashlib.sha256(payload).hexdigest()
 
 
-def _restore_exact_file(
+def restore_exact_file(
     path: Path, *, payload_b64: str, target_digest: str, expected_digest: str
 ) -> None:
     payload = base64.b64decode(payload_b64, validate=True)
@@ -121,7 +121,7 @@ def _restore_exact_file(
         staged.unlink(missing_ok=True)
 
 
-def _shadow_pg_gate(current: dict[str, str]) -> bool:
+def shadow_pg_gate(current: dict[str, str]) -> bool:
     """archive_command displays '(disabled)' under PG17 archive_mode=off."""
     return current["archive_mode"] == "off" and current["archive_command"].strip() in (
         "",
@@ -129,7 +129,7 @@ def _shadow_pg_gate(current: dict[str, str]) -> bool:
     )
 
 
-def _desired_archive_settings(home: Path) -> dict[str, str]:
+def desired_archive_settings(home: Path) -> dict[str, str]:
     config = settings.physical_backup
     shim = home / "runtime" / "pg-archive" / "archive-shim"
     spool = home / "physical-backup" / "spool"
@@ -154,7 +154,7 @@ def _desired_archive_settings(home: Path) -> dict[str, str]:
     }
 
 
-_PITR_ENV_FIELDS = {
+PITR_ENV_FIELDS = {
     "pitr_enabled": "AVA_PITR_ENABLED",
     "pitr_base_backup_enabled": "AVA_PITR_BASE_BACKUP_ENABLED",
     "pitr_restore_proof_enabled": "AVA_PITR_RESTORE_PROOF_ENABLED",
@@ -174,7 +174,7 @@ def _pitr_env_baseline(payload: bytes | None = None) -> dict[str, str]:
             [line for line in lines if env_line_key(line) == alias],
             separators=(",", ":"),
         )
-        for field, alias in _PITR_ENV_FIELDS.items()
+        for field, alias in PITR_ENV_FIELDS.items()
     }
 
 
@@ -210,7 +210,7 @@ def pitr_env_absent(payload: bytes) -> bool:
     anything in between is an operator's explicit configuration and is
     refused rather than clobbered."""
     values = dotenv_values(stream=StringIO(payload.decode()))
-    return not any(alias in values for alias in _PITR_ENV_FIELDS.values())
+    return not any(alias in values for alias in PITR_ENV_FIELDS.values())
 
 
 def rollback_effect_state(*, current: str, before: str, owned: str) -> bool:
@@ -234,7 +234,7 @@ def archiver_reached_target(*, last_archived: str, timeline: str, target: str) -
 
 def pitr_admin_url() -> str:
     """The admin-plane connection the activation's Postgres mutations run on:
-    the initdb superuser over the live unix socket (same face `_read_pg_state`
+    the initdb superuser over the live unix socket (same face `read_pg_state`
     reads through).
 
     Deliberately NOT `shared.db.direct_db_url()` — that derives from

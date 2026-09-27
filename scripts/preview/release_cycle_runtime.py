@@ -167,11 +167,11 @@ def image_input(run: Path, name: str) -> tuple[ReleaseRef, VerifiedRelease]:
 
 
 def initial(run: Path) -> None:
-    from cli.commands._root_driver import _require_root_absent
+    from cli.commands.root_driver import require_root_absent
     from cli.release_transition.root_service import install_steady
 
     reference, image = image_input(run, "a")
-    _require_root_absent()
+    require_root_absent()
     activate_release(
         run / "home/releases",
         reference.artifact_digest,

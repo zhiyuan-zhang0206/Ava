@@ -429,7 +429,7 @@ class PluginStateHandle[T: BaseModel]:
             PluginStateOutsideTurnError: `ava.state` slot not injected (called outside exec turn).
         """
         import ava  # lazy import: avoid circular (ava imports agent.state via plugin loading)
-        from ava._boot import validate_external_identity
+        from ava.agent_identity import validate_external_identity
 
         validate_external_identity()
 
@@ -459,7 +459,7 @@ class PluginStateHandle[T: BaseModel]:
             ValueError: delta contains a key outside the BaseModel schema (plugin author typo).
         """
         import ava
-        from ava._boot import validate_external_identity
+        from ava.agent_identity import validate_external_identity
 
         validate_external_identity()
 
@@ -650,7 +650,8 @@ def clear_plugin_registrations() -> None:
     _BASE_FIELD_DECLARED.clear()
     # avoid circular import: lazy import inside the function for cross-module reset points
     import ava
-    import ava._skill_sources
+    import ava.sdk_surface.wraps
+    import ava.skill_sources
     from agent.graph._context_notes import _CONTEXT_NOTES, _FRAMEWORK_NOTE_COUNT
     from agent.graph._system_prompt import _FRAMEWORK_SECTION_COUNT, _SYSTEM_PROMPT_SECTIONS
     from agent.hooks._registry import HOOKS
@@ -667,8 +668,8 @@ def clear_plugin_registrations() -> None:
     clear_plugin_flags()
     plugin_contributions.clear()
     ava.clear_registered_namespaces()
-    ava._extend.clear_wraps()
-    ava._skill_sources.clear()
+    ava.sdk_surface.wraps.clear_wraps()
+    ava.skill_sources.clear()
 
 
 def _plugin_namespace_view(state: BaseAgentState, plugin: str) -> SimpleNamespace:

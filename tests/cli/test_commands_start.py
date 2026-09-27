@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 import pytest
 
 import cli.commands._repo as _repo_commands
-import cli.commands._root_driver as _root_driver_commands
 import cli.commands._setup as _setup_commands
+import cli.commands.root_driver as _root_driver_commands
 import cli.commands.start as _start_commands
 from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
 from shared.config import settings
@@ -39,6 +39,7 @@ def test_cmd_start_aborts_when_schema_mismatched(
 ) -> None:
     """_assert_schema_current_or_die returning non-zero short-circuits cmd_start
     before register_self / session launch, so a code-vs-DB drift fails loud at start."""
+
     _ = tmp_path
     launch = MagicMock()
     monkeypatch.setattr(_root_driver_commands, "_launch_service_tree", launch)

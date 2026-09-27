@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._converge as _converge_commands
 import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
-import cli.commands._root_driver as _root_driver_commands
 import cli.commands._setup as _setup_commands
+import cli.commands.converge as _converge_commands
+import cli.commands.root_driver as _root_driver_commands
 from shared.start_serving import RootBirth
 
 # Explicit shared surface: every name the split test modules import from here.
@@ -184,7 +184,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
     monkeypatch.setattr("cli.commands._data_plane.prepare_gateway_schema", lambda: None)
     monkeypatch.setattr("cli.commands._data_plane.complete_gateway_data_plane", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    from cli.commands._root_driver import LaunchOutcome
+    from cli.commands.root_driver import LaunchOutcome
 
     monkeypatch.setattr(
         _root_driver_commands,
@@ -193,7 +193,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     )
     monkeypatch.setattr(
         _root_driver_commands,
-        "_wait_for_service_tree",
+        "wait_for_service_tree",
         lambda *_a, **_kw: _probe_commands.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
 
@@ -213,7 +213,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # _assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 0)
     # Root service preparation must not install frontend dependencies in unit tests.
-    from cli.commands import _repo, _root_driver
+    from cli.commands import _repo, root_driver
 
     monkeypatch.setattr(_repo, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -223,7 +223,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     def _fixture_runner_url() -> str:
         return "postgresql://ava_runner:test-runner@127.0.0.1:1/ava_citest"
 
-    monkeypatch.setattr(_root_driver, "runner_db_url_projection", _fixture_runner_url)
+    monkeypatch.setattr(root_driver, "runner_db_url_projection", _fixture_runner_url)
 
 
 @pytest.fixture(autouse=True)

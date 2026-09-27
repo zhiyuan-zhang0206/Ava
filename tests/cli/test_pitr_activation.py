@@ -12,15 +12,15 @@ from types import SimpleNamespace
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
-from cli.commands import _pitr_activation as activation
 from cli.commands import _pitr_activation_config as activation_config
+from cli.commands import pitr_activation as activation
 from services.gateway_side.backup import snapshot as _snapshot
 from services.pitr import activation_runtime
 from services.pitr.activation_observability import refusal_message, save_error
 from services.pitr.activation_runtime import (
-    _restore_exact_file,
     archiver_reached_target,
     pitr_env_is_desired,
+    restore_exact_file,
     rollback_effect_state,
     wal_metadata,
 )
@@ -138,15 +138,15 @@ def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(activation_config, "_apply_env", lambda _home, _record: b"a")
     monkeypatch.setattr(activation_config, "_env_payload", lambda _home: b"a")
     monkeypatch.setattr(activation_config, "pitr_env_is_desired", lambda _payload: False)
-    monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", digest))
-    monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("YQ==", digest))
+    monkeypatch.setattr(activation_config, "file_evidence", lambda _path: ("YQ==", digest))
+    monkeypatch.setattr(activation, "file_evidence", lambda _path: ("YQ==", digest))
     monkeypatch.setattr(
         activation,
         "capture_pitr_env_baseline",
         lambda _path: (
             "YQ==",
             digest,
-            dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+            dict.fromkeys(activation.PITR_ENV_FIELDS, "[]"),
         ),
     )
     monkeypatch.setattr(
@@ -192,7 +192,7 @@ def _wal_restart_pending_record(credentials: dict[str, str] | None = None) -> Ac
             "wal_config_applying",
             wal_config_before_digest="before",
             wal_config_desired_digest="desired",
-            pre_activation_pitr_env=dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+            pre_activation_pitr_env=dict.fromkeys(activation.PITR_ENV_FIELDS, "[]"),
             pre_activation_pg_auto_conf={
                 "archive_mode": "__ABSENT__",
                 "archive_command": "__ABSENT__",
@@ -224,17 +224,17 @@ def test_exact_file_rollback_is_digest_cas_and_crash_idempotent(tmp_path: Path) 
     target = hashlib.sha256(original).hexdigest()
     expected = hashlib.sha256(activated).hexdigest()
 
-    _restore_exact_file(
+    restore_exact_file(
         path, payload_b64=payload_b64, target_digest=target, expected_digest=expected
     )
-    _restore_exact_file(
+    restore_exact_file(
         path, payload_b64=payload_b64, target_digest=target, expected_digest=expected
     )
     assert path.read_bytes() == original
 
     path.write_bytes(b"concurrent=true\n")
     with pytest.raises(RuntimeError, match="changed concurrently"):
-        _restore_exact_file(
+        restore_exact_file(
             path, payload_b64=payload_b64, target_digest=target, expected_digest=expected
         )
 
@@ -304,7 +304,7 @@ def test_activate_persists_snapshot_before_wal_pending(
     )
     monkeypatch.setattr(_snapshot, "create_pre_activation_snapshot", lambda **_kwargs: snapshot)
     monkeypatch.setattr("services.backup.activation_snapshot", lambda _operation_id: None)
-    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
+    monkeypatch.setattr(activation, "read_pg_state", lambda: pg)
     monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
@@ -318,7 +318,7 @@ def test_activate_persists_snapshot_before_wal_pending(
         home_generation=1,
     )
     write_record(tmp_path, record)
-    activation._advance_activation(tmp_path, record, "test", stop_at_restart=True)
+    activation.advance_activation(tmp_path, record, "test", stop_at_restart=True)
     record = load_record(tmp_path)
     assert record is not None
     assert record.phase == "wal_restart_pending"
@@ -343,7 +343,7 @@ def test_activate_resume_never_repeats_snapshot(
         "wal_compression": "off",
         "postmaster_started_at": "2026-08-29 00:00:00+00",
     }
-    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
+    monkeypatch.setattr(activation, "read_pg_state", lambda: pg)
     monkeypatch.setattr(
         activation,
         "_validate_secrets",
@@ -360,7 +360,7 @@ def test_activate_resume_never_repeats_snapshot(
 
     record = load_record(tmp_path)
     assert record is not None
-    activation._advance_activation(tmp_path, record, "test", stop_at_restart=True)
+    activation.advance_activation(tmp_path, record, "test", stop_at_restart=True)
 
 
 @pytest.mark.parametrize("drift", ["system_identifier", "bucket_name", "backup_key_id"])
@@ -382,13 +382,13 @@ def test_wal_config_pending_drift_refuses_before_any_config_mutation(
         called = True
         raise AssertionError("config mutation ran after frozen identity drift")
 
-    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
+    monkeypatch.setattr(activation, "read_pg_state", lambda: pg)
     monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
     monkeypatch.setattr(activation, "apply_wal_config", mutate)
 
     with pytest.raises(RuntimeError, match=r"changed before (wal_config_pending|PITR mutation)"):
-        activation._advance_activation(tmp_path, record, "holder")
+        activation.advance_activation(tmp_path, record, "holder")
     assert called is False
     assert load_record(tmp_path) == record
 
@@ -410,7 +410,7 @@ def test_wal_config_pending_requires_inactive_gates_before_baseline(
         lambda: dict(record.pre_activation_credential_evidence or {}),
     )
     monkeypatch.setattr(
-        activation, "_read_pg_state", lambda: dict(record.pre_activation_pg_settings or {})
+        activation, "read_pg_state", lambda: dict(record.pre_activation_pg_settings or {})
     )
     monkeypatch.setattr(settings.physical_backup, "pitr_enabled", True)
     called = False
@@ -425,7 +425,7 @@ def test_wal_config_pending_requires_inactive_gates_before_baseline(
     with pytest.raises(
         RuntimeError, match="pre-activation baseline requires all PITR service flags"
     ):
-        activation._advance_activation(tmp_path, record, "holder")
+        activation.advance_activation(tmp_path, record, "holder")
     assert called is False
     assert load_record(tmp_path) == record
 
@@ -466,7 +466,7 @@ def test_config_apply_journals_intent_before_alter_and_resumes_partial_crash(
         "wal_config_applying",
         wal_config_before_digest="before",
         wal_config_desired_digest="desired",
-        pre_activation_pitr_env=dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+        pre_activation_pitr_env=dict.fromkeys(activation.PITR_ENV_FIELDS, "[]"),
         pre_activation_pg_auto_conf={"archive_mode": "__ABSENT__"},
         pre_activation_env_b64="T1RIRVI9a2VwdAo=",
         pre_activation_env_digest=hashlib.sha256(b"OTHER=kept\n").hexdigest(),
@@ -509,8 +509,8 @@ def test_rollback_preserves_snapshot_and_is_idempotent(
     monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
 
-    record = activation._rollback_record(tmp_path, record)
-    activation._rollback_record(tmp_path, record)
+    record = activation.rollback_record(tmp_path, record)
+    activation.rollback_record(tmp_path, record)
     rolled_back = load_record(tmp_path)
     assert rolled_back is not None
     assert rolled_back.phase == "rolled_back"
@@ -635,12 +635,12 @@ def test_rollback_leaves_config_owned_env_untouched(
     )
     monkeypatch.setattr(
         activation_config,
-        "_file_evidence",
+        "file_evidence",
         lambda _path: ("", "a" * 64),
     )
     monkeypatch.setattr(
         activation,
-        "_read_pg_state",
+        "read_pg_state",
         lambda: {
             "archive_mode": "on",
             "archive_command": "shim",
@@ -649,7 +649,7 @@ def test_rollback_leaves_config_owned_env_untouched(
             "postmaster_started_at": "2026-08-31 12:00:00+00",
         },
     )
-    monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("", "a" * 64))
+    monkeypatch.setattr(activation, "file_evidence", lambda _path: ("", "a" * 64))
 
     def restore(
         _home: Path, current: ActivationRecord, baseline: dict[str, str]
@@ -665,7 +665,7 @@ def test_rollback_leaves_config_owned_env_untouched(
         return replacement
 
     monkeypatch.setattr(activation, "restore_archive_settings", restore)
-    activation._rollback_record(tmp_path, record)
+    activation.rollback_record(tmp_path, record)
     lines = (tmp_path / ".env").read_text().splitlines()
     assert lines == [
         "AVA_PITR_ENABLED=true",
@@ -754,7 +754,7 @@ def _env_apply_fixture(
         "wal_config_applying",
         wal_config_before_digest="before",
         wal_config_desired_digest="desired",
-        pre_activation_pitr_env=dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+        pre_activation_pitr_env=dict.fromkeys(activation.PITR_ENV_FIELDS, "[]"),
         pre_activation_pg_auto_conf={
             "archive_mode": "__ABSENT__",
             "archive_command": "__ABSENT__",
@@ -923,7 +923,7 @@ def test_pg_auto_conf_baseline_uses_persisted_settings_before_restart(
         "_auto_conf_entries",
         lambda _home: [("archive_mode", "off"), ("archive_mode", "on")],
     )
-    monkeypatch.setattr(activation, "_read_pg_state", lambda: {"archive_mode": "off"})
+    monkeypatch.setattr(activation, "read_pg_state", lambda: {"archive_mode": "off"})
     assert activation._pg_auto_conf_baseline(tmp_path) == {
         "archive_mode": "on",
         "archive_command": "__ABSENT__",
@@ -994,7 +994,7 @@ def test_shadow_drift_fails_before_snapshot(
     record = ActivationRecord.start(operation_id="op-1", origin="cli")
     write_record(tmp_path, record)
     with pytest.raises(RuntimeError, match="archive_mode"):
-        activation._advance_activation(tmp_path, record, "test", stop_at_restart=True)
+        activation.advance_activation(tmp_path, record, "test", stop_at_restart=True)
     assert called is False
     assert load_record(tmp_path) == record
 
@@ -1004,12 +1004,12 @@ def test_shadow_pg_gate_accepts_pg17_disabled_archive_command() -> None:
     is off; the gate must accept that display, not only an empty string (the
     CI mocks previously hid the real PostgreSQL behavior, so activation
     failed at shadow on a pristine cluster)."""
-    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "(disabled)"})
-    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "  (disabled)  "})
-    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": ""})
-    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "   "})
-    assert not activation._shadow_pg_gate({"archive_mode": "on", "archive_command": "(disabled)"})
-    assert not activation._shadow_pg_gate(
+    assert activation.shadow_pg_gate({"archive_mode": "off", "archive_command": "(disabled)"})
+    assert activation.shadow_pg_gate({"archive_mode": "off", "archive_command": "  (disabled)  "})
+    assert activation.shadow_pg_gate({"archive_mode": "off", "archive_command": ""})
+    assert activation.shadow_pg_gate({"archive_mode": "off", "archive_command": "   "})
+    assert not activation.shadow_pg_gate({"archive_mode": "on", "archive_command": "(disabled)"})
+    assert not activation.shadow_pg_gate(
         {"archive_mode": "off", "archive_command": "cp %p /spool/%f"}
     )
 
@@ -1025,7 +1025,7 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
     )
     write_record(tmp_path, record)
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(activation, "_read_pg_state", lambda: pg)
+    monkeypatch.setattr(activation, "read_pg_state", lambda: pg)
     monkeypatch.setattr(
         activation,
         "_validate_secrets",
@@ -1035,7 +1035,7 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
     monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
 
     with pytest.raises(RuntimeError, match="credential"):
-        activation._advance_activation(tmp_path, record, "test", stop_at_restart=True)
+        activation.advance_activation(tmp_path, record, "test", stop_at_restart=True)
     failed = load_record(tmp_path)
     assert failed is not None
     assert failed.phase == "snapshot_pending"
@@ -1131,7 +1131,7 @@ def test_frozen_pg_state_contract_with_real_reader(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """QA #4788 contract: the frozen pre_activation_pg_settings must be exactly
-    the REAL _read_pg_state() face — nothing merged into it. Runs the actual
+    the REAL read_pg_state() face — nothing merged into it. Runs the actual
     reader against a real throwaway PG17 (only the registry record and the
     admin-URL formatter are faked; the reader's connections, SQL, key-set
     construction, pg_controldata and psutil cross-checks all execute for real).
@@ -1221,11 +1221,11 @@ def test_frozen_pg_state_contract_with_real_reader(
             lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
         )
         monkeypatch.setattr(
-            "cli.commands._cluster_instance.pg_admin_url",
+            "cli.commands.cluster_instance.pg_admin_url",
             lambda _pg_port: f"postgresql://ava@127.0.0.1:{port}/postgres",
         )
 
-        frozen = activation._read_pg_state()
+        frozen = activation.read_pg_state()
         # The pre-activation dump reads as the NOLOGIN schema owner, password-free.
         target = conninfo_to_dict(frozen["dump_conninfo"])
         assert target["options"] == f"-c role={db_identity()}"
@@ -1236,7 +1236,7 @@ def test_frozen_pg_state_contract_with_real_reader(
         # The frozen face round-trips: unchanged cluster -> comparison passes.
         activation._require_same_pg_state(frozen, "contract")
         # Reading twice yields the identical 12-key face (stable, no drift).
-        assert activation._read_pg_state() == frozen
+        assert activation.read_pg_state() == frozen
         # Old defect shape: any extra credential-evidence key must fail.
         with pytest.raises(RuntimeError, match="changed"):
             activation._require_same_pg_state(
@@ -1381,7 +1381,7 @@ def test_wal_ack_attempt_renews_expired_deadline_before_switch(
     record = _wal_ack_pending_record(wal_verification_deadline=expired)
     write_record(tmp_path, record)
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(activation, "_require_same_credentials", lambda *_a: None)
+    monkeypatch.setattr(activation, "require_same_credentials", lambda *_a: None)
 
     def fake_switch() -> str:
         # The ordering lock: when the switch runs, the durable record must
@@ -1399,7 +1399,7 @@ def test_wal_ack_attempt_renews_expired_deadline_before_switch(
     monkeypatch.setattr(activation, "_remote_wal_proof", proof)
     monkeypatch.setattr(activation, "run_while_renewing", lambda _h, fn: fn(None))
     with pytest.raises(RuntimeError, match="switch reached"):
-        activation._advance_activation(tmp_path, record, "holder")
+        activation.advance_activation(tmp_path, record, "holder")
     durable = load_record(tmp_path)
     assert durable is not None
     fresh = datetime.fromisoformat(durable.wal_verification_deadline or "")
@@ -1777,7 +1777,7 @@ def test_snapshot_identity_uses_native_tick_without_wall_clock_tolerance(
         "archive_mode": "off",
     }
     current = expected | {"postmaster_create_time": "101.0", "postmaster_starttime": ticks}
-    monkeypatch.setattr(activation, "_read_pg_state", lambda: current)
+    monkeypatch.setattr(activation, "read_pg_state", lambda: current)
     if ticks == "80":
         activation._require_same_pg_state(expected, "snapshot")
     else:

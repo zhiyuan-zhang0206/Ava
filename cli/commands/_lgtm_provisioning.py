@@ -14,8 +14,8 @@ import json
 import sys
 from pathlib import Path
 
-from cli.commands._observatory_urls import _atomic_write
 from cli.commands._rendered_file import write_rendered_guarded
+from cli.commands.observatory_urls import _atomic_write
 from shared import telemetry
 
 # The one provisioning file converge generates instead of copying verbatim

@@ -35,7 +35,7 @@ def ensure_gateway_data_plane() -> int:
     Pooler startup belongs to ``complete_gateway_data_plane``, after schema and
     runner grants. Storage ports always come from this home's reservation.
     """
-    from cli.commands._cluster_instance import ensure_cluster_storage
+    from cli.commands.cluster_instance import ensure_cluster_storage
     from shared.cluster import (
         get_record,
         redis_identity,
@@ -181,7 +181,7 @@ def warn_orphaned_local_instance() -> None:
         # The signal is a live process answering on this cluster's own instance
         # ports — whatever it is, it is not the remote-managed plane and not
         # something this cluster will ever manage again.
-        from cli.commands._cluster_instance import _pg_running
+        from cli.commands.cluster_instance import _pg_running
 
         if _pg_running(rec.ports["postgres"], "127.0.0.1"):
             leftovers.append("postgres")
@@ -204,7 +204,7 @@ def warn_orphaned_local_instance() -> None:
 
 def prepare_gateway_schema() -> None:
     """Initialize only a journal-owned fresh database, before any pooled login."""
-    from cli.commands._cluster_instance import pg_admin_url
+    from cli.commands.cluster_instance import pg_admin_url
     from cli.start_identity import needs_provision
     from shared import cluster
     from shared.paths import ava_home
@@ -281,7 +281,7 @@ def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connec
     autocommit, custody-checked against the home's own postmaster."""
     from psycopg.conninfo import make_conninfo
 
-    from cli.commands._cluster_instance import pg_admin_url
+    from cli.commands.cluster_instance import pg_admin_url
     from shared import pg_admin
     from shared.cluster import record_postgres_port
     from shared.paths import ava_home
@@ -334,7 +334,7 @@ def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Ge
     """Serve exactly `generation` through the owned pooler (restart on change)."""
     if not settings.data_plane.pgbouncer_enabled:
         return
-    from cli.commands._pgbouncer import ensure_pgbouncer
+    from cli.commands.pgbouncer import ensure_pgbouncer
     from shared.cluster import record_pgbouncer_port, record_postgres_port
     from shared.cluster.authority import read_pooler_admin, render_userlist
 
@@ -467,7 +467,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
         database = cluster.db_identity()
         endpoint = db_endpoint()
         if refresh_schema:
-            from cli.commands._cluster_instance import pg_admin_url
+            from cli.commands.cluster_instance import pg_admin_url
 
             cluster.ensure_pgvector_extension(
                 database,

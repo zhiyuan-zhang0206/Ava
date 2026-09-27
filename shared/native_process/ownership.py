@@ -1,6 +1,6 @@
 """PID/birth-validated process-tree ownership shared by the stop path and probes.
 
-The stop boundary (``cli.commands._maintenance_stop``) and the frontend identity
+The stop boundary (``cli.commands.maintenance_stop``) and the frontend identity
 probe (``services.healthchecks.frontend``) must answer the same question — "is
 this pid the recorded session's leader or one of its descendants, still the
 process it was?" — so the primitive lives here, importable by both without the
@@ -168,7 +168,7 @@ def _windows_live(identity: OwnedProcess) -> bool:
     appear RUNNING. A zero-time handle wait distinguishes it without waiting
     for PID disappearance or mistaking exit code 259 for STILL_ACTIVE.
     """
-    from shared.winjob import _get_last_error, _kernel32, _last_error
+    from shared.winjob import _get_last_error, _kernel32, last_error
 
     api = _kernel32()
     raw = api.OpenProcess(0x00100000, 0, identity.pid)  # SYNCHRONIZE, non-inheritable
@@ -176,19 +176,19 @@ def _windows_live(identity: OwnedProcess) -> bool:
         code = _get_last_error()
         if code == 87:  # ERROR_INVALID_PARAMETER: no process has this PID.
             return False
-        raise _last_error("open process for native liveness", code)
+        raise last_error("open process for native liveness", code)
     handle = wintypes.HANDLE(raw)
     try:
         outcome = api.WaitForSingleObject(handle, 0)
         if outcome == 0:  # WAIT_OBJECT_0: exited, even with a retained PID.
             return False
         if outcome != 258:  # WAIT_TIMEOUT is the sole live observation.
-            raise _last_error("observe native process exit")
+            raise last_error("observe native process exit")
         # Keeping the process object open prevents PID reuse during this read.
         return identity.birth_matches(psutil.Process(identity.pid))
     finally:
         if not api.CloseHandle(handle):
-            raise _last_error("close native liveness handle")
+            raise last_error("close native liveness handle")
 
 
 def _parent_edge(identity: OwnedProcess) -> tuple[OwnedProcess, int] | None:
@@ -309,6 +309,12 @@ def process_metadata() -> dict[str, Any]:
                 "boot_id": native_boot_id(),
                 "parent_pid": process.ppid(),
             }
+            if facts["name"] == "node":
+                # A Node controller (DeepSeek Harness) is identified by its
+                # script, not its interpreter; only argv[1] is recorded.
+                argv = process.cmdline()
+                if len(argv) > 1:
+                    facts["script"] = argv[1]
             if depth == 0:
                 result.update(facts)
             else:

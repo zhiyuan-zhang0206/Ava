@@ -101,7 +101,7 @@ def clear_helper_stop_intent(home: Path) -> None:
         os.close(fd)
 
 
-def _retirement_query(target: str, deadline: float) -> str | None:
+def retirement_query(target: str, deadline: float) -> str | None:
     """Absence is one positive launchd result; all other failures are unknown."""
     result = _retirement_command(["print", target], deadline)
     if result.returncode == 113 and b"Could not find service" in result.stderr:
@@ -212,7 +212,7 @@ def _request_helper_shutdown(home: Path, port: int, deadline: float) -> bytes | 
     from services.permissions_helper import client
 
     target = f"{helper_job_domain()}/{helper_job_label(home)}"
-    state = _retirement_query(target, deadline)
+    state = retirement_query(target, deadline)
     if state is None:
         return None
     path = helper_job_plist_path(home)
@@ -228,7 +228,7 @@ def _request_helper_shutdown(home: Path, port: int, deadline: float) -> bytes | 
     if reply != {"stopping": True, "pid": owner.pid, "run_dir": str(home / "run" / "ava-root")}:
         raise RuntimeError("helper shutdown did not acknowledge exact-home native custody")
     _wait_retirement_owner(owner, deadline)
-    while (latest := _retirement_query(target, deadline)) is not None:
+    while (latest := retirement_query(target, deadline)) is not None:
         if _job_pid(latest) is None:
             _require_idle_job(latest, home)
             break
@@ -253,7 +253,7 @@ def _unregister_stopped_helper(
 ) -> None:
     target = f"{helper_job_domain()}/{helper_job_label(home)}"
     path = helper_job_plist_path(home)
-    state = _retirement_query(target, deadline)
+    state = retirement_query(target, deadline)
     socket_path = home / "run" / f"permissions-helper.{port}.sock"
     if state is None and not path.exists() and not path.is_symlink():
         _require_absent_socket(socket_path, deadline)
@@ -266,7 +266,7 @@ def _unregister_stopped_helper(
         # A socket still accepting connections contradicts that absence, even
         # when launchd no longer owns the listener. Never restart it to retire it.
         _require_absent_socket(socket_path, deadline)
-        if _retirement_query(target, deadline) is not None:
+        if retirement_query(target, deadline) is not None:
             raise RuntimeError("helper job appeared during retirement; preserving its definition")
         _unlink_unchanged_plist(path, original)
         return
@@ -274,7 +274,7 @@ def _unregister_stopped_helper(
         if not force:
             raise RuntimeError("helper retirement still has a native owner; custody retained")
         owner = _retirement_owner(state, socket_path, executable)
-        latest = _retirement_query(target, deadline)
+        latest = retirement_query(target, deadline)
         latest_pid = _job_pid(latest)
         if path.is_symlink() or path.read_bytes() != original or latest_pid != owner.pid:
             raise RuntimeError("helper job changed before retirement")
@@ -326,7 +326,7 @@ def _bootout_stopped_helper(target: str, deadline: float) -> None:
     result = _retirement_command(["bootout", target], deadline)
     if result.returncode:
         raise RuntimeError(f"helper bootout failed; custody retained: {result.stderr!r}")
-    while _retirement_query(target, deadline) is not None:
+    while retirement_query(target, deadline) is not None:
         time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
 
 

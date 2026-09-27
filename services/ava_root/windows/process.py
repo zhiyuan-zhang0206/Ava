@@ -22,8 +22,8 @@ import psutil
 
 from services.ava_root.custody import ServiceCustody
 from shared.native_process.ownership import OwnedProcess
-from shared.winjob import WindowsJob, _last_error
-from shared.winjob_spawn import _process_api, _start_in_job, run_job_process
+from shared.winjob import WindowsJob, last_error
+from shared.winjob_spawn import process_api, run_job_process, start_in_job
 
 
 class ApplicationProcess:
@@ -42,15 +42,15 @@ class ApplicationProcess:
         return self.returncode
 
     def _poll(self) -> int | None:
-        api = _process_api()
+        api = process_api()
         outcome = api.WaitForSingleObject(self._handle, 0)
         if outcome == 258:  # WAIT_TIMEOUT: no blocked executor thread outlives cancellation.
             return None
         if outcome != 0:
-            raise _last_error("wait application generation")
+            raise last_error("wait application generation")
         code = ctypes.c_uint32()
         if not api.GetExitCodeProcess(self._handle, ctypes.byref(code)):
-            raise _last_error("read application generation exit")
+            raise last_error("read application generation exit")
         return int(code.value)
 
     def members(self) -> set[OwnedProcess]:
@@ -136,8 +136,8 @@ def spawn(
             ]
             for handle in set(stdio):
                 os.set_handle_inheritable(handle, True)  # noqa: FBT003 -- native positional API.
-            process = _start_in_job(
-                _process_api(),
+            process = start_in_job(
+                process_api(),
                 job,
                 stdio,
                 argv,

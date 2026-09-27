@@ -11,7 +11,7 @@ from typing import Any
 import psutil
 import pytest
 
-from cli.commands import _maintenance_data_plane as data
+from cli.commands import maintenance_data_plane as data
 from cli.release_transition.pitr_evidence import DataOwner, DataStop
 from shared.native_process.ownership import OwnedProcess
 from shared.process_evidence import ExpectedProcess

@@ -27,7 +27,7 @@ Each skill in the install registry (`shared/install_registry.py`) carries an `or
 - [[self_improvement.ava.okf.md|Self-development and Evolution]] — ava-self-evolution / skill-creator / sweeper / auto-review
 - [[ops_lifecycle.ava.okf.md|Operations, Scheduling, and Lifecycle]] — ava-guide / ava-schedule-writer / ava-watcher / ava-being-a-long-running-agent / ava-ultra-speed / ava_memory
 - [[comms.ava.okf.md|Communications and User Interaction]] — ava-ui / sms / gmail (telegram skill removed 2026-08-03)
-- [[orchestration.ava.okf.md|Workflow Orchestration]] — ava-workflow / ava-dynamic-workflow / ava-goal / ava-use-claude-code-and-codex
+- [[orchestration.ava.okf.md|Workflow Orchestration]] — ava-workflow / ava-dynamic-workflow / ava-goal / ava-use-other-agents
 - [[web_media.ava.okf.md|Web and Multimodal]] — web-ai / web-sources / audio-transcribe
 
 Four further core built-in skills live at the top level without a group: **ava-package-installer** (a verified skill / plugin / MCP installer), **ava-qa-inspection** (sweep the rendered frontend over the chrome MCP for visual/structural defects), **ava-modification-layers** (pick the right layer L1–L4 before changing a deployment; `decisions/2026-08-19-four-layer-modification-model.md`) and **develop-a-plugin** (the L3 plugin ladder, applied at `self.restart`, decoupled from `ava cluster update`). All are origin=repo skills in every agent's capabilities index; none has an OKF node yet.
@@ -40,7 +40,7 @@ One load directory: `~/.ava/skills/`; converge syncs repo built-ins (`ava_builti
 
 ## Key Dependencies
 - [[system-prompt.ava.okf.md]] — the capabilities section that indexes them (whole catalog by default)
-- Discovery/merging in `ava/skills.py` (`_scan_tree` / `_mount` / `_flatten`); `ava/_skill_sources.py` is just a registry for plugin skill-root providers (register/clear/roots), **unrelated to agents-contract**
+- Discovery/merging in `ava/skills.py` (`_scan_tree` / `_mount` / `_flatten`); `ava/skill_sources.py` is just a registry for plugin skill-root providers (register/clear/roots), **unrelated to agents-contract**
 
 ## Entry Points
 - `ava/skills.py` — scans `~/.ava/skills/` + provider roots, merges the skill tree; `help()` loads SKILL.md by path

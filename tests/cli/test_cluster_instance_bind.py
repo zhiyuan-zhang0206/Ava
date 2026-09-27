@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands import _cluster_instance as _ci
+from cli.commands import cluster_instance as _ci
 from shared.config import settings
 
 
@@ -252,7 +252,7 @@ def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[l
         lambda: pytest.fail("redis must never wait for the reachable bind"),
     )
     monkeypatch.setattr(_ci, "_redis_server_bin", lambda: "redis-server")
-    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
     redis_answers = iter([False, True])  # not running before start, up after
     monkeypatch.setattr(
         _ci,
@@ -285,7 +285,7 @@ def test_start_redis_binds_loopback_only_without_secret(
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
-    assert _ci._start_redis(6380, "redis-admin", "redis-runtime", "", "ava") == 0
+    assert _ci.start_redis(6380, "redis-admin", "redis-runtime", "", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
     assert "--save" not in started[0]  # persistence rides the rendered conf, not argv
     conf = (tmp_path / "redis.conf").read_text()
@@ -308,7 +308,7 @@ def test_start_redis_refuses_missing_credentials_before_effects(
         lambda *_a, **_kw: pytest.fail("ACL effect without credentials"),  # pyright: ignore[reportUnknownArgumentType]
     )
     with pytest.raises(ValueError, match="password"):
-        _ci._start_redis(6380, admin, runtime, "", "ava")
+        _ci.start_redis(6380, admin, runtime, "", "ava")
     assert started == []
     assert not (tmp_path / "redis.conf").exists()
 
@@ -328,7 +328,7 @@ def test_macos_start_redis_binds_loopback_only_with_secret(
     monkeypatch.setattr(_ci, "reachable_host", lambda: "10.0.0.5")
     started = _wire_redis_start(monkeypatch, tmp_path)
 
-    assert _ci._start_redis(6380, "redis-admin", "redis-runtime", "s3cr3t", "ava") == 0
+    assert _ci.start_redis(6380, "redis-admin", "redis-runtime", "s3cr3t", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
 
 
@@ -343,7 +343,7 @@ def test_macos_start_redis_does_not_use_shared_pg_bind_addrs(
     )
     started = _wire_redis_start(monkeypatch, tmp_path)
 
-    assert _ci._start_redis(6380, "redis-admin", "redis-runtime", "s3cr3t", "ava") == 0
+    assert _ci.start_redis(6380, "redis-admin", "redis-runtime", "s3cr3t", "ava") == 0
     assert _redis_bind_arg(started[0]) == ["--bind", "127.0.0.1"]
 
 
@@ -362,7 +362,7 @@ def test_linux_redis_bind_uses_caller_secret_not_inherited_config(
         return True
 
     monkeypatch.setattr(_ci, "_wait_for_reachable_bind", address_ready)
-    assert _ci._start_redis(6380, "admin", "runtime", secret, "ava") == 0
+    assert _ci.start_redis(6380, "admin", "runtime", secret, "ava") == 0
     expected = ["--bind", "127.0.0.1", "10.0.0.5"] if secret else ["--bind", "127.0.0.1"]
     assert _redis_bind_arg(started[0]) == expected
     assert waits == ([True] if secret else [])
@@ -374,7 +374,7 @@ def test_linux_redis_refuses_start_when_reachable_address_is_unavailable(
     started = _wire_redis_start(monkeypatch, tmp_path)
     monkeypatch.setattr(_ci, "is_macos", lambda: False)
     monkeypatch.setattr(_ci, "_wait_for_reachable_bind", lambda: False)
-    assert _ci._start_redis(6380, "admin", "runtime", "bearer", "ava") == 1
+    assert _ci.start_redis(6380, "admin", "runtime", "bearer", "ava") == 1
     assert started == []
     assert not (tmp_path / "redis.conf").exists()
 
@@ -383,12 +383,12 @@ def test_running_redis_persists_the_authenticated_password_to_its_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A journal retry repairs config after an old-password false-down probe."""
-    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
     (tmp_path / "redis.conf").write_text('requirepass "stale-old-password"\n')
 
-    assert _ci._start_redis(6380, "journal-password", "runtime", "bearer", "ava") == 0
+    assert _ci.start_redis(6380, "journal-password", "runtime", "bearer", "ava") == 0
     assert (tmp_path / "redis.conf").read_text() == (
         'save 900 1\nsave 300 10\nsave 60 10000\nrequirepass "journal-password"\n'
     )
@@ -419,11 +419,11 @@ def test_redis_conf_always_renders_rdb_save_schedule(
     """A no-secret cluster still persists and authenticates: the RDB save
     schedule and requirepass survive every conf render, or a restart silently
     loses persistence (task #2027) or comes back without a password."""
-    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _ci._start_redis(6380, "admin", "runtime", "", "ava") == 0
+    assert _ci.start_redis(6380, "admin", "runtime", "", "ava") == 0
     assert (tmp_path / "redis.conf").read_text() == (
         'save 900 1\nsave 300 10\nsave 60 10000\nrequirepass "admin"\n'
     )
@@ -439,7 +439,7 @@ def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
     )
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "admin-pw")
     monkeypatch.setattr(_ci.owned_postgres, "stop", lambda _data: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands._pgbouncer.stop_pgbouncer", lambda: None)
+    monkeypatch.setattr("cli.commands.pgbouncer.stop_pgbouncer", lambda: None)
     monkeypatch.setattr(_ci, "_redis_cli_bin", lambda: "redis-cli")
     shutdowns: list[tuple[list[str], str]] = []
 
@@ -481,7 +481,7 @@ def test_start_probes_receive_the_url_hosts(
     monkeypatch.setattr(_ci, "_redis_running", _redis_running)
     monkeypatch.setattr(_ci, "_ensure_redis_acl", _ensure_redis_acl)
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
-    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []
 
@@ -493,7 +493,7 @@ def test_start_probes_receive_the_url_hosts(
     monkeypatch.setattr(_ci.subprocess, "run", _run)
 
     assert _ci._start_pg(15433, "") == 0
-    assert _ci._start_redis(16380, "admin", "runtime", "", "ava") == 0
+    assert _ci.start_redis(16380, "admin", "runtime", "", "ava") == 0
     assert seen == {"redis": (16380, "10.0.0.7")}
 
 

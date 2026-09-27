@@ -9,7 +9,7 @@ from pathlib import Path
 
 from cli.release_prepare.models import LocalInputs, Preparation
 from shared.runtime_plugins import declared_plugins
-from shared.runtime_prepare import _python_input_inventory, inventory_digest, tree_inventory
+from shared.runtime_prepare import inventory_digest, python_input_inventory, tree_inventory
 from shared.runtime_release import ReleaseRejectedError, file_sha256
 
 
@@ -53,7 +53,7 @@ def validate_paths(request: Preparation) -> None:
 def validate_inputs(inputs: LocalInputs) -> None:
     for root in (inputs.python.root, inputs.wheelhouse.root):
         require_directory(root)
-    if inventory_digest(_python_input_inventory(inputs.python.root)) != inputs.python.digest:
+    if inventory_digest(python_input_inventory(inputs.python.root)) != inputs.python.digest:
         raise ReleaseRejectedError("supplied Python inventory changed")
     if inventory_digest(tree_inventory(inputs.wheelhouse.root)) != inputs.wheelhouse.digest:
         raise ReleaseRejectedError("supplied wheelhouse inventory changed")

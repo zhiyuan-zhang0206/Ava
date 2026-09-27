@@ -103,7 +103,7 @@ def test_job_assign_failure_is_loud_and_handle_remains_owned(
     def _error(action: str, _code: int | None = None) -> OSError:
         return OSError(action)
 
-    monkeypatch.setattr(winjob, "_last_error", _error)
+    monkeypatch.setattr(winjob, "last_error", _error)
     job = winjob.WindowsJob.create()
 
     with pytest.raises(OSError, match="AssignProcessToJobObject"):

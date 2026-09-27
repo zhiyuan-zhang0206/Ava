@@ -31,7 +31,7 @@ import pytest
 def test_materialization_is_not_a_converge_step() -> None:
     """Converge runs before the data plane is up (`ava start` step 1 vs step 2),
     so nothing in `CONVERGE_STEPS` may require the cluster database."""
-    from cli.commands._converge import CONVERGE_STEPS
+    from cli.commands.converge import CONVERGE_STEPS
 
     offenders = [s.name for s in CONVERGE_STEPS if "extension" in s.name.lower()]
     assert not offenders, (
@@ -47,8 +47,8 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     is about. Mirrors the monkeypatched-seam style of
     `test_release_cold_start_uses_same_storage_readiness_without_source_or_schema_writes`
     in `tests/cli/test_start_runtime.py` rather than inspecting source text."""
-    import cli.commands._converge as _converge_commands
     import cli.commands._repo as _repo_commands
+    import cli.commands.converge as _converge_commands
     import cli.commands.start as _start_commands
     from cli.commands import _converge_extensions, _data_plane
 
@@ -120,15 +120,15 @@ def test_standalone_converge_materializes_too() -> None:
     """`ava converge` is run against a cluster that is already up, so it has the
     precondition the start path has to wait for — and an operator running it
     expects the machine to end up caught up."""
-    from cli.commands._converge import cmd_converge
+    from cli.commands.converge import cmd_converge
 
     assert "materialize_cluster_extensions()" in inspect.getsource(cmd_converge)
 
 
 def test_the_materializer_lives_beside_its_siblings() -> None:
     """`_converge_extensions.py`, next to `_converge_skills.py` — a subsystem
-    reader, not another entry in `_converge.py`'s host-state roster. Extracting
-    it is also what kept `_converge.py` under the 800-line ceiling."""
+    reader, not another entry in `converge.py`'s host-state roster. Extracting
+    it is also what kept `converge.py` under the 800-line ceiling."""
     from cli.commands import _converge_extensions
 
     assert hasattr(_converge_extensions, "materialize_cluster_extensions")
@@ -157,6 +157,6 @@ def test_start_adopts_before_it_materializes(monkeypatch: pytest.MonkeyPatch) ->
 def test_standalone_converge_adopts_too() -> None:
     """`ava converge` is what an operator runs to make a machine correct without
     restarting it, and a machine holding un-adopted installs is not correct."""
-    from cli.commands._converge import cmd_converge
+    from cli.commands.converge import cmd_converge
 
     assert "adopt_local_extensions()" in inspect.getsource(cmd_converge)

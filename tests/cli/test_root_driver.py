@@ -11,7 +11,7 @@ from typing import Any, cast
 
 import pytest
 
-from cli.commands import _root_driver as driver
+from cli.commands import root_driver as driver
 from cli.commands._repo import ServiceSpec
 from shared.daemon_health import DaemonProbe
 
@@ -166,13 +166,13 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     monkeypatch.setattr(roster, "otel_collector_config", lambda: config)
     monkeypatch.setattr(roster, "_plugin_services", tuple)
     collector = next(s for s in roster.build_services() if s.session == "otel-collector")
-    before = driver._tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
+    before = driver.tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
     rows = cast("list[dict[str, object]]", before["units"])
     unit = UnitManifest.from_mapping(rows[0], origin="test")
     live = {"units": [{"id": unit.id, "manifest_digest": unit.digest()}]}
     assert not driver._changed_units(before, live)
     config.write_text("receivers: {otlp: {protocols: {http: {}}}}\n")
-    after = driver._tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
+    after = driver.tree_manifest((collector,), tmp_path, roles=frozenset({"gateway"}))
     assert driver._changed_units(after, live) == {"otel-collector"}
 
 
@@ -260,7 +260,7 @@ def test_helper_seed_is_durable_before_wire_start(
 
     from services.permissions_helper import client
 
-    monkeypatch.setattr(driver, "_root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
+    monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
 
     def seed(config: client.RootSeedConfig) -> client.RootStatus:
         path = tmp_path / "seed.json"
@@ -281,7 +281,7 @@ def test_stop_without_root_ipc_cancels_pending_helper_restart(
 
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
     monkeypatch.setattr(driver, "_helper_wire_ok", lambda: True)
-    monkeypatch.setattr(driver, "_require_root_absent", lambda: None)
+    monkeypatch.setattr(driver, "require_root_absent", lambda: None)
     calls: list[str] = []
 
     def keeper() -> client.RootStatus:
@@ -333,7 +333,7 @@ def test_linux_root_launch_never_consults_a_helper(
 def test_selected_stop_preserves_exact_home_qualified_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands._maintenance_stop import stop_services
+    from cli.commands.maintenance_stop import stop_services
 
     captured: list[frozenset[str]] = []
 
@@ -393,9 +393,9 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     def source_identity(_repo: Path) -> str:
         return "a" * 64
 
-    monkeypatch.setattr("cli.commands._start_generation.source_digest", source_identity)
-    monkeypatch.setattr(driver, "_root_child_env", dict)
-    monkeypatch.setattr(driver, "_tree_manifest", tree)
+    monkeypatch.setattr("cli.commands.start_generation.source_digest", source_identity)
+    monkeypatch.setattr(driver, "root_child_env", dict)
+    monkeypatch.setattr(driver, "tree_manifest", tree)
     monkeypatch.setattr(driver, "_root_client", object)
     monkeypatch.setattr(driver, "_root_status", snapshot_now)
     monkeypatch.setattr(driver, "_require_root_owner", owned)
@@ -445,11 +445,11 @@ def test_root_launch_path_uses_home_declaration_across_callers(
 ) -> None:
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
     monkeypatch.setenv("PATH", str(tmp_path / "interactive"))
-    interactive = driver._root_child_env()
+    interactive = driver.root_child_env()
     monkeypatch.setenv("PATH", str(tmp_path / "systemd"))
-    assert driver._root_child_env() == interactive
+    assert driver.root_child_env() == interactive
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "changed"))
-    assert driver._root_child_env() != interactive
+    assert driver.root_child_env() != interactive
 
 
 @pytest.mark.parametrize("loaded", [False, True])
@@ -467,7 +467,7 @@ def test_unusable_helper_socket_requires_positive_native_absence(
         return "state = spawn scheduled" if loaded else None
 
     monkeypatch.setattr(client, "root_status", unavailable)
-    monkeypatch.setattr(launchd_job, "_retirement_query", query)
+    monkeypatch.setattr(launchd_job, "retirement_query", query)
     if loaded:
         with pytest.raises(RuntimeError, match="custody is unavailable"):
             driver._stop_dormant_helper_root(float("inf"))

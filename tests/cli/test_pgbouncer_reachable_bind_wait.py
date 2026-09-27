@@ -25,7 +25,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from cli.commands import _pgbouncer as _pb
+from cli.commands import pgbouncer as _pb
 
 _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
 _ADMIN = "pooler-admin-fixture"

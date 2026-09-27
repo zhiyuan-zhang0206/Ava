@@ -252,16 +252,16 @@ for the whole bound. `shared.session_backend._graceful_kill_session` is that sha
 Nothing failed — the suite just got slow.
 
 So when a test needs to shorten or forbid one specific sleep, the product gives that
-sleep a name and the test patches the name: `cli/commands/_probe.py` binds
-`_poll_sleep = time.sleep` at import, and `monkeypatch.setattr(_probe, "_poll_sleep",
-...)` reaches that poll and nothing else. Same reasoning as the
-`import cli.commands as _ns` indirection used for `_probe_service` / `_has_session`
-— one named seam per patchable behaviour, so a stub's blast radius is stated in the
-product rather than inferred from an attribute path.
+sleep a name and the test patches the name: `cli/commands/root_driver.py` binds
+`_poll_sleep = time.sleep` at import, and `monkeypatch.setattr(root_driver, "_poll_sleep",
+...)` reaches that poll and nothing else. Same reasoning behind patching `_probe_service`
+at the module that actually defines it (`cli.commands._probe`) rather than some shared
+namespace — one named seam per patchable behaviour, so a stub's blast radius is stated
+in the product rather than inferred from an attribute path.
 
 The related trap in the same incident: patching a name on the **package** when the
-caller imported it directly. `cli/commands/update.py` does `from cli.commands.stop
-import _do_stop`, so `monkeypatch.setattr(cli.commands, "_do_stop", ...)` never
+caller imported it directly. A caller that does `from cli.commands.stop import
+_do_stop` holds its own binding, so `monkeypatch.setattr(cli.commands, "_do_stop", ...)` never
 reaches it — the stub is a silent no-op and the real function runs. Patch the module
 that resolves the name, or have the caller look it up dynamically. `monkeypatch` will
 not tell you the stub was unused.
@@ -278,7 +278,7 @@ with `footprint -p <pid>`, never `ps -o rss`.
 | Don't | Do |
 |------|-----|
 | `time.sleep(n)` | `asyncio.sleep(0)` or mock |
-| `monkeypatch.setattr("pkg.mod.time.sleep", ...)` — edits the stdlib module process-wide | Patch a module-local seam (`_probe._poll_sleep`); see above |
+| `monkeypatch.setattr("pkg.mod.time.sleep", ...)` — edits the stdlib module process-wide | Patch a module-local seam (`root_driver._poll_sleep`); see above |
 | Stub a name on the package when the caller did `from ... import name` | Patch the module that resolves it — a missed stub is silent |
 | Share state between tests | Each test independent, using fixture for initial state |
 | Wrap test body with `try-except` | Let pytest fail naturally |

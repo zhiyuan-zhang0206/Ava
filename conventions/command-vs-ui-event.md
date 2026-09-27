@@ -10,7 +10,7 @@ Two kinds of thing can act on an agent from the outside. Keep them distinct.
 | What it is | a prompt the model reads and reasons about | a control operation on the agent's process / state |
 | Defining test | **inserts a message** into the conversation | does **not** insert a message |
 | Examples | `/plan`, `/recap`, `/compact` | stop, terminate, restart, fork, the compact button |
-| Where it lives | a `commands/<name>.md` template, expanded by `ava/_commands.py:expand_command` | a dedicated endpoint / button (e.g. `POST /api/agents/{id}/compact`) |
+| Where it lives | a `commands/<name>.md` template, expanded by `ava/composer_commands.py:expand_command` | a dedicated endpoint / button (e.g. `POST /api/agents/{id}/compact`) |
 | Source-neutral | yes — a peer agent can send it as a message | no — a peer acts via an SDK call (`ava.agents.terminate(peer)`), not a message |
 
 The single line between them: **does it put a message in front of the model?**

@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
 from agent.messages import inbound_message
-from ava._commands import expand_command
+from ava.composer_commands import expand_command
 from ava.security import scan_inbound_content
 from shared.agents.messages.envelope import wrap_inbound
 from shared.config import settings

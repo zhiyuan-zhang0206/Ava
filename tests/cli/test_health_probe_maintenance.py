@@ -7,7 +7,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from cli.commands import _cluster_health, _health_alerts
+from cli.commands import _health_alerts, cluster_health
 from shared import pause_owner, service_selection
 
 
@@ -25,8 +25,8 @@ def probe_home(
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(service_selection, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(_cluster_health, "_deploy_suppression", lambda: None)
+    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
+    monkeypatch.setattr(cluster_health, "_deploy_suppression", lambda: None)
     return tmp_path
 
 
@@ -72,12 +72,12 @@ def test_expected_low_population_does_not_rollback_or_promote(
     # An aged incident would normally alert immediately on this probe.
     started_at = datetime.now(UTC) - timedelta(minutes=20)
     message = "FAIL: agent population — fewer than 1 agent(s) running/idling"
-    (probe_home / _cluster_health.ALERT_STATE_FILE).write_text(
+    (probe_home / cluster_health.ALERT_STATE_FILE).write_text(
         f"{message}\n{started_at.isoformat()}\n"
     )
 
-    assert _cluster_health._agent_population(1) is False
-    assert _cluster_health.run_health_probe() == 1
+    assert cluster_health._agent_population(1) is False
+    assert cluster_health.run_health_probe() == 1
 
     assert rollbacks == []
     assert len(alerts) == 1  # Local intent cannot hide a real global population outage.
@@ -108,7 +108,7 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("invalid journal")
 
-    assert _cluster_health.run_health_probe() == 1
+    assert cluster_health.run_health_probe() == 1
     assert rollbacks == []
 
 
@@ -116,11 +116,11 @@ def test_reenabled_host_keeps_low_population_unhealthy(
     probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]]
 ) -> None:
     _select_excluded({"agent-host"})
-    assert _cluster_health.run_health_probe() == 1
+    assert cluster_health.run_health_probe() == 1
     assert rollbacks == []
 
     _select_excluded(set())
-    assert _cluster_health.run_health_probe() == 1
+    assert cluster_health.run_health_probe() == 1
     assert rollbacks == []
 
 
@@ -131,10 +131,10 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _select_excluded({"agent-host"})
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: False)
+    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
 
-    assert _cluster_health.run_health_probe() == 1
+    assert cluster_health.run_health_probe() == 1
     assert rollbacks == []
 
 
@@ -150,6 +150,6 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
         raise ConnectionError("private test data plane unavailable")
 
     monkeypatch.setattr("shared.db.connect", down)
-    assert _cluster_health._agent_population_failure_class(1) == "environment"
-    assert _cluster_health.run_health_probe() == 1
+    assert cluster_health._agent_population_failure_class(1) == "environment"
+    assert cluster_health.run_health_probe() == 1
     assert rollbacks == []
