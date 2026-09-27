@@ -21,6 +21,8 @@ generation, and exact previous/candidate/executor artifact, manifest, source and
 schema identities. The candidate supplies the retained executor. Full image
 verification includes packaged source identity and every up/down migration SQL
 file; an unchanged squashed baseline alone does not establish equal SQL.
+No platform is captured: each verification, boot included, checks the image's
+ABI tag against the host as observed then ([[shared/runtime_release.ava.okf.md]]).
 
 `identity.py` requires the existing initialized start intent to match the exact
 captured registry reservation. Configuration admission uses settings-free

@@ -58,7 +58,7 @@ def execute(path: Path) -> None:
     os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
     from shared.runtime_interpreter import verify_loaded_image
 
-    image = request.executor.verify(Path(request.home), request.platform_tag)
+    image = request.executor.verify(Path(request.home))
     verify_loaded_image(
         Path(request.home),
         image,

@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import platform
 import subprocess
 import sys
 import time
@@ -26,6 +25,7 @@ from cli.release_transition.request import ReleaseRef, Request, verify_pair
 from scripts.preview import local
 from scripts.preview.linux_observer import _require_context
 from scripts.preview.linux_runtime import bound_runtime
+from shared.runtime_abi import current_abi
 from shared.runtime_release import VerifiedRelease, activate_release, current_pointer
 from shared.verified_file import regular_bytes
 
@@ -131,7 +131,6 @@ def prepare(
             home=str(run / "home"),
             registry=str(run / "clusters.json"),
             created_at=datetime.now(UTC),
-            platform_tag=platform.platform(),
             machine=machine_name(),
             previous=old,
             candidate=new,
@@ -178,7 +177,7 @@ def initial(run: Path) -> None:
         reference.artifact_digest,
         expected_current=None,
         manifest_digest=reference.manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=reference.schema_digest,
     )
     install_steady(run / "home", run / "clusters.json", reference, image)

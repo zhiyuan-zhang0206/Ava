@@ -52,7 +52,7 @@ def test_public_submission_loses_predecessor_while_waiting_for_home_lock_without
 
     class AdmittedInputs:
         def __init__(self, inputs: Request) -> None:
-            self.candidate = inputs.executor.verify(Path(inputs.home), inputs.platform_tag)
+            self.candidate = inputs.executor.verify(Path(inputs.home))
 
         def preflight(self) -> None:
             assert journal.current_pointer(store) == request.previous.selector
@@ -121,7 +121,7 @@ def test_public_submit_continues_closed_attempt_and_interrupted_relaunch(
             current.relaunch(terminal.model_dump(mode="json"))
         if crash == "planned":
             runtime = current.operation.request.executor.verify(
-                Path(current.operation.request.home), current.operation.request.platform_tag
+                Path(current.operation.request.home)
             )
             current.record_launch(linux.plan_launch(path, runtime))
     retire = _retiring_manager(planned, monkeypatch)
@@ -271,7 +271,7 @@ def test_new_public_request_retires_previous_before_replacing_active_pointer(
 
     class AdmittedInputs:
         def __init__(self, request: Request) -> None:
-            self.candidate = request.executor.verify(Path(request.home), request.platform_tag)
+            self.candidate = request.executor.verify(Path(request.home))
 
         def preflight(self) -> None:
             pass

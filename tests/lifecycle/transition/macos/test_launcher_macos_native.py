@@ -40,7 +40,8 @@ from cli.release_transition.request import ReleaseRef, Request
 from services.permissions_helper import finite_artifact, lifecycle
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
-from shared.runtime_release import file_sha256
+from shared.runtime_abi import current_abi
+from shared.runtime_release import MANIFEST_VERSION, file_sha256
 from tests.lifecycle.transition.macos import native_fixture
 
 pytestmark = [
@@ -143,8 +144,9 @@ def _image(home: Path) -> ReleaseRef:
     manifest.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": MANIFEST_VERSION,
                 "artifact_digest": digest,
+                "abi_tag": current_abi().to_json(),
                 "platform": _PLATFORM,
                 "schema_digest": "c" * 64,
                 "interpreter": str(binary.relative_to(root)),
@@ -173,7 +175,6 @@ def _operation(tmp_path: Path) -> Request:
         home=str(home),
         registry=str(registry),
         created_at=datetime.now(UTC),
-        platform_tag=_PLATFORM,
         machine="fixture",
         previous=image.model_copy(update={"artifact_digest": "a" * 64}),
         candidate=image,
@@ -622,7 +623,7 @@ def test_native_finite_helper_executor_custody(
     request = _operation(tmp_path)
     _bind_helper(monkeypatch, helper_app)
     home = Path(request.home)
-    plan = macos.plan_launch(request.path, request.executor.verify(home, request.platform_tag))
+    plan = macos.plan_launch(request.path, request.executor.verify(home))
     with journal.exclusive(request.path) as current:
         current.record_launch(plan)
     if mode in {"executor-kill", "helper-kill"}:

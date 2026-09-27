@@ -27,6 +27,7 @@ from cli.release_prepare.models import (
     encode,
 )
 from shared.release_identity import ApplicationIdentity, read_application_identity
+from shared.runtime_abi import current_abi
 from shared.runtime_prepare import (
     CollectorInput,
     FrontendInput,
@@ -38,6 +39,7 @@ from shared.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
+    release_abi,
     verify_release,
 )
 from shared.verified_file import regular_bytes
@@ -147,7 +149,7 @@ def _image(
         request.store,
         image.digest,
         manifest_digest=image.manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=source.schema_digest,
     )
     if verified != image or read_application_identity(verified, request.commit) != source:
@@ -156,6 +158,7 @@ def _image(
         artifact_digest=image.digest,
         manifest_digest=image.manifest_digest,
         schema_digest=source.schema_digest,
+        abi_tag=release_abi(verified).to_json(),
         platform=platform.platform(),
         root=image.root,
         interpreter=image.interpreter,

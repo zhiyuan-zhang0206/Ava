@@ -78,8 +78,13 @@ installed application identity must equal the captured source identity,
 including commit, tree, archive, schema and migration names.
 
 Success writes canonical `work/receipt.json` and emits the same JSON to stdout.
-The receipt binds the request, source, build input digests, current platform,
-artifact digest, manifest digest, schema digest and retained executable/cwd.
+The receipt binds the request, source, build input digests, the image's ABI tag
+(its compatibility contract, read back from the verified manifest), the current
+platform string (provenance only), artifact digest, manifest digest, schema
+digest and retained executable/cwd. The image interpreter reports its own tag
+during assembly; the preparing process then verifies the image against its own
+host ABI, so an image whose Python ABI differs from the host runtime refuses
+here rather than at boot. See [[shared/runtime_release.ava.okf.md]].
 It is local preparation evidence, not a publication signature or activation
 authorization. Consumers still verify the complete image at admission.
 

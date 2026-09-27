@@ -27,7 +27,7 @@ class StdlibOnly(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, StdlibOnly())
 sys.path.insert(0, sys.argv[1])
 # runtime_plugins is imported lazily by preparation's plugin inventory.
-import shared.runtime_plugins, shared.runtime_prepare, shared.runtime_release
+import shared.runtime_abi, shared.runtime_plugins, shared.runtime_prepare, shared.runtime_release
 """
 
 # A preparation tool whose child forks a grandchild only after the tool (the

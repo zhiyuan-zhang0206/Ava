@@ -19,6 +19,7 @@ from pydantic import model_validator
 from shared.platform import IS_WINDOWS
 from shared.process_evidence import Digest, EvidenceModel
 from shared.release_identity import ApplicationIdentity, read_application_identity
+from shared.runtime_abi import current_abi
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.verified_file import regular_bytes
 
@@ -198,8 +199,6 @@ def verify_loaded_image(
     home: Path, image: VerifiedRelease, *, schema_digest: str, source_commit: str
 ) -> LoadedRuntimeIdentity:
     """Verify immutable origin without granting start, selection, or migration."""
-    import platform
-
     if not home.is_absolute() or home.resolve(strict=True) != home:
         raise ReleaseRejectedError("release start requires a canonical existing home")
     if image.root != home / "releases" / image.digest:
@@ -208,7 +207,7 @@ def verify_loaded_image(
         image.root.parent,
         image.digest,
         manifest_digest=image.manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=schema_digest,
     )
     if verified != image:
@@ -239,8 +238,6 @@ def verify_loaded_image(
 
 def capture_loaded_runtime(home: Path) -> LoadedRuntimeIdentity:
     """Capture the current source or image, never infer it from a moving selector."""
-    import platform
-
     prefix, _executable, package, _isolated = loaded_runtime()
     if not package.is_relative_to(prefix):
         return verify_loaded_source(package)
@@ -254,7 +251,7 @@ def capture_loaded_runtime(home: Path) -> LoadedRuntimeIdentity:
         manifest_digest=hashlib.sha256(
             regular_bytes(root / "manifest.json", max_bytes=32 * 1024 * 1024)
         ).hexdigest(),
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=identity.schema_digest,
     )
     return verify_loaded_image(

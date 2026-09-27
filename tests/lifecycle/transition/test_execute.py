@@ -47,7 +47,6 @@ def request_record(tmp_path: Path) -> Request:
         home=str(home),
         registry=str(home.parent / "registry.json"),
         created_at=datetime.now(UTC),
-        platform_tag="test",
         machine="test",
         previous=previous,
         candidate=candidate,

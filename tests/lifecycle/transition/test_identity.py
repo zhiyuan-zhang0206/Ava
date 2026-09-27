@@ -43,7 +43,6 @@ def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Request:
         home=str(home),
         registry=str(registry),
         created_at=datetime.now(UTC),
-        platform_tag="Linux-test",
         machine="unit",
         previous=previous,
         candidate=candidate,

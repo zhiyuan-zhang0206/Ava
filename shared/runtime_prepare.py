@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import cast
 
 from shared.process_group_closure import close_unadmitted, wait_group_finished
+from shared.runtime_abi import AbiTag, AbiTagError, current_abi, parse_abi_tag
 from shared.runtime_release import (
+    MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
@@ -317,6 +319,15 @@ else:
         raise ReleaseRejectedError("retained Python changed optional tkinter availability")
 
 
+def _retained_abi(root: Path, interpreter: Path) -> AbiTag:
+    """The image interpreter's own ABI tag on this host, from its installed module."""
+    probe = "import json, shared.runtime_abi as a; print(json.dumps(a.current_abi().to_json()))"
+    try:
+        return parse_abi_tag(json.loads(_run([str(interpreter), "-I", "-B", "-c", probe], root)))
+    except AbiTagError as exc:
+        raise ReleaseRejectedError(f"retained interpreter has no release ABI tag: {exc}") from exc
+
+
 def _retain_startup_wheel(wheels: Path, root: Path) -> None:
     """Keep original locked dependency bytes for the active startup-hook gate."""
     candidates = list(wheels.glob("setuptools-*.whl"))
@@ -563,9 +574,10 @@ assert hashlib.sha256(schema.read_bytes()).hexdigest() == sys.argv[1], 'schema m
         raise ReleaseRejectedError("inputs changed during preparation")
     _write_json(root / "loaded-native-images.json", loaded_native_images(root))
     manifest = {
-        "version": 1,
+        "version": MANIFEST_VERSION,
         "artifact_digest": identity,
-        "platform": platform.platform(),
+        "abi_tag": _retained_abi(root, interpreter).to_json(),
+        "platform": platform.platform(),  # Provenance only; the ABI tag is the contract.
         "schema_digest": inputs.schema_digest,
         "interpreter": "venv/bin/python",
         "cwd": "venv",
@@ -576,7 +588,7 @@ assert hashlib.sha256(schema.read_bytes()).hexdigest() == sys.argv[1], 'schema m
         store,
         identity,
         manifest_digest=file_sha256(root / "manifest.json"),
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=inputs.schema_digest,
     )
     # Read-only sealing is defense against accidental writes, not a same-UID

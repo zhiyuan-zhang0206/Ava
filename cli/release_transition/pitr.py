@@ -81,7 +81,7 @@ class PitrTransition:
     def __init__(self, request: PitrRequest) -> None:
         self.request = request
         self.home = Path(request.home)
-        self.image = request.image.verify(self.home, request.platform_tag)
+        self.image = request.image.verify(self.home)
 
     @property
     def at(self) -> datetime:

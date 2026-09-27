@@ -1,10 +1,12 @@
 """Config-free release verification and atomic generation selection.
 
 Ordinary image startup and the finite release executor verify retained image
-bytes here. The caller owns operation admission and independently establishes
-platform/schema compatibility before selection; a verified image alone grants
-no mutation authority. Generations are assembled at their final path because
-venv entry-point shebangs are not relocatable.
+bytes here, together with the image's schema identity and its ABI tag against
+the host ABI the caller observed (`shared.runtime_abi`). The manifest's full
+platform string is provenance and is never compared. The caller owns operation
+admission; a verified image alone grants no mutation authority. Generations are
+assembled at their final path because venv entry-point shebangs are not
+relocatable.
 
 Standard library only: the release-store filesystem contract and the
 checkout-retiring runtime proof import this module (and `shared.runtime_prepare`)
@@ -26,8 +28,22 @@ from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from shared.platform import file_lock
+from shared.runtime_abi import AbiTag, AbiTagError, abi_refusal, parse_abi_tag
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+MANIFEST_VERSION = 2
+_MANIFEST_FIELDS = frozenset(
+    {
+        "version",
+        "artifact_digest",
+        "abi_tag",
+        "platform",
+        "schema_digest",
+        "interpreter",
+        "cwd",
+        "files",
+    }
+)
 
 
 class ReleaseRejectedError(ValueError):
@@ -116,15 +132,50 @@ class VerifiedRelease:
         return (str(self.interpreter), "-I", "-B", "-X", "utf8", "-m", module, *arguments)
 
 
+def _manifest(encoded: str) -> dict[str, Any]:
+    manifest = json.loads(encoded)
+    if not isinstance(manifest, dict):
+        raise ReleaseRejectedError("unsupported release manifest shape/version")
+    if "abi_tag" not in manifest:
+        raise ReleaseRejectedError(
+            "release manifest has no abi_tag (prepared before the ABI contract); re-prepare it"
+        )
+    fields = cast(dict[str, Any], manifest)
+    if frozenset(fields) != _MANIFEST_FIELDS or fields["version"] != MANIFEST_VERSION:
+        raise ReleaseRejectedError("unsupported release manifest shape/version")
+    return fields
+
+
+def _manifest_abi(manifest: dict[str, Any]) -> AbiTag:
+    """The ABI tag of an already shape-checked manifest; malformed tags refuse."""
+    try:
+        return parse_abi_tag(manifest["abi_tag"])
+    except AbiTagError as exc:
+        raise ReleaseRejectedError(f"invalid release abi_tag: {exc}") from exc
+
+
+def _require_host_abi(manifest: dict[str, Any], host_abi: AbiTag) -> None:
+    image = _manifest_abi(manifest)
+    reason = abi_refusal(image, host_abi)
+    if reason is not None:
+        raise ReleaseRejectedError(
+            f"release ABI {image} is incompatible with this host ({host_abi}): {reason}"
+        )
+
+
 def verify_release(
     store: Path,
     digest: str,
     *,
     manifest_digest: str,
-    platform_tag: str,
+    host_abi: AbiTag,
     schema_digest: str,
 ) -> VerifiedRelease:
-    """Hash the complete generation and reject unknown files or compatibility."""
+    """Hash the complete generation and reject unknown files or incompatibility.
+
+    `host_abi` is the caller's fresh `current_abi()` observation (or a
+    simulated host in tests); it is never a value captured earlier.
+    """
     digest = _digest(digest)
     root = store / digest
     if store.resolve() != store.absolute() or root.is_symlink() or not root.is_dir():
@@ -134,24 +185,12 @@ def verify_release(
         raise ReleaseRejectedError(
             "manifest digest does not match independently verified install record"
         )
-    manifest: dict[str, Any] = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected = {
-        "version",
-        "artifact_digest",
-        "platform",
-        "schema_digest",
-        "interpreter",
-        "cwd",
-        "files",
-    }
-    if not isinstance(manifest, dict) or set(manifest) != expected or manifest["version"] != 1:
-        raise ReleaseRejectedError("unsupported release manifest shape/version")
+    manifest = _manifest(manifest_path.read_text(encoding="utf-8"))
     if manifest["artifact_digest"] != digest:
         raise ReleaseRejectedError("artifact identity differs from generation directory")
-    if manifest["platform"] != platform_tag or _digest(manifest["schema_digest"]) != _digest(
-        schema_digest
-    ):
-        raise ReleaseRejectedError("release platform/schema incompatible with observed host")
+    if _digest(manifest["schema_digest"]) != _digest(schema_digest):
+        raise ReleaseRejectedError("release schema differs from the expected schema")
+    _require_host_abi(manifest, host_abi)
     if not isinstance(manifest["files"], dict) or not manifest["files"]:
         raise ReleaseRejectedError("release must declare a nonempty complete file inventory")
     raw_files = cast(dict[object, object], manifest["files"])
@@ -200,6 +239,14 @@ def verify_release(
     )
 
 
+def release_abi(release: VerifiedRelease) -> AbiTag:
+    """The ABI tag of a verified generation, rechecked against its manifest digest."""
+    encoded = _plain_file(release.root, "manifest.json").read_bytes()
+    if hashlib.sha256(encoded).hexdigest() != release.manifest_digest:
+        raise ReleaseRejectedError("release manifest changed after verification")
+    return _manifest_abi(_manifest(encoded.decode("utf-8")))
+
+
 def current_pointer(store: Path) -> tuple[str, str] | None:
     """Read one complete pointer; never silently fall back to production source."""
     pointer = store / "current-release"
@@ -223,7 +270,7 @@ def activate_release(
     *,
     expected_current: tuple[str, str] | None,
     manifest_digest: str,
-    platform_tag: str,
+    host_abi: AbiTag,
     schema_digest: str,
 ) -> VerifiedRelease:
     """CAS an atomic pointer after verification; does not restart any service.
@@ -247,7 +294,7 @@ def activate_release(
             store,
             target,
             manifest_digest=manifest_digest,
-            platform_tag=platform_tag,
+            host_abi=host_abi,
             schema_digest=schema_digest,
         )
         fd, temporary = tempfile.mkstemp(prefix=".current-release-", dir=store)

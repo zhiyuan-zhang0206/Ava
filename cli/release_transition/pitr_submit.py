@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import platform
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +14,7 @@ from cli.release_transition.journal import Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest, ReleaseRef
 from cli.release_transition.submit import submit_request
 from services.pitr.activation_state import ActivationRecord, load_record, record_path
+from shared.runtime_abi import current_abi
 from shared.runtime_release import current_pointer, verify_release
 from shared.start_inputs import configuration_files, files_digest
 from shared.verified_file import regular_bytes
@@ -38,10 +38,10 @@ def selected_image(home: Path) -> ReleaseRef:
         home / "releases",
         artifact,
         manifest_digest=manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=manifest["schema_digest"],
     )
-    member = application_identity_members(manifest["files"], manifest["platform"])[0]
+    member = application_identity_members(manifest["files"], manifest["abi_tag"]["os"])[0]
     candidate = ApplicationIdentity.model_validate_json(regular_bytes(root / member))
     identity = read_application_identity(image, candidate.source_commit)
     return ReleaseRef(
@@ -178,7 +178,6 @@ def _new_request(
         home=str(home),
         registry=str(registry_path().resolve(strict=True)),
         created_at=datetime.now(UTC),
-        platform_tag=platform.platform(),
         machine=machine_name(),
         image=selected_image(home),
         activation_id=activation_id,

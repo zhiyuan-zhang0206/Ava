@@ -17,6 +17,7 @@ from cli.release_prepare.acquisition_models import Acquisition, AcquisitionRecei
 from cli.release_prepare.models import BuildEvidence, ImageEvidence, encode
 from scripts.preview import release_inputs
 from scripts.preview.release_fixture import FixtureWheel
+from shared.runtime_abi import current_abi
 from shared.runtime_release import ReleaseRejectedError, file_sha256
 from tests.lifecycle.preparation.test_acquisition import acquisition as acquisition
 from tests.lifecycle.preparation.test_acquisition import tools as tools
@@ -107,6 +108,7 @@ def _prepared(request: Preparation, acquired: AcquisitionReceipt) -> Preparation
             artifact_digest="e" * 64,
             manifest_digest="f" * 64,
             schema_digest=acquired.source.schema_digest,
+            abi_tag=current_abi().to_json(),
             platform=acquired.platform,
             root=root,
             interpreter=root / "venv/bin/python",

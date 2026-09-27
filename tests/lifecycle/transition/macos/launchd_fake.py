@@ -193,7 +193,6 @@ def operation(
         home=str(home),
         registry=str(registry),
         created_at=datetime.now(UTC),
-        platform_tag="macOS-fixture",
         machine="test",
         previous=old,
         candidate=new,

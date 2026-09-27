@@ -4,6 +4,7 @@ on:
     paths:
       - 'shared/runtime_prepare.py'
       - 'shared/process_group_closure.py'
+      - 'shared/runtime_abi.py'
       - 'shared/runtime_release.py'
       - 'shared/release_identity.py'
       - 'shared/runtime_interpreter.py'
@@ -186,16 +187,17 @@ jobs:
         shell: bash
         run: |
           uv run --locked --no-dev python - <<'PY'
-          import json, os, pathlib, platform
+          import json, os, pathlib
           from shared.release_identity import read_application_identity
-          from shared.runtime_release import verify_release
+          from shared.runtime_abi import current_abi
+          from shared.runtime_release import release_abi, verify_release
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'prepare'
           build = json.loads((root / 'application-build/build-receipt.json').read_bytes())
           proof = json.loads((root / 'proof.json').read_bytes())
-          assert proof['platform'] == platform.platform(), (proof['platform'], platform.platform())
           image = verify_release(root / 'unit/releases', proof['artifact_digest'],
-              manifest_digest=proof['manifest_digest'], platform_tag=platform.platform(),
+              manifest_digest=proof['manifest_digest'], host_abi=current_abi(),
               schema_digest=build['schema_digest'])
+          assert proof['abi_tag'] == release_abi(image).to_json(), proof['abi_tag']
           identity = read_application_identity(image, build['source_commit']).model_dump(mode='json')
           assert all(build[key] == value for key, value in identity.items())
           (root / 'application-identity-proof.json').write_text(json.dumps(identity) + '\n')

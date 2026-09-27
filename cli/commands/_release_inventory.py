@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import platform
 import plistlib
 import sys
 from datetime import UTC, datetime, timedelta
@@ -34,6 +33,7 @@ from shared.native_job_observation import (
 )
 from shared.private_storage import write_private_bytes
 from shared.process_evidence import ExpectedProcess
+from shared.runtime_abi import current_abi
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.verified_file import regular_bytes as _regular_bytes
 
@@ -278,7 +278,7 @@ def collect_inventory(
         release.root.parent,
         release.digest,
         manifest_digest=release.manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=schema_digest,
     )
     if verified != release:

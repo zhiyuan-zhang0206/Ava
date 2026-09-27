@@ -75,7 +75,7 @@ def submit_request(request: Request | PitrRequest) -> tuple[Path, dict[str, Json
             # Recover a controller death after retiring the old native job but
             # before recording or submitting the next attempt. Inputs and
             # release phase remain the original operation's captured decision.
-            runtime = request.executor.verify(Path(request.home), request.platform_tag)
+            runtime = request.executor.verify(Path(request.home))
             record = existing.launch or host.plan_launch(request.path, runtime)
             with exclusive(request.path) as journal:
                 journal.record_launch(record)

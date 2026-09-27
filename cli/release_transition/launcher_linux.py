@@ -184,7 +184,7 @@ def _admitted(
     if operation.launch != record or (launch.boot_id != _boot_id() and not settled):
         raise ValueError("native launch lacks matching durable intent in this boot")
     if verify:
-        runtime = request.executor.verify(Path(request.home), request.platform_tag)
+        runtime = request.executor.verify(Path(request.home))
     else:
         runtime = VerifiedRelease(
             launch.artifact_digest,
@@ -478,9 +478,7 @@ def resume(record: dict[str, JsonValue]) -> LinuxJob:
         if journal.operation.terminal:
             raise RuntimeError("a completed release operation cannot launch another executor")
         terminal = _retire(journal, launch)
-        runtime = journal.operation.request.executor.verify(
-            Path(parsed.home), journal.operation.request.platform_tag
-        )
+        runtime = journal.operation.request.executor.verify(Path(parsed.home))
         journal.relaunch(terminal.model_dump(mode="json"))
         replacement = plan_launch(path, runtime)
         journal.record_launch(replacement)

@@ -26,7 +26,8 @@ from cli.release_transition import journal, launcher_linux
 from cli.release_transition.request import ReleaseRef, Request
 from shared.native_process.ownership import OwnedProcess
 from shared.os_boot_unit import unit_name
-from shared.runtime_release import file_sha256
+from shared.runtime_abi import current_abi
+from shared.runtime_release import MANIFEST_VERSION, file_sha256
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux" or os.environ.get("AVA_NATIVE_RELEASE_LAUNCHER") != "1",
@@ -103,8 +104,9 @@ def _image(home: Path) -> ReleaseRef:
     manifest.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": MANIFEST_VERSION,
                 "artifact_digest": digest,
+                "abi_tag": current_abi().to_json(),
                 "platform": "Linux-fixture",
                 "schema_digest": "c" * 64,
                 "interpreter": str(binary.relative_to(root)),
@@ -199,7 +201,6 @@ def _operation(tmp_path: Path) -> Request:
         home=str(home),
         registry=str(registry),
         created_at=datetime.now(UTC),
-        platform_tag="Linux-fixture",
         machine="fixture",
         previous=image.model_copy(update={"artifact_digest": "a" * 64}),
         candidate=image,
@@ -242,7 +243,7 @@ def test_native_finite_executor_and_sibling_cgroup(tmp_path: Path, mode: str) ->
     request = _operation(tmp_path)
     home = Path(request.home)
     image = request.executor
-    plan = launcher_linux.plan_launch(request.path, image.verify(home, request.platform_tag))
+    plan = launcher_linux.plan_launch(request.path, image.verify(home))
     with journal.exclusive(request.path) as current:
         current.record_launch(plan)
     sibling = unit_name(home)

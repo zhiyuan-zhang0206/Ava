@@ -263,7 +263,7 @@ def _admitted(
     if launch.boot_id != _boot_id():
         raise ValueError("native launch lacks matching durable intent in this boot")
     if verify:
-        runtime = request.executor.verify(Path(request.home), request.platform_tag)
+        runtime = request.executor.verify(Path(request.home))
         expected = plan_launch(request.path, runtime)
     else:
         runtime = VerifiedRelease(
@@ -739,7 +739,7 @@ def resume(record: dict[str, JsonValue]) -> DarwinJob:
             raise RuntimeError("a completed release operation cannot launch another executor")
         terminal = _retire(journal, current)
         request = journal.operation.request
-        runtime = request.executor.verify(Path(parsed.home), request.platform_tag)
+        runtime = request.executor.verify(Path(parsed.home))
         if finite_artifact.capture(Path(parsed.home)) != current.helper:
             raise RuntimeError(
                 "signed helper changed between executor attempts; upgrade it only outside "

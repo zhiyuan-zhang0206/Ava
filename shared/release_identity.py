@@ -41,14 +41,18 @@ class ApplicationIdentity(EvidenceModel):
         return self
 
 
-def application_identity_members(files: dict[str, str], platform: str) -> list[str]:
-    """Admit one install and its exact Linux lib64 materialization, if present."""
+def application_identity_members(files: dict[str, str], abi_os: str) -> list[str]:
+    """Admit one install and its exact Linux lib64 materialization, if present.
+
+    `abi_os` is the verified manifest's `abi_tag["os"]`, not the provenance
+    platform string.
+    """
     members = sorted(name for name in files if name.endswith("/" + _IDENTITY_MEMBER))
     primary = [name for name in members if _APPLICATION_MEMBER_PATTERN.fullmatch(name)]
     if len(primary) != 1:
         raise ReleaseRejectedError("verified image requires one installed application identity")
     allowed = {primary[0]}
-    if platform.startswith("Linux-") and primary[0].startswith("venv/lib/"):
+    if abi_os == "linux" and primary[0].startswith("venv/lib/"):
         # Runtime preparation replaces stdlib venv's lib64 -> lib symlink with
         # a private directory copy. Both physical copies must agree below.
         allowed.add(primary[0].replace("venv/lib/", "venv/lib64/", 1))
@@ -71,7 +75,7 @@ def read_application_identity(image: VerifiedRelease, commit: str) -> Applicatio
     if hashlib.sha256(encoded_manifest).hexdigest() != image.manifest_digest:
         raise ReleaseRejectedError("application identity manifest changed")
     manifest = json.loads(encoded_manifest)
-    members = application_identity_members(manifest["files"], manifest["platform"])
+    members = application_identity_members(manifest["files"], manifest["abi_tag"]["os"])
     copies = [regular_bytes(image.root / name) for name in members]
     for name, encoded in zip(members, copies, strict=True):
         if hashlib.sha256(encoded).hexdigest() != manifest["files"][name]:

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import stat
 import sys
 from collections.abc import Callable
@@ -33,6 +32,7 @@ from shared.migrations import (
     required_migration_set,
 )
 from shared.release_identity import ApplicationIdentity
+from shared.runtime_abi import current_abi
 from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
 from shared.runtime_release import ReleaseRejectedError, current_pointer, verify_release
 from shared.verified_file import regular_bytes
@@ -133,7 +133,7 @@ def main() -> None:
         home / "releases",
         artifact,
         manifest_digest=manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=schema_digest,
     )
     identity = ApplicationIdentity.model_validate_json(

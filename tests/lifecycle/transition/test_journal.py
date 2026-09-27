@@ -42,7 +42,6 @@ def request_record(tmp_path: Path) -> Request:
         home=str(home),
         registry=str(home.parent / "clusters.json"),
         created_at=datetime.now(UTC),
-        platform_tag="Linux-test",
         machine="test-unit",
         previous=previous,
         candidate=candidate,

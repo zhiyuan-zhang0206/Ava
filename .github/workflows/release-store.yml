@@ -2,6 +2,7 @@ name: Release store contract
 on:
   pull_request:
     paths:
+      - 'shared/runtime_abi.py'
       - 'shared/runtime_release.py'
       - 'shared/runtime_prepare.py'
       - 'shared/process_group_closure.py'

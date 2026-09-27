@@ -14,8 +14,10 @@ import pytest
 from cli.release_build import ApplicationBuild
 from cli.release_prepare import FileInput, LocalInputs, Preparation, PreparationReceipt, TreeInput
 from cli.release_prepare import prepare as preparation
+from shared.runtime_abi import current_abi
 from shared.runtime_prepare import PrepareInputs, inventory_digest, tree_inventory
 from shared.runtime_release import (
+    MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
@@ -133,8 +135,9 @@ def _assemble(
         value["source_tree"] = "f" * 40
         receipt.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
     manifest = {
-        "version": 1,
+        "version": MANIFEST_VERSION,
         "artifact_digest": digest,
+        "abi_tag": current_abi().to_json(),
         "platform": platform.platform(),
         "schema_digest": inputs.schema_digest,
         "interpreter": "venv/bin/python",
@@ -146,7 +149,7 @@ def _assemble(
         store,
         digest,
         manifest_digest=file_sha256(root / "manifest.json"),
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=inputs.schema_digest,
     )
 

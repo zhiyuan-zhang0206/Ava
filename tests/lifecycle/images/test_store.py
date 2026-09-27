@@ -9,13 +9,20 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from shared.runtime_abi import AbiTag
 from shared.runtime_release import (
+    MANIFEST_VERSION,
     ReleaseRejectedError,
     activate_release,
     current_pointer,
     file_sha256,
+    release_abi,
     verify_release,
 )
+
+# A simulated host: the store contract runs on Linux, macOS and Windows alike.
+_PY = ("cpython-312", "")
+_HOST = AbiTag("linux", "x86_64", "glibc", "2.39", None, None, *_PY)
 
 
 class ReleaseStoreTests(unittest.TestCase):
@@ -32,9 +39,10 @@ class ReleaseStoreTests(unittest.TestCase):
         (root / "runtime" / "python").write_bytes(content)
         (root / "runtime" / "kernel.py").write_bytes(b"value = 1\n")
         manifest = {
-            "version": 1,
+            "version": MANIFEST_VERSION,
             "artifact_digest": artifact,
-            "platform": "test-platform",
+            "abi_tag": _HOST.to_json(),
+            "platform": "Linux-6.8.0-45-generic-x86_64-with-glibc2.39",
             "schema_digest": self.schema,
             "interpreter": "runtime/python",
             "cwd": "runtime",
@@ -52,7 +60,7 @@ class ReleaseStoreTests(unittest.TestCase):
             release[0],
             manifest_digest=release[1],
             expected_current=expected,
-            platform_tag="test-platform",
+            host_abi=_HOST,
             schema_digest=self.schema,
         )
 
@@ -70,7 +78,7 @@ class ReleaseStoreTests(unittest.TestCase):
                 redirected,
                 release[0],
                 manifest_digest=release[1],
-                platform_tag="test-platform",
+                host_abi=_HOST,
                 schema_digest=self.schema,
             )
         with self.assertRaises(ReleaseRejectedError):
@@ -79,7 +87,7 @@ class ReleaseStoreTests(unittest.TestCase):
                 release[0],
                 expected_current=None,
                 manifest_digest=release[1],
-                platform_tag="test-platform",
+                host_abi=_HOST,
                 schema_digest=self.schema,
             )
         self.assertFalse((self.store / "activation.lock").exists())
@@ -99,7 +107,7 @@ class ReleaseStoreTests(unittest.TestCase):
             self.store,
             first[0],
             manifest_digest=first[1],
-            platform_tag="test-platform",
+            host_abi=_HOST,
             schema_digest=self.schema,
         )
         self.activate(second, first)
@@ -152,20 +160,85 @@ class ReleaseStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ReleaseRejectedError, "manifest digest"):
             self.activate(release)
 
-    def test_schema_and_platform_mismatch_rejected(self) -> None:
+    def test_schema_mismatch_rejected(self) -> None:
         release = self.make_release(b"first")
-        for platform_tag, schema in (("other", self.schema), ("test-platform", "f" * 64)):
+        with self.assertRaisesRegex(ReleaseRejectedError, "schema differs"):
+            self.verify_on(release, _HOST, schema="f" * 64)
+
+    def rewrite_manifest(self, release: tuple[str, str], **changes: object) -> tuple[str, str]:
+        path = self.store / release[0] / "manifest.json"
+        manifest = json.loads(path.read_text())
+        for name, value in changes.items():
+            if value is None:
+                del manifest[name]
+            else:
+                manifest[name] = value
+        path.write_text(json.dumps(manifest))
+        return release[0], file_sha256(path)
+
+    def verify_on(self, release: tuple[str, str], host: AbiTag, schema: str = "") -> None:
+        verify_release(
+            self.store,
+            release[0],
+            manifest_digest=release[1],
+            host_abi=host,
+            schema_digest=schema or self.schema,
+        )
+
+    def test_abi_tag_round_trips_and_platform_string_is_provenance_only(self) -> None:
+        release = self.make_release(b"first")
+        image = verify_release(
+            self.store,
+            release[0],
+            manifest_digest=release[1],
+            host_abi=_HOST,
+            schema_digest=self.schema,
+        )
+        self.assertEqual(release_abi(image), _HOST)
+        # A kernel or OS patch changes the provenance string, and a glibc
+        # upgrade raises the host above the floor: the image stays bootable.
+        patched = self.rewrite_manifest(release, platform="Linux-6.11.0-99-generic-x86_64")
+        self.verify_on(patched, AbiTag("linux", "x86_64", "glibc", "2.41", None, None, *_PY))
+        self.activate(patched)
+        self.assertEqual(current_pointer(self.store), patched)
+
+    def test_incompatible_host_abi_rejected_before_activation(self) -> None:
+        release = self.make_release(b"first")
+        hosts = {
+            "arch": AbiTag("linux", "aarch64", "glibc", "2.39", None, None, *_PY),
+            "older glibc": AbiTag("linux", "x86_64", "glibc", "2.35", None, None, *_PY),
+            "python": AbiTag("linux", "x86_64", "glibc", "2.39", None, None, "cpython-313", ""),
+            "os": AbiTag("macos", "x86_64", None, None, "26", None, *_PY),
+        }
+        for label, host in hosts.items():
             with (
-                self.subTest(platform=platform_tag, schema=schema),
-                self.assertRaisesRegex(ReleaseRejectedError, "incompatible"),
+                self.subTest(label),
+                self.assertRaisesRegex(ReleaseRejectedError, "incompatible with this host"),
             ):
-                verify_release(
-                    self.store,
-                    release[0],
-                    manifest_digest=release[1],
-                    platform_tag=platform_tag,
-                    schema_digest=schema,
-                )
+                self.verify_on(release, host)
+        self.assertIsNone(current_pointer(self.store))
+
+    def test_manifest_without_abi_tag_refuses_clearly(self) -> None:
+        release = self.make_release(b"first")
+        legacy = self.rewrite_manifest(release, abi_tag=None, version=1)
+        with self.assertRaisesRegex(ReleaseRejectedError, "no abi_tag.*re-prepare"):
+            self.verify_on(legacy, _HOST)
+        stale = self.rewrite_manifest(legacy, abi_tag=_HOST.to_json())
+        with self.assertRaisesRegex(ReleaseRejectedError, "shape/version"):
+            self.verify_on(stale, _HOST)
+
+    def test_malformed_abi_tag_refuses(self) -> None:
+        release = self.make_release(b"first")
+        for label, tag in {
+            "unknown field": {**_HOST.to_json(), "kernel": "6.8"},
+            "unknown libc": {**_HOST.to_json(), "libc": "musl"},
+            "numeric floor": {**_HOST.to_json(), "libc_version": 2.39},
+        }.items():
+            with (
+                self.subTest(label),
+                self.assertRaisesRegex(ReleaseRejectedError, "invalid release abi_tag"),
+            ):
+                self.verify_on(self.rewrite_manifest(release, abi_tag=tag), _HOST)
 
     def test_failed_replace_preserves_old_pointer(self) -> None:
         first = self.make_release(b"first")

@@ -49,7 +49,8 @@ from services.permissions_helper import client, lifecycle
 from shared import paths
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
-from shared.runtime_release import VerifiedRelease, file_sha256
+from shared.runtime_abi import current_abi
+from shared.runtime_release import MANIFEST_VERSION, VerifiedRelease, file_sha256
 from tests.lifecycle.transition.macos import native_fixture
 
 pytestmark = [
@@ -237,8 +238,9 @@ def _image(home: Path, tag: str) -> ReleaseRef:
     manifest.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": MANIFEST_VERSION,
                 "artifact_digest": digest,
+                "abi_tag": current_abi().to_json(),
                 "platform": _PLATFORM,
                 "schema_digest": _SCHEMA,
                 "interpreter": str(binary.relative_to(staging)),
@@ -289,7 +291,7 @@ class NativeHome:
         return f"gui/{os.getuid()}/{self.label}"
 
     def image(self, tag: str) -> VerifiedRelease:
-        return self.images[tag].verify(self.home, _PLATFORM)
+        return self.images[tag].verify(self.home)
 
     def helper(self) -> OwnedProcess:
         _reply, peer = client.ping_peer(sock_path=paths.permissions_helper_socket())
@@ -354,8 +356,8 @@ class NativeTransition(LocalTransition):
     def __init__(self, request: Request) -> None:
         self.request = request
         self.home = Path(request.home)
-        self.previous = request.previous.verify(self.home, _PLATFORM)
-        self.candidate = request.candidate.verify(self.home, _PLATFORM)
+        self.previous = request.previous.verify(self.home)
+        self.candidate = request.candidate.verify(self.home)
 
     def preflight(self) -> None:
         return
@@ -496,7 +498,6 @@ def _operation(native: NativeHome, previous: str, candidate: str) -> Request:
         home=str(native.home),
         registry=str(native.registry),
         created_at=datetime.now(UTC),
-        platform_tag=_PLATFORM,
         machine="fixture",
         previous=native.images[previous],
         candidate=native.images[candidate],
@@ -505,7 +506,7 @@ def _operation(native: NativeHome, previous: str, candidate: str) -> Request:
     )
     current = journal.create(request)
     # The persistent helper is real; this process stands in for the finite job.
-    plan = macos.plan_launch(request.path, request.executor.verify(native.home, _PLATFORM))
+    plan = macos.plan_launch(request.path, request.executor.verify(native.home))
     with journal.exclusive(request.path) as locked:
         assert locked.operation == current
         locked.record_launch(plan)

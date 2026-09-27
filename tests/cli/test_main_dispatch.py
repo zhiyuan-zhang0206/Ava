@@ -76,7 +76,7 @@ reference = ReleaseRef(artifact_digest="a"*64, manifest_digest="b"*64,
     schema_digest="c"*64, source_commit="d"*40)
 request = Request(id=uuid4(), home=str(home),
     registry=os.environ["AVA_CLUSTER_REGISTRY"], created_at=datetime.now(UTC),
-    platform_tag="cold-start-test", machine="test",
+    machine="test",
     previous=reference.model_copy(update={"artifact_digest":"e"*64}),
     candidate=reference, executor=reference,
     configuration_digest=configuration_digest(home))

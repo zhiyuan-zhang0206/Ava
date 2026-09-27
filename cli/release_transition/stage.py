@@ -107,7 +107,7 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
         reference = request.previous if previous else request.candidate
     runtime = StartRuntime.from_image(
         Path(request.home),
-        reference.verify(Path(request.home), request.platform_tag),
+        reference.verify(Path(request.home)),
         schema_digest=reference.schema_digest,
         source_commit=reference.source_commit,
     )
@@ -158,7 +158,7 @@ def observe_operation(path: Path) -> int:
     reference = operation.reference
     runtime = admit_release(
         Path(request.home),
-        reference.verify(Path(request.home), request.platform_tag),
+        reference.verify(Path(request.home)),
         schema_digest=reference.schema_digest,
         source_commit=reference.source_commit,
     )

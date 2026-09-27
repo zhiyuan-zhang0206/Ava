@@ -15,8 +15,14 @@ from shared.migrations import (
     MigrationAuthorityMismatch,
     _assert_migration_authority,
 )
+from shared.runtime_abi import current_abi
 from shared.runtime_migration import ReleaseMigrationContext, installed_migration_paths
-from shared.runtime_release import ReleaseRejectedError, file_sha256, verify_release
+from shared.runtime_release import (
+    MANIFEST_VERSION,
+    ReleaseRejectedError,
+    file_sha256,
+    verify_release,
+)
 
 
 def test_installed_readonly_inventory_rejects_unlisted_and_changed_sql(tmp_path: Path) -> None:
@@ -97,8 +103,9 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
     migration = directory / "29991231T235959_runtime-authority.sql"
     migration.write_text("CREATE TABLE runtime_migration_probe (id integer)")
     manifest = {
-        "version": 1,
+        "version": MANIFEST_VERSION,
         "artifact_digest": digest,
+        "abi_tag": current_abi().to_json(),
         "platform": "test-platform",
         "schema_digest": "b" * 64,
         "interpreter": "venv/python",
@@ -111,7 +118,7 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
         store,
         digest,
         manifest_digest=file_sha256(manifest_path),
-        platform_tag="test-platform",
+        host_abi=current_abi(),
         schema_digest="b" * 64,
     )
     monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", directory)

@@ -31,7 +31,6 @@ def _operation(home: Path) -> Path:
         home=str(home),
         registry=str(home.parent / "clusters.json"),
         created_at=datetime.now(UTC),
-        platform_tag="Linux-test",
         machine="test-unit",
         previous=previous,
         candidate=candidate,

@@ -21,7 +21,9 @@ from cli.commands import _root_driver, _start_generation
 from ops.service_spec import ServiceSpec
 from services.ava_root_glue import manifests
 from shared import runtime_interpreter
+from shared.runtime_abi import current_abi
 from shared.runtime_release import (
+    MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
@@ -59,8 +61,9 @@ def image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> VerifiedRelease:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
     manifest = {
-        "version": 1,
+        "version": MANIFEST_VERSION,
         "artifact_digest": root.name,
+        "abi_tag": current_abi().to_json(),
         "platform": platform.platform(),
         "schema_digest": schema,
         "interpreter": "venv/bin/python",
@@ -72,7 +75,7 @@ def image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> VerifiedRelease:
         root.parent,
         root.name,
         manifest_digest=file_sha256(root / "manifest.json"),
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=schema,
     )
     (root.parent / "current-release").write_text(
@@ -356,14 +359,13 @@ def _operation_fixture(image: VerifiedRelease, phase: str) -> SimpleNamespace:
         source_commit="b" * 40,
     )
 
-    def verify(_home: Path, _platform: str) -> VerifiedRelease:
+    def verify(_home: Path) -> VerifiedRelease:
         return image
 
     reference.verify = verify
     request = SimpleNamespace(
         home=str(home),
         registry=str(home.parent / "registry.json"),
-        platform_tag=platform.platform(),
         candidate=reference,
         previous=reference,
         configuration_digest=configuration_digest(home),
@@ -551,7 +553,6 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
         home=str(home),
         registry=str(home.parent / "registry.json"),
         created_at=datetime.now(UTC),
-        platform_tag=platform.platform(),
         machine="fixture",
         previous=reference.model_copy(update={"artifact_digest": "f" * 64}),
         candidate=reference,

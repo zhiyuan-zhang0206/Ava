@@ -57,7 +57,6 @@ def pitr_request(tmp_path: Path) -> PitrRequest:
         home=str(home),
         registry=str(home.parent / "registry.json"),
         created_at=datetime.now(UTC),
-        platform_tag="test",
         machine="test",
         image=image,
         activation_id=uuid4(),

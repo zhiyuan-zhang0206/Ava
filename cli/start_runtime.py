@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shared import runtime_interpreter
+from shared.runtime_abi import current_abi
 from shared.runtime_interpreter import LoadedRuntimeIdentity
 from shared.runtime_release import (
     ReleaseRejectedError,
@@ -123,8 +124,6 @@ def admit_loaded_release(home: Path) -> StartRuntime:
     the selected manifest digest authenticates those bytes. This cannot switch
     an installed caller to a different selected image or authorize migration.
     """
-    import platform
-
     from shared.release_identity import ApplicationIdentity
     from shared.verified_file import regular_bytes
 
@@ -142,7 +141,7 @@ def admit_loaded_release(home: Path) -> StartRuntime:
         home / "releases",
         digest,
         manifest_digest=manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=identity.schema_digest,
     )
     return admit_release(

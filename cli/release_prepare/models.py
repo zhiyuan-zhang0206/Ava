@@ -10,6 +10,7 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from shared.release_identity import ApplicationIdentity
+from shared.runtime_abi import parse_abi_tag
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Commit = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
@@ -93,15 +94,24 @@ class BuildEvidence(Record):
 
 
 class ImageEvidence(Record):
+    """`abi_tag` is the image's compatibility contract; `platform` is provenance."""
+
     artifact_digest: Digest
     manifest_digest: Digest
     schema_digest: Digest
+    abi_tag: dict[str, str | None]
     platform: str = Field(min_length=1)
     root: Path
     interpreter: Path
     cwd: Path
 
     _paths = field_validator("root", "interpreter", "cwd")(_absolute)
+
+    @field_validator("abi_tag")
+    @classmethod
+    def _abi_tag(cls, value: dict[str, str | None]) -> dict[str, str | None]:
+        parse_abi_tag(value)
+        return value
 
 
 class PreparationReceipt(Record):

@@ -51,7 +51,6 @@ def planned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, JsonVa
         home=str(home),
         registry=str(registry),
         created_at=datetime.now(UTC),
-        platform_tag="linux-arm64",
         machine="test",
         previous=old,
         candidate=new,

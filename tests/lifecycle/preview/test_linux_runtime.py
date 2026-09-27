@@ -50,15 +50,16 @@ def test_prepared_receipt_verifies_image_despite_unreadable_moving_selector(
     assert source.image is None and source.interpreter == run / "source/.venv/bin/python"
 
 
-@pytest.mark.parametrize("field", ["interpreter", "cwd", "platform", "source_tree"])
+@pytest.mark.parametrize("field", ["interpreter", "cwd", "abi_tag", "source_tree"])
 def test_receipt_rejects_paths_or_identity_not_supported_by_verified_bytes(
     request_fixture: Preparation, receipt_path: Path, field: str
 ) -> None:
     value = json.loads(receipt_path.read_text())
     if field in {"interpreter", "cwd"}:
         value["image"][field] = value["image"]["root"] + "/another-path"
-    elif field == "platform":
-        value["image"][field] = "foreign-platform"
+    elif field == "abi_tag":
+        # A receipt cannot claim a different contract than its verified manifest.
+        value["image"][field] = value["image"][field] | {"arch": "riscv64"}
     else:
         value["source"][field] = "f" * 40
     receipt_path.write_text(json.dumps(value))

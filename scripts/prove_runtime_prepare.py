@@ -16,6 +16,7 @@ from unittest.mock import patch
 # subprocesses use -I and cannot see this checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from shared.runtime_abi import current_abi
 from shared.runtime_prepare import (
     CollectorInput,
     FrontendInput,
@@ -33,6 +34,7 @@ from shared.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
+    release_abi,
     verify_release,
 )
 
@@ -458,7 +460,7 @@ def main() -> None:
         store,
         release.digest,
         manifest_digest=release.manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=inputs.schema_digest,
     )
     # A fresh generation fails after allocation but before venv creation. No
@@ -490,6 +492,7 @@ def main() -> None:
         "retained_broken_provider_rejected": True,
         "artifact_digest": release.digest,
         "manifest_digest": release.manifest_digest,
+        "abi_tag": release_abi(release).to_json(),
         "platform": platform.platform(),
         "architecture": platform.machine(),
         "python_abi": subprocess.check_output(  # noqa: S603 — verified interpreter.

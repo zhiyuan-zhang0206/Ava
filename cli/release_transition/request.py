@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from shared.runtime_abi import current_abi
 from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.start_inputs import files_digest, require_configuration
 
@@ -34,15 +35,18 @@ class ReleaseRef(Record):
     schema_digest: Digest
     source_commit: Commit
 
-    def verify(self, home: Path, platform_tag: str) -> VerifiedRelease:
-        """Verify all retained bytes and the separately captured source receipt."""
+    def verify(self, home: Path) -> VerifiedRelease:
+        """Verify all retained bytes, the separately captured source receipt, and
+        the image's ABI tag against this host as observed now (never a captured
+        request value: a reboot between phases can change the host).
+        """
         from shared.release_identity import read_application_identity
 
         image = verify_release(
             home / "releases",
             self.artifact_digest,
             manifest_digest=self.manifest_digest,
-            platform_tag=platform_tag,
+            host_abi=current_abi(),
             schema_digest=self.schema_digest,
         )
         read_application_identity(image, self.source_commit)
@@ -59,7 +63,6 @@ class HomeRequest(Record):
     home: str
     registry: str
     created_at: AwareDatetime
-    platform_tag: str = Field(min_length=1, max_length=128)
     machine: str = Field(min_length=1, max_length=128)
     configuration_digest: Digest
 
@@ -159,8 +162,8 @@ def verify_pair(request: Request) -> tuple[VerifiedRelease, VerifiedRelease]:
     home = Path(request.home)
     if home.resolve(strict=True) != home or home.is_symlink():
         raise ReleaseRejectedError("release operation home must be canonical and existing")
-    previous = request.previous.verify(home, request.platform_tag)
-    candidate = request.candidate.verify(home, request.platform_tag)
+    previous = request.previous.verify(home)
+    candidate = request.candidate.verify(home)
     if request.previous.schema_digest != request.candidate.schema_digest:
         raise ReleaseRejectedError("schema-changing release requires the fleet migration barrier")
     if sql_inventory(previous) != sql_inventory(candidate):

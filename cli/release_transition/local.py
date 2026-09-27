@@ -17,6 +17,7 @@ from pathlib import Path
 from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.native import helper_root
 from cli.release_transition.request import Request, verify_pair
+from shared.runtime_abi import current_abi
 from shared.runtime_release import VerifiedRelease, activate_release, current_pointer
 
 
@@ -96,14 +97,14 @@ class LocalTransition:
         store = self.home / "releases"
         observed = current_pointer(store)
         if observed == target.selector:
-            target.verify(self.home, self.request.platform_tag)
+            target.verify(self.home)
             return  # A crash after selector CAS is an observed completed effect.
         activate_release(
             store,
             target.artifact_digest,
             expected_current=predecessor.selector,
             manifest_digest=target.manifest_digest,
-            platform_tag=self.request.platform_tag,
+            host_abi=current_abi(),
             schema_digest=target.schema_digest,
         )
 

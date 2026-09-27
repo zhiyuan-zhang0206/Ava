@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from cli.release_transition import request as request_module
 from cli.release_transition.request import ReleaseRef, Request, verify_pair
-from shared.runtime_release import ReleaseRejectedError
+from shared.runtime_abi import AbiTag, current_abi
+from shared.runtime_release import MANIFEST_VERSION, ReleaseRejectedError, VerifiedRelease
 
 _SITE = "venv/lib/python3.12/site-packages"
 _UP = "20260926T000000_example.sql"
@@ -68,9 +72,10 @@ def _image(
         path.write_bytes(contents)
     manifest = _canonical(
         {
-            "version": 1,
+            "version": MANIFEST_VERSION,
             "artifact_digest": artifact,
-            "platform": "Linux-test",
+            "abi_tag": current_abi().to_json(),
+            "platform": "provenance-only-platform-string",
             "schema_digest": schema,
             "interpreter": "venv/bin/python",
             "cwd": _SITE,
@@ -92,7 +97,6 @@ def _request(home: Path, previous: ReleaseRef, candidate: ReleaseRef) -> Request
         home=str(home),
         registry=str(home.parent / "clusters.json"),
         created_at=datetime.now(UTC),
-        platform_tag="Linux-test",
         machine="test-unit",
         previous=previous,
         candidate=candidate,
@@ -130,6 +134,67 @@ def test_exact_pair_admission_is_read_only_and_replayable(home: Path) -> None:
     assert (pair[0].digest, pair[1].digest) == (previous.artifact_digest, candidate.artifact_digest)
     assert _files(home) == before
     assert not request.path.parent.exists()
+
+
+def _patched(tag: AbiTag) -> AbiTag:
+    """The same host after an OS patch/upgrade: only the release floor rises."""
+    if tag.os == "linux":
+        major, minor = tag.floor()
+        return dataclasses.replace(tag, libc_version=f"{major}.{minor + 1}")
+    return dataclasses.replace(tag, macos=str(tag.floor()[0] + 1))
+
+
+def test_verification_observes_the_host_now_not_a_captured_platform(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Boot, selection and stage all verify through `ReleaseRef.verify`."""
+    request = _request(home, _image(home, "previous"), _image(home, "candidate"))
+    host = current_abi()
+    monkeypatch.setattr(request_module, "current_abi", lambda: _patched(host))
+    assert verify_pair(request)[1].digest == request.candidate.artifact_digest
+    foreign = dataclasses.replace(host, arch="riscv64")
+    monkeypatch.setattr(request_module, "current_abi", lambda: foreign)
+    with pytest.raises(ReleaseRejectedError, match="incompatible with this host"):
+        request.candidate.verify(home)
+    older = dataclasses.replace(host, python="cpython-311")
+    monkeypatch.setattr(request_module, "current_abi", lambda: older)
+    with pytest.raises(ReleaseRejectedError, match="python"):
+        verify_pair(request)
+
+
+class _AdmittedError(Exception):
+    """Stops the boot at admission, before Settings load."""
+
+
+def test_boot_checks_the_booting_host_before_admission(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reboot after an OS patch still boots; a foreign host refuses before Settings."""
+    from cli import start_runtime
+    from cli.release_transition import boot
+
+    image = _image(home, "candidate")
+    registry = home.parent / "clusters.json"
+    admitted: list[str] = []
+
+    def admit(_home: Path, verified: VerifiedRelease, **_facts: str) -> None:
+        admitted.append(verified.digest)
+        raise _AdmittedError
+
+    monkeypatch.setattr(start_runtime, "admit_release", admit)
+    # The boot entry exports its home; keep that out of this test process.
+    monkeypatch.setattr(boot, "os", SimpleNamespace(environ={}))
+    host = current_abi()
+    monkeypatch.setattr(
+        request_module, "current_abi", lambda: dataclasses.replace(host, arch="riscv64")
+    )
+    with pytest.raises(ReleaseRejectedError, match="incompatible with this host"):
+        boot.start_image(home, registry, image)
+    assert admitted == []
+    monkeypatch.setattr(request_module, "current_abi", lambda: _patched(host))
+    with pytest.raises(_AdmittedError):
+        boot.start_image(home, registry, image)
+    assert admitted == [image.artifact_digest]
 
 
 @pytest.mark.parametrize("change", ["up", "down", "added", "removed"])

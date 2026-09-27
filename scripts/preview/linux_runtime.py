@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import platform
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from cli.release_prepare import PreparationReceipt
 from shared.release_identity import read_application_identity
-from shared.runtime_release import VerifiedRelease, verify_release
+from shared.runtime_abi import current_abi
+from shared.runtime_release import VerifiedRelease, release_abi, verify_release
 from shared.session_env import frontend_toolchain_path, normalize_service_path
 from shared.verified_file import regular_bytes
 
@@ -79,13 +79,11 @@ def bound_runtime(run: Path, receipt_path: Path, digest: str, commit: str) -> Ex
 def _image_runtime(run: Path, receipt: PreparationReceipt, digest: str) -> ExpectedRuntime:
     if receipt.request.store != run / "home/releases":
         raise RuntimeError("prepared image store belongs to another preview home")
-    if receipt.image.platform != platform.platform():
-        raise RuntimeError("prepared image platform differs from this native host")
     image = verify_release(
         receipt.request.store,
         receipt.image.artifact_digest,
         manifest_digest=receipt.image.manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=receipt.image.schema_digest,
     )
     if (image.root, image.interpreter, image.cwd) != (
@@ -94,6 +92,8 @@ def _image_runtime(run: Path, receipt: PreparationReceipt, digest: str) -> Expec
         receipt.image.cwd,
     ):
         raise RuntimeError("prepared image paths differ from the verified runtime")
+    if receipt.image.abi_tag != release_abi(image).to_json():
+        raise RuntimeError("prepared image ABI tag differs from its verified manifest")
     if read_application_identity(image, receipt.request.commit) != receipt.source:
         raise RuntimeError("prepared image source identity differs from its build receipt")
     return ExpectedRuntime(

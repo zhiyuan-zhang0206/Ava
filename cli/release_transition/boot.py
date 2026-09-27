@@ -10,16 +10,18 @@ from cli.release_transition.request import ReleaseRef
 
 
 def start_image(home: Path, registry: Path, release: ReleaseRef) -> int:
-    """Load Settings only after explicit image, identity and home admission."""
-    import platform
+    """Load Settings only after explicit image, identity and home admission.
 
+    The image's ABI tag is checked against this boot's host: an OS patch or
+    kernel update since preparation still boots; an incompatible host refuses.
+    """
     from cli.parsers import build_parser
     from cli.start_intent import run_start
     from cli.start_runtime import admit_release
 
     os.environ["AVA_HOME"] = str(home)
     os.environ["AVA_CLUSTER_REGISTRY"] = str(registry)
-    image = release.verify(home, platform.platform())
+    image = release.verify(home)
     runtime = admit_release(
         home, image, schema_digest=release.schema_digest, source_commit=release.source_commit
     )

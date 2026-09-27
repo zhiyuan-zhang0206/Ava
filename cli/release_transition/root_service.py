@@ -130,9 +130,7 @@ def install_steady(
     home: Path, registry: Path, reference: ReleaseRef, image: VerifiedRelease
 ) -> None:
     """Install one pinned ordinary boot action without fabricating an operation."""
-    import platform
-
-    if reference.verify(home, platform.platform()) != image:
+    if reference.verify(home) != image:
         raise ValueError("steady boot image differs from its captured reference")
     context = _context(home, registry, image)
     action = BootStartAction(
