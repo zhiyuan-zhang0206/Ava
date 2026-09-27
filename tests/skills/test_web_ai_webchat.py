@@ -1,4 +1,5 @@
-"""Unit tests for the web-ai shared driver (ava_builtins/skills/web-ai/reference/webchat.py).
+"""Unit tests for the web-ai shared driver
+(ava_builtins.skill_support.web_ai.webchat).
 
 The live browser behavior (real chrome MCP against the logged-in sites) was
 verified by hand during the build; these lock the *pure* tab-ownership logic
@@ -10,24 +11,12 @@ it). The chrome MCP seam is mocked so nothing drives a browser.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-# Load the driver by path (ava_builtins/skills/ are not importable packages).
-_WEBCHAT_PATH = (
-    Path(__file__).parents[2] / "ava_builtins" / "skills" / "web-ai" / "reference" / "webchat.py"
-)
-_spec = importlib.util.spec_from_file_location("web_ai_webchat_under_test", _WEBCHAT_PATH)
-assert _spec and _spec.loader
-webchat = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = webchat
-_spec.loader.exec_module(webchat)
-
+from ava_builtins.skill_support.web_ai import webchat
 
 _PAGE_LIST = (
     "## Pages\n"

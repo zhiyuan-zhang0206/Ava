@@ -690,10 +690,6 @@
     "ava_builtins/plugins/ava_memory/skills/scripts/rebuild_memory_index.py::sys.path": 1,
     "ava_builtins/plugins/ava_memory/skills/scripts/steward.py::sys.path": 1,
     "ava_builtins/skills/telegram-send-file/scripts/send_file.py::sys.path": 1,
-    "ava_builtins/skills/web-ai/console/reference/ask.py::importlib.util.spec_from_file_location": 1,
-    "ava_builtins/skills/web-ai/deep-research/reference/research.py::importlib.util.spec_from_file_location": 1,
-    "ava_builtins/skills/web-ai/media/reference/generate.py::importlib.util.spec_from_file_location": 1,
-    "ava_builtins/skills/web-ai/reference/webchat.py::sys.path": 1,
     "ava_builtins/skills/web-sources/rss/reference/feed.py::importlib.util.spec_from_file_location": 1,
     "ava_builtins/skills/web-sources/youtube/reference/feed.py::importlib.util.spec_from_file_location": 1
   }

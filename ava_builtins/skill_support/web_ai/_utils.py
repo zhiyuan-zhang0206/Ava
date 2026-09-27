@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from _sites import site
+from ava_builtins.skill_support.web_ai._sites import site
 
 
 def _new_idle_state() -> dict[str, Any]:
