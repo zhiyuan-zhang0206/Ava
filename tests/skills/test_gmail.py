@@ -24,7 +24,7 @@ import feed as gmail  # noqa: E402  # pyright: ignore[reportMissingImports]
 # pyright: reportUnknownArgumentType = warning
 
 
-# ── _parse_list_id ──────────────────────────────────────────────────────────
+# ── parse_list_id ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -42,18 +42,18 @@ import feed as gmail  # noqa: E402  # pyright: ignore[reportMissingImports]
     ],
 )
 def test_parse_list_id(raw: str | None, expected: str | None) -> None:
-    assert gmail._parse_list_id(raw) == expected
+    assert gmail.parse_list_id(raw) == expected
 
 
-# ── _html_to_text ───────────────────────────────────────────────────────────
+# ── html_to_text ───────────────────────────────────────────────────────────
 
 
 def test_html_to_text_plain() -> None:
-    assert gmail._html_to_text("Hello world") == "Hello world"
+    assert gmail.html_to_text("Hello world") == "Hello world"
 
 
 def test_html_to_text_strips_tags() -> None:
-    result = gmail._html_to_text("<p>Hello <b>world</b></p>")
+    result = gmail.html_to_text("<p>Hello <b>world</b></p>")
     assert "Hello" in result
     assert "world" in result
     assert "<p>" not in result
@@ -61,61 +61,61 @@ def test_html_to_text_strips_tags() -> None:
 
 
 def test_html_to_text_strips_scripts() -> None:
-    result = gmail._html_to_text("<html><script>alert('x')</script><body>Content</body></html>")
+    result = gmail.html_to_text("<html><script>alert('x')</script><body>Content</body></html>")
     assert "Content" in result
     assert "alert" not in result
 
 
 def test_html_to_text_handles_entities() -> None:
-    result = gmail._html_to_text("Price: &euro;5 &amp; &lt;free&gt;")
+    result = gmail.html_to_text("Price: &euro;5 &amp; &lt;free&gt;")
     assert "€5" in result
     assert "&" in result or "&amp;" not in result
 
 
 def test_html_to_text_collapses_whitespace() -> None:
-    result = gmail._html_to_text("<div>a</div>   <div>b</div>")
+    result = gmail.html_to_text("<div>a</div>   <div>b</div>")
     # Whitespace should be normalized — no double spaces
     assert "  " not in result or result.count("\n") >= 1
 
 
 def test_html_to_text_empty() -> None:
-    assert gmail._html_to_text("") == ""
+    assert gmail.html_to_text("") == ""
 
 
-# ── _iso ────────────────────────────────────────────────────────────────────
+# ── iso ────────────────────────────────────────────────────────────────────
 
 
 def test_iso_none() -> None:
-    assert gmail._iso(None) is None
-    assert gmail._iso("") is None
+    assert gmail.iso(None) is None
+    assert gmail.iso("") is None
 
 
 def test_iso_rfc2822() -> None:
-    result = gmail._iso("Mon, 21 Jun 2026 15:30:00 +0000")
+    result = gmail.iso("Mon, 21 Jun 2026 15:30:00 +0000")
     assert result is not None
     assert result.endswith("Z")
     assert "2026-06-21T15:30:00" in result
 
 
 def test_iso_naive_becomes_utc() -> None:
-    result = gmail._iso("Mon, 21 Jun 2026 15:30:00")
+    result = gmail.iso("Mon, 21 Jun 2026 15:30:00")
     assert result is not None
     assert result.endswith("Z")
 
 
 def test_iso_invalid() -> None:
-    assert gmail._iso("not a date") is None
-    assert gmail._iso("garbage") is None
+    assert gmail.iso("not a date") is None
+    assert gmail.iso("garbage") is None
 
 
-# ── _now_iso ────────────────────────────────────────────────────────────────
+# ── now_iso ────────────────────────────────────────────────────────────────
 
 
 def test_now_iso_ends_with_z() -> None:
-    assert gmail._now_iso().endswith("Z")
+    assert gmail.now_iso().endswith("Z")
 
 
-# ── _meta ───────────────────────────────────────────────────────────────────
+# ── meta ───────────────────────────────────────────────────────────────────
 
 
 def test_meta_extracts_fields() -> None:
@@ -126,7 +126,7 @@ def test_meta_extracts_fields() -> None:
     msg["Subject"] = "Test Subject"
     msg["Date"] = "Mon, 21 Jun 2026 15:30:00 +0000"
 
-    meta = gmail._meta(msg)
+    meta = gmail.meta(msg)
     assert meta["message_id"] == "abc123@example.com"
     assert meta["list_id"] == "newsletter.example.com"
     assert meta["from"] == "sender@example.com"
@@ -136,7 +136,7 @@ def test_meta_extracts_fields() -> None:
 
 def test_meta_missing_fields() -> None:
     msg = Message()
-    meta = gmail._meta(msg)
+    meta = gmail.meta(msg)
     assert meta["message_id"] is None
     assert meta["list_id"] is None
     assert meta["from"] is None
@@ -144,29 +144,29 @@ def test_meta_missing_fields() -> None:
     assert meta["date"] is None
 
 
-# ── _addr_list ──────────────────────────────────────────────────────────────
+# ── addr_list ──────────────────────────────────────────────────────────────
 
 
 def test_addr_list_single() -> None:
-    assert gmail._addr_list("a@b.com") == ["a@b.com"]
+    assert gmail.addr_list("a@b.com") == ["a@b.com"]
 
 
 def test_addr_list_multiple() -> None:
-    result = gmail._addr_list("a@b.com, c@d.com")
+    result = gmail.addr_list("a@b.com, c@d.com")
     assert result == ["a@b.com", "c@d.com"]
 
 
 def test_addr_list_with_names() -> None:
-    result = gmail._addr_list("Alice <a@b.com>, Bob <c@d.com>")
+    result = gmail.addr_list("Alice <a@b.com>, Bob <c@d.com>")
     assert result == ["a@b.com", "c@d.com"]
 
 
 def test_addr_list_none() -> None:
-    assert gmail._addr_list(None) == []
+    assert gmail.addr_list(None) == []
 
 
 def test_addr_list_empty() -> None:
-    assert gmail._addr_list("") == []
+    assert gmail.addr_list("") == []
 
 
 # ── _since_to_ts ────────────────────────────────────────────────────────────
@@ -193,18 +193,18 @@ def test_since_to_ts_iso_date() -> None:
     assert ts is not None
 
 
-# ── _xgm ────────────────────────────────────────────────────────────────────
+# ── xgm ────────────────────────────────────────────────────────────────────
 
 
 def test_xgm_simple() -> None:
-    result = gmail._xgm("from:boss newer_than:7d")
+    result = gmail.xgm("from:boss newer_than:7d")
     assert result.startswith('"')
     assert result.endswith('"')
     assert "from:boss" in result
 
 
 def test_xgm_escapes_quotes() -> None:
-    result = gmail._xgm('subject:"hello world"')
+    result = gmail.xgm('subject:"hello world"')
     assert '\\"' in result
 
 
@@ -225,7 +225,7 @@ def test_body_arg_rejects_whitespace() -> None:
         gmail._body_arg("   ")
 
 
-# ── _msg_summary / _sent_summary ────────────────────────────────────────────
+# ── msg_summary / sent_summary ────────────────────────────────────────────
 
 
 def test_msg_summary() -> None:
@@ -236,7 +236,7 @@ def test_msg_summary() -> None:
     msg["Message-Id"] = "<abc@mail.gmail.com>"
     msg.set_content("Hello world")
 
-    summary = gmail._msg_summary(msg)
+    summary = gmail.msg_summary(msg)
     assert summary["message_id"] == "abc@mail.gmail.com"
     assert summary["from"] == "me@gmail.com"
     assert summary["to"] == "you@gmail.com"
@@ -253,7 +253,7 @@ def test_sent_summary_dry_run() -> None:
     msg["Message-Id"] = "<abc@mail.gmail.com>"
     msg.set_content("Hello")
 
-    summary = gmail._sent_summary(msg, sent=False)
+    summary = gmail.sent_summary(msg, sent=False)
     assert summary["sent"] is False
     assert summary["body"] == "Hello"
 
@@ -266,7 +266,7 @@ def test_sent_summary_real() -> None:
     msg["Message-Id"] = "<abc@mail.gmail.com>"
     msg.set_content("Hello")
 
-    summary = gmail._sent_summary(msg, sent=True)
+    summary = gmail.sent_summary(msg, sent=True)
     assert summary["sent"] is True
 
 

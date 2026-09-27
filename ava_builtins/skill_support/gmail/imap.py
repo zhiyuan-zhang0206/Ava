@@ -146,7 +146,7 @@ def _conn() -> imaplib.IMAP4_SSL:
     return conn
 
 
-def _xgm(query: str) -> str:
+def xgm(query: str) -> str:
     """Quote a Gmail-syntax query as an IMAP string for the X-GM-RAW criterion."""
     return '"' + query.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -158,7 +158,7 @@ def _search(query: str) -> list[bytes]:
     infeasible query` in the data line rather than a BAD status, so a non-OK
     status or an empty-but-error payload both raise instead of looking like a
     zero-result match."""
-    typ, data = _conn().search(None, "X-GM-RAW", _xgm(query))
+    typ, data = _conn().search(None, "X-GM-RAW", xgm(query))
     if typ != "OK":
         raise GmailError(f"search failed (typ={typ}) for {query!r}: {data!r}")
     payload = data[0] if data else b""
@@ -202,7 +202,7 @@ def _full(uid: bytes) -> tuple[bytes, Message]:
 # --------------------------------------------------------------------------- #
 
 
-def _parse_list_id(raw: str | None) -> str | None:
+def parse_list_id(raw: str | None) -> str | None:
     """The List-Id value: the `<...>` bracket content (`Name <id.domain>` or bare
     `<id.domain>`), else the trimmed string. None when the header is absent."""
     if not raw:
@@ -214,7 +214,7 @@ def _parse_list_id(raw: str | None) -> str | None:
     return groups[-1].strip() if groups else raw.strip()
 
 
-def _iso(date_hdr: str | None) -> str | None:
+def iso(date_hdr: str | None) -> str | None:
     if not date_hdr:
         return None
     try:
@@ -226,18 +226,18 @@ def _iso(date_hdr: str | None) -> str | None:
     return dt.astimezone(_dt.UTC).isoformat().replace("+00:00", "Z")
 
 
-def _now_iso() -> str:
+def now_iso() -> str:
     return _dt.datetime.now(tz=_dt.UTC).isoformat().replace("+00:00", "Z")
 
 
-def _meta(msg: Message) -> dict[str, Any]:
+def meta(msg: Message) -> dict[str, Any]:
     """The metadata every lens returns -- newsletter identity lives in List-Id."""
     return {
         "message_id": (msg["Message-Id"] or "").strip().strip("<>") or None,
-        "list_id": _parse_list_id(msg["List-Id"]),
+        "list_id": parse_list_id(msg["List-Id"]),
         "from": (msg["From"] or "").strip() or None,
         "subject": (msg["Subject"] or "").strip() or None,
-        "date": _iso(msg["Date"]),
+        "date": iso(msg["Date"]),
     }
 
 
@@ -246,7 +246,7 @@ def _meta(msg: Message) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def _html_to_text(html_body: str) -> str:
+def html_to_text(html_body: str) -> str:
     no_scripts = _RE_SCRIPT_STYLE.sub(" ", html_body)
     text = html.unescape(_RE_TAG.sub(" ", no_scripts))
     return _RE_WS.sub("\n", re.sub(r"[ \t]{2,}", " ", text)).strip()
@@ -262,7 +262,7 @@ def _body_text(msg: Message) -> str:
         return str(plain.get_content()).strip()
     htmlpart = msg.get_body(preferencelist=("html",))
     if htmlpart is not None:
-        return _html_to_text(str(htmlpart.get_content()))
+        return html_to_text(str(htmlpart.get_content()))
     return ""
 
 
@@ -282,9 +282,9 @@ def search(query: str, *, limit: int | None = 50) -> list[dict[str, Any]]:
     """Run a Gmail search (full `X-GM-RAW` syntax), newest-first, return metadata.
 
     The general "find me mail" lens -- e.g. `from:foo newer_than:7d`,
-    `subject:invoice`, `category:updates`. Each item is `_meta` (message_id /
+    `subject:invoice`, `category:updates`. Each item is `meta` (message_id /
     list_id / from / subject / date)."""
-    return [_meta(_headers(uid)) for uid in _recent(_search(query), limit)]
+    return [meta(_headers(uid)) for uid in _recent(_search(query), limit)]
 
 
 def read(
@@ -301,7 +301,7 @@ def read(
     out: list[dict[str, Any]] = []
     for uid in _recent(_search(q), limit):
         _, msg = _full(uid)
-        out.append({**_meta(msg), "text": _body_text(msg)})
+        out.append({**meta(msg), "text": _body_text(msg)})
     return out
 
 
@@ -327,7 +327,7 @@ def discover(*, since_ts: int | None = None, max_scan: int = 400) -> list[dict[s
     # Gmail's `OR` binds tighter than the implicit space-AND, leaving the `updates`
     # arm unbounded by --since.
     for uid in _recent(_search(f"({DISCOVER_NET}){_after(since_ts)}"), max_scan):
-        m = _meta(_headers(uid))
+        m = meta(_headers(uid))
         lid = m["list_id"]
         if not lid:
             continue
@@ -347,11 +347,11 @@ def enum(
     `list_id` is the List-Id value (e.g. `newsletter.example.com`) -- the
     S2 follow key. `list:` filters server-side, so every result already belongs to
     this newsletter; bounded by `--since` (server-side) and `--limit`/`max_scan`.
-    Each item is `_meta`."""
+    Each item is `meta`."""
     if limit is not None and limit <= 0:
         return []
     ids = _search(f"list:{list_id}{_after(since_ts)}")
-    return [_meta(_headers(uid)) for uid in _recent(ids, limit if limit is not None else max_scan)]
+    return [meta(_headers(uid)) for uid in _recent(ids, limit if limit is not None else max_scan)]
 
 
 # --------------------------------------------------------------------------- #
@@ -440,25 +440,25 @@ def fetch(message_id: str, *, root: Path | None = None) -> dict[str, Any]:
     if not ids:
         raise GmailError(f"no message with Message-Id {message_id!r}")
     raw, msg = _full(ids[-1])
-    meta = _meta(msg)
-    if not meta["message_id"]:
+    msg_meta = meta(msg)
+    if not msg_meta["message_id"]:
         raise GmailError(f"message {message_id!r} has no Message-Id header")
     text = _body_text(msg)
-    from_name = email.utils.parseaddr(meta["from"] or "")[0] or meta["from"]
-    outdir = _outdir(meta["message_id"], root or MIRROR_ROOT)
+    from_name = email.utils.parseaddr(msg_meta["from"] or "")[0] or msg_meta["from"]
+    outdir = _outdir(msg_meta["message_id"], root or MIRROR_ROOT)
     outdir.mkdir(parents=True, exist_ok=True)
     post: dict[str, Any] = {
         "platform": "gmail",
-        "message_id": meta["message_id"],
-        "list_id": meta["list_id"],
+        "message_id": msg_meta["message_id"],
+        "list_id": msg_meta["list_id"],
         "url": _canonical_url(text),
-        "title": meta["subject"],
+        "title": msg_meta["subject"],
         "text": text,
-        "author": {"id": meta["list_id"], "name": from_name},
-        "published_at": meta["date"],
+        "author": {"id": msg_meta["list_id"], "name": from_name},
+        "published_at": msg_meta["date"],
         "list_unsubscribe": (msg["List-Unsubscribe"] or "").strip() or None,
         "attachments": _attachments(msg, outdir),
-        "fetched_at": _now_iso(),
+        "fetched_at": now_iso(),
         "fetched_via": "gmail",
     }
     save(post, raw, root=root)
