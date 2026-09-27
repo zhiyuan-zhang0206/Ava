@@ -351,6 +351,11 @@ def write_tree(agent_id: int, nodes: Sequence[MaterializedNode], *, model: str) 
 ## shared.agents.history.hierarchy.tokens
 def count_tokens(text: str) -> int
 
+## shared.agents.history.inbound_sideload
+async def claimed_reconcile_scope(pool: AsyncConnectionPool, agent_id: int) -> tuple[bool, datetime | None, set[int]]
+async def committed_ids_for_reconcile(pool: AsyncConnectionPool, checkpointer: AsyncPostgresSaver, agent_id: int) -> set[int]
+async def sideload_committed_ids(pool: AsyncConnectionPool, checkpointer: AsyncPostgresSaver, agent_id: int, *, since: datetime) -> set[int] | None
+
 ## shared.agents.history.timeline
 TimelineItem  (re-export of shared.agents.history.timeline_item.TimelineItem)
 def build_timeline_items(messages: Sequence[BaseMessage], chat_anchors: list[InboundRow], *, start: int=0, segment_prefix: str='') -> tuple[list[TimelineItem], int]
