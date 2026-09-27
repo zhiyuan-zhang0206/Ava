@@ -96,7 +96,7 @@ from shared.sessions.pty.records import (
     session_generation,
     session_started_at,
 )
-from shared.sessions.pty.session_tree import kill_host_tree, kill_session_tree
+from shared.sessions.pty.session_tree import TreeKill, kill_host_tree, kill_session_tree
 
 # ---------------------------------------------------------------------------
 # Key translation — the classic send-keys vocabulary (prototype _KEYMAP, with
@@ -579,11 +579,10 @@ def _kill_by_record(name: str) -> int:
     """
     path = record_path(name)
     rec = SessionRecord.read(path)
-    survivors: list[int] = []
+    result = TreeKill((), ())
     if rec is not None and _record_alive(rec, path):
         shell = OwnedProcess(rec.pid, rec.create_time, rec.starttime)
         result = kill_session_tree(shell, wait_s=_RECORD_KILL_WAIT_S)
-        survivors = sorted(identity.pid for identity in result.survivors)
     _kill_recorded_host(name)
     deadline = time.monotonic() + _RECORD_KILL_WAIT_S
     while time.monotonic() < deadline:
@@ -594,9 +593,11 @@ def _kill_by_record(name: str) -> int:
     if has_session(name):
         sys.stderr.write(f"session {name} survived the record-based kill\n")
         return 1
-    if survivors:
+    if result.stuck:
+        survivors = _pids(result.stuck)
         sys.stderr.write(f"session {name}: processes survived the record-based kill: {survivors}\n")
         return 1
+    _report_denied(name, _pids(result.denied))
     sys.stdout.write("interrupted\n")  # fail-open: a wedged host's kill could not be probed
     _sweep_dead(name)
     try:
@@ -605,6 +606,23 @@ def _kill_by_record(name: str) -> int:
         sys.stderr.write(f"session {name} left an orphaned host after record-based kill: {exc}\n")
         return 1
     return 0
+
+
+def _pids(identities: tuple[OwnedProcess, ...]) -> list[int]:
+    return sorted(identity.pid for identity in identities)
+
+
+def _report_denied(name: str, pids: list[int] | None) -> None:
+    """Name the processes a finished kill had no permission to signal.
+
+    The session itself is gone (its shell and everything this user may
+    signal), so the kill succeeds; the leftovers belong to another user (a
+    root `sudo` on the pty) and are that user's to end.
+    """
+    if pids:
+        sys.stderr.write(
+            f"session {name}: processes this user may not signal outlived the kill: {pids}\n"
+        )
 
 
 def _op_kill(name: str, rest: list[str]) -> int:
@@ -629,6 +647,7 @@ def _op_kill(name: str, rest: list[str]) -> int:
     result = _finish_op(resp)
     if result != 0:
         return result
+    _report_denied(name, resp["data"].get("survivors"))
     sys.stdout.write("interrupted\n" if resp["data"].get("interrupted") else "idle\n")
     try:
         _reap_orphaned_hosts(name, force_unresponsive=True)
