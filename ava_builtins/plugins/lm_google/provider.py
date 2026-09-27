@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.lm._effort import _clamp_effort
+from shared.lm.effort import clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -98,7 +98,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
             if spec is not None and spec.effort_levels
             else (ctx.effort_levels if ctx.effort_levels is not None else _GEMINI_EFFORT_LEVELS)
         )
-        thinking_level = _clamp_effort(
+        thinking_level = clamp_effort(
             ctx.resolved_effort,
             levels,
             target="gemini",

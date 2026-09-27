@@ -1000,7 +1000,7 @@ def test_fetch_effort_accepts_enum_member(
     monkeypatch: pytest.MonkeyPatch, mock_llm: dict[str, Any]
 ) -> None:
     """A ReasoningEffort member is accepted — same wire value as its literal."""
-    from shared.lm._effort import ReasoningEffort
+    from shared.lm.effort import ReasoningEffort
 
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="ok")

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.lm._effort import _clamp_effort
+from shared.lm.effort import clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -60,7 +60,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     kimi_kwargs: dict[str, Any] = {}
     if ctx.resolved_effort:
         kimi_kwargs["extra_body"] = {
-            "reasoning_effort": _clamp_effort(
+            "reasoning_effort": clamp_effort(
                 ctx.resolved_effort,
                 ctx.effort_levels if ctx.effort_levels is not None else _KIMI_EFFORT_LEVELS,
                 target="kimi",

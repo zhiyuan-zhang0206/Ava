@@ -41,7 +41,7 @@ from services.memory_indexer.embeddings.gemini import (
     GeminiEmbeddingProvider,
 )
 from shared.config import settings
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.resilience import ExponentialBackoff, Policy
 
 

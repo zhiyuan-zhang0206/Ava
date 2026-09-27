@@ -137,7 +137,7 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
     from dataclasses import replace
 
     from shared.config import settings
-    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
     from shared.lm.registry import MODELS
 
     _exec_child(monkeypatch, tmp_path)

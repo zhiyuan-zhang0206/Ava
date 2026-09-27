@@ -194,7 +194,7 @@ def test_provider_registration_surface_stays_off_the_lm_stack() -> None:
 
 _PROVIDER_PLUGIN_LOAD = """
 from shared.lm import provider_api
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 ensure_provider_plugins_loaded()
 heavy = sorted(

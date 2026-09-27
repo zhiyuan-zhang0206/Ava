@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from shared.lm import provider_api
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.attach_constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_FILES_PER_TURN,
@@ -21,6 +20,7 @@ from shared.lm.attach_constants import (
     ATTACH_MEDIA_MIME,
 )
 from shared.lm.factory import attach_modalities_for_model
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.provider_api import AttachPolicy
 
 # Keep the notice bare: attachments persist in the message history, so any

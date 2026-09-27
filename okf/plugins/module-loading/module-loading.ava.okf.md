@@ -82,7 +82,7 @@ not a plugin failure.
 
 The same containment applies at the other plugin-code load sites, each
 reporting through the one reporter: a plugin's `provider.py`
-(`shared/lm/_plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
+(`shared/lm/plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
 (`cli/commands/extensions/_plugin_scaffold.py`), a built-in plugin's `metrics.py`
 (`gateway/routers/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/routers/_plugin_inspector.py`), and the launched

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 
 @pytest.fixture(scope="module", autouse=True)

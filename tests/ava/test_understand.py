@@ -124,7 +124,7 @@ def test_text_effort_flows_to_build_chat_model(mock_deepseek: dict[str, Any]) ->
 def test_text_effort_accepts_enum_member(mock_deepseek: dict[str, Any]) -> None:
     """A ReasoningEffort member is accepted and equals its literal value —
     both spellings produce the same wire value."""
-    from shared.lm._effort import ReasoningEffort
+    from shared.lm.effort import ReasoningEffort
 
     understand_mod.understand([{"prompt": "x", "text": "some text"}], effort=ReasoningEffort.XHIGH)
     assert mock_deepseek["reasoning_effort"] == "xhigh"

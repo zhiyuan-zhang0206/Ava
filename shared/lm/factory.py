@@ -23,7 +23,7 @@ kimi uses `ChatMoonshot` (`langchain-moonshot`) and captures reasoning in
 streaming fan-out (`RedisStreamHandler`) and timeline (`shared/agents/history/timeline.py`)
 handle that style. Its binding lives in `ava_builtins/plugins/lm_moonshot`.
 
-glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/_reasoning_compat.py`), a
+glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/reasoning_compat.py`), a
 ChatOpenAI subclass folding `reasoning_content` deltas into canonical
 `{"type":"thinking", ...}` blocks — none has a suitable community package
 (`langchain-zhipuai` unmaintained; `langchain_zhipu` needs `langchain<0.3.0`;
@@ -44,11 +44,11 @@ of the box, bypassing the broken reasoning_content roundtrip entirely.
 
 Adding a provider means adding a `provider.py` beside a plugin's `plugin.py`
 (`shared/lm/model-providers-as-plugins.md`; contract in
-`shared/lm/provider_api.py`, loaded by `shared/lm/_plugin_providers.py`).
+`shared/lm/provider_api.py`, loaded by `shared/lm/plugin_providers.py`).
 
 **`max_tokens` + reasoning effort dispatching** — per-model facts (output caps,
 effort vocabularies) live in `shared/lm/registry.py` (`MODELS`); the
-per-provider clamp machinery lives in the companion module `shared/lm/_effort.py`
+per-provider clamp machinery lives in the companion module `shared/lm/effort.py`
 (its docstring has the detail). In short: the two anthropic-protocol branches
 pin max_tokens explicitly to the model's documented output cap
 (`ModelSpec.max_output_tokens`) and fail fast on unregistered models —
@@ -59,7 +59,7 @@ OpenAI-style branches leave it unset (those APIs default to the model's own
 cap). The reasoning effort (`resolve_setting("reasoning_effort", ...)`:
 explicit env/overlay value, else the model's registry default, else the
 provider default) maps per branch onto what each provider accepts via
-`_clamp_effort` — out-of-range values clamp (logged), unknown strings fail
+`clamp_effort` — out-of-range values clamp (logged), unknown strings fail
 fast at build time instead of as a provider 400 mid-run.
 
 Streaming / usage_metadata: providers attach `usage_metadata` on the final
@@ -86,18 +86,18 @@ from loguru import logger
 
 from shared.config import field_alias, get_field, settings
 from shared.lm import provider_api
+from shared.lm._providers import ThinkingConfig
 
-# Reasoning-effort dispatch lives in the companion module shared/lm/_effort.py
+# Reasoning-effort dispatch lives in the companion module shared/lm/effort.py
 # (split for the file-size ceiling); per-model facts and the media-capability
 # resolution live in shared/lm/registry.py. Both are re-imported here so
 # factory stays the catalog import surface for callers and tests.
-from shared.lm._effort import (
-    _clamp_effort as _clamp_effort,
+from shared.lm.effort import (
+    clamp_effort as clamp_effort,
 )  # re-exported (tests import it via factory)
-from shared.lm._plugin_providers import (
+from shared.lm.plugin_providers import (
     ensure_provider_plugins_loaded as ensure_provider_plugins_loaded,
 )  # re-exported (gateway entry points call it before reading the registry)
-from shared.lm._providers import ThinkingConfig
 from shared.lm.registry import (
     _VISION_MODEL_PREFIXES as _VISION_MODEL_PREFIXES,  # re-exported legacy fallback
 )
@@ -174,7 +174,7 @@ def provider_key_of_model(model: str) -> str | None:
     Keys are the core `_MODEL_KEY_MAP` prefixes with a trailing dash stripped,
     plus each registered plugin's explicit provider key or stripped dispatch
     prefix — the same keys `AVA_LLM_MAX_CONCURRENT` accepts
-    (`shared/lm/_concurrency.py`). None means the limiter passes through.
+    (`shared/lm/concurrency.py`). None means the limiter passes through.
     """
     ensure_provider_plugins_loaded()
     for prefix in _MODEL_KEY_MAP:

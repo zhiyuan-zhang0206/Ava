@@ -17,7 +17,7 @@ from typing import Any, cast
 import pytest
 
 from shared.lm import pricing
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.pricing import (
     CostQuote,
     Rates,

@@ -137,26 +137,26 @@ def test_multiple_private_names_from_one_module_count_as_one_site(
 
 
 def _shared_lm_and_db(tmp_path: pathlib.Path) -> None:
-    _write(tmp_path, "shared/lm/_effort.py", "x = 1\n")
+    _write(tmp_path, "shared/lm/_scratch.py", "x = 1\n")
     _write(tmp_path, "shared/db.py", "class Foo:\n    _x = 1\n\n\ndef _restore(): ...\n")
 
 
 def test_attribute_reach_in_via_import_module(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("import shared.lm\nshared.lm._effort.x\n")
+    tree = _parse("import shared.lm\nshared.lm._scratch.x\n")
 
     sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
 
-    assert sites == {"gateway/x.py::shared.lm._effort": [2]}
+    assert sites == {"gateway/x.py::shared.lm._scratch": [2]}
 
 
 def test_attribute_reach_in_via_from_import_package(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("from shared import lm\nlm._effort\n")
+    tree = _parse("from shared import lm\nlm._scratch\n")
 
     sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
 
-    assert sites == {"gateway/x.py::shared.lm._effort": [2]}
+    assert sites == {"gateway/x.py::shared.lm._scratch": [2]}
 
 
 def test_attribute_reach_in_via_from_import_module(tmp_path: pathlib.Path) -> None:
@@ -194,18 +194,18 @@ def test_an_unbound_local_attribute_is_never_a_reach_in(tmp_path: pathlib.Path) 
 
 def test_attribute_reach_in_from_inside_the_owner_is_not_flagged(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("import shared.lm\nshared.lm._effort.x\n")
+    tree = _parse("import shared.lm\nshared.lm._scratch.x\n")
 
     assert locality.private_imports(tree, "shared/lm/other.py", ("shared",), tmp_path) == {}
 
 
 def test_a_long_attribute_chain_counts_the_site_once(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("import shared.lm\nshared.lm._effort.a.b\n")
+    tree = _parse("import shared.lm\nshared.lm._scratch.a.b\n")
 
     sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
 
-    assert sites == {"gateway/x.py::shared.lm._effort": [2]}
+    assert sites == {"gateway/x.py::shared.lm._scratch": [2]}
 
 
 # --- private_imports: `ava` has no exemption ---------------------------------

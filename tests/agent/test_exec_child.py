@@ -748,7 +748,7 @@ def test_child_help_hides_attach_for_withdrawn_model(
         tmp_path,
         "import ava, io, contextlib\n"
         "from dataclasses import replace\n"
-        "from shared.lm._plugin_providers import ensure_provider_plugins_loaded\n"
+        "from shared.lm.plugin_providers import ensure_provider_plugins_loaded\n"
         "from shared.lm.registry import MODELS\n"
         "ensure_provider_plugins_loaded()\n"
         "MODELS['deepseek-vision-fixture'] = replace(MODELS['deepseek-flash'], "

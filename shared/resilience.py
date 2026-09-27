@@ -8,7 +8,7 @@ R2 convergence point D (design-concept.md §4.4 + evaluation-record #14):
   the HTTP client: ``fn`` is any zero-argument callable (urllib / httpx /
   aiohttp / provider SDKs). This module is the DESIGNATED convergence target
   for retry loops (design invariant D1), not yet the only one: dedicated
-  loops still live in ``shared/lm/_call.py`` (invoke_text, its own
+  loops still live in ``shared/lm/call.py`` (invoke_text, its own
   exponential backoff + jittered), ``shared/bootstrap.py``
   (fetch_bootstrap_config, linear backoff without jitter) and
   ``shared/redis_listener.py`` (connect retry, backoff without jitter). The
@@ -126,7 +126,7 @@ def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
     ``delay - span``, and a negative sleep raises ValueError from
     ``time.sleep`` — masking the original exception and killing the retry
     path exactly when the retry is the recovery (audit 2026-08-08 P2; the
-    `shared/lm/_call.py` retry delay comes from a writable cluster setting,
+    `shared/lm/call.py` retry delay comes from a writable cluster setting,
     so ``delay < span`` is reachable in production, not just a broken
     Policy).
     """

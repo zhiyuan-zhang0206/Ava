@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.lm._effort import _clamp_effort
+from shared.lm.effort import clamp_effort
 from shared.lm.provider_api import (
     AttachPolicy,
     BuildContext,
@@ -42,7 +42,7 @@ def deepseek_wire_effort(effort: str, levels: tuple[str, ...], *, target: str) -
     """
     if effort == "none":
         return None
-    return _clamp_effort(effort, levels, target=target)
+    return clamp_effort(effort, levels, target=target)
 
 
 def build(ctx: BuildContext) -> BaseChatModel:
@@ -51,7 +51,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     `output_config.effort` via extra_body; `none` maps onto thinking
     disabled (the endpoint's effort vocabulary has no off level).
     """
-    from shared.lm._anthropic_compat import ThinkingTokensChatAnthropic
+    from shared.lm.anthropic_compat import ThinkingTokensChatAnthropic
 
     # Use DeepSeek's anthropic-compatible endpoint via ChatAnthropic client.
     # Not langchain-deepseek (1.0.1 reasoning_content roundtrip bug).

@@ -428,7 +428,7 @@ async def _stream_with_cache_retry(
             (last_ts - first_ts) * 1000.0 if first_ts is not None and last_ts is not None else None
         )
 
-    from shared.lm._concurrency import get_limiter
+    from shared.lm.concurrency import get_limiter
     from shared.lm.factory import provider_key_of_model
 
     provider = provider_key_of_model(getattr(llm, "model_name", "") or "")
