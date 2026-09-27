@@ -43,7 +43,7 @@ def run_plugin_scaffolds() -> ScaffoldResult:
     from shared import plugin_load_report
     from shared import plugins_config as plugins_cfg
 
-    discovered = plugins_cfg._discover_plugins()
+    discovered = plugins_cfg.discover_plugins()
     config = plugins_cfg.load_for_runtime(set(discovered))
 
     ran: list[str] = []

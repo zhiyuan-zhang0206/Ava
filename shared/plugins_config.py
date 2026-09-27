@@ -70,7 +70,7 @@ class DuplicatePlugin(PluginsConfigError):  # noqa: N818
     """Same plugin name exists in both builtin and external directories."""
 
 
-def _discover_plugins() -> dict[str, Path]:
+def discover_plugins() -> dict[str, Path]:
     """Scan builtin + external plugin directories; return {name: plugin_dir}.
 
     Builtin is scanned first; external plugin matching a builtin name
@@ -272,7 +272,7 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
 _dangling_reported: set[str] = set()
 
 
-def _report_dangling(exc: DanglingPlugin) -> None:
+def report_dangling(exc: DanglingPlugin) -> None:
     """Report dangling config entries through the one canonical fail-soft reporter.
 
     Both dangling-handling load sites — the runtime wrapper below and the
@@ -306,12 +306,12 @@ def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
     fail-soft contract `load_extensions` follows (2026-08-28 ava_ledger
     incident); interactive CLI paths (`set_local_enabled`) keep the strict
     `load()` and its DanglingPlugin error. Each dangling name is reported once
-    per process through `_report_dangling`.
+    per process through `report_dangling`.
     """
     try:
         return load(known_plugins)
     except DanglingPlugin as exc:
-        _report_dangling(exc)
+        report_dangling(exc)
         return load(known_plugins, allow_dangling=True)
 
 
@@ -319,7 +319,7 @@ def installed_plugin_dirs() -> dict[str, Path]:
     """{name: plugin_dir} for every plugin PRESENT on this machine (builtin +
     external), regardless of enable-state.
 
-    A thin public alias for `_discover_plugins()`. The service roster
+    A thin public alias for `discover_plugins()`. The service roster
     (`ops.spec._plugin_services`) uses this — presence, NOT the agent-facing
     enable-state (`ava plugins enable/disable`) — to fold plugin-declared
     ServiceSpecs into `build_services()`. The roster is a machine/cluster concern
@@ -327,7 +327,7 @@ def installed_plugin_dirs() -> dict[str, Path]:
     own service via an explicit settings field in `ServiceSpec.gate` (e.g.
     task-maintenance's `AVA_TASK_MAINTENANCE_ENABLED`).
     """
-    return _discover_plugins()
+    return discover_plugins()
 
 
 def set_local_enabled(name: str, *, enabled: bool) -> PluginsConfig:
@@ -340,7 +340,7 @@ def set_local_enabled(name: str, *, enabled: bool) -> PluginsConfig:
     Raises:
         DanglingPlugin: `name` is not a plugin installed on this machine.
     """
-    known = set(_discover_plugins())
+    known = set(discover_plugins())
     resolved = skill_names.find(name, known)
     if resolved is None:
         raise DanglingPlugin(
@@ -394,7 +394,7 @@ def update_all_disk_images() -> PluginUpdateResult:
     side effects.
     """
     entries: list[PluginUpdateEntry] = []
-    for name, plugin_dir in sorted(_discover_plugins().items()):
+    for name, plugin_dir in sorted(discover_plugins().items()):
         default_config_py = plugin_dir / "default_config.py"
         if not default_config_py.exists():
             entries.append(

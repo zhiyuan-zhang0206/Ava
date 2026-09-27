@@ -606,8 +606,6 @@
     "tests/shared/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
   },
   "private_imports": {
-    "agent/extensions.py::shared.plugins_config._discover_plugins": 1,
-    "agent/extensions.py::shared.plugins_config._report_dangling": 1,
     "agent/exec_child.py::shared.log._add_postgres_sink": 1,
     "agent/impersonation_handoff.py::shared.agents.impersonation._impersonation_store": 2,
     "agent/state.py::agent.hooks._registry": 1,
@@ -621,7 +619,6 @@
     "cli/commands/cluster/hold_watchdog.py::ops.cluster_deploy._new_update_log": 1,
     "cli/commands/cluster_rollback.py::shared.migrations._BASELINE_NAME": 1,
     "cli/commands/cluster_rollback.py::shared.migrations._migration_stem": 1,
-    "cli/commands/extensions/_plugin_scaffold.py::shared.plugins_config._discover_plugins": 1,
     "cli/commands/_health_preflight.py::shared.cluster._port_free": 1,
     "cli/commands/maintenance.py::ops.agent_pause._drain": 1,
     "cli/commands/maintenance.py::ops.agent_pause._hold": 1,
@@ -653,7 +650,6 @@
     "gateway/routers/status.py::ops.cluster._check_pidfile": 1,
     "ops/cluster_pause.py::services.agent_ops.daemon._db_pool": 1,
     "ops/ops_cluster.py::ava_builtins.plugins.ava_code._walk": 1,
-    "ops/ops_inventory.py::shared.plugins_config._discover_plugins": 2,
     "ops/publication_recovery.py::shared.managed_writer_publication._locked_publication": 1,
     "ops/strand_hold.py::ops.controllers.stranded_pause._executing_owner": 1,
     "ops/updater_reap.py::ops.controllers._heal_record": 2,
