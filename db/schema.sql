@@ -1794,10 +1794,18 @@ CREATE INDEX agent_impersonation_messages_unacknowledged_delivery
 
 -- Every termination writer (including force/reaper) revokes in its own atomic
 -- status transaction. Restart uses 'restarting' and preserves the active lease.
+-- Protocol-v1 manifest admission closes with the lease, like every other end.
 CREATE OR REPLACE FUNCTION revoke_terminated_impersonation() RETURNS trigger AS $$
+DECLARE
+    ended_lease UUID;
 BEGIN
-    UPDATE agent_impersonations SET status='expired', ended_at=clock_timestamp()
-    WHERE agent_id=NEW.id AND status IN ('requested','accepted','active');
+    FOR ended_lease IN
+        UPDATE agent_impersonations SET status='expired', ended_at=clock_timestamp()
+        WHERE agent_id=NEW.id AND status IN ('requested','accepted','active')
+        RETURNING id
+    LOOP
+        PERFORM close_impersonation_event_manifest_admission(ended_lease);
+    END LOOP;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

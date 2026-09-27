@@ -198,6 +198,32 @@ BEGIN
     END;
     RAISE EXCEPTION 'manifest protocol version was mutable after admission';
 END $$;
+-- Agent termination ends an open protocol-v1 lease and closes its manifest
+-- admission through the SECURITY DEFINER door, like every other lease end.
+INSERT INTO agents (id, label) VALUES (991007, 'terminated-manifest-owner-smoke');
+INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
+    VALUES (991007, 'idling', 'smoke-machine',
+            '00000000-0000-0000-0000-000000000003',
+            '00000000-0000-0000-0000-000000000004');
+INSERT INTO agent_impersonations (
+    id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
+    accepted_generation, accepted_owner, automatic, event_delivery_protocol_version, activated_at
+) VALUES (
+    '00000000-0000-0000-0000-000000000007', 991007, 'external_agent:terminate-smoke',
+    'smoke-machine', 'terminate-smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
+    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 1,
+    clock_timestamp()
+);
+UPDATE agents_meta SET status = 'terminated' WHERE id = 991007;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM agent_impersonations
+                   WHERE id='00000000-0000-0000-0000-000000000007'
+                     AND status='expired' AND ended_at IS NOT NULL
+                     AND manifest_admission_closed_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'agent termination did not close the lease manifest admission';
+    END IF;
+END $$;
 
 -- Lifecycle status transitions preserve spawn lineage, even when the parent is
 -- terminated. This protects against a trigger reintroducing a spawner rewrite.

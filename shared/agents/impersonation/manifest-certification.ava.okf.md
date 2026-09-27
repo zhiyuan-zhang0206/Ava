@@ -52,9 +52,10 @@ immediately without waiting for participant seals.
 For an ended lease whose manifest is not frozen, replay freezes the union once
 all participants have sealed, then performs the same indexed/consumed comparison
 as normal release. Open or failed receipts remain pending; a sealed receipt on
-a live lease does not close admission. An ended lease whose admission is still
-open — the agent-termination trigger ends leases in SQL without closing it —
-also remains pending rather than attempting a freeze the database refuses.
+a live lease does not close admission. The agent-termination trigger closes
+admission too, through the same SQL door. Any ended lease whose admission is
+still open remains pending rather than attempting a freeze the database
+refuses.
 This also repairs a release interrupted between admission closure and freezing
 without changing recorded lifecycle facts.
 Never-activated, rejected, and non-automatic leases remain untouched: they are
