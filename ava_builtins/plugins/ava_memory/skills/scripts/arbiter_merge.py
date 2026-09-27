@@ -1,6 +1,6 @@
 """Arbiter merge: squash-merge all open PRs targeting main, then refresh.
 
-Usage: python3 arbiter_merge.py
+Usage: $AVA_HOME/source/.venv/bin/python arbiter_merge.py
 
 Run by the Memory Arbiter after all per-machine stewards have reported their
 PRs ready. Merges PRs one at a time (each merge advances main, which may make
@@ -13,10 +13,8 @@ any PR was skipped or the refresh failed — treat that as an alert.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import pool_dir, refresh_index, repo_slug, run
+from ava_builtins.plugins.ava_memory.pool_ops import pool_dir, refresh_index, repo_slug, run
 
 
 def main() -> int:

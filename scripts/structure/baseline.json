@@ -683,11 +683,5 @@
     "shared/pg_stall_watchdog.py::postgres-dial": 2,
     "shared/pg_tools.py::postgres-dial": 2
   },
-  "path_imports": {
-    "ava_builtins/plugins/ava_memory/skills/scripts/arbiter_merge.py::sys.path": 1,
-    "ava_builtins/plugins/ava_memory/skills/scripts/consolidate.py::sys.path": 1,
-    "ava_builtins/plugins/ava_memory/skills/scripts/gen_indexes.py::sys.path": 1,
-    "ava_builtins/plugins/ava_memory/skills/scripts/rebuild_memory_index.py::sys.path": 1,
-    "ava_builtins/plugins/ava_memory/skills/scripts/steward.py::sys.path": 1
-  }
+  "path_imports": {}
 }

@@ -1,12 +1,9 @@
 import os
 import re
-import sys
-from pathlib import Path
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import ava_home
+from ava_builtins.plugins.ava_memory.pool_ops import ava_home
 
 mp = str(ava_home() / "memory")
 RESERVED = {"MEMORY.md", "AGENTS.md", "index.md", "log.md"}

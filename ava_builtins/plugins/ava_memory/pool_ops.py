@@ -1,16 +1,15 @@
 """Shared helpers for the ava-memory pool operation scripts.
 
-Self-contained (stdlib + subprocess only): these scripts are meant to be
-copied with the skill and run on any machine that has the pool checkout,
-git, gh, and the `ava` CLI on PATH. No dependency on the Ava source tree —
-`consolidation/SKILL.md` runs them with a bare `python3` (not `.venv/bin/
-python`), and a machine may carry only the copied skill folder plus the pool
-checkout, with no Ava source checkout at all, so `shared.dotenv_boot` (which
-also pulls in the `python-dotenv` third-party package) cannot be imported
-here the way `shared`-dependent skill scripts do.
+Imported by the consolidation scripts under `skills/scripts/` (`consolidate.py`,
+`steward.py`, `arbiter_merge.py`, `gen_indexes.py`, `rebuild_memory_index.py`)
+as `ava_builtins.plugins.ava_memory.pool_ops`, so a run needs the checkout's
+venv (`ava_builtins` importable) — `consolidation/SKILL.md` invokes them with
+that venv's `python`, not a bare `python3`. Still stdlib + subprocess only, no
+`shared` import: `ava_home()` does not use the checkout-anchored home
+resolution the rest of the repo uses (`shared.dotenv_boot`), for the reason
+below.
 
-That rules out the checkout-anchored home resolution the rest of the repo
-uses, so `ava_home()` takes the opposite, simpler stance: require an explicit
+`ava_home()` takes the opposite, simpler stance: require an explicit
 `AVA_HOME` instead of guessing one. Every legitimate caller already has it:
 these scripts run inside an agent's shell tool, a child of the agent process
 that pinned `AVA_HOME` into its own environment at boot
@@ -63,10 +62,11 @@ def branch_name() -> str:
 
 def current_branch(pool: Path) -> str:
     """The branch checked out in the pool ("" when HEAD is detached)."""
-    r = subprocess.run(
+    r = subprocess.run(  # noqa: S603 — fixed git argv, static args, not shell-interpolated
         ["git", "-C", str(pool), "branch", "--show-current"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if r.returncode != 0:
         raise SystemExit(f"✗ cannot read current branch: {r.stderr.strip()}")
@@ -75,10 +75,11 @@ def current_branch(pool: Path) -> str:
 
 def repo_slug(pool: Path) -> str:
     """user/repo from the pool's origin remote."""
-    r = subprocess.run(
+    r = subprocess.run(  # noqa: S603 — fixed git argv, static args, not shell-interpolated
         ["git", "-C", str(pool), "remote", "get-url", "origin"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if r.returncode != 0:
         raise SystemExit(f"✗ cannot read origin remote: {r.stderr.strip()}")
@@ -87,8 +88,12 @@ def repo_slug(pool: Path) -> str:
     return url.rstrip("/").rstrip(".git").split("github.com", 1)[-1].strip(":/")
 
 
-def run(cmd: list[str], cwd: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+def run(
+    cmd: list[str], cwd: str | None = None, *, check: bool = True
+) -> subprocess.CompletedProcess:
+    r = subprocess.run(  # noqa: S603 — caller-constructed argv, static args, not shell-interpolated
+        cmd, capture_output=True, text=True, cwd=cwd, check=False
+    )
     if r.stdout:
         print(r.stdout.rstrip())
     if check and r.returncode != 0:

@@ -13,9 +13,9 @@ procedure.
 All git / gh / refresh operations are wrapped in self-contained scripts under
 `../scripts/` — the agent calls one script per step instead of hand-typing
 shell pipelines:
-- `python3 ../scripts/consolidate.py -m "..."` — single-box: stage, commit, push, refresh
-- `python3 ../scripts/steward.py -m "..."` — per-machine: stage, commit, push, create PR
-- `python3 ../scripts/arbiter_merge.py` — merge all open PRs + refresh (exit 1 = alert)
+- `$AVA_HOME/source/.venv/bin/python ../scripts/consolidate.py -m "..."` — single-box: stage, commit, push, refresh
+- `$AVA_HOME/source/.venv/bin/python ../scripts/steward.py -m "..."` — per-machine: stage, commit, push, create PR
+- `$AVA_HOME/source/.venv/bin/python ../scripts/arbiter_merge.py` — merge all open PRs + refresh (exit 1 = alert)
 - `ava memory refresh` — the one remaining memory CLI (gateway index rebuild)
 
 **Which procedure applies depends on the deployment.** On a single box (multihost
@@ -212,7 +212,7 @@ call `ava.watcher.cron("0 3 * * *", "ava-memory: consolidate the pool")`, then i
 
 **Each time you are woken to consolidate:**
 
-1. Run `python3 ../scripts/consolidate.py -m "<date>: <short summary>"`.
+1. Run `$AVA_HOME/source/.venv/bin/python ../scripts/consolidate.py -m "<date>: <short summary>"`.
    This stages, commits, pushes, and refreshes the gateway index in one command.
    If the commit is rejected by the pre-commit hook, read the error, fix the
    offending file(s), and re-run.
@@ -244,7 +244,7 @@ you to consolidate now.
    stays silent far longer than the others,
    `ava.agents.resurrect(steward_id, prompt="Status? Your pull request has not arrived.")`.
 3. Merge all open pull requests into `main`:
-   `ava.shell.run("python3 ../scripts/arbiter_merge.py")`.
+   `ava.shell.run("$AVA_HOME/source/.venv/bin/python ../scripts/arbiter_merge.py")`.
    This squash-merges every open PR targeting `main` sequentially **and then
    refreshes the index** (the refresh is bundled — it is what keeps the
    gateway checkout and search index in sync with `main`; the F3 staleness
@@ -272,7 +272,7 @@ you to consolidate now.
 
 You publish one machine's day of notes. Your prompt carries the arbiter's id.
 
-1. Run `python3 ../scripts/steward.py -m "<machine> <date>: <short summary>"`.
+1. Run `$AVA_HOME/source/.venv/bin/python ../scripts/steward.py -m "<machine> <date>: <short summary>"`.
    This stages, commits, pushes, and creates a PR (if none exists for your branch)
    in one command. If the commit is rejected by the pre-commit hook, read the
    error, fix the offending file, and re-run. If there is nothing to commit, the
