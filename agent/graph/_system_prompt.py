@@ -71,22 +71,18 @@ def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
 
 # --- SDK detail: expanded contracts for the highest-frequency namespaces ---
 def _discover_all_namespaces() -> list[str]:
-    """Public ava namespaces the `"*"` expand entry stands for: every
-    name in `help(ava)` that is itself a namespace (a module / namespace
-    object), plus public nested submodules reachable through parent
-    `__all_for_ava__` lists. Top-level functions (`help`, `understand`) are intentionally NOT
-    discovered: the SDK overview already prints their full signature +
-    docstring, so re-expanding them would only duplicate — the expanded
-    reference earns its place only for namespaces, which the overview shows as a
-    bare `from . import X` line. The capability surfaces (`_CAPABILITY_SURFACES`)
-    are skipped for the same anti-duplication reason: `# Capabilities` is their
-    index. Private names (leading underscore, e.g. a stray
-    `_settings`) and any name removed via AVA_SDK_DISABLE are excluded too — a
-    disabled namespace must never be expanded back into the prompt. Returned
-    sorted so the rendered order is deterministic. Discovery is recursive: any
-    module with a public `__all_for_ava__` is descended into, so `shell.sessions`
-    (listed in `shell.__all_for_ava__`) is discovered without being listed
-    explicitly alongside `"*"`."""
+    """Public ava namespaces the `"*"` expand entry stands for: every name in `help(ava)` that is
+    itself a namespace (a module / namespace object), plus public nested submodules reachable
+    through parent `__all_for_ava__` lists. Top-level functions (`help`, `understand`) are
+    intentionally NOT discovered: the SDK overview already prints their full signature + docstring,
+    so re-expanding them would only duplicate — the expanded reference earns its place only for
+    namespaces, which the overview shows as a bare `from . import X` line. The capability surfaces
+    (`_CAPABILITY_SURFACES`) are skipped for the same anti-duplication reason: `# Capabilities` is
+    their index. Private names (leading underscore, e.g. a stray `_settings`) and any name removed
+    via AVA_SDK_DISABLE are excluded too — a disabled namespace must never be expanded back into the
+    prompt. Returned sorted so the rendered order is deterministic. Discovery is recursive: any
+    module with a public `__all_for_ava__` is descended into, so `shell.sessions` (listed in
+    `shell.__all_for_ava__`) is discovered without being listed explicitly alongside `"*"`."""
     import ava
 
     discovered: list[str] = []
@@ -721,11 +717,20 @@ register_system_prompt_section(capabilities_section)
 
 
 # Sections registered above this line are framework-owned (registered at module
-# import). Everything appended later comes from a plugin via _load_extensions.
-# clear_plugin_registrations() truncates back to this count so a plugin reload
-# drops only plugin sections — the framework ones are never re-registered
-# in-process, so clearing them would silently lose them for the rest of the run.
+# import). Everything appended later comes from a plugin via _load_extensions;
+# clear_plugin_system_prompt_sections() truncates back to this count so a reload
+# drops only the plugin tail — framework sections are never re-registered.
 _FRAMEWORK_SECTION_COUNT = len(_SYSTEM_PROMPT_SECTIONS)
+
+
+def clear_plugin_system_prompt_sections() -> None:
+    """Drop plugin-contributed system prompt sections, keeping the framework-owned ones."""
+    del _SYSTEM_PROMPT_SECTIONS[_FRAMEWORK_SECTION_COUNT:]
+
+
+def plugin_system_prompt_sections() -> tuple[Callable[[], str], ...]:
+    """Return the plugin-contributed system prompt sections (the tail past the framework-owned ones)."""
+    return tuple(_SYSTEM_PROMPT_SECTIONS[_FRAMEWORK_SECTION_COUNT:])
 
 
 def build_system_prompt() -> str:
