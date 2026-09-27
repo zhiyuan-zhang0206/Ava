@@ -120,23 +120,36 @@ async def deliver_handoff(
     even when nothing else is queued (claim also resumes on the trailing note, so
     an empty queue is not an idle verdict).
 
+    Event accounting runs after the save: a control-DB hiccup degrades to the
+    pending semantics the note documents — the runner's reconcile loop completes
+    it later — instead of blocking the resume.
+
     ``reason`` is the death cause of a supervisor-aborted session (task #3998);
     when present, the note names it right after the session-end sentence.
     """
     import httpx
+    import psycopg
+    from psycopg_pool import PoolTimeout
 
     from agent.impersonation import flush_checkpoint
     from ava.impersonation_replay import consume_recorded_events
     from shared.log import logger
 
+    # Save (and hand off) the record before replaying events: a control-DB
+    # hiccup during accounting must not block the old agent's resume. The
+    # accounting stays pending — the note below states its semantics — and the
+    # runner's reconcile loop completes it later. PoolTimeout/OperationalError
+    # are the control-DB classes the host already treats as crash-equivalent
+    # (services/agent_host/maintenance.py).
+    summary, path = await asyncio.to_thread(_save_document, session, incarnation)
     try:
         await asyncio.to_thread(consume_recorded_events, session)
-    except (httpx.HTTPError, GatewayUnavailable):
+    except (httpx.HTTPError, GatewayUnavailable, psycopg.OperationalError, PoolTimeout) as exc:
         logger.warning(
             "Impersonation event accounting pending; runner reconciliation will retry",
             agent_id=session["agent_id"],
+            error_type=type(exc).__name__,
         )
-    summary, path = await asyncio.to_thread(_save_document, session, incarnation)
     config = {"configurable": {"thread_id": str(incarnation.agent_id)}}
     snapshot = await graph.aget_state(config)
     receipt = f"{session['agent_id']}:{session['session_id']}"

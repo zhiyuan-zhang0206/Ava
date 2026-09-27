@@ -10,6 +10,7 @@ from uuid import uuid4
 import httpx
 import psycopg
 import pytest
+from psycopg_pool import PoolTimeout
 
 from ava import impersonation_replay as recorded
 from shared import telemetry
@@ -212,6 +213,58 @@ def test_gateway_transport_outage_leaves_accounting_pending_and_delivers_handoff
         )
         owner = RuntimeIncarnation(session["agent_id"], uuid4(), uuid4())
         asyncio.run(handoff.deliver_handoff(graph, lease, owner))
+
+    save_document.assert_called_once_with(lease, owner)
+    receipt.assert_called_once_with(lease, owner)
+    assert (
+        history.resolve(session["agent_id"], session["session_id"])["events_completed_at"] is None
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        PoolTimeout("control DB pool exhausted"),
+        psycopg.OperationalError("statement timeout while replaying events"),
+    ],
+    ids=["pool-timeout", "operational-error"],
+)
+def test_control_db_hiccup_leaves_accounting_pending_and_delivers_handoff(
+    session: dict[str, Any], monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    """A transient control-DB failure during replay must not block the handoff.
+
+    Regression (platform incident 2026-09-27): deliver_handoff awaited event
+    accounting before saving the document and degraded only on transport
+    failures, so a PoolTimeout left every handoff_path null and blocked the
+    resume. The save now runs first and DB hiccups degrade like transport ones.
+    """
+    from agent import impersonation_handoff as handoff
+    from ava import impersonation_replay as recorded
+
+    leases.release(str(session["id"]), attested_caller(session), "Completed external work")
+    lease = history.resolve(session["agent_id"], session["session_id"])
+
+    def hiccup(_session: dict[str, Any]) -> None:
+        raise failure
+
+    monkeypatch.setattr(recorded, "consume_recorded_events", hiccup)
+    save_document = Mock(return_value=("Done", "/test/0.json"))
+    receipt = Mock()
+    monkeypatch.setattr(handoff, "_save_document", save_document)
+    monkeypatch.setattr(handoff, "_receipt", receipt)
+    graph = SimpleNamespace(
+        checkpointer=object(),
+        aget_state=AsyncMock(
+            return_value=SimpleNamespace(
+                values={
+                    "impersonation_handoff_id": f"{session['agent_id']}:{session['session_id']}"
+                }
+            )
+        ),
+    )
+    owner = RuntimeIncarnation(session["agent_id"], uuid4(), uuid4())
+    asyncio.run(handoff.deliver_handoff(graph, lease, owner))
 
     save_document.assert_called_once_with(lease, owner)
     receipt.assert_called_once_with(lease, owner)
