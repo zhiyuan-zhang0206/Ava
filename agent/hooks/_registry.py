@@ -128,6 +128,12 @@ HOOKS: dict[HookName, list[Hook]] = {
 _HOOK_PLUGIN: weakref.WeakKeyDictionary[Hook, str] = weakref.WeakKeyDictionary()
 
 
+def clear_hooks() -> None:
+    """Clear every hook list in `HOOKS`."""
+    for hook_list in HOOKS.values():
+        hook_list.clear()
+
+
 def _register(hook_name: HookName, hook: Hook) -> None:
     """Append to the hook point's list and attribute the registration to the
     importing plugin (a no-op outside a `PluginContext`, i.e. for the framework's
