@@ -11,7 +11,7 @@ account-wide sum.
 Two acquire flavors, both pass-through when the provider is unconfigured:
 
 - `sync(provider)` — a `threading.BoundedSemaphore` for the synchronous
-  invoke paths (`shared/lm/_call.py` `invoke_text`); safe across worker
+  invoke paths (`shared/lm/call.py` `invoke_text`); safe across worker
   threads (ava.understand's thread pool).
 - `async_acquire(provider)` — an `asyncio.Semaphore` for the streaming
   agent path (`agent/graph/_llm.py` `_stream_with_cache_retry`); created

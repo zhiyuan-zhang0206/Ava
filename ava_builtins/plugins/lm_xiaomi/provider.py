@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.lm._effort import _clamp_effort
+from shared.lm.effort import clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -43,7 +43,7 @@ def mimo_extra_body(
     if thinking is not None and thinking.get("type") == "disabled":
         return {"thinking": {"type": "disabled"}}
     if reasoning_effort:
-        tier = _clamp_effort(reasoning_effort, effort_levels, target="mimo")
+        tier = clamp_effort(reasoning_effort, effort_levels, target="mimo")
         if tier == "none":
             return {"thinking": {"type": "disabled"}}
     return {}
@@ -53,7 +53,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     """mimo-* branch: ReasoningContentChatModel (OpenAI-compatible).
     Auth uses the `api-key` header; deep thinking on/off rides top-level
     `thinking` in the POST body via `mimo_extra_body`."""
-    from shared.lm._reasoning_compat import ReasoningContentChatModel
+    from shared.lm.reasoning_compat import ReasoningContentChatModel
 
     # Xiaomi MiMo API is OpenAI-compatible (https://api.xiaomimimo.com/v1).
     # Auth uses the `api-key` header (not the standard `Authorization: Bearer`).

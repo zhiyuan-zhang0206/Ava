@@ -15,8 +15,8 @@ from __future__ import annotations
 import pytest
 from langchain_anthropic import ChatAnthropic
 
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.factory import MODEL_CONTEXT_WINDOW, build_chat_model
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODEL_IDENTITY
 
 

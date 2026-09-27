@@ -415,7 +415,7 @@ def _validate_model_membership(value: object) -> str | None:
     MODELS, plugin-registered models included). An unregistered id would pass
     the Pydantic str type check, persist, and crash the next boot at model
     build (Task #1704 — the deepseek-v4-flash-vision incident)."""
-    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
     from shared.lm.registry import MODELS
 
     # Registry-consulting check: make it self-sufficient. MODELS starts empty
@@ -430,13 +430,13 @@ def _validate_model_membership(value: object) -> str | None:
 
 
 def _validate_reasoning_effort_range(value: object) -> str | None:
-    from shared.lm._effort import _EFFORT_VOCAB
+    from shared.lm.effort import EFFORT_VOCAB
 
     # None = unset (the field is `str | None` and a None overlay is a no-op) —
     # accepted, matching the pre-PR behavior.
     if value is None:
         return None
-    valid_values = ("", *_EFFORT_VOCAB)
+    valid_values = ("", *EFFORT_VOCAB)
     if isinstance(value, str) and value in valid_values:
         return None
     rendered_values = ", ".join(repr(candidate) for candidate in valid_values)

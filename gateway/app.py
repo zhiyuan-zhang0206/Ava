@@ -234,7 +234,7 @@ from shared.cluster_auth import (
 )
 from shared.config import settings
 from shared.context import AvaContext
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.machine import machine_name
 from shared.os_cron import register_os_cron
 

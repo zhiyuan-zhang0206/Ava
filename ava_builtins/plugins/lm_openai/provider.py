@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.lm._effort import _clamp_effort
+from shared.lm.effort import clamp_effort
 from shared.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -59,7 +59,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # without a declared vocabulary keep the historic verbatim passthrough.
     model_levels = ctx.spec.effort_levels if ctx.spec is not None else None
     if model_levels is not None:
-        gpt_effort = _clamp_effort(gpt_effort, model_levels, target=ctx.model)
+        gpt_effort = clamp_effort(gpt_effort, model_levels, target=ctx.model)
     gpt_reasoning: dict[str, Any] = (
         {"effort": gpt_effort} if thinking_disabled else {"effort": gpt_effort, "summary": "auto"}
     )

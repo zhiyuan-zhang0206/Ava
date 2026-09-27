@@ -1,4 +1,4 @@
-"""shared/lm/_reasoning_compat.py — ReasoningContentChatModel reasoning recovery.
+"""shared/lm/reasoning_compat.py — ReasoningContentChatModel reasoning recovery.
 
 reasoning_content-style providers (MiMo, Kimi, GLM) stream reasoning in the
 delta's `reasoning_content` field, which the base ChatOpenAI drops. The subclass
@@ -13,7 +13,7 @@ from __future__ import annotations
 from langchain_core.messages import AIMessageChunk, message_chunk_to_message
 from pydantic import SecretStr
 
-from shared.lm._reasoning_compat import ReasoningContentChatModel
+from shared.lm.reasoning_compat import ReasoningContentChatModel
 
 
 def _mimo() -> ReasoningContentChatModel:

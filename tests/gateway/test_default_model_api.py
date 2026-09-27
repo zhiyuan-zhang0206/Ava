@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
 
 

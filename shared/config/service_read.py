@@ -326,7 +326,7 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     # BOOTSTRAP_FIELDS. Read only declared keys from the raw gateway .env; this
     # is the authenticated, fresh-file channel a split runner materializes.
     from shared.lm import provider_api
-    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
     ensure_provider_plugins_loaded()
     for binding in provider_api.REGISTRY.bindings.values():

@@ -120,7 +120,7 @@ def _retry_delay_s(attempt: int) -> float:
     """
     base = min(_RETRY_BASE_DELAY_S * (2**attempt), _RETRY_MAX_DELAY_S)
     # S311: jitter needs spread, not secrecy — stdlib random is right (same
-    # ruling as shared/lm/_call.py's retry jitter).
+    # ruling as shared/lm/call.py's retry jitter).
     return base * random.uniform(0.5, 1.5)  # noqa: S311
 
 

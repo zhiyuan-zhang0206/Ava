@@ -36,7 +36,7 @@ def _view(stored: str | None) -> DefaultModelView:
     (`shared/lm/factory.py:validate_model_config`). A withdrawn id registered
     with a fallback therefore reports the model a new agent actually runs,
     never the id that is dead on the wire."""
-    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
     from shared.lm.registry import resolve_available_model
 
     # Plugin models must be registered before the registry lookup below.

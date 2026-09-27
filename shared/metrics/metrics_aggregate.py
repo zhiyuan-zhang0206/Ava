@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.pricing import cost_usd
 from shared.metrics import (
     MetricSection,

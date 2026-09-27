@@ -537,7 +537,7 @@ def _enabled_provider_key_envs() -> frozenset[str]:
     boundaries that need that declaration.
     """
     from shared.lm import provider_api
-    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
     ensure_provider_plugins_loaded()
     return frozenset(binding.key_env for binding in provider_api.REGISTRY.bindings.values())

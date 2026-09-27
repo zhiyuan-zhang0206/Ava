@@ -19,12 +19,12 @@ from ava import files as _files
 from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava.sdk_validation import coerce_str
 from shared.config import settings
-from shared.lm._effort import (
+from shared.lm.attach_constants import ATTACH_MEDIA_MIME
+from shared.lm.effort import (
     ReasoningEffort,
-    _clamp_effort,
+    clamp_effort,
     coerce_effort,
 )
-from shared.lm.attach_constants import ATTACH_MEDIA_MIME
 
 # Provider split by modality is config-driven: settings.lm.understand_text_model
 # (default deepseek-flash) handles literal strings / text files;
@@ -312,10 +312,10 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
 
     `effort` (validated by the public function) rides
     `build_chat_model(reasoning_effort=...)`; the cross-provider clamp in
-    `shared/lm/_effort.py` maps it onto what the model's provider accepts
+    `shared/lm/effort.py` maps it onto what the model's provider accepts
     (`max` → deepseek's max, `none` → reasoning off via the thinking switch).
     """
-    from shared.lm._call import invoke_text
+    from shared.lm.call import invoke_text
     from shared.lm.factory import build_chat_model, provider_key_of_model
 
     model = settings.lm.understand_text_model
@@ -362,7 +362,7 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     see the module docstring — so the knob always applies.)
     """
     from shared.lm import provider_api
-    from shared.lm._call import invoke_text
+    from shared.lm.call import invoke_text
     from shared.lm.factory import build_chat_model, provider_key_of_model
 
     model = settings.lm.understand_media_model
@@ -396,7 +396,7 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
             raise UnderstandError(
                 f"media model {model!r} does not declare a reasoning-effort vocabulary"
             )
-        thinking_level = _clamp_effort(effort, levels, target="gemini")
+        thinking_level = clamp_effort(effort, levels, target="gemini")
     try:
         llm = build_chat_model(
             model,
