@@ -1,6 +1,6 @@
 ---
 name: ava-use-other-agents
-description: Drives other coding agents — Claude Code or Codex CLI as supervised long-running workers, and Codex, Claude Code or DeepSeek Harness as a takeover that impersonates the launching Ava agent. Use when outsourcing multi-step implementation or review, choosing between the tools, resuming a coding session, monitoring delegated coding work, or launching a takeover.
+description: Drives other coding agents — Claude Code or Codex CLI as supervised long-running workers, and Codex, Claude Code or DeepSeek Harness as a takeover that impersonates the launching Ava agent. Use when outsourcing multi-step implementation or review, choosing between the tools, resuming a coding session after an interruption, monitoring delegated coding work, or launching a takeover.
 ---
 
 # Use other agents
@@ -254,18 +254,13 @@ The tool **replaces you**: it talks to the human through your normal Ava chat
 and calls Ava capabilities under your identity while your execution is paused.
 A takeover is **file-less and supervisor-less** — nothing from Mode A applies:
 
-- **The briefing is inline.** `--brief` inlines it verbatim into the launch
-  message. There is no task file to read, no work file to write, and nothing
-  watches a file.
-- **Run it from your own workspace.** In most takeovers your own workspace is
-  the best working directory: spawn the takeover under it and pass that
-  directory as the spawn workspace argument, so the workspace is directly the
-  impersonator's working directory. Other locations are not forbidden — this is
-  the recommended default, not a requirement.
-- **Start — the process interrupts you.** The launch call returns; when the
-  takeover activates, the platform saves your checkpoint and your execution
-  pauses. You and the replacement never run at the same time, so there is no
-  lockstep to maintain and no supervisor to start.
+- **The briefing is inline** (`--brief`, verbatim in the launch message): no
+  task file, no work file, nothing watches a file.
+- **Run it from your own workspace** by default: pass that directory as the
+  spawn workspace argument (other locations are allowed, not recommended).
+- **Start — the process interrupts you.** When the takeover activates, the
+  platform saves your checkpoint and pauses you; the two of you never run at
+  the same time, so there is no lockstep and no supervisor.
 - **End — one message resumes you.** When the takeover releases, a system note
   resumes you carrying its summary and the path of the handoff JSON
   (`impersonation/<session_id>.json`). Read that file before acting on pending
@@ -278,17 +273,21 @@ Launch it from your own execution context, briefing inline:
   --impersonation-name 'Fix login' --brief '<the full briefing text>'
 ```
 
-`--brief` is required in this mode; `--tasks-file`/`--work-file` are refused —
-a takeover reads no files. The workspace must not carry a live canonical
-generation (`--cancel-generation <generation>` first). The takeover generation
-is recorded without files or supervisor — its coding session alone is its
-liveness signal — so do not start `watch_work.py` or any other file watcher
-for it. The same command works with `spawn_claude.py` (relay via the bundled
-`ava-relay` plugin; `--no-relay-resident` restores the executor-armed flow) and
-`spawn_dsh.py` ([DeepSeek Harness](reference/deepseek_harness.md), takeover-only).
+`--brief` is required; `--tasks-file`/`--work-file` are refused, and no file
+watcher runs for a takeover. The same command works with
+`spawn_claude.py` and `spawn_dsh.py` ([DeepSeek Harness](reference/deepseek_harness.md),
+takeover-only). The full procedure is [Let the coding agent take over your
+identity](reference/impersonate_self.md); the executor's own manual is the
+`impersonator-guide` skill.
 
-The full procedure is [Let the coding agent take over your identity](reference/impersonate_self.md);
-the takeover process's own operating manual is the `impersonator-guide` skill.
+## After an interruption — resume
+
+A full stop, a reboot, a crash or a TTL expiry closes the shell a coding
+session runs in, but the tool keeps its conversation. Every launch prints the
+tool's session id (`claude_session=` / `codex_session=`), and
+`--resume <id>` on the same spawn command reopens it. Whether to resume or
+start fresh is your call from the task's context: [Resume after an
+interruption](reference/resume_after_interruption.md).
 
 ## CLI reference
 

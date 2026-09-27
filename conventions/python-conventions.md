@@ -23,6 +23,12 @@ packages (`agent`, `ava`, `ava_builtins`, `gateway`, `shared`, `services`, `ops`
 `cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and machine_role()
 allowlist still apply only to the eight packages.
 
+A script shipped with a skill or plugin gets no exemption. When one outgrows
+the budget, its logic moves into a governed package the script imports
+normally (the Claude/Codex launchers live in `ava/shell/coding_tools/`, their
+`spawn_*.py` scripts only parse arguments). Splitting it into path-imported
+siblings is refused by Rule 6 below.
+
 Existing over-limit files are frozen in `scripts/structure/baseline.json`.
 New violations and growth above a frozen value fail the gate. The baseline is
 shrink-only: a guard compares it with the base revision described below and
@@ -71,6 +77,14 @@ section covers fixing a violation and maintaining its baseline.
   `ava/_*.py` module another package needs is promoted to a public module name
   without becoming agent-visible. Files under a `tests/` directory are
   exempt.
+- **Rule 6 — no path imports under `ava_builtins/`.** A skill or plugin
+  module may not edit `sys.path`, call `site.addsitedir`, or load a module
+  by file path (`spec_from_file_location`, `SourceFileLoader`,
+  `runpy.run_path`); `scripts/structure/path_imports.py` finds them. Shared
+  code moves into a governed package the script imports normally. The
+  existing sites are frozen in the `path_imports` section with the same exact
+  count semantics as Rules 4 and 5, but there is no pairing: a new key is
+  always refused.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`shared/db_connections.py`). Any other module making that

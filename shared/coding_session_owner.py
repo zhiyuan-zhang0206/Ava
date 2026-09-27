@@ -5,9 +5,12 @@ task file, a work file, and an automatic lifecycle supervisor — or a
 *file-less takeover* that replaces the launching Ava agent: no files, no
 supervisor, and its coding session alone is the liveness signal.
 
-The authoritative key is ``(cluster home, canonical workspace, tool)``. Each
-transition is serialized by a host-local per-key lock and scoped to an opaque
-generation. Cleanup stops the recorded PTY before removing private tool state.
+Every launch owns a generation of its own under the key ``(cluster home,
+canonical workspace, tool)``; several may share a workspace. A launch first
+reclaims its dead siblings (expired, crashed, unsupervised, or owned by a
+terminated agent) and leaves live ones alone. Transitions under one key are
+serialized by a host-local lock and scoped to an exact generation. Cleanup
+stops the recorded PTY before removing private tool state.
 """
 
 from __future__ import annotations
@@ -16,9 +19,8 @@ import datetime as dt
 import shutil
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import Literal
 
 from shared.coding_session_owner_record import (
     CodingSessionKey,
@@ -29,9 +31,12 @@ from shared.coding_session_owner_record import (
     expected_suffix,
     full_session_name,
     generation_state_dir,
+    generations,
     key_digest,
     lock_path,
+    read_legacy_unlocked,
     read_unlocked,
+    remove_unlocked,
     state_path,
     supervisor_suffix,
     write_unlocked,
@@ -39,7 +44,6 @@ from shared.coding_session_owner_record import (
 from shared.platform import file_lock
 
 __all__ = [
-    "CodingSessionClaim",
     "CodingSessionCleanupError",
     "CodingSessionGenerationChangedError",
     "CodingSessionKey",
@@ -47,11 +51,12 @@ __all__ = [
     "InvalidCodingSessionOwnerError",
     "attach_supervisor",
     "canonical_key",
-    "claim",
     "codex_app_server_socket",
     "full_session_name",
     "generation_state_dir",
+    "launch_generation",
     "launch_is_stale",
+    "list_generations",
     "publish_active",
     "read",
     "state_path",
@@ -66,6 +71,7 @@ _MAX_TTL_SECONDS = 86_400.0
 SessionLister = Callable[[], list[str]]
 SessionLiveness = Callable[[str], bool]
 SessionTerminator = Callable[[str], bool]
+OwnerTerminated = Callable[[int], bool]
 
 
 class CodingSessionCleanupError(RuntimeError):
@@ -73,15 +79,7 @@ class CodingSessionCleanupError(RuntimeError):
 
 
 class CodingSessionGenerationChangedError(RuntimeError):
-    """A stale launcher attempted to publish over a replacement generation."""
-
-
-@dataclass(frozen=True)
-class CodingSessionClaim:
-    """Atomic launch decision for one canonical key."""
-
-    action: Literal["launch", "adopt", "busy"]
-    owner: CodingSessionOwner
+    """A launcher's generation ended (or was reclaimed) before it could publish."""
 
 
 def launch_is_stale(
@@ -120,9 +118,14 @@ def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
     )
 
 
-def read(key: CodingSessionKey) -> CodingSessionOwner:
-    """Read one atomic owner snapshot without taking its transition lock."""
-    return read_unlocked(key)
+def read(key: CodingSessionKey, generation: str) -> CodingSessionOwner:
+    """Read one generation's atomic snapshot without taking the transition lock."""
+    return read_unlocked(key, generation)
+
+
+def list_generations(key: CodingSessionKey) -> list[CodingSessionOwner]:
+    """Every generation recorded under ``key``, including invalid records."""
+    return [read_unlocked(key, generation) for generation in generations(key)]
 
 
 def _default_list_sessions() -> list[str]:
@@ -185,7 +188,72 @@ def _cleanup_unlocked(
         ) from exc
 
 
-def claim(
+def _reclaimable(
+    owner: CodingSessionOwner,
+    *,
+    now: dt.datetime,
+    list_sessions: SessionLister,
+    session_live: SessionLiveness,
+    owner_terminated: OwnerTerminated,
+) -> bool:
+    """Whether a sibling generation is over and may be cleaned up by another launch."""
+    if owner.status == "terminal":
+        return True
+    if owner.status not in ("launching", "active"):
+        return False  # inactive or invalid: nothing to reclaim, never guess
+    if owner.owner_agent_id is not None and owner_terminated(owner.owner_agent_id):
+        return True
+    if owner.status == "launching":
+        return launch_is_stale(owner, now=now) and not any(
+            session_live(name) for name in _candidate_sessions(owner, list_sessions)
+        )
+    if owner.expires_at is None or now >= owner.expires_at:
+        return True
+    if owner.session_name is None or not session_live(owner.session_name):
+        return True
+    # A supervised generation lives only while its supervisor does; a file-less
+    # takeover has none and lives on its coding session alone.
+    return owner.work_file is not None and not (
+        owner.supervisor_session_name is not None and session_live(owner.supervisor_session_name)
+    )
+
+
+def _reclaim_siblings_unlocked(
+    key: CodingSessionKey,
+    *,
+    now: dt.datetime,
+    list_sessions: SessionLister,
+    session_live: SessionLiveness,
+    terminate_session: SessionTerminator,
+    owner_terminated: OwnerTerminated,
+) -> None:
+    """Clean up and drop every dead generation under ``key``, the legacy slot included."""
+    siblings = [read_unlocked(key, generation) for generation in generations(key)]
+    legacy = read_legacy_unlocked(key)
+    for owner, generation in [*((o, o.generation) for o in siblings), (legacy, None)]:
+        if not _reclaimable(
+            owner,
+            now=now,
+            list_sessions=list_sessions,
+            session_live=session_live,
+            owner_terminated=owner_terminated,
+        ):
+            continue
+        if owner.status != "terminal":
+            _cleanup_unlocked(
+                owner,
+                list_sessions=list_sessions,
+                session_live=session_live,
+                terminate_session=terminate_session,
+            )
+        remove_unlocked(key, generation)
+
+
+def _never_terminated(_agent_id: int) -> bool:
+    return False
+
+
+def launch_generation(
     key: CodingSessionKey,
     *,
     owner_agent_id: int,
@@ -196,9 +264,9 @@ def claim(
     list_sessions: SessionLister = _default_list_sessions,
     session_live: SessionLiveness = _default_session_live,
     terminate_session: SessionTerminator = _default_terminate_session,
-    terminated_generation: str | None = None,
-) -> CodingSessionClaim:
-    """Atomically adopt, wait for, or replace one canonical generation."""
+    owner_terminated: OwnerTerminated = _never_terminated,
+) -> CodingSessionOwner:
+    """Reclaim dead siblings, then publish a fresh ``launching`` generation of our own."""
     if owner_agent_id < 0:
         raise ValueError("owner_agent_id must be non-negative")
     if not 0 < ttl_seconds <= _MAX_TTL_SECONDS:
@@ -207,48 +275,21 @@ def claim(
         raise ValueError("task and work files are given together, or neither for a takeover")
     timestamp = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
-        current = read_unlocked(key)
-        if current.status == "invalid":
-            raise InvalidCodingSessionOwnerError(
-                f"invalid canonical owner {state_path(key)}: {current.error}"
-            )
-        current_owner_terminated = current.generation == terminated_generation
-        supervisor_live = current.supervisor_session_name is not None and session_live(
-            current.supervisor_session_name
+        _reclaim_siblings_unlocked(
+            key,
+            now=timestamp,
+            list_sessions=list_sessions,
+            session_live=session_live,
+            terminate_session=terminate_session,
+            owner_terminated=owner_terminated,
         )
-        if (
-            current.status == "active"
-            and current.expires_at is not None
-            and timestamp < current.expires_at
-            and current.session_name is not None
-            and session_live(current.session_name)
-            and not current_owner_terminated
-            # A file-less takeover has no supervisor; its coding session alone
-            # is the liveness signal. A supervised generation is adoptable only
-            # while its supervisor is live too.
-            and (current.work_file is None or supervisor_live)
-        ):
-            return CodingSessionClaim(action="adopt", owner=current)
-        if current.status == "launching" and not current_owner_terminated:
-            if not launch_is_stale(current, now=timestamp):
-                return CodingSessionClaim(action="busy", owner=current)
-            if any(session_live(name) for name in _candidate_sessions(current, list_sessions)):
-                return CodingSessionClaim(action="busy", owner=current)
-        if current.status != "inactive":
-            _cleanup_unlocked(
-                current,
-                list_sessions=list_sessions,
-                session_live=session_live,
-                terminate_session=terminate_session,
-            )
         generation = str(uuid.uuid4())
-        label = display_label(key.workspace)
         owner = CodingSessionOwner(
             key=key,
             status="launching",
             generation=generation,
             owner_agent_id=owner_agent_id,
-            display_label=label,
+            display_label=display_label(key.workspace),
             expected_suffix=expected_suffix(key, generation),
             state_dir=generation_state_dir(key, generation),
             tasks_file=tasks_file.expanduser().resolve() if tasks_file is not None else None,
@@ -257,7 +298,7 @@ def claim(
             expires_at=timestamp + dt.timedelta(seconds=ttl_seconds),
         )
         write_unlocked(owner)
-        return CodingSessionClaim(action="launch", owner=owner)
+        return owner
 
 
 def attach_supervisor(
@@ -269,8 +310,8 @@ def attach_supervisor(
 ) -> CodingSessionOwner:
     """CAS-publish the supervisor handle before launching the coding PTY."""
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
-        current = read_unlocked(key)
-        if current.status != "launching" or current.generation != generation:
+        current = read_unlocked(key, generation)
+        if current.status != "launching":
             raise CodingSessionGenerationChangedError("owner generation changed before supervision")
         if current.work_file is None:
             raise RuntimeError("cannot attach a supervisor to a file-less takeover generation")
@@ -300,8 +341,8 @@ def publish_active(
 ) -> CodingSessionOwner:
     """CAS-publish the ready PTY handle for one launching generation."""
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
-        current = read_unlocked(key)
-        if current.status != "launching" or current.generation != generation:
+        current = read_unlocked(key, generation)
+        if current.status != "launching":
             raise CodingSessionGenerationChangedError("owner generation changed during launch")
         if current.work_file is not None and (
             current.supervisor_session_id is None or current.supervisor_session_name is None
@@ -335,16 +376,16 @@ def terminate_generation(
     session_live: SessionLiveness = _default_session_live,
     terminate_session: SessionTerminator = _default_terminate_session,
 ) -> bool:
-    """Stop and terminalize exactly ``generation``; stale callers do nothing."""
+    """Stop and terminalize exactly ``generation``; one with no record returns False."""
     if not reason:
         raise ValueError("terminal reason must be non-empty")
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
-        current = read_unlocked(key)
+        current = read_unlocked(key, generation)
         if current.status == "invalid":
             raise InvalidCodingSessionOwnerError(
-                f"invalid canonical owner {state_path(key)}: {current.error}"
+                f"invalid owner record {state_path(key, generation)}: {current.error}"
             )
-        if current.generation != generation or current.status == "inactive":
+        if current.status == "inactive":
             return False
         if current.status == "terminal":
             return True
