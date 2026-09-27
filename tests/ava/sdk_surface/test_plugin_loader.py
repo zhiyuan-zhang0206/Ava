@@ -138,7 +138,7 @@ def test_scan_and_load_enabled_skips_names_not_in_set(tmp_path: Path):
 def test_scan_and_load_skips_dot_prefixed_dirs(tmp_path: Path):
     """Atomic-install residue (.name.staging / .name.backup-<pid>) must not be
     exec'd by the agent-host boot loader — the same ghost-plugin guard as
-    _discover_plugins (QA nit, PR #880 review)."""
+    discover_plugins (QA nit, PR #880 review)."""
     _make_plugin(tmp_path, "real")
     ghost = tmp_path / ".real.backup-1234"
     ghost.mkdir()

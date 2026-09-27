@@ -10,7 +10,7 @@ from shared.lm.registry import MODELS
 
 
 def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_anthropic"].enabled
@@ -85,7 +85,7 @@ def test_gpt6_sol_luna_successors_and_capabilities() -> None:
 
 
 def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_openai"].enabled

@@ -111,7 +111,7 @@ def ensure_provider_plugins_loaded() -> None:
         # registers; the set is empty once every provider is plugin-owned.
         provider_api.REGISTRY.reserve_core_prefixes(set(_MODEL_KEY_MAP))
 
-        discovered = plugins_config._discover_plugins()
+        discovered = plugins_config.discover_plugins()
         known = set(discovered)
         config = plugins_config.load_for_runtime(known)
         repo_dir = str(paths.repo_plugins_dir())

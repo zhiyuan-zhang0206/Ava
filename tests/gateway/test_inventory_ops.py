@@ -113,7 +113,7 @@ def test_inventory_write_op_plugin_happy_path(
     assert result.applied is True
     assert result.plugin_results["ava_code"] == FieldWriteResult(ok=True, reason=None)
     # The per-machine plugins_config.json now records ava_code as disabled.
-    cfg = plugins_config.load(set(plugins_config._discover_plugins()))
+    cfg = plugins_config.load(set(plugins_config.discover_plugins()))
     assert cfg.plugins["ava_code"].enabled is False
 
 
@@ -187,7 +187,7 @@ def test_inventory_write_op_applies_both_plugin_and_mcp(
     _write_machine_mcp(_machine_only_mcp, {"fs": {"command": "x"}})
     result = inventory_write_op(plugins={"ava_code": False}, mcp_servers={"fs": False})
     assert result.applied is True
-    cfg = plugins_config.load(set(plugins_config._discover_plugins()))
+    cfg = plugins_config.load(set(plugins_config.discover_plugins()))
     assert cfg.plugins["ava_code"].enabled is False
     assert mcp_enabled.read_enabled() == {"fs": False}
 
