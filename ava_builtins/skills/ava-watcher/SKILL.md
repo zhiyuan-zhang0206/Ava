@@ -175,6 +175,14 @@ another, independent session. If you want exactly one live copy of a
 schedule, kill the old session yourself before (or after) registering the
 new one.
 
+**A watcher outlives your termination and will wake you again.** Terminating
+does not stop or clean up any watcher you left running: it is a session, not
+part of your process. Its next fire delivers your wake as a normal message,
+and message delivery wakes a terminated agent back up — so a standing cron
+keeps re-waking you, fire after fire, for as long as it lives. If you do not
+want to be woken again, kill your watchers (`ava.shell.sessions.kill`) before
+terminating.
+
 ## See also
 
 This skill's own `reference/watch_idle.py` is a ready-made watcher that wakes
