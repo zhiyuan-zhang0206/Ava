@@ -59,12 +59,14 @@ const LazyPromptDialog = dynamic(() =>
 export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring";
 
 // Public status semantics: sky = actively running, emerald = idling/waiting,
-// red = terminated. Internal launch/restart states are projected to idling
-// before a row reaches this component; offline remains a separate liveness
-// badge.
+// indigo = impersonated (an external tool has taken the agent over — calm
+// and distinct from both the idling and terminated tones), red = terminated.
+// Internal launch/restart states are projected to idling before a row
+// reaches this component; offline remains a separate liveness badge.
 export const STATUS_DOT: Record<PublicAgentStatus, string> = {
   running: "bg-sky-500",
   idling: "bg-emerald-500",
+  impersonated: "bg-indigo-400",
   terminated: "bg-destructive",
 };
 
@@ -74,6 +76,7 @@ export const STATUS_DOT: Record<PublicAgentStatus, string> = {
 export const STATUS_TITLE_KEY: Record<PublicAgentStatus, string> = {
   running: "statusRunning",
   idling: "statusIdling",
+  impersonated: "statusImpersonated",
   terminated: "statusTerminated",
 };
 
@@ -384,11 +387,6 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                   <span className={cn("break-words", MIN_W_0)}>{displayLabel}</span>
                 </span>
               )}
-              {agent.open_impersonation_session_id != null ? (
-                <span className="text-[10px] text-foreground/70">
-                  {t(pending === "expiring" ? "takeoverEnding" : "takeoverOpen")}
-                </span>
-              ) : null}
             </span>
             {showTime ? (
               <span className="text-[10px] opacity-60 shrink-0 tabular-nums">
@@ -396,8 +394,8 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
               </span>
             ) : null}
             {/* Reserve room for the on-row action or pending spinner. */}
-            {!editing && (agent.status === "terminated" || pending || agent.open_impersonation_session_id != null) ? (
-              <span className={cn("shrink-0", agent.open_impersonation_session_id != null && !pending ? "w-14" : "w-5")} />
+            {!editing && (agent.status === "terminated" || pending) ? (
+              <span className="shrink-0 w-5" />
             ) : null}
           </button>
           {!editing ? (
@@ -405,7 +403,6 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
               agent={agent}
               pending={pending}
               onResurrect={() => onResurrect()}
-              onForceExpire={confirmForceExpire}
             />
           ) : null}
         </li>

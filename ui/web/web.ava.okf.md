@@ -10,13 +10,20 @@ description: Overview index of the Ava frontend subsystem—Next.js 16 Web UI (f
 
 Ava frontend subsystem—Next.js 16 web interface for fleet supervision, agent conversation management, task tracking, cluster configuration. All source code is in `ui/web/src/`.
 
-The console exposes exactly three agent statuses: `running`, `idling`, and
-`terminated`. The gateway wire deliberately retains its finer control-plane
+The console exposes four agent statuses: `running`, `idling`, `impersonated`,
+and `terminated`. The gateway wire deliberately retains its finer control-plane
 states (`allocated`, `starting`, and `restarting`); every
 frontend ingest path (`/api/agents`, lifecycle SSE snapshots, and the fleet
 graph) exhaustively projects those non-executing transitions to `idling` before
 they enter a cache. Machine/process reachability remains the separate
 `liveness_state` axis, so this projection never hides an offline runner.
+`impersonated` is a separate, card-level projection (`projectAgentStatus` in
+`src/lib/types.ts`): only the roster/directory card carries the open
+impersonation lease's phase, and only an `active` lease (an external tool has
+actually taken the agent over, not merely requested or accepted a takeover)
+overrides the lifecycle projection to `impersonated`. The selected-agent detail
+read and the fleet graph carry no lease field, so they never produce it — an
+impersonated agent there still reads as its underlying `running`/`idling`.
 
 **Role assignment**: gateway side (pure agent-runner does not run it)—Next.js server is a `frontend` session from `build_services` (not in `_AGENT_RUNNER_ONLY_SESSIONS`), roster derived by `ops/spec.py:services_for_capabilities` by capability (re-exported by `cli/commands/_repo.py`).
 

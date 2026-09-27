@@ -81,26 +81,34 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(e2e_env: E2EEnv) -> No
     roster = httpx.get(f"{e2e_env.gateway_url}/api/agents/roster", timeout=10.0).json()
     card = next(card for card in roster["agents"] if card["agent_id"] == agent_id)
     assert card["open_impersonation_session_id"] == session_id
+    assert card["open_impersonation_status"] == "active"
 
+    # The sidebar shows no dedicated takeover label or on-row button (the only
+    # visible difference for an impersonated agent is its status) — ending a
+    # takeover is reachable only from the row's right-click context menu.
+    # Radix keeps the menu's content live while it stays open, so a single
+    # right-click followed by a generous wait still lets the frontend's own
+    # SSE-driven roster refetch land the conditional menu item.
     row = page.locator("li.group.relative").filter(has_text=f"#{agent_id}").first
-    action = row.get_by_role("button", name="End external takeover session")
-
-    def control_ready() -> tuple[bool, object]:
-        visible = action.is_visible() and row.get_by_text("Takeover open").is_visible()
-        return visible, {
-            "row": row.inner_text(),
-        }
-
-    poll_until(control_ready, timeout=15.0, interval=0.5, what="open session appears in sidebar")
+    row.click(button="right")
+    menu_item = page.get_by_role("menuitem", name="End external takeover session")
+    menu_item.wait_for(state="visible", timeout=15_000)
     page.once("dialog", lambda dialog: dialog.accept())
-    action.click()
+    menu_item.click()
     page.get_by_text("Takeover session ended").wait_for(timeout=10_000)
 
-    def control_cleared() -> tuple[bool, object]:
-        visible = action.is_visible()
-        return not visible, {"end_action_visible": visible}
+    # Re-open the menu until the item is gone — proves the frontend, not just
+    # the backend, has picked up the closed session (mirrors the pre-removal
+    # test's poll on the on-row button's disappearance).
+    def end_item_absent() -> tuple[bool, object]:
+        row.click(button="right")
+        present = page.get_by_role("menuitem", name="End external takeover session").is_visible()
+        page.keyboard.press("Escape")
+        return not present, {"end_item_present": present}
 
-    poll_until(control_cleared, timeout=10.0, interval=0.5, what="closed session leaves sidebar")
+    poll_until(
+        end_item_absent, timeout=10.0, interval=0.5, what="end-session item leaves the context menu"
+    )
 
     def resumed() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn:
