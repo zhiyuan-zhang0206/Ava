@@ -34,6 +34,7 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from cli.commands.data_plane.pgbouncer import pgbouncer_bin
+from shared.cluster.authority import POOLER_ADMIN
 from tests._containers import _free_port, _wait_port, postgres
 
 _SECRET = "pgbouncerwiretestsecret"  # noqa: S105 — test fixture, not a real credential
@@ -82,7 +83,8 @@ def _pgbouncer_in_front(
     tmp = Path(tempfile.mkdtemp(prefix="ava-pgbouncer-test-"))
     listen_port = _free_port()
     userlist = tmp / "userlist.txt"
-    userlist.write_text(f'"{role}" "{_SECRET}"\n')
+    # Mirrors _render_ini: the admin console belongs to the pooler admin alone.
+    userlist.write_text(f'"{role}" "{_SECRET}"\n"{POOLER_ADMIN}" "{_SECRET}"\n')
     ini = tmp / "pgbouncer.ini"
     ini.write_text(
         "\n".join(
@@ -114,7 +116,7 @@ def _pgbouncer_in_front(
                 "max_client_conn = 100",
                 f"default_pool_size = {pool_size}",  # tiny, so transactions genuinely reuse backends
                 "ignore_startup_parameters = extra_float_digits,options",
-                f"admin_users = {role}",
+                f"admin_users = {POOLER_ADMIN}",
                 f"logfile = {tmp / 'pgbouncer.log'}",
                 f"pidfile = {tmp / 'pgbouncer.pid'}",
                 "",
@@ -486,10 +488,10 @@ def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer() -> None:
 
 
 def test_admin_probe_reaches_the_bound_address_only() -> None:
-    """P4: the load-bearing premise of the degraded-bind probe — a psycopg dial
-    to an address pgbouncer failed to bind actually FAILS, while the bound one
-    answers. `_admin_reachable(host=...)` is what `pgbouncer_public_listener_
-    reachable` trusts to tell a silently degraded pooler from a healthy one.
+    """P4: the admin-console probe authenticates as the pooler admin and dials
+    exactly the address it names — an address pgbouncer did not bind FAILS,
+    while the bound one answers. (Public-bind verification itself reads the
+    socket table, `pgbouncer_public_listener_reachable`, never a self-dial.)
 
     127.0.0.2 is local on Linux (CI runs this); macOS needs an lo0 alias, so
     skip there."""
@@ -504,8 +506,8 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
         _pgbouncer_in_front(pg_url, listen_addr="127.0.0.2") as pooled,
     ):
         listen_port = int(str(conninfo_to_dict(pooled)["port"]))
-        assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.2") is True
-        assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.1") is False
+        assert _admin_reachable(listen_port, _SECRET, host="127.0.0.2") is True
+        assert _admin_reachable(listen_port, _SECRET, host="127.0.0.1") is False
 
 
 # ── 2026-09-02 P0: pooled session-GUC pollution (read-only backend) ──────────
