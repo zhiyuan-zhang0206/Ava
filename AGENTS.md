@@ -124,8 +124,8 @@ builds a complete inactive image before any outage. `ava cluster update --prepar
 REQUEST` submits or continues the exact captured release operation through a
 finite external executor. The ordinary root boot unit owns the replacement
 application. Current activation supports one single-machine home (Linux, or
-macOS through the home helper) with a local data plane, unchanged packaged SQL
-and no retained terminal writers; PITR activation is Linux-only. Fleet/schema
+macOS through the home helper) with a local data plane and unchanged packaged
+SQL; its stop closes terminals and schedules (PITR, Linux-only, refuses them). Fleet/schema
 transitions and other platform adapters remain pre-cutover work; unsupported
 requests refuse before draining. See
 [`release preparation`](cli/release_prepare/release_prepare.ava.okf.md) and
