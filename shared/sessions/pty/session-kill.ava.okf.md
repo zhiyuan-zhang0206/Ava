@@ -111,11 +111,14 @@ orphan-host reaper and a failed spawn's abort.
 session backend.
 
 A normal `ava stop` (`cli/commands/_temporary_stop.py`) captures each shell's
-membership with `session_members` before any signal, HUPs the shells, TERMs
-the rest, and after a bounded grace kills what is left with
-`kill_session_tree(also=<the capture>)`
-(decisions/2026-09-28-stop-escalates-to-sigkill.md). `ava pause` closes no
-terminal.
+session with `capture_session` before any signal, HUPs the shells and TERMs
+the rest. Each grace poll `refresh`es every capture with one scan, keeping its
+proof current; a quiet poll counts only once a second, immediate one is quiet
+too, since a member can fork while the first scan runs. What is left after
+the grace dies by `kill_session_tree(also=<capture>, proven_at=<its proof>)`
+(decisions/2026-09-28-stop-escalates-to-sigkill.md,
+decisions/2026-09-28-session-id-proven-by-a-live-member.md). `ava pause`
+closes no terminal.
 
 ## Dependencies
 

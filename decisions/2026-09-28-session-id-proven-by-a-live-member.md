@@ -1,0 +1,117 @@
+# A session kill proves the session id with a live member, not the live shell
+
+## Context
+
+A PTY session kill (`shared/sessions/pty/session_tree.py`, PR #3521) takes the
+shell, its descendants, and every process in the shell's POSIX session. #3521
+scanned by session id only while the verified shell was alive. Once the shell
+has died, a later session could in principle carry the same id.
+
+`ava stop` then gained a SIGKILL leg after a bounded grace (PR #3558,
+decisions/2026-09-28-stop-escalates-to-sigkill.md). The adversarial review of
+#3558 (https://github.com/zhiyuan-zhang0206/Ava/pull/3558#issuecomment-5858247325)
+found an escape that happens every time, not by a race. A foreground job's
+TERM handler forks a helper and exits at once:
+
+- the helper is born after the stop's signals;
+- its parent is gone before the next 50 ms poll;
+- the shell has already died of its hangup.
+
+No capture rule reaches the helper, yet it is still in the shell's session. The
+stop returned 0 and recorded the session as closed, in 3 of 3 runs. This held
+both when the helper ignored HUP/TERM and when it kept the default
+dispositions, in which case it never receives any signal.
+
+The user ruled that a stop takes the whole session, background jobs and
+double-forked orphans included, so this helper must die.
+
+## Decision
+
+A pass takes a process by the session id S only when S is proven, after every
+read of the pass and before any signal. Two proofs count.
+
+- **A live witness (kernel-backed).**
+  - At any instant, at most one session carries a given id:
+    - Linux `free_pid` returns an id only once no task holds its `struct pid`
+      as PID, thread group, process group or session;
+    - XNU `forkproc` skips a candidate pid that `pfind`, `pgfind` or
+      `session_find` still resolves.
+  - A captured member that reads S after the pass's reads, and whose identity
+    is re-verified afterwards, stayed in one session for the whole pass.
+    Leaving a session takes `setsid`, which renames the leaver's session to
+    its own pid.
+  - The frozen shell is the usual witness. When the shell is dead, any other
+    captured member can serve.
+  - If some other process holds the shell's pid, S is disproven: the kernel
+    released that pid, so the original session has ended.
+- **A fresh proof (the repo's existing pid-reuse bound).**
+  - Once the helper's parent exits, the helper is the only process left in
+    the session and none of the captured members are alive. No kernel fact
+    observable at that moment separates it from a member of a new session that
+    received S after the pid was recycled. Only elapsed time does.
+  - So a proof stands for `_PROOF_FRESH_S` (1 s) after the last witness. That
+    is half the "pid reuse cannot land inside a couple of seconds" bound
+    that `shared/proc_tree.py`'s identity check already relies on.
+
+Anything a pass cannot prove is logged and left running.
+
+The stop keeps its proof current while it waits:
+
+- Each grace poll refreshes every session's capture with one shared scan
+  (`session_tree.refresh`), adding new descendants and proven session members.
+- A member can fork while that scan runs, so a quiet poll counts only after a
+  second, immediate poll is quiet too.
+- The kill leg starts with one more refresh and passes each capture's proof to
+  the kill.
+
+Closure notices follow #2044's rule that partial success notifies only what
+actually closed:
+
+- A busy session whose captured processes are all verified gone records its
+  notice before an incomplete stop reports.
+- A session with a live survivor records nothing, and a retry picks it up
+  while its shell is still alive.
+
+## Alternatives rejected
+
+- **A witness rule alone** ("no live witness means the session is empty"):
+  - The premise is false in exactly the reported case: the helper is
+    uncaptured and is the session's only process.
+  - The helper still escapes.
+- **The review's process-group rule** (`sid == S` and `pgid` in the captured
+  groups):
+  - It needs the same proof, because the helper is the only member of its
+    captured group, so a recycled group id looks the same.
+  - It also misses a helper that moves to its own group.
+- **Freezing the shell through the grace instead of hanging it up:**
+  - This would keep a kernel-backed witness alive.
+  - But it changes the ruled HUP-first sequence (#2045), so the shell would
+    never handle its own hangup.
+  - That is a separate ruling.
+- **Having the PTY host hold the shell's zombie** (which pins the pid): this
+  changes the host's reap protocol and couples the stop to the host.
+- **Scanning by session id with no proof:** this can kill a process in a new
+  session that received the recycled id.
+
+## Consequences
+
+- **What escapes.** A helper escapes only if, when the stop looks for it, no
+  captured member is alive and no proof is younger than a second. Examples
+  are a stop process stalled for over a second, or a chain of fork-and-exit
+  hops that outruns every scan. The escape is logged. The stop's result is
+  unchanged by it.
+- **Theoretical corner.** The witness argument assumes that the shell's pid
+  was not recycled onto one of the session's own descendants, which then led
+  its own session and has itself already exited. That requires the whole
+  original session to end, and the pid space to wrap, inside the kill.
+- **Host graceful kill.** The host's graceful kill (`kill --graceful`, which
+  the TTL reaper uses) carries no fresh proof. A helper forked on TERM is
+  therefore still reachable there only through a surviving witness.
+  Interactive shells ignore TERM, which keeps the frozen shell as that
+  witness.
+- **Kill-op latency.** A kill op waits only for the members it signalled. A
+  member it may not signal has its liveness read once, so it no longer spends
+  the TTL reaper's 5 s dispatch budget.
+- **Identity, not pid.** Membership checks compare identities, not pids. A
+  parent vouches for a child only while it still is the captured process, and
+  a pid the kernel handed on never counts as its dead member.

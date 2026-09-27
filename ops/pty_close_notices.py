@@ -3,7 +3,8 @@
 `ava stop` closes busy persistent-shell sessions AFTER the gateway and ops
 server are already down, so the closure notice for each owner agent cannot be
 delivered synchronously. The stop path records one notice per busy session it
-VERIFIED closed (exact process identity gone, no terminals left) under
+VERIFIED closed (every captured process of it gone — also when another session
+leaves the stop incomplete) under
 ``$AVA_HOME/state/pty-close-notices/`` — durable across the data-plane
 shutdown. The ops daemon flushes the journal at its next startup: a notice for
 a live owner becomes a system inbound message, one for a terminated/restarting
