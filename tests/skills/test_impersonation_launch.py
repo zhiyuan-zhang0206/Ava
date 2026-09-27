@@ -86,7 +86,7 @@ def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) 
     workspace.mkdir()
     endpoint = f"unix://{tmp_path}/run/codex-app-server.0123456789ab-01234567.sock"
     server = codex._app_server_command(owner, workspace, endpoint)
-    tui = codex._codex_command(owner, workspace, None, remote=endpoint)
+    tui = codex._codex_command(workspace, None, remote=endpoint)
     assert f"codex app-server --listen {endpoint}" in server
     assert "AP=${!}" in server and "kill $AP" in server
     assert "if ! kill -0 $$ 2>/dev/null; then" in server
@@ -94,21 +94,19 @@ def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) 
     assert f"rm -f {endpoint.removeprefix('unix://')}" in server
     assert 'approval_policy="never"' in server
     assert 'sandbox_mode="danger-full-access"' in server
+    assert "CODEX_HOME" not in server and "check_for_update_on_startup=false" in server
     assert f"--remote {endpoint} --dangerously-bypass-approvals-and-sandbox" in tui
     assert tui.startswith("clear && ")
 
 
-def test_supervised_launch_command_is_unchanged(tmp_path: Path) -> None:
-    state = tmp_path / "home"
-    state.mkdir()
-    owner = _owner(state)
+def test_supervised_launch_command_has_no_remote(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    command = codex._codex_command(owner, workspace)
-    assert command == (
-        f"cd {workspace} && CODEX_HOME={state} "
-        "exec codex --dangerously-bypass-approvals-and-sandbox"
+    command = codex._codex_command(workspace)
+    assert command.startswith(
+        f"cd {workspace} && exec codex --dangerously-bypass-approvals-and-sandbox -c "
     )
+    assert "--remote" not in command and "clear" not in command
 
 
 def test_app_server_wait_accepts_a_bound_socket() -> None:

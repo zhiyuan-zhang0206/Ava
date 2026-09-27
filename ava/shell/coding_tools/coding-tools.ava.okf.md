@@ -22,6 +22,11 @@ This package is the implementation behind the
    collaboration contract. For a takeover (Mode B) it is an inline briefing.
 5. Checks that the message was actually submitted.
 
+Each launch prints the tool's own session id (`claude_session`, chosen up
+front with `--session-id`; `codex_session`, read from `/status`). The tool's
+conversation store outlives the shell, so `resume` reopens exactly that session
+after a stop, reboot or crash closed it.
+
 It lives under `ava.shell` because it drives these same session primitives.
 It is not part of the agent-facing surface: the package appears in no
 `__all_for_ava__`. The scripts keep only argument parsing. Each passes its own
@@ -37,9 +42,10 @@ locates the impersonator guide.
   session through the resident plugin, unless the executor-armed flow is
   requested.
 - `codex` — the Codex launcher. Every launch is a canonical generation keyed by
-  `(cluster, workspace, codex)`. It adds three things: an automatic supervisor
-  for the supervised mode, a private generation `CODEX_HOME`, and, for a
-  takeover, the shared app server the TUI and the relay both use.
+  `(cluster, workspace, codex)`. It adds an automatic supervisor for the
+  supervised mode and, for a takeover, the shared app server the TUI and the
+  relay both use. Codex runs on the user's own `~/.codex` with per-session
+  `-c` overrides (workspace trust, no startup update check).
 - `_claude_checks` — Claude-specific checks:
   - UI readiness and the missing-executable and signed-out markers;
   - bracketed-paste delivery (#4364);

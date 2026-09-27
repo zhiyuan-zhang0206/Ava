@@ -50,6 +50,12 @@ def main() -> int:
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--status", action="store_true", help="Print the canonical owner record.")
     action.add_argument(
+        "--resume",
+        metavar="SESSION_ID",
+        type=codex.session_uuid,
+        help="Reopen this recorded Codex session (the codex_session a launch printed) instead of starting a new one; the workspace must have no live generation.",
+    )
+    action.add_argument(
         "--cancel-generation",
         metavar="GENERATION",
         help="Stop and terminalize exactly this canonical generation.",
@@ -104,6 +110,7 @@ def main() -> int:
         (args.impersonation_name or workspace.name) if args.impersonate_self else None,
         args.brief,
         reference_dir=_REFERENCE,
+        resume=args.resume,
     )
 
 

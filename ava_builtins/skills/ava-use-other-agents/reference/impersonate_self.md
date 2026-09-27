@@ -49,6 +49,16 @@ The two states, and nothing else:
   human input: it retains all messages (including unACKed ones), operations and
   consumed events.
 
+If the takeover's shell is closed (a full stop, a reboot, a crash), the platform
+ends the impersonation session ("the executor process is gone") and resumes
+you with the handoff JSON. To continue with the same executor, relaunch with
+`--impersonate-self --resume <claude_session|codex_session> --brief '...'`: it
+reopens the executor's own conversation, and the brief tells it which session
+ended and where the handoff JSON is; it then opens a new impersonation session,
+since the old one is over. See [Resume after an
+interruption](resume_after_interruption.md). A DeepSeek Harness takeover is
+relaunched fresh instead.
+
 TTL remains the recovery deadline if the takeover dies. Without
 `--impersonate-self` the normal delegated workflow applies and you remain the
 supervisor making decisions.
