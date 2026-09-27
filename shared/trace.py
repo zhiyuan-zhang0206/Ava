@@ -80,8 +80,8 @@ from shared.observability import cluster_label
 from shared.paths import traces_dir
 from shared.telemetry.otlp.telemetry_otlp import (
     COLLECTOR_RETRY_INTERVAL_S,
-    _observability_export_allowed,
     endpoint_reachable,
+    observability_export_allowed,
 )
 from shared.trace_mirror import (
     _disk_usage,
@@ -608,7 +608,7 @@ def initialize_tracing() -> None:
         return
     if not settings.observability.trace_enabled:
         return
-    if not _observability_export_allowed():
+    if not observability_export_allowed():
         return
 
     # Bounded disk FIRST — before the watermark guard, so the relief valves

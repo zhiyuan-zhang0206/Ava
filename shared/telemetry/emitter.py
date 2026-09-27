@@ -109,7 +109,7 @@ _JSONL_LINEAGE_RETENTION_DAYS = 365
 _JSONL_ROLLUP_SOURCE_EVENTS = frozenset({"llm_usage", "turn_end"})
 
 
-def _is_rollup_source(event_name: str) -> bool:
+def is_rollup_source(event_name: str) -> bool:
     """Whether an event feeds the durable token/metrics ledger rollup."""
     return (
         event_name in _JSONL_ROLLUP_SOURCE_EVENTS
@@ -186,7 +186,7 @@ def category_for_kind(event_name: str) -> Category:
     return registry_category(event_name)
 
 
-def _capture_trace_ids() -> tuple[str | None, str | None]:
+def capture_trace_ids() -> tuple[str | None, str | None]:
     """Read the current OTel span's trace_id/span_id, if any.
 
     Called at enqueue time — the drain thread runs outside the span context, so
@@ -304,7 +304,7 @@ def _append_jsonl(events: list[Event]) -> None:
                 + "\n"
             )
             lines.append(line)
-            if _is_rollup_source(e.event_name):
+            if is_rollup_source(e.event_name):
                 rollup_lines.append(line)
             if _is_lineage_source(e.event_name):
                 lineage_lines.append(line)
@@ -324,7 +324,7 @@ def _append_jsonl(events: list[Event]) -> None:
         global _jsonl_failures  # noqa: PLW0603 — module-level counter
         _jsonl_failures += 1
         if _jsonl_failures == 1 or _jsonl_failures % 50 == 0:
-            _report_no_pipeline(
+            report_no_pipeline(
                 "[event-emitter] JSONL mirror write failed ({n} consecutive) — "
                 "the mirror is the durable local copy; a sustained failure "
                 "means batches are not landing in it: {err}",
@@ -364,7 +364,7 @@ _jsonl_failures = 0
 _NO_EMITTER = "_no_emitter"
 
 
-def _report_no_pipeline(message: str, **extra: Any) -> None:
+def report_no_pipeline(message: str, **extra: Any) -> None:
     """Log a drain-thread diagnostic through loguru, marked `_NO_EMITTER` so
     the emitter adapter skips it. Best-effort: never raises, never blocks."""
     with contextlib.suppress(Exception):
@@ -389,7 +389,7 @@ def _write_batch(events: list[Event]) -> None:
 
         project_events(events)
     except Exception as exc:
-        _report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
+        report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
     _export_otlp(events)
 
 
@@ -458,7 +458,7 @@ class _EventPipeline:
             if due:
                 self._drop_reported_at = now
         if due:
-            from shared.telemetry_loss import report_loss
+            from shared.telemetry.loss import report_loss
 
             report_loss(event, 1, "emitter")
 
@@ -498,7 +498,7 @@ class _EventPipeline:
             bounded=bounded,
         )
         if outcome is not None:
-            _report_no_pipeline(
+            report_no_pipeline(
                 f"[event-emitter] sync() timed out after {{t}}s during {outcome} — the mirror may land later",
                 t=timeout,
             )
@@ -517,7 +517,7 @@ class _EventPipeline:
             example = self._drop_example
             self._drop_example = None
         if n and example is not None:
-            from shared.telemetry_loss import loss_event
+            from shared.telemetry.loss import loss_event
 
             batch = [*batch, loss_event(example, n, "emitter", dropped_at=example.ts)]
         if not batch:
@@ -712,7 +712,7 @@ def prepare_event(
             f"emit() category={category!r} contradicts the registry for "
             f"event_name={event_name!r} (declared {spec.category!r})"
         )
-    trace_id, span_id = _capture_trace_ids()
+    trace_id, span_id = capture_trace_ids()
     return Event(
         ts=_as_utc(ts),
         trace_id=trace_id,

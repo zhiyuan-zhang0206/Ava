@@ -184,7 +184,7 @@ def test_active_otel_trace_id_wins_over_request_fallback(
     """Envelope correlation uses the active OTel trace when one exists."""
     from gateway import error_envelope
 
-    monkeypatch.setattr(error_envelope.telemetry, "_capture_trace_ids", lambda: ("a" * 32, None))
+    monkeypatch.setattr(error_envelope.telemetry, "capture_trace_ids", lambda: ("a" * 32, None))
     response = handler_client.get("/agent")
     assert response.json()["trace_id"] == "a" * 32
 

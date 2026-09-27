@@ -77,9 +77,8 @@ def _drain_background_trace_threads() -> None:
 def _reset_init_flag():
     """Reset trace-init and retry-loop state between tests."""
     _assert_no_background_trace_threads()
-    gate = getattr(telemetry_otlp, "_observability_export_allowed", None)
-    if gate is not None:
-        gate.cache_clear()
+    gate = telemetry_otlp.observability_export_allowed
+    gate.cache_clear()
     trace_mod._state.clear()
     trace_mod._state.update(
         initialized=False,
@@ -90,8 +89,7 @@ def _reset_init_flag():
         arm_failed=False,
         timeout_reported=False,
     )
-    if gate is not None:
-        gate.cache_clear()
+    gate.cache_clear()
     yield
     trace_mod._state["initialized"] = True
     _drain_background_trace_threads()
@@ -200,7 +198,7 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    telemetry_otlp._observability_export_allowed.cache_clear()
+    telemetry_otlp.observability_export_allowed.cache_clear()
     calls: list[dict[str, object]] = []
 
     def record_init(**kw: object) -> None:
@@ -227,7 +225,7 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path / "traces")
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    telemetry_otlp._observability_export_allowed.cache_clear()
+    telemetry_otlp.observability_export_allowed.cache_clear()
     _under_watermark(monkeypatch)
     calls: list[dict[str, object]] = []
 

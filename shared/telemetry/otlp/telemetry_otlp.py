@@ -242,7 +242,7 @@ _NO_EMITTER = "_no_emitter"
 
 
 @cache
-def _observability_export_allowed() -> bool:
+def observability_export_allowed() -> bool:
     """Whether this process may arm OTLP export, frozen once per process."""
     if endpoint_override_is_explicit("AVA_TELEMETRY_OTLP_ENDPOINT"):
         return True
@@ -398,7 +398,7 @@ class _OtlpBackend:
                 example = event
         if lost and example is not None:
             from shared.telemetry import _append_jsonl
-            from shared.telemetry_loss import report_loss
+            from shared.telemetry.loss import report_loss
 
             with self._dropped_lock:
                 self._dropped += lost
@@ -493,7 +493,7 @@ class _OtlpBackend:
 
             return (
                 bool(settings.observability.telemetry_otlp_enabled)
-                and _observability_export_allowed()
+                and observability_export_allowed()
             )
         return False
 
