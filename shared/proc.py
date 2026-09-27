@@ -372,6 +372,7 @@ def run_bounded(
     *,
     timeout: float,
     capture_output: bool = False,
+    input: bytes | str | None = None,  # mirrors subprocess.run's own parameter name
     **popen_kwargs: object,
 ) -> subprocess.CompletedProcess[Any]:  # str or bytes, decided by the caller's `text=`
     """`subprocess.run` whose timeout bounds the **work**, not just the process
@@ -379,10 +380,11 @@ def run_bounded(
     `TimeoutExpired` propagates.
 
     Drop-in for the `subprocess.run(argv, timeout=..., check=False)` shape:
-    `capture_output` is honoured, everything else is passed through to `Popen`
-    (`cwd`, `text`, `env`, …). There is deliberately no `check=` — this returns
-    the `CompletedProcess` and the caller reads `returncode`, so a non-zero exit
-    can never be confused with the timeout path.
+    `capture_output` and `input` are honoured, everything else is passed
+    through to `Popen` (`cwd`, `text`, `env`, …). There is deliberately no
+    `check=` — this returns the `CompletedProcess` and the caller reads
+    `returncode`, so a non-zero exit can never be confused with the timeout
+    path.
 
     `TimeoutExpired` is raised exactly as `subprocess.run` raises it, carrying
     whatever output was captured before the bound tripped: a caller that treats a
@@ -399,12 +401,23 @@ def run_bounded(
         popen_kwargs["stdout"] = subprocess.PIPE
         popen_kwargs["stderr"] = subprocess.PIPE
 
+    if input is not None:
+        if popen_kwargs.get("stdin") is not None:
+            raise ValueError("stdin and input arguments may not both be used")
+        popen_kwargs["stdin"] = subprocess.PIPE
+
     if "creationflags" not in popen_kwargs:
         popen_kwargs["creationflags"] = CREATE_NO_WINDOW
 
     proc = subprocess.Popen(argv, **popen_kwargs)  # type: ignore[call-overload]  # noqa: S603 — argv is list-form, callers pass fixed argv
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
+        # Keep the no-input call shape exactly `communicate(timeout=timeout)`
+        # for callers that never asked to feed stdin.
+        stdout, stderr = (
+            proc.communicate(timeout=timeout)
+            if input is None
+            else proc.communicate(input, timeout=timeout)
+        )
     except subprocess.TimeoutExpired as exc:
         kill_process_tree(proc.pid)
         # The pipes' write ends were inherited by the descendants, so this drain

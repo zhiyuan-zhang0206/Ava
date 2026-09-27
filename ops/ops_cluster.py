@@ -58,6 +58,7 @@ from shared.log import logger
 from shared.machine import machine_name
 from shared.machines import mark_stopping
 from shared.paths import ava_home
+from shared.proc import run_bounded
 from shared.runtime_abi import current_abi
 
 
@@ -496,14 +497,17 @@ def run_release_entry(
         raise HandoffRefusedError("the request names another executor than the image to run")
     verified = image.verify(home, host_abi=current_abi())
     try:
-        completed = subprocess.run(  # noqa: S603 — verified image, fixed v1 entry, no shell
+        # run_bounded, not subprocess.run(timeout=...): a plain timeout only
+        # kills the direct child, which can leave the real entry process
+        # (or a launcher-stub descendant on Windows) running past the bound
+        # (shared/proc.py).
+        completed = run_bounded(
             entry_argv(verified, entry, "-"),
             input=request,
             capture_output=True,
             cwd=verified.cwd,
             env=entry_environment(os.environ, str(home)),
             timeout=timeout_s,
-            check=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise HandoffRefusedError(
