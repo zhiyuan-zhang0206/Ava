@@ -20,17 +20,20 @@ tags:
 
 ## Canonical Codex lifecycle
 
-`reference/spawn_codex.py` creates or adopts one generation keyed by resolved
-cluster home plus resolved workspace plus `codex`. The canonical record returns
-the current owner and full Persistent Shell handle across Ava-agent callers;
-workspace basename appears only in display suffixes. Launching is serialized by
+`reference/spawn_codex.py` is a thin command-line entry over
+[[ava/shell/coding_tools/coding-tools.ava.okf.md|ava.shell.coding_tools]] (so is
+`reference/spawn_claude.py`). Every launch owns a generation of its own under the
+resolved cluster home plus resolved workspace plus `codex`, so several can share
+a workspace; the record carries its owner and full Persistent Shell handle, and
+the workspace basename appears only in display suffixes. A launch first reclaims
+the workspace's dead generations; transitions are serialized by
 [[shared/coding-session-owner.ava.okf.md|the host-local owner journal]].
 
-Every fresh generation receives a private `CODEX_HOME` seeded only with the
-authentication file and a configuration snapshot. Codex always starts fresh
-(supervised workers from task/work/Git state, takeovers from the briefing
-inlined in their launch message); shared SQLite, logs, and resume state are not
-copied. The launcher starts a quiet supervisor before Codex only in the
+Codex runs on the host user's own `~/.codex` with per-session `-c` overrides
+(workspace trust, no startup update check), so its conversation outlives the
+shell: each launch prints the Codex session id (`codex_session`, from
+`/status`) and `--resume` reopens it after an interruption (Claude alike, with
+`claude_session`); a handoff still starts fresh. The launcher starts a quiet supervisor before Codex only in the
 supervised mode; it terminalizes the exact generation and reclaims its
 PTY/private state on current-generation `DONE` or `HANDOFF`, explicit cancel,
 owner termination, Codex death, or absolute expiry. A takeover starts no
@@ -47,4 +50,5 @@ use non-resurrecting system notes.
 - [[ava_builtins/skills/orchestration/orchestration.ava.okf.md|Workflow orchestration skill]] — belongs to functional group
 - [[ava/shell/shell.ava.okf.md|ava.shell]] — `sessions` (new/send/send_keys/capture/kill) session primitive itself
 - [[ava/watcher.ava.okf.md|ava.watcher]] — wait for it to produce results when supervising long tasks
-- [[shared/coding-session-owner.ava.okf.md]] — canonical generation admission, adoption, transfer, and cleanup
+- [[shared/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
+- [[ava/shell/coding_tools/coding-tools.ava.okf.md|ava.shell.coding_tools]] — the launch logic behind the Claude and Codex spawn scripts

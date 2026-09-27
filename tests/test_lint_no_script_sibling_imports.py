@@ -61,6 +61,19 @@ def test_unguarded_sibling_import_in_script_is_rejected(scan_tmp) -> None:
     assert "sys.path.insert" in errs[0]
 
 
+def test_ava_builtins_sibling_import_points_at_a_package_not_a_guard(scan_tmp) -> None:
+    """Under ava_builtins/ a guard is refused by structure Rule 6, so the hint names a package."""
+    _write(scan_tmp, "ava_builtins/skills/demo/reference/helper.py", "VALUE = 1\n")
+    errs = _errors(
+        scan_tmp,
+        "ava_builtins/skills/demo/reference/runner.py",
+        _script("from helper import VALUE"),
+    )
+    assert len(errs) == 1
+    assert "governed package" in errs[0]
+    assert "sys.path.insert" not in errs[0]
+
+
 def test_guard_before_import_is_accepted(scan_tmp) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     guard = (

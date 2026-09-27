@@ -1,54 +1,62 @@
 ---
 type: doc
-title: Canonical Coding Session Owner
-description: Host-local generation ownership for one external coding tool per canonical cluster workspace, including atomic launch admission and exact terminal cleanup.
+title: Coding Session Owner
+description: Host-local generation records for external coding-tool sessions. Every launch owns a generation of its own, several may share a workspace, and a launch reclaims the workspace's dead generations; exact terminal cleanup.
 tags:
 - shared
 - lifecycle
 - concurrency
 ---
 
-# Canonical Coding Session Owner
+# Coding Session Owner
 
 ## Identity and storage
 
 `shared/coding_session_owner.py` owns lifecycle transitions over the validated
-record codec in `shared/coding_session_owner_record.py`. The authoritative key
-is `(resolved cluster home, resolved workspace path, tool)`. The workspace
-basename is stored only as a display label. Records and per-key locks live in
-`coding-session-owners/` beside the host cluster registry, so co-located Ava
-agents serialize the same canonical workspace while distinct workspaces retain
-independent locks.
+record codec in `shared/coding_session_owner_record.py`. A key is
+`(resolved cluster home, resolved workspace path, tool)`; the workspace
+basename is stored only as a display label. Every launch owns a **generation of
+its own** under that key, recorded at
+`coding-session-owners/<key digest>/<generation>.json` beside the host cluster
+registry, so several sessions can share a workspace. All transitions under one
+key take the key's one lock (`<key digest>.lock`); distinct workspaces keep
+independent locks. The single-slot record the earlier layout kept at
+`<key digest>.json` is still read, so a launch can reclaim what it left behind;
+a live one is left running.
 
 Each record carries an opaque generation, owner agent, launch phase, full PTY
 handle, expiry, numeric and full supervisor handle, task/work file paths (both
 absent for a file-less takeover), and the private mutable tool-state path.
-Invalid records fail closed.
+Invalid records fail closed: they are never reclaimed or stopped, and
+terminating one raises.
 
 ## State machine
 
-- `inactive|terminal -> launching`: one atomic claimant publishes a fresh
-  generation before creating a PTY. Concurrent claimants observe `busy`.
-- `launching -> active`: the winner CAS-publishes the allocated numeric and full
-  PTY handle immediately after creation, before slow tool startup and bootstrap.
-  A fresh unfinished launch cannot be replaced during its bounded spawn grace;
-  after that grace, a live suffix-matching PTY still keeps the generation busy.
-- `active -> adopt`: a live, unexpired generation is returned unchanged even
-  when another Ava agent asks to launch it — a supervised one only while its
-  supervisor is live; a file-less takeover on its coding session alone. A
-  missing supervisor on a supervised record makes the generation stale rather
-  than silently falling back to TTL; a launch that wanted a takeover refuses
-  to adopt instead of reclaiming a live takeover in place.
-- `active|stale launching -> launching`: owner termination, expiry, process
-  death, or a stale launch with no live candidate PTY permits transfer only
-  after the old PTY and private state are reclaimed.
+- **Launch**: `launch_generation` first sweeps the key's siblings (the legacy
+  slot included) and reclaims every generation that is over. That covers:
+  - a terminal record;
+  - an expired generation;
+  - a dead coding session;
+  - a supervised generation whose supervisor died (nobody would close it on
+    `DONE`);
+  - a generation whose owner agent was terminated;
+  - a launch past its bounded spawn grace with no live candidate PTY.
+
+  Reclaiming stops its PTY, removes its private state and drops its record.
+  Live generations, including a file-less takeover alive on its coding session
+  alone, are left alone. The launch then publishes a fresh `launching`
+  generation.
+- `launching -> active`: the launcher CAS-publishes the allocated numeric and
+  full PTY handle immediately after creation, before slow tool startup and
+  bootstrap. A supervised generation attaches its supervisor first. A
+  generation reclaimed in between refuses the publish.
 - `launching|active -> terminal`: exact-generation cleanup stops the PTY,
   verifies it is no longer live, removes private state, then publishes the
-  terminal reason. A stale generation is a no-op.
+  terminal reason. A generation with no record is a no-op.
 
 Record cleanup intentionally does not kill the supervisor PTY: the supervisor
-may be the caller performing terminalization. It exits after observing terminal
-state or a replacement generation, with its own TTL as the final backstop.
+may be the caller performing terminalization. It exits after observing its own
+generation terminal or gone, with its own TTL as the final backstop.
 
 The generation state directory is
 `$AVA_HOME/run/coding-tools/<tool>/<canonical-key-digest>/<generation>/`.

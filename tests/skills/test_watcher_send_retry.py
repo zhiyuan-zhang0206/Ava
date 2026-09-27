@@ -313,8 +313,9 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
         expires_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
     )
 
-    def _read(_key: CodingSessionKey) -> CodingSessionOwner:
+    def _read(_key: CodingSessionKey, generation: str) -> CodingSessionOwner:
         assert _key == key
+        assert generation == owner.generation
         return owner
 
     def _owner_terminated(_agent_id: int) -> bool:
