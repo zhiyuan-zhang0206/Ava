@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-import cli.commands as cli
+from cli.commands import start as cli
 from gateway.app import app
 from shared import host_deploy_state, maintenance, start_serving
 from tests.agent.test_maintenance import isolate as isolate

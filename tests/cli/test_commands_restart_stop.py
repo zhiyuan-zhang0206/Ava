@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cli import commands as _cli
+from cli.commands import stop as _cli
 from cli.commands.stop import _force_stop
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import (

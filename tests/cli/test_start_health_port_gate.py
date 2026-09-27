@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands as _cli
+from cli.commands import start as _cli
 from cli.commands._repo import ServiceSpec
 from ops.service_spec import _AGENT_RUNNER, _GATEWAY
 from shared.daemon_health import DaemonProbe

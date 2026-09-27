@@ -588,7 +588,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     reclaimed as before. The lock wait is bounded by that same timeout —
     expiry raises `LockTimeoutError`.
     """
-    from cli.commands._cluster_rollback import _migration_set_at_commit
+    from cli.commands.cluster_rollback import _migration_set_at_commit
 
     if _migration_set_at_commit(target_sha) == current_schema_state():
         return None

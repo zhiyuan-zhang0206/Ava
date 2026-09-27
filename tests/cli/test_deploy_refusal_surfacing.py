@@ -68,7 +68,7 @@ def test_update_reports_a_refused_deploy_instead_of_raising(
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Refused())  # pyright: ignore[reportUnknownArgumentType]
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     rc = cmd_update()
 
@@ -104,7 +104,7 @@ def test_update_force_is_threaded_through_the_new_try(
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType]
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update(force=True) == 0
     assert seen == [True]
@@ -131,7 +131,7 @@ def test_nothing_to_update_is_a_no_op_not_a_traceback(
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Nothing())  # pyright: ignore[reportUnknownArgumentType]
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update() == 0
     assert "already up to date" in capsys.readouterr().err
@@ -151,7 +151,7 @@ def test_a_dispatched_rollout_still_reports_normally(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Resp())  # pyright: ignore[reportUnknownArgumentType]
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update() == 0
 
@@ -176,7 +176,7 @@ def test_dispatched_replay_names_the_half_deployed_state(
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Resp())  # pyright: ignore[reportUnknownArgumentType]
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update() == 0
     assert "half-deployed state" in capsys.readouterr().out

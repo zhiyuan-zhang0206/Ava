@@ -22,10 +22,10 @@ from typing import Any
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import _update_phase_b as phase_b
 from cli.commands import _update_recover as _rec
 from cli.commands import update as _up
+from cli.commands import update_dispatch as _cli
 from cli.commands._update_fanout import ClusterOpPayload
 
 

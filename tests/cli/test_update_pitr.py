@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cli.commands import _cluster_rollback, _update_dryrun, _update_git, _update_pitr
+from cli.commands import _update_dryrun, _update_git, _update_pitr, cluster_rollback
 from cli.commands._update_recover import _print_pre_update_data_snapshot_restore
 from services import backup
 from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
@@ -267,7 +267,7 @@ def _enable_update_pitr(monkeypatch: pytest.MonkeyPatch) -> None:
     def migrations(_sha: str) -> set[str]:
         return {"new"}
 
-    monkeypatch.setattr(_cluster_rollback, "_migration_set_at_commit", migrations)
+    monkeypatch.setattr(cluster_rollback, "_migration_set_at_commit", migrations)
     monkeypatch.setattr(_update_git, "current_schema_state", lambda: {"old"})
     monkeypatch.setattr(
         _update_git,

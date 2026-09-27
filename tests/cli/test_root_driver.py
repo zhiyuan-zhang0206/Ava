@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
-import cli.commands as _cli
 from cli.commands import _root_driver as _root_mod
+from cli.commands import start as _start_mod
 from cli.commands._probe import ReadinessWait
 from cli.commands._repo import ServiceSpec
 from cli.commands._session_lifecycle import LaunchOutcome
@@ -598,7 +598,7 @@ def test_start_switch_off_uses_the_session_path(monkeypatch: pytest.MonkeyPatch)
         lambda *_a, **_k: ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli.cmd_start()
+    rc = _start_mod.cmd_start()
 
     assert rc == 0
     assert len(session_calls) == 1
@@ -637,7 +637,7 @@ def test_start_switch_on_uses_the_root_legs(monkeypatch: pytest.MonkeyPatch) -> 
     recorded: list[list[str]] = []
     monkeypatch.setattr(launch_failures, "record", lambda names: recorded.append(list(names)))  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli.cmd_start()
+    rc = _start_mod.cmd_start()
 
     assert root_calls and root_calls[0]["reconcile"] is True
     assert wait_calls, "the root wait must be the readiness leg"

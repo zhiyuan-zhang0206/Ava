@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands as _ns
 from cli.commands import _update_orchestration as orch
+from cli.commands import stop as _ns
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.platform import IS_WINDOWS
 

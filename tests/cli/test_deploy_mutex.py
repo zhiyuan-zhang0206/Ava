@@ -163,7 +163,7 @@ def test_refusal_reaches_the_operator_as_a_message_not_a_traceback(
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", lambda *_a, **_kw: _Refused())  # pyright: ignore[reportUnknownArgumentType]
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update() == 1
     assert "gateway-host:pid1" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
@@ -189,7 +189,7 @@ def test_nothing_to_update_is_reported_as_success(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", lambda *_a, **_kw: _Nothing())  # pyright: ignore[reportUnknownArgumentType]
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update() == 0
     assert "up to date" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]

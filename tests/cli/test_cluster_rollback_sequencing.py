@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _cluster_rollback as _rb
+from cli.commands import cluster_rollback as _rb
 from cli.commands._update_phase_b import POLL_OK, POLL_STALLED, PollVerdict
 from shared.cluster_lock import DeployLease
 

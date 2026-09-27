@@ -17,11 +17,11 @@ subcommand builders and `_h_*` handlers); `cli/main.py` composes it and
 dispatches via `set_defaults(func=)` to the module's `cmd_*` handler — there is
 no registry or plugin mechanism, the wiring is the parser.
 
-`cli/commands/__init__.py` is the command door: it imports the `cmd_*` names
-`cli.parsers` handlers lazy-import from the door (a few parsers instead import
-a domain module directly, e.g. `cli.parsers.agents` reads `cmd_agents_ls` from
-`cli.commands.agents.control`). Seven subpackages hold the leaf domains split
-out of the once-flat directory, each an independent package door:
+`cli/commands/__init__.py` is an empty package door: no import work and no
+re-exports, so `import cli.commands` loads nothing else, Settings included.
+Each command module is its own door; `cli.parsers` handlers lazy-import
+`cmd_*` from the module that defines it, and test seams patch there. Seven
+subpackages hold the leaf domains, each an independent package door:
 
 - `agents/` — lifecycle control, notices, timelines, external-agent
   impersonation, the pty/computer-use daemons

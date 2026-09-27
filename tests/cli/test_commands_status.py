@@ -11,7 +11,7 @@ from typing import cast
 
 import pytest
 
-from cli import commands as _cli
+from cli.commands import status as _cli
 from shared.config import settings
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
