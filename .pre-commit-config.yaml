@@ -545,6 +545,18 @@ repos:
         files: ^(shared/config_registry\.py$|shared/config/.*\.py$|scripts/gen_config_lite_table\.py$|shared/config_lite_table\.json$)
         pass_filenames: false
 
+      # Package-door contract snapshots (shared/db.api.txt, shared/agents/api.txt,
+      # shared/events/api.txt) must match the door's current public surface — pure
+      # AST, so a body-only fix leaves the snapshot untouched; a signature change,
+      # or a new/removed public name, must land its snapshot diff in the same PR.
+      # See conventions/python-conventions.md and scripts/structure/contracts.py.
+      - id: contracts-snapshot-fresh
+        name: "core package-door contract snapshots in sync (drift: run .venv/bin/python scripts/structure/contracts.py --write)"
+        entry: .venv/bin/python scripts/structure/contracts.py --check
+        language: system
+        files: ^(shared/db\.py$|shared/agents/.*\.py$|shared/events/.*\.py$|shared/db\.api\.txt$|shared/agents/api\.txt$|shared/events/api\.txt$|scripts/structure/contracts\.py$)
+        pass_filenames: false
+
   - repo: local
     hooks:
       - id: lint-ava-okf
