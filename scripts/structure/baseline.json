@@ -608,7 +608,6 @@
   "private_imports": {
     "agent/exec_child.py::shared.log._add_postgres_sink": 1,
     "agent/impersonation_handoff.py::shared.agents.impersonation._impersonation_store": 2,
-    "agent/state.py::agent.hooks._registry": 1,
     "ava/_settings.py::shared.db._restore_pooled_session": 1,
     "ava/_settings.py::shared.plugin_config_registry._PLUGIN_CONFIGS": 1,
     "ava/_settings.py::shared.redis_client._RESILIENCE_KWARGS": 1,
