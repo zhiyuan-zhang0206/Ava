@@ -64,10 +64,11 @@ It refuses missing, changed, or unsettled holds and leaves resume to the finite
 executor after observation. Ordinary startup keeps its readiness-gated resume.
 
 A pure runner joins through `ava start --serve-agent-runner --no-serve-gateway`
-with `--gateway-url`, `--machine-name`, `--machine-host`, and an environment bearer.
-It validates the gateway's runner projection and persists local identity without
-creating a local cluster data plane. Every runner process fetches current
-connection facts at Settings construction.
+with `--gateway-url`, `--machine-name`, `--machine-host`, an environment bearer
+and `--db-capability` (the unit capability from `ava cluster db-authority
+issue-unit`, [[shared/cluster/authority/wiring.ava.okf.md]]). It installs it
+before persisting identity, creating no local data plane. Every runner process
+fetches current connection facts at Settings construction.
 
 Package acquisition is separate and has no cluster effects:
 [[cli/python-install.ava.okf.md]].

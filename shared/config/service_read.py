@@ -20,7 +20,6 @@ pattern as `shared/runtime_config.py`.
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -262,54 +261,41 @@ def _warn_undecodable_field(name: str, alias: str, _raw: str) -> None:
     )
 
 
-def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
+def bootstrap_config_values() -> dict[str, str]:
     """Return {ENV_ALIAS: value} for the BOOTSTRAP_FIELDS that are set.
 
-    Values are unmasked (the caller is an authenticated machine that needs the
-    real connection strings + secrets). A field set in the gateway's `.env` is
-    served as its raw `.env` text verbatim (already the env-string form the
-    recipient re-parses, including a comma-list), read fresh — so a rotated cluster
-    secret reaches an agent on its next restart without the gateway itself
-    restarting. The data-plane URL aliases
+    Values are unmasked (the caller is an authenticated machine). A field set in
+    the gateway's `.env` is served as its raw `.env` text verbatim (already the
+    env-string form the recipient re-parses, including a comma-list), read fresh
+    — so a rotated cluster secret reaches an agent on its next restart without
+    the gateway itself restarting. The data-plane URL aliases
     (`AVA_DB_URL` / `AVA_REDIS_URL`) have their loopback host rewritten to this
     gateway's reachable address (`_serve_reachable_data_plane_hosts`) — required
     for cross-machine enroll. AVA_GATEWAY_OTLP_ENDPOINT is derived from this
     gateway's reachable host and OTLP port; local receiver settings are not
-    distributed. A field absent
-    from `.env` is served as its stringified boot-time value, except the required
-    DB URL and runner credential, which must share this fresh snapshot. Only None is skipped
-    (env can't express "no value"), so the recipient falls back to the field
-    default. An empty string IS served: it is the env form of an explicit
-    set-to-empty (e.g. AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT="" on a bench
-    gateway), and dropping it would silently revert the recipient to the field
-    default — exactly the distinction between "unset" and "set to empty".
+    distributed. A field absent from `.env` is served as its stringified
+    boot-time value, except the required DB URL, which must come from this fresh
+    snapshot. Only None is skipped (env can't express "no value"), so the
+    recipient falls back to the field default. An empty string IS served: it is
+    the env form of an explicit set-to-empty (e.g.
+    AVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT="" on a bench gateway), and dropping
+    it would silently revert the recipient to the field default — exactly the
+    distinction between "unset" and "set to empty".
 
-    `role` selects the credential projection: `None` and `"runner"` both rewrite the served
-    `AVA_DB_URL` to a runner-class login carried INSIDE the URL, never served as a
-    standalone key, so every bootstrap recipient dials exactly the surface its role
-    grants and nothing more (Task #1236). A local plane serves its active write
-    generation's runner login; a remote-managed plane serves the provider's
-    `ava_runner` with the gateway .env AVA_RUNNER_DB_PASSWORD. A cluster without
-    that authority raises rather than serving an endpoint that fails at first
-    connect with an unexplained auth error.
+    `AVA_DB_URL` is served as the CREDENTIAL-FREE endpoint (`served_db_endpoint`):
+    bootstrap hands out configuration, never a database login. A remote
+    agent-runner receives its runner login only through the explicit per-unit
+    capability the gateway operator issues (`shared.cluster.authority.unit`), so a
+    stale runner holding the bearer cannot reacquire the current write
+    generation here.
     """
     from pydantic import SecretStr
 
     from shared import runtime_config
     from shared.config import BOOTSTRAP_FIELDS, field_alias
 
-    if role not in (None, "runner"):
-        raise ValueError(
-            f"bootstrap role {role!r} is not a known projection — supported: "
-            f"'runner' or None (the least-privilege ava_runner URL)"
-        )
     aliases = runtime_config.read_env_aliases()
     out: dict[str, str] = {}
-    if not aliases.get("AVA_DB_URL"):
-        raise ValueError(
-            "AVA_DB_URL is missing from the gateway config snapshot; "
-            "cannot serve runner credentials from mixed config snapshots"
-        )
     for name in BOOTSTRAP_FIELDS:
         alias = field_alias(name)
         if alias in aliases:
@@ -322,6 +308,7 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
             value = value.get_secret_value()
         out[alias] = runtime_config.env_value_text(value)
     _serve_reachable_data_plane_hosts(out)
+    out["AVA_DB_URL"] = served_db_endpoint(aliases)
     out["AVA_GATEWAY_OTLP_ENDPOINT"] = _gateway_otlp_projection(aliases)
     # Provider keys are not Settings fields, so they cannot arrive through
     # BOOTSTRAP_FIELDS. Read only declared keys from the raw gateway .env; this
@@ -333,66 +320,27 @@ def bootstrap_config_values(role: str | None = None) -> dict[str, str]:
     for binding in provider_api.REGISTRY.bindings.values():
         if binding.key_env in aliases and binding.key_env not in out:
             out[binding.key_env] = aliases[binding.key_env]
-    db_url = out.get("AVA_DB_URL")
-    if not db_url:
-        raise ValueError(
-            "AVA_DB_URL is not served by bootstrap — cannot project the runner credential onto it"
-        )
-    out["AVA_DB_URL"] = _runner_projection(db_url, aliases)
     return out
 
 
-def _runner_projection(db_url: str, aliases: dict[str, str]) -> str:
-    """The served runner login: the active write generation's on a local plane
-    (its home keeps the ledger), the provider's `ava_runner` on a
-    remote-managed plane; anything else refuses."""
+def served_db_endpoint(aliases: dict[str, str] | None = None) -> str:
+    """The database endpoint this gateway serves to agent-runners: its `.env`
+    `AVA_DB_URL` without any password, loopback rewritten to the reachable host.
+
+    A local plane's `.env` already holds the credential-free endpoint; a
+    remote-managed plane's provider URL loses its password here. Raises when
+    the gateway's fresh config snapshot has no `AVA_DB_URL`."""
     from shared import runtime_config
-    from shared.cluster.authority import load_ledger
-    from shared.config import settings
+    from shared.cluster.authority.unit import credential_free
 
-    home = runtime_config.env_file_path().parent.resolve()
-    if load_ledger(home) is not None:
-        return _generation_runner_url(db_url, home)
-    if settings.data_plane.is_remote:
-        return _provider_runner_url(db_url, aliases)
-    raise ValueError(
-        "this gateway home has no database authority ledger, so it has no runner "
-        "login to serve; birth it with `ava start` or convert it once with "
-        "scripts/cutover_db_authority.py"
-    )
-
-
-def _generation_runner_url(db_url: str, home: Path) -> str:
-    """A local plane's runner projection: the active write generation's runner
-    login on the served endpoint.
-
-    Interim (dbgen slice 4): a networked cluster's runners still acquire their
-    login here, so a stale runner holding the bearer can reacquire the current
-    generation until per-unit delivery retires this exchange (slice 6).
-    """
-    from shared.cluster.authority import AuthorityRefusedError, write_grant
-
-    try:
-        grant = write_grant(home, "runner")
-    except AuthorityRefusedError as exc:
-        raise ValueError(f"cannot serve the runner database login: {exc}") from exc
-    return grant.dsn(db_url)
-
-
-def _provider_runner_url(db_url: str, aliases: dict[str, str]) -> str:
-    """A remote-managed plane's runner projection: the provider-provisioned
-    `ava_runner` with the gateway's recorded provider credential."""
-    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, project_runner_db_url
-
-    runner_password = aliases.get(RUNNER_DB_PASSWORD_ENV) or ""
-    if not runner_password:
-        raise ValueError(
-            "AVA_RUNNER_DB_PASSWORD is not set in the gateway's .env — on a "
-            "remote-managed data plane the runner role is provisioned at the "
-            "provider and its password must be written into the gateway .env "
-            "as the explicit first-start credential."
-        )
-    return project_runner_db_url(db_url, runner_password)
+    if aliases is None:
+        aliases = runtime_config.read_env_aliases()
+    db_url = aliases.get("AVA_DB_URL")
+    if not db_url:
+        raise ValueError("AVA_DB_URL is missing from the gateway config snapshot")
+    served = {"AVA_DB_URL": credential_free(db_url)}
+    _serve_reachable_data_plane_hosts(served)
+    return served["AVA_DB_URL"]
 
 
 def _gateway_otlp_projection(aliases: dict[str, str]) -> str:

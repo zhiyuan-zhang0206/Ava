@@ -31,9 +31,7 @@ def _read_policy() -> SamplingPolicy:
     if config_source_is_local() or not should_fetch_from_gateway():
         aliases = read_env_aliases()
     else:
-        aliases = fetch_bootstrap_config(
-            settings.gateway.gateway_url, timeout=2.0, attempts=1, role="runner"
-        )
+        aliases = fetch_bootstrap_config(settings.gateway.gateway_url, timeout=2.0, attempts=1)
     defaults = SamplingPolicy()
     return SamplingPolicy.model_validate(
         {

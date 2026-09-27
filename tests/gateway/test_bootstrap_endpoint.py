@@ -33,14 +33,14 @@ def test_bootstrap_returns_config_with_secret(db_conn, monkeypatch: pytest.Monke
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 200
     body = cast(dict[str, str], resp.json())
-    # Every projection uses the least-privilege DB role; only the host may be
+    # The DB URL is the credential-free endpoint; only the host may be
     # rewritten for a remote runner.
     expected = str(config.settings.data_plane.db_url)
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)
     served, owner = urlsplit(body["AVA_DB_URL"]), urlsplit(expected)
-    assert served.username == "ava_g0_runner"
+    assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path
@@ -90,13 +90,14 @@ def test_bootstrap_serves_without_auth_when_secret_unset(
     assert "AVA_DB_URL" in resp.json()
 
 
-def test_bootstrap_role_runner_projects_the_active_generation(
+def test_old_role_runner_request_gets_no_database_login(
     db_conn,
     monkeypatch: pytest.MonkeyPatch,
     served_gateway_home: Any,
 ) -> None:
-    """?role=runner serves AVA_DB_URL as the active write generation's runner
-    login, carried inside the URL (Task #1236) — never as a standalone key."""
+    """Regression: a runner still on the retired exchange asks `?role=runner`
+    with the bearer. It receives the credential-free endpoint, never the active
+    generation's login, so a stale runner cannot re-authorize itself here."""
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
         resp = client.get("/api/bootstrap", params={"role": "runner"}, headers=_auth())
@@ -104,32 +105,23 @@ def test_bootstrap_role_runner_projects_the_active_generation(
     body: dict[str, str] = resp.json()
     assert "AVA_RUNNER_DB_PASSWORD" not in body
     parts = urlsplit(body["AVA_DB_URL"])
-    runner = served_gateway_home.roles.runner
-    assert (parts.username, parts.password) == (runner.name, runner.password)
-    assert parts.path == urlsplit(config.settings.data_plane.db_url).path
+    assert parts.password is None
+    payload = "".join(body.values())
+    for role in (served_gateway_home.roles.runner, served_gateway_home.roles.gateway):
+        assert role.name not in payload
+        assert role.password not in payload
 
 
-def test_bootstrap_unknown_role_refused(
-    db_conn,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    with TestClient(app) as client:
-        resp = client.get("/api/bootstrap", params={"role": "admin"}, headers=_auth())
-    assert resp.status_code == 400
-
-
-def test_bootstrap_role_runner_without_authority_refused(
+def test_bootstrap_without_a_database_endpoint_refused(
     db_conn,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A local home without a database authority ledger fails with the operator
-    fix, not a URL that dies at first connect."""
-    (tmp_path / ".env").write_text(f"AVA_DB_URL={config.settings.data_plane.db_url}\n")
+    """A gateway config snapshot without AVA_DB_URL is a 400, never a guess."""
+    (tmp_path / ".env").write_text("AVA_REDIS_URL=redis://127.0.0.1:1/0\n")
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     with TestClient(app) as client:
-        resp = client.get("/api/bootstrap", params={"role": "runner"}, headers=_auth())
+        resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 400
-    assert "database authority ledger" in resp.json()["detail"]
+    assert "AVA_DB_URL is missing" in resp.json()["detail"]

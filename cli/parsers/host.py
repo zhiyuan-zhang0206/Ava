@@ -181,6 +181,14 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "--health-port-base", type=int, default=None, help="this unit's daemon port-block base"
     )
     start_p.add_argument("--ssl-cert-file", default=None, help="CA bundle for gateway verification")
+    start_p.add_argument(
+        "--db-capability",
+        default=None,
+        metavar="BUNDLE",
+        help="agent-runner only: install the database capability bundle the gateway operator "
+        "issued (`ava cluster db-authority issue-unit`); its transport key comes from "
+        "AVA_DB_CAPABILITY_KEY. The bundle file is deleted once installed.",
+    )
     start_p.set_defaults(func=_h_start)
 
 

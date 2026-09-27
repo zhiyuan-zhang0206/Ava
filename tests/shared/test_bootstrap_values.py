@@ -14,7 +14,7 @@ from shared.envfile import upsert_env
 
 @pytest.fixture
 def serve_generation(seed_write_generation: Callable[[Path], Any]) -> Callable[[Path], None]:
-    """Make `home` a local gateway home serving its active generation's runner login."""
+    """Make `home` a local gateway home keeping an active generation (never served)."""
 
     def serve(home: Path) -> None:
         upsert_env(home / ".env", {"AVA_DB_URL": str(config.settings.data_plane.db_url)})
@@ -29,14 +29,14 @@ def test_bootstrap_values_use_env_aliases_and_skip_unset() -> None:
     # DB/Redis URLs are required (always set in test env) → present, keyed by alias.
     assert "AVA_DB_URL" in vals
     assert "AVA_REDIS_URL" in vals
-    # Every bootstrap projection is the runner identity; only the host may be
+    # The served DB URL is the credential-free endpoint; only the host may be
     # rewritten for a remote runner.
     expected = str(config.settings.data_plane.db_url)
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(expected)
-    assert served.username == "ava_g0_runner"
+    assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path
@@ -179,7 +179,7 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
 
     vals = config.bootstrap_config_values()
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(config.settings.data_plane.db_url)
-    assert served.username == "ava_g0_runner"
+    assert (served.username, served.password) == (owner.username, None)
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path
@@ -201,7 +201,7 @@ def test_bootstrap_keeps_existing_reachable_url_host(
 
     vals = config.bootstrap_config_values()
     served, owner = urlsplit(vals["AVA_DB_URL"]), urlsplit(host_url)
-    assert served.username == "ava_g0_runner"
+    assert (served.username, served.password) == ("ava_main", None)
     assert served.hostname == owner.hostname
     assert served.port == owner.port
     assert served.path == owner.path

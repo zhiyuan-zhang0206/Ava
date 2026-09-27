@@ -334,3 +334,56 @@ def _fetch_gateway_cluster_status() -> dict[str, object]:
     resp = dial_get(url, timeout=10.0, headers=gateway_auth_headers())
     resp.raise_for_status()
     return resp.json()
+
+
+def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours: float) -> int:
+    """`ava cluster db-authority issue-unit` — seal one remote unit's database capability.
+
+    Runs on the gateway home. The bundle carries the ACTIVE write generation's
+    runner login, the endpoint bootstrap serves and the unit's enrollment
+    secret, bound to (`machine`, `home`) and expiring after `ttl_hours`. It is
+    written 0600 to `out` (never overwritten) and sealed under a transport key
+    printed once here; the unit installs it with
+    `ava start --db-capability <bundle>` and that key in AVA_DB_CAPABILITY_KEY.
+    Refused on a pure agent-runner, a remote-managed plane, a home without an
+    active generation, and while a release operation is incomplete.
+    """
+    from pathlib import Path
+
+    from shared.bootstrap import config_source_is_local
+    from shared.cluster.authority import AuthorityRefusedError
+    from shared.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
+    from shared.config import settings
+    from shared.config.service_read import served_db_endpoint
+    from shared.paths import ava_home
+    from shared.release_operation import require_configuration_write_authorized
+
+    gateway_home = ava_home().resolve()
+    target = Path(out).expanduser().absolute()
+    if not config_source_is_local() or settings.data_plane.is_remote:
+        print(
+            "✗ ava cluster db-authority issue-unit: runs on a gateway home with a local data "
+            "plane; a remote-managed plane has no write generation to issue",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        require_configuration_write_authorized(gateway_home)
+        unit = UnitIdentity(machine=machine, home=home)
+        issued = issue_bundle(
+            gateway_home, unit=unit, endpoint=served_db_endpoint(), ttl_s=ttl_hours * 3600
+        )
+        write_bundle(target, issued.envelope)
+    except (AuthorityRefusedError, ValueError, RuntimeError, OSError) as exc:
+        print(f"✗ ava cluster db-authority issue-unit: {exc}", file=sys.stderr)
+        return 1
+    expires = datetime.fromtimestamp(issued.expires_at).astimezone().isoformat(timespec="seconds")
+    print(
+        f"✓ bundle for {unit.describe()} (write generation {issued.generation}, expires "
+        f"{expires}) written to {target} (0600)\n"
+        f"  transport key (shown once, carry it separately): {issued.transport_key}\n"
+        "  on the unit: export AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run\n"
+        f"  `ava start --db-capability <bundle>` (first start also takes --gateway-url, "
+        "--machine-name, --machine-host and AVA_CLUSTER_SECRET)"
+    )
+    return 0

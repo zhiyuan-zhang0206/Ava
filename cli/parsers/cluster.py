@@ -110,6 +110,43 @@ def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
     return cmd_cron_unregister()
 
 
+def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
+    from cli.commands.cluster import cmd_db_authority_issue_unit
+
+    return cmd_db_authority_issue_unit(
+        machine=args.machine, home=args.home, out=args.out, ttl_hours=args.ttl_hours
+    )
+
+
+def _add_db_authority_parser(
+    cluster_sub: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    from cli.main import _h_cluster_db_authority_issue_unit
+
+    db_authority_p = cluster_sub.add_parser(
+        "db-authority",
+        help="[cluster] database write-generation authority for remote agent-runner units",
+    )
+    db_authority_sub = db_authority_p.add_subparsers(dest="db_authority_cmd", required=True)
+    issue_unit_p = db_authority_sub.add_parser(
+        "issue-unit",
+        help="on the gateway: seal the active generation's runner login and the unit's "
+        "enrollment secret into a 0600 bundle for one agent-runner unit (join, the "
+        "one-time cutover, emergencies); prints its transport key once",
+    )
+    issue_unit_p.add_argument("--machine", required=True, help="the unit's machine name")
+    issue_unit_p.add_argument(
+        "--home", required=True, help="the unit's absolute $AVA_HOME path on its machine"
+    )
+    issue_unit_p.add_argument(
+        "--out", required=True, help="bundle path to create (refused when it exists)"
+    )
+    issue_unit_p.add_argument(
+        "--ttl-hours", type=float, default=24.0, help="bundle lifetime in hours (default: 24)"
+    )
+    issue_unit_p.set_defaults(func=_h_cluster_db_authority_issue_unit)
+
+
 def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     from cli.main import (
         _h_cluster_destroy,
@@ -212,6 +249,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
                 "machines row as pause_reason for the resume checklist)",
             )
         p_.set_defaults(func=_h_cluster_pause if verb == "pause" else _h_cluster_resume)
+
+    _add_db_authority_parser(cluster_sub)
 
     cluster_update_p = cluster_sub.add_parser(
         "update",

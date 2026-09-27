@@ -524,12 +524,12 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     from ops.roster import build_services
     from shared.config import PROCESS_PROFILES
 
-    def projection(_url: str) -> str:
-        return "postgresql://ava_runner@fixture/ava"
+    def delivery(_cls: str) -> dict[str, str]:
+        return {"AVA_DB_URL": "postgresql://ava_g0_runner@fixture/ava"}
 
-    # The launcher binds the runner DB projection next to the marker; that
-    # projection is not under test, so keep it independent of this host's .env.
-    monkeypatch.setattr(_root_driver, "runner_db_url_projection", projection)
+    # The launcher binds the database login next to the marker; that delivery
+    # is not under test, so keep it independent of this host's home.
+    monkeypatch.setattr("cli.commands._data_plane.db_delivery", delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
     profile = _root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"

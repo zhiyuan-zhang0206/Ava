@@ -394,15 +394,6 @@ def test_launched_services_receive_their_class_login_only(
     assert "AVA_DB_URL" not in root and authority.GENERATION_ENV not in root
 
 
-def test_bootstrap_projects_the_active_runner_generation(born: Born) -> None:
-    from shared.config.service_read import _generation_runner_url
-
-    name, password = born.login("runner")
-    assert _generation_runner_url(born.endpoint(), born.home) == url_with_userinfo(
-        born.endpoint(), name, password
-    )
-
-
 def test_revoked_generation_login_is_not_resurrected_by_start(born: Born) -> None:
     """A restored catalog that re-enables an old number is swept, never admitted."""
     with born.admin() as conn:

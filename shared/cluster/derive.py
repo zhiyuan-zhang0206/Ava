@@ -271,25 +271,23 @@ def redis_password_from_env() -> str:
     return (dotenv_values(ava_home() / ".env").get(REDIS_PASSWORD_ENV) or "").strip()
 
 
-def runner_db_url_projection(db_url: str) -> str:
-    """Project ``db_url`` onto the least-privilege runner identity.
+def runner_db_url_projection() -> str:
+    """The provider runner login for agents on a remote-managed gateway plane.
 
-    Agent processes and agent-profile daemons receive the runner credential
-    inside their database URL, never as a standalone secret. A gateway-local
-    launcher reads URL and password from one current file snapshot, not a cached
-    URL combined with a newly rotated password. A remote runner preserves its
-    authenticated bootstrap projection and never guesses local credentials.
+    A remote-managed (provider) plane has no write generation: its agents dial
+    the provider-provisioned `ava_runner` with the gateway `.env`'s recorded
+    provider credential, read with its URL from one current file snapshot, never
+    a cached URL combined with a newly rotated password. Only a gateway-config
+    unit projects this; a pure agent-runner's services receive their installed
+    unit capability instead (`shared.cluster.authority.unit`).
     """
     from shared.bootstrap import config_source_is_local
-    from shared.config.data_plane import _is_runner_db_url
     from shared.runtime_config import read_env_aliases
 
     if not config_source_is_local():
-        if _is_runner_db_url(db_url):
-            return db_url
         raise RuntimeError(
-            "a remote agent launcher requires an ava_runner URL from authenticated bootstrap; "
-            "refusing to combine an owner URL with local credentials"
+            "a pure agent-runner never projects a runner login; its services receive the "
+            "installed unit capability"
         )
     aliases = read_env_aliases()
     snapshot_url = aliases.get("AVA_DB_URL")

@@ -37,12 +37,17 @@ join the private network, read/export that bearer without echoing it, then run:
 ```bash
 .venv/bin/ava start --serve-agent-runner --no-serve-gateway \
   --gateway-url http://<gateway-host>:8000 \
-  --machine-name <new-name> --machine-host <this-host-addr>
+  --machine-name <new-name> --machine-host <this-host-addr> \
+  --db-capability <bundle>
 ```
 
-Unset the bearer afterward. `--ssl-cert-file PATH` supplies a trusted CA bundle
-when required. First start validates the runner projection, durably records
-local identity, registers this host, and starts its selected root services.
+The bundle comes from `ava cluster db-authority issue-unit --machine <new-name>
+--home <this unit's $AVA_HOME> --out <bundle>` on the gateway; export its
+printed transport key as `AVA_DB_CAPABILITY_KEY` without echoing it. Unset the
+bearer and the key afterward. `--ssl-cert-file PATH` supplies a trusted CA
+bundle when required. First start installs the capability (and deletes the
+bundle), durably records local identity, registers this host, and starts its
+selected root services.
 Every runner process fetches current connection facts at Settings construction.
 Use bare start thereafter; conflicting identity flags refuse.
 

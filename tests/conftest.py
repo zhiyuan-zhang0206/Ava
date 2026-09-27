@@ -1667,6 +1667,16 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shared.bootstrap, "dial_get", _boom)
 
 
+@pytest.fixture(autouse=True)
+def _restore_db_authority_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test that drives a boot pass (`load_ava_env`, a runner's bootstrap
+    injection) may record a per-process database-authority refusal; restore the
+    suite's value afterwards so the refusal never leaks into later tests' dials."""
+    from shared import dotenv_boot
+
+    monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", dotenv_boot._db_authority_refusal)
+
+
 @pytest.fixture(scope="session")
 def milvus_server() -> Iterator[str]:
     """Session-scoped standalone milvus-lite server.

@@ -1,4 +1,10 @@
-"""Runner database URL projection for every agent-profile launch path."""
+"""The provider runner projection for agents on a remote-managed gateway plane.
+
+A remote-managed plane has no write generation: its gateway-local launcher
+projects the provider `ava_runner` from one fresh `.env` snapshot. A pure
+agent-runner never projects a login; its services receive the installed unit
+capability.
+"""
 
 from __future__ import annotations
 
@@ -19,19 +25,7 @@ def test_projects_owner_url_to_runner_identity(monkeypatch: pytest.MonkeyPatch) 
         Mock(return_value={"AVA_DB_URL": _OWNER_URL, "AVA_RUNNER_DB_PASSWORD": "runner-password"}),
     )
 
-    assert derive.runner_db_url_projection(_OWNER_URL) == _RUNNER_URL
-
-
-def test_runner_url_passes_through_without_reading_password(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _unexpected_password_read() -> str:
-        pytest.fail("runner projection must not replace an already-runner URL")
-
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=False))
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", _unexpected_password_read)
-
-    assert derive.runner_db_url_projection(_RUNNER_URL) == _RUNNER_URL
+    assert derive.runner_db_url_projection() == _RUNNER_URL
 
 
 def test_missing_runner_password_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,12 +35,11 @@ def test_missing_runner_password_fails_loudly(monkeypatch: pytest.MonkeyPatch) -
     )
 
     with pytest.raises(RuntimeError, match="AVA_RUNNER_DB_PASSWORD is missing"):
-        derive.runner_db_url_projection(_OWNER_URL)
+        derive.runner_db_url_projection()
 
 
-@pytest.mark.parametrize("cached_url", [_OWNER_URL, _RUNNER_URL])
 def test_gateway_url_and_password_come_from_one_snapshot(
-    monkeypatch: pytest.MonkeyPatch, cached_url: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=True))
     snapshot = Mock(
@@ -56,36 +49,30 @@ def test_gateway_url_and_password_come_from_one_snapshot(
         }
     )
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", snapshot)
-    assert derive.runner_db_url_projection(cached_url) == (
+    assert derive.runner_db_url_projection() == (
         "postgresql://ava_runner:new-runner@db-new:6000/new-database"
     )
     snapshot.assert_called_once_with()
 
 
-def test_missing_snapshot_url_cannot_fall_back_to_cached_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_missing_snapshot_url_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=True))
     monkeypatch.setattr(
         "shared.runtime_config.read_env_aliases",
-        Mock(
-            return_value={
-                "AVA_RUNNER_DB_PASSWORD": "new-runner",
-            }
-        ),
+        Mock(return_value={"AVA_RUNNER_DB_PASSWORD": "new-runner"}),
     )
     with pytest.raises(RuntimeError, match="AVA_DB_URL is missing"):
-        derive.runner_db_url_projection(_OWNER_URL)
+        derive.runner_db_url_projection()
 
 
-def test_remote_owner_projection_never_reads_local_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_pure_runner_never_projects_a_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pure agent-runner has no provider credential and no bootstrap-served
+    login to pass through: the projection refuses without reading anything."""
     monkeypatch.setattr("shared.bootstrap.config_source_is_local", Mock(return_value=False))
     snapshot = Mock(side_effect=AssertionError("must not read local credentials"))
     monkeypatch.setattr("shared.runtime_config.read_env_aliases", snapshot)
-    with pytest.raises(RuntimeError, match="authenticated bootstrap"):
-        derive.runner_db_url_projection(_OWNER_URL)
+    with pytest.raises(RuntimeError, match="installed unit capability"):
+        derive.runner_db_url_projection()
     snapshot.assert_not_called()
 
 

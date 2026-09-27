@@ -9,10 +9,11 @@ internal data plane always authenticates, whatever the bearer
 | `AVA_CLUSTER_SECRET` | Gateway and enrolled runners | Control-plane bearer for gateway API, `/ops`, bootstrap, and machine registration; empty = unauthenticated user-facing API, loopback-only listeners |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority fence |
 | OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists and rollouts leave it alone |
-| `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home only | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`) |
+| `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`), `units/<key>.json` (each remote unit's enrollment secret) |
+| `$AVA_HOME/db-authority/` (0700; files 0600) | Remote agent-runner home | `unit.json` (the installed runner login of one generation, bound to this unit and the served endpoint), `enrollment.json` (this unit's enrollment secret) |
 | `AVA_REDIS_ADMIN_PASSWORD` | Gateway only | Redis `default` user and `requirepass` |
 | `AVA_REDIS_PASSWORD` | Gateway file; embedded in `AVA_REDIS_URL` | Redis ACL runtime user |
-| `AVA_RUNNER_DB_PASSWORD` | Remote-managed planes only | The provider-provisioned `ava_runner` login a remote plane's bootstrap projects |
+| `AVA_RUNNER_DB_PASSWORD` | Remote-managed planes only | The provider-provisioned `ava_runner` login the gateway-local launcher projects for agents (never served by bootstrap) |
 
 A local plane's `.env` carries only the credential-free database endpoint
 (`postgresql://<owner>@host:port/<db>`). The schema owner is `NOLOGIN` without
@@ -32,9 +33,14 @@ Delivery:
   the selected release image, or the source checkout the home was born from.
   Anything else keeps the credential-free endpoint and its first dial fails
   with `NoDatabaseAuthorityError`.
-- Bootstrap projects the active runner login inside `AVA_DB_URL` for enrolled
-  runners. This interim exchange lets a stale runner holding the bearer
-  reacquire the current generation; per-unit delivery retires it.
+- Bootstrap serves no database credential: its `AVA_DB_URL` is the
+  credential-free endpoint (a remote-managed provider URL loses its password),
+  and a runner strips any password an older gateway still serves. A remote
+  agent-runner's root launcher delivers its installed unit capability to every
+  runner-class service, and an admitted operator process on that home consumes
+  it; anything else refuses by name. The capability arrives only as an
+  operator-issued bundle ([runbook](runbook.md)), so a stale runner holding the
+  bearer cannot reacquire the current generation.
 
 Agents never receive an admin password, `AVA_REDIS_PASSWORD` as a standalone
 variable, or a gateway-class login. Agent-profile startup at the default home
@@ -48,12 +54,14 @@ home), a LOGIN `ava_runner` (`AVA_RUNNER_DB_PASSWORD`), trust `pg_hba` lines and
 no database authority ledger. `ava start` refuses it before any native effect
 and names `scripts/cutover_db_authority.py`, the one explicit conversion;
 nothing converts implicitly. Development and preview homes can be destroyed
-and re-born instead. Networked homes (remote agent-runners) are not converted
-by this script: their runners hold owner-era credentials and wait for the
-fleet cutover.
+and re-born instead. A networked home (remote agent-runners) additionally
+classifies its remote units and issues their capabilities in step
+`remote-units` below; the runner-side cleanup of retired keys belongs to the
+home adoption.
 
 Run it from the checkout that owns the home (its `.venv`), in a gateway context,
-with the application stopped:
+with the application stopped (a networked home adds `--unit` / `--exclude-unit`
+/ `--bundle-dir`):
 
 ```bash
 ava stop --keep-infra
@@ -79,6 +87,16 @@ application root and persistent terminals. Two steps run in order:
   that pair, proves both logins, activates the generation, checks the catalog
   invariant, and only then rewrites `.env` (credential-free `AVA_DB_URL`; the
   owner and runner passwords removed). A superuser owner is refused first.
+- `remote-units` reads `machine_units`: every unit other than this gateway unit
+  must be classified exactly once, `--unit MACHINE:HOME` (included) or
+  `--exclude-unit MACHINE:HOME` (paused or offline; it stays fenced); units of
+  paused machines must be excluded. It rotates the Redis admin password (runner
+  homes hold copies of it; staged in `db-authority/redis-admin.pending` so a
+  crash resumes with the same value, applied with `CONFIG SET requirepass`,
+  persisted to `redis.conf` and `.env`, the old password proven refused) and
+  writes one sealed bundle per included unit into `--bundle-dir` (an
+  owner-only directory), printing each transport key once. A single box has no
+  remote unit and the step is a no-op.
 
 A home already born authenticated is only verified. Each step records its
 intent before its effect in `$AVA_HOME/db-authority/cutover.json` (0600): an

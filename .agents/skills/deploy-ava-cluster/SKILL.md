@@ -104,16 +104,22 @@ Start the gateway first, then use the same entry on each runner:
 ```bash
 printf 'Cluster secret: ' >&2
 IFS= read -rs AVA_CLUSTER_SECRET
+printf '\nCapability transport key: ' >&2
+IFS= read -rs AVA_DB_CAPABILITY_KEY
 printf '\n' >&2
-export AVA_CLUSTER_SECRET
+export AVA_CLUSTER_SECRET AVA_DB_CAPABILITY_KEY
 .venv/bin/ava start --serve-agent-runner --no-serve-gateway \
   --gateway-url http://<gateway-host>:8000 \
-  --machine-name machine-2 --machine-host <this-host-addr>
-unset AVA_CLUSTER_SECRET
+  --machine-name machine-2 --machine-host <this-host-addr> \
+  --db-capability /path/to/machine-2.bundle
+unset AVA_CLUSTER_SECRET AVA_DB_CAPABILITY_KEY
 ```
 
-First start validates the gateway's authenticated runner projection, persists
-local identity, registers the host, and waits for its selected services. It
+The bundle comes from `ava cluster db-authority issue-unit --machine machine-2
+--home <the runner's $AVA_HOME> --out machine-2.bundle` on the gateway, which
+prints its transport key once. First start installs that database capability,
+persists local identity, registers the host, and waits for its selected
+services. It
 creates no local cluster data plane. Each runner process fetches current
 connection facts from the gateway at Settings construction. See
 [join a runner](references/join-a-runner.md) for health-port and TLS inputs.

@@ -105,8 +105,9 @@ sessions.
 
 ## Delivery and wiring
 
-How the active generation reaches the pooler, launched services and operator
-processes, and where birth, ordinary start and the cutover call this library:
+How the active generation reaches the pooler, launched services, operator
+processes and remote agent-runner units (`unit`: sealed per-unit bundles), and
+where birth, ordinary start and the cutover call this library:
 [[shared/cluster/authority/wiring.ava.okf.md|Write-generation delivery and wiring]].
 
 ## Tests
@@ -115,7 +116,11 @@ processes, and where birth, ordinary start and the cutover call this library:
 `authority_postgres`; `test_single_box.py` and `test_cutover.py` drive the real
 start steps and the cutover against a home-owned PostgreSQL, PgBouncer and
 Redis (including the collector's monitoring dial across a rollover), and
-`test_delivery.py` covers delivery and the boot pass without a database. It
+`test_delivery.py` covers delivery and the boot pass without a database;
+`test_unit_capability.py` covers the remote-unit bundle (sealing, binding,
+install, the runner's boot pass and launcher) and, on the real gateway plane,
+issue -> runner start -> generation login, the credential-free bootstrap, a
+revoked generation's bundle and the networked cutover step. It
 uses a throwaway instance with peer-only admin and SCRAM for every other role,
 plus a template built by the superuser acting as the owner. Crash injection
 covers each durable boundary. A mutation of every guard turns at least one test

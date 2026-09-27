@@ -201,17 +201,25 @@ groups carry every grant, birth mints write generation 0
 ([authority](../../shared/cluster/authority/authority.ava.okf.md)), an ordinary
 start re-grants, sweeps and checks the catalog invariant, the root launcher
 delivers each service its class login bound into the launch digest, and an
-admitted operator CLI consumes the gateway login. Existing homes convert
-through the one-time `scripts/cutover_db_authority.py` (steps `redis`, `db`;
+admitted operator CLI consumes the gateway login. Bootstrap serves no database
+credential; a remote agent-runner installs a sealed, unit-bound capability the
+gateway operator issues (`ava cluster db-authority issue-unit`,
+`ava start --db-capability`), carrying the active generation's runner login and
+the unit's enrollment secret
+([unit capability](../../shared/cluster/authority/wiring.ava.okf.md#remote-agent-runner-units)).
+Existing homes convert through the one-time `scripts/cutover_db_authority.py`
+(steps `redis`, `db`, and for networked homes `remote-units`;
 [credential split](../../conventions/data-plane-secret-split.md#convert-an-existing-home)).
 
 Remaining: the release transition's `fencing` / `authorizing` phases (revoke,
 pooler stop, closure proof, mint the next generation, restart the pooler) and
 its executor's admin DSN — until they land, the finite executor running a
-candidate image receives no database authority from the boot pass; per-unit
-delivery for remote runners, retiring the interim bootstrap projection (which
-still lets a bearer-holding stale runner reacquire the current runner login),
-and the networked cutover; per-generation API machine tokens.
+candidate image receives no database authority from the boot pass; the
+enrollment channel that uses the unit enrollment secret (join-time minting,
+rotation and revocation commands, the coordinator listener) and the automated
+per-operation capability exchange, without which networked rollouts keep
+refusing; per-generation API machine tokens and runners that stop holding the
+human bearer.
 
 ## Remaining: qualify PITR custody and restart recovery
 

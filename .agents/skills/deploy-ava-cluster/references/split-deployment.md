@@ -33,8 +33,9 @@ with the same bytes or omit it. Transfer the bearer through the operator's
 secret channel. Do not transfer the gateway environment file to a runner.
 
 For locally owned storage, keep the generated DB and Redis URLs (the DB URL is
-a credential-free endpoint). Bootstrap projects the active runner login and
-rewrites loopback hosts to the gateway's reachable `machine_host`. The gateway itself dials its local
+a credential-free endpoint). Bootstrap serves that endpoint without a login
+and rewrites loopback hosts to the gateway's reachable `machine_host`; each
+runner's login is its issued unit capability. The gateway itself dials its local
 storage. Off-box reachability requires both the configured private network and
 the credential for the caller's role.
 
@@ -54,7 +55,8 @@ gateway alone does not establish that return path.
 
 Use a distinct health-port block when units share a loopback namespace. A
 runner does not cache the gateway's DB/Redis URLs or owner credentials; each
-process fetches its runner projection at startup. Model-provider credentials
+process fetches the configuration at startup and uses its installed unit
+capability for the database. Model-provider credentials
 remain local to the runner.
 
 ## External data plane
@@ -66,6 +68,8 @@ the application-owner identity. The three fields are required together; local,
 mixed-ownership, or query-redirected endpoints are rejected.
 
 The external service must already provide Ava's baseline schema and runner role.
+Its runner login serves the gateway's own agents; there is no write generation
+to issue, so remote agent-runners are not supported on such a plane.
 Start does not initialize or manage its native instances, provision roles, or
 apply Redis ACLs. The explicitly supplied DB owner still authorizes ordinary
 application migrations. Native instance ownership and application-schema

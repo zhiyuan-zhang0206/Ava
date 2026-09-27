@@ -1,4 +1,10 @@
-"""Agent-profile root manifests bind the runner credential to that child only."""
+"""Agent-profile root manifests bind the runner credential to that child only.
+
+This is the remote-managed gateway plane's provider projection: no write
+generation exists there, so only the agent-profile child receives the
+provider runner login. A pure agent-runner delivers its installed unit
+capability instead (tests/lifecycle/db_authority/test_unit_capability.py).
+"""
 
 from pathlib import Path
 
@@ -28,9 +34,13 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
     )
     projected = "postgresql://ava_runner:fixture@127.0.0.1:1/ava"
 
-    def _fake_projection(_url: str) -> str:
+    def _fake_projection() -> str:
         return projected
 
+    from shared.config import settings
+
+    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
     monkeypatch.setattr(_root_driver, "runner_db_url_projection", _fake_projection)
     environments = {spec.session: _root_driver._service_extra_env(spec) for spec in (agent, ops)}
     path = generate(

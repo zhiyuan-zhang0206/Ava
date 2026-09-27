@@ -17,12 +17,16 @@ from shared.runtime_interpreter import source_digest
 
 
 def _write_generation(home: Path) -> dict[str, object] | None:
-    """The active write generation's non-secret reference, or None when the home
-    keeps no database authority (a pure runner or a remote-managed plane)."""
+    """The delivered write generation's non-secret reference: the ledger's active
+    generation on a gateway home, the installed unit capability's on a pure
+    agent-runner, None on a remote-managed plane."""
     from shared.cluster.authority import load_ledger
+    from shared.cluster.authority.unit import unit_reference
 
     ledger = load_ledger(home.resolve())
-    if ledger is None or ledger.active is None:
+    if ledger is None:
+        return unit_reference(home.resolve())
+    if ledger.active is None:
         return None
     return {"number": ledger.active.number, "credential_digest": ledger.active.credential_digest}
 

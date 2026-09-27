@@ -126,31 +126,59 @@ def _capability_value(cap: str, stored: dict[str, str], *, explicit: bool | None
     return prior if prior is not None else explicit
 
 
-def _join(values: dict[str, str]) -> None:
+def _join(values: dict[str, str], home: Path, capability: str | None) -> None:
     from shared.bootstrap import fetch_bootstrap_config
+    from shared.cluster.authority.unit import CAPABILITY_KEY_ENV, load_unit_capability
 
     gateway = values["AVA_GATEWAY_URL"]
     host = values.get("AVA_MACHINE_HOST", "")
     secret = values.get("AVA_CLUSTER_SECRET", "")
+    transport_key = os.environ.pop(CAPABILITY_KEY_ENV, "")
     remote = not is_loopback_host(urlsplit(gateway).hostname or "")
     if remote and (not host or is_loopback_host(host)):
         raise ValueError("joining a remote gateway requires a reachable --machine-host")
     if remote and not secret:
         raise ValueError("joining a remote gateway requires AVA_CLUSTER_SECRET")
     os.environ["AVA_CLUSTER_SECRET"] = secret
-    payload = fetch_bootstrap_config(gateway, role="runner")
-    from shared.config.data_plane import _is_runner_db_url
-
-    if not _is_runner_db_url(payload["AVA_DB_URL"]):
-        raise ValueError("gateway did not return the runner database credential projection")
+    payload = fetch_bootstrap_config(gateway)
     if remote and any(
         is_loopback_host(urlsplit(payload[key]).hostname or "")
         for key in ("AVA_DB_URL", "AVA_REDIS_URL")
     ):
         raise ValueError("remote gateway returned loopback data-plane URLs")
+    if capability is not None:
+        _install_capability(home, Path(capability), transport_key, values, payload["AVA_DB_URL"])
+    elif load_unit_capability(home) is None:
+        from shared.cluster.authority.unit import no_capability_message
+
+        raise ValueError(no_capability_message(home))
     # Verify connection facts without persisting a gateway-owned configuration cache.
     for key in payload:
         values.pop(key, None)
+
+
+def _install_capability(
+    home: Path, bundle_path: Path, transport_key: str, values: dict[str, str], endpoint: str
+) -> None:
+    """Install the operator-carried unit capability, then delete the bundle."""
+    from shared.cluster.authority.unit import (
+        CAPABILITY_KEY_ENV,
+        install_bundle,
+        open_bundle,
+    )
+    from shared.verified_file import regular_bytes
+
+    if not transport_key:
+        raise ValueError(f"--db-capability requires its transport key in {CAPABILITY_KEY_ENV}")
+    bundle = open_bundle(regular_bytes(bundle_path, max_bytes=64 * 1024), transport_key)
+    installed = install_bundle(
+        home, bundle, machine=values["AVA_MACHINE_NAME"], served_endpoint=endpoint
+    )
+    bundle_path.unlink()
+    print(
+        f"  ✓ database capability installed: write generation {installed.generation.number}; "
+        f"bundle {bundle_path} consumed"
+    )
 
 
 def _config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str], str | None]:
@@ -268,7 +296,12 @@ def _inputs(
         if not values.get("AVA_GATEWAY_URL"):
             raise ValueError("first remote-unit start requires --gateway-url")
         values.setdefault("AVA_CLUSTER_SECRET", os.environ.get("AVA_CLUSTER_SECRET", ""))
-        _join(values)
+        _join(values, home, args.db_capability)
+    elif args.db_capability is not None:
+        raise ValueError(
+            "--db-capability is for agent-runner units; a gateway unit keeps its own "
+            "write-generation ledger"
+        )
     registry = (
         Path(
             os.environ.get("AVA_CLUSTER_REGISTRY")

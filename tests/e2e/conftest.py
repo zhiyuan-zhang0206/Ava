@@ -604,7 +604,7 @@ def agent_host_proc(gateway_proc: str) -> Iterator[None]:
     # Prod-shaped launch: the `agent` profile (marker-less construction masked a
     # `runner`-profile soak crash, 2026-08-30) with the launcher's runner DB URL.
     env["AVA_PROCESS_PROFILE"] = "agent"
-    env["AVA_DB_URL"] = runner_db_url_projection(settings.data_plane.db_url)
+    env["AVA_DB_URL"] = runner_db_url_projection()
     # pidfile placed in e2e tmp dir, avoids conflict with dev daemon / cross-test residue
     env["AVA_AGENT_HOST_PIDFILE"] = str(_AVA_HOME / "agent_host.pid")
     # Kernel-assigned per worker, avoiding a shared health port across tests.

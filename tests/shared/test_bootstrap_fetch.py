@@ -31,22 +31,19 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 
     monkeypatch.setattr(bootstrap, "dial_get", fake_get)  # pyright: ignore[reportUnknownArgumentType]
     values = bootstrap.fetch_bootstrap_config("http://cp")
-    # Bootstrap serves the active write generation's runner login. A multi-host
-    # gateway also rewrites its loopback host to the reachable address for
-    # remote runners.
-    from shared.url_secret import url_with_userinfo
-
+    # Bootstrap serves the credential-free endpoint even though this gateway
+    # keeps an active write generation: its runner login never travels here. A
+    # multi-host gateway also rewrites its loopback host to the reachable
+    # address for remote runners.
     runner = served_gateway_home.roles.runner
-    expected = url_with_userinfo(
-        str(config.settings.data_plane.db_url), runner.name, runner.password
-    )
+    expected = str(config.settings.data_plane.db_url)
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)
     actual_parts = urlsplit(values["AVA_DB_URL"])
     expected_parts = urlsplit(expected)
     # libpq dial hints such as hostaddr are implementation-specific query
-    # parameters. The runner projection's connection identity must still match.
+    # parameters. The endpoint's connection identity must still match.
     assert (
         actual_parts.scheme,
         actual_parts.username,
@@ -57,11 +54,12 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     ) == (
         expected_parts.scheme,
         expected_parts.username,
-        expected_parts.password,
+        None,
         expected_parts.hostname,
         expected_parts.port,
         expected_parts.path.lstrip("/"),
     )
+    assert runner.password not in "".join(values.values())
 
 
 # NOTE: shared/bootstrap.py reads os.environ directly (it must run BEFORE

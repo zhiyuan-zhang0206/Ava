@@ -111,11 +111,35 @@ and a terminal destroy intent refuse rather than reconstructing ownership.
 The host registry at `~/.ava/clusters.json` (`AVA_CLUSTER_REGISTRY`) is keyed
 by home path. See [[cli/start_identity.ava.okf.md]].
 
-A runner fetches the gateway's authenticated `role=runner` bootstrap projection
-before recording local identity. Its DB/Redis connection facts are not cached
-locally: every runner process fetches them at Settings construction. Start the
-gateway first, then the runners. Gateway unavailability fails runner startup;
-the boot policy retries the same start entry.
+A runner fetches the gateway's authenticated bootstrap configuration before
+recording local identity. Bootstrap serves no database login: `AVA_DB_URL` is the
+credential-free endpoint. The runner's login is a per-unit database capability
+the gateway operator issues and the runner installs at start:
+
+```bash
+# on the gateway (its checkout's CLI), for one unit:
+ava cluster db-authority issue-unit --machine <name> --home <unit $AVA_HOME> --out <bundle>
+# carry the 0600 bundle to the unit and the printed transport key separately; then:
+read -rs AVA_DB_CAPABILITY_KEY && export AVA_DB_CAPABILITY_KEY
+ava start --db-capability <bundle>        # plus the first-start identity flags
+```
+
+The bundle is sealed (AES-256-GCM) under a transport key printed once; it names
+one unit (machine + home), the endpoint bootstrap serves, the active write
+generation and an expiry (`--ttl-hours`, default 24). Start refuses an altered
+bundle, the wrong key, another unit's bundle, an expired one, an older
+generation than the installed one, and a login the cluster rejects (a revoked
+generation); it then writes `$AVA_HOME/db-authority/unit.json` and
+`enrollment.json` (0600) and deletes the bundle. A runner without a capability
+refuses to start and names the issue command. Issue is refused while a release
+operation is incomplete and on a remote-managed plane. Networked release
+operations keep refusing; a new generation reaches remote units only by a new
+bundle (cutover, join, emergency).
+
+Its DB/Redis connection facts are not cached locally: every runner process
+fetches them at Settings construction. Start the gateway first, then the
+runners. Gateway unavailability fails runner startup; the boot policy retries
+the same start entry.
 
 **Application services belong to one root per home.** On macOS, root descends
 from the signed permissions helper; on Linux, root runs directly or under
@@ -1219,9 +1243,11 @@ retires this home's native jobs and registry reservation; `--drop-db` additional
 removes its data directories. It refuses the default production home.
 
 A runner joins through the same first-start entry. Supply `AVA_CLUSTER_SECRET`
-without echoing it, then use `ava start --serve-agent-runner --no-serve-gateway
---gateway-url URL --machine-name NAME --machine-host HOST`. The join publishes
-only runner data-plane credentials. Memory checkout initialization remains
+and the capability bundle's `AVA_DB_CAPABILITY_KEY` without echoing them, then
+use `ava start --serve-agent-runner --no-serve-gateway --gateway-url URL
+--machine-name NAME --machine-host HOST --db-capability BUNDLE` (the bundle from
+`ava cluster db-authority issue-unit` on the gateway). Bootstrap publishes no
+database credential; the runner's login is that unit-bound capability. Memory checkout initialization remains
 explicit through `ava memory init`.
 
 Release preparation completes before maintenance. The prepared request captures

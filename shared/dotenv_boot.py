@@ -618,9 +618,10 @@ def _enforce_cluster_env_authority() -> None:
     # (the env-suppliable gateway-URL pair stays exempt).
     for key in env_authority_drop_set(role) - _force_also - _identity_env_only():
         if file_vals.get(key) is None and os.environ.get(key) != UNANCHORED_DB_SENTINEL:
-            if key == "AVA_DB_URL" and _is_launcher_runner_projection(os.environ.get(key)):
+            if key == "AVA_DB_URL" and _keeps_undeclared_db_url(os.environ.get(key)):
                 # Mirrored force-loop exemption (#4334): the launcher's runner
-                # projection is the agent child's DB source.
+                # projection is the agent child's DB source; a pure runner's
+                # launcher delivers its installed unit login to every class.
                 continue
             if key == "AVA_REDIS_URL" and _is_launcher_redis_url(os.environ.get(key)):
                 # The Redis mirror (#4334): same launcher context, no username
@@ -717,6 +718,57 @@ def _deliver_operator_authority(endpoint: str | None) -> None:
         return
     os.environ["AVA_DB_URL"] = grant.dsn(endpoint)
     os.environ[_GENERATION_ENV] = str(grant.number)
+
+
+def _keeps_undeclared_db_url(value: str | None) -> bool:
+    """Whether the drop pass keeps an AVA_DB_URL the unit's `.env` omits."""
+    return _is_launcher_runner_projection(value) or is_delivered_unit_login()
+
+
+def is_delivered_unit_login() -> bool:
+    """Whether os.environ carries exactly this runner home's installed unit
+    login (`shared.cluster.authority.unit`) with its generation marker."""
+    generation = os.environ.get(_GENERATION_ENV)
+    home = _HOME.expanduser().resolve()
+    if not _ANCHORED or not generation or not (home / "db-authority" / "unit.json").exists():
+        return False
+    from shared.cluster.authority.unit import is_delivered_login
+
+    return is_delivered_login(home, os.environ.get("AVA_DB_URL"), generation)
+
+
+def deliver_unit_authority() -> None:
+    """Give a pure agent-runner process its database login after the bootstrap
+    fetch, which serves only the credential-free endpoint.
+
+    A launcher delivery of this home's installed capability is kept. An
+    operator process (the `ava` CLI, a script) with no launcher context
+    consumes the installed capability only while it runs the home's admitted
+    runtime. Anything else keeps the credential-free endpoint and records why,
+    so its first dial fails with that reason (`db_authority_refusal`).
+    """
+    global _db_authority_refusal  # noqa: PLW0603 — per-process boot authority result
+    _db_authority_refusal = None
+    if not _ANCHORED or is_delivered_unit_login():
+        return
+    home = _HOME.expanduser().resolve()
+    context = _launcher_context()
+    if context is not None:
+        _db_authority_refusal = (
+            f"this {context}-profile agent-runner process was launched without its unit's "
+            "database login; only the root launcher delivers it"
+        )
+        return
+    from shared.cluster.authority import AuthorityRefusedError
+    from shared.cluster.authority.unit import consume_unit
+
+    try:
+        capability = consume_unit(home)
+    except (AuthorityRefusedError, ValueError, OSError) as exc:
+        _db_authority_refusal = f"no database authority for this agent-runner process: {exc}"
+        return
+    os.environ["AVA_DB_URL"] = capability.dsn
+    os.environ[_GENERATION_ENV] = str(capability.generation.number)
 
 
 def db_authority_refusal() -> str | None:

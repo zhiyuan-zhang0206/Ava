@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Write-generation delivery and wiring
-description: How the active write generation reaches the pooler userlist, launched services and admitted operator processes, and the birth, ordinary-start and cutover call sequences.
+description: How the active write generation reaches the pooler userlist, launched services, admitted operator processes and remote agent-runner units, and the birth, ordinary-start and cutover call sequences.
 tags: [postgres, authority, lifecycle]
 ---
 
@@ -23,6 +23,47 @@ the ledger's credential digest:
   inject, only after `require_admitted_runtime` (the selected release image's
   prefix, or the start intent's source checkout).
 
+## Remote agent-runner units
+
+Bootstrap (`GET /api/bootstrap`) serves the credential-free endpoint and no
+login, and a runner strips any password an older gateway still serves
+(`shared.bootstrap.fetch_bootstrap_config`). `unit` is the only path that
+carries a login to another home:
+
+- **Issue** (gateway, `ava cluster db-authority issue-unit --machine M --home H
+  --out FILE`): `issue_bundle` seals the ACTIVE generation's runner login, the
+  endpoint bootstrap serves (`service_read.served_db_endpoint`), the unit's
+  enrollment and a binding (machine, home, generation number and credential
+  digest, nonce, expiry) with AES-256-GCM under a fresh 32-byte transport key.
+  The key is printed once and stored nowhere; the header (machine, home,
+  generation, expiry, nonce) is readable and authenticated as associated data.
+  The enrollment is minted once per unit into `db-authority/units/<key>.json`
+  and reused by later bundles; deleting that record revokes it. Refused on a
+  pure runner, a remote-managed plane (no generation exists there), a home
+  without an active generation, and while a release operation is incomplete.
+- **Install** (unit, `ava start --db-capability FILE`, key in
+  `AVA_DB_CAPABILITY_KEY`, popped at once): `open_bundle` refuses anything that
+  fails authentication or has expired; `install_bundle` requires this machine
+  name and home, the endpoint the gateway serves now, a generation not older
+  than the installed one (an equal number must carry the same credential
+  digest), and a login the cluster accepts (`SELECT 1` through the endpoint, so
+  a revoked generation never installs). It writes `unit.json` and
+  `enrollment.json` (0600) and start deletes the bundle. A first join with no
+  bundle and no installed capability refuses before identity is persisted.
+- **Deliver**: the unit's root launcher gives every runner-class service
+  `unit_delivery` (the login on the recorded endpoint plus
+  `AVA_DB_GENERATION`; a gateway-class service on a pure runner fails the
+  launch); the launch digest binds `unit_reference`. The boot pass keeps an
+  environment login only when it equals the installed delivery exactly
+  (`is_delivered_login`), including across the bootstrap injection; an operator
+  process consumes it (`consume_unit`) only while it runs the home's admitted
+  runtime; anything else records a refusal naming the issue command, raised at
+  the first dial.
+
+A new generation reaches a remote unit only through a new bundle (the one-time
+cutover, a join, an emergency). Networked release operations keep refusing
+until the fleet transition exchanges capabilities automatically.
+
 ## Wiring
 
 - **Birth** (`cli/commands/_data_plane.complete_gateway_data_plane`, start
@@ -42,7 +83,9 @@ the ledger's credential digest:
   `retire_legacy_logins(Cutover)` -> `ensure_groups` -> `ensure_monitor` ->
   `prove_closure` over the
   legacy roles -> ledger -> generation 0 -> pooler -> proof -> `activate` ->
-  invariant -> credential-free `.env`.
+  invariant -> credential-free `.env`. Step `remote-units` (networked homes):
+  explicit classification of every other `machine_units` row -> Redis admin
+  rotation -> one `issue_bundle` per included unit.
 - **Monitoring** is not delivered: the collector's PostgreSQL receiver
   (`cli/commands/_otel_collector.py`) dials the owner-only socket as
   `ava_monitor` by `peer`, so its rendered config names no credential and a

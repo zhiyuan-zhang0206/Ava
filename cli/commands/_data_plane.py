@@ -309,14 +309,22 @@ def db_delivery(cls: DbAccess) -> dict[str, str]:
     A local plane delivers the active write generation's `cls` login on the
     home's credential-free endpoint plus its non-secret generation number; a
     missing ledger or active generation fails the launch (no fallback). A pure
-    runner or a remote-managed plane delivers nothing here: its processes keep
-    their bootstrap / provider projection.
+    agent-runner delivers its installed unit capability (runner class only);
+    without one the launch fails with the issue-unit instruction. A
+    remote-managed gateway plane delivers nothing here: its agents keep the
+    provider projection.
     """
     from shared.bootstrap import config_source_is_local
     from shared.cluster.authority import GENERATION_ENV, write_grant
     from shared.paths import ava_home
 
-    if settings.data_plane.is_remote or not config_source_is_local():
+    if not config_source_is_local():
+        from shared.cluster.authority.unit import unit_delivery
+
+        if cls != "runner":
+            raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class database service")
+        return unit_delivery(ava_home().resolve())
+    if settings.data_plane.is_remote:
         return {}
     grant = write_grant(ava_home().resolve(), cls)
     return {"AVA_DB_URL": grant.dsn(db_endpoint()), GENERATION_ENV: str(grant.number)}
@@ -445,7 +453,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
             prepare_memory_vectors()
         from shared.cluster.derive import runner_db_url_projection
 
-        urls = [settings.data_plane.db_url, runner_db_url_projection(settings.data_plane.db_url)]
+        urls = [settings.data_plane.db_url, runner_db_url_projection()]
         for url in urls:
             if error := probe_postgres(url):
                 raise RuntimeError(f"consumer database readiness failed: {error}")

@@ -347,24 +347,25 @@ def test_config_file_cannot_choose_identity(inputs: identity.IdentityInput, key:
         start_intent._config_values(_args("--config-file", str(config)), inputs.home)
 
 
-def test_runner_verifies_projection_before_persisting(
-    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
-) -> None:
+_RUNNER_ENDPOINT = "postgresql://ava@remote.invalid/db"
+
+
+def _runner_start(
+    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, *extra: str
+) -> Any:
+    """A remote runner's first start against a gateway serving the endpoint only."""
     from shared import bootstrap
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     monkeypatch.setenv("AVA_CLUSTER_SECRET", "runner-bearer")
-    monkeypatch.setattr(
-        bootstrap,
-        "fetch_bootstrap_config",
-        lambda *_a, **_k: {  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-            "AVA_DB_URL": "postgresql://owner@remote.invalid/db",
-            "AVA_REDIS_URL": "redis://remote.invalid/0",
-        },
-    )
-    args = _args(
+
+    def served(*_a: object, **_k: object) -> dict[str, str]:
+        return {"AVA_DB_URL": _RUNNER_ENDPOINT, "AVA_REDIS_URL": "redis://remote.invalid/0"}
+
+    monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", served)
+    return _args(
         "--serve-agent-runner",
         "--no-serve-gateway",
         "--machine-name",
@@ -373,23 +374,73 @@ def test_runner_verifies_projection_before_persisting(
         "runner.invalid",
         "--gateway-url",
         "https://gateway.invalid",
+        *extra,
     )
-    with pytest.raises(ValueError, match="projection"):
+
+
+def test_runner_without_a_capability_refuses_before_persisting(
+    inputs: identity.IdentityInput,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    seed_write_generation: Any,
+) -> None:
+    """Bootstrap serves no login, so a runner's first start needs its unit
+    capability; without one it refuses before any identity is written."""
+    from shared.cluster.authority import unit
+
+    args = _runner_start(inputs, monkeypatch)
+    with pytest.raises(ValueError, match="holds no database capability"):
         start_intent.prepare_start(args)
     assert not (inputs.home / ".env").exists()
-    monkeypatch.setattr(
-        bootstrap,
-        "fetch_bootstrap_config",
-        lambda *_a, **_k: {  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
-            "AVA_DB_URL": "postgresql://ava_runner@remote.invalid/db",
-            "AVA_REDIS_URL": "redis://remote.invalid/0",
-        },
+    # An installed capability (a bundle the operator carried earlier) admits it.
+    gateway = tmp_path / "gateway"
+    gateway.mkdir(mode=0o700)
+    seed_write_generation(gateway)
+    home = inputs.home.resolve()
+    issued = unit.issue_bundle(
+        gateway.resolve(),
+        unit=unit.UnitIdentity(machine="runner", home=str(home)),
+        endpoint=_RUNNER_ENDPOINT,
+        ttl_s=60,
+    )
+    unit.install_bundle(
+        home,
+        unit.open_bundle(issued.envelope, issued.transport_key),
+        machine="runner",
+        served_endpoint=_RUNNER_ENDPOINT,
+        probe=lambda _dsn: None,
     )
     start_intent.prepare_start(args)
     env = dotenv_values(inputs.home / ".env")
     assert env["AVA_MACHINE_HOST"] == "runner.invalid"
     assert "AVA_DB_URL" not in env and "AVA_REDIS_URL" not in env
     assert not inputs.registry.exists()
+
+
+def test_capability_bundle_needs_its_transport_key(
+    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bundle = tmp_path / "unit.bundle"
+    bundle.write_text("{}")
+    monkeypatch.delenv("AVA_DB_CAPABILITY_KEY", raising=False)
+    args = _runner_start(inputs, monkeypatch, "--db-capability", str(bundle))
+    with pytest.raises(ValueError, match="AVA_DB_CAPABILITY_KEY"):
+        start_intent.prepare_start(args)
+    assert bundle.exists()
+    assert not (inputs.home / ".env").exists()
+
+
+def test_gateway_start_refuses_a_capability_bundle(
+    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
+    monkeypatch.setenv("AVA_HOME", str(inputs.home))
+    monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
+    with pytest.raises(ValueError, match="agent-runner units"):
+        start_intent.prepare_start(
+            _args("--worktree", "--db-capability", str(tmp_path / "unit.bundle"))
+        )
+    assert identity.read_intent(inputs.home) is None
 
 
 def test_ready_phase_never_regresses_or_rewrites(inputs: identity.IdentityInput) -> None:

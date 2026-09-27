@@ -43,6 +43,7 @@ from cli.parsers.agents import (
     _h_notices_resolve,
 )
 from cli.parsers.cluster import (
+    _h_cluster_db_authority_issue_unit,
     _h_cluster_destroy,
     _h_cluster_down,
     _h_cluster_health_probe,
@@ -160,6 +161,7 @@ __all__ = [
     "_h_agents_send",
     "_h_agents_terminate",
     "_h_agents_timeline",
+    "_h_cluster_db_authority_issue_unit",
     "_h_cluster_destroy",
     "_h_cluster_down",
     "_h_cluster_health_probe",
@@ -344,7 +346,7 @@ _LITE_VERBS = frozenset(
 # current one; and why the read-only (`ls`, `status`) and probe-registration
 # subcommands are absent too.
 _ANCHORED_HOME_VERBS = frozenset({"stop", "pause", "restart", "converge", "logs", "maintenance"})
-_ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset({"recover"})
+_ANCHORED_HOME_CLUSTER_SUBVERBS = frozenset({"recover", "db-authority"})
 
 
 def _print_settings_load_failure(e: ValidationError) -> int:
@@ -376,7 +378,7 @@ def _print_settings_load_failure(e: ValidationError) -> int:
     print(
         "\nAdd the lines above to ~/.ava/.env, then re-run your command. For the full\n"
         "agent-runner bring-up flow, use `ava start --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> "
-        "--machine-host <this-host-addr>`.",
+        "--machine-host <this-host-addr> --db-capability <bundle>`.",
         file=sys.stderr,
     )
     return 1

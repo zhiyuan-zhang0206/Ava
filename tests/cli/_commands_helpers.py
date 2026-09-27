@@ -220,7 +220,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # These call-shape tests use the suite's owner DB URL, not an enrolled
     # runner's bootstrap projection. Credential forwarding has its own tests
     # in test_agent_profile_launch_env.py.
-    def _fixture_runner_url(_url: str) -> str:
+    def _fixture_runner_url() -> str:
         return "postgresql://ava_runner:test-runner@127.0.0.1:1/ava_citest"
 
     monkeypatch.setattr(_root_driver, "runner_db_url_projection", _fixture_runner_url)

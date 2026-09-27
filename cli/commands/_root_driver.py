@@ -77,7 +77,7 @@ def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     if delivery:
         extra.update(delivery)
     elif marker == "agent":
-        extra["AVA_DB_URL"] = runner_db_url_projection(settings.data_plane.db_url)
+        extra["AVA_DB_URL"] = runner_db_url_projection()
     return extra
 
 

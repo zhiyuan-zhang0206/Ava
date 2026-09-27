@@ -30,7 +30,6 @@ import os
 import time
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlencode
 
 # An agent boots by fetching this. The timeout must cover a slow-but-healthy
 # fetch under load (the whole boot -- fetch + import + claim -- has to finish
@@ -59,8 +58,10 @@ def _fetch_backoff(attempt: int) -> float:
 # because during a gateway outage no cluster config edit can have happened
 # since the snapshot was written.
 _SNAPSHOT_NAME = "bootstrap-snapshot.json"
-# Version 2 snapshots carry unmodified zero turn limits; version 1 is incompatible.
-_SNAPSHOT_VERSION = 2
+# Version 3 snapshots carry no database credential (bootstrap serves the
+# credential-free endpoint); an older snapshot may hold a runner login and is
+# never reused.
+_SNAPSHOT_VERSION = 3
 # Freshness window: how long a snapshot may stand in for a live fetch. Bounds
 # cluster-edit propagation to a few minutes in steady state (the first child
 # past the window re-fetches and refreshes the snapshot) while keeping the
@@ -219,16 +220,17 @@ def fetch_bootstrap_config(
     base_url: str,
     timeout: float = _FETCH_TIMEOUT_S,
     attempts: int = _FETCH_ATTEMPTS,
-    role: str | None = None,
 ) -> dict[str, str]:
     """GET {base_url}/api/bootstrap. Return {alias: value}.
 
     Retries with linear backoff so a gateway that is briefly unreachable as the
     agent boots doesn't strand it.
 
-    `role` is the credential projection requested from the gateway: both
-    ``"runner"`` and ``None`` receive the least-privilege `ava_runner`
-    AVA_DB_URL. The main identity is never a bootstrap projection.
+    A runner never takes a database credential from bootstrap: any password in
+    the served `AVA_DB_URL` (an older gateway still projecting a runner login) is
+    removed here, before the value reaches the snapshot or `os.environ`. The
+    runner's login comes only from its installed unit capability
+    (`shared.cluster.authority.unit`).
 
     Presents `Authorization: Bearer <AVA_CLUSTER_SECRET>` when that env var is set
     (enroll writes it on a split agent-runner); the gateway requires it when
@@ -247,8 +249,7 @@ def fetch_bootstrap_config(
 
     secret = os.environ.get("AVA_CLUSTER_SECRET", "")
     headers = bearer_header(secret) if secret else {}
-    params = {"role": role} if role else {}
-    url = f"{base_url.rstrip('/')}/api/bootstrap?{urlencode(params)}"
+    url = f"{base_url.rstrip('/')}/api/bootstrap"
     # Gateway briefly down: retry connect errors only; ReadTimeout propagates.
     # Keep the original 0.5s, 1.0s, ... schedule without Retry-After or jitter.
     policy = Policy(
@@ -265,7 +266,12 @@ def fetch_bootstrap_config(
     def _fetch_once() -> dict[str, str]:
         resp = dial_get(url, timeout=timeout, headers=headers)
         resp.raise_for_status()
-        return _validated_bootstrap_payload(resp.json())
+        values = _validated_bootstrap_payload(resp.json())
+        if "AVA_DB_URL" in values:
+            from shared.cluster.authority.unit import credential_free
+
+            values["AVA_DB_URL"] = credential_free(values["AVA_DB_URL"])
+        return values
 
     return retry(policy)(_fetch_once)
 
@@ -362,7 +368,14 @@ def _apply_bootstrap_values(base_url: str, values: dict[str, str]) -> None:
     # one reachability fact this process already proved.
     if not os.environ.get("AVA_GATEWAY_HEALTH_URL"):
         os.environ["AVA_GATEWAY_HEALTH_URL"] = f"{base_url.rstrip('/')}/api/health"
+    from shared.dotenv_boot import is_delivered_unit_login
+
+    delivered = is_delivered_unit_login()
     for key, value in values.items():
+        if key == "AVA_DB_URL" and delivered:
+            # The launcher's (or this process's consumed) unit login stays; the
+            # served value is only the credential-free endpoint.
+            continue
         os.environ[key] = value
 
 
@@ -377,9 +390,9 @@ def _gateway_base_url() -> str:
         raise BootstrapFetchError(
             "this host is a pure agent-runner but has no AVA_GATEWAY_URL — its cluster "
             "config comes from the gateway at startup. Enroll it first:\n"
-            "    set AVA_CLUSTER_SECRET from a non-echoing prompt, then run:\n"
+            "    set AVA_CLUSTER_SECRET and AVA_DB_CAPABILITY_KEY from non-echoing prompts, then run:\n"
             "    ava start --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> --machine-host "
-            "<this-host-addr>"
+            "<this-host-addr> --db-capability <bundle from `ava cluster db-authority issue-unit`>"
         )
     return base_url
 
@@ -412,11 +425,10 @@ def resolve_bootstrap_values() -> dict[str, str]:
         # must not block this process (P0 #2100).
         return snapshot[0]
     try:
-        # A runner process dials as the least-privilege ava_runner role (the
-        # gateway projects AVA_DB_URL onto that credential — Task #1236). The
-        # gateway itself never fetches (config_source_is_local), so every
-        # fetch this module makes is a runner fetch.
-        values = fetch_bootstrap_config(base_url, role="runner")
+        # The gateway itself never fetches (config_source_is_local), so every
+        # fetch this module makes is a runner fetch; it carries no database
+        # login (the unit capability does).
+        values = fetch_bootstrap_config(base_url)
     except _transport_failures() as exc:
         if snapshot is not None:
             # Gateway unreachable: continue on the last-known cluster config
@@ -465,8 +477,14 @@ def inject_config_from_gateway() -> None:
     The values come from `resolve_bootstrap_values` (fresh snapshot / fetch /
     last-known-snapshot fallback); this wrapper applies them, including the
     derived `AVA_GATEWAY_HEALTH_URL` for a runner enrolled without an explicit
-    override.
+    override. The database login is the one exception to "fetched values are
+    authoritative": a delivered unit login is kept, and a process without one
+    receives the installed capability only when it runs the admitted runtime
+    (`shared.dotenv_boot.deliver_unit_authority`).
     """
     base_url = _gateway_base_url()
     values = resolve_bootstrap_values()
     _apply_bootstrap_values(base_url, values)
+    from shared.dotenv_boot import deliver_unit_authority
+
+    deliver_unit_authority()

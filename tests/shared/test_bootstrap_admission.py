@@ -5,7 +5,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 import httpx2
 import pytest
@@ -102,7 +102,8 @@ def test_runner_fetch_replaces_stale_admission(
     monkeypatch.setattr(bootstrap, "dial_get", dial)
     bootstrap.inject_config_from_gateway()
     assert len(requests) == 1
-    assert parse_qs(urlsplit(requests[0]).query) == {"role": ["runner"]}
+    # The fetch requests no projection: bootstrap serves configuration only.
+    assert urlsplit(requests[0]).query == ""
     assert env[_TURN_LIMIT] == "0"
     assert env["AVA_HOST_DB_POOL_MAX_SIZE"] == "64"
     assert env["AVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"

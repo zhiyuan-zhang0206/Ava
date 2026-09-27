@@ -141,25 +141,9 @@
     "/api/bootstrap": {
       "get": {
         "summary": "Get Bootstrap",
-        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`role=None` and `role=\"runner\"` both serve the least-privilege\n`ava_runner` AVA_DB_URL (the role's own password, carried inside the URL —\nnever a standalone key). The main identity and all admin credentials remain\ngateway-local (see shared.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request does not carry\n        `Authorization: Bearer <cluster secret>` (a no-secret cluster serves\n        without auth — there is no credential to require); 400 for an\n        unknown role value, and when the runner credential is not provisioned.",
+        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`AVA_DB_URL` is the credential-free endpoint; no database credential is\nserved. The admin credentials remain gateway-local (see\nshared.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request does not carry\n        `Authorization: Bearer <cluster secret>` (a no-secret cluster serves\n        without auth — there is no credential to require); 400 when the\n        gateway configuration has no database endpoint.",
         "operationId": "get_bootstrap_api_bootstrap_get",
         "parameters": [
-          {
-            "name": "role",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Role"
-            }
-          },
           {
             "name": "authorization",
             "in": "header",

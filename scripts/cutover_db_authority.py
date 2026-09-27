@@ -32,6 +32,19 @@ owner and runner passwords are removed. A home born with a ledger is only
 verified. Any release request prepared before the cutover no longer matches its
 configuration digest and must be prepared again.
 
+Step `remote-units` (networked homes only): every `machine_units` row other
+than this gateway unit is a remote unit whose runners held the owner-era
+`ava_runner` login (the `db` step fenced it) and copies of the Redis admin
+password. The operator classifies each one explicitly: `--unit MACHINE:HOME`
+(included: it receives a sealed database capability bundle for generation 0
+with its enrollment secret, written into `--bundle-dir`, its transport key
+printed once) or `--exclude-unit MACHINE:HOME` (paused or offline: no bundle,
+it stays fenced until a later issue-unit). Units of paused machines must be
+excluded; an unclassified or unknown unit refuses. The step also rotates the
+Redis admin password, staged in `db-authority/redis-admin.pending` so a crash
+resumes with the same value, then applied live, persisted to `redis.conf`
+and `.env`. A single box has no remote unit and the step is a no-op.
+
 Dry-run is the default and changes nothing. `--execute` requires the home's
 application root to be absent, no persistent terminals and no active release
 operation. Each step records its intent before its effect in
@@ -47,8 +60,16 @@ Run it from the checkout that owns the home, in a gateway context:
     .venv/bin/python scripts/cutover_db_authority.py --home <home> --execute
     ava start
 
-Networked homes (remote agent-runners) are not converted here: their runners
-hold owner-era credentials and need the fleet cutover's per-unit delivery.
+A networked home adds the classification and the bundle directory:
+
+    .venv/bin/python scripts/cutover_db_authority.py --home <home> --execute \
+        --unit mini:/Users/u/.ava --exclude-unit win:C:\\Users\\u\\.ava \
+        --bundle-dir <private dir>
+
+Each runner then installs its bundle at its first start on the new code
+(`ava start --db-capability <bundle>` with the transport key in
+`AVA_DB_CAPABILITY_KEY`); the runner-home cleanup of the retired keys belongs
+to the home adoption.
 """
 
 from __future__ import annotations
@@ -56,8 +77,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import secrets
 import socket
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,6 +108,7 @@ _URL_ENV = "AVA_REDIS_URL"
 _STEP_STATES: dict[str, tuple[str, ...]] = {
     "redis": ("converting", "done"),
     "db": ("converting", "done"),
+    "remote-units": ("issuing", "done"),
 }
 _DB_URL_ENV = "AVA_DB_URL"
 _LEGACY_DB_KEYS = ("AVA_DB_ADMIN_PASSWORD", "AVA_RUNNER_DB_PASSWORD")
@@ -499,6 +523,148 @@ def convert_db(home: Path, record: ClusterRecord, *, execute: bool) -> str:
     )
 
 
+Units = set[tuple[str, str]]
+
+
+@dataclass(frozen=True)
+class UnitPlan:
+    """The operator's explicit classification of the remote units."""
+
+    include: tuple[tuple[str, str], ...] = ()
+    exclude: tuple[tuple[str, str], ...] = ()
+    bundle_dir: Path | None = None
+    ttl_s: float = 24 * 3600
+
+    @staticmethod
+    def parse(value: str) -> tuple[str, str]:
+        machine, sep, unit_home = value.partition(":")
+        if not (sep and machine and unit_home):
+            raise argparse.ArgumentTypeError(f"{value!r} is not MACHINE:HOME")
+        return machine, unit_home
+
+
+def _remote_inventory(record: ClusterRecord, database: str, home: Path) -> tuple[Units, Units]:
+    """(remote units, units of paused machines) from the gateway's own tables."""
+    from cli.commands._data_plane import admin_session
+    from shared.machine import machine_name
+
+    with admin_session(record, database) as conn:
+        units = {(m, h) for m, h in conn.execute("SELECT machine_name, home FROM machine_units")}
+        paused = {
+            (m, h)
+            for m, h in conn.execute(
+                "SELECT u.machine_name, u.home FROM machine_units u"
+                " JOIN machines m ON m.name = u.machine_name WHERE m.paused_at IS NOT NULL"
+            )
+        }
+    units.discard((machine_name(), str(home)))
+    return units, paused
+
+
+def _require_classified(plan: UnitPlan, remote: Units, paused: Units) -> None:
+    include, exclude = set(plan.include), set(plan.exclude)
+    if include & exclude:
+        raise CutoverRefusedError(f"units both included and excluded: {sorted(include & exclude)}")
+    if include | exclude != remote:
+        raise CutoverRefusedError(
+            "classify every remote unit exactly once with --unit / --exclude-unit: "
+            f"unclassified {sorted(remote - include - exclude)}, "
+            f"unknown {sorted((include | exclude) - remote)}"
+        )
+    if include & paused:
+        raise CutoverRefusedError(
+            f"paused machines' units must be excluded: {sorted(include & paused)}"
+        )
+    if include and plan.bundle_dir is None:
+        raise CutoverRefusedError("included units need --bundle-dir for their bundles")
+
+
+def _pending_admin(home: Path) -> str:
+    """The staged next Redis admin password, created once (0600)."""
+    path = home / "db-authority" / "redis-admin.pending"
+    if not path.exists():
+        write_private_bytes(path, (secrets.token_urlsafe(32) + "\n").encode())
+    return regular_bytes(path).decode().strip()
+
+
+def _rotate_redis_admin(home: Path, port: int) -> None:
+    """Replace the Redis admin password every runner home may hold a copy of."""
+    from cli.commands import _cluster_instance as instance
+
+    env = RedisEnv.read(home)
+    pending = _pending_admin(home)
+    if not _authenticates(port, pending):
+        if not _authenticates(port, env.admin):
+            raise CutoverRefusedError(
+                "Redis accepts neither this home's admin password nor the staged one"
+            )
+        with _probe_client(port, password=env.admin) as client:
+            client.config_set("requirepass", pending)
+    instance._write_redis_conf(instance._redis_data_dir(), pending)
+    upsert_env(home / ".env", {_ADMIN_ENV: pending}, audit_site="cutover_db_authority")
+    if env.admin != pending and _authenticates(port, env.admin):
+        raise RuntimeError("Redis still accepts the previous admin password")
+    _verify(port, RedisEnv.read(home), instance._redis_data_dir())
+    (home / "db-authority" / "redis-admin.pending").unlink()
+
+
+def _issue_bundles(home: Path, plan: UnitPlan, bundle_dir: Path) -> list[str]:
+    from shared.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
+    from shared.config.service_read import served_db_endpoint
+
+    bundle_dir.mkdir(mode=0o700, exist_ok=True)
+    info = bundle_dir.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.geteuid():
+        raise CutoverRefusedError(f"--bundle-dir {bundle_dir} must be an owner-only directory")
+    lines: list[str] = []
+    for machine, unit_home in plan.include:
+        unit = UnitIdentity(machine=machine, home=unit_home)
+        issued = issue_bundle(home, unit=unit, endpoint=served_db_endpoint(), ttl_s=plan.ttl_s)
+        target = bundle_dir / f"{machine}-{unit.key[:12]}.bundle"
+        target.unlink(missing_ok=True)
+        write_bundle(target, issued.envelope)
+        lines.append(f"  {unit.describe()}: {target} transport key {issued.transport_key}")
+    return lines
+
+
+def convert_remote_units(
+    home: Path, record: ClusterRecord, plan: UnitPlan, *, execute: bool
+) -> str:
+    """Classify the remote units, rotate Redis admin and issue their bundles."""
+    from cli.commands import _cluster_instance as instance
+    from shared.cluster import record_postgres_port
+
+    state = read_journal(home).get("remote-units")
+    env = DbEnv.read(home)
+    if not instance._pg_running(record_postgres_port(record)):
+        if not execute:
+            return "remote-units: would classify machine_units once PostgreSQL runs"
+        raise RuntimeError(
+            "the owned PostgreSQL is not running; stop the home with `ava stop --keep-infra`"
+        )
+    remote, paused = _remote_inventory(record, env.database, home)
+    if not remote and not (plan.include or plan.exclude):
+        return "remote-units: none (single box)"
+    _require_classified(plan, remote, paused)
+    observed = f"journal={state or 'none'} include={len(plan.include)} exclude={len(plan.exclude)}"
+    if state == "done":
+        return f"remote-units: verified, bundles were issued ({observed})"
+    if not execute:
+        return f"remote-units: would rotate the Redis admin password and issue bundles ({observed})"
+    _record(home, "remote-units", "issuing")
+    _rotate_redis_admin(home, record_redis_port(record))
+    lines = [] if plan.bundle_dir is None else _issue_bundles(home, plan, plan.bundle_dir)
+    _record(home, "remote-units", "done")
+    excluded = ", ".join(f"{m}:{h}" for m, h in plan.exclude) or "none"
+    return "\n".join(
+        [
+            "remote-units: Redis admin rotated; excluded units stay fenced "
+            f"({excluded}); bundles (carry each with its key; shown once):",
+            *lines,
+        ]
+    )
+
+
 def admitted_record(home: Path) -> ClusterRecord:
     """`home`'s registry record, only when it is this checkout's quiescent local
     gateway home: no application root, terminals or active release operation."""
@@ -527,21 +693,36 @@ def admitted_redis_port(home: Path) -> int:
     return record_redis_port(admitted_record(home))
 
 
-def _run(home: Path, *, execute: bool) -> None:
+def _run(home: Path, *, execute: bool, plan: UnitPlan) -> None:
     record = admitted_record(home)
     print(convert_redis(home, record_redis_port(record), execute=execute))
     print(convert_db(home, record, execute=execute))
+    print(convert_remote_units(home, record, plan, execute=execute))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else None)
     parser.add_argument("--home", required=True, help="the home to convert (explicit)")
     parser.add_argument("--execute", action="store_true", help="perform the cutover")
+    parser.add_argument(
+        "--unit", action="append", default=[], type=UnitPlan.parse, metavar="MACHINE:HOME"
+    )
+    parser.add_argument(
+        "--exclude-unit", action="append", default=[], type=UnitPlan.parse, metavar="MACHINE:HOME"
+    )
+    parser.add_argument("--bundle-dir", default=None, help="private directory for the bundles")
     args = parser.parse_args(argv)
     home = Path(args.home).expanduser().resolve()
+    plan = UnitPlan(
+        include=tuple(args.unit),
+        exclude=tuple(args.exclude_unit),
+        bundle_dir=None
+        if args.bundle_dir is None
+        else Path(args.bundle_dir).expanduser().absolute(),
+    )
     try:
         if not args.execute:
-            _run(home, execute=False)
+            _run(home, execute=False, plan=plan)
             print("[dry-run] no changes made.")
             return 0
         from shared.home_lifecycle_locks import resource_lock
@@ -552,7 +733,7 @@ def main(argv: list[str] | None = None) -> int:
             file_lock(home / "start-intent.lock", timeout_s=30),
             resource_lock(purpose="scripts.cutover_db_authority"),
         ):
-            _run(home, execute=True)
+            _run(home, execute=True, plan=plan)
     except CutoverRefusedError as exc:
         print(f"✗ cutover refused, nothing changed by the refused step: {exc}", file=sys.stderr)
         return 1
