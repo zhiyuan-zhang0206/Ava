@@ -94,6 +94,7 @@ from ops.resurrect_gates import (
 from ops.resurrect_gates import (
     wake_suppression_active as _wake_suppression_active,
 )
+from ops.resurrection_retry import report_auto_resurrect_failure
 from ops.rpc_schemas import (
     BillingResurrectAgentResponse,
     CancelRequested,
@@ -356,9 +357,9 @@ async def resurrect_if_terminated(
 
     Returns the agent's status after the attempt: the post-resurrect status when
     a process was spawned, otherwise the unchanged status (a non-terminated agent
-    is returned untouched). A resurrect failure (e.g. the launch path is
-    unreachable) is logged and swallowed — the inbound is already queued, so a
-    later manual resurrect picks it up.
+    is returned untouched). A resurrect failure is logged and swallowed — the
+    inbound is already queued, so a later manual resurrect picks it up; a
+    durable refusal (e.g. `runtime_cutover_required`) is a WARNING naming it.
 
     The process must start on the agent's home machine (`agents_meta.machine`)
     — launching it here when the agent lives elsewhere trips the boot placement
@@ -467,13 +468,8 @@ async def resurrect_if_terminated(
             agent_id,
             exc,
         )
-    except Exception:
-        _log.info(
-            "resurrect_if_terminated: auto-resurrect agent %s failed; "
-            "inbound queued, manual resurrect will pick it up",
-            agent_id,
-            exc_info=True,
-        )
+    except Exception as exc:
+        report_auto_resurrect_failure(agent_id, exc)
     return status
 
 

@@ -15,7 +15,15 @@ import psutil
 import psycopg
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from shared import native_process
 from shared.native_process import ownership as proc_tree
@@ -24,6 +32,12 @@ from shared.runtime_incarnation import RuntimeIncarnation
 
 class ResourceEvidenceError(RuntimeError):
     """Missing, stale or incomplete evidence cannot authorize resource work."""
+
+
+class ResourceShapeError(ResourceEvidenceError, ValueError):
+    """A stored value the current model cannot decode: malformed, or written by
+    a retired runtime (process receipts without native boot scope). No runtime
+    path parses it; only the one-time cutover reconciliation replaces it."""
 
 
 class _StrictEvidence(BaseModel):
@@ -138,7 +152,13 @@ _STATE: TypeAdapter[ResourceBirth | IncarnationResources] = TypeAdapter(Resource
 def decode_resources(value: object) -> ResourceBirth | IncarnationResources:
     if value is None:
         raise ResourceEvidenceError("incarnation resource set is unknown")
-    return _STATE.validate_json(json.dumps(value))
+    try:
+        return _STATE.validate_json(json.dumps(value))
+    except ValidationError as exc:
+        raise ResourceShapeError(
+            "stored incarnation resources do not match the current model; "
+            "explicit cutover reconciliation is required"
+        ) from exc
 
 
 def _transaction(conn: psycopg.Connection) -> None:

@@ -81,14 +81,21 @@ def require_current_for_managed(decision: AdmissionDecision, resource_value: obj
     exactly as upstream does (its tests and rows carry the pre-deadline marker
     shape); the spawn-side producers this check was written against are
     retired. The surviving fences: a pending publication defers admission in
-    decide/decide_async, and a committed publication refuses a row whose
-    resource closure cannot be inferred. Raises ResourceEvidenceError so the
-    hosted caller converts the fence into a quiet refusal.
+    decide/decide_async, a committed publication refuses a row whose
+    resource closure cannot be inferred, and a stored value the current model
+    cannot decode (a retired writer's shape awaiting cutover reconciliation)
+    refuses under every decision. Raises ResourceEvidenceError so the hosted
+    caller converts the fence into a recorded refusal.
     """
-    if resource_value is None and isinstance(decision, CurrentAdmission):
-        from shared.incarnation_resources import ResourceEvidenceError
+    from shared.incarnation_resources import ResourceEvidenceError, decode_resources
 
-        raise ResourceEvidenceError("published runtime cannot infer closure of legacy resources")
+    if resource_value is None:
+        if isinstance(decision, CurrentAdmission):
+            raise ResourceEvidenceError(
+                "published runtime cannot infer closure of legacy resources"
+            )
+        return
+    decode_resources(resource_value)
 
 
 @lru_cache(maxsize=1)

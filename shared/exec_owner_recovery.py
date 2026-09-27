@@ -16,6 +16,7 @@ from shared.incarnation_resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
+    ResourceShapeError,
     complete_exec,
     decode_resources,
 )
@@ -36,6 +37,16 @@ def process_ended(identity: ResourceProcess) -> bool:
         return False
 
 
+def _recoverable(value: object) -> object:
+    """The decoded set, or None for a retired shape: it has no exact local
+    evidence to recover, and admission and resurrection refuse it until the
+    cutover reconciliation replaces it."""
+    try:
+        return decode_resources(value)
+    except ResourceShapeError:
+        return None
+
+
 def recover_local_resources(agent_id: int, machine: str) -> None:
     with write_transaction() as conn:
         row = conn.execute(
@@ -44,7 +55,7 @@ def recover_local_resources(agent_id: int, machine: str) -> None:
         ).fetchone()
     if row is None or row[0] is None:
         return
-    state = decode_resources(row[0])
+    state = _recoverable(row[0])
     if not isinstance(state, IncarnationResources) or row[3] != machine:
         return
     target = RuntimeIncarnation(agent_id, state.generation, state.owner)

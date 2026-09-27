@@ -18,6 +18,7 @@ from shared import maintenance, pause_owner, telemetry
 from shared.config import settings
 from shared.hold_driver import HoldDriver
 from shared.maintenance_state import MaintenanceHold
+from shared.resource_admission import DRAINED_RESOURCES
 
 
 class LifecycleCollisionError(RuntimeError):
@@ -302,10 +303,10 @@ def _applied_capture(
     # continuation receipt, which only the original boot may later sign.
     operation = Jsonb({"holder": holder, "acquired_at": acquired_at.isoformat()})
     rows = conn.execute(
-        "SELECT m.id FROM agents_meta m JOIN inbound_messages i "
+        "SELECT m.id FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
         "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
         "WHERE m.id=ANY(%s) AND m.status='idling' AND m.runtime_owner IS NULL "
-        "AND m.runtime_generation IS NULL AND m.incarnation_resources IS NULL "
+        f"AND m.runtime_generation IS NULL AND {DRAINED_RESOURCES} "
         "AND i.kind='restart' AND i.source='system:maintenance' AND i.status='claimed' "
         "AND i.target_owner=%s "
         "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
@@ -492,12 +493,12 @@ def verify_drained(conn: psycopg.Connection, hold: MaintenanceHold) -> None:
                 )
             continue
         row = conn.execute(
-            "SELECT 1 FROM agents_meta m JOIN inbound_messages i "
+            "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
             "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
             "WHERE m.id=%s AND i.id=%s AND i.kind='restart' AND i.status='claimed' "
             "AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
             "AND m.status='idling' AND m.runtime_owner IS NULL AND m.runtime_generation IS NULL "
-            "AND m.incarnation_resources IS NULL",
+            f"AND {DRAINED_RESOURCES}",
             (agent_id, command_id),
         ).fetchone()
         if row is None:

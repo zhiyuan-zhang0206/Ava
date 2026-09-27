@@ -56,6 +56,6 @@ This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 | `posix_command.run_owned_command` | `wait_group_finished`, then the exec domain's close |
 | ava-root unit stop | `group_empty` and `group_members`, after the unit leader is reaped |
 
-Consumers: [[incarnation-resources.ava.okf.md|exec incarnation resources]],
+Consumers: [[incarnation-resources/incarnation-resources.ava.okf.md|exec incarnation resources]],
 [[services/pitr/operation-custody.ava.okf.md|PITR operation custody]],
 [[runtime_prepare.ava.okf.md|runtime preparation]].

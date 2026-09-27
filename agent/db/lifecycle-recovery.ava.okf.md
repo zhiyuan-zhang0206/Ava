@@ -22,9 +22,14 @@ original owner and resources are positively absent; unresolved evidence
 remains pending.
 
 Resurrection requires the terminated hosted incarnation's retained generation
-and owner, no per-agent PID, and no outstanding applied lifecycle command.
-Historical process runtimes, unknown runtime kinds, and incomplete hosted
-identities refuse resurrection pending explicit one-time cutover reconciliation.
+and owner, no per-agent PID, and no outstanding applied lifecycle command. A
+never-admitted row (no runtime identity, birth marker unconsumed, rechecked in
+the final CAS) resurrects as a fresh hosted birth instead.
+Historical process runtimes, unknown runtime kinds, incomplete hosted
+identities and resources the current model cannot decode refuse resurrection
+(`runtime_cutover_required`) pending explicit one-time cutover reconciliation.
+An automatic resurrection that meets such a refusal leaves its inbound queued
+and logs a WARNING naming the reason.
 No process-exit observer adopts those rows or settles a hosted logical lifecycle.
 
 Hosted protocol-zero rows with NULL resource metadata retain their existing

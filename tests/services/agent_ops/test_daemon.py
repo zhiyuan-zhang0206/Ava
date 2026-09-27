@@ -452,6 +452,28 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_resurrect_refusal_fails_with_its_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resurrection refusal is a durable verdict, returned in the wire form
+    the caller classifies (`ResurrectRefused: <reason>`), not a dispatch crash."""
+    from shared.agents import ResurrectRefused
+
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+
+    async def _raises(  # type: ignore[no-untyped-def]
+        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+    ):
+        raise ResurrectRefused("runtime_cutover_required")
+
+    monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
+    status, result = await daemon._dispatch(
+        "lifecycle", {"path": "/api/agents/7/resurrect-explicit-v2", "body": {}}
+    )
+    assert (status, result) == ("failed", {"error": "ResurrectRefused: runtime_cutover_required"})
+
+
+@pytest.mark.asyncio
 async def test_dispatch_wire_error_carries_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     """AvaAgentError raised by an op is converted to a failed result with reason field
     so the gateway's _raise_proxied_wire_error_from_payload can re-emit."""

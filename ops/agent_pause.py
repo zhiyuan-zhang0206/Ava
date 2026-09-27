@@ -27,6 +27,7 @@ from shared.db import connect, publish_inbound_wake
 from shared.hold_driver import HoldDriver
 from shared.machine import machine_name, machine_role
 from shared.maintenance_state import MaintenanceHold
+from shared.resource_admission import DRAINED_RESOURCES
 
 _log = logging.getLogger(__name__)
 
@@ -403,9 +404,9 @@ def _stall_report(hold: MaintenanceHold, pending: list[int]) -> str:
     try:
         with connect() as conn:
             raw_rows = conn.execute(
-                "SELECT m.status, m.runtime_kind, m.runtime_owner, "
+                "SELECT m.status, m.runtime_kind, m.runtime_owner, "  # noqa: S608 -- constant SQL fragment
                 "m.lease_expires_at IS NOT NULL AND m.lease_expires_at > clock_timestamp(), "
-                "m.incarnation_resources IS NULL, m.last_active_at, "
+                f"{DRAINED_RESOURCES}, m.last_active_at, "
                 "i.status, i.applied_at IS NOT NULL "
                 "FROM unnest(%s::int[], %s::bigint[]) AS cohort(agent_id, command_id) "
                 "LEFT JOIN agents_meta m ON m.id = cohort.agent_id "

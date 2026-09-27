@@ -222,8 +222,9 @@ class ResurrectBudgetExhausted(ResurrectError): ...  # noqa: N818
 class ResurrectRefused(ResurrectError):  # noqa: N818 — style consistent with ResurrectAlreadyAlive
     """Resurrection refused a runtime or billing recovery guard.
 
-    Historical process/unknown runtime kinds or an incomplete hosted identity
-    require explicit cutover reconciliation (`runtime_cutover_required`). Billing
+    Historical process/unknown runtime kinds, an incomplete hosted identity or
+    resources the current model cannot decode require explicit cutover
+    reconciliation (`runtime_cutover_required`). Billing
     recovery additionally refuses `closed` and `not_billing_halted` rows. The
     billing op returns these as structured per-agent outcomes; this exception is
     not wire-encoded (no ErrorReason entry).

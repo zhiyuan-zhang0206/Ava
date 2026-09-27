@@ -149,6 +149,19 @@ grants, legacy selector parser, protocol-zero fallback and their dead controller
 be deleted together. No permanent row-adoption compatibility path belongs in the
 new runtime.
 
+Implemented for existing agents (FC-4a; why: `decisions/2026-09-27-existing-agent-closed-predecessor-admission.md`):
+a retired-shape row is admissible only after the cutover rewrites it to the
+closed-predecessor form, `IncarnationResources(G, O, host_process=null,
+requests={})` for the incarnation the retired value names, backed by that
+incarnation's existing predecessor receipt (the old drain's applied restart,
+or an observed terminate) and the machine's closure attestation recorded on
+the receipt. `shared.predecessor_closure.close_retired_predecessor` is the
+one-time library FC-4 calls; admission keeps `PREDECESSOR_RECEIPT` as its only
+rule. Unconverted rows refuse with `resource_fence` / `runtime_cutover_required`;
+NULL rows are untouched and stay protocol zero. Drain certification accepts
+the complete empty recorded set of the released incarnation. A never-admitted
+row resurrects as a fresh birth only with its birth marker intact.
+
 ### Proposed database authority boundary
 
 Separate schema compatibility from write authority. A same-schema patch must

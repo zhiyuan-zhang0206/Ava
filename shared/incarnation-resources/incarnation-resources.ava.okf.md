@@ -42,6 +42,10 @@ evidence alone never authorizes takeover. No spawn stamps the birth marker:
 enabling new births still requires the publication/all-writer boundary, never an
 environment flag or an installed revision.
 
+Values the current model cannot decode, their one-time conversion, drained
+sets and never-admitted resurrection:
+[[cutover-closure.ava.okf.md|closed predecessor]].
+
 Hosted admission resolves the loaded image once per host process and rechecks
 its cheap immutable binding without traversing the image on each turn. The
 existing publication decision locks deployment and registry before agent
@@ -103,17 +107,5 @@ Fresh host and ready-handshake captures compare native births; database CAS and
 terminal receipts retain exact model equality, including the original timestamp.
 Same-host admission preserves the stored receipt rather than rewriting its facts.
 
-The dedicated owner's `ExecProcessDomain.close_confirmed` keeps the POSIX root
-unreaped until [[process-group-closure.ava.okf.md|group closure]] is proven.
-It is distinct from successful signal submission. On Windows,
-`WindowsJob.terminate_and_confirm` retains the original Job handle through
-termination and a zero `ActiveProcesses` readback, then closes it. Query failure
-or timeout remains unknown even if fallback close subsequently kills members.
-Neither operation covers unregistered POSIX session escapes or Windows breakaway.
-These stronger operations are used by the independent owner, never by a
-historical numeric PGID after its direct-child pin has been released.
-
-Windows accounting follows the native
-[QueryInformationJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject)
-and [basic accounting](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information)
-contracts; real native CI, not simulated handle close, must establish support.
+Owner domain closure and Windows Job accounting:
+[[domain-closure.ava.okf.md|domain closure]].

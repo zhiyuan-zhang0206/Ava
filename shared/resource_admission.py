@@ -2,6 +2,9 @@
 
 NULL stays legacy protocol zero, not a known empty set. No producer in this
 module creates a birth marker or enables managed mode on an existing row.
+A successor replaces another incarnation's set only through the predecessor
+receipt rule; the cutover's closed-predecessor form (`shared.predecessor_closure`)
+is admitted by that same rule, with no other acceptance path.
 """
 
 from typing import Any
@@ -19,8 +22,21 @@ from shared.incarnation_resources import (
 from shared.runtime_incarnation import RuntimeIncarnation
 
 _LOCK = "SELECT incarnation_resources,runtime_generation,runtime_owner,runtime_kind,pid,started_at,runtime_protocol_version FROM agents_meta WHERE id=%s FOR UPDATE"
-_PREDECESSOR = "SELECT i.id FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id WHERE i.agent_id=%s AND i.target_generation=%s AND i.target_owner=%s AND i.applied_at IS NOT NULL AND ((i.kind='restart' AND i.status='claimed' AND m.lifecycle_command_id=i.id) OR (i.kind='terminate' AND i.status='done' AND i.observed_at IS NOT NULL)) LIMIT 1"
+# The one predecessor rule: a settled lifecycle receipt for (agent, generation,
+# owner) — the applied restart still held as the lifecycle pointer, or an
+# applied and observed terminate. Aliases: i = inbound_messages, m = agents_meta.
+PREDECESSOR_RECEIPT = "i.agent_id=%s AND i.target_generation=%s AND i.target_owner=%s AND i.applied_at IS NOT NULL AND ((i.kind='restart' AND i.status='claimed' AND m.lifecycle_command_id=i.id) OR (i.kind='terminate' AND i.status='done' AND i.observed_at IS NOT NULL))"
+_PREDECESSOR = f"SELECT i.id FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id WHERE {PREDECESSOR_RECEIPT} LIMIT 1"  # noqa: S608 -- constant SQL fragment
 _STORE = "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s"
+# What a drained restart leaves: protocol-zero NULL, or the complete recorded
+# set of exactly the incarnation restart `i` released, empty and unfrozen.
+DRAINED_RESOURCES = (
+    "(m.incarnation_resources IS NULL OR (m.incarnation_resources->>'state'='admitted' "
+    "AND m.incarnation_resources->>'generation'=i.target_generation::text "
+    "AND m.incarnation_resources->>'owner'=i.target_owner::text "
+    "AND m.incarnation_resources->>'frozen_by' IS NULL "
+    "AND m.incarnation_resources->'requests'='{}'::jsonb))"
+)
 
 
 def _require_same_host(state: IncarnationResources, host: ResourceProcess) -> None:

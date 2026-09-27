@@ -83,7 +83,7 @@ from services.agent_ops._boot import (
     _register_boot,
 )
 from services.agent_ops.dispatch_sync import dispatch_sync
-from shared.agents import AvaAgentError
+from shared.agents import AvaAgentError, ResurrectRefused
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
@@ -237,8 +237,9 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
     the OpFailure shape ({"error", "detail", "reason"}) so the gateway's handler
     can re-emit the original semantics via `_raise_proxied_wire_error_from_payload`.
     A malformed payload (ValidationError), an unparseable lifecycle path
-    (ValueError), or a capture for a session that no longer exists
-    (ShellNotFoundError) becomes a plain 'failed' result.
+    (ValueError), a capture for a session that no longer exists
+    (ShellNotFoundError) or a resurrection refusal (ResurrectRefused) becomes a
+    plain 'failed' result.
     """
     if not is_op_kind(kind):
         return "failed", {"error": f"unknown kind: {kind!r}"}
@@ -281,10 +282,12 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
         # ValidationError: a payload that failed its per-kind model_validate.
         # ValueError: ops_lifecycle.lifecycle_op raises it for an unparseable path.
         return "failed", {"error": f"{type(exc).__name__}: {exc}"}
-    except ShellNotFoundError as exc:
+    except (ShellNotFoundError, ResurrectRefused) as exc:
         # A capture for a shell session that no longer exists (capture_shell's
         # business miss) is a normal 'failed' result the gateway turns into its
-        # 404 — not a dispatch crash for _ops_route's catch-all to log.
+        # 404; a resurrection refusal is a durable row verdict the caller
+        # reports by reason. Neither is a dispatch crash for _ops_route's
+        # catch-all to log.
         return "failed", {"error": f"{type(exc).__name__}: {exc}"}
 
 
