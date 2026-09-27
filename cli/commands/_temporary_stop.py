@@ -200,7 +200,7 @@ def _report_incomplete(
     else:
         outcome = "Retry the command, or use ava start to resume. "
     print(
-        f"Pause/stop incomplete; resources were not force-killed: {exc}. "
+        f"Pause/stop incomplete; services and the data plane were not force-killed: {exc}. "
         f"phases: {timing or 'before the first phase'}. "
         f"{outcome}"
         f"Status journal: {status_path()}.",
@@ -330,7 +330,12 @@ def stop(
     teardown_extras: bool,
     timeout: float = PAUSE_TIMEOUT_SECONDS,
 ) -> int:
-    """Drain via normal restart, then stop selected resources; never force."""
+    """Drain via normal restart, then stop selected resources.
+
+    Services and the data plane are never forced. Closing terminals (stop, not
+    pause) SIGKILLs what outlives its bounded grace
+    (`service_stop.close_terminals`).
+    """
     from cli.commands.stop import _announce_stopping, _confirm_stop
 
     os.environ.pop("AVA_HOME_OVERRIDE", None)

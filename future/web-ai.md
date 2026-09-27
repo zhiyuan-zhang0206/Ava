@@ -50,7 +50,7 @@ selection.
   (`console --continue-url`, `deep-research reply`).
 - [x] `perplexity` as a console site — user call: its search is the best.
   Landed (the corp-gateway 502 blocking it was resolved); live in
-  `ava_builtins/skills/web-ai/reference/_sites.py`.
+  `ava_builtins/skill_support/web_ai/_sites.py`.
 
 Future candidates (not committed): Grok DeepSearch, AI Studio.
 

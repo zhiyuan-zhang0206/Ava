@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import importlib.util
 import json
 import re
 import subprocess
@@ -35,12 +34,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-_WEBCHAT_PATH = Path(__file__).resolve().parents[2] / "reference" / "webchat.py"
-_spec = importlib.util.spec_from_file_location("webchat", _WEBCHAT_PATH)
-if _spec is None or _spec.loader is None:
-    raise RuntimeError(f"cannot load shared driver at {_WEBCHAT_PATH}")
-webchat = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(webchat)
+from ava_builtins.skill_support.web_ai import webchat
 
 # Phrasing the prompt as an explicit generation request makes the model produce
 # the asset rather than describe it. --raw sends the prompt verbatim.

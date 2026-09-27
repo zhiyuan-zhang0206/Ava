@@ -45,6 +45,24 @@ scan for ★ to pick out "what is this new entry point doing / why was that one 
 **Prerequisite**: the codebase is organized well enough that filenames are self-documenting
 (`wake_dispatch.py` is obviously the wake-dispatch job; no comment needed to explain it).
 
+## 1a. Contract change (when a `*.api.txt` snapshot changes)
+
+`shared/db.api.txt` / `shared/agents/api.txt` / `shared/events/api.txt` are
+generated snapshots of a package door's public surface
+(`scripts/structure/contracts.py`; see `conventions/python-conventions.md`).
+If any changed, add a "Contract change" section naming each changed door and
+why — a new/removed public name, a changed signature, a widened re-export.
+A `fix`-labeled PR that has to touch a contract snapshot is a design change in
+disguise; call that out explicitly rather than letting it pass as internal.
+
+## 1b. Cross-package spread (locality)
+
+When the PR's source changes span 3 or more packages — package meaning what
+`scripts/structure/locality.py::_package_of` computes — name the decision
+those packages had to agree on to change together. Then either close it (the
+decision now has one owner) or file a task for it; don't let it evaporate.
+`scripts/structure/cochange.py` shows the spread.
+
 ## 2. Prose data flow supplement (as needed)
 
 The file tree shows **what changed**; prose covers **how runtime behavior changes**:

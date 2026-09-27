@@ -9,8 +9,8 @@ mechanic lives here so a selector fix happens in ONE place.
 Everything is driven from inside this module via `ava.mcps.chrome` against the
 shared headed Chrome on the user's logged-in session (the same browser the
 web-sources adapters use). Nothing here is imported into the agent namespace;
-the children load this file with importlib and call its functions, then print
-JSON to stdout.
+the children import this module and call its functions, then print JSON to
+stdout.
 
 Why text-stability is the primary completion signal: every site marks "still
 generating" differently (a stop button with a site-specific selector), and
@@ -34,29 +34,20 @@ from __future__ import annotations
 
 import contextlib
 import json
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
 import ava
-
-# Sibling leaf modules live next to this file; it is loaded by path (children
-# use importlib spec_from_file_location), so its own directory is put on
-# sys.path for the plain absolute imports below.
-_HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-
-from _dom import (  # noqa: E402, F401  (re-exported for children/tests)
+from ava_builtins.skill_support.web_ai._dom import (  # noqa: F401  (re-exported for children/tests)
     _any_present_js,
     _resolve_clickable,
     _selected_page_id,
     click_by_text,
     download_by_click,
 )
-from _sites import SITES, site  # noqa: E402, F401
-from _utils import (  # noqa: E402, F401
+from ava_builtins.skill_support.web_ai._sites import SITES, site  # noqa: F401
+from ava_builtins.skill_support.web_ai._utils import (  # noqa: F401
     _GROUP,
     _cluster,
     _new_idle_state,

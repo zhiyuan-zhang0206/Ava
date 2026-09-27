@@ -194,6 +194,12 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_REAP_POLL_S",
     ): "independent: waitpid poll after SIGKILL to collect the zombie, no lattice neighbour",
     (
+        "cli/commands/service_stop.py",
+        "_TERMINAL_STOP_GRACE_S",
+    ): "independent: HUP/TERM -> SIGKILL grace of a normal stop's terminal closure "
+    "(decisions/2026-09-28-stop-escalates-to-sigkill.md); the stop's own deadline caps it "
+    "and nothing orders against it, no lattice neighbour",
+    (
         "shared/redis_listener.py",
         "_CONSUME_ABANDON_GRACE",
     ): "independent: pubsub consume-abandon window, no lattice neighbour",

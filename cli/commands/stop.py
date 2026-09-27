@@ -1,7 +1,9 @@
 """Local pause, stop and restart commands over the shared native drain boundary.
 
-Normal paths retain checkpoints and never escalate on timeout. Explicit force
-uses the separate legacy resource teardown; updates preserve persistent PTYs.
+Normal paths retain checkpoints and never escalate a service or data-plane
+stop on timeout; a normal stop's terminal closure SIGKILLs what outlives its
+bounded grace. Explicit force uses the separate legacy resource teardown;
+updates preserve persistent PTYs.
 """
 
 from __future__ import annotations
@@ -236,7 +238,7 @@ def _do_stop(
     force: bool = False,
     timeout: float = 300,
 ) -> int:
-    """Shared pause/stop kernel; only explicit force authorizes escalation."""
+    """Shared pause/stop kernel; only explicit force escalates a service stop."""
     if force:
         return _force_stop(
             _repo,

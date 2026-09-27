@@ -35,7 +35,6 @@ from __future__ import annotations
 import calendar
 import datetime as _dt
 import hashlib
-import importlib.util
 import ipaddress
 import json
 import os
@@ -249,16 +248,12 @@ def _now_iso() -> str:
 
 
 def _webscrape() -> Any:
-    """Load the sibling `generic` skill's module (for `--full` body
-    extraction). Same cross-skill load pattern the other media adapters use for
-    audio-transcribe."""
-    mod_path = Path(__file__).parents[2] / "generic" / "reference" / "feed.py"
-    spec = importlib.util.spec_from_file_location("web_scrape_feed", mod_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load generic skill at {mod_path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """The sibling `generic` skill's shared web-scrape adapter module (for
+    `--full` body extraction). Imported lazily so a plain enum/sync run never
+    pays for trafilatura unless `--full` is actually used."""
+    from ava_builtins.skill_support.web_sources import webscrape
+
+    return webscrape
 
 
 def build_post(feed_url: str, feed_title: str, entry: Any, *, full: bool = False) -> dict[str, Any]:

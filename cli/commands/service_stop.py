@@ -2,19 +2,23 @@
 
 The caller owns the maintenance journal and admission fence. These functions
 prove only local recorded process identities; they do not prove remote drain or
-stop OS-managed extras. Ordinary stops never escalate to force. Persistent
-terminals close at their own boundary: `close_terminals` for `ava stop`, and
-`close_release_terminals` at a release or a PITR activation, where no terminal
-survives (decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2;
-decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2). Both take a
-session's whole membership as `shared.sessions.pty.session_tree` defines it —
-the recorded shell, its descendants and its POSIX session — and KILL reaches
-only identities captured from the terminal records' shells and hosts.
+stop OS-managed extras. Service stops never escalate to force.
+
+Persistent terminals have one closure (`_close`): capture each shell's whole
+session as `shared.sessions.pty.session_tree` defines it — the recorded shell,
+its descendants and its POSIX session — then HUP the shells and TERM the rest,
+wait a bounded grace, and SIGKILL what is left, each session whole. Its callers
+differ only in the grace, the SIGKILL leg's bound, the report's stage and when
+the owner's notice is recorded: `close_terminals` at `ava stop`
+(decisions/2026-09-28-stop-escalates-to-sigkill.md), `close_release_terminals`
+at a release or a PITR activation
+(decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2;
+decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2). KILL
+reaches only identities captured from the terminal records' shells and hosts.
 """
 
 from __future__ import annotations
 
-import contextlib
 import math
 import signal
 import sys
@@ -23,11 +27,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-import psutil
-
 from cli.commands._maintenance_stop_report import (
     StopIncompleteError,
-    StopSurvivor,
     SurvivorInventory,
     capture_survivor,
     live_identities,
@@ -43,6 +44,20 @@ from shared.sessions.pty import host_identity, host_starttime, session_tree
 
 # How often the completed-work wait re-reads the terminal trees.
 _WORK_POLL_S = 0.5
+
+# How long a normal stop's terminal closure waits between its HUP/TERM and the
+# SIGKILL of whatever is left (decisions/2026-09-28-stop-escalates-to-sigkill.md):
+# a job that handles TERM gets this long to clean up. The stop's own deadline
+# caps it as well. A release or PITR activation passes its own grace.
+_TERMINAL_STOP_GRACE_S = 10.0
+
+# The SIGKILL leg's own bound at a normal stop: each wait inside a session kill,
+# the wait for the killed sessions' hosts to end, and the closure evidence.
+# Every wait ends as soon as its processes are gone. The leg runs even when the
+# grace spent the rest of the stop deadline — a stop that reached its terminal
+# phase closes its terminals — so a stop can overrun its deadline by this
+# bounded leg.
+_TERMINAL_KILL_WAIT_S = 3.0
 
 
 def deadline_after(timeout: float) -> float:
@@ -122,130 +137,213 @@ def live_terminals() -> list[str]:
     return sorted(set(terminals))
 
 
-@dataclass(frozen=True)
-class TerminalInventory:
-    """Every live recorded terminal, captured before any signal.
+@dataclass
+class _Terminal:
+    """One persistent shell a closure takes, with everything captured as its session's.
 
-    `jobs` maps each captured member of a shell's session beyond the shell (its
-    descendants and its POSIX session, `session_tree.session_members`) to that
-    session; `hosts` holds each session's recorded PTY host. A session is busy
-    when it has a job.
+    `members` is the session's membership as `session_tree.session_members`
+    defines it — the shell, its descendants and every process in its POSIX
+    session (`cmd &` in its own group, a double-forked orphan) — each pinned by
+    birth before any signal; a live member's new descendants join it while the
+    closure waits. `host` is the recorded PTY host. Anything beyond the shell
+    at capture is running work, so the session is busy.
     """
 
-    shells: dict[str, OwnedProcess]
-    jobs: dict[OwnedProcess, str]
-    hosts: dict[str, OwnedProcess]
+    name: str
+    shell: OwnedProcess
+    members: set[OwnedProcess]
+    host: OwnedProcess | None
+    busy: bool
+
+    def role(self, identity: OwnedProcess) -> str:
+        if identity == self.shell:
+            return "terminal"
+        return "pty-host" if identity == self.host else "job"
+
+
+@dataclass(frozen=True)
+class TerminalInventory:
+    """Every live recorded terminal, captured before any signal."""
+
+    terminals: tuple[_Terminal, ...]
+
+    @property
+    def shells(self) -> dict[str, OwnedProcess]:
+        return {terminal.name: terminal.shell for terminal in self.terminals}
 
     @property
     def busy(self) -> dict[str, OwnedProcess]:
-        return {name: self.shells[name] for name in sorted(set(self.jobs.values()))}
-
-    def processes(self) -> set[OwnedProcess]:
-        return set(self.shells.values()) | set(self.jobs)
-
-    def session_of(self, identity: OwnedProcess) -> str | None:
-        for recorded in (self.shells, self.hosts):
-            for name, process in recorded.items():
-                if process == identity:
-                    return name
-        return self.jobs.get(identity)
-
-    def survivors(self, identities: list[OwnedProcess]) -> list[StopSurvivor]:
-        """Each identity's report entry, attributed to its recorded session."""
-
-        def role(identity: OwnedProcess) -> str:
-            if identity in self.shells.values():
-                return "terminal"
-            return "pty-host" if identity in self.hosts.values() else "job"
-
-        return [
-            capture_survivor(identity, service=self.session_of(identity), role=role(identity))
-            for identity in identities
-        ]
+        return {terminal.name: terminal.shell for terminal in self.terminals if terminal.busy}
 
 
 def capture_terminals() -> TerminalInventory:
-    """Capture each live recorded session's shell, jobs and PTY host; signal nothing.
+    """Capture each live recorded session's membership and PTY host; signal nothing."""
+    return TerminalInventory(tuple(_capture_terminals(get_shell_backend().list_sessions())))
 
-    A job is any live member of the shell's session: `cmd &` in its own
-    process group and a double-forked orphan that left the shell's tree count
-    the same as a foreground child.
-    """
-    shells: dict[str, OwnedProcess] = {}
-    jobs: dict[OwnedProcess, str] = {}
-    hosts: dict[str, OwnedProcess] = {}
-    for name in get_shell_backend().list_sessions():
+
+def _capture_terminals(names: list[str]) -> list[_Terminal]:
+    """Each live shell's session membership and PTY host, captured before any signal."""
+    terminals: list[_Terminal] = []
+    for name in names:
         path = run_dir() / "pty" / f"{name}.json"
         record = SessionRecord.read(path)
         if record is None:
             continue
         shell = OwnedProcess(record.pid, record.create_time, record.starttime)
-        if not shell.live():
-            continue
-        shells[name] = shell
-        host = host_identity(path)
-        if host is not None:
-            hosts[name] = OwnedProcess(host[0], host[1], host_starttime(path))
-        for identity in session_tree.session_members(shell):
-            if identity != shell:
-                jobs[identity] = name
-    return TerminalInventory(shells, jobs, hosts)
+        members = session_tree.session_members(shell)
+        if not members:
+            continue  # the shell is no longer the recorded, live process
+        recorded_host = host_identity(path)
+        host = None
+        if recorded_host is not None:
+            host = OwnedProcess(recorded_host[0], recorded_host[1], host_starttime(path))
+        terminals.append(_Terminal(name, shell, set(members), host, busy=len(members) > 1))
+    return terminals
 
 
-def _cancel_terminals(inventory: TerminalInventory) -> None:
-    """The graceful close: HUP each shell, then TERM each captured job.
+def _hang_up(terminals: list[_Terminal]) -> None:
+    """SIGHUP every shell, then SIGTERM every other captured member.
 
-    The spawners stop FIRST: an interactive shell's own SIGHUP makes bash exit
+    The shells go first: an interactive shell's own SIGHUP makes bash exit
     (re-sending HUP to its jobs), so a loop that restarts its job cannot keep
-    producing new descendants during the wait — the 2026-09-09 field evidence
+    producing new descendants during the grace — the 2026-09-09 field evidence
     showed a restart loop outliving every interrupt aimed at its current job
-    (#2045). Jobs get their graceful SIGTERM right after.
+    (#2045).
     """
-    for shell in inventory.shells.values():
-        if shell.live():
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
-                shell.send_signal(signal.SIGHUP)
-    for job in inventory.jobs:
-        if job.live():
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
-                job.send_signal(signal.SIGTERM)
+    session_tree.terminate([terminal.shell for terminal in terminals], signal.SIGHUP)
+    for terminal in terminals:
+        session_tree.terminate(terminal.members - {terminal.shell})
 
 
-def _await_closed(
-    inventory: TerminalInventory, tracked: set[OwnedProcess], deadline: float
-) -> None:
-    """Wait for every tracked identity to exit; never force, report each survivor."""
-    try:
-        wait_for_exit(tracked, deadline)
-    except TimeoutError as exc:
-        # A shell that HUP'd out may have dropped its record while a
-        # signal-ignoring job survives as an orphan — report the owning
-        # session by name and each survivor's identity (issue #2162) so the
-        # operator can find and judge the exact process.
-        live = live_identities(tracked)
-        survivors = inventory.survivors(live)
-        surviving = sorted({name for name in map(inventory.session_of, live) if name})
-        raise StopIncompleteError(
-            f"terminal stop incomplete — {exc} surviving terminal processes "
-            f"from sessions: {surviving}\n"
-            f"{SurvivorInventory(survivors=survivors, groups=[]).render(stage='terminals')}",
-            stage="terminals",
-            survivors=[survivor.payload() for survivor in survivors],
-        ) from exc
+def _await_members(terminals: list[_Terminal], until: float) -> bool:
+    """Wait for every captured member to exit; False when `until` passes first.
 
-
-def _await_no_terminals(deadline: float) -> None:
-    """The closure evidence: no recorded shell or PTY host birth remains live.
-
-    Hosts finish naturally after their child exits. Their protocol deliberately
-    ignores SIGTERM, so sending signals to every host process is not a stop API.
+    A live member's new descendants join its session's capture on every poll,
+    so a child forked during the grace dies with the rest.
     """
     while True:
-        try:
-            require_no_terminals()
+        live = [(t, identity) for t in terminals for identity in list(t.members) if identity.live()]
+        if not live:
+            return True
+        for terminal, identity in live:
+            terminal.members |= capture_tree(identity)
+        left = until - time.monotonic()
+        if left <= 0:
+            return False
+        time.sleep(min(0.05, left))
+
+
+def _kill_leftovers(
+    terminals: list[_Terminal], wait_s: float
+) -> list[tuple[_Terminal, OwnedProcess]]:
+    """SIGKILL each session's remaining membership; return what outlived it.
+
+    Every session dies through `session_tree.kill_session_tree`: frozen, killed
+    children first with the shell last, rooted at the shell and at every member
+    captured, so a job whose shell already exited is still taken with its
+    descendants.
+    """
+    survivors: list[tuple[_Terminal, OwnedProcess]] = []
+    for terminal in terminals:
+        if not any(identity.live() for identity in terminal.members):
+            continue
+        result = session_tree.kill_session_tree(
+            terminal.shell, also=terminal.members, wait_s=wait_s
+        )
+        survivors += [(terminal, identity) for identity in result.survivors]
+    return survivors
+
+
+def _end_hosts(terminals: list[_Terminal], wait_s: float) -> list[tuple[_Terminal, OwnedProcess]]:
+    """Let each PTY host end once its session is gone; SIGKILL one that does not.
+
+    A host exits on its own the moment its shell is gone, unlinking its record
+    first; it ignores HUP and TERM by protocol, so a signal is no stop API for a
+    healthy one. A host still running `wait_s` later is wedged, and a closure
+    leaves no captured birth running: it gets SIGKILL. Returns the hosts that
+    outlived that too.
+    """
+    hosts = {terminal.host: terminal for terminal in terminals if terminal.host is not None}
+    if not _await_gone(list(hosts), wait_s):
+        for host in live_identities(hosts):
+            host.send_signal(signal.SIGKILL)
+        _await_gone(list(hosts), wait_s)
+    return [(hosts[host], host) for host in live_identities(hosts)]
+
+
+def _await_gone(identities: list[OwnedProcess], wait_s: float) -> bool:
+    """Poll until none of `identities` is live; False when `wait_s` passes first."""
+    until = time.monotonic() + wait_s
+    while live_identities(identities):
+        left = until - time.monotonic()
+        if left <= 0:
+            return False
+        time.sleep(min(0.05, left))
+    return True
+
+
+def _terminals_incomplete(
+    survivors: list[tuple[_Terminal, OwnedProcess]], stage: str
+) -> StopIncompleteError:
+    """The report for processes that outlived their SIGKILL (issue #2162's inventory).
+
+    Each survivor names its owning session and its identity so the operator
+    can find and judge the exact process — typically another user's (a root
+    `sudo`), which this closure may not signal.
+    """
+    owners = {identity: terminal for terminal, identity in survivors}
+    live = live_identities(owners)
+    report = [
+        capture_survivor(
+            identity, service=owners[identity].name, role=owners[identity].role(identity)
+        )
+        for identity in live
+    ]
+    surviving = sorted({owners[identity].name for identity in live})
+    return StopIncompleteError(
+        f"terminal closure incomplete — processes outlived their SIGKILL: "
+        f"{[identity.pid for identity in live]} from sessions: {surviving}\n"
+        f"{SurvivorInventory(survivors=report, groups=[]).render(stage=stage)}",
+        stage=stage,
+        survivors=[survivor.payload() for survivor in report],
+    )
+
+
+def _close(terminals: list[_Terminal], *, grace_until: float, kill_s: float, stage: str) -> None:
+    """The one terminal closure: hang up, a bounded grace, SIGKILL, then the evidence.
+
+    Each shell's whole session was captured before this first signal
+    (`_capture_terminals`). The shells get HUP and every other member TERM
+    (`_hang_up`); whatever is still alive at `grace_until` is SIGKILLed with its
+    session (`_kill_leftovers`), and each PTY host ends after its session
+    (`_end_hosts`). The SIGKILL leg runs even when `grace_until` has already
+    passed, each of its waits bounded by `kill_s`. A captured process that
+    outlives its SIGKILL fails the closure with its identity
+    (`StopIncompleteError` at `stage`); so does a terminal still live after
+    it (`_await_no_terminals`).
+    """
+    _hang_up(terminals)
+    graceful = _await_members(terminals, grace_until)
+    survivors = [] if graceful else _kill_leftovers(terminals, kill_s)
+    survivors += _end_hosts(terminals, kill_s)
+    if live_identities(identity for _terminal, identity in survivors):
+        raise _terminals_incomplete(survivors, stage)
+    _await_no_terminals(time.monotonic() + kill_s)
+
+
+def _await_no_terminals(until: float) -> None:
+    """The closure evidence: no recorded shell or PTY host birth is live; raise at `until`.
+
+    A host clears its record the moment its shell is gone, so this only waits
+    out a host still tearing down; a terminal born during the closure fails it.
+    """
+    while True:
+        left = live_terminals()
+        if not left:
             return
-        except RuntimeError:
-            time.sleep(min(0.05, remaining(deadline)))
+        if time.monotonic() >= until:
+            raise RuntimeError(f"terminals live after closure: {left}")
+        time.sleep(0.05)
 
 
 def _record_close_notices(
@@ -253,9 +351,9 @@ def _record_close_notices(
 ) -> None:
     """Durably record one closure notice per busy session (issue #2044).
 
-    An idle session, a timed-out stop, or a Windows unit records nothing. A
-    write failure is loud but never fails the closure — retrying the whole stop
-    would not restore the resources it closes.
+    An idle session, a failed stop, or a Windows unit records nothing. A write
+    failure is loud but never fails the closure — retrying the whole stop would
+    not restore the resources it closes.
     """
     for name, shell in busy.items():
         if shell.starttime is not None:
@@ -283,11 +381,19 @@ def _record_close_notices(
 
 
 def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> None:
-    """Close this unit's terminal jobs and shells without a kill escalation (`ava stop`).
+    """Close this unit's terminals at `ava stop`: HUP/TERM, a bounded grace, then SIGKILL.
 
-    Busy sessions verified closed leave a durable closure notice for their
-    owner agent (issue #2044): the gateway and ops server are already down by
-    now, so the notice is delivered at the next ops-daemon startup.
+    The grace is `_TERMINAL_STOP_GRACE_S`, capped by the stop's `deadline`;
+    the SIGKILL leg is bounded by `_TERMINAL_KILL_WAIT_S` and runs even when
+    the grace spent the rest of the deadline — a stop that reached its
+    terminal phase closes its terminals
+    (decisions/2026-09-28-stop-escalates-to-sigkill.md). A process that
+    outlives its SIGKILL fails the stop, which keeps its maintenance hold.
+
+    Busy sessions verified closed — a job the SIGKILL cut short included —
+    leave a durable closure notice for their owner agent (issue #2044): the
+    gateway and ops server are already down by now, so the notice is delivered
+    at the next ops-daemon startup.
     """
     if sys.platform == "win32":
         backend = get_shell_backend()
@@ -297,9 +403,12 @@ def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
                 raise RuntimeError(f"terminal {name!r} lacks a native Job closure receipt")
         return
     inventory = capture_terminals()
-    _cancel_terminals(inventory)
-    _await_closed(inventory, inventory.processes(), deadline)
-    _await_no_terminals(deadline)
+    _close(
+        list(inventory.terminals),
+        grace_until=min(deadline, time.monotonic() + _TERMINAL_STOP_GRACE_S),
+        kill_s=_TERMINAL_KILL_WAIT_S,
+        stage="terminals",
+    )
     _record_close_notices(
         inventory.busy, operation, acquired_at, reason=pty_close_notices.STOP_REASON
     )
@@ -327,65 +436,24 @@ def close_release_terminals(
 ) -> TerminalInventory:
     """Close every persistent terminal at a release or PITR boundary; none survives it.
 
+    The same closure as `close_terminals`, with the boundary's own bounds:
+    `grace_s` for the hang-up and `kill_s` for each wait of the SIGKILL leg.
     Busy sessions' owner notices are recorded first, as the closure's intent,
-    naming `reason` (`pty_close_notices.RELEASE_REASON` or `.PITR_REASON`). Then
-    the ordinary graceful close, bounded by `grace_s`; whatever is still live
-    after it dies by `_kill_terminals` (each session whole, then the recorded
-    PTY hosts). Closure is the kernel observation, within `kill_s`, that every
-    captured identity is gone and no recorded terminal remains live. A
-    survivor, or a terminal born during closure, fails with the process
-    inventory and leaves the boundary unresolved.
+    naming `reason` (`pty_close_notices.RELEASE_REASON` or `.PITR_REASON`): the
+    boundary cannot complete with the session alive, so no retry or crash may
+    lose the notice. A survivor, or a terminal born during closure, fails with
+    the process inventory and leaves the boundary unresolved.
     """
     _require_pty_custody()
     inventory = capture_terminals()
     _record_close_notices(inventory.busy, operation, acquired_at, reason=reason)
-    tracked = inventory.processes() | set(inventory.hosts.values())
-    _cancel_terminals(inventory)
-    graceful = True
-    try:
-        wait_for_exit(tracked, deadline_after(grace_s))
-    except TimeoutError:
-        graceful = False
-    kill_deadline = deadline_after(kill_s)
-    if not graceful:
-        _kill_terminals(inventory, tracked, kill_deadline)
-    try:
-        wait_for_exit(tracked, kill_deadline)
-    except TimeoutError as exc:
-        survivors = inventory.survivors(live_identities(tracked))
-        raise StopIncompleteError(
-            f"release terminal closure incomplete — {exc}; survivors of SIGKILL "
-            "to their captured births:\n" + "\n".join(entry.render() for entry in survivors),
-            stage="release-terminals",
-            survivors=[entry.payload() for entry in survivors],
-        ) from exc
-    born = live_terminals()
-    if born:
-        raise RuntimeError(f"terminals live after release closure: {born}")
+    _close(
+        list(inventory.terminals),
+        grace_until=time.monotonic() + grace_s,
+        kill_s=kill_s,
+        stage="release-terminals",
+    )
     return inventory
-
-
-def _kill_terminals(
-    inventory: TerminalInventory, tracked: set[OwnedProcess], deadline: float
-) -> None:
-    """SIGKILL what the graceful close left, each session whole.
-
-    Every session dies through `session_tree.kill_session_tree`: frozen parents
-    first, killed children first with the shell last, rooted at the shell and
-    at each job captured before the cancel, so a job whose shell already exited
-    is still taken with its descendants. Every member that kill captured joins
-    `tracked` for the closure evidence. Whatever else is tracked and still live
-    — a recorded PTY host, a descendant re-captured during the grace wait —
-    then gets SIGKILL to its captured birth.
-    """
-    for name, shell in inventory.shells.items():
-        jobs = [job for job, owner in inventory.jobs.items() if owner == name]
-        result = session_tree.kill_session_tree(
-            shell, also=jobs, wait_s=max(0.0, deadline - time.monotonic())
-        )
-        tracked.update(result.killed, result.survivors)
-    for identity in sorted(tracked, key=lambda identity: identity.pid):
-        identity.send_signal(signal.SIGKILL)
 
 
 def _require_pty_custody() -> None:

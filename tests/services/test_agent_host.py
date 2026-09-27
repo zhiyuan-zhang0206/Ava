@@ -356,6 +356,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         return None
 
     monkeypatch.setattr(host_mod, "reconcile_claimed_inbounds_at_startup", _noop_reconcile)
+    monkeypatch.setattr(settlement, "reconcile_claimed_inbounds_at_startup", _noop_reconcile)
     monkeypatch.setattr(host_mod, "repair_dangling_tool_use_at_startup", _noop_reconcile)
     monkeypatch.setattr(host_mod, "publish_agent_updated", _noop_reconcile)
 

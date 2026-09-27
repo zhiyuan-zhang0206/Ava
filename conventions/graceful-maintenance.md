@@ -11,7 +11,7 @@ start the gateway and verify its dependencies before starting runners.
 | Command | Native agent execution | Persistent shells and schedules | Local infrastructure and extras |
 | --- | --- | --- | --- |
 | `ava pause` | Drain normally and stop the native services | Retained | Keep PostgreSQL, Redis, PgBouncer, browser, Gate, helper and native LGTM |
-| `ava stop -y` | Same normal drain | Close terminal jobs and shells | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
+| `ava stop -y` | Same normal drain | Close terminal jobs and shells (HUP/TERM, SIGKILL after a bounded grace) | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
 | `ava stop -y --keep-infra` | Same normal drain | Close | Keep the private data plane |
 | `ava stop -y --keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
 | `ava start` | Restore normal admission after readiness | Reuse retained sessions; closed sessions are not serialized | Bring up enabled services from the existing home |
@@ -20,10 +20,14 @@ start the gateway and verify its dependencies before starting runners.
 an invocation's preservation choice, not a permanent disabled-service setting.
 `stop` asks for confirmation unless `-y` is passed; `pause` does not. Both use
 `--timeout 300` by default. A deadline is a failed stop, not permission to kill
-survivors. `--force` explicitly selects force behavior when normal exit cannot
-complete. Force stops the selected service processes without fabricating a
-restart receipt. Later start uses agent-host crash recovery from persisted
-checkpoints.
+surviving services. Terminals are the exception: `stop` hangs up each shell's
+whole session (its descendants and double-forked orphans included), and
+SIGKILLs what is still alive after a grace of at most 10 seconds; a busy
+session still leaves its owner the closure notice
+([decision](../decisions/2026-09-28-stop-escalates-to-sigkill.md)). `--force`
+explicitly selects force behavior when normal exit cannot complete. Force stops
+the selected service processes without fabricating a restart receipt. Later
+start uses agent-host crash recovery from persisted checkpoints.
 Force does not provide normal pause's seamless continuation or a checkpoint
 for interrupted arbitrary code; use normal stop for the planned data-plane move.
 

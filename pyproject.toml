@@ -381,6 +381,10 @@ ignore = [
 # bugbear, pylint-refactor, naming, annotation (ANN201), naive-datetime
 # (DTZ005) and pathlib-idiom (PTH123) nits are noise here.
 "ava_builtins/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
+# ava_builtins/skill_support/** holds code relocated out of ava_builtins/skills/*/
+# reference/*.py (path_imports fix, Rule 6): a pure relocation, so it keeps the
+# exact same relaxations its content had at its old reference/ path.
+"ava_builtins/skill_support/**/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
 # .agents/skills (the kernel-contributor project skills) carry the same kind of
 # runnable reference CLIs (e.g. ava-self-development's changelog generator).
 ".agents/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
@@ -502,6 +506,10 @@ omit = [
     "*/__main__.py",
     "*/__init__.py",
     "*/tests/*",
+    # ava_builtins/skill_support/** is a pure relocation of code that lived at
+    # ava_builtins/skills/*/reference/* (path_imports fix, Rule 6) — same
+    # omission its content had there.
+    "ava_builtins/skill_support/**",
     "ava_builtins/skills/*/reference/*",
     "ava_builtins/skills/*/scripts/*",
 ]
@@ -573,6 +581,10 @@ exclude = [
     # per-file-ignores for the same paths.
     "ava_builtins/skills/*/reference",
     "ava_builtins/plugins/*/skills/**/reference",
+    # ava_builtins/skill_support/** is a pure relocation of code that lived at
+    # ava_builtins/skills/*/reference/*.py (path_imports fix, Rule 6) — it
+    # keeps the same exclusion its content had there.
+    "ava_builtins/skill_support/**",
 ]
 # Libraries with incomplete third-party stubs — temporarily lenient.
 reportMissingTypeStubs = false

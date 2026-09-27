@@ -298,9 +298,8 @@ export const HEADER_CLS =
 // BAR_HEIGHT_PX / BAR_HEIGHT_CLASS in @/lib/layout (h-11 = 44px), the same
 // line findClosestStuckHeaderId measures against. A work block's child card
 // pins one level deeper instead (STICKY_CHILD_HEADER_CLS below). While
-// `isStuck`, the header switches to the elevated opaque variant that masks the
-// body scrolling beneath it, then fades back to transparent once the block's
-// range is left.
+// `isStuck`, the header switches to the elevated frosted-glass surface over the
+// body scrolling beneath it; the resting header remains transparent.
 export const STICKY_HEADER_CLS = "sticky top-11 z-10";
 
 // The nested variant (task #3215): a work block's child card pins under the
@@ -311,43 +310,39 @@ export const STICKY_HEADER_CLS = "sticky top-11 z-10";
 // it. Tailwind needs the literal class string (underscores = the calc spaces).
 export const STICKY_CHILD_HEADER_CLS =
   "sticky top-[calc(2.75rem_+_var(--turn-header-h,0px))] z-[5]";
-// The stuck variant must stay LAYOUT-NEUTRAL: a stuck/unstuck flip must not
-// change the header's border box, or the ResizeObserver that feeds
-// --turn-header-h (run-block.tsx) re-fires around a scroll boundary, the
-// resulting layout change pins the reader back to the bottom, and the flips
-// then flip-flop in a loop (user report 2026-09-12). Every edge treatment
-// below is therefore paint-only: no borders, no margins — the former +1px
-// border/-mb-px pair is gone (task #3536).
+// A single frosted pane covers the header and its 2px top overlap, preserving
+// the translucent hover without an unblurred seam under HeaderBar/parent turn.
+// The button stays transparent: painting the pane twice would flatten the glass.
+// All edges are paint-only to preserve measured height and avoid a pin loop.
+// Sticky z-index contains the pane behind the label; the 16px shadow seals the
+// scrollbar gutter and the separator sits inside the pane's bottom edge.
 //
-// One paint-only seal closes the mask's right edge (task #3224) — a
-// box-shadow copy; shadows never feed layout:
-// - 16px right: the block root ends where the scroller's reserved scrollbar
-//   gutter begins; without the seal the unmasked strip shows the body
-//   scrolling past as a vertical seam. The seal color is the raw token
-//   (var(--background)) — the theme token lives in lab space, so the
-//   hsl(var(--background)) form is invalid at computed-value time and
-//   silently drops the whole box-shadow (verified in-browser).
-//
-// The bottom edge is a paint-only ::after band (task #3536): 2px of the
-// header's own masked surface (bg-background/95 + backdrop-blur-md, so the
-// color matches the header composite rather than the raw token), then the
-// fully-opaque 1px separator line at its bottom. The band covers sub-pixel /
-// single-frame slits between this header and a child header pinned just
-// below it (pin-line desync right at a sticky transition, QA #3308), while
-// the visible signature stays [surface][line][next surface] flush. The raw-
-// token seal + in-flow border it replaced left a constant 1-2px color band
-// under the line that read as a gap (user report 2026-09-15). The line
-// stays fully opaque so content sliding under cannot ghost through it.
-
+// The pane's `::before` box is kept present (same `content-['']`, geometry,
+// and transition declarations) in BOTH stuck and unstuck states — only its
+// background/blur *values* differ. `content` flipping between `normal` (no
+// box) and `''` (a box) is a hard boundary for CSS transitions: a
+// pseudo-element that didn't exist in the previous style has no prior frame
+// to interpolate from, so the very first stick (and every un-stick/re-stick
+// after) would snap straight to the settled frosted look instead of fading in
+// over `duration-150`. Keeping the box alive at a transparent, unblurred
+// resting value while unstuck gives the transition a real "before" state.
+const HEADER_PANE_GEOMETRY_CLS =
+  "before:absolute before:inset-x-0 before:-top-[2px] before:bottom-0 before:-z-10 before:content-[''] " +
+  "before:pointer-events-none " +
+  "before:transition-[background-color,backdrop-filter] before:duration-150 before:ease-out " +
+  "motion-reduce:before:transition-none";
 export const STUCK_HEADER_CLS =
-  "bg-background/95 backdrop-blur-md " +
+  "bg-transparent hover:bg-transparent rounded-none " +
   "shadow-[16px_0_0_0_var(--background)] " +
-  "after:absolute after:inset-x-0 after:top-full after:h-[3px] after:content-[''] " +
-  "after:bg-background/95 after:backdrop-blur-md after:border-b after:border-border " +
-  "after:pointer-events-none " +
-  "transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
+  HEADER_PANE_GEOMETRY_CLS + " " +
+  "before:bg-background/95 hover:before:bg-accent/30 before:backdrop-blur-md " +
+  "after:absolute after:inset-x-0 after:bottom-0 after:h-px after:content-[''] " +
+  "after:bg-border after:pointer-events-none " +
+  "transition-[color] duration-150 ease-out motion-reduce:transition-none";
 export const UNSTUCK_HEADER_CLS =
-  "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
+  "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none " +
+  HEADER_PANE_GEOMETRY_CLS + " " +
+  "before:bg-transparent before:backdrop-blur-none";
 
 // The colored left-border container. cardText tints the whole card (markers).
 // `actions` (copy / fork) is an optional overlay pinned to the block's

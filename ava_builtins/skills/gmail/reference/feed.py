@@ -53,19 +53,10 @@ import argparse
 import datetime as _dt
 import json
 import re
-import sys
 import time
-from pathlib import Path
 from typing import Any
 
-# Sibling modules live next to this file; it is invoked as a script (python
-# reference/feed.py), whose own directory is on sys.path -- the guard below
-# also covers importlib path-loads, mirroring the web-ai driver pattern.
-_HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-
-from _imap import (  # noqa: E402, F401  (re-exported: SKILL.md invokes the CLI, tests import feed.*)
+from ava_builtins.skill_support.gmail.imap import (  # noqa: F401  (re-exported: SKILL.md invokes the CLI, tests import feed.*)
     ALL_MAIL,
     DISCOVER_NET,
     IMAP_HOST,
@@ -73,32 +64,32 @@ from _imap import (  # noqa: E402, F401  (re-exported: SKILL.md invokes the CLI,
     KEYCHAIN_SERVICE,
     MIRROR_ROOT,
     GmailError,
-    _html_to_text,
-    _iso,
-    _meta,
-    _now_iso,
-    _parse_list_id,
-    _xgm,
     discover,
     enum,
     fetch,
+    html_to_text,
+    iso,
+    meta,
+    now_iso,
+    parse_list_id,
     read,
     save,
     search,
     sync,
     to_s1,
+    xgm,
 )
-from _smtp import (  # noqa: E402, F401
+from ava_builtins.skill_support.gmail.smtp import (  # noqa: F401
     SMTP_HOST,
     SMTP_PORT,
-    _addr_list,
-    _msg_summary,
-    _sent_summary,
+    addr_list,
     draft,
     draft_delete,
     forward,
+    msg_summary,
     reply,
     send,
+    sent_summary,
 )
 
 # --------------------------------------------------------------------------- #

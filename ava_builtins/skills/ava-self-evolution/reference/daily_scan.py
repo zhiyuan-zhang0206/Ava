@@ -25,8 +25,7 @@ The alert threshold is deliberately low (one bad run alerts): the scan
 wakes the self-evolution agent, not the user, so a false positive costs
 one cheap review, while a missed bad run loses the earliest signal.
 
-Run it like its sibling collect.py (the reference dir must be on
-sys.path — run as a script, not imported):
+Run it like its sibling collect.py:
 
     .venv/bin/python skills/ava-self-evolution/reference/daily_scan.py --days 1
 """
@@ -35,19 +34,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
-# PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
-# it for the sibling import (the reference dir is a script dir, not a package).
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
-import collect  # sibling script, resolved via sys.path[0]
-import mirror_backfill  # sibling script, resolved via sys.path[0]
-
+from ava_builtins.skill_support.self_evolution import collect, mirror_backfill
 from shared.paths import ava_home
 
 ORCHESTRATION_SKILLS = ("ava-workflow", "ava-dynamic-workflow", "ava-goal")

@@ -1,4 +1,8 @@
-"""Terminal deadlines preserve native survivors and their operator diagnostics."""
+"""A terminal closure's survivors keep their native identity and operator diagnostics.
+
+A normal stop SIGKILLs what outlives its grace, so a survivor here is a process
+the stop may not signal (another user's); `_unkillable` stands in for one.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ from tests.agent.test_maintenance import WHEN
 from tests.cli.test_maintenance_stop import Launcher
 from tests.cli.test_maintenance_stop import home as home
 from tests.cli.test_maintenance_stop import launch as launch
+from tests.cli.test_stop_terminals import _unkillable
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
 
@@ -44,7 +49,7 @@ def _terminal(
     return identity
 
 
-def test_terminal_deadline_names_survivor_and_persists_exact_inventory(
+def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
@@ -56,11 +61,12 @@ def test_terminal_deadline_names_survivor_and_persists_exact_inventory(
         "signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)",
     )
     identity = _terminal(home, process, monkeypatch)
+    _unkillable(monkeypatch)
     assert lifecycle_status.begin("stop")
     with pytest.raises(report.StopIncompleteError) as caught:
         stop.close_terminals(time.monotonic() + 0.25, "private-stop", WHEN)
     failure = caught.value
-    assert identity.live(), "a reporting deadline must not force-kill the survivor"
+    assert identity.live(), "the survivor outlived its SIGKILL"
     assert failure.stage == "terminals"
     assert f"pid={identity.pid}" in str(failure) and "SIG_IGN" in str(failure)
     assert len(failure.survivors) == 1
@@ -93,6 +99,7 @@ def test_report_keeps_owned_job_after_shell_exits(
         "print('ready',flush=True); time.sleep(60)",
     )
     _terminal(home, parent, monkeypatch)
+    _unkillable(monkeypatch)
     deadline = time.monotonic() + 5
     while not armed.exists():
         assert time.monotonic() < deadline

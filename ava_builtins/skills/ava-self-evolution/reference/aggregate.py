@@ -158,8 +158,7 @@ def main() -> None:
     eval_results: dict[str, Any] | None = None
 
     # Build report data (uses the convenience builder from render_report)
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from render_report import build_report_data
+    from ava_builtins.skill_support.self_evolution.render_report import build_report_data
 
     data = build_report_data(
         week=args.week,

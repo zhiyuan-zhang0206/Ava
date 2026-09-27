@@ -9,19 +9,12 @@ OpenAI client.
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-_MOD = Path(__file__).parents[2] / "ava_builtins" / "skills" / "audio-transcribe" / "transcribe.py"
-_spec = importlib.util.spec_from_file_location("audio_transcribe_under_test", _MOD)
-assert _spec and _spec.loader
-T = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = T
-_spec.loader.exec_module(T)
+from ava_builtins.skill_support.audio_transcribe import transcribe as T  # noqa: N812
 
 
 def _cp(cmd: list[str], stdout: str = "") -> subprocess.CompletedProcess[str]:

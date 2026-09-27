@@ -16,7 +16,11 @@ tags:
 The primitives for ending a process Ava started. Normal `pause` and `stop`
 use `cli/commands/service_stop.py`: deliver a verified graceful signal and
 wait for actual process exit without implicit escalation. Their shared deadline
-reports an incomplete stop if resources remain. Explicit force may use a
+reports an incomplete stop if resources remain. Persistent terminals are the
+exception: a stop, a release or a PITR activation HUPs/TERMs each shell's
+captured session and SIGKILLs what outlives a bounded grace
+([[shared/sessions/pty/session-kill.ava.okf.md|session kill]];
+decisions/2026-09-28-stop-escalates-to-sigkill.md). Explicit force may use a
 backend's `kill_session`; non-session processes use `shared/proc.py` primitives.
 The lower-level escalating APIs below retain their own explicit contracts.
 
@@ -69,17 +73,14 @@ process is that session's leader, a captured descendant, or a group member, the
 birth pair the stop path itself revalidates, and the best-effort cmdline —
 plus the stop stage (the phase label) that hit the deadline. `stop_services`
 raises it as `StopIncompleteError` (a `TimeoutError`, so every existing catch
-keeps working); `close_terminals` reports its phase the same way.
-`close_release_terminals` is the one terminal path that escalates — used by a
-release's stop phase and by a PITR activation's `stop_apps` alike, each naming
-its own closure-notice reason: after its grace, SIGKILL reaches only captured
-births, and a survivor is reported the same way under the `release-terminals`
-stage.
+keeps working). The terminal closure reports a process that outlived its
+SIGKILL the same way, at stage `terminals` (`close_terminals`) or
+`release-terminals` (`close_release_terminals`, a release or PITR).
 
 Reads are best-effort but never dishonest: a process that cannot be inspected
 is listed as unreadable rather than dropped, and a PID recycled since capture
 is never described with its new occupant's facts. Nothing in the report path
-signals — the no-force-kill contract is unchanged.
+signals.
 
 The report is persisted, not just printed. The printable message carries the
 inventory inline, and when the stop owns the lifecycle journal the same data

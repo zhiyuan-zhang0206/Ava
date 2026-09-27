@@ -57,4 +57,8 @@ _EVENTS_LIFECYCLE: dict[str, EventSpec] = {
         "launch_force_terminated_skipped", "launch force-terminate skipped", tier="noise"
     ),
     "launch_retry": _telemetry("launch_retry", "launch retried"),
+    "inbound_reconcile_sideload_fallback": _telemetry(
+        "inbound_reconcile_sideload_fallback",
+        "inbound reconcile switched from the claim window to settled history",
+    ),
 }
