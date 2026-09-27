@@ -19,6 +19,7 @@ from shared.config import settings
 from shared.paths import repo_root, workspace_dir
 from shared.session_backend import get_shell_backend
 from shared.session_env import cwd_is_inside_checkout, forward_env_dict
+from shared.sessions.page_session import is_page_label
 
 
 def _agent_prefix() -> str:
@@ -191,6 +192,10 @@ def create_session(
             f"session name {name!r} invalid — use a lowercase slug like 'dev-server' "
             "([a-z][a-z0-9-]*)"
         )
+    if is_page_label(name):
+        # The `page-` label names ava.ui.serve page sessions exactly
+        # (shared/sessions/page_session.py), which a terminate's shell kill spares.
+        raise ValueError(f"session name {name!r} invalid — 'page-' names are reserved for pages")
     # Validate here, not at call sites, so every caller is capped at the
     # write point (ruling 2026-09-01: sessions live at most 24h) — except
     # system-side callers (watcher spawns), whose ttl IS the watcher's true
@@ -241,7 +246,8 @@ def create_session(
 
 def new(name: str, *, ttl: float) -> int:
     """`name` is only a display label — a lowercase slug like `"dev-server"`;
-    every operation takes the id.
+    every operation takes the id. Names starting with `page-` are reserved for
+    pages opened with `ava.ui.serve`.
 
     Args:
         ttl: same semantics as `run_background` — required hard lifetime in

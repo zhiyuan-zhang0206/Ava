@@ -13,8 +13,9 @@ fast (`raise_for_status()`) on any HTTP error. Ordered by escalating force:
   terminate <id>  POST /api/agents/{id}/terminate        graceful stop + exit
   kill <id>       POST /api/agents/{id}/terminate(force) hard-stop a stuck agent
 
-Both terminate and kill accept `--final`: close the agent — never
-auto-resurrected; `resurrect` reopens it.
+Both terminate and kill accept `--kill-all-shell-sessions`: also kill every
+shell session the agent owns on its home machine (watchers included), so none
+of them can wake it again.
 
 `send` is the shell-level message primitive: the completion notices of
 `ava.shell.run_background` and watcher exit notices are generated command lines
@@ -27,6 +28,8 @@ events) stay in the `ava.*` SDK and the web UI.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -443,55 +446,80 @@ def cmd_agents_resurrect_billing(*, execute: bool) -> int:
 
 
 def _terminate(
-    agent_id: int, *, force: bool, source: str | None = None, final: bool = False
+    agent_id: int,
+    *,
+    force: bool,
+    source: str | None = None,
+    kill_all_shell_sessions: bool = False,
 ) -> int:
     """Shared POST for `terminate` (graceful) and `kill` (force) — both hit
     POST /api/agents/{id}/terminate, differing only in the `force` flag. An
     explicit source is forwarded unchanged; the environment is never consulted
     (user ruling 2026-09-20). Omitting it claims no provenance and
     leaves the server default in place.
-    `final` closes the agent (never auto-resurrect); it is sent only when set,
-    so an older gateway never receives a flag it cannot honor."""
+    `kill_all_shell_sessions` is sent only when set; the output reports what
+    the kill did, so it is verifiable from the output alone."""
     from shared.http_dial import post as dial_post
     from shared.machine import gateway_api_base, gateway_auth_headers
 
     verb = "kill" if force else "terminate"
     url = f"{gateway_api_base()}/api/agents/{agent_id}/terminate"
+    kill_flag = {"kill_all_shell_sessions": True} if kill_all_shell_sessions else {}
     resp = dial_post(
         url,
-        json={"force": force, **({"final": True} if final else {}), **_explicit_caller(source)},
+        json={"force": force, **kill_flag, **_explicit_caller(source)},
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(),
     )
     resp.raise_for_status()
     data = resp.json()
-    # `closed` rides only when the runner reports it (absent on older runners):
-    # print the closure state when present, so an already-terminated `--final`
-    # close is verifiable from the output alone.
-    closed = data.get("closed")
-    suffix = "" if closed is None else (" — closed" if closed else " — not closed")
+    suffix = _shell_sessions_suffix(data.get("shell_sessions"), requested=kill_all_shell_sessions)
     print(f"  ✓ agent {agent_id} {verb}: {data.get('status')}{suffix}")
     return 0
 
 
-def cmd_agents_terminate(agent_id: int, *, source: str | None = None, final: bool = False) -> int:
+def _shell_sessions_suffix(shell: dict[str, Any] | None, *, requested: bool) -> str:
+    """Render the response's shell-session kill report for the status line.
+
+    A requested kill answered without a report came from a version that does
+    not know the option: nothing was killed, and the output says so."""
+    if shell is None:
+        return " — shell sessions NOT killed (its runner predates the option)" if requested else ""
+    if shell["when"] == "at_exit":
+        return " — its shell sessions are killed when it exits"
+    killed: list[int] = shell["killed"]
+    if not killed:
+        return " — no shell sessions to kill"
+    return f" — killed {len(killed)} shell session(s): {', '.join(str(i) for i in killed)}"
+
+
+def cmd_agents_terminate(
+    agent_id: int, *, source: str | None = None, kill_all_shell_sessions: bool = False
+) -> int:
     """`ava agents terminate <id>` — graceful stop: the agent exits after
     processing its current turn. For an agent wedged mid-turn (a hung step) that
-    cannot reach the graceful exit, use `kill`. With `--final` the agent is also
-    closed: never auto-resurrected (its queued work dead-letters on the existing
-    thresholds); `ava agents resurrect <id>` reopens it. On an
-    already-terminated agent `--final` is the metadata-only mark (the backfill
-    route for agents closed before the marker existed); the output reports the
-    resulting closure state."""
-    return _terminate(agent_id, force=False, source=source, final=final)
+    cannot reach the graceful exit, use `kill`. A terminated agent is resurrected
+    by any new message, including its own shells' and watchers' messages. With
+    `--kill-all-shell-sessions` every shell session it owns on its home machine
+    is killed too, silently: right before the termination applies (after the
+    agent's last step), or right away when it is already terminated."""
+    return _terminate(
+        agent_id, force=False, source=source, kill_all_shell_sessions=kill_all_shell_sessions
+    )
 
 
-def cmd_agents_kill(agent_id: int, *, source: str | None = None, final: bool = False) -> int:
+def cmd_agents_kill(
+    agent_id: int, *, source: str | None = None, kill_all_shell_sessions: bool = False
+) -> int:
     """`ava agents kill <id>` — request forceful interruption. Hosted work may
     return enqueued while it drains; this is acceptance, not observed exit.
     The response acknowledges the host lifecycle request; completion is asynchronous.
-    `--final` also closes the agent (see `terminate --final`)."""
-    return _terminate(agent_id, force=True, source=source, final=final)
+    `--kill-all-shell-sessions` also kills every shell session the agent owns on
+    its home machine, right away (see `terminate`). A kill supersedes an earlier
+    graceful terminate's request, so pass the option here too if still wanted."""
+    return _terminate(
+        agent_id, force=True, source=source, kill_all_shell_sessions=kill_all_shell_sessions
+    )
 
 
 def cmd_agents_compact(agent_id: int) -> int:
@@ -500,7 +528,7 @@ def cmd_agents_compact(agent_id: int) -> int:
     triggers).
 
     Returns immediately: the agent consumes the request on its next claim pass.
-    A terminated target is auto-resurrected first (except a closed one); a
+    A terminated target is auto-resurrected first; a
     wedged target consumes it once recovered (turn-liveness restart, or an
     operator kill + resurrect) — the request is durable and waits."""
     from shared.http_dial import post as dial_post

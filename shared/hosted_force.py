@@ -5,13 +5,17 @@ continuation and owned exec cleanup return. Lease expiry, an empty cache, and
 the host process dying are not proof that independent exec children ended.
 """
 
+import asyncio
+from collections.abc import Callable
 from uuid import UUID
 
 import psycopg
+from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
 from shared.db_transaction import async_write_transaction
 from shared.exec_request_evidence import RequestEvidence, quarantine_stale
+from shared.lifecycle_acceptance import COMMAND_KILLS_SHELL_SESSIONS
 from shared.runtime_incarnation import RuntimeIncarnation
 
 
@@ -55,12 +59,18 @@ async def original_host_force(
     *,
     command_id: int | None = None,
     quiescent: bool = False,
+    kill_shell_sessions: Callable[[int], None] | None = None,
 ) -> bool:
     """Validate the exact force, optionally settle in the original serialized pump.
 
     ``quiescent`` is an internal callsite contract, never accepted from HTTP or a
     payload: the host pump still excludes a replacement and its awaited work ended.
     The command's fixed target is checked against that host's actual boot owner.
+
+    A force that asked to kill the agent's shell sessions killed them when it
+    was accepted, but a step still draining then could create one afterwards;
+    the settlement sweeps again (`_sweep_requested_shell_kill`) before it
+    records the observation.
     """
     async with async_write_transaction(pool) as conn:
         row = await (
@@ -77,10 +87,12 @@ async def original_host_force(
             return False
         command = await (
             await conn.execute(
-                "SELECT id FROM inbound_messages WHERE id=%s AND agent_id=%s "
-                "AND kind='terminate' AND status='claimed' AND applied_at IS NOT NULL "
-                "AND observed_at IS NULL AND target_generation=%s AND target_owner=%s "
-                "FOR UPDATE",
+                sql.SQL(
+                    "SELECT id, {} FROM inbound_messages WHERE id=%s AND agent_id=%s "
+                    "AND kind='terminate' AND status='claimed' AND applied_at IS NOT NULL "
+                    "AND observed_at IS NULL AND target_generation=%s AND target_owner=%s "
+                    "FOR UPDATE"
+                ).format(sql.SQL(COMMAND_KILLS_SHELL_SESSIONS)),
                 (row[1], agent_id, row[0], owner),
             )
         ).fetchone()
@@ -90,6 +102,7 @@ async def original_host_force(
             from shared.resource_admission import require_resources_closed_async
 
             await require_resources_closed_async(conn, agent_id)
+            await _sweep_requested_shell_kill(agent_id, command[1], kill_shell_sessions)
             await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
                 "WHERE id=%s",
@@ -107,6 +120,8 @@ async def original_host_force(
 async def recover_orphaned_hosted_forces(
     pool: AsyncConnectionPool,
     machine: str,
+    *,
+    kill_shell_sessions: Callable[[int], None] | None = None,
 ) -> tuple[list[int], dict[int, tuple[RequestEvidence, ...]]]:
     """Observe resource-free applied forces after an exclusive host boot.
 
@@ -131,7 +146,9 @@ async def recover_orphaned_hosted_forces(
     task #3678) is blind to boot recovery and live observation alike, and this
     scan is the one recoverer that can settle it. Everything else stays the
     strict conjunction — applied set, observation missing, target matching the
-    current incarnation, pointer alive.
+    current incarnation, pointer alive. A recovered force that asked to kill
+    the agent's shell sessions sweeps them again before its observation, as
+    the live settlement does.
     """
     async with pool.connection() as conn:
         candidates = await (
@@ -176,15 +193,18 @@ async def recover_orphaned_hosted_forces(
                 continue
             command = await (
                 await conn.execute(
-                    "SELECT id FROM inbound_messages WHERE id=%s AND agent_id=%s "
-                    "AND kind='terminate' AND status IN ('claimed','done') "
-                    "AND applied_at IS NOT NULL AND observed_at IS NULL "
-                    "AND target_generation=%s AND target_owner=%s FOR UPDATE",
+                    sql.SQL(
+                        "SELECT id, {} FROM inbound_messages WHERE id=%s AND agent_id=%s "
+                        "AND kind='terminate' AND status IN ('claimed','done') "
+                        "AND applied_at IS NOT NULL AND observed_at IS NULL "
+                        "AND target_generation=%s AND target_owner=%s FOR UPDATE"
+                    ).format(sql.SQL(COMMAND_KILLS_SHELL_SESSIONS)),
                     (row[2], agent_id, row[0], row[1]),
                 )
             ).fetchone()
             if command is None:
                 continue
+            await _sweep_requested_shell_kill(agent_id, command[1], kill_shell_sessions)
             observed = await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
                 "WHERE id=%s AND agent_id=%s AND kind='terminate' "
@@ -204,3 +224,20 @@ async def recover_orphaned_hosted_forces(
                 raise RuntimeError("orphaned hosted-force recovery lost its locked target")
         recovered.append(agent_id)
     return recovered, deferred
+
+
+async def _sweep_requested_shell_kill(
+    agent_id: int, requested: object, kill_shell_sessions: Callable[[int], None] | None
+) -> None:
+    """Kill the agent's shell sessions again when its force asked for it.
+
+    Runs under the settlement's row lock, before the observation is recorded,
+    so a crash retries the sweep; the kill is idempotent. The killer belongs
+    to the host (the shared layer does not reach the ops session primitives)
+    and must not raise; a caller that binds none may not settle such a force.
+    """
+    if requested is not True:
+        return
+    if kill_shell_sessions is None:
+        raise RuntimeError("shell-session kill requested but no killer is bound")
+    await asyncio.to_thread(kill_shell_sessions, agent_id)

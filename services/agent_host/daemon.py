@@ -61,7 +61,7 @@ from agent.hosted_ownership import settle_stale_running_rows
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
-from services.agent_host.host import AgentHost
+from services.agent_host.host import AgentHost, kill_terminating_agent_shells
 from services.agent_host.pooled_checkpoint import PooledPostgresSaver
 from services.agent_host.pools import build_control_pool, build_shared_pool
 from services.agent_host.stdout_log import _rotate_stdout_log_forever
@@ -384,7 +384,9 @@ async def _recover_hosted_forces_at_boot(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection], machine: str
 ) -> None:
     """Recover only resource-free predecessor forces before scheduling starts."""
-    recovered, deferred = await recover_orphaned_hosted_forces(control_pool, machine)
+    recovered, deferred = await recover_orphaned_hosted_forces(
+        control_pool, machine, kill_shell_sessions=kill_terminating_agent_shells
+    )
     logger.info("hosted boot recovery: observed {n} orphaned force(s)", n=len(recovered))
     streaks = boot_defer.record_deferrals(deferred)
     for agent_id, evidence in deferred.items():

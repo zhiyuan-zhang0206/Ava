@@ -34,6 +34,7 @@ from shared.config import cluster_tz
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.proc import process_alive
 from shared.resource_sample import ResourceSample
+from shared.sessions.page_session import is_page_label
 
 _log = logging.getLogger(__name__)
 
@@ -272,9 +273,7 @@ def capture_shell(
     if shell is None:
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
-    full_name = shared.cluster.session_name(f"agent-{agent_id}-shell-{session_id}") + (
-        f"-{shell.name}" if shell.name else ""
-    )
+    full_name = _shell_session_name(agent_id, shell)
     from shared.session_backend import get_shell_backend
 
     try:
@@ -314,9 +313,7 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
     shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
     if shell is None:
         return "absent", False, None
-    full_name = shared.cluster.session_name(f"agent-{agent_id}-shell-{session_id}") + (
-        f"-{shell.name}" if shell.name else ""
-    )
+    full_name = _shell_session_name(agent_id, shell)
     from shared.session_backend import get_shell_backend
 
     backend = get_shell_backend()
@@ -328,6 +325,54 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
     if not ok:
         raise RuntimeError(f"failed to kill session {full_name!r}")
     return "killed", interrupted, shell.name
+
+
+# Parallel kills bound one kill-all to roughly one PTY CLI round trip: the
+# synchronous terminate path answers inside the gateway's lifecycle deadline.
+_KILL_ALL_WORKERS = 8
+
+
+def kill_agent_shells(agent_id: int) -> list[int]:
+    """Kill every host-local persistent shell of one agent; return the killed ids.
+
+    The `kill_all_shell_sessions` primitive
+    (decisions/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
+    `agent_shell_sessions` — the one `…-agent-<id>-shell-<sid>[-<name>]` rule —
+    so the agent's explicit shells and its watchers go, while another agent's
+    sessions and the agent's own process session are never touched. Page-server
+    sessions (`ava.ui.serve`, the `page-` label owned by
+    `shared.sessions.page_session`) are spared: a page keeps its own lifecycle.
+    The backend's kill is idempotent, so a session that ended between the
+    listing and its kill still counts as killed — it is gone either way. No
+    notice is produced here (an owner-level kill is silent) and nothing is
+    written to the database: removing `agent_shell_ttls` rows is the gateway's
+    part. Every listed session is attempted; a kill the backend could not
+    confirm raises one RuntimeError naming those ids after the others ran.
+    """
+    shells = [shell for shell in agent_shell_sessions(agent_id) if not is_page_label(shell.name)]
+    if not shells:
+        return []
+    from shared.session_backend import get_shell_backend
+
+    backend = get_shell_backend()
+
+    def _kill(shell: ShellInfo) -> bool:
+        ok, _mode = backend.kill_session(_shell_session_name(agent_id, shell), graceful=False)
+        return ok
+
+    with ThreadPoolExecutor(max_workers=min(len(shells), _KILL_ALL_WORKERS)) as pool:
+        confirmed = list(pool.map(_kill, shells))
+    failed = [shell.id for shell, ok in zip(shells, confirmed, strict=True) if not ok]
+    if failed:
+        raise RuntimeError(f"failed to kill shell session(s) {failed} of agent {agent_id}")
+    return [shell.id for shell in shells]
+
+
+def _shell_session_name(agent_id: int, shell: ShellInfo) -> str:
+    """The full backend session name of one listed shell (its `-<name>` kept)."""
+    return shared.cluster.session_name(f"agent-{agent_id}-shell-{shell.id}") + (
+        f"-{shell.name}" if shell.name else ""
+    )
 
 
 def _collect_sessions() -> tuple[list[SessionInfo], int, int]:

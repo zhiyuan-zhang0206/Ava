@@ -4,8 +4,8 @@
 transaction; this module is the attempt that consumes it right after. It is
 the same shape the delivery watchdog runs for a wedged turn (task #1712):
 queue the marked chat, then call the guarded `resurrect_if_terminated` — and
-the same backstop: every attempt a refusal (closed agent, suppression
-window, tripped recovery breaker), a race (hosted-force quiescence), or this
+the same backstop: every attempt a refusal (suppression window, tripped
+recovery breaker), a race (hosted-force quiescence), or this
 process's death drops is retried by the watchdog's terminated-owner
 resurrection retry until the chat's stale age gate dead-letters it. The
 attempt lives here rather than in the reaper because the agent layer does

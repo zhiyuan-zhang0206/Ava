@@ -37,7 +37,6 @@ _INVENTORY: dict[str, str] = {
     "ops/agent_wake.py::_stage_resurrect_event": "central",
     "ops/billing_recovery.py::_record_run_event": "ineligible",
     "ops/ops_exit.py::_stage_termination_event": "central",
-    "ops/ops_exit.py::mark_agent_closed": "central",
     "ops/ops_lifecycle.py::_recover_crash_marked_blocking": "central",
     "ops/publication_recovery.py::claim_abandoned_pending_lease": "ineligible",
     "ops/publication_recovery.py::complete_pending_publication_recovery": "ineligible",

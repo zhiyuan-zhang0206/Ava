@@ -118,6 +118,34 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 _UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
 
 
+def kill_terminating_agent_shells(agent_id: int) -> None:
+    """Kill every shell session a terminating agent owns on this machine.
+
+    The at-exit half of `kill_all_shell_sessions`, bound into
+    `apply_hosted_lifecycle` (right before a graceful termination commits) and
+    into the force settlements (`shared.hosted_force`: the sweep once a force
+    is observed quiescent, live or at boot). Never raises: a failed kill must
+    not turn a termination into a crashed turn, so it is logged at ERROR and
+    the termination still applies.
+    """
+    from ops.cluster_status import kill_agent_shells
+
+    try:
+        killed = kill_agent_shells(agent_id)
+    except Exception:  # fail-fast-ok: logged at ERROR; the termination must still apply
+        logger.opt(exception=True).error(
+            "terminate could not kill every shell session of agent {agent_id}",
+            agent_id=agent_id,
+        )
+        return
+    logger.info(
+        "terminate killed {count} shell session(s) of agent {agent_id}: {killed}",
+        agent_id=agent_id,
+        count=len(killed),
+        killed=killed,
+    )
+
+
 class AgentHost:
     """Runs one agent's turns on demand, over process-wide shared machinery.
 
@@ -211,7 +239,12 @@ class AgentHost:
                 self.drop_agent(agent_id)
             settlement = asyncio.create_task(
                 original_host_force(
-                    self._control_pool, agent_id, self._owner, self._machine, quiescent=True
+                    self._control_pool,
+                    agent_id,
+                    self._owner,
+                    self._machine,
+                    quiescent=True,
+                    kill_shell_sessions=kill_terminating_agent_shells,
                 )
             )
             while not settlement.done():
@@ -380,7 +413,11 @@ class AgentHost:
             batch = await claim_inbound_batch(self._control_pool, agent_id, lifecycle_only=True)
             if len(batch) > 1 or any(not item.durable_lifecycle for item in batch):
                 raise RuntimeError("held control claim returned an unaccepted command")
-            kind = await apply_hosted_lifecycle(self._control_pool, incarnation)
+            kind = await apply_hosted_lifecycle(
+                self._control_pool,
+                incarnation,
+                kill_shell_sessions=kill_terminating_agent_shells,
+            )
             if kind is None:
                 await settle_hosted_runtime(self._control_pool, incarnation)
             else:
@@ -664,7 +701,11 @@ class AgentHost:
                         )
                     self.drop_agent(agent_id)
                     async with database_phase():
-                        kind = await apply_hosted_lifecycle(self._control_pool, incarnation)
+                        kind = await apply_hosted_lifecycle(
+                            self._control_pool,
+                            incarnation,
+                            kill_shell_sessions=kill_terminating_agent_shells,
+                        )
                     logger.info(
                         "hosted lifecycle return settled",
                         agent_id=agent_id,

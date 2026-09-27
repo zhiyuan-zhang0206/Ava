@@ -41,6 +41,7 @@ __all_for_ava__ = [
     "OpenTasksHint",
     "RestartResult",
     "ResurrectResult",
+    "ShellSessionsKill",
     "TerminateOutcome",
     "TerminateResult",
     "commands",
@@ -190,37 +191,47 @@ class OpenTasksHint:
         return "\n".join(lines)
 
 
+@dataclass
+class ShellSessionsKill:
+    """What `kill_all_shell_sessions=True` did. `when` is "now" when the shell
+    sessions are already gone — `killed` lists their ids, empty when the agent
+    had none — or "at_exit" when they are killed right before the agent stops,
+    after its last step (`killed` stays empty)."""
+
+    when: Literal["now", "at_exit"]
+    killed: list[int]
+
+
 class TerminateOutcome(str):
     """What a terminate call returned: the acceptance status as a string —
     compare it directly ("enqueued" / "already_terminated") — plus `status` as
     the enum, `open_tasks`: the tasks the agent still owned as it went down, or
-    None, and `closed`: the agent's closure state after the request (True when
-    `final` was requested or the marker was already set; None when the
-    reporting version predates the field)."""
+    None, and `shell_sessions`: what `kill_all_shell_sessions` did, or None
+    when no shell session was killed on request."""
 
-    __slots__ = ("closed", "open_tasks", "status")
+    __slots__ = ("open_tasks", "shell_sessions", "status")
 
     status: TerminateResult
     open_tasks: OpenTasksHint | None
-    closed: bool | None
+    shell_sessions: ShellSessionsKill | None
 
     def __new__(
         cls,
         status: TerminateResult,
         open_tasks: OpenTasksHint | None = None,
         *,
-        closed: bool | None = None,
+        shell_sessions: ShellSessionsKill | None = None,
     ) -> TerminateOutcome:
         self = super().__new__(cls, status.value)
         self.status = status
         self.open_tasks = open_tasks
-        self.closed = closed
+        self.shell_sessions = shell_sessions
         return self
 
     def __repr__(self) -> str:
         return (
             f"TerminateOutcome(status={self.status.value!r}, "
-            f"open_tasks={self.open_tasks!r}, closed={self.closed!r})"
+            f"open_tasks={self.open_tasks!r}, shell_sessions={self.shell_sessions!r})"
         )
 
 
@@ -458,31 +469,40 @@ def terminate(
     *,
     message: str | None = None,
     force: bool = False,
-    final: bool = False,
+    kill_all_shell_sessions: bool = False,
 ) -> TerminateOutcome:
     """End an agent after its current step. `message` is saved without another
     response and is available if the agent is later revived. `force=True`
-    interrupts work; an `enqueued` result confirms acceptance, not exit.
-    `final=True` closes the agent — never auto-resurrected (its queued work
-    dead-letters on the existing thresholds); an explicit `resurrect` reopens it.
+    interrupts work; an `enqueued` result confirms acceptance, not exit. A
+    terminated agent wakes again on any new message, including one from its
+    own shell sessions or watchers; `kill_all_shell_sessions=True` also kills
+    every shell session it owns, watchers included, silently — right away
+    for `force=True` (and once more after it stops) or an already-terminated
+    agent, otherwise right before it stops. Pages opened with `ava.ui.serve`
+    keep running.
 
     The result compares as the status string (`== "enqueued"` works as before)
     and carries `open_tasks`: the tasks the agent still owns as it goes down
-    (at most five, most recently updated first), or None when it leaves none.
-    It also carries `closed`: the agent's closure state after the call — True
-    when `final` was requested (or the marker was already set), False
-    otherwise, None when an older version did not report it — so `terminate
-    --final`, including its already-terminated backfill form, is verifiable
-    from the result alone."""
+    (at most five, most recently updated first), or None when it leaves none,
+    and `shell_sessions`: what the shell-session kill did (a
+    `ShellSessionsKill`), or None when no kill was requested or honored."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     message = coerce_str(message, "message", allow_none=True)
     force = coerce_typed(force, "force", bool)
-    final = coerce_typed(final, "final", bool)
-    data = _client.terminate(agent_id, message=message, force=force, final=final)
+    kill_all_shell_sessions = coerce_typed(kill_all_shell_sessions, "kill_all_shell_sessions", bool)
+    data = _client.terminate(
+        agent_id,
+        message=message,
+        force=force,
+        kill_all_shell_sessions=kill_all_shell_sessions,
+    )
+    shell = data.get("shell_sessions")
     return TerminateOutcome(
         TerminateResult(data["status"]),
         _open_tasks_from_dict(data["open_tasks"]),
-        closed=data.get("closed"),
+        shell_sessions=None
+        if shell is None
+        else ShellSessionsKill(when=shell["when"], killed=list(shell["killed"])),
     )
 
 

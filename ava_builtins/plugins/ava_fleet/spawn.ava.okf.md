@@ -33,14 +33,15 @@ Creates a new agent, returns its agent_id.
 
 `fork_from` is a parameter of `spawn`, not a standalone function. Pass the id of an existing agent, and the new agent will copy its full conversation state — suitable for splitting work: after the parent agent accumulates context, fork a child agent to continue a specific subtask.
 
-### `ava.agents.terminate(agent_id: int, *, message: str | None = None, force: bool = False) -> TerminateOutcome`
+### `ava.agents.terminate(agent_id: int, *, message: str | None = None, force: bool = False, kill_all_shell_sessions: bool = False) -> TerminateOutcome`
 
-Terminates an agent.
+Terminates an agent. A terminated agent is resurrected by any new message, including one from its own shell sessions or watchers.
 
 - Default: agent exits after completing the current turn
 - `message`: retain a final message for the next resurrection without another response
 - `force=True`: request interruption when a clean stop cannot progress
-- Result: reads as the acceptance status string (`enqueued` / `already_terminated`); `enqueued` confirms acceptance, not exit or completion of owned work. It carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first), or None
+- `kill_all_shell_sessions=True`: also kill every shell session the agent owns (watchers included; `ava.ui.serve` pages keep running), silently — right before a graceful termination applies, or at once for `force=True` (swept again once the agent's work ended) / an already-terminated agent
+- Result: reads as the acceptance status string (`enqueued` / `already_terminated`); `enqueued` confirms acceptance, not exit or completion of owned work. It carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first), or None — and `shell_sessions`: what the shell-session kill did (`when` = `now` with the `killed` ids, or `at_exit`), or None when none was requested
 
 ### `ava.agents.restart(agent_id: int) -> RestartResult`
 

@@ -323,17 +323,17 @@ async def test_terminate_agent_op_terminated_short_circuits(
 
     monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
 
-    async def _closed_state(_aid: int, *, final: bool, db_pool: object) -> bool:
-        return final
+    def _no_kill(_aid: int) -> list[int]:
+        raise AssertionError("a terminate without the option never kills shell sessions")
 
-    monkeypatch.setattr(ops_lifecycle, "_closure_state", _closed_state)
+    monkeypatch.setattr(ops_lifecycle, "kill_agent_shells", _no_kill)
     resp = await ops_lifecycle.terminate_agent_op(
         9,
         TerminateAgentRequest(),
         stub_pool,  # type: ignore[arg-type]
     )
     assert resp.status == "already_terminated"
-    assert resp.closed is False
+    assert resp.shell_sessions is None
 
 
 @pytest.mark.asyncio
@@ -922,9 +922,6 @@ class TestResurrectIfTerminatedPlacement:
         monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
-        # The closure guard reads agents_meta; these tests pin dispatch
-        # placement, not the gate — default it to "open".
-        monkeypatch.setattr(ops_lifecycle, "_closed_agent", lambda _aid: False)
         # The notice guard reads the trigger row from the DB; these tests pin
         # dispatch placement, not the guard — default it to "not a notice".
         monkeypatch.setattr(
@@ -963,28 +960,6 @@ class TestResurrectIfTerminatedPlacement:
 
         def _no_machine_read(_aid: int) -> str:
             raise AssertionError("halted auto-resurrect must not read or contact the home")
-
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
-        status = await ops_lifecycle.resurrect_if_terminated(
-            5, trigger_inbound_id=88, trigger_inbound_kind="chat"
-        )
-        assert status is AgentStatus.TERMINATED
-
-    @pytest.mark.asyncio
-    async def test_closed_agent_skips_forward_and_launch(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A closed agent (`terminate --final`) is never auto-resurrected: the
-        closure marker outranks every automatic channel, so the delivery,
-        compact, and watchdog triggers all stop here — no home contact, no
-        launch. Its queued work waits for an explicit manual resurrect."""
-        from shared.agents import AgentStatus
-
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(ops_lifecycle, "_closed_agent", lambda _aid: True)
-
-        def _no_machine_read(_aid: int) -> str:
-            raise AssertionError("closed auto-resurrect must not read or contact the home")
 
         monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
         status = await ops_lifecycle.resurrect_if_terminated(
@@ -1173,9 +1148,6 @@ class TestResurrectIfTerminatedNotificationGuard:
         monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
         monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
-        # The closure guard reads agents_meta; these tests pin the notice
-        # guard, not the closure — default it to "open".
-        monkeypatch.setattr(ops_lifecycle, "_closed_agent", lambda _aid: False)
 
     @pytest.mark.asyncio
     async def test_system_notice_trigger_skips_forward_and_launch(
@@ -1488,18 +1460,13 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
 
     monkeypatch.setattr(ops_lifecycle, "publish_page_closed", _fake_page_closed)
 
-    async def _closed_state(_aid: int, *, final: bool, db_pool: object) -> bool:
-        return final
-
-    monkeypatch.setattr(ops_lifecycle, "_closure_state", _closed_state)
-
     resp = await ops_lifecycle.terminate_agent_op(
         9,
         TerminateAgentRequest(force=True),
         stub_pool,  # type: ignore[arg-type]
     )
     assert resp.status == "enqueued"
-    assert resp.closed is False
+    assert resp.shell_sessions is None
     assert captured == {"agent_id": 9}
     assert cancelled == [(9, 91)]
 

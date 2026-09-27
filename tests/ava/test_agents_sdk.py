@@ -331,18 +331,18 @@ class TestTerminate:
             ("", "terminate", f"agent:{ava.self.AGENT_ID}"),
         ]
 
-    def test_final_terminate_closes_the_peer_for_good(self, db_conn: psycopg.Connection) -> None:
-        """`final=True` rides the SDK body end to end: the termination is
-        accepted and the agent is closed (never auto-resurrected)."""
+    def test_kill_all_shell_sessions_rides_the_sdk_body_end_to_end(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """On a live peer the graceful terminate records the kill for its exit."""
         ava.agent_identity._agent_id = _spawn_agent()
         peer_id = ava.agents.spawn()
-
-        result = ava.agents.terminate(peer_id, final=True)
-
-        assert result == "enqueued"
+        result = ava.agents.terminate(peer_id, kill_all_shell_sessions=True)
+        assert result.shell_sessions == ava.agents.ShellSessionsKill(when="at_exit", killed=[])
         assert db_conn.execute(
-            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (peer_id,)
-        ).fetchone() == (True,)
+            "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'terminate'",
+            (peer_id,),
+        ).fetchone() == ({"kill_all_shell_sessions": True},)
 
     def test_terminate_reports_open_tasks_hint_with_truncation(
         self, db_conn: psycopg.Connection
@@ -396,20 +396,20 @@ class TestTerminate:
         assert result == TerminateResult.ALREADY_TERMINATED
         assert result.status is TerminateResult.ALREADY_TERMINATED
         assert result.open_tasks is None
-        # An older runner does not report the closure state: None, not a guess.
-        assert result.closed is None
+        # No kill was requested (and an older runner reports none): None.
+        assert result.shell_sessions is None
 
-    def test_terminate_reports_closure_state_when_present(
+    def test_terminate_reports_the_shell_session_kill(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """`closed` rides the result when the runner reports it."""
-
-        def _terminate(*_args: object, **_kwargs: object) -> dict[str, Any]:
-            return {"status": "already_terminated", "open_tasks": None, "closed": True}
+        def _terminate(*_args: object, **kwargs: object) -> dict[str, Any]:
+            assert kwargs["kill_all_shell_sessions"] is True
+            shell = {"when": "now", "killed": [2, 5]}
+            return {"status": "already_terminated", "open_tasks": None, "shell_sessions": shell}
 
         monkeypatch.setattr(ava.agents._client, "terminate", _terminate)
-        result = ava.agents.terminate(7, final=True)
-        assert result.closed is True
+        result = ava.agents.terminate(7, kill_all_shell_sessions=True)
+        assert result.shell_sessions == ava.agents.ShellSessionsKill(when="now", killed=[2, 5])
 
     def test_rejects_non_string_message_before_gateway_call(
         self, monkeypatch: pytest.MonkeyPatch
