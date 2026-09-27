@@ -408,3 +408,107 @@ def test_prior_generation_closure_records_every_captured_native_identity(
     assert evidence["result"] == ("passed" if outcome == "closed" else "failed")
     if outcome != "unknown":
         assert len(evidence["observations"]) == 3
+
+
+def _cycle_inputs(run: Path, request: FleetRequest) -> None:
+    """Captured images A (the request's previous) and B (its candidate), no request yet."""
+    images = {
+        name: {
+            "receipt": str(run / f"receipt-{name}.json"),
+            "reference": reference.model_dump(mode="json"),
+            "runtime": {},
+            "fixture": {},
+        }
+        for name, reference in (("a", request.previous), ("b", request.candidate))
+    }
+    (run / "release-inputs.json").write_text(json.dumps({"images": images, "requests": {}}))
+
+
+def test_dispatch_builds_its_request_with_the_public_verb_in_the_admitted_image(
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A→B's request is built by image A (the admitted runtime, the only one with
+    a database login), once; every later dispatch reuses the captured bytes."""
+    import subprocess
+
+    run = Path(request_record.home).parent
+    _cycle_inputs(run, request_record)
+    images = {
+        name: VerifiedRelease(
+            reference.artifact_digest,
+            reference.manifest_digest,
+            run / name,
+            run / name / "venv/bin/python",
+            run / name / "site",
+        )
+        for name, reference in (("a", request_record.previous), ("b", request_record.candidate))
+    }
+    references = {"a": request_record.previous, "b": request_record.candidate}
+    monkeypatch.setattr(runtime, "image_input", lambda _run, name: (references[name], images[name]))
+    out = run / "release-ab-request.json"
+    calls: list[tuple[str, ...]] = []
+
+    def command(argv: tuple[str, ...], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        assert kwargs["env"]["AVA_HOME"] == str(run / "home") and "PYTHONPATH" not in kwargs["env"]
+        if "request" in argv:
+            assert argv == images["a"].module_argv(
+                "cli.main",
+                "cluster",
+                "release",
+                "request",
+                "--commit",
+                request_record.candidate.source_commit,
+                "--receipt",
+                str(run / "receipt-b.json"),
+                "--out",
+                str(out),
+                "--watch-s",
+                "30",
+            )
+            out.write_text(request_record.model_dump_json() + "\n")
+        else:
+            assert argv == images["b"].module_argv(
+                "cli.main", "cluster", "update", "--prepared", str(out)
+            )
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(runtime.subprocess, "run", command)
+    runtime.dispatch(run, "ab")
+    runtime.dispatch(run, "ab")  # the completed-only retirement resubmission
+    assert [("request" in argv, "update" in argv) for argv in calls] == [
+        (True, False),
+        (False, True),
+        (False, True),
+    ]
+    recorded = json.loads((run / "release-inputs.json").read_text())["requests"]["ab"]
+    assert recorded["operation"] == str(request_record.path)
+    runtime.wait_executor(run, "ba", cleanup=True)  # never requested: nothing to settle
+
+
+@pytest.mark.parametrize("change", ["commit", "schema"])
+def test_the_cycle_admits_only_distinct_commits_over_one_schema_before_any_stop(
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    run = Path(request_record.home).parent
+    b = request_record.candidate
+    b = b.model_copy(
+        update={"source_commit": request_record.previous.source_commit}
+        if change == "commit"
+        else {"schema_digest": "0" * 64}
+    )
+    refs = {"previous": request_record.previous, "candidate": b}
+    monkeypatch.setattr("shared.os_boot_unit.systemd_running", lambda: True)
+    monkeypatch.setattr("shared.os_boot_unit.unit_name", lambda _home: "ava-home.service")
+    monkeypatch.setattr(runtime, "dotenv_values", lambda *_a, **_k: dict(runtime.local.PROFILE))
+    monkeypatch.setattr(
+        runtime, "captured", lambda _run, receipt, *_bind: (refs[receipt.name], receipt, {})
+    )
+    monkeypatch.setattr(runtime, "_fixture", lambda _run, _image: {"files": {}})
+    monkeypatch.setattr(runtime, "current_pointer", lambda _store: None)
+    monkeypatch.setattr(runtime, "sql_inventory", lambda _image: {"x.sql": "0" * 64})
+    bindings = (("d", "c"), ("d", "c"))
+    message = "distinct source commits" if change == "commit" else "same-schema releases only"
+    with pytest.raises(ValueError, match=message):
+        runtime.prepare(run, run / "previous", run / "candidate", bindings)
+    assert not (run / "release-inputs.json").exists()
