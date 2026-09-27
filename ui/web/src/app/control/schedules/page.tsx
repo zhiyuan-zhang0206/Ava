@@ -27,7 +27,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { PythonCode } from "@/components/python-code";
+import { CodeHighlighterPreloader } from "@/components/code-highlighter-preloader";
+import { PythonCode, preloadPythonCodeHighlighter } from "@/components/python-code";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -152,6 +153,9 @@ export default function SchedulesPage() {
 
   return (
     <div className="space-y-4">
+      {/* Warms the syntax-highlighter chunk once idle, ahead of a script
+          actually being expanded — see python-code.tsx. */}
+      <CodeHighlighterPreloader />
       <div className={cn("items-center justify-between", FLEX)}>
         <div className={cn("items-center gap-2", FLEX)}>
           <CalendarClock className="size-4" />
@@ -286,6 +290,8 @@ function ScheduleRow({
           <button
             type="button"
             onClick={onExpand}
+            onPointerEnter={preloadPythonCodeHighlighter}
+            onFocus={preloadPythonCodeHighlighter}
             className="text-muted-foreground hover:text-foreground"
             aria-label={expanded ? "Collapse" : "Expand"}
           >
