@@ -1,14 +1,16 @@
 """Durable close-notice outbox for busy persistent shells a unit closes (issue #2044).
 
-`ava stop` and a release transition close busy persistent-shell sessions AFTER
-the gateway and ops server are already down, so the closure notice for each
-owner agent cannot be delivered synchronously. Each records one notice per busy
-session under ``$AVA_HOME/state/pty-close-notices/`` — durable across the
-data-plane shutdown — naming why it closed. `ava stop` records only sessions it
-VERIFIED closed (exact process identity gone, no terminals left): its closure
-may be refused. A release records before its cancel: no terminal survives a
-release (decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2), so
-the notice is that closure's intent and an interrupted executor cannot lose it.
+`ava stop`, a release transition and a PITR activation close busy
+persistent-shell sessions AFTER the gateway and ops server are already down, so
+the closure notice for each owner agent cannot be delivered synchronously. Each
+records one notice per busy session under ``$AVA_HOME/state/pty-close-notices/``
+— durable across the data-plane shutdown — naming why it closed. `ava stop`
+records only sessions it VERIFIED closed (exact process identity gone, no
+terminals left): its closure may be refused. A release or a PITR activation
+records before its cancel: no terminal survives either boundary
+(decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2;
+decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2), so the
+notice is that closure's intent and an interrupted executor cannot lose it.
 The ops daemon flushes the journal at its next startup: a notice for a live
 owner becomes a system inbound message, one for a terminated/restarting owner
 is dropped without delivery (a closure notice must never resurrect a dead
@@ -50,6 +52,7 @@ _NOTIFIABLE_STATUSES = ("running", "idling")
 # retains terminals and records nothing.
 STOP_REASON = "an operator stop (ava stop)"
 RELEASE_REASON = "a release transition"
+PITR_REASON = "a PITR activation"
 
 
 @dataclass(frozen=True)

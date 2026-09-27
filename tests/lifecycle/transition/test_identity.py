@@ -147,10 +147,12 @@ def test_release_writer_boundary_admits_terminals_its_stop_phase_closes(
     require_local_writers(prepared)
 
 
-def test_pitr_still_refuses_a_live_terminal_before_draining(
+def test_pitr_preflight_admits_terminals_its_stop_phase_closes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """PITR is not a release boundary: it keeps refusing retained terminals."""
+    """A live terminal is no longer a PITR refusal either: production always
+    has schedules and PTYs, and `stop_apps` closes them like a release's stop
+    phase (decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2)."""
     from cli.commands import maintenance_stop
     from cli.release_transition import identity
     from cli.release_transition.pitr import transition
@@ -171,5 +173,4 @@ def test_pitr_still_refuses_a_live_terminal_before_draining(
     monkeypatch.setattr(runtime_release, "current_pointer", selected)
     monkeypatch.setattr(identity, "require_local_writers", one_host)
     monkeypatch.setattr(maintenance_stop, "require_no_terminals", _live_terminal)
-    with pytest.raises(RuntimeError, match="will not kill or replay"):
-        driver.preflight()
+    driver.preflight()

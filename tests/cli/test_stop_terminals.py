@@ -398,7 +398,9 @@ def test_release_work_wait_lets_a_finishing_job_complete_then_closes_it_idle(
 
     assert strict.await_terminal_work(20) == []
     assert marker.read_text() == "done", "the job ran to completion"
-    closed = strict.close_release_terminals(str(uuid4()), WHEN, grace_s=10, kill_s=10)
+    closed = strict.close_release_terminals(
+        str(uuid4()), WHEN, grace_s=10, kill_s=10, reason=pty_close_notices.RELEASE_REASON
+    )
     assert sorted(closed.shells) == [name] and closed.busy == {}
     assert not terminal.has_session(name)
     assert _wait_exit(shell.pid)
@@ -437,7 +439,9 @@ def test_release_closure_kills_a_job_that_ignores_the_cancel_and_notifies_owner(
     assert jobs, "the stubborn job never started"
     operation = str(uuid4())
 
-    closed = strict.close_release_terminals(operation, WHEN, grace_s=0.5, kill_s=10)
+    closed = strict.close_release_terminals(
+        operation, WHEN, grace_s=0.5, kill_s=10, reason=pty_close_notices.RELEASE_REASON
+    )
     assert sorted(closed.busy) == [name]
     assert _wait_exit(jobs[0].pid, timeout=1), "closure returned with the job alive"
     assert not terminal.has_session(name)
@@ -467,7 +471,9 @@ def test_release_closure_reports_a_sigkill_survivor_after_recording_its_notice(
 
     monkeypatch.setattr(OwnedProcess, "send_signal", withheld_kill)
     with pytest.raises(StopIncompleteError) as caught:
-        strict.close_release_terminals(str(uuid4()), WHEN, grace_s=0.3, kill_s=0.3)
+        strict.close_release_terminals(
+            str(uuid4()), WHEN, grace_s=0.3, kill_s=0.3, reason=pty_close_notices.RELEASE_REASON
+        )
     assert caught.value.stage == "release-terminals"
     assert {(entry["pid"], entry["service"]) for entry in caught.value.survivors} >= {
         (jobs[0].pid, name)
@@ -517,3 +523,143 @@ def test_release_stop_closes_terminals_after_root_and_before_evidence(
     transition.stop(SimpleNamespace(direction="candidate", launch=None))  # type: ignore[arg-type]
     assert events == ["root stop", "root absent"]
     assert _wait_exit(jobs[0].pid, timeout=1)
+
+
+# ─── PITR boundary (decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2) ──
+
+
+def _no_op(_operation: object) -> None:
+    return None
+
+
+def test_pitr_closure_reports_a_sigkill_survivor_after_recording_its_notice(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """`close_release_terminals` is shared code: a PITR activation names its own
+    reason, and an unresolved closure still fails with the survivor's identity
+    after recording that notice."""
+    from ops import pty_close_notices
+
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-6100-pitr-unkillable"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the stubborn job never started"
+    deliver = OwnedProcess.send_signal
+
+    def withheld_kill(identity: OwnedProcess, signum: int) -> bool:
+        return False if signum == signal.SIGKILL else deliver(identity, signum)
+
+    monkeypatch.setattr(OwnedProcess, "send_signal", withheld_kill)
+    with pytest.raises(StopIncompleteError) as caught:
+        strict.close_release_terminals(
+            str(uuid4()), WHEN, grace_s=0.3, kill_s=0.3, reason=pty_close_notices.PITR_REASON
+        )
+    assert caught.value.stage == "release-terminals"
+    assert {(entry["pid"], entry["service"]) for entry in caught.value.survivors} >= {
+        (jobs[0].pid, name)
+    }
+    assert not _has_exited(jobs[0])
+    [notice] = _release_notices(home)
+    assert notice["name"] == name and notice["reason"] == pty_close_notices.PITR_REASON
+
+
+def test_pitr_stop_apps_closes_terminals_after_root_and_before_evidence(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """PITR's `stop_apps` closes a live terminal instead of refusing it, in the
+    same order as a release's stop phase: work bound, root stop keeping
+    terminals, closure (with a PITR-named notice for the busy owner), root
+    evidence, then the post-closure terminal evidence check."""
+    from cli.commands import maintenance as maintenance_commands
+    from cli.commands import root_driver
+    from cli.release_transition.pitr import transition as pitr_transition
+    from ops import pty_close_notices
+    from shared import maintenance
+
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-6101-pitr"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the stubborn job never started"
+    events: list[str] = []
+
+    def root_stop(*_args: object, **kwargs: object) -> None:
+        assert kwargs["keep_terminals"] is True and shell.live(), "root stops first"
+        events.append("root stop")
+
+    def root_absent() -> None:
+        assert not terminal.has_session(name), "terminals close before the evidence"
+        events.append("root absent")
+
+    for bound, value in (("_TERMINAL_WORK_S", 0.5), ("_TERMINAL_GRACE_S", 0.5)):
+        monkeypatch.setattr(pitr_transition, bound, value)
+    monkeypatch.setattr(maintenance_commands, "stop", root_stop)
+    monkeypatch.setattr(root_driver, "require_root_absent", root_absent)
+    monkeypatch.setattr(pitr_transition, "require_inputs", _no_op)
+    monkeypatch.setattr(pitr_transition.PitrTransition, "at", property(lambda _self: WHEN))
+
+    def drained(*_args: object) -> SimpleNamespace:
+        return SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))
+
+    monkeypatch.setattr(maintenance, "require_operation", drained)
+    driver = object.__new__(pitr_transition.PitrTransition)
+    driver.request = SimpleNamespace(id=uuid4())  # type: ignore[assignment]
+    # A non-None data_stop skips the post-evidence PostgreSQL capture: this
+    # test is scoped to terminal closure ordering, not data-plane custody.
+    journal = SimpleNamespace(operation=SimpleNamespace(pitr=SimpleNamespace(data_stop="captured")))
+
+    driver.stop_apps(journal)  # type: ignore[arg-type]
+    assert events == ["root stop", "root absent"]
+    assert _wait_exit(jobs[0].pid, timeout=1)
+    [notice] = _release_notices(home)
+    assert notice["name"] == name and notice["reason"] == pty_close_notices.PITR_REASON
+
+
+def test_pitr_stop_apps_evidence_check_refuses_a_terminal_live_after_closure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`require_no_terminals` is the post-closure evidence check: a terminal
+    that is somehow still alive right after `close_release_terminals` returns
+    must refuse before PITR touches the data plane."""
+    from cli.commands import maintenance as maintenance_commands
+    from cli.commands import root_driver
+    from cli.release_transition.pitr import transition as pitr_transition
+    from shared import maintenance
+
+    def drained(*_args: object) -> SimpleNamespace:
+        return SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))
+
+    def no_busy(_timeout: float) -> list[str]:
+        return []
+
+    def root_stop(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def closed_nothing(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(shells={})
+
+    def root_absent() -> None:
+        return None
+
+    def survivor() -> list[str]:
+        return ["ava-agent-1-shell-2-survivor"]
+
+    driver = object.__new__(pitr_transition.PitrTransition)
+    driver.request = SimpleNamespace(id=uuid4())  # type: ignore[assignment]
+    monkeypatch.setattr(pitr_transition.PitrTransition, "at", property(lambda _self: WHEN))
+    monkeypatch.setattr(pitr_transition, "require_inputs", _no_op)
+    monkeypatch.setattr(maintenance, "require_operation", drained)
+    monkeypatch.setattr(strict, "await_terminal_work", no_busy)
+    monkeypatch.setattr(maintenance_commands, "stop", root_stop)
+    monkeypatch.setattr(strict, "close_release_terminals", closed_nothing)
+    monkeypatch.setattr(root_driver, "require_root_absent", root_absent)
+    monkeypatch.setattr(strict, "live_terminals", survivor)
+    journal = SimpleNamespace(operation=SimpleNamespace(pitr=SimpleNamespace(data_stop="captured")))
+
+    with pytest.raises(RuntimeError, match="will not kill or replay"):
+        driver.stop_apps(journal)  # type: ignore[arg-type]

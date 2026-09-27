@@ -2,6 +2,14 @@
 
 ActivationRecord owns business progress. This driver owns maintenance and native
 stop/start boundaries, and never starts an application outside its boot owner.
+
+Persistent terminals and schedules do not block activation: production always
+carries them, so refusing on a live one would make PITR impossible there
+(decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2). `stop_apps`
+closes them exactly like a release's stop phase (FC-6) — a bounded wait for their
+work to finish, root stop with terminals kept alive, then their closure with a
+PITR-named notice for each busy session's owner — before the post-closure
+evidence check.
 """
 
 from __future__ import annotations
@@ -20,6 +28,14 @@ from services.pitr.activation_state import ActivationRecord, record_path, write_
 from shared.native_process.ownership import OwnedProcess
 from shared.process_evidence import ExpectedProcess
 from shared.verified_file import regular_bytes
+
+# Terminal writer closure bounds, matching the release stop phase (FC-6): busy
+# terminals get the completed-work wait while root still serves them, then the
+# graceful cancel; whatever is live after the grace gets SIGKILL over its
+# captured birth.
+_TERMINAL_WORK_S = 30.0
+_TERMINAL_GRACE_S = 10.0
+_TERMINAL_KILL_S = 10.0
 
 
 def _digest(home: Path) -> str:
@@ -88,7 +104,6 @@ class PitrTransition:
         return read_operation(self.request.path).maintenance_at
 
     def preflight(self) -> None:
-        from cli.commands.maintenance_stop import require_no_terminals
         from cli.release_transition.identity import require_local_writers
         from shared.runtime_release import current_pointer
 
@@ -96,7 +111,6 @@ class PitrTransition:
         if current_pointer(self.home / "releases") != self.request.image.selector:
             raise ValueError("PITR must use the currently selected retained image")
         require_local_writers(self.request)
-        require_no_terminals()
 
     def _record(self, journal: Journal) -> ActivationRecord:
         operation, progress = journal.operation, journal.operation.pitr
@@ -268,14 +282,12 @@ class PitrTransition:
         journal.provisioned(seal, data_stopped=data_stopped)
 
     def quiesce(self, operation: Operation) -> None:
-        from cli.commands.maintenance_stop import require_no_terminals
         from cli.release_transition.identity import require_local_writers
         from cli.release_transition.root_service import preflight
         from ops import agent_pause
 
         require_inputs(operation)
         require_local_writers(self.request)
-        require_no_terminals()
         preflight(operation, self.image, previous=False)
         from shared import maintenance
 
@@ -297,7 +309,13 @@ class PitrTransition:
     def stop_apps(self, journal: Journal) -> None:
         from cli.commands import maintenance as maintenance_commands
         from cli.commands.maintenance_data_plane import capture_custody
+        from cli.commands.maintenance_stop import (
+            await_terminal_work,
+            close_release_terminals,
+            require_no_terminals,
+        )
         from cli.commands.root_driver import require_root_absent
+        from ops import pty_close_notices
         from shared import maintenance, pause_owner
         from shared.maintenance_state import MaintenanceHold
 
@@ -313,8 +331,25 @@ class PitrTransition:
                 hold,
                 MaintenanceHold.decode(hold.encode() | {"phase": "stopping"}),
             )
-        maintenance_commands.stop(str(self.request.id), self.at, 90, gateway_last=True)
+        # Observation only: in-flight terminal work may still need root.
+        busy = await_terminal_work(_TERMINAL_WORK_S)
+        # Root first: its reconcilers (schedules, pages) would re-arm a session.
+        maintenance_commands.stop(
+            str(self.request.id), self.at, 90, gateway_last=True, keep_terminals=True
+        )
+        closed = close_release_terminals(
+            str(self.request.id),
+            self.at,
+            grace_s=_TERMINAL_GRACE_S,
+            kill_s=_TERMINAL_KILL_S,
+            reason=pty_close_notices.PITR_REASON,
+        )
+        print(
+            f"PITR closed persistent terminals: {sorted(closed.shells)}; "
+            f"busy past the {_TERMINAL_WORK_S:.0f}s work bound: {busy}"
+        )
         require_root_absent()
+        require_no_terminals()
         progress = journal.operation.pitr
         if progress is None:
             raise RuntimeError("PITR stop lost its action")

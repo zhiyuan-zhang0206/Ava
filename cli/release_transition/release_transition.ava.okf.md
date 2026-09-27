@@ -54,58 +54,8 @@ details, including recovery direction and root start, are in
 ## PITR operations
 
 `ava cluster pitr activate` and `rollback` submit a `PitrRequest` through this
-same home journal and finite native adapter. A request captures one selected
-image, activation identity, action generation and exact configuration inputs;
-it has no release direction or selector step. The home is reserved before any
-activation record, environment or PostgreSQL configuration mutation. A new
-operation after a completed release captures the current image, while an
-interrupted operation continues its original captured image.
-
-`ActivationRecord` remains the sole business journal: logical recovery snapshot,
-archive settings, exact WAL ACK and viewer evidence, base candidate and restore
-proof. The home journal records exact business-write byte intent, maintenance
-generation, start-input seal and native data-plane custody. Capability is local
-to the admitted executor, bound to home/action/generation, and never inherited
-through environment flags. Ordinary start, maintenance and configuration writes
-refuse an incomplete operation.
-
-The PITR phases are prepared, provisioning, quiescing, stopping_apps,
-stopping_data, starting, observing, resuming, proving and complete. Provisioning
-validates the inactive posture and recovery snapshot, then journals each owned
-archive mutation and one atomic four-flag environment CAS. Its start seal binds
-configuration, auto.conf, expected archive settings and the current PostgreSQL
-birth. The executor replaces itself with its exact recorded image argv and
-environment to load fresh Settings; PID and native invocation remain unchanged.
-
-After the maintenance drain, root application closure precedes data-plane
-closure. The complete PG/Redis/PgBouncer birth/tree receipt is persisted before
-the first data signal. A retry with the database down checks that same receipt
-without another SQL drain; a vanished leader does not excuse a live captured
-child. Startup uses the ordinary boot owner and the same image. Full selected
-readiness and a new PostgreSQL birth with the sealed settings precede resume;
-WAL, remote-viewer and restore proofs then establish protection.
-
-Rollback is explicit and serialized after the exact previous executor domain
-is positively closed and retired. A still-held maintenance timestamp is retained;
-a new one is captured only after the recorded resume boundary. Offline rollback
-requires the stopped hold, root absence and durable data custody before restoring
-exact owned auto.conf bytes. Unknown writes or process ownership remain blocked.
-Rollback keeps config-owned PITR service flags and all backup data. Native PITR
-activation/rollback proof is still required; source controls are not that proof.
-
-Every online `ALTER SYSTEM` intent binds exact preimage and predicted PostgreSQL
-17 postimage digests. PostgreSQL's own file parser supplies ordered persisted
-values; effective `SHOW` values belong to post-restart readiness. The admitted
-input is native `ALTER SYSTEM` formatting (or an empty initial file), so the
-predicted rewrite cannot flatten unclassified includes or adopt manual byte
-changes. An interrupted write accepts only its exact postimage; the next write
-requires the last owned digest. This does not fence an independent SQL or file
-writer between observations: divergent output remains a blocked operation.
-
-A repeated protected/rolled-back action verifies the business record against
-its original completed home journal, including action and generation. It joins
-that receipt even after a later release; it neither reserves a new operation nor
-switches images. Missing or changed completed evidence refuses before effects.
+same home journal and finite native adapter:
+[[cli/release_transition/pitr/pitr.ava.okf.md]].
 
 ## Executor custody
 
@@ -129,7 +79,8 @@ The current effect adapter admits an initialized, single-host gateway (Linux,
 or macOS through the persistent home helper) with a local data plane and equal
 packaged SQL. Other topologies or schema changes refuse before quiescing. A
 schedule or PTY may write the DB after application root exits, so the stop
-phase closes every persistent terminal (see Execution); PITR refuses them and
+phase closes every persistent terminal (see Execution); a PITR activation
+closes them the same way ([[cli/release_transition/pitr/pitr.ava.okf.md]]) and
 is never admitted on macOS. Native Windows execution, fleet/schema
 barriers, workload rollback policy and complete application A/B/A proof remain
 in the [lifecycle implementation plan](../../future/infra/unified-cluster-lifecycle.md).

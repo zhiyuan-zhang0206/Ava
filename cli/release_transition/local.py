@@ -65,6 +65,7 @@ class LocalTransition:
         from cli.commands import maintenance_stop
         from cli.commands.root_driver import require_root_absent
         from cli.release_transition import root_macos
+        from ops import pty_close_notices
         from shared import maintenance, pause_owner
         from shared.maintenance_state import MaintenanceHold
 
@@ -89,7 +90,11 @@ class LocalTransition:
         # Root first: its reconcilers (schedules, pages) would re-arm a session.
         maintenance_commands.stop(holder, at, 90, gateway_last=True, keep_terminals=True)
         closed = maintenance_stop.close_release_terminals(
-            holder, at, grace_s=_TERMINAL_GRACE_S, kill_s=_TERMINAL_KILL_S
+            holder,
+            at,
+            grace_s=_TERMINAL_GRACE_S,
+            kill_s=_TERMINAL_KILL_S,
+            reason=pty_close_notices.RELEASE_REASON,
         )
         print(
             f"Release closed persistent terminals: {sorted(closed.shells)}; "

@@ -69,10 +69,12 @@ process is that session's leader, a captured descendant, or a group member, the
 birth pair the stop path itself revalidates, and the best-effort cmdline —
 plus the stop stage (the phase label) that hit the deadline. `stop_services`
 raises it as `StopIncompleteError` (a `TimeoutError`, so every existing catch
-keeps working); `close_terminals` reports its phase the same way. A release's
-`close_release_terminals` is the one terminal path that escalates: after its
-grace, SIGKILL reaches only captured births, and a survivor is reported the
-same way under the `release-terminals` stage.
+keeps working); `close_terminals` reports its phase the same way.
+`close_release_terminals` is the one terminal path that escalates — used by a
+release's stop phase and by a PITR activation's `stop_apps` alike, each naming
+its own closure-notice reason: after its grace, SIGKILL reaches only captured
+births, and a survivor is reported the same way under the `release-terminals`
+stage.
 
 Reads are best-effort but never dishonest: a process that cannot be inspected
 is listed as unreadable rather than dropped, and a PID recycled since capture

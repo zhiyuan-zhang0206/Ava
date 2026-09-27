@@ -4,8 +4,9 @@ The caller owns the maintenance journal and admission fence. These functions
 prove only local recorded process identities; they do not prove remote drain or
 stop OS-managed extras. Ordinary stops never escalate to force. Persistent
 terminals close at their own boundary: `close_terminals` for `ava stop`, and
-`close_release_terminals` at a release, where no terminal survives
-(decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2) and KILL
+`close_release_terminals` at a release or a PITR activation, where no terminal
+survives (decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2;
+decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2) and KILL
 reaches only identities captured from the terminal records.
 """
 
@@ -312,23 +313,22 @@ def await_terminal_work(timeout: float) -> list[str]:
 
 
 def close_release_terminals(
-    operation: str, acquired_at: datetime, *, grace_s: float, kill_s: float
+    operation: str, acquired_at: datetime, *, grace_s: float, kill_s: float, reason: str
 ) -> TerminalInventory:
-    """Close every persistent terminal at a release boundary; none survives it.
+    """Close every persistent terminal at a release or PITR boundary; none survives it.
 
-    Busy sessions' owner notices are recorded first, as the closure's intent.
-    Then the ordinary graceful close, bounded by `grace_s`; any identity still
-    live after it — a captured shell, job, re-captured descendant or recorded
-    PTY host whose birth still matches — gets SIGKILL. Closure is the kernel
+    Busy sessions' owner notices are recorded first, as the closure's intent,
+    naming `reason` (`pty_close_notices.RELEASE_REASON` or `.PITR_REASON`). Then
+    the ordinary graceful close, bounded by `grace_s`; any identity still live
+    after it — a captured shell, job, re-captured descendant or recorded PTY
+    host whose birth still matches — gets SIGKILL. Closure is the kernel
     observation, within `kill_s`, that every one is gone and no recorded
     terminal remains live. A survivor, or a terminal born during closure,
-    fails with the process inventory and leaves the release unresolved.
+    fails with the process inventory and leaves the boundary unresolved.
     """
     _require_pty_custody()
     inventory = capture_terminals()
-    _record_close_notices(
-        inventory.busy, operation, acquired_at, reason=pty_close_notices.RELEASE_REASON
-    )
+    _record_close_notices(inventory.busy, operation, acquired_at, reason=reason)
     tracked = inventory.processes() | set(inventory.hosts.values())
     _cancel_terminals(inventory)
     try:
