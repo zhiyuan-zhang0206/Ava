@@ -1,4 +1,5 @@
-"""Hermetic unit tests for the web-sources:generic skill (ava_builtins/skills/web-sources/generic/reference/feed.py).
+"""Hermetic unit tests for the web-sources:generic skill
+(ava_builtins.skill_support.web_sources.webscrape).
 
 The skill's live behavior (curl against real 403-prone sites + trafilatura main-
 content extraction) was verified by hand during the build; these lock the *pure*
@@ -10,31 +11,15 @@ only the HTTP fetch so nothing hits the network.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-_PATH = (
-    Path(__file__).parents[2]
-    / "ava_builtins"
-    / "skills"
-    / "web-sources"
-    / "generic"
-    / "reference"
-    / "feed.py"
-)
-_spec = importlib.util.spec_from_file_location("web_scrape_under_test", _PATH)
-assert _spec and _spec.loader
-feed = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = feed
-_spec.loader.exec_module(feed)
-
+from ava_builtins.skill_support.web_sources import webscrape as feed
 
 _ARTICLE_HTML = """<html><head><title>Headline Here</title>
 <meta property="og:site_name" content="Example News"/>
