@@ -80,10 +80,12 @@ orphan-host reaper and a failed spawn's abort.
 `kill_all_shell_sessions`, and a force stop reach the host op through the
 session backend.
 
-Not a kill: the normal `ava stop` terminal closure
-(`cli/commands/_temporary_stop.py`) HUPs the shells and TERMs their captured
-descendants without escalation; a shell exiting on its own closes the pty,
-and jobs that ignore the hangup outlive it (pane semantics).
+A normal `ava stop` (`cli/commands/_temporary_stop.py`) captures each shell's
+membership with `session_members` before any signal, HUPs the shells, TERMs
+the rest, and after a bounded grace kills what is left with
+`kill_session_tree(also=<the capture>)`
+(decisions/2026-09-28-stop-escalates-to-sigkill.md). `ava pause` closes no
+terminal.
 
 ## Dependencies
 

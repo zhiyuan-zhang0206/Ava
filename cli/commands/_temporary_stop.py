@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import signal
 import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 import psutil
@@ -40,14 +40,153 @@ from shared.machine import MachineRoles, machine_name, machine_role
 from shared.paths import run_dir
 from shared.session_backend import WinprocSessionBackend, get_shell_backend
 from shared.session_record import SessionRecord
+from shared.sessions.pty import session_tree
+
+# How long a normal stop's terminal closure waits between its HUP/TERM and the
+# SIGKILL of whatever is left (decisions/2026-09-28-stop-escalates-to-sigkill.md):
+# a job that handles TERM gets this long to clean up. The stop's own deadline
+# caps it as well.
+_TERMINAL_STOP_GRACE_S = 10.0
+
+# The SIGKILL leg's own bound: each wait inside a session kill, and the wait for
+# the killed sessions' hosts to clear their records. Every wait ends as soon as
+# its processes are gone. The leg runs even when the grace spent the rest of the
+# stop deadline — a stop that reached its terminal phase closes its terminals —
+# so a stop can overrun its deadline by this bounded leg.
+_TERMINAL_KILL_WAIT_S = 3.0
+
+
+@dataclass
+class _Terminal:
+    """One persistent shell a stop closes, with everything captured as its session's."""
+
+    name: str
+    shell: OwnedProcess
+    members: set[OwnedProcess]
+    busy: bool
+
+
+def _capture_terminals(names: list[str]) -> list[_Terminal]:
+    """Each live shell's session membership, captured before any signal.
+
+    The membership is `session_tree`'s: the shell, its descendants, and every
+    process in its POSIX session — a `cmd &` job in its own group, a
+    double-forked orphan — each pinned by birth identity. Anything beyond the
+    shell is running work, so the session is busy.
+    """
+    terminals: list[_Terminal] = []
+    for name in names:
+        record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
+        if record is None:
+            continue
+        shell = OwnedProcess(record.pid, record.create_time, record.starttime)
+        members = session_tree.session_members(shell)
+        if members:
+            terminals.append(_Terminal(name, shell, set(members), busy=len(members) > 1))
+    return terminals
+
+
+def _hang_up(terminals: list[_Terminal]) -> None:
+    """SIGHUP every shell, then SIGTERM every other captured member.
+
+    The shells go first: an interactive shell's own SIGHUP makes bash exit
+    (re-sending HUP to its jobs), so a loop that restarts its job cannot keep
+    producing new descendants during the grace — the 2026-09-09 field evidence
+    showed a restart loop outliving every interrupt aimed at its current job
+    (#2045).
+    """
+    session_tree.terminate([terminal.shell for terminal in terminals], signal.SIGHUP)
+    for terminal in terminals:
+        session_tree.terminate(terminal.members - {terminal.shell})
+
+
+def _await_members(terminals: list[_Terminal], until: float) -> bool:
+    """Wait for every captured member to exit; False when `until` passes first.
+
+    A live member's new descendants join its session's capture on every poll,
+    so a child forked during the grace dies with the rest.
+    """
+    while True:
+        live = [(t, identity) for t in terminals for identity in list(t.members) if identity.live()]
+        if not live:
+            return True
+        for terminal, identity in live:
+            terminal.members |= capture_tree(identity)
+        left = until - time.monotonic()
+        if left <= 0:
+            return False
+        time.sleep(min(0.05, left))
+
+
+def _kill_leftovers(terminals: list[_Terminal]) -> list[tuple[_Terminal, OwnedProcess]]:
+    """SIGKILL each session's remaining membership; return what outlived it."""
+    survivors: list[tuple[_Terminal, OwnedProcess]] = []
+    for terminal in terminals:
+        if not any(identity.live() for identity in terminal.members):
+            continue
+        result = session_tree.kill_session_tree(
+            terminal.shell, also=terminal.members, wait_s=_TERMINAL_KILL_WAIT_S
+        )
+        survivors += [(terminal, identity) for identity in result.survivors]
+    return survivors
+
+
+def _terminals_incomplete(survivors: list[tuple[_Terminal, OwnedProcess]]) -> StopIncompleteError:
+    """The report for processes that outlived their SIGKILL (issue #2162's inventory).
+
+    Each survivor names its owning session and its identity so the operator
+    can find and judge the exact process — typically another user's (a root
+    `sudo`), which this stop may not signal.
+    """
+    owners = {identity: terminal for terminal, identity in survivors}
+    live = live_identities(owners)
+    report = [
+        capture_survivor(
+            identity,
+            service=owners[identity].name,
+            role="terminal" if identity == owners[identity].shell else "job",
+        )
+        for identity in live
+    ]
+    surviving = sorted({owners[identity].name for identity in live})
+    return StopIncompleteError(
+        f"terminal stop incomplete — processes outlived their SIGKILL: "
+        f"{[identity.pid for identity in live]} from sessions: {surviving}\n"
+        f"{SurvivorInventory(survivors=report, groups=[]).render(stage='terminals')}",
+        stage="terminals",
+        survivors=[survivor.payload() for survivor in report],
+    )
+
+
+def _await_no_terminals(until: float) -> None:
+    """Wait for every terminal host to clear its record; raise at `until`.
+
+    A host ends on its own once its shell is gone. Its protocol deliberately
+    ignores SIGTERM, so signalling host processes is not a stop API.
+    """
+    from cli.commands._maintenance_stop import require_no_terminals
+
+    while True:
+        try:
+            require_no_terminals()
+            return
+        except RuntimeError:
+            if time.monotonic() >= until:
+                raise
+        time.sleep(0.05)
 
 
 def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> None:
-    """Close this unit's terminal jobs and shells without a kill escalation.
+    """Close this unit's terminals: HUP/TERM, a bounded grace, then SIGKILL.
 
-    Busy sessions verified closed leave a durable closure notice for their
-    owner agent (issue #2044): the gateway and ops server are already down by
-    now, so the notice is delivered at the next ops-daemon startup.
+    Each shell's whole session is captured before any signal and hung up
+    (`_hang_up`); whatever is still alive after `_TERMINAL_STOP_GRACE_S` is
+    SIGKILLed with its session (`session_tree`).
+
+    Busy sessions verified closed — a job the SIGKILL cut short included —
+    leave a durable closure notice for their owner agent (issue #2044): the
+    gateway and ops server are already down by now, so the notice is
+    delivered at the next ops-daemon startup.
     """
     backend = get_shell_backend()
     names = backend.list_sessions()
@@ -57,73 +196,19 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
         names = [name for name in names if _TERMINAL_NAME.match(name)]
         stop_services(remaining(deadline), keep_terminals=True, selected=frozenset(names))
         return
-    # Capture identities before signalling anything.
-    shells: list[OwnedProcess] = []
-    jobs: set[OwnedProcess] = set()
-    owner: dict[int, str] = {}
-    by_name: dict[str, OwnedProcess] = {}
-    for name in names:
-        record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
-        if record is None:
-            continue
-        shell = OwnedProcess(record.pid, record.create_time, record.starttime)
-        if not shell.live():
-            continue
-        shells.append(shell)
-        by_name[name] = shell
-        owner[shell.pid] = name
-        for identity in capture_tree(shell) - {shell}:
-            jobs.add(identity)
-            owner[identity.pid] = name
-    busy = {owner[identity.pid]: by_name[owner[identity.pid]] for identity in jobs}
-    # Stop the spawners FIRST: an interactive shell's own SIGHUP makes bash
-    # exit (re-sending HUP to its jobs), so a loop that restarts its job cannot
-    # keep producing new descendants during the wait — the 2026-09-09 field
-    # evidence showed a restart loop outliving every interrupt aimed at its
-    # current job (#2045). Jobs get their graceful SIGTERM right after.
-    for shell in shells:
-        if shell.live():
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
-                psutil.Process(shell.pid).send_signal(signal.SIGHUP)
-    for process in jobs:
-        if process.live():
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
-                psutil.Process(process.pid).send_signal(signal.SIGTERM)
-    try:
-        wait_for_exit(set(shells) | jobs, deadline)
-    except TimeoutError as exc:
-        # A shell that HUP'd out may have dropped its record while a
-        # signal-ignoring job survives as an orphan — report the owning
-        # session by name and each survivor's identity (issue #2162) so the
-        # operator can find and judge the exact process.
-        live = live_identities(set(shells) | jobs)
-        survivors = [
-            capture_survivor(
-                identity,
-                service=owner.get(identity.pid),
-                role="terminal" if identity in shells else "job",
-            )
-            for identity in live
-        ]
-        surviving = sorted({owner[identity.pid] for identity in live})
-        raise StopIncompleteError(
-            f"terminal stop incomplete — {exc} surviving terminal processes "
-            f"from sessions: {surviving}\n"
-            f"{SurvivorInventory(survivors=survivors, groups=[]).render(stage='terminals')}",
-            stage="terminals",
-            survivors=[survivor.payload() for survivor in survivors],
-        ) from exc
-    # Hosts finish naturally after their child exits. Their protocol deliberately
-    # ignores SIGTERM, so sending signals to every host process is not a stop API.
-    from cli.commands._maintenance_stop import require_no_terminals
-
-    while True:
-        try:
-            require_no_terminals()
-            break
-        except RuntimeError:
-            time.sleep(min(0.05, remaining(deadline)))
-    _record_close_notices(busy, operation, acquired_at)
+    terminals = _capture_terminals(names)
+    _hang_up(terminals)
+    grace_end = min(deadline, time.monotonic() + _TERMINAL_STOP_GRACE_S)
+    if not _await_members(terminals, grace_end):
+        survivors = _kill_leftovers(terminals)
+        if live_identities(identity for _terminal, identity in survivors):
+            raise _terminals_incomplete(survivors)
+    _await_no_terminals(max(deadline, time.monotonic() + _TERMINAL_KILL_WAIT_S))
+    _record_close_notices(
+        {terminal.name: terminal.shell for terminal in terminals if terminal.busy},
+        operation,
+        acquired_at,
+    )
 
 
 def _record_close_notices(
@@ -331,7 +416,7 @@ def _report_incomplete(
     else:
         outcome = "Retry the command, or use ava start to resume. "
     print(
-        f"Pause/stop incomplete; resources were not force-killed: {exc}. "
+        f"Pause/stop incomplete; services and the data plane were not force-killed: {exc}. "
         f"phases: {timing or 'before the first phase'}. "
         f"{outcome}"
         f"Status journal: {status_path()}.",
@@ -433,7 +518,11 @@ def stop(
     teardown_extras: bool,
     timeout: float = PAUSE_TIMEOUT_SECONDS,
 ) -> int:
-    """Drain via normal restart, then stop selected resources; never force."""
+    """Drain via normal restart, then stop selected resources.
+
+    Services and the data plane are never forced. Closing terminals (stop, not
+    pause) SIGKILLs what outlives its bounded grace (`_stop_terminals`).
+    """
     from cli.commands.stop import _announce_stopping, _confirm_stop
 
     os.environ.pop("AVA_HOME_OVERRIDE", None)

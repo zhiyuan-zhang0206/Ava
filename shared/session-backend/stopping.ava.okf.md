@@ -14,9 +14,13 @@ tags:
 ## What it is
 
 The primitives for ending a process Ava started. Normal `pause` and `stop`
-use `cli/commands/_maintenance_stop.py`: deliver a verified graceful signal and
-wait for actual process exit without implicit escalation. Their shared deadline
-reports an incomplete stop if resources remain. Explicit force may use a
+use `cli/commands/_maintenance_stop.py` for services: deliver a verified
+graceful signal and wait for actual process exit without implicit escalation.
+Their shared deadline reports an incomplete stop if resources remain. The one
+exception is `stop`'s terminal closure: HUP/TERM to each shell's captured
+session, a bounded grace, then SIGKILL of what is left
+([[shared/sessions/pty/session-kill.ava.okf.md|session kill]];
+decisions/2026-09-28-stop-escalates-to-sigkill.md). Explicit force may use a
 backend's `kill_session`; non-session processes use `shared/proc.py` primitives.
 The lower-level escalating APIs below retain their own explicit contracts.
 
@@ -69,12 +73,13 @@ process is that session's leader, a captured descendant, or a group member, the
 birth pair the stop path itself revalidates, and the best-effort cmdline —
 plus the stop stage (the phase label) that hit the deadline. `stop_services`
 raises it as `StopIncompleteError` (a `TimeoutError`, so every existing catch
-keeps working); `_stop_terminals` reports its phase the same way.
+keeps working); `_stop_terminals` reports a process that outlived its SIGKILL
+the same way.
 
 Reads are best-effort but never dishonest: a process that cannot be inspected
 is listed as unreadable rather than dropped, and a PID recycled since capture
 is never described with its new occupant's facts. Nothing in the report path
-signals — the no-force-kill contract is unchanged.
+signals.
 
 The report is persisted, not just printed. The printable message carries the
 inventory inline, and when the stop owns the lifecycle journal the same data

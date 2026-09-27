@@ -4,8 +4,9 @@ A session's membership is its shell, every descendant of the shell, and every
 process in the shell's POSIX session (``getsid(pid) == shell pid``) together
 with that process's descendants. Every path that ends a session goes through
 `kill_session_tree`: the host's ``kill`` op, the CLI's record-based kill of a
-wedged host, the lazy sweep of a crashed host's shell, and the orphan-host
-reaper (`kill_host_tree`).
+wedged host, the lazy sweep of a crashed host's shell, the orphan-host reaper
+(`kill_host_tree`), and the SIGKILL leg of a normal `ava stop`'s terminal
+closure.
 
 Why the POSIX session is the membership test, not process groups or the tty:
 
@@ -50,6 +51,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import signal
 import time
 from collections import deque
 from collections.abc import Iterable
@@ -382,13 +384,13 @@ def session_members(leader: OwnedProcess) -> list[OwnedProcess]:
     return [member.identity for member in members.values()]
 
 
-def terminate(members: Iterable[OwnedProcess]) -> None:
-    """SIGTERM each member that is still the captured process (graceful kill)."""
+def terminate(members: Iterable[OwnedProcess], sig: int = signal.SIGTERM) -> None:
+    """Send `sig` (SIGTERM by default) to each member still the captured process."""
     for identity in members:
         process = _pin_identity(identity)
         if process is not None:
             with contextlib.suppress(psutil.Error):
-                process.terminate()
+                process.send_signal(sig)
 
 
 def kill_session_tree(
@@ -397,11 +399,12 @@ def kill_session_tree(
     """Freeze, then SIGKILL, the whole membership of `leader`'s session.
 
     `leader` is the session's shell. `also` adds roots captured earlier (a
-    graceful kill's pre-TERM snapshot), so their trees are still taken when
-    the shell itself already died. The session-id scan runs only while the
-    leader is the verified live shell. The leader dies last, after the rest
-    were waited for; `wait_s` bounds each wait. When anything raises midway,
-    every member frozen and not yet killed is SIGKILLed on the way out.
+    graceful kill's pre-TERM snapshot, a stop's pre-hangup capture), so their
+    trees are still taken when the shell itself already died. The session-id
+    scan runs only while the leader is the verified live shell. The leader
+    dies last, after the rest were waited for; `wait_s` bounds each wait. When
+    anything raises midway, every member frozen and not yet killed is
+    SIGKILLed on the way out.
     """
     members: dict[int, _Member] = {}
     done: set[int] = set()
