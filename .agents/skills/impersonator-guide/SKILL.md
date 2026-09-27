@@ -161,8 +161,11 @@ The correct model:
 3. To renew, extend from now for the time you still need:
 
 ```bash
-ava impersonate renew <session_id> --agent <agent_id> --ttl 3600
+ava impersonate renew <session_id> --agent <agent_id> --ttl 1800
 ```
+
+The reminder's own renew command repeats your current window as a starting
+point; set `--ttl` to what the remaining work needs.
 
 Estimate the TTL short — pick the smallest window that covers the work ahead
 (1..86400 seconds; the clock restarts at the moment you renew). The same rule

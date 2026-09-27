@@ -163,8 +163,11 @@ def remind_expiring_impersonations(
                 f"{home}/source/.venv/bin/python" if home else "~/.ava/source/.venv/bin/python"
             )
             prefix = [python, "-m", "cli", "impersonate"]
+            # Suggest the window the executor last chose, not a fixed hour: the
+            # guide asks for short leases extended in steps.
+            ttl = str(lease["ttl_seconds"])
             renew = shlex.join(
-                [*prefix, "renew", str(session_id), "--agent", str(agent_id), "--ttl", "3600"]
+                [*prefix, "renew", str(session_id), "--agent", str(agent_id), "--ttl", ttl]
             )
             release = shlex.join(
                 [*prefix, "release", str(session_id), "--agent", str(agent_id), "--summary", "..."]
