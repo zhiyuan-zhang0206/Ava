@@ -527,9 +527,15 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
     def delivery(_cls: str) -> dict[str, str]:
         return {"AVA_DB_URL": "postgresql://ava_g0_runner@fixture/ava"}
 
-    # The launcher binds the database login next to the marker; that delivery
-    # is not under test, so keep it independent of this host's home.
+    def token_delivery(_cls: str) -> dict[str, str]:
+        return {"AVA_API_TOKEN": "fixture-token"}
+
+    # The launcher binds the database login and API token next to the marker;
+    # neither delivery is under test, so keep them independent of this host's
+    # home (a scratch dir with no installed unit capability, which
+    # api_delivery would otherwise refuse).
     monkeypatch.setattr("cli.commands.data_plane.bringup.db_delivery", delivery)
+    monkeypatch.setattr("cli.commands.data_plane.bringup.api_delivery", token_delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
     profile = root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"
