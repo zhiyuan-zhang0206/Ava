@@ -206,11 +206,11 @@ class _PluginsView:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        from shared.plugin_config_registry import _PLUGIN_CONFIGS
+        from shared.plugin_config_registry import registered_plugin_config_names
         from shared.plugin_config_view import turn_plugin_config
 
-        if name not in _PLUGIN_CONFIGS:
-            known = sorted(_PLUGIN_CONFIGS.keys())
+        known = registered_plugin_config_names()
+        if name not in known:
             raise AttributeError(
                 f"ava._settings.plugins.{name} does not exist — plugin {name!r} has no "
                 f"register_plugin_config, or framework `bind_from_disk` hasn't run yet. "
