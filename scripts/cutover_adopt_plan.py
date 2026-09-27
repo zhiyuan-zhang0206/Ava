@@ -14,7 +14,8 @@ Steps run in this order; each one's effects are idempotent:
 3. `files` moves inert legacy files aside.
 4. `selection` translates `disabled_services` into `service-selection.json`.
 5. `env` records `AVA_SERVICE_PATH`, removes dead keys and, on a remote unit,
-   the gateway-only keys (and the bearer only with `--retire-bearer`).
+   the gateway-only keys and the human bearer `AVA_CLUSTER_SECRET` (a remote
+   unit authenticates with its capability's machine API token).
 6. `residue` moves former-gateway material aside on a remote unit.
 7. `record` completes a gateway record's port block, or retires a remote
    unit's gateway-shaped record.

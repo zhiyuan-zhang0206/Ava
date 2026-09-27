@@ -38,7 +38,11 @@ window: an ordinary start releases a standing maintenance hold after readiness.
    (`scripts/cutover_db_authority.py`, see
    [convert an existing home](data-plane-secret-split.md#convert-an-existing-home)),
    the [database records repair](cutover-db-records.md), then `--start` (W8).
-4. Each runner (W9): check out the new commit, `--execute`, then `--start`.
+4. Each runner (W9): check out the new commit, `--execute`, then
+   `--start --db-capability <bundle>` with the bundle the gateway's data-plane
+   cutover issued for it (step `remote-units`) and its transport key in
+   `AVA_DB_CAPABILITY_KEY`: the runner no longer holds the human bearer, and
+   its capability both authenticates it and carries its database login.
 5. At the go/no-go gate (W11), release each hold with the command `--start`
    prints: `ava maintenance resume --operation <holder> --acquired-at <time>`.
 
@@ -63,7 +67,7 @@ acts and `done` after:
 | `hold` | Adopts the maintenance hold a completed legacy `ava stop` left (phase `stopped`) as the cutover hold, so the final resume wakes exactly the agents that stop drained. Without one, it archives an inert resumed pause-owner journal and creates a fresh cutover hold in phase `stopped`. |
 | `files` | Moves inert legacy files aside: `installed_sha`, `deploy-state.json`, `cluster_paused`, probe counters, updater locks and flags, session records, the hold-watchdog attempt, stale `run/*.pid`, the legacy boot script. |
 | `selection` | Translates a non-empty `disabled_services` into `service-selection.json` (`except` mode) and moves the legacy file aside. |
-| `env` | Records `AVA_SERVICE_PATH` exactly as supplied (never from the caller's PATH) and removes dead keys. On a remote unit it removes the gateway-only keys (owner, admin and runner passwords, data-plane URLs, `AVA_PITR_*`) and, only with `--retire-bearer`, `AVA_CLUSTER_SECRET`. Other keys, including model API keys, are untouched. |
+| `env` | Records `AVA_SERVICE_PATH` exactly as supplied (never from the caller's PATH) and removes dead keys. On a remote unit it removes the gateway-only keys (owner, admin and runner passwords, data-plane URLs, `AVA_PITR_*`) and the human bearer `AVA_CLUSTER_SECRET` (the gateway's cutover rotates it; a remote unit authenticates with its capability's API token and a runner home still holding it refuses to start). Other keys, including model API keys, are untouched. |
 | `residue` | Remote unit only: moves former-gateway material aside (`backups/`, `physical-backup/`, `masked-backup-*`, `redis/`, `pgbouncer/`, `pg/`, `secrets/*` except `--keep-secret` names, `run/bootstrap-snapshot.json`). The host-level `pg-template-17` beside the registry and `runtime/` stay. |
 | `record` | Gateway: adds any port key of the current block the record lacks (for example the release coordinator's `coordinator` slot), at the block position (the default home uses its fixed ports), refusing a collision. Remote unit: retires the gateway-shaped record after the data plane was proven absent. |
 | `intent` | Writes `start-intent.json` in phase `provisioned`: the existing registry record (gateway) or none, the persisted machine identity and capabilities, `AVA_SERVICE_PATH`, `checkout` = the owning checkout, `worktree=false`. Nothing is re-minted. |
@@ -80,8 +84,7 @@ cutover hold identity (`origin` `legacy-stop` or `cutover`) and each step's stat
 and effects. The first `--execute` writes it only after every refusal check
 passed. A crashed run continues from it with the same inputs; a completed
 journal re-verifies and changes nothing. A different `--service-path`,
-`--retire-bearer`, `--keep-secret`, registry or checkout on a continuation is
-refused.
+`--keep-secret`, registry or checkout on a continuation is refused.
 
 Refusals, all before the first effect: a live Ava process of the home (the
 kept helper excepted), a pidfile naming one, a bound data-plane port, a destroy
@@ -104,8 +107,11 @@ from its pre-adoption snapshot in `backups/env/` (moved to
 
 - Remote units: the archived residue and `.env` snapshots hold gateway
   credentials and backups. Confirm the gateway holds its own copies (the backup
-  encryption key first), archive the runner copies encrypted and offline, then
-  delete `cutover-rollback/residue/`.
+  encryption key first: after the gateway's `api` cutover step that is the
+  pinned `$AVA_HOME/backups/logical-backup.passphrase`, the only key to every
+  pre-rotation logical backup once the old secret is gone — escrow it with the
+  gateway's other backup keys), archive the runner copies encrypted and
+  offline, then delete `cutover-rollback/residue/`.
 - Keep the hosts awake and on AC until the holds are released: after the first
   start the new converge registers the autostart job again, and a reboot runs
   an ordinary start, which would release the hold.

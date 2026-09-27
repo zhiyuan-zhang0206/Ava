@@ -38,6 +38,11 @@ Run from the checkout that owns the home:
     .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path P
     .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path P --execute
     .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --start
+
+A remote unit's `.env` loses the human bearer (`AVA_CLUSTER_SECRET`) with the
+other gateway-only keys; its held start installs the unit capability bundle the
+gateway's data-plane cutover issued (`--start --db-capability BUNDLE`, transport
+key in `AVA_DB_CAPABILITY_KEY`).
 """
 
 from __future__ import annotations
@@ -127,7 +132,6 @@ def _new_journal(facts: Facts, inputs: Inputs, cutover_id: str) -> dict[str, Any
         "created_at": now.isoformat(),
         "inputs": {
             "service_path": inputs.service_path,
-            "retire_bearer": inputs.retire_bearer,
             "keep_secrets": list(inputs.keep_secrets),
             "registry": str(registry),
             "checkout": str(checkout),
@@ -146,15 +150,11 @@ def reconcile_inputs(
     recorded = journal["inputs"]
     if inputs.service_path is not None and inputs.service_path != recorded["service_path"]:
         raise RefusedError("--service-path differs from the value this adoption recorded")
-    if (inputs.retire_bearer and not recorded["retire_bearer"]) or (
-        inputs.keep_secrets and list(inputs.keep_secrets) != recorded["keep_secrets"]
-    ):
-        raise RefusedError("--retire-bearer/--keep-secret differ from this adoption's record")
+    if inputs.keep_secrets and list(inputs.keep_secrets) != recorded["keep_secrets"]:
+        raise RefusedError("--keep-secret differs from this adoption's record")
     if (recorded["registry"], recorded["checkout"]) != (str(registry), str(checkout)):
         raise RefusedError("the registry or checkout differs from this adoption's record")
-    return Inputs(
-        recorded["service_path"], recorded["retire_bearer"], tuple(recorded["keep_secrets"])
-    )
+    return Inputs(recorded["service_path"], tuple(recorded["keep_secrets"]))
 
 
 def _archive(home: Path, effect: dict[str, Any]) -> None:
@@ -409,8 +409,12 @@ def execute(
     return journal
 
 
-def held_start(home: Path) -> int:
-    """The first start with new code, inside the cutover hold; the hold stays closed."""
+def held_start(home: Path, db_capability: str | None = None) -> int:
+    """The first start with new code, inside the cutover hold; the hold stays closed.
+
+    A remote unit's first start installs its capability bundle (`db_capability`,
+    transport key in AVA_DB_CAPABILITY_KEY): it holds no human bearer any more.
+    """
     from shared import pause_owner
 
     journal = read_journal(home)
@@ -426,7 +430,7 @@ def held_start(home: Path) -> int:
     if phase not in {"stopped", "starting", "ready"}:
         raise RefusedError(f"the cutover hold is in phase {phase}, not a held start phase")
     if phase != "ready":
-        rc = _start_inside_hold(home, holder, at, phase)
+        rc = _start_inside_hold(home, holder, at, phase, db_capability)
         if rc != 0:
             return rc
     print(f"✓ {home} is started and held. At the go/no-go gate release it with:")
@@ -434,7 +438,9 @@ def held_start(home: Path) -> int:
     return 0
 
 
-def _start_inside_hold(home: Path, holder: str, at: datetime, phase: str) -> int:
+def _start_inside_hold(
+    home: Path, holder: str, at: datetime, phase: str, db_capability: str | None
+) -> int:
     from shared import maintenance, start_serving
     from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
     from shared.paths import ava_home
@@ -446,7 +452,8 @@ def _start_inside_hold(home: Path, holder: str, at: datetime, phase: str) -> int
     from cli.parsers import build_parser
     from cli.start_intent import run_start
 
-    args = build_parser().parse_args(["start"])
+    argv = ["start"] if db_capability is None else ["start", "--db-capability", db_capability]
+    args = build_parser().parse_args(argv)
     with maintenance.authorized_start(holder, at):
         rc = run_start(args)
     if rc != 0:
@@ -476,7 +483,8 @@ def main(
     parser.add_argument("--service-path", help="the reviewed AVA_SERVICE_PATH to record")
     parser.add_argument("--registry", help="cluster registry (default: the home's, else ~/.ava)")
     parser.add_argument(
-        "--retire-bearer", action="store_true", help="remove a remote unit's bearer"
+        "--db-capability",
+        help="--start on a remote unit: its capability bundle (key in AVA_DB_CAPABILITY_KEY)",
     )
     parser.add_argument("--keep-secret", action="append", default=[], help="secrets/ entry to keep")
     parser.add_argument("--cutover-id", help="names the cutover hold (default: minted)")
@@ -485,13 +493,15 @@ def main(
     mode.add_argument("--execute", action="store_true", help="perform the adoption")
     mode.add_argument("--start", action="store_true", help="held first start after adoption")
     args = parser.parse_args(argv)
+    if args.db_capability is not None and not args.start:
+        parser.error("--db-capability belongs to --start")
     try:
         home = canonical_home(args.home)
         owner = checkout or own_checkout()
         require_owning_checkout(home, owner)
         if args.start:
-            return held_start(home)
-        inputs = Inputs(args.service_path, args.retire_bearer, tuple(args.keep_secret))
+            return held_start(home, args.db_capability)
+        inputs = Inputs(args.service_path, tuple(args.keep_secret))
         registry = registry_path(home, args.registry)
         host = host or Host.current()
         if args.execute:

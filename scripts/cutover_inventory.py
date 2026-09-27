@@ -132,7 +132,6 @@ class Inputs:
     """Operator-supplied adoption inputs; nothing here is inferred from the caller."""
 
     service_path: str | None = None
-    retire_bearer: bool = False
     keep_secrets: tuple[str, ...] = ()
 
 
@@ -340,10 +339,12 @@ def env_changes(facts: Facts, inputs: Inputs) -> tuple[list[str], dict[str, str]
         names += [
             key
             for key in facts.env
-            if key in GATEWAY_ONLY_KEYS or key.startswith(GATEWAY_ONLY_PREFIXES)
+            if key in GATEWAY_ONLY_KEYS
+            or key.startswith(GATEWAY_ONLY_PREFIXES)
+            # A remote unit authenticates with its capability's machine API
+            # token; it never holds the human bearer.
+            or key == BEARER_KEY
         ]
-        if inputs.retire_bearer and BEARER_KEY in facts.env:
-            names.append(BEARER_KEY)
     sets: dict[str, str] = {}
     if inputs.service_path is not None and facts.env.get("AVA_SERVICE_PATH") != inputs.service_path:
         sets["AVA_SERVICE_PATH"] = inputs.service_path
@@ -687,13 +688,12 @@ def main(argv: list[str] | None = None, *, host: Host | None = None) -> int:
     parser.add_argument("--home", required=True, help="the home to inventory (explicit)")
     parser.add_argument("--registry", help="cluster registry (default: the home's, else ~/.ava)")
     parser.add_argument("--service-path", help="the AVA_SERVICE_PATH adoption would record")
-    parser.add_argument("--retire-bearer", action="store_true", help="plan bearer removal")
     parser.add_argument("--keep-secret", action="append", default=[], help="secrets/ entry to keep")
     parser.add_argument("--attest", help="JSON rows of legacy process evidence to attest")
     args = parser.parse_args(argv)
     try:
         home = canonical_home(args.home)
-        inputs = Inputs(args.service_path, args.retire_bearer, tuple(args.keep_secret))
+        inputs = Inputs(args.service_path, tuple(args.keep_secret))
         registry = registry_path(home, args.registry)
         facts = gather(home, registry, own_checkout(), host or Host.current(), inputs)
         if args.attest:

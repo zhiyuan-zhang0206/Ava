@@ -72,12 +72,8 @@ def _moved(home: Path, relative: str, area: str) -> bool:
 
 def _assert_runner_files(legacy: LegacyHome) -> None:
     home = legacy.home
-    assert set(legacy.env()) == {
-        "AVA_CLUSTER_SECRET",
-        MACHINE_KEY,
-        "AVA_GATEWAY_URL",
-        "AVA_SERVICE_PATH",
-    }
+    # The human bearer went with the gateway-only keys.
+    assert set(legacy.env()) == {MACHINE_KEY, "AVA_GATEWAY_URL", "AVA_SERVICE_PATH"}
     residue = ("backups", "redis", "pgbouncer", "physical-backup", "masked-backup-20260920")
     assert all(_moved(home, name, "residue") for name in residue)
     assert _moved(home, "run/bootstrap-snapshot.json", "residue")
@@ -260,10 +256,39 @@ def test_a_crash_inside_a_step_resumes_without_repeating_effects(
     assert _journal(legacy)["steps"]["residue"]["state"] == "done"
 
 
-def test_retire_bearer_removes_the_cluster_secret(make_legacy: Make) -> None:
+def test_a_remote_unit_loses_the_human_bearer(make_legacy: Make) -> None:
+    """A remote unit authenticates with its capability's machine API token, so
+    the adoption always removes the human bearer from its `.env`."""
     legacy = make_legacy()
-    assert _run(legacy, "--execute", "--retire-bearer") == 0
+    assert "AVA_CLUSTER_SECRET" in legacy.env()
+    assert _run(legacy, "--execute") == 0
     assert "AVA_CLUSTER_SECRET" not in legacy.env() and MACHINE_KEY in legacy.env()
+
+
+def test_a_remote_units_held_start_installs_its_capability_bundle(
+    make_legacy: Make, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import cli.start_intent
+    from shared import start_serving
+    from shared.config import settings
+
+    legacy = make_legacy()
+    assert _run(legacy, "--execute") == 0
+    monkeypatch.setattr(settings.general, "ava_home", str(legacy.home))
+    seen: list[object] = []
+
+    def fake_start(args: object) -> int:
+        seen.append(getattr(args, "db_capability", None))
+        return 0
+
+    monkeypatch.setattr(cli.start_intent, "run_start", fake_start)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+    bundle = str(legacy.home.parent / "mini.bundle")
+    argv = ["--home", str(legacy.home), "--start", "--db-capability", bundle]
+    assert adopt.main(argv, checkout=legacy.checkout) == 0
+    assert seen == [bundle]
+    with pytest.raises(SystemExit):
+        adopt.main(["--home", str(legacy.home), "--db-capability", bundle])
 
 
 def test_a_continuation_refuses_different_inputs(
@@ -287,7 +312,9 @@ def test_a_continuation_refuses_different_inputs(
     )
     assert (
         adopt.main(
-            [*argv, "--retire-bearer"], host=legacy.scheduler.host(), checkout=legacy.checkout
+            [*argv, "--keep-secret", "other"],
+            host=legacy.scheduler.host(),
+            checkout=legacy.checkout,
         )
         == 1
     )

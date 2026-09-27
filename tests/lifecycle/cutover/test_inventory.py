@@ -27,6 +27,7 @@ def _report(
 
 _RUNNER_REMOVALS = [
     "AVA_CLUSTER",
+    "AVA_CLUSTER_SECRET",  # a remote unit never holds the human bearer
     "AVA_DB_ADMIN_PASSWORD",
     "AVA_PITR_BACKUP_KEY_FILE",
     "AVA_PITR_GCS_BUCKET",
