@@ -20,7 +20,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from shared import bootstrap
-from shared.dotenv_boot import AVA_ENV_PATH
+from shared.dotenv_boot import AVA_ENV_PATH, checkout_anchored
 from shared.env_registry import (
     WSL_DEFAULT_HEALTH_PORT_BASE,
     health_port_env,
@@ -428,6 +428,17 @@ def run_enroll(argv: list[str]) -> int:
         "Windows unit would; pass this flag to pick a different one instead.",
     )
     args = parser.parse_args(argv)
+    if not checkout_anchored():
+        # The bootstrap env is this unit's `.env`; a checkout that claims no
+        # home would write it (credentials included) into a throwaway scratch.
+        print(
+            "enroll FAILED: this checkout claims no unit home (no AVA_HOME, not the "
+            "prod source, no .ava_home pointer). Enroll from the runner's own checkout "
+            "(clone it to ~/.ava/source — conventions/dev-setup.md), or set AVA_HOME "
+            "to the unit's home.",
+            file=sys.stderr,
+        )
+        return 1
     cluster_secret = _enroll_cluster_secret(parser, args.cluster_secret)
 
     # Remote enrollment requires a reachable machine-host: if the gateway is on

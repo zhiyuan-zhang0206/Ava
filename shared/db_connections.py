@@ -25,9 +25,8 @@ class UnanchoredHomeError(RuntimeError):
 
     The process's db_url is the unanchored sentinel rather than a real cluster
     database: this checkout is not the prod source, carries no `.ava_home`
-    pointer, and AVA_HOME is unset, so home resolution fell back without a
-    database (see shared/dotenv_boot.py). Raised instead of letting the
-    connection silently reach the prod database the host .env points at.
+    pointer, and AVA_HOME is unset, so it booted bare on a scratch home with no
+    database (see shared/dotenv_boot.py). Raised instead of dialing anything.
     """
 
 
@@ -180,8 +179,9 @@ def _guard_db_url(url: str) -> str:
             "refusing to open a DB connection: AVA_DB_URL is the never-dialed "
             "placeholder. Two ways to land here: this checkout resolved no AVA_HOME "
             "(not the prod source, no .ava_home pointer, AVA_HOME unset) — run "
-            "`ava start` in this worktree (writes its .ava_home pointer) or export "
-            "AVA_HOME=<unit home>; or this process built settings-lite "
+            "`scripts/install.sh --worktree` from this checkout (births its cluster and "
+            "writes its .ava_home pointer) or export AVA_HOME=<unit home>; or this "
+            "process built settings-lite "
             "(AVA_CONFIG_FETCH=skip, the maintenance verbs' gateway-down mode) and "
             "this operation needs the cluster config a fetch would have provided."
         )

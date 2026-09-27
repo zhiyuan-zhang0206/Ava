@@ -86,7 +86,9 @@ gateway-only = minted bearer plus independent data-plane credentials; existing
 credentials never rotate at install). The home
 is resolved **checkout-anchored** (`AVA_HOME` env > prod source → `~/.ava` > the
 checkout's `.ava_home` pointer; a contradicting env refuses outright unless
-`AVA_HOME_OVERRIDE=1`) — never cwd, never a flag. `ava start` is a pure
+`AVA_HOME_OVERRIDE=1`; a checkout with none of these owns no cluster and boots
+bare on a scratch home — no `.env`, no gateway fetch, never `~/.ava`) — never
+cwd, never a flag. `ava start` is a pure
 bring-up: an uninstalled home fails fast pointing at `install.sh` /
 `install.sh --worktree` / `ava enroll` by role. Machine identity
 (machine-name / serve-gateway / serve-agent-runner / gateway-url) is passed on
