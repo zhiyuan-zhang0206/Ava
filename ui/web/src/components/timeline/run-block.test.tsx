@@ -426,6 +426,14 @@ describe("TurnBlock component", () => {
     expect(toggle.className).toContain("sticky");
     expect(toggle.className).toContain("top-11");
     expect(toggle.className).toContain("z-10");
+    // The frosted pane's `::before` box stays present while resting too (see
+    // card.tsx's HEADER_PANE_GEOMETRY_CLS) — a `content` toggle between "no
+    // box" and "a box" can't be interpolated by a CSS transition, so the pane
+    // must already exist before the first stick, or it pops in instead of
+    // fading.
+    expect(toggle.className).toContain("before:content-['']");
+    expect(toggle.className).toContain("before:bg-transparent");
+    expect(toggle.className).toContain("before:backdrop-blur-none");
   });
 
   it("renders stuck active styling when expanded and isStuck is true", () => {
