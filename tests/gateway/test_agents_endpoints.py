@@ -946,6 +946,7 @@ class TestList:
             "unread_notice_count",
             "heartbeat_paused_until",
             "open_impersonation_session_id",
+            "open_impersonation_status",
             "observation",
             "availability",
         }
@@ -1022,10 +1023,12 @@ class TestList:
             "unread_notice_count",
             "heartbeat_paused_until",
             "open_impersonation_session_id",
+            "open_impersonation_status",
             "observation",
             "availability",
         }
         assert row["open_impersonation_session_id"] is None
+        assert row["open_impersonation_status"] is None
         assert row["observation"]["runtime_owner"] == "unknown"
         assert row["observation"]["machine_probe_at"] is None
         assert row["observation"]["machine_probe_valid_until"] is None

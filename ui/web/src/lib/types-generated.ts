@@ -3951,6 +3951,8 @@ export interface components {
             heartbeat_paused_until: string | null;
             /** Open Impersonation Session Id */
             open_impersonation_session_id: number | null;
+            /** Open Impersonation Status */
+            open_impersonation_status: ("requested" | "accepted" | "active") | null;
         };
         /**
          * AgentCost
