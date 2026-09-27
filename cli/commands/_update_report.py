@@ -7,8 +7,8 @@ no orchestration side effects:
   INCOMPLETE block for sessions this host could not launch (the pin advanced,
   one local service process does not exist).
 
-Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
-so `cli.commands(.update)._local_leg_defect` keep resolving for tests.
+`cli/commands/update.py` imports `_local_leg_defect` for its own use; the patch
+seam is this module.
 """
 
 from __future__ import annotations
