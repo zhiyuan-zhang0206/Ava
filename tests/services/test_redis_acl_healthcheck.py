@@ -97,7 +97,7 @@ def test_unreachable_server_is_restarted_and_verified(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(redis_acl, "_ping", _mock_ping)
     monkeypatch.setattr(
-        "cli.commands.cluster_instance.start_redis",
+        "cli.commands.data_plane.cluster_instance.start_redis",
         _start,
         raising=True,
     )
@@ -119,7 +119,9 @@ def test_failed_redis_restart_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         return 1
 
     monkeypatch.setattr(redis_acl, "_ping", _dead_ping)
-    monkeypatch.setattr("cli.commands.cluster_instance.start_redis", _failed_start, raising=True)
+    monkeypatch.setattr(
+        "cli.commands.data_plane.cluster_instance.start_redis", _failed_start, raising=True
+    )
 
     with pytest.raises(RuntimeError, match="rc=1"):
         _check("redis://ava_feat_x@127.0.0.1:16380/0", "redis://127.0.0.1:16380/0")
@@ -245,7 +247,7 @@ def test_no_secret_unreachable_server_is_restarted(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(redis_acl, "_ping", _mock_ping)
     monkeypatch.setattr(
-        "cli.commands.cluster_instance.start_redis",
+        "cli.commands.data_plane.cluster_instance.start_redis",
         _start,
         raising=True,
     )

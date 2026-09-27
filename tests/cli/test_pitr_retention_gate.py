@@ -25,7 +25,7 @@ from cli.commands import (
     cmd_pitr_retention_run_once,
     cmd_pitr_retention_status,
 )
-from cli.commands import pitr as pitr_commands
+from cli.commands.data_plane import pitr as pitr_commands
 from services.pitr import retention_gate, retention_scheduler
 from services.pitr.retention_executor import RetentionExecutionSummary
 from services.pitr.retention_manifest import (

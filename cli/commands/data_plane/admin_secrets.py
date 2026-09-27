@@ -16,7 +16,6 @@ from typing import cast
 
 from dotenv import dotenv_values
 
-from cli.commands.cluster_instance import pg_admin_url
 from shared.cluster import (
     ensure_cluster_redis_acl,
     ensure_cluster_role,
@@ -36,6 +35,8 @@ from shared.platform import file_lock
 from shared.private_storage import write_private_bytes
 from shared.rollout_handoff import update_process_env
 from shared.url_secret import url_host, url_with_password
+
+from .cluster_instance import pg_admin_url
 
 _TOKEN_BYTES = 32
 _TRANSITION_FILE = "data-plane-credential-split.json"
@@ -257,7 +258,7 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
     )
 
     if settings.data_plane.pgbouncer_enabled:
-        from cli.commands.pgbouncer import ensure_pgbouncer, runner_password_from_env
+        from .pgbouncer import ensure_pgbouncer, runner_password_from_env
 
         rc = ensure_pgbouncer(
             pg_port=pg_port,

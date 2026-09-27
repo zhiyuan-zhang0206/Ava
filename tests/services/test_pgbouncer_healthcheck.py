@@ -75,16 +75,18 @@ def _wire(monkeypatch: pytest.MonkeyPatch, calls: _Calls) -> None:
     defining modules rather than on this one.
     """
     monkeypatch.setattr(
-        "cli.commands.pgbouncer.pgbouncer_listener_reachable",
+        "cli.commands.data_plane.pgbouncer.pgbouncer_listener_reachable",
         calls.probe_listener,
         raising=True,
     )
     monkeypatch.setattr(
-        "cli.commands.pgbouncer.pgbouncer_public_listener_reachable",
+        "cli.commands.data_plane.pgbouncer.pgbouncer_public_listener_reachable",
         calls.probe_public,
         raising=True,
     )
-    monkeypatch.setattr("cli.commands.pgbouncer.ensure_pgbouncer", calls.ensure, raising=True)
+    monkeypatch.setattr(
+        "cli.commands.data_plane.pgbouncer.ensure_pgbouncer", calls.ensure, raising=True
+    )
     monkeypatch.setattr("shared.telemetry.emit", calls.emit, raising=True)
 
 

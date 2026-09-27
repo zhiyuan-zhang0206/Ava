@@ -62,11 +62,11 @@ def ensure_cluster_instance(
     """Thin wrapper around the per-cluster Postgres+Redis bring-up (for
     monkeypatching in tests, like `provision`). `identity` is the data-plane
     db/role/ACL identifier, names-as-data (see
-    `cli.commands.cluster_instance.ensure_cluster_instance`, the real bring-up
+    `cli.commands.data_plane.cluster_instance.ensure_cluster_instance`, the real bring-up
     this wrapper calls). `runner_password` (the gateway .env
     AVA_RUNNER_DB_PASSWORD) is threaded at install birth, when the .env does
     not exist yet; a later bring-up resolves it from the file itself."""
-    from cli.commands.cluster_instance import ensure_cluster_instance as _bring_up
+    from cli.commands.data_plane.cluster_instance import ensure_cluster_instance as _bring_up
     from shared.cluster import record_pgbouncer_port
 
     return _bring_up(

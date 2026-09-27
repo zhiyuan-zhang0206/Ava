@@ -64,10 +64,10 @@ from cli.commands._ownership_preflight import (
     ensure_ownership_preflight as _ensure_ownership_preflight,
 )
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
+from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
 from cli.commands.observability.lgtm import ensure_lgtm_stack_step
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
 from cli.commands.observability.otel_collector import ensure_otel_collector_step
-from cli.commands.pgbouncer import _ensure_pgbouncer_step
 from shared.cluster import is_default_home
 from shared.config import settings
 from shared.host.converge.accessibility import (
@@ -439,7 +439,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # PgBouncer binary when the pooler is enabled (gateway box's data plane).
     ConvergeStep(
         "one DB URL + pgbouncer binary (when enabled)",
-        _ensure_pgbouncer_step,
+        ensure_pgbouncer_step,
         roles=frozenset({"gateway"}),
     ),
     # Legacy clusters carry a username-less AVA_REDIS_URL; backfill the identity

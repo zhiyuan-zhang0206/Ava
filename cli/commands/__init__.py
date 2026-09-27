@@ -43,11 +43,6 @@ from cli.commands._firewall import (
     cmd_firewall_status,
     cmd_firewall_sync,
 )
-from cli.commands._pitr_activation import (
-    cmd_pitr_activate,
-    cmd_pitr_rollback,
-    cmd_pitr_status,
-)
 from cli.commands._update_dispatch import cmd_update
 from cli.commands.agents.pty import (
     cmd_pty_freeze,
@@ -66,7 +61,25 @@ from cli.commands.cluster_lifecycle import (
     cmd_cluster_down,
     cmd_cluster_ls,
 )
-from cli.commands.ensure_db_role import cmd_ensure_db_role
+from cli.commands.data_plane.ensure_db_role import cmd_ensure_db_role
+from cli.commands.data_plane.pitr import (
+    cmd_pitr_drill,
+    cmd_pitr_multipart_abort,
+    cmd_pitr_multipart_list,
+    cmd_pitr_retention_arm,
+    cmd_pitr_retention_disable,
+    cmd_pitr_retention_inspect,
+    cmd_pitr_retention_run_once,
+    cmd_pitr_retention_status,
+    cmd_pitr_snapshot_archive,
+    cmd_pitr_snapshot_retire,
+    cmd_pitr_snapshot_verify,
+)
+from cli.commands.data_plane.pitr_activation import (
+    cmd_pitr_activate,
+    cmd_pitr_rollback,
+    cmd_pitr_status,
+)
 from cli.commands.extensions.mcp import (
     cmd_mcp_add,
     cmd_mcp_disable,
@@ -113,19 +126,6 @@ from cli.commands.observability.logs import (
     cmd_logs_rotate,
 )
 from cli.commands.observability.trace import cmd_trace_ship
-from cli.commands.pitr import (
-    cmd_pitr_drill,
-    cmd_pitr_multipart_abort,
-    cmd_pitr_multipart_list,
-    cmd_pitr_retention_arm,
-    cmd_pitr_retention_disable,
-    cmd_pitr_retention_inspect,
-    cmd_pitr_retention_run_once,
-    cmd_pitr_retention_status,
-    cmd_pitr_snapshot_archive,
-    cmd_pitr_snapshot_retire,
-    cmd_pitr_snapshot_verify,
-)
 from cli.commands.start import cmd_start
 from cli.commands.status import cmd_status
 from cli.commands.stop import (

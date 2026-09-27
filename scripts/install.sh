@@ -362,7 +362,7 @@ install_gateway() {
         Darwin)
             # macOS: native pg/redis@8.2 via Homebrew (no docker). `brew install`
             # runs initdb for postgresql@17; `ava start`
-            # (cli/commands/cluster_instance.py) creates the `ava` role + db
+            # (cli/commands/data_plane/cluster_instance.py) creates the `ava` role + db
             # on first boot and runs the per-cluster data plane under $AVA_HOME.
             bash "$SCRIPT_DIR/provision/database.sh"
             # The gateway runs the frontend and ava-browser needs npx; attempt

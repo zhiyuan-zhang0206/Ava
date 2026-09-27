@@ -299,7 +299,7 @@ def _birth(*, home: Path, secret: str) -> int:
         )
         return rc
     try:
-        from cli.commands.cluster_instance import pg_admin_url
+        from cli.commands.data_plane.cluster_instance import pg_admin_url
 
         base_admin_url = pg_admin_url(rec.ports["postgres"])
         base_db_url, base_redis_url = cl.per_cluster_base_urls(rec)

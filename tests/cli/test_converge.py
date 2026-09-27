@@ -904,7 +904,7 @@ def test_next_public_keys_absent_file_is_empty(tmp_path: Path):
 def _pgbouncer_ctx(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, db_url: str | None, enabled: bool
 ):
-    """Wire _ensure_pgbouncer_step's deps: a default-home record (no pgbouncer key
+    """Wire ensure_pgbouncer_step's deps: a default-home record (no pgbouncer key
     → derived pooler 6433 / pg 5433), settings reflecting the toggle, and an
     optional existing .env carrying the pre-cutover AVA_DB_URL."""
     from shared import cluster
@@ -937,7 +937,7 @@ def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
     the direct pg port; with the toggle on (default), converge rewrites it to the
     pooler port and drops the retired AVA_PGBOUNCER_PORT key."""
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=_DIRECT_URL, enabled=True)
-    _converge._ensure_pgbouncer_step(ctx)
+    _converge.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _POOLED_URL in env  # main's derived legacy pooler 6433
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -958,7 +958,7 @@ def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
     )
     monkeypatch.setattr(_converge.settings.data_plane, "db_url", remote_url)
     monkeypatch.setattr(_converge.settings.data_plane, "redis_url", "rediss://10.9.8.7:6380/0")
-    _converge._ensure_pgbouncer_step(ctx)
+    _converge.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + remote_url in env, "the remote URL must pass through byte-identical"
     # The pooler port normalization (and the retired-key cleanup) is skipped
@@ -971,7 +971,7 @@ def test_ensure_pgbouncer_step_rewrites_pooler_url_back_to_direct_when_disabled(
     """The kill-switch: toggle off + restart -> the pooler never starts and the
     URL is rewritten to the direct pg port."""
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=_POOLED_URL, enabled=False)
-    _converge._ensure_pgbouncer_step(ctx)
+    _converge.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _DIRECT_URL in env
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -983,7 +983,7 @@ def test_ensure_pgbouncer_step_leaves_matching_url_untouched(
     """A URL that already matches the toggle is not rewritten — no snapshot churn
     every start — but the retired key is still dropped."""
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=_POOLED_URL, enabled=True)
-    _converge._ensure_pgbouncer_step(ctx)
+    _converge.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _POOLED_URL in env
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -997,7 +997,7 @@ def test_ensure_pgbouncer_step_leaves_operator_standin_untouched(
     ctx = _pgbouncer_ctx(
         tmp_path, monkeypatch, db_url="postgresql://ava:dev@localhost:5432/ava", enabled=True
     )
-    _converge._ensure_pgbouncer_step(ctx)
+    _converge.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=postgresql://ava:dev@localhost:5432/ava" in env
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -1009,7 +1009,7 @@ def test_ensure_pgbouncer_step_without_env_writes_nothing(
     """No .env (a fresh home converge runs before birth materializes URLs): the
     step is a no-op, not a crash."""
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=None, enabled=True)
-    _converge._ensure_pgbouncer_step(ctx)
+    _converge.ensure_pgbouncer_step(ctx)
     assert not (tmp_path / ".env").exists()
 
 

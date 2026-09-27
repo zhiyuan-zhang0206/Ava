@@ -4,7 +4,7 @@ and spin up throwaway clusters for tests.
 macOS runs Homebrew's keg-only `postgresql@17` (binaries are not symlinked
 onto PATH, so the full keg path is required); Linux runs the apt
 `postgresql-17` layout; Windows uses the EDB installer path. Shared by the
-per-cluster data-plane bring-up (`cli/commands/cluster_instance.py`), the local
+per-cluster data-plane bring-up (`cli/commands/data_plane/cluster_instance.py`), the local
 backup path (`services/backup.py`), and the throwaway clusters the test suite
 (`tests/_containers.py`), migration smoke (`scripts/migration_smoke.py`), and eval
 fixtures spin up.
@@ -50,7 +50,7 @@ _fixture_log_artifact_dir = fixture_log_artifact_dir
 
 def is_macos() -> bool:
     """True on macOS. Thin re-export of shared.platform.IS_MACOS, kept because
-    cli/commands/cluster_instance.py imports this name."""
+    cli/commands/data_plane/cluster_instance.py imports this name."""
     return IS_MACOS
 
 
@@ -76,7 +76,7 @@ def pg_shm_args() -> str:
 
     Returns the two `-c` settings (no surrounding spaces) that every PG startup
     path passes on the `pg_ctl start` command line: the per-cluster data plane
-    (`cli/commands/cluster_instance.py`) and the throwaway test/eval clusters
+    (`cli/commands/data_plane/cluster_instance.py`) and the throwaway test/eval clusters
     (`throwaway_postgres`). Command-line `-c` outranks anything a machine's
     postgresql.conf says, so Ava's instances carry the posture no matter what
     the host is configured with. A platform that must not set them yields "" —

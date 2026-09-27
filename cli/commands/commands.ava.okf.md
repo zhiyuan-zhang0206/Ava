@@ -21,7 +21,7 @@ Most command modules follow these two naming groups:
 
 - **public** (`start.py`, `stop.py`, `status.py`, `observability/logs.py`, `update.py`,
   `cluster.py`, `agents/control.py`, `management/config.py`, `extensions/plugins.py`, `extensions/skill.py`,
-  `extensions/mcp.py`, `pitr.py`, `extensions/memory.py`, `management/presets.py`, `agents/pty.py`,
+  `extensions/mcp.py`, `data_plane/pitr.py`, `extensions/memory.py`, `management/presets.py`, `agents/pty.py`,
   `management/schedules.py`, `observability/trace.py`, `migrations.py`,
   `cluster_lifecycle.py`, `agents/timeline.py`, `agents/impersonation.py`,
   `agents/impersonation_relay.py`) — reachable from the command line.
@@ -38,9 +38,10 @@ Most command modules follow these two naming groups:
   `_start_gui_handover` (the macOS GUI-chain warning and its handover),
   `_ownership_preflight`, `_pkg_source`, `_claude_code_plugin`,
   `_cluster_health` / `_cluster_rollback` / `_cluster_cron` /
-  `_cluster_watchdog_probe` (`cluster_instance.py`, `pgbouncer.py`,
-  `observability/lgtm.py`, `observability/lgtm_native.py`, and
-  `observability/otel_collector.py` are more, under public names).
+  `_cluster_watchdog_probe` (`data_plane/cluster_instance.py`,
+  `data_plane/pgbouncer.py`, `observability/lgtm.py`,
+  `observability/lgtm_native.py`, and `observability/otel_collector.py` are
+  more, under public names).
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
 restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
@@ -62,7 +63,7 @@ See [the coordinated operator procedure](../../conventions/graceful-maintenance.
 
 Gateway data-plane startup passes separate URL identities to `cluster_instance`:
 Postgres db/role comes from `db_identity()`, Redis ACL user from `redis_identity()`.
-`_data_plane_admin_secrets` preserves that distinction during credential splitting.
+`admin_secrets` preserves that distinction during credential splitting.
 Installation supplies the same birth identifier for both before `.env` exists.
 Legacy username backfill adopts its committed Redis URL in the same start
 process, including named `nopass` URLs for no-auth homes.
@@ -114,7 +115,7 @@ schema change catches the DB up on its own.
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp
   SDK that no other verb needs. See [[cli/commands/extensions/packages.ava.okf.md]].
-- [[pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
+- [[cli/commands/data_plane/pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
   verify → retire guard for finite migration rollback snapshots.
 - [[ownership_preflight.ava.okf.md]] names the warning-only ownership repair
   guard that runs before converge writes later host state.

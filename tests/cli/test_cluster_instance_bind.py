@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import cluster_instance as _ci
+from cli.commands.data_plane import cluster_instance as _ci
 from shared.config import settings
 
 
@@ -225,7 +225,7 @@ def _wire_redis_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[l
         lambda: pytest.fail("redis must never wait for the reachable bind"),
     )
     monkeypatch.setattr(_ci, "_redis_server_bin", lambda: "redis-server")
-    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
     redis_answers = iter([False, True])  # not running before start, up after
     monkeypatch.setattr(
         _ci,
@@ -325,7 +325,7 @@ def test_running_redis_persists_the_authenticated_password_to_its_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A journal retry repairs config after an old-password false-down probe."""
-    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
     (tmp_path / "redis.conf").write_text('requirepass "stale-old-password"\n')
@@ -360,7 +360,7 @@ def test_redis_conf_always_renders_rdb_save_schedule(
 ) -> None:
     """A no-secret cluster still persists: the RDB save schedule must survive
     every conf render, or a restart silently loses persistence (task #2027)."""
-    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_redis_running", lambda *_args: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_ci, "_ensure_redis_acl", lambda *_args: 0)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -396,7 +396,7 @@ def test_start_probes_receive_the_url_hosts(
     monkeypatch.setattr(_ci, "_redis_running", _redis_running)
     monkeypatch.setattr(_ci, "_ensure_redis_acl", _ensure_redis_acl)
     monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
-    monkeypatch.setattr(_ci, "_redis_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "redis_data_dir", lambda: tmp_path)
     monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
     calls: list[list[str]] = []
 

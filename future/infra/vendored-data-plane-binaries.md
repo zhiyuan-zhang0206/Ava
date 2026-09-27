@@ -6,7 +6,7 @@
 `cli/commands/_converge.py` step), and
 `shared/pg_tools.py:pg_tool()` prefers it over brew/apt. So `brew install
 postgresql@17` is no longer a prerequisite. Redis defaults to brew/PATH
-(`cli/commands/cluster_instance.py`); the unit-local `redis_bin_dir` setting can
+(`cli/commands/data_plane/cluster_instance.py`); the unit-local `redis_bin_dir` setting can
 select an already-installed server/CLI pair. Automatic Redis download remains
 unimplemented, so fresh provisioning still needs a package manager or an
 operator-supplied build.
@@ -89,7 +89,7 @@ infra this introduces.
 - **Resolution:** `shared/pg_tools.py:pg_tool()` prefers `~/.ava/runtime/pg/` when
   present, else falls back to brew/apt — so existing dev boxes keep working
   unchanged and a clean machine uses the vendored copy. The redis bin resolver
-  (`cli/commands/cluster_instance.py`) currently uses the unit's explicit
+  (`cli/commands/data_plane/cluster_instance.py`) currently uses the unit's explicit
   `redis_bin_dir` or the brew/PATH default. A future vendored default must preserve
   an explicit per-unit selection rather than overriding it with a host-wide copy.
 - **Version pinning:** the PG major must match across `initdb` and the data dir it

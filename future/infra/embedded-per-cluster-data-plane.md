@@ -112,7 +112,7 @@ model: every cluster owns its instance, and `uses_own_instance` is simply
 At the time, `cli/commands/_compose.py` already managed native pg/redis lifecycle:
 cold-start `initdb`, start/stop, config rendering. This change **re-scoped** that
 management from per-host-shared to per-`$AVA_HOME` (it now lives in
-`cli/commands/cluster_instance.py`; `_compose.py` is gone). It was not a
+`cli/commands/data_plane/cluster_instance.py`; `_compose.py` is gone). It was not a
 from-scratch supervision lift.
 
 - **Data dir moves under `$AVA_HOME`.** `_pg_data()` / `_redis_conf_*()` resolve

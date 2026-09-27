@@ -32,7 +32,7 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from cli.commands.pgbouncer import pgbouncer_bin
+from cli.commands.data_plane.pgbouncer import pgbouncer_bin
 from tests._containers import _free_port, _wait_port, postgres
 
 _SECRET = "pgbouncerwiretestsecret"  # noqa: S105 — test fixture, not a real credential
@@ -502,7 +502,7 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
     skip there."""
     import sys
 
-    from cli.commands.pgbouncer import _admin_reachable
+    from cli.commands.data_plane.pgbouncer import _admin_reachable
 
     if sys.platform == "darwin":
         pytest.skip("127.0.0.2 needs an lo0 alias on macOS")
