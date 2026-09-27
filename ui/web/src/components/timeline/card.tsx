@@ -315,17 +315,33 @@ export const STICKY_CHILD_HEADER_CLS =
 // All edges are paint-only to preserve measured height and avoid a pin loop.
 // Sticky z-index contains the pane behind the label; the 16px shadow seals the
 // scrollbar gutter and the separator sits inside the pane's bottom edge.
+//
+// The pane's `::before` box is kept present (same `content-['']`, geometry,
+// and transition declarations) in BOTH stuck and unstuck states — only its
+// background/blur *values* differ. `content` flipping between `normal` (no
+// box) and `''` (a box) is a hard boundary for CSS transitions: a
+// pseudo-element that didn't exist in the previous style has no prior frame
+// to interpolate from, so the very first stick (and every un-stick/re-stick
+// after) would snap straight to the settled frosted look instead of fading in
+// over `duration-150`. Keeping the box alive at a transparent, unblurred
+// resting value while unstuck gives the transition a real "before" state.
+const HEADER_PANE_GEOMETRY_CLS =
+  "before:absolute before:inset-x-0 before:-top-[2px] before:bottom-0 before:-z-10 before:content-[''] " +
+  "before:pointer-events-none " +
+  "before:transition-[background-color,backdrop-filter] before:duration-150 before:ease-out " +
+  "motion-reduce:before:transition-none";
 export const STUCK_HEADER_CLS =
   "bg-transparent hover:bg-transparent rounded-none " +
   "shadow-[16px_0_0_0_var(--background)] " +
-  "before:absolute before:inset-x-0 before:-top-[2px] before:bottom-0 before:-z-10 before:content-[''] " +
-  "before:bg-background/95 hover:before:bg-accent/30 before:backdrop-blur-md before:pointer-events-none " +
-  "before:transition-colors before:duration-150 before:ease-out motion-reduce:before:transition-none " +
+  HEADER_PANE_GEOMETRY_CLS + " " +
+  "before:bg-background/95 hover:before:bg-accent/30 before:backdrop-blur-md " +
   "after:absolute after:inset-x-0 after:bottom-0 after:h-px after:content-[''] " +
   "after:bg-border after:pointer-events-none " +
   "transition-[color] duration-150 ease-out motion-reduce:transition-none";
 export const UNSTUCK_HEADER_CLS =
-  "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none";
+  "bg-transparent transition-[background-color,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none " +
+  HEADER_PANE_GEOMETRY_CLS + " " +
+  "before:bg-transparent before:backdrop-blur-none";
 
 // The colored left-border container. cardText tints the whole card (markers).
 // `actions` (copy / fork) is an optional overlay pinned to the block's

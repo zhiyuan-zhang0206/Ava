@@ -580,6 +580,15 @@ describe("CardHeader sticky header (task #3136)", () => {
     expect(btn.className).toContain("z-10");
     expect(btn.getAttribute("data-stuck")).toBe("false");
     expect(btn.className).not.toContain("backdrop-blur-md");
+    // The pane's `::before` box stays present (same content/geometry/
+    // transition as the stuck state) even while resting — only its
+    // background/blur value differs — so the first stick transitions from a
+    // real prior frame instead of popping in (a `content` toggle between "no
+    // box" and "a box" can't be interpolated by a CSS transition).
+    expect(btn.className).toContain("before:content-['']");
+    expect(btn.className).toContain("before:bg-transparent");
+    expect(btn.className).toContain("before:backdrop-blur-none");
+    expect(btn.className).toContain("before:transition-[background-color,backdrop-filter]");
   });
 
   it("collapsed sticky card does not pin (the rest position stays in flow)", () => {
