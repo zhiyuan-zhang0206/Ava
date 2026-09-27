@@ -336,11 +336,19 @@ class _Outcome:
     survivors: list[OwnedProcess] = field(default_factory=list[OwnedProcess])
 
     def kill(self, batch: list[_Member], done: set[int], wait_s: float) -> None:
-        """SIGKILL `batch` in one tight loop, then wait for it to exit."""
+        """SIGKILL `batch` in one tight loop, then wait for what it signalled to exit.
+
+        A member the caller may not signal got no signal, so no wait can
+        change its fate: its liveness is read once instead of costing the
+        whole `wait_s` (the TTL reaper's dispatch budget covers the kill op).
+        """
         killed, denied = _kill(batch, done)
         self.killed += killed
         self.denied += denied
-        self.survivors += _await_exit(batch, wait_s)
+        refused = set(denied)
+        signalled = [member for member in batch if member.identity not in refused]
+        self.survivors += _await_exit(signalled, wait_s)
+        self.survivors += [identity for identity in denied if _live(identity)]
 
     def add(self, result: TreeKill) -> None:
         self.killed += result.killed
