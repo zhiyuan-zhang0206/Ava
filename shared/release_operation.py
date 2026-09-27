@@ -127,6 +127,10 @@ def _require_operation_identity(home: Path, path: Path, operation: dict[str, Any
         raise ValueError("invalid PITR operation progress")
 
 
+# How an operator reads each journaled kind: a fleet operation is the release.
+_KIND_LABELS = {"fleet": "release", "unit": "unit release", "pitr": "pitr"}
+
+
 def operation_in_flight(home: Path) -> str | None:
     """Name this home's incomplete operation that has recorded no failure.
 
@@ -142,7 +146,8 @@ def operation_in_flight(home: Path) -> str | None:
     _require_operation_identity(home, path, operation)
     if operation["phase"] == "complete" or operation["error"] is not None:
         return None
-    return f"{operation['request']['kind']} operation {path.parent.name} at {operation['phase']}"
+    label = _KIND_LABELS[operation["request"]["kind"]]
+    return f"{label} operation {path.parent.name} at {operation['phase']}"
 
 
 def require_start_authorized(home: Path) -> tuple[str, datetime] | None:

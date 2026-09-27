@@ -501,8 +501,6 @@ def test_release_stop_closes_terminals_after_root_and_before_evidence(
         assert not terminal.has_session(name), "terminals close before the evidence"
         events.append("root absent")
 
-    for bound, value in (("_TERMINAL_WORK_S", 0.5), ("_TERMINAL_GRACE_S", 0.5)):
-        monkeypatch.setattr(local, bound, value)
     monkeypatch.setattr(maintenance_commands, "stop", root_stop)
     monkeypatch.setattr(root_driver, "require_root_absent", root_absent)
 
@@ -510,10 +508,15 @@ def test_release_stop_closes_terminals_after_root_and_before_evidence(
         return SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))
 
     monkeypatch.setattr(maintenance, "require_operation", drained)
+    from cli.release_fleet.policy import FleetPolicy
+
     transition = object.__new__(local.LocalTransition)
-    transition.request = SimpleNamespace(id=uuid4(), created_at=WHEN)  # type: ignore[assignment]
+    # The captured policy's closure bounds: the work wait and the cancel grace.
+    policy = FleetPolicy(close_s=1, cancel_grace_s=1)
+    transition.request = SimpleNamespace(id=uuid4(), policy=policy)  # type: ignore[assignment]
     monkeypatch.setattr(transition, "preflight", lambda: None)
 
-    transition.stop(SimpleNamespace(direction="candidate", launch=None))  # type: ignore[arg-type]
+    operation = SimpleNamespace(direction="candidate", launch=None, maintenance_at=WHEN)
+    transition.stop(operation)  # type: ignore[arg-type]
     assert events == ["root stop", "root absent"]
     assert _wait_exit(jobs[0].pid, timeout=1)

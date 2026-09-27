@@ -387,9 +387,9 @@ def test_operation_in_flight_names_only_an_unfailed_incomplete_operation(
     explains no outage, and no active pointer means no operation."""
     home = _home(operation_path)
     identity = operation_path.parent.name
-    assert operation_in_flight(home) == f"fleet operation {identity} at prepared"
+    assert operation_in_flight(home) == f"release operation {identity} at prepared"
     _set_state(operation_path, phase="stopping")
-    assert operation_in_flight(home) == f"fleet operation {identity} at stopping"
+    assert operation_in_flight(home) == f"release operation {identity} at stopping"
     _set_state(operation_path, error="injected native failure")
     assert operation_in_flight(home) is None
     _set_state(operation_path, phase="complete", error=None)
