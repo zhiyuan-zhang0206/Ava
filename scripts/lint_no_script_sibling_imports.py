@@ -225,13 +225,29 @@ def _scan_file(path: Path) -> list[str]:
                         violations.append(
                             f"{rel}:{stmt.lineno}: sibling import `{first}` in a script-mode "
                             "file — PYTHONSAFEPATH=1 keeps the script's own directory off "
-                            "sys.path. Add a guard before it: "
-                            "sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  "
-                            "# noqa: PTH100, PTH120"
+                            f"sys.path. {_fix_hint(rel)}"
                         )
 
     walk(tree.body, [], in_fn=False)
     return violations
+
+
+def _fix_hint(rel: str) -> str:
+    """How to fix an unguarded sibling import at ``rel``.
+
+    Under ava_builtins/ the structure gate refuses path imports (Rule 6), so a
+    guard there would only trade one failure for another: the shared code moves
+    into a governed package instead.
+    """
+    if rel.startswith("ava_builtins/"):
+        return (
+            "Under ava_builtins/ a sys.path guard is itself refused (structure Rule 6): "
+            "move the shared code into a governed package and import it normally."
+        )
+    return (
+        "Add a guard before it: "
+        "sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120"
+    )
 
 
 def _iter_py_files(roots: list[Path]) -> list[Path]:

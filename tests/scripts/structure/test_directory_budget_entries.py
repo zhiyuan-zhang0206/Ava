@@ -24,6 +24,7 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
         "nesting",
         "private_imports",
         "owner_bypasses",
+        "path_imports",
     )
     empty = {section: {} for section in sections}
     baseline.write_text(json.dumps(empty) + "\n", encoding="utf-8")

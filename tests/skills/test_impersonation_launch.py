@@ -11,18 +11,11 @@ from typing import Any
 import pytest
 
 from ava.impersonation_launch import bootstrap_message
+from ava.shell.coding_tools import codex
 from shared import coding_session_owner
 
 _REFERENCE = Path(__file__).parents[2] / "ava_builtins/skills/ava-use-other-agents/reference"
 _ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
-
-
-def _load_spawn(module_name: str):
-    spec = importlib.util.spec_from_file_location(module_name, _REFERENCE / "spawn_codex.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _owner(state_dir: Path) -> coding_session_owner.CodingSessionOwner:
@@ -86,15 +79,14 @@ def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
 
 
 def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) -> None:
-    module = _load_spawn("takeover_spawn_codex_shared_server")
     state = tmp_path / "home"
     state.mkdir()
     owner = _owner(state)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     endpoint = f"unix://{tmp_path}/run/codex-app-server.0123456789ab-01234567.sock"
-    server = module._app_server_command(owner, workspace, endpoint)
-    tui = module._codex_command(owner, workspace, None, remote=endpoint)
+    server = codex._app_server_command(owner, workspace, endpoint)
+    tui = codex._codex_command(workspace, None, remote=endpoint)
     assert f"codex app-server --listen {endpoint}" in server
     assert "AP=${!}" in server and "kill $AP" in server
     assert "if ! kill -0 $$ 2>/dev/null; then" in server
@@ -102,22 +94,19 @@ def test_takeover_launcher_wires_one_explicit_shared_app_server(tmp_path: Path) 
     assert f"rm -f {endpoint.removeprefix('unix://')}" in server
     assert 'approval_policy="never"' in server
     assert 'sandbox_mode="danger-full-access"' in server
+    assert "CODEX_HOME" not in server and "check_for_update_on_startup=false" in server
     assert f"--remote {endpoint} --dangerously-bypass-approvals-and-sandbox" in tui
     assert tui.startswith("clear && ")
 
 
-def test_supervised_launch_command_is_unchanged(tmp_path: Path) -> None:
-    module = _load_spawn("takeover_spawn_codex_supervised")
-    state = tmp_path / "home"
-    state.mkdir()
-    owner = _owner(state)
+def test_supervised_launch_command_has_no_remote(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    command = module._codex_command(owner, workspace)
-    assert command == (
-        f"cd {workspace} && CODEX_HOME={state} "
-        "exec codex --dangerously-bypass-approvals-and-sandbox"
+    command = codex._codex_command(workspace)
+    assert command.startswith(
+        f"cd {workspace} && exec codex --dangerously-bypass-approvals-and-sandbox -c "
     )
+    assert "--remote" not in command and "clear" not in command
 
 
 def test_app_server_wait_accepts_a_bound_socket() -> None:
@@ -126,7 +115,6 @@ def test_app_server_wait_accepts_a_bound_socket() -> None:
     import tempfile
     import threading
 
-    module = _load_spawn("takeover_spawn_codex_wait_ok")
     # A bound AF_UNIX path must stay under the kernel's ~104-byte limit, and
     # macOS pytest tmp dirs (/private/var/folders/...) exceed it (review C2) —
     # build a short private dir under the system temp root instead.
@@ -145,7 +133,7 @@ def test_app_server_wait_accepts_a_bound_socket() -> None:
     thread = threading.Thread(target=accept_once, daemon=True)
     thread.start()
     try:
-        module._wait_for_app_server(f"unix://{path}", timeout=5.0)
+        codex._wait_for_app_server(f"unix://{path}", timeout=5.0)
     finally:
         # Join before closing the listener: under CI load the accept thread can
         # be scheduled only after the waiter returns; closing first makes the
@@ -158,10 +146,9 @@ def test_app_server_wait_accepts_a_bound_socket() -> None:
 
 
 def test_app_server_wait_fails_loudly_when_absent(tmp_path: Path) -> None:
-    module = _load_spawn("takeover_spawn_codex_wait_missing")
     log_path = tmp_path / "app-server.log"
     with pytest.raises(RuntimeError, match="did not become ready") as excinfo:
-        module._wait_for_app_server(
+        codex._wait_for_app_server(
             f"unix://{tmp_path}/missing.sock", timeout=0.4, log_path=log_path
         )
     assert str(log_path) in str(excinfo.value)
@@ -227,7 +214,6 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     import signal
     import time
 
-    module = _load_spawn("takeover_spawn_codex_pane_exec")
     state = tmp_path / "home"
     state.mkdir()
     owner = _owner(state)
@@ -236,7 +222,7 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
     run = tmp_path / "run"
     run.mkdir()
     endpoint = f"unix://{run}/codex-app-server.0123456789ab-01234567.sock"
-    command = module._app_server_command(owner, workspace, endpoint)
+    command = codex._app_server_command(owner, workspace, endpoint)
 
     shim_dir = tmp_path / "bin"
     argv_file = tmp_path / "codex-argv.txt"
